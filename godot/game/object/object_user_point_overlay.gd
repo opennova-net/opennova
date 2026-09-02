@@ -17,7 +17,25 @@ const MARKER_COLOR := Color(0.2, 0.9, 1.0, 0.95)
 var _object_data: ObjectData
 var _source_model: ObjectModel
 var _entity_transform := Transform3D.IDENTITY
-var _markers: Array = []
+var _markers: Array[Marker] = []
+
+
+## One drawn user point: its marker node, the authored model-space position,
+## the subobject it rides (-1 = the model root) and that position in the
+## subobject's rest frame for the rigid-part pose.
+class Marker:
+	extends RefCounted
+	var node: Node3D
+	var model_position: Vector3
+	var subobject: int
+	var part_local: Vector3
+
+	func _init(p_node: Node3D, p_model_position: Vector3, p_subobject: int,
+			p_part_local: Vector3) -> void:
+		node = p_node
+		model_position = p_model_position
+		subobject = p_subobject
+		part_local = p_part_local
 var _marker_mesh: SphereMesh
 var _marker_material: StandardMaterial3D
 
@@ -90,12 +108,8 @@ func _rebuild() -> void:
 		var subobject := info.subobject
 		var marker := _make_marker(i, _label_text(info, i))
 		add_child(marker)
-		_markers.append({
-			"node": marker,
-			"model_position": model_pos,
-			"subobject": subobject,
-			"part_local": _part_local_position(model_pos, subobject),
-		})
+		_markers.append(Marker.new(marker, model_pos, subobject,
+				_part_local_position(model_pos, subobject)))
 		if _source_model == null:
 			marker.position = model_pos
 	_update_live_marker_positions()
@@ -175,11 +189,11 @@ func _update_live_marker_positions() -> void:
 	var skeleton: Skeleton3D = _source_model.get_skeleton()
 	var visual_layers := _source_visual_layers()
 	for entry in _markers:
-		var marker := entry.get("node") as Node3D
+		var marker := entry.node
 		if marker == null or not is_instance_valid(marker):
 			continue
 		_sync_marker_layers(marker, visual_layers)
-		var subobject := int(entry.get("subobject", -1))
+		var subobject := entry.subobject
 		var global_pos: Vector3
 		if skeleton != null and subobject >= 0 and subobject < skeleton.get_bone_count():
 			# Fake-skinned rigid parts carry authored model-space user points by the
@@ -189,12 +203,12 @@ func _update_live_marker_positions() -> void:
 			var model_to_world := (skeleton.global_transform
 					* skeleton.get_bone_global_pose(subobject)
 					* skeleton.get_bone_global_rest(subobject).affine_inverse())
-			global_pos = model_to_world * (entry.get("model_position", Vector3.ZERO) as Vector3)
+			global_pos = model_to_world * entry.model_position
 		elif subobject >= 0 and part_nodes.has(subobject):
 			var part := part_nodes[subobject] as Node3D
-			global_pos = part.global_transform * (entry.get("part_local", Vector3.ZERO) as Vector3)
+			global_pos = part.global_transform * entry.part_local
 		else:
-			global_pos = _source_model.global_transform * (entry.get("model_position", Vector3.ZERO) as Vector3)
+			global_pos = _source_model.global_transform * entry.model_position
 		marker.global_position = global_pos
 
 

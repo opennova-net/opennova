@@ -15,9 +15,9 @@ func test_spans_nest_and_measure() -> void:
 	var line := timeline.finish()
 	var spans := timeline.spans()
 	assert_eq(spans.size(), 2, "two spans recorded")
-	assert_eq(int(spans[0]["depth"]), 0, "outer is top-level")
-	assert_eq(int(spans[1]["depth"]), 1, "inner nests under outer")
-	assert_true(int(spans[0]["end_us"]) >= int(spans[1]["end_us"]),
+	assert_eq(spans[0].depth, 0, "outer is top-level")
+	assert_eq(spans[1].depth, 1, "inner nests under outer")
+	assert_true(spans[0].end_us >= spans[1].end_us,
 		"outer ends at or after inner")
 	assert_string_contains(line, "op", "the structured line names the operation")
 
@@ -26,7 +26,7 @@ func test_finish_closes_unbalanced_spans() -> void:
 	var timeline := PerfTimeline.begin("op")
 	timeline.span("left_open")
 	timeline.finish()
-	assert_true(int(timeline.spans()[0]["end_us"]) > 0,
+	assert_true(timeline.spans()[0].end_us > 0,
 		"finish closes spans an early return left open")
 
 

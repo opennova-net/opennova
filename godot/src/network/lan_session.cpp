@@ -31,21 +31,18 @@ PackedByteArray to_packed_bytes(const std::vector<uint8_t> &bytes) {
 	return out;
 }
 
-Dictionary row_dictionary(const opennova::np::LanDiscoveryRow &row) {
-	Dictionary out;
+Ref<LanServerRow> row_record(const opennova::np::LanDiscoveryRow &row) {
 	// Retail hosts advertise the typed server name in the host's single-byte
 	// codepage (cp1252), never UTF-8.
-	const String server_name = opennova::cp1252_to_gd(row.server.server_name);
-	out["name"] = server_name;
-	out["server_name"] = server_name;
-	out["host_ip"] = String::utf8(row.host_ip.c_str());
-	out["port"] = row.port;
-	out["players"] = static_cast<int64_t>(row.server.current_players);
-	out["max_players"] = static_cast<int64_t>(row.server.max_players);
-	out["gametype"] = static_cast<int64_t>(row.server.gametype);
-	out["server_flags"] = static_cast<int64_t>(row.server.server_flags);
-	out["session_id"] = String::utf8(row.server.session_id.c_str());
-	out["expansion"] = String::utf8(row.server.expansion.c_str());
+	Ref<LanServerRow> out = LanServerRow::make(
+			opennova::cp1252_to_gd(row.server.server_name),
+			String::utf8(row.host_ip.c_str()), static_cast<int>(row.port));
+	out->set_players(static_cast<int>(row.server.current_players));
+	out->set_max_players(static_cast<int>(row.server.max_players));
+	out->set_gametype(static_cast<int64_t>(row.server.gametype));
+	out->set_server_flags(static_cast<int64_t>(row.server.server_flags));
+	out->set_session_id(String::utf8(row.server.session_id.c_str()));
+	out->set_expansion(String::utf8(row.server.expansion.c_str()));
 	return out;
 }
 
@@ -146,8 +143,8 @@ void LanSession::stop() {
 	set_process(false);
 }
 
-Array LanSession::get_servers() const {
-	return servers_.duplicate(true);
+TypedArray<LanServerRow> LanSession::get_servers() const {
+	return servers_.duplicate();
 }
 
 void LanSession::_process(double delta) {
@@ -185,7 +182,7 @@ void LanSession::poll_replies() {
 void LanSession::rebuild_rows() {
 	servers_.clear();
 	for (const opennova::np::LanDiscoveryRow &row : browser_.servers())
-		servers_.push_back(row_dictionary(row));
+		servers_.push_back(row_record(row));
 	emit_signal("servers_changed", get_servers());
 }
 

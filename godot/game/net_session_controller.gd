@@ -194,7 +194,7 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	var err := int(_spectator_probe.start_browsing(
 			target.host_ip, target.port, target.port))
 	if err != OK:
-		_finish_spectator_preflight(_spectator_probe, target, serial, {})
+		_finish_spectator_preflight(_spectator_probe, target, serial, null)
 		return
 	get_tree().create_timer(SPECTATOR_PREFLIGHT_SECONDS).timeout.connect(
 			_on_spectator_preflight_timeout.bind(serial))
@@ -209,10 +209,10 @@ func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
 			or rows.is_empty()
 	):
 		return
-	var row: Dictionary = rows[0]
+	var row: LanServerRow = rows[0]
 	for candidate in rows:
-		var typed := candidate as Dictionary
-		if int(typed.get("port", -1)) == target.port:
+		var typed := candidate as LanServerRow
+		if typed.port == target.port:
 			row = typed
 			break
 	_finish_spectator_preflight(probe, target, serial, row)
@@ -228,23 +228,23 @@ func _on_spectator_preflight_timeout(serial: int) -> void:
 	var target := _spectator_probe_target
 	if probe == null or target == null:
 		return
-	_finish_spectator_preflight(probe, target, serial, {})
+	_finish_spectator_preflight(probe, target, serial, null)
 
 
 func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
-		serial: int, row: Dictionary) -> void:
+		serial: int, row: LanServerRow) -> void:
 	if (
 			probe != _spectator_probe
 			or target != _spectator_probe_target
 			or serial != _spectator_probe_serial
 	):
 		return
-	if not row.is_empty():
-		target.server_flags = int(row.get("server_flags", 0))
+	if row != null:
+		target.server_flags = row.server_flags
 		if target.server_name.is_empty():
-			target.server_name = String(row.get("server_name", row.get("name", "")))
+			target.server_name = row.server_name
 		if target.game_type < 0:
-			target.game_type = int(row.get("gametype", -1))
+			target.game_type = row.gametype
 	_cancel_spectator_probe()
 	if target.allows_spectators():
 		_show_join_role_prompt(target)

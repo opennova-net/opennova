@@ -140,6 +140,7 @@
 #include "network/udp_datagram.h"
 #include "network/udp_pump.h"
 #include "network/lan_session.h"
+#include "network/lan_server_row.h"
 #include "network/net_protocol.h"
 #include "network/net_session_policy.h"
 #include "util/paths.h"
@@ -418,6 +419,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(UdpDatagram);
 	GDREGISTER_CLASS(UdpPump);
 	GDREGISTER_CLASS(LanSession);
+	GDREGISTER_CLASS(LanServerRow);
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts

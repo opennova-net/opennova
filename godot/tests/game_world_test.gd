@@ -2059,8 +2059,8 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	var spans := timeline.spans()
 	assert_eq(spans.size(), 1)
 	if spans.size() == 1:
-		assert_eq(String(spans[0].get("name", "")), "environment")
-		assert_gt(int(spans[0].get("end_us", 0)), 0,
+		assert_eq(spans[0].name, "environment")
+		assert_gt(spans[0].end_us, 0,
 			"finish closes the environment span left open by the early return")
 
 
@@ -2096,9 +2096,9 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	var spans := timeline.spans()
 	assert_eq(spans.size(), 2)
 	if spans.size() == 2:
-		assert_eq(String(spans[0].get("name", "")), "environment")
-		assert_eq(String(spans[1].get("name", "")), "terrain")
-		assert_gt(int(spans[1].get("end_us", 0)), 0,
+		assert_eq(spans[0].name, "environment")
+		assert_eq(spans[1].name, "terrain")
+		assert_gt(spans[1].end_us, 0,
 			"finish closes the terrain span left open by the early return")
 
 
