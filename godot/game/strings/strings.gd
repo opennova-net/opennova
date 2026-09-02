@@ -31,6 +31,11 @@ const SECTION_WEPDES := "WepDes"
 const SECTION_WPNAMES := "WPNames"
 const SECTION_CANNED_MSG := "Canned Msg"
 const SECTION_CLIENT := "Client"
+const SECTION_LOADING_TEXT := "LoadingText"
+const TABLE_MENUTXT := "menutxt"
+const TABLE_GAMEUI := "gameui"
+const SECTION_MENU := "Menu"
+const SECTION_AVATARS := "Avatars"
 
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
@@ -119,6 +124,15 @@ func lookup_or(table_name: String, section: String, key: String, fallback: Strin
 	if t != null and t.has_string_in_section(section, key):
 		return t.get_string_in_section(section, key)
 	return fallback
+
+
+## A menu UI token: menutxt's "Menu" section, then gameui's, else the fallback
+## (the armory, player-info and DEATH-screen tokens all resolve this way).
+## [orig: the menu tokens resolve against the menu resource (game.bin) via
+##  TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
+func menu_text(key: String, fallback: String) -> String:
+	return lookup_or(TABLE_MENUTXT, SECTION_MENU, key,
+			lookup_or(TABLE_GAMEUI, SECTION_MENU, key, fallback))
 
 
 ## lookup() with the {hot} accelerator marker stripped for display (the miss

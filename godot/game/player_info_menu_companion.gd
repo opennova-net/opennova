@@ -229,12 +229,7 @@ func _restore_player_class() -> void:
 # shared Strings registry at boot. A miss falls back to the raw key (the witnessed
 # fallback; not the "??section:key??" debug marker Strings.lookup would return).
 func _display_name(key: String) -> String:
-	if key.is_empty():
-		return ""
-	var t: RtxtStringFile = Strings.get_table("gameui")
-	if t != null and t.has_string_in_section(ATBL_SECTION, key):
-		return t.get_string_in_section(ATBL_SECTION, key)
-	return key
+	return Strings.lookup_or(Strings.TABLE_GAMEUI, ATBL_SECTION, key, key)
 
 
 # --- Loadout (weapon slot lists) ----------------------------------------------
@@ -597,18 +592,18 @@ func _update_weight() -> void:
 		var saved := int(_ammo_pri.get(g.index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 		total += _weapons.extra_ammo_weight(g.index, saved)
 	var band := _weapons.encumbrance_class(total)
-	var encumbrance := _menu_ui_text("LIGHT_ENCUMBRANCE", "Light")
+	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = _menu_ui_text("HEAVY_ENCUMBRANCE", "Heavy")
+		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = _menu_ui_text("NORMAL_ENCUMBRANCE", "Normal")
+		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		# [orig: update_player_info_weight_and_weapon_icons @ 0x55f480 —
 		#  sprintf "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE]
 		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			_menu_ui_text("TOTAL_WEIGHT", "Total Weight"), total,
-			_menu_ui_text("LBS", "lbs"), encumbrance])
+			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
+			Strings.menu_text("LBS", "lbs"), encumbrance])
 
 
 # Texture the PRIMARY/SECONDARY/ACCESSORY_ICON windows from the selected def's
@@ -646,13 +641,6 @@ func _update_icons() -> void:
 
 # The weight/encumbrance keys are menu-UI tokens (menutxt "Menu", else gameui
 # "Menu") — a different section set than the Avatars display keys.
-func _menu_ui_text(key: String, fallback: String) -> String:
-	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback
-
 
 # --- Population (the cascade) -------------------------------------------------
 
@@ -1004,11 +992,8 @@ func _radio_checked(name: String) -> bool:
 
 
 func _menu_text(key: String, fallback: String) -> String:
-	# DEFAULT_VOICE / CHARVOICE_%d are menu UI strings: try menutxt's "Menu" then gametext's
-	# "Avatars" in the shared registry, else the readable fallback. Voice labels are cosmetic,
+	# DEFAULT_VOICE / CHARVOICE_%d are menu UI strings: menutxt's "Menu" then
+	# gameui's "Avatars", else the readable fallback. Voice labels are cosmetic,
 	# so a miss never blocks population.
-	for spec in [["menutxt", "Menu"], ["gameui", ATBL_SECTION]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback
+	return Strings.lookup_or(Strings.TABLE_MENUTXT, Strings.SECTION_MENU, key,
+			Strings.lookup_or(Strings.TABLE_GAMEUI, ATBL_SECTION, key, fallback))

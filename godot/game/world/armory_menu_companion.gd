@@ -214,7 +214,7 @@ func _populate_classes() -> void:
 	var rows := PackedStringArray()
 	for row_v in _class_catalog:
 		var text_key := row_v.text_key
-		rows.append(_menu_text(text_key,
+		rows.append(Strings.menu_text(text_key,
 				String(CLASS_FALLBACK_TEXT.get(text_key, text_key))))
 	_populating = true
 	_driver.set_widget_items(spin, rows)
@@ -302,7 +302,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		labeled.append([_weapon_label(w), w])
 	labeled.sort_custom(func(a, b): return String(a[0]).nocasecmp_to(String(b[0])) < 0)
 	var rows := PackedStringArray()
-	rows.append(_menu_text("NONE", "None"))
+	rows.append(Strings.menu_text("NONE", "None"))
 	var sorted: Array[WeaponDef] = []
 	for pair in labeled:
 		rows.append(pair[0])
@@ -501,16 +501,16 @@ func _update_weight() -> void:
 		# the def_extra_ammo_weight term].
 		total += _weapons.extra_ammo_weight(_grenade_rows[i].index, clips)
 	var band := _weapons.encumbrance_class(total)
-	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
+	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
+		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
+		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			_menu_text("LBS", "lbs"), encumbrance])
+			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
+			Strings.menu_text("LBS", "lbs"), encumbrance])
 	_update_icons()
 
 
@@ -666,13 +666,3 @@ func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
 	if rows.size() > 0:
 		_driver.select_row(combo, 0, false)
 	_populating = false
-
-
-func _menu_text(key: String, fallback: String) -> String:
-	# [orig: the armory's menu tokens resolve against the menu resource (game.bin)
-	#  via TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
-	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback
