@@ -149,134 +149,6 @@ int WeaponDatabase::get_count() const {
 	return static_cast<int>(weapons_file_.count);
 }
 
-Dictionary WeaponDatabase::weapon_dict(int index) const {
-	Dictionary d;
-	const DefWeaponDef *w = row(index);
-	if (w == nullptr) {
-		return d;
-	}
-	d["index"] = index;
-	d["name"] = String(w->weapon_name);                 // weapon "<id>", the display fallback
-	d["display_textid"] = String(w->loadout_menu_textid); // GameText "WepDes" key
-	d["round_type"] = String(w->round_type);            // ammo key (GameText "WepDes")
-	d["icon"] = String(w->loadout_menu_icon);
-	d["selectable"] = w->loadout_selectable;
-	d["loadout_subclasses"] = w->loadout_subclasses;    // (+36) the *_AMMO2 walk bound
-	d["slot"] = w->weapon_class_slot;                   // 0 accessory 1 primary 2 secondary 3 grenade
-	d["team_mask"] = w->teamfilter_mask;                // blue/yellow=2, red/violet=1
-	d["class_mask"] = w->charfilter_mask;               // medic1 sniper2 gunner4 rifleman8 engineer16
-	d["weight"] = w->weaponweight;
-	d["clip_weight"] = w->clipweight;
-	d["clipsize"] = w->clipsize;
-	d["startrounds"] = w->startrounds;
-	d["maxclips"] = w->maxclips;
-	// First-person viewmodel slice [orig: WeaponDef_ParseProperty @0x54d730
-	// rows; consumer Player_RenderFirstPersonViewModel @0x4ded60]: the FP gun
-	// model (gfx1), the 3P model (gfx3), the shared animation set (animadm),
-	// the hip/ADS view biases (pos/tpos: xyz raw file units + yaw/pitch/roll
-	// degrees), and renderfov (horizontal degrees, record default 80.0 — no
-	// shipped JO def sets it). gfx1a/gfx1b are recognized-and-DISCARDED
-	// tokens [orig: WeaponDefs_ParseLineCallback @0x5448d0 -> xor eax; the
-	// FP arms are the character combo's, see docs/playerinfo/avatars-re.md].
-	d["animadm"] = String(w->animadm);
-	d["gfx1"] = String(w->gfx1);
-	d["gfx3"] = String(w->gfx3);
-	PackedFloat32Array pos;
-	PackedFloat32Array tpos;
-	for (int k = 0; k < 6; ++k) {
-		pos.push_back(w->pos[k]);
-		tpos.push_back(w->tpos[k]);
-	}
-	d["pos"] = pos;   // xyz raw file units (/256 = world), then yaw/pitch/roll degrees
-	d["tpos"] = tpos; // the ADS variant [orig: WeaponDef.CamOffsetTpos @ 0x124]
-	d["renderfov"] = w->renderfov;
-	// The witnessed WeaponDef+8 flag mask (engine/formats/def flag_table maps the file
-	// tokens: scoped 1, sighted 2, burst 0x20, auto 0x100, ...) and the ADS zoom
-	// magnification [orig: Player_ToggleWeaponScope @ 0x4df0c0 gates Flags & 3;
-	// scoped FOV = 80 / zoom @ 0x4df401]; flags2 is the second FLAGS dword
-	// (Inset 0x200 = the 7-step ADS ease).
-	d["flags"] = w->flags;
-	d["flags2"] = w->flags2;
-	d["scope_max_mag"] = w->scope_max_mag;
-	// The standard SIGHTS card rows, authored draw order preserved. The frame's
-	// dynamic Scoped/Sighted/NoCardSwitch selector lives in the simulation; row
-	// presence supplies card contents rather than selecting the card.
-	// [orig: rows at the weapon record +0x1C8 (stride 36, count +0x258) drawn by
-	// draw_weapon_sight_overlays @ 0x4dce00]
-	Array sights;
-	for (size_t si = 0; si < w->sights_count; ++si) {
-		const DefSightEntry &se = w->sights[si];
-		Dictionary row;
-		row["texture"] = String(se.texture);
-		row["x1"] = se.x1;
-		row["y1"] = se.y1;
-		row["x2"] = se.x2;
-		row["y2"] = se.y2;
-		row["blend"] = se.blend; // DefSightBlendMode transport value.
-		row["scale"] = se.scale != 0;
-		row["slide"] = se.slide != 0;
-		row["slide_frames"] = se.slide_frames;
-		sights.push_back(row);
-	}
-	d["sights"] = sights;
-	// The 3P body-channel kinds (0 = absent, rifle): special_hold 1..8 picks the
-	// body hold-pose ladder 50-61 (2 also selects reload2), attack_anim 1/2 stamps
-	// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc;
-	// world-wac-ai-re.md section 14.8].
-	d["special_hold"] = w->special_hold;
-	d["attack_anim"] = w->attack_anim;
-	// The run-gait class: the forward-walk promotion adds this to the constant
-	// pitch tier 2 to pick run_2/run_3 [orig: 'run_anim' -> AdmDefs +0xAC; @ 0x4b729d].
-	d["run_anim"] = w->run_anim;
-	// The heat model, in the def's pre-divided 16.16 units (0 = the weapon
-	// authors no heat) [orig: weapon.def 'heat_values'/'heat_effect' ->
-	// WeaponDef +0x36C/+0x370/+0x374/+0x358; docs/net/novaworld-net-re.md §5.62].
-	d["heat_per_shot"] = w->heat_per_shot;
-	d["heat_decay_per_tick"] = w->heat_decay_per_tick;
-	d["heat_glow_threshold"] = w->heat_glow_threshold;
-	d["heat_effect"] = String(w->heat_effect);
-	// HUD weapon-coupled slice (docs/interface/hud-re.md): the 6-row dispersion
-	// table in DEGREES, rows = hip prone/crouch/stand then scoped prone/crouch/
-	// stand — the crosshair spread reads ERROR[stance + 3*scoped] [orig: weapon
-	// +0xB0 parse @0x543b21 (16.16); HUD_DrawCrosshair @0x592b84]. The clip
-	// graphic (HUDCLIPGFX: offset + texture [orig: parse @0x54427f]) and the
-	// per-round row (HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor,
-	// texture [orig: parse @0x5442fc -> weapon +644/+648/+652/+656/+727]).
-	PackedFloat32Array error;
-	for (int k = 0; k < 6; ++k) {
-		error.push_back(w->error[k]);
-	}
-	d["error"] = error;
-	d["hudclipgfx_texture"] = String(w->hudclipgfx_texture);
-	d["hudclipgfx_offset"] = Vector2i(w->hudclipgfx_offset[0], w->hudclipgfx_offset[1]);
-	d["hudrndgfx_texture"] = String(w->hudrndgfx_texture);
-	d["hudrndgfx_offset"] = Vector2i(w->hudrndgfx_offset[0], w->hudrndgfx_offset[1]);
-	d["hudrndgfx_layout"] = Vector3i(w->hudrndgfx_layout[0], w->hudrndgfx_layout[1], w->hudrndgfx_layout[2]);
-	// The weapon's ACTION blocks, verbatim rows for the weapon-FSM bake — Dicts
-	// {name, anim, function, delaystart, delayend} [orig: ActionDef_ParseScriptLine
-	// @ 0x4023c0; bound by Anim_InitActions @ 0x541fa0; net-re §5.62], plus the
-	// per-ACTION audio/effect hooks: the GF_* sound set played on action
-	// start/end and the particle effect spawned at the model user point
-	// [orig: ActionSlot fields consumed by ActionSlot_SpawnEffect @ 0x401f20].
-	Array actions;
-	for (size_t a = 0; a < w->actions_count; ++a) {
-		const DefWeaponAction &act_row = w->actions[a];
-		Dictionary act;
-		act["name"] = String(act_row.name);
-		act["anim"] = String(act_row.anim);
-		act["function"] = String(act_row.function);
-		act["delaystart"] = act_row.delaystart;
-		act["delayend"] = act_row.delayend;
-		act["soundset"] = String(act_row.soundset);
-		act["soundsetend"] = String(act_row.soundsetend);
-		act["particle"] = String(act_row.particle);
-		act["particleuserpoint"] = String(act_row.particleuserpoint);
-		actions.push_back(act);
-	}
-	d["actions"] = actions;
-	return d;
-}
-
 int WeaponDatabase::find_weapon(const String &p_name) const {
 	const CharString wanted = p_name.utf8();
 	for (size_t i = 0; i < weapons_file_.count; ++i) {
@@ -287,19 +159,26 @@ int WeaponDatabase::find_weapon(const String &p_name) const {
 	return -1;
 }
 
-Array WeaponDatabase::get_slot_weapons(int slot, int class_mask, int team_mask) const {
+TypedArray<WeaponDef> WeaponDatabase::get_slot_weapons(int slot, int class_mask, int team_mask) const {
 	std::vector<int32_t> indices;
 	opennova::world::weapon_slot_indices(weapons_file_.entries, weapons_file_.count,
 			slot, class_mask, team_mask, indices);
-	Array out;
+	TypedArray<WeaponDef> out;
 	for (const int32_t i : indices) {
-		out.push_back(weapon_dict(i));
+		out.push_back(get_weapon(i));
 	}
 	return out;
 }
 
-Dictionary WeaponDatabase::get_weapon(int index) const {
-	return weapon_dict(index);
+Ref<WeaponDef> WeaponDatabase::get_weapon(int index) const {
+	const DefWeaponDef *w = row(index);
+	if (w == nullptr) {
+		return Ref<WeaponDef>();
+	}
+	Ref<WeaponDef> def;
+	def.instantiate();
+	def->assign(index, *w);
+	return def;
 }
 
 double WeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices,
@@ -361,16 +240,16 @@ int WeaponDatabase::armory_resolve_selected_class(int p_player_class,
 			static_cast<uint32_t>(p_class_allow_mask) & 0xFFFFu);
 }
 
-Array WeaponDatabase::armory_class_catalog() {
+TypedArray<ArmoryClassRow> WeaponDatabase::armory_class_catalog() {
 	// The engine table (world/player_loadout.h kArmoryClassCatalog) is the
 	// one authored spin order; this only marshals rows.
-	Array rows;
+	TypedArray<ArmoryClassRow> rows;
 	for (int i = 0; i < opennova::world::kArmoryClassCount; ++i) {
 		const opennova::world::ArmoryClassCatalogEntry &entry =
 				opennova::world::kArmoryClassCatalog[i];
-		Dictionary row;
-		row["value"] = entry.class_value;
-		row["text_key"] = String(entry.text_key);
+		Ref<ArmoryClassRow> row;
+		row.instantiate();
+		row->assign(entry.class_value, entry.text_key);
 		rows.push_back(row);
 	}
 	return rows;

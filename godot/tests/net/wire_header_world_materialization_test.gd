@@ -198,12 +198,12 @@ func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 
 
-func _weapon(name: String) -> Dictionary:
+func _weapon(name: String) -> WeaponDef:
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _present_wire_handle_for_type(sim: Simulation, type_id: int) -> int:

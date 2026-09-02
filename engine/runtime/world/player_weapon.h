@@ -9,6 +9,7 @@
 //  WeaponAction_Reload @ 0x5430b0 / WeaponAction_Recoil @ 0x542dd0]
 #pragma once
 
+#include <formats/def/def.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/vehicle_mount.h>
@@ -192,8 +193,8 @@ struct LocalPlayerWeapon {
     bool trace_armed = false;
 };
 
-// The plain install payload — both embedder feeders (the retained weapon.def
-// row and the legacy dictionary seam) build exactly this.
+// The plain install payload: weapon_install_data_from_def fills the row half
+// from the retained weapon.def parse; the feeder adds the clip rings.
 struct WeaponInstallData {
     std::string name;
     std::string animadm;
@@ -211,6 +212,12 @@ struct WeaponInstallData {
     // Per-key clip-variant lengths in seconds (keys any case; stored lowered).
     std::vector<std::pair<std::string, std::vector<float>>> clip_rings;
 };
+
+// The row half of a WeaponInstallData from a parsed weapon.def entry: the
+// scalar slice the FSM bake reads plus the ACTION rows mirrored as
+// WeaponFsmActionRow. The clip-variant rings are the caller's (the kernel's
+// .adm clip index, or the embedder's own read).
+WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row);
 
 // The pump's wire-side outputs: the embedder's net layer consumes these — the
 // joiner's C2S 0x06 fired descriptor inputs and the 0x25 reload request. The

@@ -121,7 +121,7 @@ var _placer  # MissionObjectPlacer (kept so mission audio reuses its item databa
              # because game_world_test's ViewmodelWorldHarness installs a RefCounted double
 var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
-var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
+var _local_weapon: WeaponDef = null  # the resolved weapon.def row (the viewmodel/HUD slices decode it)
 var _mission_audio: MissionAudio
 var _effect_world: EffectWorld  # the runtime .ptl effect world (render-only, per mission)
 # GameWorld-owned first-person presentation seam. MissionPresentation invokes GameWorld

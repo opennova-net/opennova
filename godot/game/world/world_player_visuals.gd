@@ -165,7 +165,7 @@ func set_local_player_weapon_by_name(weapon_name: String,
 	_world._viewmodel_weapon_cleared = false
 	_world._local_weapon_preserve_slot_state = preserve_slot_state
 	# The render-side def record (viewmodel gfx/adm/fov reads + the name guard).
-	_world._local_weapon_dict = weapon_db.get_weapon(index)
+	_world._local_weapon = weapon_db.get_weapon(index)
 	var sim := _world.get_sim()
 	if sim != null:
 		_world._set_local_player_first_person_model_available(false)
@@ -240,7 +240,7 @@ func _sync_local_player_weapon_from_inventory(sim: Simulation) -> void:
 func clear_local_player_weapon() -> void:
 	_world._viewmodel_weapon_override = ""
 	_world._viewmodel_weapon_cleared = true
-	_world._local_weapon_dict = {}
+	_world._local_weapon = null
 	_world._viewmodel_def_name = ""
 	_world._viewmodel_def = null
 	_world._local_weapon_preserve_slot_state = false
@@ -355,10 +355,10 @@ func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
 	return witness
 
 
-## The installed FP weapon dict's name (empty when none) — the switch-event guard
+## The installed FP weapon's name (empty when none) — the switch-event guard
 ## against redundant viewmodel reinstalls.
 func local_player_weapon_name() -> String:
-	return String(_world._local_weapon_dict.get("name", ""))
+	return _world._local_weapon.name if _world._local_weapon != null else ""
 
 
 ## Feed only the first-person-visible NVG state into world lighting. The raw
@@ -382,7 +382,7 @@ func local_player_view() -> PlayerLocalView:
 ## reads it per frame, mirroring the original HUD info struct's weapon-def pointer
 ## [orig: HUD_BuildEntityInfo @0x4b8561 -> hudInfo+552]. Null until a weapon resolves.
 func local_player_hud_weapon_def() -> PlayerHudWeaponDef:
-	return PlayerHudWeaponDef.from_weapon_dict(_world._local_weapon_dict)
+	return PlayerHudWeaponDef.from_weapon_def(_world._local_weapon)
 
 
 ## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
@@ -441,7 +441,7 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
-	_world._local_weapon_dict = weapon_db.get_weapon(index)
+	_world._local_weapon = weapon_db.get_weapon(index)
 	_world._viewmodel_def_name = weapon_name
-	_world._viewmodel_def = PlayerViewmodelDef.from_weapon_dict(_world._local_weapon_dict)
+	_world._viewmodel_def = PlayerViewmodelDef.from_weapon_def(_world._local_weapon)
 	return _world._viewmodel_def

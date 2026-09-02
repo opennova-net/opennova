@@ -54,7 +54,7 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
 var _db: AvatarDatabase
 var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
-var _slot_rows: Dictionary = {}         # control name -> row-aligned weapon transport dicts
+var _slot_rows: Dictionary = {}         # control name -> Array[WeaponDef], row-aligned (null = NONE)
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 # Per-def picked clip counts, keyed by weapon-table index; -1/absent = the def
 # default (the maxclips row). The interleaved saved-count pair of the original
@@ -65,7 +65,7 @@ var _ammo_sec: Dictionary = {}
 # The ammo-TYPE byte per team per slot (0=FMJ 1=AP 2=SP)
 # [orig: g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
 var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
-var _grenade_rows: Array[Dictionary] = []  # the first 3 class-3 defs, table order
+var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
 var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
 var _sel_nat := -1
 var _sel_div := -1
@@ -302,38 +302,38 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 	if combo < 0:
 		return
 	var rows := PackedStringArray()
-	var defs: Array[Dictionary] = []
+	var defs: Array[WeaponDef] = []
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
-	defs.append({})
-	for w in _weapons.get_slot_weapons(slot, class_mask, team_mask):
+	defs.append(null)
+	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
 		rows.append(_weapon_label(w))
 		defs.append(w)
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
 
 
-# Return the selected weapon.def transport row for a loadout control. NONE and an
-# absent control both resolve to an empty dictionary.
-func _selected_weapon(control: String) -> Dictionary:
+# The selected weapon.def row for a loadout control. NONE and an absent
+# control both resolve to null.
+func _selected_weapon(control: String) -> WeaponDef:
 	var combo := _id(control)
 	var defs: Array = _slot_rows.get(control, [])
 	if combo < 0:
-		return {}
+		return null
 	var row := _driver.selected_row(combo)
 	if row < 0 or row >= defs.size():
-		return {}
-	return (defs[row] as Dictionary).duplicate(true)
+		return null
+	return defs[row]
 
 
 # Weapon display name = loadout_menu_textid resolved in gametext's Strings.SECTION_WEPDES section, else the
 # raw weapon id [orig: populate_weapon_slot_lists @ 0x560430: entry+40 textid else entry+0].
-func _weapon_label(w: Dictionary) -> String:
-	var textid := String(w.get("display_textid", ""))
+func _weapon_label(w: WeaponDef) -> String:
+	var textid := w.display_textid
 	if not textid.is_empty():
 		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
 			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
-	return String(w.get("name", ""))
+	return w.name
 
 
 # PLAYERCLASS carries values 5..9 (Medic..Engineer); the class mask is the matching
@@ -379,16 +379,15 @@ func _on_class_selected(_row: int, _value: String) -> void:
 #  inlined in populate_weapon_accessory_ammo_ui @ 0x55e8b0].
 func _populate_slot_ammo(control: String) -> void:
 	var w := _selected_weapon(control)
-	var index := int(w.get("index", -1))
-	var clipsize := int(w.get("clipsize", 0))
+	var index := w.index if w != null else -1
+	var has_ammo := w != null and w.clipsize > 0
 	var ammo1 := _id(control + "_AMMO1")
 	var type_combo := _id(control + "_AMMO1_TYPE")
 	var ammo2 := _id(control + "_AMMO2")
-	var has_ammo := not w.is_empty() and clipsize > 0
 	if ammo1 >= 0:
 		_driver.set_widget_shown(ammo1, has_ammo)
 		if has_ammo:
-			var maxclips := int(w.get("maxclips", 0))
+			var maxclips := w.maxclips
 			var rows := PackedStringArray()
 			# Rows 1..maxclips: "%d - %s" = rounds + round label; row value = the
 			# clip count (retail keys rows by the def index; ours by position).
@@ -408,7 +407,7 @@ func _populate_slot_ammo(control: String) -> void:
 		# [orig: @ 0x55def0 — the +188 & 0x40 gate -> UIWidget_SetInteractiveRecursive].
 		_driver.set_widget_shown(type_combo, has_ammo)
 		if has_ammo:
-			var locked := (int(w.get("flags2", 0)) & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
+			var locked := (w.flags2 & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
 			_driver.set_widget_disabled(type_combo, locked)
 			if locked:
 				_slot_type_store(control)[_team] = 0
@@ -421,10 +420,10 @@ func _populate_slot_ammo(control: String) -> void:
 					break
 	if ammo2 >= 0:
 		var sub := _subclass_weapon(w)
-		var sub_ok := has_ammo and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0
+		var sub_ok := has_ammo and sub != null and sub.clipsize > 0
 		_driver.set_widget_shown(ammo2, sub_ok)
 		if sub_ok:
-			var sub_max := int(sub.get("maxclips", 0))
+			var sub_max := sub.maxclips
 			var rows2 := PackedStringArray()
 			for clips in range(1, sub_max + 1):
 				rows2.append(_ammo_row_label(sub, clips))
@@ -437,11 +436,11 @@ func _populate_slot_ammo(control: String) -> void:
 # The sub-weapon behind *_AMMO2 — the native def-table walk
 # (engine/formats/def def_subclass_weapon_index
 # [orig: the stricmp walk over entry+192.. in @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
-func _subclass_weapon(parent: Dictionary) -> Dictionary:
-	if parent.is_empty() or _weapons == null:
-		return {}
-	var index := int(_weapons.subclass_weapon_index(int(parent.get("index", -1))))
-	return _weapons.get_weapon(index) if index >= 0 else {}
+func _subclass_weapon(parent: WeaponDef) -> WeaponDef:
+	if parent == null or _weapons == null:
+		return null
+	var index := int(_weapons.subclass_weapon_index(parent.index))
+	return _weapons.get_weapon(index) if index >= 0 else null
 
 
 # The first three selectable class-3 defs passing the class+team masks own
@@ -451,10 +450,10 @@ func _subclass_weapon(parent: Dictionary) -> Dictionary:
 func _populate_grenades(class_mask: int, team_mask: int) -> void:
 	_grenade_rows = []
 	if _weapons != null:
-		var dicts: Array = _weapons.get_slot_weapons(
+		var defs := _weapons.get_slot_weapons(
 				WeaponDatabase.SLOT_GRENADE, class_mask, team_mask)
-		for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
-			_grenade_rows.append(dicts[i] as Dictionary)
+		for i in mini(defs.size(), GRENADE_CONTROLS.size()):
+			_grenade_rows.append(defs[i])
 	for i in GRENADE_CONTROLS.size():
 		var combo := _id(GRENADE_CONTROLS[i])
 		if combo < 0:
@@ -464,25 +463,25 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 			continue
 		_driver.set_widget_shown(combo, true)
 		var w := _grenade_rows[i]
-		var maxclips := int(w.get("maxclips", 0))
+		var maxclips := w.maxclips
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
 			rows.append(_ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
-		var saved := int(_ammo_pri.get(int(w.get("index", -1)), -1))
+		var saved := int(_ammo_pri.get(w.index, -1))
 		_driver.select_row(combo,
 				maxclips if saved < 0 else clampi(saved, 0, maxclips), false)
 
 
 # "<rounds> - <round label>" [orig: sprintf "%d - %s" with i*clipsize + round_type
 # in every ammo fill; the label resolves through gametext Strings.SECTION_WEPDES].
-func _ammo_row_label(w: Dictionary, clips: int) -> String:
-	var round_label := String(w.get("round_type", ""))
+func _ammo_row_label(w: WeaponDef, clips: int) -> String:
+	var round_label := w.round_type
 	if not round_label.is_empty():
 		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
 			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
-	return "%d - %s" % [clips * int(w.get("clipsize", 0)), round_label]
+	return "%d - %s" % [clips * w.clipsize, round_label]
 
 
 func _slot_type_store(control: String) -> Dictionary:
@@ -496,9 +495,9 @@ func _slot_type_store(control: String) -> Dictionary:
 ## array rather than the combo position — retail serializes -1 until the user picks.
 func selected_clips(control: String) -> int:
 	var w := _selected_weapon(control)
-	if w.is_empty():
+	if w == null:
 		return -1
-	return int(_ammo_pri.get(int(w.get("index", -1)), -1))
+	return int(_ammo_pri.get(w.index, -1))
 
 
 ## The ammo-TYPE byte for a slot on the current team (0=FMJ 1=AP 2=SP).
@@ -518,9 +517,9 @@ func _on_weapon_slot_selected(_row: int, _value: String, control: String) -> voi
 func _on_ammo1_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
-	var index := int(_selected_weapon(control).get("index", -1))
-	if index >= 0:
-		_ammo_pri[index] = row + 1  # [orig: @ 0x55f730 — stores selected_row + 1]
+	var w := _selected_weapon(control)
+	if w != null:
+		_ammo_pri[w.index] = row + 1  # [orig: @ 0x55f730 — stores selected_row + 1]
 	_update_weight()
 	_update_icons()  # the original's combined refresh [orig: @ 0x55f480]
 
@@ -528,9 +527,9 @@ func _on_ammo1_selected(row: int, _value: String, control: String) -> void:
 func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
-	var index := int(_selected_weapon(control).get("index", -1))
-	if index >= 0:
-		_ammo_sec[index] = row + 1  # [orig: @ 0x55f730 ctx 1 — the interleaved pair]
+	var w := _selected_weapon(control)
+	if w != null:
+		_ammo_sec[w.index] = row + 1  # [orig: @ 0x55f730 ctx 1 — the interleaved pair]
 	_update_weight()
 	_update_icons()
 
@@ -557,7 +556,7 @@ func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 		# VALUE — rounds — which equals clips only because grenade defs use
 		# clipsize 1; we store clips, the consistent half of that quirk
 		# [orig: @ 0x55fb70].)
-		_ammo_pri[int(_grenade_rows[i].get("index", -1))] = row
+		_ammo_pri[_grenade_rows[i].index] = row
 	_update_weight()
 	_update_icons()
 
@@ -577,17 +576,16 @@ func _update_weight() -> void:
 	var total := 0.0
 	for control in PARENT_SLOTS:
 		var w := _selected_weapon(control)
-		if w.is_empty():
+		if w == null:
 			continue
-		var index := int(w.get("index", -1))
+		var index := w.index
 		indices.append(index)
 		counts.append(int(_ammo_pri.get(index, -1)))
 		# The witnessed sub-weapon term is gated on the *_AMMO2 control existing.
 		var sub := _subclass_weapon(w)
-		if _id(control + "_AMMO2") >= 0 \
-				and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
+		if _id(control + "_AMMO2") >= 0 and sub != null and sub.clipsize > 0:
 			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			total += _weapons.extra_ammo_weight(int(sub.get("index", -1)),
+			total += _weapons.extra_ammo_weight(sub.index,
 					WeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
 	total += _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
@@ -596,9 +594,8 @@ func _update_weight() -> void:
 		if combo < 0 or not _driver.is_widget_shown(combo):
 			continue
 		var g := _grenade_rows[i]
-		var saved := int(_ammo_pri.get(int(g.get("index", -1)),
-				WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-		total += _weapons.extra_ammo_weight(int(g.get("index", -1)), saved)
+		var saved := int(_ammo_pri.get(g.index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+		total += _weapons.extra_ammo_weight(g.index, saved)
 	var band := _weapons.encumbrance_class(total)
 	var encumbrance := _menu_ui_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
@@ -638,7 +635,8 @@ func _update_icons() -> void:
 			frame.add_child(icon_rect)
 			_icon_mounts[control] = icon_rect
 		_place_mount(icon_rect, holder)
-		var icon_name := String(_selected_weapon(control).get("icon", ""))
+		var selected := _selected_weapon(control)
+		var icon_name := selected.icon if selected != null else ""
 		if icon_name.is_empty() or _root == null:
 			icon_rect.texture = null
 		else:
@@ -954,13 +952,13 @@ func snapshot() -> Dictionary:
 		# writes the saved arrays; "-1" is the filler]. The type bytes are the
 		# tuple's flags field [orig: g_playerInfoAmmoTypePri/Sec].
 		profile.merge({
-			"primary": String(primary.get("name", "")),
+			"primary": primary.name if primary != null else "",
 			"primary_clips": selected_clips("PRIMARY"),
 			"primary_ammo_type": selected_ammo_type("PRIMARY"),
-			"secondary": String(secondary.get("name", "")),
+			"secondary": secondary.name if secondary != null else "",
 			"secondary_clips": selected_clips("SECONDARY"),
 			"secondary_ammo_type": selected_ammo_type("SECONDARY"),
-			"accessory": String(accessory.get("name", "")),
+			"accessory": accessory.name if accessory != null else "",
 			"accessory_clips": selected_clips("ACCESSORY"),
 		})
 	return profile

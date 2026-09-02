@@ -924,34 +924,7 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 	}
 	if (row == nullptr) return false;
 	clip_index.load(asset_index(), row->animadm);
-	w::WeaponInstallData data;
-	data.name = row->weapon_name;
-	data.animadm = row->animadm;
-	data.flags = row->flags;
-	data.flags2 = row->flags2;
-	data.heat_per_shot = row->heat_per_shot;
-	data.heat_decay_per_tick = row->heat_decay_per_tick;
-	data.heat_glow_threshold = row->heat_glow_threshold;
-	data.scope_max_mag = row->scope_max_mag;
-	data.attack_anim = row->attack_anim;
-	data.run_anim = row->run_anim;
-	data.clipsize = row->clipsize;
-	data.startrounds = row->startrounds;
-	data.rows.reserve(row->actions_count);
-	for (size_t a = 0; a < row->actions_count; ++a) {
-		const DefWeaponAction &act = row->actions[a];
-		w::WeaponFsmActionRow r;
-		std::snprintf(r.name, sizeof(r.name), "%s", act.name);
-		std::snprintf(r.anim, sizeof(r.anim), "%s", act.anim);
-		std::snprintf(r.function, sizeof(r.function), "%s", act.function);
-		r.delaystart = act.delaystart;
-		r.delayend = act.delayend;
-		std::snprintf(r.soundset, sizeof(r.soundset), "%s", act.soundset);
-		std::snprintf(r.soundsetend, sizeof(r.soundsetend), "%s", act.soundsetend);
-		std::snprintf(r.particle, sizeof(r.particle), "%s", act.particle);
-		std::snprintf(r.particleuserpoint, sizeof(r.particleuserpoint), "%s", act.particleuserpoint);
-		data.rows.push_back(r);
-	}
+	w::WeaponInstallData data = w::weapon_install_data_from_def(*row);
 	const auto add_key = [&](const char *key) {
 		if (key == nullptr || key[0] == '\0') return;
 		const std::string lowered = strutil::to_lower(key);

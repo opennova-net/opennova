@@ -591,29 +591,29 @@ func _weight_text() -> String:
 # is public: row = position in the filtered slot list + 1 (row 0 is NONE)
 # [orig: populate_weapon_slot_lists @ 0x560430].
 func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
-		class_mask: int, weapon_name: String) -> Dictionary:
+		class_mask: int, weapon_name: String) -> WeaponDef:
 	var combo := _ammo_id(control)
-	var defs: Array = wdb.get_slot_weapons(slot, class_mask, 2)  # blue
+	var defs := wdb.get_slot_weapons(slot, class_mask, 2)  # blue
 	for i in defs.size():
-		var w := defs[i] as Dictionary
-		if String(w.get("name", "")).nocasecmp_to(weapon_name) == 0:
+		var w := defs[i] as WeaponDef
+		if w.name.nocasecmp_to(weapon_name) == 0:
 			_ammo_driver.select_row(combo, i + 1)  # emits -> the witnessed refill
 			return w
 	assert_true(false, "%s offers %s" % [control, weapon_name])
-	return {}
+	return null
 
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
 # mirrors [orig: the stricmp walk in populate_ammo_combo_boxes @ 0x55def0].
-func _expected_sub(wdb: WeaponDatabase, parent: Dictionary) -> Dictionary:
-	var parent_round := String(parent.get("round_type", ""))
-	for k in range(1, int(parent.get("loadout_subclasses", 0)) + 1):
-		var cand := wdb.get_weapon(int(parent.get("index", -1)) + k)
-		if cand.is_empty():
-			return {}
-		if String(cand.get("round_type", "")).nocasecmp_to(parent_round) != 0:
+func _expected_sub(wdb: WeaponDatabase, parent: WeaponDef) -> WeaponDef:
+	var parent_round := parent.round_type
+	for k in range(1, parent.loadout_subclasses + 1):
+		var cand := wdb.get_weapon(parent.index + k)
+		if cand == null:
+			return null
+		if cand.round_type.nocasecmp_to(parent_round) != 0:
 			return cand
-	return {}
+	return null
 
 
 func _items(name: String) -> Array:
@@ -662,12 +662,12 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 	var selected_primary := ""
 	var selected_row := -1
 	for i in primary_defs.size():
-		var weapon: Dictionary = primary_defs[i]
-		if String(weapon.get("name", "")).nocasecmp_to("WPN_M4AUTO") == 0:
-			selected_primary = String(weapon.get("name", ""))
+		var weapon: WeaponDef = primary_defs[i]
+		if weapon.name.nocasecmp_to("WPN_M4AUTO") == 0:
+			selected_primary = weapon.name
 			selected_row = i + 1 # row 0 is NONE
 			break
-	assert_false(selected_primary.is_empty(), "the fixture offers M4AUTO for medic/blue")
+	assert_false(selected_primary == null, "the fixture offers M4AUTO for medic/blue")
 	_ammo_driver.select_row(_ammo_id("PRIMARY"), selected_row, false)  # silent reselect
 
 	var profile := companion.snapshot()
@@ -743,12 +743,12 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var _presenter := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var ammo := _ammo_id("PRIMARY_AMMO1")
-	var maxclips := int(w.get("maxclips", 0))
+	var maxclips := w.maxclips
 	assert_true(_ammo_driver.is_widget_shown(ammo), "a clip-carrying weapon shows its ammo combo")
 	assert_eq(_ammo_driver.item_count(ammo), maxclips,
 		"rows 1..maxclips [orig: populate_ammo_combo_boxes @ 0x55def0]")
 	assert_eq(_ammo_driver.item_text(ammo, 0),
-		"%d - %s" % [int(w.get("clipsize", 0)), String(w.get("round_type", ""))],
+		"%d - %s" % [w.clipsize, w.round_type],
 		"row labels are the witnessed \"%d - %s\" rounds + round type")
 	assert_eq(_ammo_driver.selected_row(ammo), maxclips - 1,
 		"the untouched default selects the full (maxclips) row")
@@ -783,14 +783,14 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	# The witnessed walk skips same-round WPN_M4M203 and lands on WPN_M4M203HE
 	# (AMMO_M203_40MM_NADE) within loadout_subclasses = 2.
 	var sub := _expected_sub(wdb, w)
-	assert_eq(String(sub.get("name", "")), "WPN_M4M203HE",
+	assert_eq(sub.name, "WPN_M4M203HE",
 		"the sub walk lands on the first DIFFERING round_type entry")
 	var ammo2 := _ammo_id("PRIMARY_AMMO2")
 	assert_true(_ammo_driver.is_widget_shown(ammo2), "a live sub-weapon shows *_AMMO2")
-	assert_eq(_ammo_driver.item_count(ammo2), int(sub.get("maxclips", 0)),
+	assert_eq(_ammo_driver.item_count(ammo2), sub.maxclips,
 		"*_AMMO2 rows come from the SUB-weapon's maxclips")
 	assert_eq(_ammo_driver.item_text(ammo2, 0),
-		"%d - %s" % [int(sub.get("clipsize", 0)), String(sub.get("round_type", ""))],
+		"%d - %s" % [sub.clipsize, sub.round_type],
 		"*_AMMO2 labels use the sub-weapon's clipsize + round type")
 
 
@@ -805,13 +805,13 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
 	for i in mini(expected.size(), 3):
 		var combo := _ammo_id("GRENADE_AMMO%d" % (i + 1))
-		var w := expected[i] as Dictionary
+		var w := expected[i] as WeaponDef
 		assert_true(_ammo_driver.is_widget_shown(combo), "an owned grenade control shows")
-		assert_eq(_ammo_driver.item_count(combo), int(w.get("maxclips", 0)) + 1,
+		assert_eq(_ammo_driver.item_count(combo), w.maxclips + 1,
 			"grenade rows are 0..maxclips INCLUDING the zero row [orig: @ 0x55def0]")
-		assert_eq(_ammo_driver.item_text(combo, 0), "0 - %s" % String(w.get("round_type", "")),
+		assert_eq(_ammo_driver.item_text(combo, 0), "0 - %s" % w.round_type,
 			"row 0 is the zero-rounds row")
-		assert_eq(_ammo_driver.selected_row(combo), int(w.get("maxclips", 0)),
+		assert_eq(_ammo_driver.selected_row(combo), w.maxclips,
 			"the untouched default selects the full row")
 	for i in range(expected.size(), 3):
 		assert_false(_ammo_driver.is_widget_shown(_ammo_id("GRENADE_AMMO%d" % (i + 1))),
@@ -828,13 +828,13 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
 	# full-grenade clip-only terms the fill selects by default.
-	var expected := float(w.get("weight", 0.0)) \
-			+ int(w.get("maxclips", 0)) * float(w.get("clip_weight", 0.0))
+	var expected := w.weight \
+			+ w.maxclips * w.clip_weight
 	var sub := _expected_sub(wdb, w)
-	if not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
-		expected += int(sub.get("maxclips", 0)) * float(sub.get("clip_weight", 0.0))
+	if sub != null and sub.clipsize > 0:
+		expected += sub.maxclips * sub.clip_weight
 	for g in wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
-		expected += int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0))
+		expected += g.maxclips * g.clip_weight
 	var band := "Light"
 	if expected >= 66.6:
 		band = "Heavy"
@@ -870,7 +870,7 @@ func test_ammo_selection_recomputes_weight_and_snapshot() -> void:
 		"the type byte rides the snapshot [orig: the kit tuple flags field]")
 	# Icon side of the same selection: the M4's authored icon texture name is
 	# non-empty, but with no resource root the rect stays cleared (root-less unit).
-	assert_false(String(w.get("icon", "")).is_empty(), "the fixture authors an icon")
+	assert_false(w.icon.is_empty(), "the fixture authors an icon")
 
 
 func test_type_combo_locks_for_noammotypes_weapons() -> void:
@@ -931,8 +931,8 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	var g := wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
-	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
+	var g: WeaponDef = wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2)[0]
+	assert_gt(g.clip_weight * g.maxclips, 0.0,
 		"the first grenade def carries weighable clips")
 	var default_text := _weight_text()  # -1 default = full grenades weighed in
 	_ammo_driver.select_row(_ammo_id("GRENADE_AMMO1"), 0)  # the zero row
@@ -941,7 +941,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	var zero_total := float(_weight_text().get_slice(" ", 2))
 	var default_total := float(default_text.get_slice(" ", 2))
 	assert_almost_eq(default_total - zero_total,
-		int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0)), 0.06,
+		g.maxclips * g.clip_weight, 0.06,
 		"the delta is exactly the grenade's maxclips*clip_weight term")
 
 
@@ -952,5 +952,5 @@ func test_weapon_dict_carries_loadout_subclasses() -> void:
 	var wdb := _load_weapons()
 	var idx := wdb.find_weapon("WPN_M4M203AUTO")
 	assert_gt(idx, 0)
-	assert_eq(int(wdb.get_weapon(idx).get("loadout_subclasses", -1)), 2,
+	assert_eq(wdb.get_weapon(idx).loadout_subclasses, 2,
 		"loadout_subclasses (+36) rides the transport dict")

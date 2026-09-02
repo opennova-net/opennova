@@ -1216,4 +1216,40 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	weapon_trace_record(w, active_slot, ev, world.logic_tick);
 }
 
+WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
+	WeaponInstallData data;
+	data.name = row.weapon_name;
+	data.animadm = row.animadm;
+	data.flags = row.flags;
+	data.flags2 = row.flags2;
+	data.heat_per_shot = row.heat_per_shot;
+	data.heat_decay_per_tick = row.heat_decay_per_tick;
+	data.heat_glow_threshold = row.heat_glow_threshold;
+	data.scope_max_mag = row.scope_max_mag;
+	data.attack_anim = row.attack_anim;
+	data.run_anim = row.run_anim;
+	data.clipsize = row.clipsize;
+	data.startrounds = row.startrounds;
+	// The ACTION rows, verbatim, for the weapon-FSM bake plus the per-ACTION
+	// audio/effect hooks [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows;
+	// bound by Anim_InitActions @ 0x541fa0].
+	data.rows.reserve(row.actions_count);
+	for (size_t a = 0; a < row.actions_count; ++a) {
+		const DefWeaponAction &act = row.actions[a];
+		WeaponFsmActionRow r;
+		std::snprintf(r.name, sizeof(r.name), "%s", act.name);
+		std::snprintf(r.anim, sizeof(r.anim), "%s", act.anim);
+		std::snprintf(r.function, sizeof(r.function), "%s", act.function);
+		r.delaystart = act.delaystart;
+		r.delayend = act.delayend;
+		std::snprintf(r.soundset, sizeof(r.soundset), "%s", act.soundset);
+		std::snprintf(r.soundsetend, sizeof(r.soundsetend), "%s", act.soundsetend);
+		std::snprintf(r.particle, sizeof(r.particle), "%s", act.particle);
+		std::snprintf(r.particleuserpoint, sizeof(r.particleuserpoint), "%s",
+				act.particleuserpoint);
+		data.rows.push_back(r);
+	}
+	return data;
+}
+
 } // namespace opennova::world

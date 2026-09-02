@@ -161,7 +161,7 @@ func open() -> bool:
 			var index: int = weapon_db.find_weapon(weapon_name)
 			if index < 0:
 				continue
-			match int(weapon_db.get_weapon(index).get("slot", -1)):
+			match weapon_db.get_weapon(index).slot:
 				WeaponDatabase.SLOT_PRIMARY:
 					if current_primary.is_empty():
 						current_primary = weapon_name

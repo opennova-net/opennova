@@ -387,7 +387,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 		else:
 			_game_hud.clear_weapon()
 		if _sights_card != null:
-			_sights_card.set_weapon_sights(weapon.sights if weapon != null else [],
+			var sights: Array[WeaponSightRow] = weapon.sights if weapon != null else []
+			_sights_card.set_weapon_sights(sights,
 					_world.get_resource_root() if _world != null else null)
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info

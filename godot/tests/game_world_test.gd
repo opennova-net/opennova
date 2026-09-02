@@ -648,6 +648,18 @@ func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 					"%s must not self-clock on the physics tick either" % presenter_name)
 
 
+## A first-person viewmodel definition authored by hand (the record the
+## weapon.def slice decodes to): the gun model, the flags, no arms — the FP arms
+## are the character's, never a weapon.def field (retail parses-and-discards
+## gfx1a/gfx1b [orig: WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6]).
+func _viewmodel_def(name: String, gfx1: String, flags: int) -> PlayerViewmodelDef:
+	var def := PlayerViewmodelDef.new()
+	def.weapon_name = name
+	def.gfx1 = gfx1
+	def.flags = flags
+	return def
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -2317,11 +2329,7 @@ func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 	# definition resolves at all.
 	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
 	var placer := ViewmodelPlacerStub.new()
-	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
-		"name": "WPN_AVENGER",
-		"gfx1": "",
-		"flags": 0x80,
-	}), placer)
+	world.install_viewmodel_fixture(_viewmodel_def("WPN_AVENGER", "", 0x80), placer)
 	var viewmodel := world.build_local_player_viewmodel()
 	assert_not_null(viewmodel,
 			"a valid no-model definition is a stable empty FP presentation epoch")
@@ -2338,12 +2346,7 @@ func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
 	world.add_child(terrain)
 	add_child_autofree(world)
 	var placer := SelectedAvatarViewmodelPlacerStub.new()
-	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
-		"name": "WPN_TEST",
-		"gfx1": "TestGun",
-		"gfx1a": "WeaponDefaultArms",  # a retail-discarded token; never an arms source
-		"flags": 0,
-	}), placer)
+	world.install_viewmodel_fixture(_viewmodel_def("WPN_TEST", "TestGun", 0), placer)
 	var container := world.build_local_player_viewmodel()
 	assert_not_null(container)
 	assert_eq(placer.graphics, ["SelectedArms", "TestGun"],
@@ -2380,12 +2383,7 @@ func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
 func test_first_person_without_character_arms_submits_the_gun_alone() -> void:
 	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
 	var placer := NoCharacterViewmodelPlacerStub.new()
-	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
-		"name": "WPN_TEST",
-		"gfx1": "TestGun",
-		"gfx1a": "WeaponDefaultArms",
-		"flags": 0,
-	}), placer)
+	world.install_viewmodel_fixture(_viewmodel_def("WPN_TEST", "TestGun", 0), placer)
 	var container := world.build_local_player_viewmodel()
 	assert_not_null(container)
 	assert_eq(placer.graphics, ["TestGun"],
@@ -2398,12 +2396,7 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 	var world: ChallengePrewarmWorldHarness = autofree(
 			ChallengePrewarmWorldHarness.new())
 	var placer := ChallengePrewarmPlacerStub.new()
-	world.install_prewarm_fixture(PlayerViewmodelDef.from_weapon_dict({
-		"name": "WPN_TEST",
-		"gfx1": "test_gun",
-		"gfx1a": "test_arms",
-		"flags": 0,
-	}), placer)
+	world.install_prewarm_fixture(_viewmodel_def("WPN_TEST", "test_gun", 0), placer)
 
 	world.prewarm_challenge_models()
 

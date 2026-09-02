@@ -713,14 +713,13 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var weapon := {
-		"name": "WPN_INSET_NVG_TEST",
-		"actions": [{"name": "idle", "delaystart": 0, "delayend": 0}],
-		"flags": 0x1,
-		"flags2": 0x200,
-		"clipsize": 30,
-		"startrounds": 60,
-	}
+	var weapon := WeaponDef.new()
+	weapon.name = "WPN_INSET_NVG_TEST"
+	weapon.set_actions([WeaponActionRow.make("idle", 0, 0)])
+	weapon.flags = 0x1
+	weapon.flags2 = 0x200
+	weapon.clipsize = 30
+	weapon.startrounds = 60
 	sim.set_local_player_weapon(weapon, {})
 	sim.step()
 	assert_true(sim.request_local_player_scope_toggle())
@@ -793,15 +792,11 @@ func _anim_root() -> ResourceRoot:
 	return root
 
 
-func _minimal_weapon(name: String, animadm: String) -> Dictionary:
-	return {
-		"name": name,
-		"animadm": animadm,
-		"actions": [],
-		"flags": 0,
-		"clipsize": 0,
-		"startrounds": 0,
-	}
+func _minimal_weapon(name: String, animadm: String) -> WeaponDef:
+	var def := WeaponDef.new()
+	def.name = name
+	def.animadm = animadm
+	return def
 
 
 func _weapon_arm_pitch_deg(sim: Simulation) -> float:
@@ -816,20 +811,20 @@ func _aim_verdict_sim(flags: int) -> Simulation:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	sim.set_local_player_weapon({
-		"name": "WPN_AIM_VERDICT",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-			{"name": "reload", "delaystart": 8, "delayend": 8},
-			{"name": "scopeup", "delaystart": 0, "delayend": 0},
-			{"name": "scopedown", "delaystart": 0, "delayend": 0},
-		],
-		"flags": flags,
-		"clipsize": 30,
-		"startrounds": 60,
-	}, {})
+	var def_1 := WeaponDef.new()
+	def_1.name = "WPN_AIM_VERDICT"
+	def_1.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0),
+		WeaponActionRow.make("recoil", 0, 0),
+		WeaponActionRow.make("reload", 8, 8),
+		WeaponActionRow.make("scopeup", 0, 0),
+		WeaponActionRow.make("scopedown", 0, 0),
+	])
+	def_1.flags = flags
+	def_1.clipsize = 30
+	def_1.startrounds = 60
+	sim.set_local_player_weapon(def_1, {})
 	return sim
 
 
@@ -1096,17 +1091,17 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	# A compact deterministic FSM is enough for the view toggle; the entity's
 	# equipped ADM index still resolves the exact M4 ERROR table loaded above.
-	sim.set_local_player_weapon({
-		"name": "WPN_M4AUTO",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "scopeup", "delaystart": 0, "delayend": 0},
-			{"name": "scopedown", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0x1,
-		"clipsize": 30,
-		"startrounds": 300,
-	}, {})
+	var def_2 := WeaponDef.new()
+	def_2.name = "WPN_M4AUTO"
+	def_2.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("scopeup", 0, 0),
+		WeaponActionRow.make("scopedown", 0, 0),
+	])
+	def_2.flags = 0x1
+	def_2.clipsize = 30
+	def_2.startrounds = 300
+	sim.set_local_player_weapon(def_2, {})
 	sim.step()
 	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 2,
 			"standing selects row 2")
@@ -1288,17 +1283,17 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
-	sim.set_local_player_weapon({
-		"name": "WPN_M4AUTO",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0,
-		"clipsize": 30,
-		"startrounds": 300,
-	}, {})
+	var def_3 := WeaponDef.new()
+	def_3.name = "WPN_M4AUTO"
+	def_3.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0),
+		WeaponActionRow.make("recoil", 0, 0),
+	])
+	def_3.flags = 0
+	def_3.clipsize = 30
+	def_3.startrounds = 300
+	sim.set_local_player_weapon(def_3, {})
 	sim.step()
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(4):
@@ -1376,15 +1371,17 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var def := {
-		"name": "WPN_RING", "animadm": "ring.adm",
-		"actions": [
-			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
-			{"name": "reload", "anim": "anim_wpn_reload", "delaystart": -1, "delayend": -1},
-		],
-		"flags": 0, "clipsize": 30, "startrounds": 60,
-	}
+	var def := WeaponDef.new()
+	def.name = "WPN_RING"
+	def.animadm = "ring.adm"
+	def.set_actions([
+		WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle"),
+		WeaponActionRow.make("fire", 0, 0, "anim_wpn_fire"),
+		WeaponActionRow.make("reload", -1, -1, "anim_wpn_reload"),
+	])
+	def.flags = 0
+	def.clipsize = 30
+	def.startrounds = 60
 	sim.set_local_player_weapon(def, {
 		"anim_wpn_idle": PackedFloat32Array([0.2]),
 		"anim_wpn_fire": PackedFloat32Array([0.05]),
@@ -1442,20 +1439,16 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var def := {
-		"name": "WPN_EVENT_BATCH",
-		"actions": [
-			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0,
-				"soundset": "FIRE_BEGIN", "soundsetend": "FIRE_END"},
-			{"name": "recoil", "anim": "anim_wpn_recoil", "delaystart": 0,
-				"delayend": 0, "soundset": "RECOIL_BEGIN",
-				"particle": "Effect_TestCas", "particleuserpoint": "bcasing"},
-		],
-		"flags": 0x100,
-		"clipsize": 30,
-		"startrounds": 60,
-	}
+	var def := WeaponDef.new()
+	def.name = "WPN_EVENT_BATCH"
+	def.set_actions([
+		WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle"),
+		WeaponActionRow.make("fire", 0, 0, "anim_wpn_fire", "FIRE_BEGIN", "FIRE_END"),
+		WeaponActionRow.make("recoil", 0, 0, "anim_wpn_recoil", "RECOIL_BEGIN", "", "", "Effect_TestCas", "bcasing"),
+	])
+	def.flags = 0x100
+	def.clipsize = 30
+	def.startrounds = 60
 	sim.set_local_player_weapon(def, {
 		"anim_wpn_idle": 0.1,
 		"anim_wpn_fire": 0.1,
@@ -1521,18 +1514,16 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var def := {
-		"name": "WPN_SCOPE_BATCH",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0,
-				"particle": "Effect_TestMF", "particleuserpoint": "muzzle1"},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0x102, # Auto + Sighted
-		"clipsize": 30,
-		"startrounds": 60,
-	}
+	var def := WeaponDef.new()
+	def.name = "WPN_SCOPE_BATCH"
+	def.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0, "", "", "", "", "Effect_TestMF", "muzzle1"),
+		WeaponActionRow.make("recoil", 0, 0),
+	])
+	def.flags = 0x102 # Auto + Sighted
+	def.clipsize = 30
+	def.startrounds = 60
 	sim.set_local_player_weapon(def, {})
 	sim.step()
 	sim.drain_local_player_weapon_events()
@@ -1571,13 +1562,13 @@ func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void
 		var sim := Simulation.new()
 		assert_true(sim.load_from_mission_data(md))
 		assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-		sim.set_local_player_weapon({
-			"name": String(case["name"]),
-			"actions": [{"name": "idle", "delaystart": 0, "delayend": 0}],
-			"flags": int(case["flags"]),
-			"clipsize": 30,
-			"startrounds": 60,
-		}, {})
+		var def_4 := WeaponDef.new()
+		def_4.name = String(case["name"])
+		def_4.set_actions([WeaponActionRow.make("idle", 0, 0)])
+		def_4.flags = int(case["flags"])
+		def_4.clipsize = 30
+		def_4.startrounds = 60
+		sim.set_local_player_weapon(def_4, {})
 		sim.step()
 		assert_true(sim.request_local_player_scope_toggle())
 		for _i in range(15):
@@ -1596,16 +1587,18 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	sim.set_local_player_weapon({
-		"name": "WPN_SCOPE_RELOAD",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-			{"name": "reload", "delaystart": 1, "delayend": 1},
-		],
-		"flags": 0x2, "clipsize": 30, "startrounds": 60,
-	}, {})
+	var def_5 := WeaponDef.new()
+	def_5.name = "WPN_SCOPE_RELOAD"
+	def_5.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0),
+		WeaponActionRow.make("recoil", 0, 0),
+		WeaponActionRow.make("reload", 1, 1),
+	])
+	def_5.flags = 0x2
+	def_5.clipsize = 30
+	def_5.startrounds = 60
+	sim.set_local_player_weapon(def_5, {})
 	sim.step()
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(6):
@@ -1654,17 +1647,16 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO")
-	var fire_def := {
-		"name": "WPN_M4AUTO",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0,
-		"clipsize": 30,
-		"startrounds": 300,
-	}
+	var fire_def := WeaponDef.new()
+	fire_def.name = "WPN_M4AUTO"
+	fire_def.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0),
+		WeaponActionRow.make("recoil", 0, 0),
+	])
+	fire_def.flags = 0
+	fire_def.clipsize = 30
+	fire_def.startrounds = 300
 	sim.set_local_player_weapon(fire_def, {})
 	sim.step()
 	sim.drain_local_player_weapon_events()
@@ -2104,12 +2096,9 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var def := {
-		"name": "WPN_EVENT_LIFECYCLE",
-		"actions": [
-			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
-		],
-	}
+	var def := WeaponDef.new()
+	def.name = "WPN_EVENT_LIFECYCLE"
+	def.set_actions([WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle")])
 	var clips := {"anim_wpn_idle": 0.1}
 
 	sim.set_local_player_weapon(def, clips)
@@ -2136,8 +2125,8 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	assert_eq(int(remounted.get("play_serial", -1)), 0)
 	sim.step()
 	# A different-weapon mount has the same epoch boundary.
-	var def_b: Dictionary = def.duplicate(true)
-	def_b["name"] = "WPN_EVENT_LIFECYCLE_B"
+	var def_b := def.copy()
+	def_b.name = "WPN_EVENT_LIFECYCLE_B"
 	sim.set_local_player_weapon(def_b, clips)
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"a new-weapon mount discards the previous weapon's queued presentation")
@@ -2159,17 +2148,16 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var def := {
-		"name": "WPN_RESTART_POWERTHROW",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "delaystart": 0, "delayend": 0},
-			{"name": "recoil", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 1 << 31,
-		"clipsize": 1,
-		"startrounds": 0,
-	}
+	var def := WeaponDef.new()
+	def.name = "WPN_RESTART_POWERTHROW"
+	def.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("fire", 0, 0),
+		WeaponActionRow.make("recoil", 0, 0),
+	])
+	def.flags = 1 << 31
+	def.clipsize = 1
+	def.startrounds = 0
 	sim.set_local_player_weapon(def, {})
 	sim.step() # advance off tick zero so the idle sentinel cannot mask the windup
 	sim.set_local_player_weapon_input(true, true, false)
@@ -2261,7 +2249,7 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var m4_index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(m4_index, 0)
-	var m4: Dictionary = weapons.get_weapon(m4_index)
+	var m4: WeaponDef = weapons.get_weapon(m4_index)
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
 	sim.set_local_player_weapon(m4, {})
 	sim.step()
@@ -2784,17 +2772,17 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
-	sim.set_local_player_weapon({
-		"name": "WPN_LABEL_SCOPE",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "scopeup", "delaystart": 0, "delayend": 0},
-			{"name": "scopedown", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0x1,
-		"clipsize": 30,
-		"startrounds": 60,
-	}, {})
+	var def_6 := WeaponDef.new()
+	def_6.name = "WPN_LABEL_SCOPE"
+	def_6.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("scopeup", 0, 0),
+		WeaponActionRow.make("scopedown", 0, 0),
+	])
+	def_6.flags = 0x1
+	def_6.clipsize = 30
+	def_6.startrounds = 60
+	sim.set_local_player_weapon(def_6, {})
 	sim.step()
 	assert_eq(sim.get_attach_labels().size(), 2,
 			"an unraised Scoped weapon cannot fire, so both candidates label")
@@ -2973,14 +2961,17 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	sim.set_local_player_weapon({
-		"name": "WPN_GATE", "animadm": "gate.adm",
-		"actions": [
-			{"name": "idle", "anim": "anim_wpn_idle", "delaystart": 0, "delayend": 0},
-			{"name": "fire", "anim": "anim_wpn_fire", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0, "clipsize": 30, "startrounds": 60,
-	}, {
+	var def_7 := WeaponDef.new()
+	def_7.name = "WPN_GATE"
+	def_7.animadm = "gate.adm"
+	def_7.set_actions([
+		WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle"),
+		WeaponActionRow.make("fire", 0, 0, "anim_wpn_fire"),
+	])
+	def_7.flags = 0
+	def_7.clipsize = 30
+	def_7.startrounds = 60
+	sim.set_local_player_weapon(def_7, {
 		"anim_wpn_idle": PackedFloat32Array([0.2]),
 		"anim_wpn_fire": PackedFloat32Array([0.2]),
 	})
@@ -3041,9 +3032,9 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: Dictionary = weapons.get_weapon(
+	var mounted: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
@@ -3145,9 +3136,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: Dictionary = weapons.get_weapon(
+	var mounted: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
@@ -3264,9 +3255,9 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: Dictionary = weapons.get_weapon(
+	var mounted: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
@@ -3389,13 +3380,13 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	var mounted_idx := weapons.find_weapon("WPN_AVENGER")
 	assert_gte(personal_idx, 0)
 	assert_gte(mounted_idx, 0)
-	var personal_def: Dictionary = weapons.get_weapon(personal_idx)
-	var mounted_def: Dictionary = weapons.get_weapon(mounted_idx)
+	var personal_def: WeaponDef = weapons.get_weapon(personal_idx)
+	var mounted_def: WeaponDef = weapons.get_weapon(mounted_idx)
 	# Exercise the merge seam with a PowerThrow-shaped personal def while the
 	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff must
 	# cancel its windup before borrowing the parent's persistent slot.
-	var powerthrow_personal: Dictionary = personal_def.duplicate(true)
-	powerthrow_personal["flags"] = int(personal_def.get("flags", 0)) | (1 << 31)
+	var powerthrow_personal := personal_def.copy()
+	powerthrow_personal.flags = personal_def.flags | (1 << 31)
 	sim.set_local_player_weapon(powerthrow_personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step() # move beyond tick zero, the windup's idle sentinel
@@ -3437,7 +3428,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	sim.set_local_player_weapon(mounted_def, {}, true)
 	var mounted_before: Dictionary = sim.get_local_player_weapon_state()
 	assert_eq(int(mounted_before.get("clip", -1)),
-			int(mounted_def.get("clipsize", -2)))
+			mounted_def.clipsize)
 	var mounted_slot_before_rebake := {
 		"current": int(mounted_before.get("current", -1)),
 		"next": int(mounted_before.get("next", -1)),
@@ -3567,11 +3558,11 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var first_mount: Dictionary = weapons.get_weapon(
+	var first_mount: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_AVENGER"))
-	var second_mount: Dictionary = weapons.get_weapon(
+	var second_mount: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
@@ -3688,9 +3679,9 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var mounted_def: Dictionary = weapons.get_weapon(
+	var mounted_def: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_AVENGER"))
-	var personal_def: Dictionary = weapons.get_weapon(
+	var personal_def: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()

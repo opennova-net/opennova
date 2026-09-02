@@ -371,13 +371,13 @@ private:
 		opennova::world::queue_local_usegun_weapon_switch(
 				kernel_->world, kernel_->weapon, p_same_category);
 	}
-	void install_local_player_weapon(const Dictionary &p_def,
+	void install_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                 const Dictionary &p_clip_seconds,
 	                                 bool p_preserve_slot_state,
 	                                 bool p_allow_same_weapon_rebake);
 	// The Dictionary/def-row feeders both build the world install payload.
-	static opennova::world::WeaponInstallData install_data_from_dict(
-			const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	static opennova::world::WeaponInstallData install_data_from_def(
+			const DefWeaponDef &p_def, const Dictionary &p_clip_seconds);
 	void tick_local_player_weapon();
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------

@@ -44,6 +44,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
 class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
+class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -677,7 +678,7 @@ public:
 	// serve-then-advance read per 'auto' delay field (engine: runtime/world/player_weapon.cpp). A normal install is a real mount and
 	// resets the personal slot unless p_preserve_slot_state selects an already-live
 	// UseGun parent/personal slot.
-	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
+	void set_local_player_weapon(const Ref<WeaponDef> &p_def, const Dictionary &p_clip_seconds,
 	                             bool p_preserve_slot_state = false);
 	// The production mount (S6b, ADR 0028): find the row in the RETAINED
 	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
@@ -691,7 +692,7 @@ public:
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
 	// queued presentation (engine: net/npruntime/joiner_world_bridge.cpp).
-	void rebake_local_player_weapon(const Dictionary &p_def,
+	void rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                const Dictionary &p_clip_seconds,
 	                                bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();

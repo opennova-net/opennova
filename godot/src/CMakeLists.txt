@@ -103,6 +103,7 @@ add_library(${TARGET_NAME} SHARED
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/weapon_database.cpp
+    object/weapon_def.cpp
     object/avatar_database.cpp
     object/skeletal_anim.cpp
     hud/hud_overlay.cpp

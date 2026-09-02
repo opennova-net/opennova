@@ -16,14 +16,14 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 435,
+    "adapter_cpp_orig_cites": 421,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
-    "gd_dict_key_sites": 1181,
+    "gd_dict_key_sites": 1106,
     "gd_orig_cites": 725,
     "gd_prints_outside_debug": 0,
-    "godot_src_dictionary_returns": 170,
+    "godot_src_dictionary_returns": 168,
     "has_method_guards": 22,
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
@@ -32,7 +32,6 @@
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",
-    "armory_menu_companion.gd|func selected_weapon(",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()",
     "host_session_config.gd|func to_session_options()",

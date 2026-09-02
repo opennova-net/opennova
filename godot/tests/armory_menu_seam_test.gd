@@ -202,7 +202,7 @@ func test_unclassed_default_shows_all_weapons() -> void:
 	assert_true(driver.is_widget_disabled(spin), "SP leaves the class spin disabled")
 
 	var primary := driver.widget_id("PRIMARY")
-	var expected: Array = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, -1, 2)
+	var expected: Array[WeaponDef] = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, -1, 2)
 	assert_gt(expected.size(), 0, "the fixture has blue primaries")
 	assert_eq(driver.item_count(primary), expected.size() + 1, "PRIMARY = NONE + ALL blue primaries")
 	assert_eq(driver.selected_row(primary), 0, "no equipped weapon known -> NONE stays selected")
@@ -225,7 +225,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 	# Rifleman (mask 8), blue (mask 2): NONE + the filtered primaries, sorted
 	# case-insensitively [orig: cmp @0x6448a0 mode (string, asc)].
 	var primary := driver.widget_id("PRIMARY")
-	var expected: Array = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 2)
+	var expected: Array[WeaponDef] = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 2)
 	assert_gt(expected.size(), 0, "the fixture has rifleman/blue primaries")
 	assert_eq(driver.item_count(primary), expected.size() + 1, "PRIMARY = NONE + filtered weapons")
 	var texts := _items(driver, "PRIMARY")
@@ -234,7 +234,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 			"weapon rows sort ascending: %s <= %s" % [texts[i - 1], texts[i]])
 	var sel := driver.selected_row(primary)
 	assert_gt(sel, 0, "the equipped primary's row is pre-selected")
-	assert_eq(String(companion.selected_weapon("PRIMARY").get("name", "")), "WPN_M4AUTO",
+	assert_eq(companion.selected_weapon("PRIMARY").name, "WPN_M4AUTO",
 		"the pre-selected row is the equipped M4")
 
 	# Retail rows are zero-based UI indices for one-based clip counts: row 0 means
@@ -242,11 +242,11 @@ func test_populates_classes_slots_and_ammo() -> void:
 	# [orig: populate_ammo_type_combo_boxes @0x564c7d..0x564ce4].
 	var ammo := driver.widget_id("PRIMARY_AMMO1")
 	var weapon := companion.selected_weapon("PRIMARY")
-	var maxclips := int(weapon.get("maxclips", 0))
+	var maxclips := weapon.maxclips
 	assert_eq(driver.item_count(ammo), maxclips, "PRIMARY_AMMO1 has one row per 1..maxclips")
 	assert_eq(driver.selected_row(ammo), maxclips - 1, "full clips selects the last zero-based row")
 	assert_eq(driver.item_text(ammo, 0), "%d - %s" % [
-		int(weapon.get("clipsize", 0)), String(weapon.get("round_type", ""))],
+		weapon.clipsize, weapon.round_type],
 		"row 0 displays one clip's round quantity and ammo label")
 	driver.select_row(ammo, 0)  # the user pick relays as a "combo" value change
 	assert_eq(companion.selected_clips("PRIMARY"), 1,
@@ -340,10 +340,10 @@ func test_weight_updates_from_selection() -> void:
 	# [orig: calculate_equipped_weapons_weight @0x565490;
 	#  update_weapon_weight_display @0x565640 "%s %.1f %s (%s)"]
 	assert_false(companion.weight_line().is_empty(), "the weight readout renders")
-	var w: Dictionary = companion.selected_weapon("PRIMARY")
-	assert_false(w.is_empty(), "the equipped primary is selected")
+	var w := companion.selected_weapon("PRIMARY")
+	assert_not_null(w, "the equipped primary is selected")
 	var clips := int(companion.selected_clips("PRIMARY"))
-	var expected := float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
+	var expected := w.weight + clips * w.clip_weight
 	var band := "Light"
 	if expected >= 66.6:
 		band = "Heavy"
@@ -355,12 +355,12 @@ func test_weight_updates_from_selection() -> void:
 
 func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	var wdb := _load_weapons()
-	var grenades: Array = wdb.get_slot_weapons(
+	var grenades: Array[WeaponDef] = wdb.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_eq(grenades.size(), 3, "the JO fixture has three blue rifleman grenade defs")
 	if grenades.size() < 3:
 		return
-	var banned_name := String((grenades[0] as Dictionary).get("name", ""))
+	var banned_name := grenades[0].name
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(wdb)
 	companion.set_player_class(8)
@@ -375,10 +375,10 @@ func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	assert_eq(driver.item_count(grenade1), 1,
 		"a banned first grenade retains control 1 with only its zero row")
 	assert_eq(driver.item_count(grenade2),
-			int((grenades[1] as Dictionary).get("maxclips", 0)) + 1,
+			grenades[1].maxclips + 1,
 			"the second table-order grenade remains on control 2")
 	assert_eq(driver.item_count(grenade3),
-			int((grenades[2] as Dictionary).get("maxclips", 0)) + 1,
+			grenades[2].maxclips + 1,
 			"the third table-order grenade remains on control 3")
 
 	watch_signals(companion)
@@ -390,30 +390,30 @@ func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	if selected.is_empty():
 		return
 	assert_eq(String((selected[0] as Dictionary).get("name", "")),
-			String((grenades[1] as Dictionary).get("name", "")),
+			grenades[1].name,
 			"availability does not compress the third grenade into control 2")
 
 
 func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	var fixture_db := _load_weapons()
-	var fixture_grenades: Array = fixture_db.get_slot_weapons(
+	var fixture_grenades: Array[WeaponDef] = fixture_db.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_gt(fixture_grenades.size(), 0,
 			"the JO fixture supplies a blue rifleman grenade")
 	if fixture_grenades.is_empty():
 		return
-	var grenade_name := String((fixture_grenades[0] as Dictionary).get("name", ""))
+	var grenade_name := fixture_grenades[0].name
 	const GRENADE_WEAPON_WEIGHT_SENTINEL := 40.0
 	var wdb := _load_weapons_with_weight(
 			grenade_name, GRENADE_WEAPON_WEIGHT_SENTINEL)
-	var grenades: Array = wdb.get_slot_weapons(
+	var grenades: Array[WeaponDef] = wdb.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_gt(grenades.size(), 0,
 			"the temporary weapon.def retains the blue rifleman grenade")
 	if grenades.is_empty():
 		return
-	var grenade_def := grenades[0] as Dictionary
-	assert_eq(float(grenade_def.get("weight", 0.0)),
+	var grenade_def := grenades[0] as WeaponDef
+	assert_eq(grenade_def.weight,
 			GRENADE_WEAPON_WEIGHT_SENTINEL,
 			"the public weapon database carries the authored weaponweight sentinel")
 	var companion := ArmoryMenuCompanion.new()
@@ -428,10 +428,10 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 
 	var grenade := driver.widget_id("GRENADE_AMMO1")
 	var expected_rows: Array = []
-	for row in range(0, int(grenade_def.get("maxclips", 0)) + 1):
+	for row in range(0, grenade_def.maxclips + 1):
 		expected_rows.append("%d - %s" % [
-			row * int(grenade_def.get("clipsize", 0)),
-			String(grenade_def.get("round_type", ""))])
+			row * grenade_def.clipsize,
+			grenade_def.round_type])
 	assert_eq(_items(driver, "GRENADE_AMMO1"), expected_rows,
 			"grenade rows display row*clipsize and the ammo label")
 	assert_eq(driver.selected_row(grenade), 2,
@@ -441,7 +441,7 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	# [orig: @0x5655c9..0x56561c].
 	driver.select_row(grenade, 1)
 	assert_eq(companion.weight_line(), "Total Weight %.1f lbs (Light)" % [
-			float(grenade_def.get("clip_weight", 0.0))],
+			grenade_def.clip_weight],
 			"grenade weight is clips*clipweight and excludes weaponweight")
 
 

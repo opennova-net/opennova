@@ -6,6 +6,7 @@
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
+#include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
