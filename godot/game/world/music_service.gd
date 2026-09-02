@@ -74,11 +74,11 @@ static func resolve_game_music_pair(root) -> MusicPair:
 			MusicDirector.resolve_game_music_pair(String(root.get_expansion())))
 
 
-static func _pair_from_names(root, names: Dictionary) -> MusicPair:
+static func _pair_from_names(root, names: MusicPairNames) -> MusicPair:
 	var pair := MusicPair.new()
-	var bank_file := String(names.get("bank_file", ""))
-	var script_file := String(names.get("script_file", ""))
-	var subdir := String(names.get("subdir", ""))
+	var bank_file := names.bank_file
+	var script_file := names.script_file
+	var subdir := names.subdir
 	if not subdir.is_empty():
 		# The expansion bank lives inside the expansion folder, streamed loose
 		# (the subdir witness lives at the engine home, audio/music_policy.h).

@@ -30,8 +30,8 @@ func update(hud: HudOverlay, hud_pos: HudPos, item_db: ItemDatabase,
 		_hide(hud)
 		return
 	var sid := item_db.get_sid(view.item_id)
-	var block: Dictionary = hud_pos.get_vehicle_hud(sid) if not sid.is_empty() else {}
-	if block.is_empty():
+	var block: VehicleHudBlock = hud_pos.get_vehicle_hud(sid) if not sid.is_empty() else null
+	if block == null:
 		# No authored block for this vehicle: retail draws no panel for it
 		# (the shipped sid whose art is missing behaves the same).
 		_hide(hud)
@@ -42,5 +42,5 @@ func update(hud: HudOverlay, hud_pos: HudPos, item_db: ItemDatabase,
 
 func _hide(hud: HudOverlay) -> void:
 	if _pushed:
-		hud.set_vehicle_panel(false, {}, 0, null)
+		hud.set_vehicle_panel(false, null, 0, null)
 		_pushed = false

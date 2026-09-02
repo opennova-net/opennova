@@ -26,6 +26,7 @@
 namespace godot {
 
 class Simulation;
+class VehicleHudBlock;
 
 class HudPos;
 class ResourceRoot;
@@ -129,7 +130,7 @@ public:
 	// the Simulation the hull band + seat rows are pulled from natively
 	// (Simulation::fill_vehicle_panel). The block's `interface` silhouette is
 	// loaded per sid (the set_weapon reload idiom). Pass null when hiding.
-	void set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
+	void set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
 			Simulation *p_sim);
 	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
 	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.

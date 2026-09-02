@@ -821,20 +821,22 @@ func test_vehicle_panel_draws_the_block_silhouette() -> void:
 	var hud := _make_overlay()
 	var layout: HudPos = fixture["layout"]
 	hud.configure(layout, fixture["root"])
-	var block: Dictionary = layout.get_vehicle_hud("dbuggy1")
-	assert_false(block.is_empty(), "The fixture's VEHICLE_HUD block resolves by sid.")
+	var block := layout.get_vehicle_hud("dbuggy1")
+	assert_not_null(block, "The fixture's VEHICLE_HUD block resolves by sid.")
+	if block == null:
+		return
 	var before := int(hud.get_draw_list_stats()["quads_textured"])
 	hud.set_vehicle_panel(true, block, 0, null)
 	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before + 1,
 			"The panel adds exactly the interface silhouette quad.")
 	await get_tree().process_frame
-	hud.set_vehicle_panel(false, {}, 0, null)
+	hud.set_vehicle_panel(false, null, 0, null)
 	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
 			"Hiding the panel removes the silhouette.")
 	# A block whose interface art is missing draws NO panel at all.
-	var missing := block.duplicate()
-	missing["sid"] = "nosuch"
-	missing["interface"] = "missing.tga"
+	var missing := layout.get_vehicle_hud("dbuggy1")
+	missing.sid = "nosuch"
+	missing.interface_texture = "missing.tga"
 	hud.set_vehicle_panel(true, missing, 0, null)
 	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
 			"Without the interface texture the panel is skipped entirely.")

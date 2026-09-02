@@ -130,6 +130,7 @@ add_library(${TARGET_NAME} SHARED
     devtools/dev_tools.cpp
     devtools/oned_ui.cpp
     hud/hud_pos.cpp
+    hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
     mission/mission_info.cpp
     simulation/present_applier.cpp
@@ -181,6 +182,7 @@ add_library(${TARGET_NAME} SHARED
     audio/sbf_audio_stream_playback.cpp
     audio/music_script.cpp
     audio/music_director.cpp
+    audio/music_pair_names.cpp
     mnu/mnu_document.cpp
     mnu/mnu_document_state.cpp
     mnu/mns_stylesheet.cpp
