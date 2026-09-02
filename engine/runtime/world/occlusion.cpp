@@ -99,9 +99,9 @@ RenderMatrix render_matrix_multiply(const RenderMatrix &a, const RenderMatrix &b
 
 // [orig: Math_FixedPointToFloat3_YNegated @ 0x611210]
 void render_float_from_fixed(const int32_t p[3], float out[3]) {
-    out[0] = static_cast<float>(-p[1]) * (1.0f / 65536.0f);
-    out[1] = static_cast<float>(p[2]) * (1.0f / 65536.0f);
-    out[2] = static_cast<float>(p[0]) * (1.0f / 65536.0f);
+    out[0] = static_cast<float>(-p[1]) * (io::kInvFp16One);
+    out[1] = static_cast<float>(p[2]) * (io::kInvFp16One);
+    out[2] = static_cast<float>(p[0]) * (io::kInvFp16One);
 }
 
 // [orig: Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200 — roll (float Z), then
@@ -149,9 +149,9 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
     }
     RenderMatrix t{};
     t.m[0] = t.m[5] = t.m[10] = t.m[15] = 1.0f;
-    t.m[12] = static_cast<float>(-pos[1]) * (1.0f / 65536.0f);
-    t.m[13] = static_cast<float>(pos[2]) * (1.0f / 65536.0f);
-    t.m[14] = static_cast<float>(pos[0]) * (1.0f / 65536.0f);
+    t.m[12] = static_cast<float>(-pos[1]) * (io::kInvFp16One);
+    t.m[13] = static_cast<float>(pos[2]) * (io::kInvFp16One);
+    t.m[14] = static_cast<float>(pos[0]) * (io::kInvFp16One);
     return render_matrix_multiply(acc, t);
 }
 
@@ -401,7 +401,7 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
 
     float center[3];
     render_float_from_fixed(center_fixed, center);
-    const float radius = static_cast<float>(radius_fixed) * (1.0f / 65536.0f);
+    const float radius = static_cast<float>(radius_fixed) * (io::kInvFp16One);
     for (int32_t p = 0; p < cam.frustum_count; ++p) {
         const float d = center[0] * cam.frustum[p][0] + center[1] * cam.frustum[p][1] +
                         center[2] * cam.frustum[p][2] + cam.frustum[p][3];
@@ -1110,7 +1110,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
             abs32(cand_cm->min[2]) > abs32(cand_cm->max[2]) ? cand_cm->min[2] : cand_cm->max[2]);
         radius_fixed = corner;
     }
-    const float radius = static_cast<float>(radius_fixed) * (1.0f / 65536.0f);
+    const float radius = static_cast<float>(radius_fixed) * (io::kInvFp16One);
 
     // Camera-inside early rule. [orig: @ 0x5c4662-0x5c4721]
     const int32_t window_groups = static_cast<int32_t>(window_groups_.size());
@@ -1206,12 +1206,12 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
             // 8-corner collision-AABB refinement. [orig: @ 0x5c490e-0x5c4a4d —
             // the corner components swizzle the mission-axis bounds into the
             // 3DI float model frame: X = -y, Y = z, Z = x.]
-            const float min_x = static_cast<float>(-cand_cm->min[1]) * (1.0f / 65536.0f);
-            const float max_x = static_cast<float>(-cand_cm->max[1]) * (1.0f / 65536.0f);
-            const float min_y = static_cast<float>(cand_cm->min[2]) * (1.0f / 65536.0f);
-            const float max_y = static_cast<float>(cand_cm->max[2]) * (1.0f / 65536.0f);
-            const float min_z = static_cast<float>(cand_cm->min[0]) * (1.0f / 65536.0f);
-            const float max_z = static_cast<float>(cand_cm->max[0]) * (1.0f / 65536.0f);
+            const float min_x = static_cast<float>(-cand_cm->min[1]) * (io::kInvFp16One);
+            const float max_x = static_cast<float>(-cand_cm->max[1]) * (io::kInvFp16One);
+            const float min_y = static_cast<float>(cand_cm->min[2]) * (io::kInvFp16One);
+            const float max_y = static_cast<float>(cand_cm->max[2]) * (io::kInvFp16One);
+            const float min_z = static_cast<float>(cand_cm->min[0]) * (io::kInvFp16One);
+            const float max_z = static_cast<float>(cand_cm->max[0]) * (io::kInvFp16One);
             const RenderMatrix cand_mat = render_matrix_from_entity_pose(*cand);
             bool all_corners_inside = true;
             for (int32_t corner = 0; corner < 8 && all_corners_inside; ++corner) {

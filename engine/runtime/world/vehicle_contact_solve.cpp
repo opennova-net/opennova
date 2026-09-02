@@ -1,4 +1,5 @@
 #include <runtime/world/vehicle_motor.h>
+#include <base/io/fixed.h>
 
 // Split out of vehicle_motor.cpp (the oversize-TU ratchet). Motion only — every
 // body is unchanged, and each original-code citation moved with the code it
@@ -265,7 +266,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
         // [orig: @0x47C3A3..0x47C443].
         const VehicleEulerBasis rest_basis = vehicle_euler_basis(
                 m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-        m.grounded = rest_basis.up[2] * 65536.0 > 4096.0;
+        m.grounded = rest_basis.up[2] * io::kFp16OneD > 4096.0;
         return;
     }
 
@@ -365,8 +366,8 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // count), and a LIGHT hull (mass <= 10) grounds on any single pad while
     // not steeply pitched (fwd.z < 24576). The crash/wreck/settle byte gates
     // ride the deferred latch machine.
-    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
-    const int32_t fwd_z16 = static_cast<int32_t>(basis.fwd[2] * 65536.0);
+    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
+    const int32_t fwd_z16 = static_cast<int32_t>(basis.fwd[2] * io::kFp16OneD);
     for (int k = 0; k < 4; ++k) m.dbg_pad_depth[k] = d[k]; // diagnostic tap ("pd")
     const bool pair_contact =
             (d[0] != 0 && d[3] != 0) || (d[1] != 0 && d[2] != 0) ||
@@ -546,7 +547,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
         m.slide_z >>= 1;
         const VehicleEulerBasis rest_basis = vehicle_euler_basis(
                 m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-        m.grounded = rest_basis.up[2] * 65536.0 > 4096.0;
+        m.grounded = rest_basis.up[2] * io::kFp16OneD > 4096.0;
         return;
     }
 
@@ -671,7 +672,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
         const double dot = (double(forces[i].fx) * basis.fwd[0] +
                             double(forces[i].fy) * basis.fwd[1] +
                             double(forces[i].fz) * basis.fwd[2]) / n;
-        reverse_flag[i] = dot * 65536.0 < -49152.0;
+        reverse_flag[i] = dot * io::kFp16OneD < -49152.0;
     }
     // The head-on wall stop [orig: @0x477D3E..0x477E30]: the summed contacted
     // force, normalized, against the same direction — past -0.871 (-57070)
@@ -685,7 +686,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
             const double dot = (double(sum_fx) * basis.fwd[0] +
                                 double(sum_fy) * basis.fwd[1] +
                                 double(sum_fz) * basis.fwd[2]) / n;
-            if (dot * 65536.0 < -57070.0) {
+            if (dot * io::kFp16OneD < -57070.0) {
                 m.vel_x = 0;
                 m.vel_y = 0;
                 m.speed = 0;
@@ -699,7 +700,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // pads driving forward, rear pads in reverse) must be SYMMETRIC — both
     // pads contacted or neither — and neither may be a reverse-direction hit.
     // The crash/park/destroyed bytes ride the deferred latch machine.
-    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
+    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
     {
         bool stable;
         if (m.speed >= 0) {
@@ -1008,8 +1009,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     }
 
     // ---- solve select [orig: the `!d_front && !d_rear` split @0x47A985].
-    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
-    const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * 65536.0);
+    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
+    const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * io::kFp16OneD);
     // ---- the suspension spring leg's bike legs (vehicle_suspension.h): the
     // live crash test over the spine probes [orig: @0x47B32D..0x47B375] and
     // the +100 front/rear sink growth with no latch terms [orig: @0x47AB36..
@@ -1055,7 +1056,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     for (int i = 0; i < 3; ++i) {
         const int32_t off = static_cast<int32_t>(
                 (static_cast<int64_t>(half_len) *
-                         static_cast<int32_t>(basis.fwd[i] * 65536.0) +
+                         static_cast<int32_t>(basis.fwd[i] * io::kFp16OneD) +
                  0x8000) >> 16);
         cf[i] = off;
         cr[i] = -off;
@@ -1074,9 +1075,9 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         int32_t fwd[3];
         q16_normalize(axle, fwd);
         const int32_t old_up[3] = {
-            static_cast<int32_t>(basis.up[0] * 65536.0),
-            static_cast<int32_t>(basis.up[1] * 65536.0),
-            static_cast<int32_t>(basis.up[2] * 65536.0)};
+            static_cast<int32_t>(basis.up[0] * io::kFp16OneD),
+            static_cast<int32_t>(basis.up[1] * io::kFp16OneD),
+            static_cast<int32_t>(basis.up[2] * io::kFp16OneD)};
         int64_t raw[3];
         q16_cross(old_up, fwd, raw);
         int32_t right[3];

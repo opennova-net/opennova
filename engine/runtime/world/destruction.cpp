@@ -1,5 +1,6 @@
 // Item destruction — see world/destruction.h for the witness map.
 #include <runtime/world/destruction.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
@@ -25,7 +26,7 @@ constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / 2pi
 // home; 0 = no water authored) as float units [orig: Env_WaterHeightFixed
 // @0x26c6454].
 float world_water_z(const World &world) {
-    return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / 65536.0f
+    return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / io::kFp16One
                                   : -1.0e9f;
 }
 
@@ -262,9 +263,8 @@ Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point
             to_fixed(point.x), to_fixed(point.y), to_fixed(point.z)};
     int32_t rotated[3];
     orientation.rotate_point(local, rotated);
-    constexpr float kFromFixed = 1.0f / 65536.0f;
-    return Vec3{rotated[0] * kFromFixed, rotated[1] * kFromFixed,
-                rotated[2] * kFromFixed};
+    return Vec3{rotated[0] * io::kInvFp16One, rotated[1] * io::kInvFp16One,
+                rotated[2] * io::kInvFp16One};
 }
 
 // LOS between two points: collision-world walk when available (terrain +
@@ -811,8 +811,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // faster than 0.1 u/tick; at rest the base is zero [orig: the velocity fold
     // @ 0x493589-0x4935ff — normalize2D(vel) * (|vel| * 2.0); eps 0.1
     // @ 0x7C69F4, scale flt 2.0 @ 0x7C3B90].
-    const float wreck_vx = target.veh.vel_x / 65536.0f;
-    const float wreck_vy = target.veh.vel_y / 65536.0f;
+    const float wreck_vx = target.veh.vel_x / io::kFp16One;
+    const float wreck_vy = target.veh.vel_y / io::kFp16One;
     const float wreck_speed = std::sqrt(wreck_vx * wreck_vx + wreck_vy * wreck_vy);
     float base_x = 0.0f, base_y = 0.0f;
     if (wreck_speed > 0.1f) {
@@ -824,7 +824,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // @ 0x49353c-0x49355d].
     float dir_ai_x = 0.0f, dir_ai_y = 0.0f;
     if (target.is_ai_capable) {
-        const float az = target.veh.slide_z / 65536.0f;
+        const float az = target.veh.slide_z / io::kFp16One;
         const float alen =
                 std::sqrt(wreck_vx * wreck_vx + wreck_vy * wreck_vy + az * az);
         if (alen > 1.0e-6f) {
@@ -843,7 +843,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         const DeathPieceType &tp = death_piece_type(type_idx);
         if (tp.probability < 1.0f) {
             // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]
-            if (death_rand16(world) >= static_cast<uint16_t>(tp.probability * 65536.0f))
+            if (death_rand16(world) >= static_cast<uint16_t>(tp.probability * io::kFp16One))
                 continue;
         }
         DeathPiece &p = world.death_pieces.alloc();
@@ -868,8 +868,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         // again; the vertical is an INDEPENDENT rand [0,1) with the 1.25 lift
         // [orig: flt 1.25 @ 0x7C6F18] — so the horizontal launch speed is always
         // exactly vel_scale, only the direction varies.
-        float hx = base_x + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / 65536.0f;
-        float hy = base_y + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / 65536.0f;
+        float hx = base_x + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
+        float hy = base_y + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
         float hlen = std::sqrt(hx * hx + hy * hy);
         if (hlen > 1.0e-6f) {
             hx /= hlen;
@@ -882,7 +882,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
             hx /= hlen;
             hy /= hlen;
         }
-        const float vz = static_cast<int32_t>(death_rand16(world)) / 65536.0f;
+        const float vz = static_cast<int32_t>(death_rand16(world)) / io::kFp16One;
         p.vel = Vec3{hx * tp.vel_scale, hy * tp.vel_scale,
                      vz * tp.vel_scale * 1.25f};
         // Spin rates: max*(rand%100)/100 floored at min, DEGREES PER TICK
@@ -973,7 +973,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
             !traits->bridge_dead_points.empty()) {
             const CollisionMatrix orientation = destruction_orientation(target);
             const float water_z =
-                    static_cast<float>(world.env.water_z) / 65536.0f;
+                    static_cast<float>(world.env.water_z) / io::kFp16One;
             for (const Vec3 &point : traits->bridge_dead_points) {
                 const Vec3 offset = rotate_authored_point(orientation, point);
                 world.destruction.effects.push_back(DestructionEffectEvent{
@@ -1221,9 +1221,9 @@ void destruction_tick_dead_items(World &world,
                 // The callback then advances, truncates the float 0.97 damp
                 // toward zero, zeroes raw components under 8, and applies
                 // half-gravity only once horizontal motion stops.
-                e->position.x += e->veh.vel_x / 65536.0f;
-                e->position.y += e->veh.vel_y / 65536.0f;
-                e->position.z += e->veh.slide_z / 65536.0f;
+                e->position.x += e->veh.vel_x / io::kFp16One;
+                e->position.y += e->veh.vel_y / io::kFp16One;
+                e->position.z += e->veh.slide_z / io::kFp16One;
                 e->veh.vel_x = static_cast<int32_t>(
                         static_cast<float>(e->veh.vel_x) * 0.9700000286102295f);
                 e->veh.vel_y = static_cast<int32_t>(
@@ -1263,9 +1263,9 @@ void destruction_tick_dead_items(World &world,
             // (world-wac-ai-re.md D-ITEM-9).
             if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
             const float old_top = e->position.z + e->bound_radius;
-            const float new_z = e->position.z + e->veh.slide_z / 65536.0f;
-            const float new_x = e->position.x + e->veh.vel_x / 65536.0f;
-            const float new_y = e->position.y + e->veh.vel_y / 65536.0f;
+            const float new_z = e->position.z + e->veh.slide_z / io::kFp16One;
+            const float new_x = e->position.x + e->veh.vel_x / io::kFp16One;
+            const float new_y = e->position.y + e->veh.vel_y / io::kFp16One;
             if (!routed_falling) {
                 e->position.x = new_x;
                 e->position.y = new_y;
@@ -1360,7 +1360,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
                          float water_height, DestructionEvents &events) {
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
     // @ 0x492dd0]
-    constexpr float kGravity = 334.0f / 65536.0f; // the falling-death gravity
+    constexpr float kGravity = 334.0f / io::kFp16One; // the falling-death gravity
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);
@@ -1373,7 +1373,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
         } else {
             p.vel.x *= 0.5f;
             p.vel.y *= 0.5f;
-            p.vel.z = -4096.0f / 65536.0f;
+            p.vel.z = -4096.0f / io::kFp16One;
         }
         p.pos.x += p.vel.x;
         p.pos.y += p.vel.y;
@@ -1418,7 +1418,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
                 events.effects.push_back(
                         DestructionEffectEvent{tp.bounce_fx, p.pos, Vec3{}, 0, 0});
             const float speed = vec_len(p.vel);
-            if (speed > 20480.0f / 65536.0f && tp.bounce_snd != nullptr)
+            if (speed > 20480.0f / io::kFp16One && tp.bounce_snd != nullptr)
                 events.sounds.push_back(DestructionSoundEvent{tp.bounce_snd, p.pos});
         } else {
             // Exhausted [orig: @0x492EDB..0x493048]: release the trail, add a

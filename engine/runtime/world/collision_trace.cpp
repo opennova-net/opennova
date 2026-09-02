@@ -1,4 +1,5 @@
 #include <runtime/world/collision.h>
+#include <base/io/fixed.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -224,11 +225,10 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
                 }
                 const double heading = std::atan2(
                         static_cast<double>(dy), static_cast<double>(dx));
-                constexpr float kFromFixed = 1.0f / 65536.0f;
                 out.push_back(SectionDebrisSample{
-                        Vec3{world_point[0] * kFromFixed,
-                             world_point[1] * kFromFixed,
-                             world_point[2] * kFromFixed},
+                        Vec3{world_point[0] * io::kInvFp16One,
+                             world_point[1] * io::kInvFp16One,
+                             world_point[2] * io::kInvFp16One},
                         direction_from_angles(heading, pitch), face.material});
             }
             accumulator += stride;
@@ -472,8 +472,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
 
             // Local bilinear gradient in engine axes. This is presentation
             // metadata; the fixed refined hit point remains authoritative.
-            const float wx = static_cast<float>(hit[0]) / 65536.0f;
-            const float wy = static_cast<float>(hit[1]) / 65536.0f;
+            const float wx = static_cast<float>(hit[0]) / io::kFp16One;
+            const float wy = static_cast<float>(hit[1]) / io::kFp16One;
             const float hx0 = terrain::height_field_height_world_bilinear(*terrain, wx - 1.0f, -wy);
             const float hx1 = terrain::height_field_height_world_bilinear(*terrain, wx + 1.0f, -wy);
             const float hy0 = terrain::height_field_height_world_bilinear(*terrain, wx, -(wy - 1.0f));
@@ -483,9 +483,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             double nz = 1.0;
             const double nl = std::sqrt(nx * nx + ny * ny + nz * nz);
             th.normal_q16 = FixedVec3{
-                static_cast<int32_t>(nx * 65536.0 / nl),
-                static_cast<int32_t>(ny * 65536.0 / nl),
-                static_cast<int32_t>(nz * 65536.0 / nl),
+                static_cast<int32_t>(nx * io::kFp16OneD / nl),
+                static_cast<int32_t>(ny * io::kFp16OneD / nl),
+                static_cast<int32_t>(nz * io::kFp16OneD / nl),
             };
             consider(th, distance);
         }
@@ -592,14 +592,14 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
 
     // Segment endpoints in slot-table units for the witnessed broad phase.
     const float p0f[3] = {
-        static_cast<float>(trace.start.x) / 65536.0f,
-        static_cast<float>(trace.start.y) / 65536.0f,
-        static_cast<float>(trace.start.z) / 65536.0f,
+        static_cast<float>(trace.start.x) / io::kFp16One,
+        static_cast<float>(trace.start.y) / io::kFp16One,
+        static_cast<float>(trace.start.z) / io::kFp16One,
     };
     const float p1f[3] = {
-        static_cast<float>(trace.end.x) / 65536.0f,
-        static_cast<float>(trace.end.y) / 65536.0f,
-        static_cast<float>(trace.end.z) / 65536.0f,
+        static_cast<float>(trace.end.x) / io::kFp16One,
+        static_cast<float>(trace.end.y) / io::kFp16One,
+        static_cast<float>(trace.end.z) / io::kFp16One,
     };
 
     // The per-candidate CFAC narrow phase shared by the local slot tables and
@@ -801,7 +801,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     //  (building, <), @0x4e87cb (item, <)]
     if (person_faces_only && trace.walk_persons) {
         trace_polygon_table(persons_, ProjectileHitClass::Person,
-                            1.0f / 65536.0f, false, /*tie_wins=*/true);
+                            io::kInvFp16One, false, /*tie_wins=*/true);
     }
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
     if (profile_trace) {
@@ -811,7 +811,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     }
     if (!wire_projected)
         trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity,
-                            1.0f / 65536.0f, false);
+                            io::kInvFp16One, false);
 
     // The decoded pool-1 wire projection: authored CFAC geometry posed from the
     // decoded wire state, walked in wire-handle (= host pool slot) order as the
@@ -834,15 +834,15 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (proxy.wire_handle == trace.shooter_wire_handle) continue;
             if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
             const float sc[3] = {
-                static_cast<float>(proxy.position_q16.x) / 65536.0f,
-                static_cast<float>(proxy.position_q16.y) / 65536.0f,
-                static_cast<float>(proxy.position_q16.z) / 65536.0f,
+                static_cast<float>(proxy.position_q16.x) / io::kFp16One,
+                static_cast<float>(proxy.position_q16.y) / io::kFp16One,
+                static_cast<float>(proxy.position_q16.z) / io::kFp16One,
             };
             const int32_t broad_radius = proxy.bound_radius_q16 > 0
                 ? proxy.bound_radius_q16
                 : 0x10000;
             if (!round_broad_phase(p0f, p1f, sc,
-                                   static_cast<float>(broad_radius) / 65536.0f))
+                                   static_cast<float>(broad_radius) / io::kFp16One))
                 continue;
             if (profile_trace) trace_profile_.dynamic_survivors++;
             CollisionPolygonHit model_hit;
@@ -1058,13 +1058,13 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 continue;
             {
                 const float sc[3] = {
-                    static_cast<float>(proxy.position_q16.x) / 65536.0f,
-                    static_cast<float>(proxy.position_q16.y) / 65536.0f,
-                    static_cast<float>(proxy.position_q16.z) / 65536.0f};
+                    static_cast<float>(proxy.position_q16.x) / io::kFp16One,
+                    static_cast<float>(proxy.position_q16.y) / io::kFp16One,
+                    static_cast<float>(proxy.position_q16.z) / io::kFp16One};
                 const int32_t proxy_bound = std::max(proxy.bound_radius_q16, 0);
                 const float r = static_cast<float>(proxy_bound + 0x18000 +
                                                    effective_radius) /
-                                65536.0f;
+                                io::kFp16One;
                 if (!round_broad_phase(p0f, p1f, sc, r)) continue;
             }
             if (profile_trace) trace_profile_.person_survivors++;
@@ -1091,12 +1091,12 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // radius. Generous by design: a false pass only costs the narrow
             // test it always ran before.
             const float sc[3] = {
-                static_cast<float>(slot.x) / 65536.0f,
-                static_cast<float>(slot.y) / 65536.0f,
-                static_cast<float>(slot.z + kOrganicCenterZQ16) / 65536.0f};
+                static_cast<float>(slot.x) / io::kFp16One,
+                static_cast<float>(slot.y) / io::kFp16One,
+                static_cast<float>(slot.z + kOrganicCenterZQ16) / io::kFp16One};
             const float r = static_cast<float>(slot.radius + 0x18000 +
                                                effective_radius) /
-                            65536.0f;
+                            io::kFp16One;
             if (!round_broad_phase(p0f, p1f, sc, r)) continue;
         }
         if (profile_trace) trace_profile_.person_survivors++;

@@ -1,4 +1,5 @@
 #include <runtime/hud/hud_minimap.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,7 @@ namespace {
 
 constexpr double kPi = io::kPi;
 // BAM16 to radians [orig: flt_7C7988 = 9.58738019e-05 = 2*pi/65536]
-constexpr double kBam16ToRadians = (2.0 * kPi) / 65536.0;
+constexpr double kBam16ToRadians = (2.0 * kPi) / io::kFp16OneD;
 constexpr int kCircleSegments = 32; // [orig: ring step 0x8000000 BAM @0x5a5f40 vertex loop]
 // World-per-pixel divisor [orig: flt_7D2290 = 200.0 @0x5a5f40 scale setup]
 constexpr float kZoomHeightDivisor = 200.0f;
@@ -262,9 +263,9 @@ void view_project(const MapView &view, const HudMinimapInput &input,
 		int32_t world_x_q16, int32_t world_y_q16, float &out_x, float &out_y) {
 	const float inv = 1.0f / std::max(view.scale, 1e-6f);
 	const float lx = static_cast<float>(world_x_q16 - input.player_x) *
-			inv / 65536.0f;
+			inv / io::kFp16One;
 	const float ly = static_cast<float>(world_y_q16 - input.player_y) *
-			inv * -1.0f / 65536.0f;
+			inv * -io::kInvFp16One;
 	out_x = view.center_x + lx * view.cos_a - ly * view.sin_a;
 	out_y = view.center_y + lx * view.sin_a + ly * view.cos_a;
 }
@@ -463,7 +464,7 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 		view_project(view, input, footprint.bound_x_q16, footprint.bound_y_q16,
 				bx, by);
 		const float radius_px = view_length_px(view,
-				static_cast<float>(footprint.bound_radius_q16) / 65536.0f);
+				static_cast<float>(footprint.bound_radius_q16) / io::kFp16One);
 		if (view.rect_clip) {
 			if (bx + radius_px < view.px_x1 || bx - radius_px > view.px_x2 ||
 					by + radius_px < view.px_y1 || by - radius_px > view.px_y2)
@@ -682,8 +683,8 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	//  Terrain_SectorGrid[16*(row&0xF)+(col&0xF)] - 1]
 	if (input.terrain.present &&
 			input.terrain.sector_count > 0 && input.terrain.sector_rows > 0) {
-		const float player_x = static_cast<float>(input.player_x) / 65536.0f;
-		const float player_z = -static_cast<float>(input.player_y) / 65536.0f;
+		const float player_x = static_cast<float>(input.player_x) / io::kFp16One;
+		const float player_z = -static_cast<float>(input.player_y) / io::kFp16One;
 		const float diag_px = std::sqrt(view.rect_w * view.rect_w +
 				view.rect_h * view.rect_h);
 		const float bound = diag_px * kTerrainBoundFactor * view.scale;
@@ -716,7 +717,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				const float wy1 = -static_cast<float>(
 						(sz + 1) * terrain::COORDS_SECTOR_SIZE);
 				const auto q16 = [](float wu) {
-					return static_cast<int32_t>(wu * 65536.0f);
+					return static_cast<int32_t>(wu * io::kFp16One);
 				};
 				float x[4], y[4];
 				view_project(view, input, q16(wx0), q16(wy0), x[0], y[0]);
@@ -805,7 +806,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		const uint32_t rule_color = 0x40FFFF7Fu;
 		const uint32_t label_color = 0x80FFFF7Fu;
 		const float half_world_q16 = std::max(view.rect_w, view.rect_h) *
-				0.5f * view.scale * 65536.0f;
+				0.5f * view.scale * io::kFp16One;
 		const int32_t lo_x = input.player_x -
 				static_cast<int32_t>(half_world_q16);
 		const int32_t hi_x = input.player_x +
@@ -1010,7 +1011,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				//  radius = max(arg, projected z) @0x597357..0x597366,
 				//  color | 0xFF000000 @0x597392]
 				const float height_wu =
-						static_cast<float>(marker.z) / 65536.0f;
+						static_cast<float>(marker.z) / io::kFp16One;
 				const float radius = std::max(4.0f,
 						view_length_px(view, height_wu));
 				const uint32_t pulse =
@@ -1072,9 +1073,9 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				float half_y_wu;
 				if (marker.half_x_q16 > 0 || marker.half_y_q16 > 0) {
 					half_x_wu = static_cast<float>(marker.half_x_q16) /
-							65536.0f;
+							io::kFp16One;
 					half_y_wu = static_cast<float>(marker.half_y_q16) /
-							65536.0f;
+							io::kFp16One;
 				} else {
 					const bool person = marker.icon == 3 || marker.icon == 8;
 					half_x_wu = half_y_wu = person ? 2.0f : 10.0f;
