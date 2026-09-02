@@ -1,4 +1,5 @@
 #include "object/item_database.h"
+#include "object/item_records.h"
 #include "resource_index/resource_root.h"
 
 #include <formats/mission/mission.h> // kItemIdOffset
@@ -49,6 +50,8 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &ItemDatabase::has_item);
 	ClassDB::bind_method(D_METHOD("get_vehicle_physics", "id"), &ItemDatabase::get_vehicle_physics);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &ItemDatabase::get_graphic);
+	ClassDB::bind_method(D_METHOD("get_sid", "id"), &ItemDatabase::get_sid);
+	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &ItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_husk", "id"), &ItemDatabase::get_husk);
 	ClassDB::bind_method(D_METHOD("get_huskfinal", "id"), &ItemDatabase::get_huskfinal);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &ItemDatabase::get_anim_def);
@@ -61,22 +64,25 @@ void ItemDatabase::_bind_methods() {
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&ItemDatabase::extract_seat_specs_for_item);
 	ClassDB::bind_method(D_METHOD("get_emplacement_attachments", "id"), &ItemDatabase::get_emplacement_attachments);
-	ClassDB::bind_method(D_METHOD("get_emplacement_attachment_markers", "id"), &ItemDatabase::get_emplacement_attachment_markers);
+	ClassDB::bind_method(D_METHOD("get_emplacement_g_slot", "id"), &ItemDatabase::get_emplacement_g_slot);
+	ClassDB::bind_method(D_METHOD("get_emplacement_c_slot", "id"), &ItemDatabase::get_emplacement_c_slot);
+	ClassDB::bind_method(D_METHOD("has_mount_config", "id"), &ItemDatabase::has_mount_config);
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &ItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("resolve_envs_markers", "mission"),
 			&ItemDatabase::resolve_envs_markers);
-	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &ItemDatabase::get_particle_effects);
+	ClassDB::bind_method(D_METHOD("get_particle_fx", "id"), &ItemDatabase::get_particle_fx);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
-	ClassDB::bind_method(D_METHOD("get_item", "id"), &ItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
-	ClassDB::bind_method(D_METHOD("get_items"), &ItemDatabase::get_items);
 
 	BIND_CONSTANT(TYPE_VEHICLE);
 	BIND_CONSTANT(TYPE_PERSON);
 	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_POWERUP);
 	BIND_CONSTANT(TYPE_OBJECT);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
 	BIND_CONSTANT(ATTRIB_POWERUP);
 	BIND_CONSTANT(ATTRIB_PLAYER_CONTROL);
 }
@@ -318,6 +324,11 @@ String ItemDatabase::get_graphic(int id) const {
 	return it == items.end() ? String() : it->second.graphic;
 }
 
+String ItemDatabase::get_sid(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.sid;
+}
+
 String ItemDatabase::get_anim_def(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.anim_def;
@@ -423,8 +434,8 @@ String ItemDatabase::get_launchups_closeattack(int id) const {
 	return it == items.end() ? String() : it->second.launchups_closeattack;
 }
 
-Array ItemDatabase::get_emplacement_attachments(int id) const {
-	Array out;
+TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(int id) const {
+	TypedArray<ItemEmplacementAttachment> out;
 	const auto it = items.find(id);
 	if (it == items.end()) {
 		return out;
@@ -432,54 +443,37 @@ Array ItemDatabase::get_emplacement_attachments(int id) const {
 	for (size_t i = 0; i < it->second.emplacement_attachments.size(); ++i) {
 		const Item::EmplacementAttachment &attachment =
 				it->second.emplacement_attachments[i];
-		Dictionary row;
-		row["kind"] = attachment.kind;
-		switch (attachment.kind) {
-			case EMPLACEMENT_ADDEWEAP_G:
-				row["key"] = "addeweapG";
-				break;
-			case EMPLACEMENT_ADDEWEAP_C:
-				row["key"] = "addeweapC";
-				break;
-			default:
-				row["key"] = "addeweap";
-				break;
-		}
-		row["userpoint"] = attachment.userpoint;
-		row["item_id"] = attachment.item_id;
-		row["stored_slot"] = static_cast<int>(i + 1);
-		row["angle_count"] = attachment.angle_count;
-		row["has_explicit_limits"] = attachment.angle_count == 4;
-		row["down_limit_bam"] = attachment.down_angle;
-		row["up_limit_bam"] = attachment.up_angle;
-		row["right_limit_bam"] = attachment.right_angle;
-		row["left_limit_bam"] = attachment.left_angle;
-		row["designated_g"] =
-				static_cast<int>(i + 1) == it->second.emplacement_g_slot;
-		row["designated_c"] =
-				static_cast<int>(i + 1) == it->second.emplacement_c_slot;
+		const int stored_slot = static_cast<int>(i + 1);
+		Ref<ItemEmplacementAttachment> row;
+		row.instantiate();
+		row->assign(attachment.kind, attachment.userpoint, attachment.item_id, stored_slot,
+				attachment.angle_count, attachment.down_angle, attachment.up_angle,
+				attachment.right_angle, attachment.left_angle,
+				stored_slot == it->second.emplacement_g_slot,
+				stored_slot == it->second.emplacement_c_slot);
 		out.push_back(row);
 	}
 	return out;
 }
 
-Dictionary ItemDatabase::get_emplacement_attachment_markers(int id) const {
-	Dictionary out;
+int ItemDatabase::get_emplacement_g_slot(int id) const {
 	const auto it = items.find(id);
-	out["g_slot"] =
-			it == items.end() ? 0 : it->second.emplacement_g_slot;
-	out["c_slot"] =
-			it == items.end() ? 0 : it->second.emplacement_c_slot;
-	return out;
+	return it == items.end() ? 0 : it->second.emplacement_g_slot;
 }
 
-Dictionary ItemDatabase::get_mount_config(int id) const {
-	Dictionary out;
+int ItemDatabase::get_emplacement_c_slot(int id) const {
 	const auto it = items.find(id);
-	const bool valid = it != items.end() && it->second.mount_config_valid;
-	out["valid"] = valid;
-	out["value"] = valid ? it->second.mount_config : 0;
-	return out;
+	return it == items.end() ? 0 : it->second.emplacement_c_slot;
+}
+
+bool ItemDatabase::has_mount_config(int id) const {
+	const auto it = items.find(id);
+	return it != items.end() && it->second.mount_config_valid;
+}
+
+int ItemDatabase::get_mount_config(int id) const {
+	const auto it = items.find(id);
+	return it != items.end() && it->second.mount_config_valid ? it->second.mount_config : 0;
 }
 
 String ItemDatabase::get_husk(int id) const {
@@ -499,23 +493,17 @@ String ItemDatabase::get_huskfinal(int id) const {
 // S13 (ADR 0028): the envs-class dispatch + soundloop slot resolution runs in
 // engine/runtime/audio over the retained items.def parse and the mission's
 // native bms document. The shell applies its own bank-presence filtering.
-TypedArray<Dictionary> ItemDatabase::resolve_envs_markers(
+TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 		const Ref<MissionData> &p_mission) const {
-	TypedArray<Dictionary> out;
+	TypedArray<EnvsMarkerRow> out;
 	if (p_mission.is_null()) return out;
 	const std::vector<opennova::audio::EnvsMarker> markers =
 			opennova::audio::resolve_envs_markers(
 					p_mission->native_document().bms_file(), native_items());
 	for (const opennova::audio::EnvsMarker &marker : markers) {
-		Dictionary row;
-		row["position"] = Vector3(marker.x, marker.y, marker.z);
-		row["bms_id"] = marker.bms_id;
-		PackedStringArray slots;
-		slots.resize(4);
-		for (int slot = 0; slot < 4; ++slot)
-			slots.set(slot, String(
-					marker.slot_sets[static_cast<size_t>(slot)].c_str()));
-		row["slot_sets"] = slots;
+		Ref<EnvsMarkerRow> row;
+		row.instantiate();
+		row->assign(marker);
 		out.push_back(row);
 	}
 	return out;
@@ -533,65 +521,18 @@ PackedStringArray ItemDatabase::get_sound_loops(int id) const {
 	return out;
 }
 
-// The particle-effect keys as authored, keyed by the ITEMS.DEF key names — the runtime
-// effect-attach pass consumes slot A ("particlefx"); the rest ride along for future
-// consumers. [orig: ItemDef_ParseProperty @ 0x49eb00; runtime witness
-// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
-Dictionary ItemDatabase::get_particle_effects(int id) const {
-	Dictionary out;
+// Slot A ("particlefx") as authored — the one the runtime effect-attach pass
+// consumes (item_records.h carries the witness).
+Ref<ItemParticleFx> ItemDatabase::get_particle_fx(int id) const {
 	const auto it = items.find(id);
 	if (it == items.end()) {
-		return out;
+		return Ref<ItemParticleFx>();
 	}
-	const Item &item = it->second;
-	const auto fx_dict = [](const Item::ParticleFx &fx) {
-		Dictionary d;
-		d["effect"] = fx.effect;
-		d["userpoint"] = fx.userpoint;
-		d["secondary_effect"] = fx.secondary_effect;
-		return d;
-	};
-	out["particlefx"] = fx_dict(item.particlefx);
-	out["particlefxs"] = fx_dict(item.particlefxs);
-	out["particlefxw1"] = fx_dict(item.particlefxw[0]);
-	out["particlefxw2"] = fx_dict(item.particlefxw[1]);
-	out["particlefxw3"] = fx_dict(item.particlefxw[2]);
-	out["particlefxw4"] = fx_dict(item.particlefxw[3]);
-	out["particledeath"] = item.particledeath;
-	out["particleh2odeath"] = item.particleh2odeath;
-	out["particlefire"] = item.particlefire;
-	out["particleother"] = item.particleother;
-	out["particlespawn"] = item.particlespawn;
-	out["particlefinale"] = item.particlefinale;
+	Ref<ItemParticleFx> out;
+	out.instantiate();
+	out->assign(it->second.particlefx.effect, it->second.particlefx.userpoint,
+			it->second.particlefx.secondary_effect);
 	return out;
-}
-
-Dictionary ItemDatabase::item_dictionary(const Item &item) const {
-	Dictionary out;
-	out["id"] = item.id;
-	out["type"] = item.type;
-	out["sid"] = item.sid;
-	out["display_name"] = item.display_name;
-	out["graphic"] = item.graphic;
-	out["anim_def"] = item.anim_def;
-	out["model_scale_q16"] = item.model_scale_q16;
-	out["light_transfer"] = item.light_transfer;
-	out["sound_profile"] = item.sound_profile;
-	out["soundloops"] = get_sound_loops(item.id);
-	out["mount_config_valid"] = item.mount_config_valid;
-	out["mount_config"] = item.mount_config_valid ? item.mount_config : 0;
-	out["emplacement_attachments"] = get_emplacement_attachments(item.id);
-	out["emplacement_attachment_markers"] =
-			get_emplacement_attachment_markers(item.id);
-	return out;
-}
-
-Dictionary ItemDatabase::get_item(int id) const {
-	const auto it = items.find(id);
-	if (it == items.end()) {
-		return Dictionary();
-	}
-	return item_dictionary(it->second);
 }
 
 // The backing store is an unordered_map, so callers that enumerate get a stable
@@ -619,14 +560,6 @@ PackedInt32Array ItemDatabase::get_item_ids() const {
 	out.resize(static_cast<int>(sorted.size()));
 	for (size_t i = 0; i < sorted.size(); ++i) {
 		out.set(static_cast<int>(i), sorted[i]->id);
-	}
-	return out;
-}
-
-Array ItemDatabase::get_items() const {
-	Array out;
-	for (const Item *item : sorted_items()) {
-		out.push_back(item_dictionary(*item));
 	}
 	return out;
 }

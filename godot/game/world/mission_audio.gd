@@ -272,7 +272,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 	_audio_root.name = "MissionAudio"
 	container.add_child(_audio_root)
 
-	var marker_rows: Array = []
+	var marker_rows: Array[EnvsMarkerRow] = []
 	# S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
 	# names resolve natively over the retained items.def and the mission's
 	# bms document (audio/envs_markers.h). The bank-presence filter below
@@ -280,12 +280,11 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 	# gate — a missing set is simply silent).
 	if _ambient_markers_enabled and _item_db != null:
 		marker_rows = _item_db.resolve_envs_markers(mission)
-	for row_value in marker_rows:
-		var row: Dictionary = row_value
+	for row in marker_rows:
 		_stats.markers_total += 1
 		# Authored slot names -> playable slots: only sets the loaded bank chain
 		# actually carries participate; an empty slot stays SILENT in its region.
-		var authored: PackedStringArray = row.get("slot_sets", PackedStringArray())
+		var authored := row.slot_sets
 		var slot_sets: PackedStringArray = ["", "", "", ""]
 		for i in range(4):
 			if i < authored.size():
@@ -298,7 +297,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 				distinct.append(s)
 		if distinct.is_empty():
 			continue
-		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(row.get("position", Vector3.ZERO))
+		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(row.position)
 		# Keep layer candidates as data. The original registers only the current
 		# region's set and has eight physical channels; it does not materialize a
 		# player for every marker/time-of-day layer [orig: @ 0x4a81da].
@@ -318,7 +317,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 			candidate_count += layers.size()
 		if layers_by_set.is_empty():
 			continue
-		_markers.append(Marker.new(pos, int(row.get("bms_id", 0)), slot_sets,
+		_markers.append(Marker.new(pos, row.bms_id, slot_sets,
 				_markers.size() & 0xF, layers_by_set))
 		_stats.markers_resolved += 1
 		_stats.ambient_candidates += candidate_count

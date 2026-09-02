@@ -65,7 +65,7 @@ func test_item_database_loads_and_handles_missing() -> void:
 
 	assert_false(db.has_item(-99999), "unknown id is absent")
 	assert_eq(db.get_graphic(-99999), "", "unknown id has no graphic")
-	assert_eq(db.get_item(-99999), {}, "unknown id has empty record")
+	assert_eq(db.get_display_name(-99999), "", "unknown id has no display name")
 
 
 func test_item_database_exposes_retail_interior_light_transfer() -> void:
@@ -88,7 +88,6 @@ func test_item_database_exposes_retail_interior_light_transfer() -> void:
 			"an unauthored building keeps the zero-initialized retail value")
 	assert_almost_eq(db.get_light_transfer(101216), 0.2, 0.0001,
 			"items.def percent is the interior daylight lerp at ItemDef+0x218")
-	assert_almost_eq(float(db.get_item(101216)["light_transfer"]), 0.2, 0.0001)
 	DirAccess.remove_absolute(tmp)
 
 
@@ -111,15 +110,16 @@ func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> v
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
-	assert_eq(db.get_mount_config(710001), {"valid": false, "value": 0},
-			"absent phrase_set remains unknown")
-	assert_eq(db.get_mount_config(710002), {"valid": true, "value": 0},
-			"authored zero remains a valid retail config")
+	assert_false(db.has_mount_config(710001), "absent phrase_set remains unknown")
+	assert_eq(db.get_mount_config(710001), 0)
+	assert_true(db.has_mount_config(710002), "authored zero remains a valid retail config")
+	assert_eq(db.get_mount_config(710002), 0)
 	DirAccess.remove_absolute(tmp)
 
 	# Existing retail-shaped fixture witness: the emplaced mount target authors 4.
 	assert_eq(db.load(_items_abs()), OK)
-	assert_eq(db.get_mount_config(101419), {"valid": true, "value": 4},
+	assert_true(db.has_mount_config(101419))
+	assert_eq(db.get_mount_config(101419), 4,
 			"target item definition phrase_set is the production mount config source")
 
 
@@ -140,26 +140,26 @@ func test_item_database_preserves_emplacement_attachment_variants_and_markers() 
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
-	var rows: Array = db.get_emplacement_attachments(710100)
+	var rows := db.get_emplacement_attachments(710100)
 	assert_eq(rows.size(), 4, "retail stores at most four child emplacement rows")
-	assert_eq(rows[0]["key"], "addeweap")
-	assert_eq(rows[1]["key"], "addeweapG")
-	assert_eq(rows[2]["key"], "addeweapC")
-	assert_eq(rows[1]["userpoint"], "ewep02")
-	assert_eq(rows[1]["item_id"], 710102, "the public domain keeps the full child item id")
-	assert_eq(rows[1]["down_limit_bam"], 70 * 11930464)
-	assert_eq(rows[1]["up_limit_bam"], -10 * 11930464)
-	assert_true(rows[1]["has_explicit_limits"])
-	assert_true(rows[3]["has_explicit_limits"],
+	assert_eq(rows[0].kind, ItemDatabase.EMPLACEMENT_ADDEWEAP)
+	assert_eq(rows[1].kind, ItemDatabase.EMPLACEMENT_ADDEWEAP_G)
+	assert_eq(rows[2].kind, ItemDatabase.EMPLACEMENT_ADDEWEAP_C)
+	assert_eq(rows[1].userpoint, "ewep02")
+	assert_eq(rows[1].item_id, 710102, "the public domain keeps the full child item id")
+	assert_eq(rows[1].stored_slot, 2)
+	assert_eq(rows[1].down_limit_bam, 70 * 11930464)
+	assert_eq(rows[1].up_limit_bam, -10 * 11930464)
+	assert_true(rows[1].has_explicit_limits())
+	assert_true(rows[3].has_explicit_limits(),
 			"explicit all-zero limits remain distinct from an omitted fallback")
-	assert_eq(db.get_emplacement_attachment_markers(710100),
-			{"g_slot": 2, "c_slot": 4},
+	assert_eq([db.get_emplacement_g_slot(710100), db.get_emplacement_c_slot(710100)], [2, 4],
 			"the last stored G/C records retain their 1-based markers")
-	assert_true(rows[1]["designated_g"])
-	assert_false(rows[2]["designated_c"],
+	assert_true(rows[1].is_designated_g())
+	assert_false(rows[2].is_designated_c(),
 			"a later C row overwrites the earlier C designation")
-	assert_true(rows[3]["designated_c"])
-	assert_eq(db.get_item(710100)["emplacement_attachments"].size(), 4)
+	assert_true(rows[3].is_designated_c())
+	assert_eq(db.get_emplacement_attachments(-1).size(), 0, "an unknown id has no rows")
 	DirAccess.remove_absolute(tmp)
 
 
@@ -549,29 +549,22 @@ func test_add_entity_without_a_mission_is_rejected() -> void:
 func test_item_database_enumeration_is_sorted_and_complete() -> void:
 	var db := ItemDatabase.new()
 	assert_eq(db.load(_items_abs()), OK)
-	var items := db.get_items()
 	var ids := db.get_item_ids()
-	assert_eq(items.size(), db.get_count(), "get_items returns every item")
 	assert_eq(ids.size(), db.get_count(), "get_item_ids returns every id")
 
 	# Stable order: sorted with Godot's natural, case-insensitive comparator, matching
 	# ItemDatabase::sorted_items (so the assertion can actually catch a sort
 	# regression, not just lexicographic ordering that happens to coincide).
-	for i in range(1, items.size()):
-		var prev := String(items[i - 1]["display_name"])
-		var cur := String(items[i]["display_name"])
+	for i in range(1, ids.size()):
+		var prev := db.get_display_name(ids[i - 1])
+		var cur := db.get_display_name(ids[i])
 		assert_true(prev.naturalnocasecmp_to(cur) <= 0,
 			"items are ordered by natural display name (%s <= %s)" % [prev, cur])
 
-	# get_item_ids() must enumerate in the same order as get_items().
-	for i in items.size():
-		assert_eq(int(ids[i]), int(items[i]["id"]), "get_item_ids matches get_items order at row %d" % i)
-
-	# Each enumerated entry matches the single-id getter.
-	var sample: Dictionary = items[0]
-	var direct := db.get_item(int(sample["id"]))
-	assert_eq(direct, sample, "an enumerated item matches get_item for its id")
-	assert_true(sample.has("graphic") and sample.has("type"), "enumerated items carry graphic + type")
+	# Every enumerated id resolves through the single-id getters.
+	for id in ids:
+		assert_true(db.has_item(id), "enumerated id %d is an item" % id)
+	assert_false(db.get_graphic(ids[0]).is_empty(), "enumerated items carry their graphic")
 
 
 # --- Authoring (Phase 4): remove an entity -----------------------------------

@@ -441,9 +441,9 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 			if not control_entry.is_empty() and _item_fx_control_node_is_active(control_entry):
 				return _attach_item_effect_to_node(node, kind, item_id, item_db, true)
 			return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
+	var fx := item_db.get_particle_fx(item_id)
+	var effect := fx.effect if fx != null else ""
+	var userpoint := fx.userpoint if fx != null else ""
 	if effect.is_empty():
 		return 0
 	var data: ObjectData = node.get_object_data()
@@ -530,9 +530,9 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 		item_db = _resolve_item_db()
 	if item_db == null or not _item_effect_pool_allows(kind, item_db.get_attrib(item_id)):
 		return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
+	var fx := item_db.get_particle_fx(item_id)
+	var effect := fx.effect if fx != null else ""
+	var userpoint := fx.userpoint if fx != null else ""
 	var data: ObjectData = source.get("object_data")
 	if effect.is_empty() or data == null:
 		return 0
