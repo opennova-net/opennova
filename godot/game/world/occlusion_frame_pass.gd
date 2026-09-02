@@ -208,8 +208,8 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		if node == null:
 			continue
 		var packed := int(changes[i + 1])
-		node.set_section_visibility_mask(packed & 0xFFFFFFFF)
-		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
+		node.set_section_visibility_mask(Simulation.building_visibility_mask(packed))
+		_set_occlusion_hidden(sim, node, bms_id, not Simulation.building_visibility_visible(packed))
 	if timing:
 		building_apply_us = Time.get_ticks_usec() - building_apply_start
 

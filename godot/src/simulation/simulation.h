@@ -1415,10 +1415,16 @@ public:
 	                         double p_aspect, double p_near, double p_fog_dist_units,
 	                         double p_water_z_units, bool p_force_indoors);
 
-	// Frame results: [bms_id, visible<<32 | mask] pairs for every building the
-	// occlusion frame touched (mask = section bits with forced-visible def bits
-	// applied; bit N = COBJ section / render part N; bit 0 = exterior).
+	// Frame results: [bms_id, packed] pairs for every building the occlusion
+	// frame touched; the packed word is world/occlusion_feed.h's
+	// pack_building_visibility (section mask low, visible flag at bit 32),
+	// read back through the two static decoders below.
 	PackedInt64Array get_building_visibility() const;
+	// The section mask of a packed building verdict (bit N = COBJ section /
+	// render part N; bit 0 = exterior; forced-visible def bits merged).
+	static int64_t building_visibility_mask(int64_t p_packed);
+	// The batch/frustum visible flag of a packed building verdict.
+	static bool building_visibility_visible(int64_t p_packed);
 	// bms_ids of non-building entities the collector gates culled this frame.
 	PackedInt32Array get_render_culled_bms_ids() const;
 	// Delta form of get_building_visibility(): only pairs whose packed value
