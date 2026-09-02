@@ -995,6 +995,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 		ObjectModel *model = memnew(ObjectModel);
 		model->set_panm_clock(panm_clock_);
 		model->set_name(vformat("Anim_%s_%d", graphic, animated_count));
+		model->set_graphic_name(graphic);
 		model->set_mirror_reflected(_placement_is_mirror_reflected(
 				uint32_t(a.get("ai_flags", 0)), item_id));
 		_configure_item_scale(model, item_id);
@@ -1097,6 +1098,7 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	model->set_panm_clock(panm_clock_);
 	model->set_authored_lod_enabled(true);
 	model->set_name(vformat("PlayerAvatar_%s", graphic));
+	model->set_graphic_name(graphic);
 	// Wire-streamed and avatar builds share this chain: vehicles reflect in
 	// the water mirror, persons and everything else never do (env #30).
 	model->set_mirror_reflected(_item_is_mirror_reflected(p_item_id));
@@ -1213,8 +1215,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	// Same node naming as the item-model path (PlayerAvatar_<graphic>): the
 	// composed body IS the player's avatar node; the head rides under it.
 	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
-	body->set_meta("avatar_part", "body");
-	body->set_meta("character_id", p_character_id & 0xffff);
+	body->set_avatar_part(ObjectModel::AVATAR_PART_BODY);
+	body->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
 	// @0x5c800f, see docs/playerinfo/avatars-re.md]
 	AvatarDatabase::apply_part_camo(body, spec->get_body_camo(),
@@ -1237,8 +1239,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	}
 	head->set_name(vformat("PlayerAvatarHead_%s",
 			head_graphic.get_file().get_basename()));
-	head->set_meta("avatar_part", "head");
-	head->set_meta("character_id", p_character_id & 0xffff);
+	head->set_avatar_part(ObjectModel::AVATAR_PART_HEAD);
+	head->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
 	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
 	AvatarDatabase::apply_part_camo(head, spec->get_head_camo(),
@@ -1258,8 +1260,7 @@ ObjectModel *MissionObjectPlacer::avatar_head_part(ObjectModel *p_body) {
 	}
 	for (int i = 0; i < p_body->get_child_count(); ++i) {
 		ObjectModel *part = Object::cast_to<ObjectModel>(p_body->get_child(i));
-		if (part != nullptr && part->has_meta("avatar_part") &&
-				String(part->get_meta("avatar_part")) == "head") {
+		if (part != nullptr && part->get_avatar_part() == ObjectModel::AVATAR_PART_HEAD) {
 			return part;
 		}
 	}
@@ -1281,6 +1282,7 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 	model->set_panm_clock(panm_clock_);
 	model->set_authored_lod_enabled(p_retain_authored_lods);
 	model->set_name(vformat("Viewmodel_%s", p_graphic));
+	model->set_graphic_name(p_graphic);
 	p_parent->add_child(model);
 	if (!p_adm_name.is_empty()) {
 		// The ADM names the CLIP SET; the rig table belongs to the equipped

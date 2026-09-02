@@ -1704,6 +1704,23 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
+	ClassDB::bind_method(D_METHOD("set_avatar_part", "part"), &ObjectModel::set_avatar_part);
+	ClassDB::bind_method(D_METHOD("get_avatar_part"), &ObjectModel::get_avatar_part);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "avatar_part", PROPERTY_HINT_ENUM,
+						 "None,Body,Head,Arms"),
+			"set_avatar_part", "get_avatar_part");
+	ClassDB::bind_method(D_METHOD("set_character_id", "id"), &ObjectModel::set_character_id);
+	ClassDB::bind_method(D_METHOD("get_character_id"), &ObjectModel::get_character_id);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "character_id"), "set_character_id",
+			"get_character_id");
+	ClassDB::bind_method(D_METHOD("set_avatar_camo", "camo"), &ObjectModel::set_avatar_camo);
+	ClassDB::bind_method(D_METHOD("get_avatar_camo"), &ObjectModel::get_avatar_camo);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3I, "avatar_camo"), "set_avatar_camo",
+			"get_avatar_camo");
+	ClassDB::bind_method(D_METHOD("set_graphic_name", "name"), &ObjectModel::set_graphic_name);
+	ClassDB::bind_method(D_METHOD("get_graphic_name"), &ObjectModel::get_graphic_name);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic_name"), "set_graphic_name",
+			"get_graphic_name");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),
@@ -1865,6 +1882,10 @@ void ObjectModel::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("bounds_changed", PropertyInfo(Variant::AABB, "bounds")));
 
+	BIND_ENUM_CONSTANT(AVATAR_PART_NONE);
+	BIND_ENUM_CONSTANT(AVATAR_PART_BODY);
+	BIND_ENUM_CONSTANT(AVATAR_PART_HEAD);
+	BIND_ENUM_CONSTANT(AVATAR_PART_ARMS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_CLOCK_ANIMATION_US);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_PANM_US);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_MATERIAL_US);

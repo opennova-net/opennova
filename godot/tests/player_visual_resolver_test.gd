@@ -75,8 +75,8 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	var body: ObjectModel = placer.build_player_animated_model(
 			0x14B9, parent, 0x0400)
 	assert_not_null(body)
-	assert_eq(int(body.get_meta("character_id", -1)), 0x0400)
-	assert_eq(String(body.get_meta("avatar_part", "")), "body")
+	assert_eq(body.character_id, 0x0400)
+	assert_eq(body.avatar_part, ObjectModel.AVATAR_PART_BODY)
 	var body_ctrl := body.get_ctrl_values()
 	assert_eq(int(body_ctrl.get("TEX_CAMO1", -1)), 100)
 	assert_eq(int(body_ctrl.get("TEX_CAMO2", -1)), 120)
