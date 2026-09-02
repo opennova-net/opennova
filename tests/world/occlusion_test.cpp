@@ -17,6 +17,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/world/occlusion_feed.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -936,6 +937,23 @@ void test_forced_visible_bits() {
     CHECK(rig.ow.section_mask(building) == (0xFFFFFFFFu << 5));
 }
 
+// The feed's building verdict word round-trips the full 32-bit mask (its top
+// bit included) beside the visible flag, and an all-ones mask never reads as
+// visible on its own.
+void test_building_visibility_feed_word() {
+    const int64_t hidden_full = pack_building_visibility(0xFFFFFFFFu, false);
+    CHECK(building_visibility_mask(hidden_full) == 0xFFFFFFFFu);
+    CHECK(!building_visibility_visible(hidden_full));
+    const int64_t visible_full = pack_building_visibility(0xFFFFFFFFu, true);
+    CHECK(building_visibility_mask(visible_full) == 0xFFFFFFFFu);
+    CHECK(building_visibility_visible(visible_full));
+    const int64_t visible_none = pack_building_visibility(0u, true);
+    CHECK(building_visibility_mask(visible_none) == 0u);
+    CHECK(building_visibility_visible(visible_none));
+    CHECK(visible_none == (int64_t(1) << kBuildingVisibleBit));
+    CHECK(pack_building_visibility(0x80000001u, false) == int64_t(0x80000001u));
+}
+
 } // namespace
 
 int main() {
@@ -952,6 +970,7 @@ int main() {
     test_three_ray_latch();
     test_camera_blink_query();
     test_forced_visible_bits();
+    test_building_visibility_feed_word();
     if (failures == 0) std::printf("occlusion_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

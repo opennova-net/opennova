@@ -4111,9 +4111,9 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	if visibility.size() == 2:
 		assert_eq(int(visibility[0]), int(placed.get("bms_id", 0)))
 		var packed := int(visibility[1])
-		assert_eq(packed & 0xFFFFFFFF, 0xFFFFFFFF,
+		assert_eq(Simulation.building_visibility_mask(packed), 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
-		assert_ne(packed & (1 << 32), 0, "the in-frustum building is visible")
+		assert_true(Simulation.building_visibility_visible(packed), "the in-frustum building is visible")
 	sim.free()
 
 

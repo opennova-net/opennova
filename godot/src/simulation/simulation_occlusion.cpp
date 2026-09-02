@@ -182,9 +182,17 @@ PackedInt64Array Simulation::get_building_visibility() const {
 		const uint32_t mask =
 		    has_occlusion ? kernel_->occlusion.section_mask(e.handle) : 0xFFFFFFFFu;
 		out.push_back(e.bms_id);
-		out.push_back(static_cast<int64_t>(mask) | (visible ? (int64_t(1) << 32) : 0));
+		out.push_back(opennova::world::pack_building_visibility(mask, visible));
 	});
 	return out;
+}
+
+int64_t Simulation::building_visibility_mask(int64_t p_packed) {
+	return static_cast<int64_t>(opennova::world::building_visibility_mask(p_packed));
+}
+
+bool Simulation::building_visibility_visible(int64_t p_packed) {
+	return opennova::world::building_visibility_visible(p_packed);
 }
 
 PackedInt32Array Simulation::get_render_culled_bms_ids() const {
@@ -209,8 +217,7 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 		const bool visible = kernel_->occlusion.building_visible(e.handle);
 		const uint32_t mask =
 		    has_occlusion ? kernel_->occlusion.section_mask(e.handle) : 0xFFFFFFFFu;
-		const int64_t packed =
-				static_cast<int64_t>(mask) | (visible ? (int64_t(1) << 32) : 0);
+		const int64_t packed = opennova::world::pack_building_visibility(mask, visible);
 		const uint32_t key = e.handle.packed;
 		auto it = occl_apply_building_last_.find(key);
 		if (it != occl_apply_building_last_.end() && it->second == packed) return;

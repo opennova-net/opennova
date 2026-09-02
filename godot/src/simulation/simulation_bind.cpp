@@ -468,6 +468,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_render_culled_bms_ids);
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),
 	                     &Simulation::get_building_visibility_changes);
+	ClassDB::bind_static_method("Simulation", D_METHOD("building_visibility_mask", "packed"),
+	                            &Simulation::building_visibility_mask);
+	ClassDB::bind_static_method("Simulation", D_METHOD("building_visibility_visible", "packed"),
+	                            &Simulation::building_visibility_visible);
 	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
 	                     &Simulation::get_render_culled_changes);
 	ClassDB::bind_method(D_METHOD("get_wire_render_culled_changes"),
