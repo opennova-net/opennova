@@ -374,7 +374,7 @@ func local_player_view() -> PlayerLocalView:
 	var sim := _world.get_sim()
 	if sim == null:
 		return null
-	return PlayerLocalView.from_view_dict(sim.get_local_player_view())
+	return sim.get_local_player_view()
 
 
 ## The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX, clipsize, name),

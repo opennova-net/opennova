@@ -3,6 +3,7 @@
 // inputs the arbiter reads, and the Dictionary read. The orchestration and
 // every witnessed gate live in <runtime/world/local_player_view.h>.
 #include "simulation/simulation_internal.h"
+#include "simulation/player_local_view.h"
 #include "env/env_axes.h"
 
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
@@ -130,42 +131,10 @@ void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot, bool
 	opennova::world::local_player_set_eye_offset(&kernel_->world, offset, p_valid);
 }
 
-Dictionary Simulation::get_local_player_view() const {
-	const opennova::world::LocalPlayerViewFrame f = kernel_->view_frame();
-	Dictionary out;
-	out["scope_engaged"] = f.scope_engaged;
-	out["binoculars_requested"] = f.binoculars_requested;
-	out["binoculars_raised"] = f.binoculars_raised;
-	out["binoculars_view_active"] = f.binoculars_view_active;
-	out["binocular_yaw_offset_deg"] = f.binocular_yaw_offset_deg;
-	out["binocular_pitch_offset_deg"] = f.binocular_pitch_offset_deg;
-	out["nvg_active"] = f.nvg_active;
-	out["nvg_visible"] = f.nvg_visible;
-	out["nvg_gain"] = f.nvg_gain;
-	out["mounted"] = f.mounted;
-	out["third_person"] = f.third_person;
-	out["third_person_selected"] = f.third_person_selected;
-	out["camera_mode"] = f.camera_mode;
-	out["camera_mounted"] = f.camera_mounted;
-	out["vehicle_attack_context"] = f.vehicle_attack_context;
-	out["scope_fraction"] = f.scope_fraction;
-	out["suppress_view_bias"] = f.suppress_view_bias;
-	out["scope_card_active"] = f.scope_card_active;
-	out["fov_h_deg"] = f.fov_h_deg;
-	// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position map.
-	out["tp_anchor"] = mission_to_godot(f.tp_anchor);
-	out["tp_anchor_valid"] = f.tp_anchor_valid;
-	if (f.fp_terms_valid) {
-		out["fp_pitch_recoil_deg"] = f.fp_pitch_recoil_deg;
-		out["fp_roll_deg"] = f.fp_roll_deg;
-	}
-	if (f.camera_pose_valid) {
-		out["camera_pose_valid"] = true;
-		out["camera_eye"] = mission_to_godot(f.camera.eye);
-		out["camera_yaw_deg"] = f.camera.yaw_deg;
-		out["camera_pitch_deg"] = f.camera.pitch_deg;
-		out["camera_roll_deg"] = f.camera.roll_deg;
-	}
+Ref<PlayerLocalView> Simulation::get_local_player_view() const {
+	Ref<PlayerLocalView> out;
+	out.instantiate();
+	out->assign(kernel_->view_frame());
 	return out;
 }
 

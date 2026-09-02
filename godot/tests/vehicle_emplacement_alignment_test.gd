@@ -588,18 +588,18 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		var settle := MissionFrameInput.new()
 		settle.delta_seconds = Simulation.tick_dt()
 		assert_true(rt.advance_session_frame(settle).did_tick())
-	var view: Dictionary = rt.get_sim().get_local_player_view()
-	assert_true(bool(view.get("third_person", false)),
+	var view := rt.get_sim().get_local_player_view()
+	assert_true(view.third_person,
 			"a control seat resolves the chase camera without any camera write")
-	assert_true(bool(view.get("camera_mounted", false)),
+	assert_true(view.camera_mounted,
 			"a control-seat rider engages the mounted camera leg")
-	assert_true(bool(view.get("camera_pose_valid", false)))
-	var eye: Vector3 = view.get("camera_eye", Vector3.ZERO)
+	assert_true(view.camera_pose_valid)
+	var eye := view.camera_eye
 	var carrier_pos: Vector3 = carrier_node.global_position
 	var horizontal := Vector2(eye.x - carrier_pos.x, eye.z - carrier_pos.z).length()
 	assert_gt(horizontal, 1.5,
 			"the mounted eye backs off further than the on-foot 1.0 u chase")
 	assert_gt(eye.y, carrier_pos.y,
 			"the mounted eye sits above the lifted carrier anchor")
-	assert_lt(float(view.get("camera_pitch_deg", 0.0)), 0.0,
+	assert_lt(view.camera_pitch_deg, 0.0,
 			"the mounted camera looks down on the vehicle")

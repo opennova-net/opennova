@@ -119,13 +119,13 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_lt(drift, 0.001,
 			"mounted avatar root %s must follow live E50triB Usegun %s (drift %.6f m)" % [
 				str(avatar_root_world), str(live_usegun_world), drift])
-	var overlay: Dictionary = sim.get_local_player_aim_overlay()
-	assert_true(bool(overlay.get("valid", false)),
+	var overlay := sim.get_local_player_aim_overlay()
+	assert_true(overlay != null,
 			"the mounted local player exports its authoritative body frame")
 	var expected_body_basis := gun_world.basis \
 			* (live_parts[part_index] as Transform3D).basis
 	var actual_body_basis := MissionObjectPlacer.bms_to_godot_basis(
-			overlay.get("body", Vector3.ZERO))
+			overlay.body_angles)
 	var basis_error_deg := rad_to_deg(expected_body_basis.get_rotation_quaternion().angle_to(
 			actual_body_basis.get_rotation_quaternion()))
 	assert_lt(basis_error_deg, 0.51,

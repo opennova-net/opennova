@@ -650,42 +650,42 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	assert_true(sim.request_local_player_binoculars_toggle())
-	var view: Dictionary = sim.get_local_player_view()
-	assert_true(bool(view.get("binoculars_requested", false)))
-	assert_true(bool(view.get("binoculars_raised", false)))
-	assert_true(bool(view.get("binoculars_view_active", false)))
-	assert_almost_eq(float(view.get("fov_h_deg", 0.0)), 20.0, 0.001)
+	var view := sim.get_local_player_view()
+	assert_true(view.binoculars_requested)
+	assert_true(view.binoculars_raised)
+	assert_true(view.binoculars_view_active)
+	assert_almost_eq(view.fov_h_deg, 20.0, 0.001)
 	var jitter := Vector2(
-			float(view.get("binocular_yaw_offset_deg", 0.0)),
-			float(view.get("binocular_pitch_offset_deg", 0.0)))
+			view.binocular_yaw_offset_deg,
+			view.binocular_pitch_offset_deg)
 	assert_almost_eq(jitter.length(), 2.8125, 0.0001,
 			"the toggle seeds the fixed 0x02000000-BAM displacement")
 
 	sim.set_player_input(true, false, false, false, false, false, false)
 	view = sim.get_local_player_view()
-	assert_true(bool(view.get("binoculars_requested", false)),
+	assert_true(view.binoculars_requested,
 			"movement suppresses rather than destroys raw intent")
-	assert_false(bool(view.get("binoculars_raised", true)))
-	assert_false(bool(view.get("binoculars_view_active", true)))
+	assert_false(view.binoculars_raised)
+	assert_false(view.binoculars_view_active)
 	sim.set_player_input(false, false, false, false, false, false, false)
 	sim.set_local_player_debug_third_person(true)
 	view = sim.get_local_player_view()
-	assert_true(bool(view.get("binoculars_raised", false)),
+	assert_true(view.binoculars_raised,
 			"third person retains the remote-visible body pose")
-	assert_false(bool(view.get("binoculars_view_active", true)))
+	assert_false(view.binoculars_view_active)
 	sim.set_local_player_debug_third_person(false)
 	sim.request_local_player_binoculars_toggle()
-	assert_false(bool(sim.get_local_player_view().get("binoculars_requested", true)))
+	assert_false(sim.get_local_player_view().binoculars_requested)
 
 	assert_eq(sim.request_local_player_nvg_gain(99), 4)
-	assert_eq(int(sim.get_local_player_view().get("nvg_gain", -1)), 4,
+	assert_eq(sim.get_local_player_view().nvg_gain, 4,
 			"gain is adjustable while NVG is inactive")
 	assert_true(sim.request_local_player_nvg_toggle())
-	assert_true(bool(sim.get_local_player_view().get("nvg_visible", false)))
+	assert_true(sim.get_local_player_view().nvg_visible)
 	sim.set_local_player_debug_third_person(true)
 	view = sim.get_local_player_view()
-	assert_true(bool(view.get("nvg_active", false)))
-	assert_false(bool(view.get("nvg_visible", true)),
+	assert_true(view.nvg_active)
+	assert_false(view.nvg_visible,
 			"third person suppresses treatment without clearing NVG")
 	sim.free()
 
@@ -698,17 +698,17 @@ func test_start_with_nvg_reseeds_on_player_init() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var view: Dictionary = sim.get_local_player_view()
-	assert_true(bool(view.get("nvg_active", false)))
-	assert_eq(int(view.get("nvg_gain", -1)), 0)
+	var view := sim.get_local_player_view()
+	assert_true(view.nvg_active)
+	assert_eq(view.nvg_gain, 0)
 
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_eq(sim.request_local_player_nvg_gain(3), 3)
 	sim.respawn_local_player_loadout()
 	view = sim.get_local_player_view()
-	assert_true(bool(view.get("nvg_active", false)),
+	assert_true(view.nvg_active,
 			"Player_InitPlayer reseeds the mission's StartWithNVGOn bit")
-	assert_eq(int(view.get("nvg_gain", -1)), 0)
+	assert_eq(view.nvg_gain, 0)
 	sim.free()
 
 
@@ -730,10 +730,10 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	assert_true(sim.request_local_player_scope_toggle())
 	for _i in range(7):
 		sim.step()
-	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)))
+	assert_true(sim.get_local_player_view().scope_engaged)
 
 	assert_true(sim.request_local_player_nvg_toggle())
-	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)),
+	assert_false(sim.get_local_player_view().scope_engaged,
 			"enabling NVG drops a settled Inset scope")
 	for _i in range(7):
 		sim.step()
@@ -742,13 +742,13 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	sim.rebake_local_player_weapon(weapon, {})
 
 	assert_false(sim.request_local_player_nvg_toggle())
-	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)),
+	assert_true(sim.get_local_player_view().scope_engaged,
 			"a render-only same-weapon rebake preserves the scope restore latch")
 
 	assert_true(sim.request_local_player_nvg_toggle())
 	sim.set_local_player_weapon(weapon, {})
 	assert_false(sim.request_local_player_nvg_toggle())
-	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)),
+	assert_false(sim.get_local_player_view().scope_engaged,
 			"a real weapon mount invalidates the stale scope restore latch")
 	sim.free()
 
@@ -805,8 +805,8 @@ func _minimal_weapon(name: String, animadm: String) -> WeaponDef:
 
 
 func _weapon_arm_pitch_deg(sim: Simulation) -> float:
-	var overlay: Dictionary = sim.get_local_player_aim_overlay()
-	var angles: PackedVector3Array = overlay.get("angles", PackedVector3Array())
+	var overlay := sim.get_local_player_aim_overlay()
+	var angles := overlay.segment_angles if overlay != null else PackedVector3Array()
 	return float(angles[4].x) if angles.size() > 4 else 0.0
 
 
@@ -1316,8 +1316,8 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	assert_eq(int(weapon_state.get("hud_spread_fp16", -1)),
 			0x4000 + (recoil_pitch >> 7) + (weight_spread >> 7),
 			"HUD spread preserves exact ERROR plus both live SAR terms")
-	var recoil_view: Dictionary = sim.get_local_player_view()
-	assert_almost_eq(float(recoil_view.get("fp_pitch_recoil_deg", 0.0)),
+	var recoil_view := sim.get_local_player_view()
+	assert_almost_eq(recoil_view.fp_pitch_recoil_deg,
 			float(recoil_pitch) * 2.0 * 360.0 / 4294967296.0, 0.0001,
 			"the bridge exports retail's wrapped 2*recoil camera pitch")
 	sim.free()
@@ -1578,10 +1578,10 @@ func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void
 		assert_true(sim.request_local_player_scope_toggle())
 		for _i in range(15):
 			sim.step()
-		var view: Dictionary = sim.get_local_player_view()
-		assert_almost_eq(float(view.get("scope_fraction", 0.0)), 1.0, 0.001,
+		var view := sim.get_local_player_view()
+		assert_almost_eq(view.scope_fraction, 1.0, 0.001,
 			"the ADS ease settled before checking the card switch")
-		assert_eq(bool(view.get("scope_card_active", false)), bool(case["expected_card"]),
+		assert_eq(view.scope_card_active, bool(case["expected_card"]),
 			"Scoped/Sighted and NoCardSwitch select the card for %s" % case["name"])
 		sim.free()
 
@@ -1611,13 +1611,13 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29)
 	assert_true(sim.request_local_player_scope_toggle())
 	sim.step()
-	assert_lt(float(sim.get_local_player_view().get("scope_fraction", 1.0)), 1.0)
+	assert_lt(sim.get_local_player_view().scope_fraction, 1.0)
 	var before := int(sim.get_local_player_weapon_state().get("unscope_serial", 0))
 	sim.set_local_player_weapon_input(false, false, true)
 	for _i in range(3):
 		sim.step()
 	assert_eq(int(sim.get_local_player_weapon_state().get("unscope_serial", 0)), before)
-	assert_true(bool(sim.get_local_player_view().get("scope_engaged", false)))
+	assert_true(sim.get_local_player_view().scope_engaged)
 	sim.free()
 
 
@@ -2282,7 +2282,7 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	assert_eq(int(mounted.get("current", -1)), 0)
 	assert_eq(int(mounted.get("next", -1)), 0)
 	assert_false(bool(mounted.get("windup_active", true)))
-	assert_false(bool(sim.get_local_player_view().get("scope_engaged", true)))
+	assert_false(sim.get_local_player_view().scope_engaged)
 	sim.free()
 
 
@@ -3284,11 +3284,10 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			"emplaced_gun_yaw", 0))
 	assert_eq(initial_yaw_control, 0,
 			'the attach snap starts EWEAP_GUNYAW at its neutral phase')
-	var initial_overlay: Dictionary = sim.get_local_player_aim_overlay()
-	assert_true(bool(initial_overlay.get('valid', false)))
-	var initial_body: Vector3 = initial_overlay.get('body', Vector3.ZERO)
-	var initial_angles: PackedVector3Array = initial_overlay.get(
-			'angles', PackedVector3Array())
+	var initial_overlay := sim.get_local_player_aim_overlay()
+	assert_not_null(initial_overlay)
+	var initial_body := initial_overlay.body_angles
+	var initial_angles := initial_overlay.segment_angles
 	assert_gt(initial_angles.size(), 0)
 	assert_lt(absf(wrapf(initial_body.y, -180.0, 180.0)), 0.01,
 			'the mounted body neutral overlay follows the snapped gun yaw')

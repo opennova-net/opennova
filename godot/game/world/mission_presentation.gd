@@ -442,7 +442,7 @@ func has_player() -> bool:
 
 # Decoded at the Simulation transport edge (ADR 0017); null when absent/invalid.
 func local_player_aim_overlay() -> PlayerAimOverlay:
-	return PlayerAimOverlay.from_sim_dict(_sim.get_local_player_aim_overlay()) if _sim != null else null
+	return _sim.get_local_player_aim_overlay() if _sim != null else null
 
 func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0

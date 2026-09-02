@@ -111,6 +111,8 @@ add_library(${TARGET_NAME} SHARED
     object/character_join_profile.cpp
     mission/player_visual_spec.cpp
     simulation/fp_viewmodel_spec.cpp
+    simulation/player_aim_overlay.cpp
+    simulation/player_local_view.cpp
     object/skeletal_anim.cpp
     hud/hud_overlay.cpp
     hud/feed_row.cpp

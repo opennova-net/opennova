@@ -1176,18 +1176,18 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
-	assert_false(bool(joiner.get_local_player_view().get("mounted", true)))
+	assert_false(joiner.get_local_player_view().mounted)
 
 	assert_true(joiner.local_player_toggle_mount(),
 			"Shift queues the joiner's C2S 0x26 attach")
-	assert_false(bool(joiner.get_local_player_view().get("mounted", true)),
+	assert_false(joiner.get_local_player_view().mounted,
 			"attach is not locally predicted before the authority echo")
 	var mounted_echoed := false
 	for _tick in range(180):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if bool(joiner.get_local_player_view().get("mounted", false)) \
+		if joiner.get_local_player_view().mounted \
 				and host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 1:
@@ -1307,14 +1307,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		OS.delay_msec(1)
 	assert_true(joiner.local_player_toggle_mount(),
 			"a mounted Shift queues C2S 0x27 immediately")
-	assert_true(bool(joiner.get_local_player_view().get("mounted", false)),
+	assert_true(joiner.get_local_player_view().mounted,
 			"detach also waits for the authority echo")
 	var detached_echoed := false
 	for _tick in range(180):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if not bool(joiner.get_local_player_view().get("mounted", true)) \
+		if not joiner.get_local_player_view().mounted \
 				and not host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 0:
@@ -1544,7 +1544,7 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 		joiner.free()
 		host.free()
 		return
-	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive on foot: first person")
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
@@ -1553,10 +1553,10 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 		host.free()
 		return
 	joiner.step()
-	var view: Dictionary = joiner.get_local_player_view()
-	assert_eq(int(view.get("camera_mode", -1)), 4,
+	var view := joiner.get_local_player_view()
+	assert_eq(view.camera_mode, 4,
 			"the dead joiner's arbiter resolves the death lerp camera")
-	assert_true(bool(view.get("camera_pose_valid", false)),
+	assert_true(view.camera_pose_valid,
 			"mode 4 composes a camera pose")
 	# The deployment release: pick the default spawn and pump until the host
 	# releases; the respawned player is alive again -> first person.
@@ -1577,7 +1577,7 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 		OS.delay_msec(1)
 	assert_true(alive, "the release brought the joiner back alive")
 	joiner.step()
-	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive again: the arbiter returns to first person")
 	joiner.free()
 	host.free()
@@ -1720,7 +1720,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	for _tick in range(180):
 		joiner.step()
 		host.step()
-		if bool(joiner.get_local_player_view().get("mounted", false)):
+		if joiner.get_local_player_view().mounted:
 			mounted_echoed = true
 			break
 		OS.delay_msec(2)

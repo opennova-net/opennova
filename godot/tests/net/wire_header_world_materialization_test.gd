@@ -579,7 +579,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if bool(joiner.get_local_player_view().get("mounted", false)) \
+		if joiner.get_local_player_view().mounted \
 				and host_player_index >= 0 \
 				and host.entity_card_by_ai_index(host_player_index).is_mounted():
 			mounted_echoed = true

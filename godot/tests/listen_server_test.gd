@@ -134,12 +134,12 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		sim.add_local_player_look(80.0, 100.0)
 		sim.step()
 
-		var local: Dictionary = sim.get_local_player_aim_overlay()
-		assert_true(bool(local.get("valid", false)))
-		assert_eq(int(local.get("mount_mode", 0)), 2,
+		var local := sim.get_local_player_aim_overlay()
+		assert_true(local != null)
+		assert_eq(local.mount_mode, 2,
 				"UseGun selects the animation-owned Gunner mode")
-		assert_true(bool(local.get("mount_config_valid", false)))
-		assert_eq(int(local.get("mount_config", -1)), config_value)
+		assert_true(local.mount_config_valid)
+		assert_eq(local.mount_config, config_value)
 		var local_angles: PackedVector3Array = local.get(
 				"angles", PackedVector3Array())
 		assert_eq(local_angles.size(), 9)
@@ -156,7 +156,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 					snapshot[base + Simulation.PF_AIM_BODY_PITCH_DEG],
 					snapshot[base + Simulation.PF_AIM_BODY_YAW_DEG],
 					snapshot[base + Simulation.PF_AIM_BODY_ROLL_DEG])
-			assert_lt(packed_body.distance_to(local.get("body", Vector3.ZERO)), 0.001,
+			assert_lt(packed_body.distance_to(local.body_angles), 0.001,
 					"packed body orientation equals the local selector result")
 			var packed_angles := _packed_aim_angles(snapshot, base)
 			for overlay_class in range(9):
