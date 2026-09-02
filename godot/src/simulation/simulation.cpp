@@ -3,6 +3,7 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
+#include "simulation/debug_cards.h"
 #include "env/env_axes.h"
 
 #include "env/weather.h"
@@ -949,13 +950,15 @@ void Simulation::seal_mission_start_baseline() {
 	kernel_->capture_baseline();
 }
 
-Dictionary Simulation::get_wac_state() const {
-	Dictionary out;
-	out["loaded"] = kernel_ != nullptr && kernel_->wac.vm().loaded();
-	out["paused"] = kernel_ != nullptr && kernel_->wac.paused;
-	out["runs"] = kernel_ != nullptr ? static_cast<int64_t>(kernel_->wac.runs()) : 0;
-	out["event_count"] = kernel_ != nullptr ? kernel_->wac.program().event_count : 0;
-	out["code_size"] = kernel_ != nullptr ? static_cast<int>(kernel_->wac.program().code.size()) : 0;
+Ref<WacState> Simulation::get_wac_state() const {
+	Ref<WacState> out;
+	out.instantiate();
+	if (kernel_ == nullptr) return out;
+	out->set_loaded(kernel_->wac.vm().loaded());
+	out->set_paused(kernel_->wac.paused);
+	out->set_runs(static_cast<int64_t>(kernel_->wac.runs()));
+	out->set_event_count(static_cast<int>(kernel_->wac.program().event_count));
+	out->set_code_size(static_cast<int>(kernel_->wac.program().code.size()));
 	return out;
 }
 

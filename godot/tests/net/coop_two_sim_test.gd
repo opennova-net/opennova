@@ -999,8 +999,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			attach_db, PackedInt32Array([5004])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
 	var def_root := ResourceRoot.new()
@@ -1129,8 +1128,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			seat_db, PackedInt32Array([1419])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install resolved the B50 model source")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1598,8 +1596,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install resolved the drivable model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)

@@ -73,15 +73,15 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 	autofree(sim)
 	sim.build_demo_mission()
 	assert_true(sim.is_loaded())
-	var state: Dictionary = sim.get_wac_state()
-	assert_false(bool(state["loaded"]), "no program installed -> VM unloaded (BMS-only case)")
+	var state := sim.get_wac_state()
+	assert_false(state.loaded, "no program installed -> VM unloaded (BMS-only case)")
 
 	# v1 starts 0, so eq(v1,0) fires on the first VM execution and sets v2=7.
 	assert_true(sim.compile_and_set_wac(PackedStringArray(["if eq(v1,0) then set(v2,7) endif\n"])),
 		"the registry-aware compile installs")
 	state = sim.get_wac_state()
-	assert_true(bool(state["loaded"]))
-	assert_eq(int(state["event_count"]), 1)
+	assert_true(state.loaded)
+	assert_eq(state.event_count, 1)
 
 	# The VM executes only every 62nd tick [orig: dword_C6EAD4 / cmp 0x3E].
 	for _i in range(61):
@@ -89,7 +89,7 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 	assert_eq(sim.get_mission_variable(2), 0, "61 ticks: the divider has not fired yet")
 	sim.step()
 	assert_eq(sim.get_mission_variable(2), 7, "tick 62: the program ran and set v2")
-	assert_eq(int(sim.get_wac_state()["runs"]), 1, "one completed execution counted")
+	assert_eq(sim.get_wac_state().runs, 1, "one completed execution counted")
 
 	# Pause gate [orig: dword_C6EB28]: a paused script never advances.
 	sim.set_mission_variable(2, 0)
@@ -101,7 +101,7 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 
 	# reset_session() rewinds: the system's on_load resets the accumulator + runs.
 	sim.reset_session()
-	assert_eq(int(sim.get_wac_state()["runs"]), 0, "restart resets the completed-runs counter")
+	assert_eq(sim.get_wac_state().runs, 0, "restart resets the completed-runs counter")
 
 
 func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
@@ -115,24 +115,24 @@ func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
 	assert_true(sim.run_mission_start_wac(), "the authority executes startup WAC immediately")
 	assert_false(sim.run_mission_start_wac(), "startup execution is idempotent per program")
 	assert_eq(sim.get_mission_variable(2), 1)
-	assert_eq(int(sim.get_wac_state()["runs"]), 1)
+	assert_eq(sim.get_wac_state().runs, 1)
 	assert_eq(sim.get_logic_tick(), logic_tick_before,
 		"eager WAC consumes no world logic tick")
 	sim.seal_mission_start_baseline()
 
 	for _i in range(61):
 		sim.step()
-	assert_eq(int(sim.get_wac_state()["runs"]), 1)
+	assert_eq(sim.get_wac_state().runs, 1)
 	sim.step()
-	assert_eq(int(sim.get_wac_state()["runs"]), 2, "the next WAC run remains tick 62")
+	assert_eq(sim.get_wac_state().runs, 2, "the next WAC run remains tick 62")
 	assert_eq(sim.get_mission_variable(2), 1, "the startup edge does not refire")
 
 	sim.reset_session()
-	assert_eq(int(sim.get_wac_state()["runs"]), 1, "restart restores the sealed post-eager VM")
+	assert_eq(sim.get_wac_state().runs, 1, "restart restores the sealed post-eager VM")
 	assert_eq(sim.get_mission_variable(2), 1)
 	for _i in range(62):
 		sim.step()
-	assert_eq(int(sim.get_wac_state()["runs"]), 2)
+	assert_eq(sim.get_wac_state().runs, 2)
 	assert_eq(sim.get_mission_variable(2), 1)
 
 
@@ -143,9 +143,9 @@ func test_set_wac_program_survives_a_reload() -> void:
 	assert_eq(wac.compile_source("if eq(v1,0) then set(v2,5) endif\n"), OK)
 	sim.set_wac_program(wac)  # installed before any load: applied by finish_load
 	sim.build_demo_mission()
-	assert_true(bool(sim.get_wac_state()["loaded"]), "finish_load applied the held program")
+	assert_true(sim.get_wac_state().loaded, "finish_load applied the held program")
 	sim.build_demo_mission()  # reload: reset_world recreates the WacSystem
-	assert_true(bool(sim.get_wac_state()["loaded"]), "the held program re-applies on reload")
+	assert_true(sim.get_wac_state().loaded, "the held program re-applies on reload")
 	for _i in range(62):
 		sim.step()
 	assert_eq(sim.get_mission_variable(2), 5, "the re-applied program executes")

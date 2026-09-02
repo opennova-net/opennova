@@ -76,7 +76,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, _mission_type_ids(mission)))
-	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+	assert_gt(sim.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	assert_eq(sim.spawn_local_player_at_start(), 1)

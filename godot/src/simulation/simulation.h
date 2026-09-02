@@ -70,6 +70,9 @@ class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_
 class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
 class CollisionDebugReport; // the F3 collision overlay payload (simulation/collision_debug_report.h)
 class DebugPickCard;     // the F3 entity picker's card (simulation/debug_pick_card.h)
+class WacState;          // the WAC VM state card (simulation/debug_cards.h)
+class NativePoseStats;   // the native pose-path health card (simulation/debug_cards.h)
+class DestructionDebugCard; // the per-entity destruction gate card (simulation/debug_cards.h)
 class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
 class RayDebugReport;    // the F3 rays view channel (simulation/ray_debug_report.h)
 class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlusion_portal_report.h)
@@ -1028,8 +1031,8 @@ public:
 	// Replace the early post-BMS restore point with the fully settled play-start
 	// state, including WAC temporal/RNG state.
 	void seal_mission_start_baseline();
-	// { loaded, paused, runs, event_count, code_size } for transport/debug UI.
-	Dictionary get_wac_state() const;
+	// The installed WAC program's VM state (simulation/debug_cards.h WacState).
+	Ref<WacState> get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
 	// One opt-in seam for native sim/net/present/occlusion timings and
@@ -1168,7 +1171,7 @@ public:
 	// chain's gate inputs.
 	// (entity_card is the per-entity debug card; this one resolves by the
 	// placed bms_id and carries the §24 gate fields.)
-	Dictionary get_destruction_debug(int p_bms_id) const;
+	Ref<DestructionDebugCard> get_destruction_debug(int p_bms_id) const;
 
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
@@ -1188,7 +1191,7 @@ public:
 	// provider and the mounted resolver, plus the installed mounted model
 	// sources. The soak gates on declines == 0 — the A/B divergence stats this
 	// replaces were retired with the cutover.
-	Dictionary debug_native_pose_stats() const;
+	Ref<NativePoseStats> debug_native_pose_stats() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.

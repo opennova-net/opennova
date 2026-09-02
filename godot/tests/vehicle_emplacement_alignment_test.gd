@@ -184,7 +184,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([CARRIER_TYPE_ID])))
-	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+	assert_gt(sim.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
@@ -291,7 +291,7 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([MRK5_TYPE_ID])))
-	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+	assert_gt(sim.debug_native_pose_stats().mounted_graphic_sources, 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)

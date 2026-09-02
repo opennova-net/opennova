@@ -78,6 +78,7 @@
 #include "simulation/ai_debug_report.h"
 #include "simulation/destruction_events.h"
 #include "simulation/collision_debug_report.h"
+#include "simulation/debug_cards.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/occlusion_portal_report.h"
@@ -260,6 +261,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(CollisionDebugPlayer);
 	GDREGISTER_CLASS(CollisionDebugReport);
 	GDREGISTER_CLASS(DebugPickCard);
+	GDREGISTER_CLASS(WacState);
+	GDREGISTER_CLASS(NativePoseStats);
+	GDREGISTER_CLASS(DestructionDebugCard);
 	GDREGISTER_CLASS(RoundDebugEvent);
 	GDREGISTER_CLASS(RoundDebugReport);
 	GDREGISTER_CLASS(RayDebugCount);
