@@ -26,7 +26,7 @@ func update(sim: Simulation, world: GameWorld) -> void:
 	var tone := String(feedback.get("tone", ""))
 	if tone.is_empty() or not _enabled or world == null:
 		return
-	var audio = world.get_mission_audio()
+	var audio: MissionAudio = world.get_mission_audio()
 	if audio != null:
 		audio.ui_soundset(tone)
 

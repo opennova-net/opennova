@@ -164,7 +164,7 @@ func _run(operation: WorldLoadOperation, loader: Callable) -> void:
 		if _is_cancelled_or_stale(operation):
 			_settle(operation)
 			return
-	var result = loader.call()
+	var result: Variant = loader.call()
 	var err := int(result) if result != null else OK
 	# GameWorld normally emits load_failed inside the loader call. If that path
 	# already dismissed this presentation, suppress the duplicate fallback.

@@ -49,7 +49,7 @@ var _ui_parent: Node = null
 var _layout_control: Control = null
 var _hud_presenter: GameHudPresenter = null
 var _deploy_presenter: DeployScreenPresenter = null
-var _armory_presenter = null
+var _armory_presenter: ArmoryPresenter = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
@@ -104,7 +104,7 @@ func _hud() -> HudOverlay:
 
 
 func _gametext() -> RtxtStringFile:
-	return Strings.get_table("gametext")
+	return Strings.get_table(Strings.TABLE_GAMETEXT)
 
 
 func is_open() -> bool:

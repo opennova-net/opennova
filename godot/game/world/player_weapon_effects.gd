@@ -235,7 +235,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if _world == null:
 		return
 	if not event.action_soundset.is_empty():
-		var audio = _world.get_mission_audio()
+		var audio: MissionAudio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(event.action_soundset, event.world_position, -1)
 	if event.action_particle.is_empty():
@@ -249,7 +249,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	# @0x526786; gate @0x541aba !g_weaponScopeActive]
 	if event.scope_settled and not event.third_person and not event.vehicle_attack_context:
 		return  # settled-scoped FP fire shows no muzzle flash [orig: @0x541aba]
-	var fx = _world.get_effect_world()
+	var fx: EffectWorld = _world.get_effect_world()
 	if fx == null:
 		return
 	var pos := _action_particle_world_position(event.action_particle_userpoint)
@@ -289,7 +289,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 func _fire_direct_action_effect(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.effect_particle.is_empty():
 		return
-	var fx = _world.get_effect_world()
+	var fx: EffectWorld = _world.get_effect_world()
 	if fx == null:
 		return
 	var pos := _action_particle_world_position(event.effect_particle_userpoint)
@@ -435,7 +435,7 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.action_end_soundset.is_empty():
 		return
-	var audio = _world.get_mission_audio()
+	var audio: MissionAudio = _world.get_mission_audio()
 	if audio != null:
 		audio.fire_soundset(event.action_end_soundset, event.world_position, -1)
 
@@ -457,7 +457,7 @@ const SWITCH_DENY_SOUNDSET := "DRY_CLAYSATCH"
 func _play_switch_deny_sound() -> void:
 	if _world == null:
 		return
-	var audio = _world.get_mission_audio()
+	var audio: MissionAudio = _world.get_mission_audio()
 	if audio != null:
 		audio.ui_soundset(SWITCH_DENY_SOUNDSET)
 

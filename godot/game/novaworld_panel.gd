@@ -481,7 +481,7 @@ func _rebuild_view() -> void:
 	_update_column_titles()
 
 
-func _ping_for(row: Dictionary):
+func _ping_for(row: Dictionary) -> Variant:
 	return _pings.get(int(row.get("rid", -1)))
 
 
@@ -516,7 +516,7 @@ func _on_server_pings_updated() -> void:
 		return
 	var item := _server_tree.get_root().get_first_child()
 	while item != null:
-		var row = item.get_metadata(0)
+		var row: Variant = item.get_metadata(0)
 		if row is Dictionary:
 			item.set_text(Column.PING, ping_text(_ping_for(row)))
 		item = item.get_next()
@@ -599,8 +599,8 @@ static func sort_rows(rows: Array, column: int, ascending: bool,
 			Column.PLAYERS:
 				cmp = signi(int(ra.get("players", 0)) - int(rb.get("players", 0)))
 			Column.PING:
-				var pa = pings.get(int(ra.get("rid", -1)))
-				var pb = pings.get(int(rb.get("rid", -1)))
+				var pa: Variant = pings.get(int(ra.get("rid", -1)))
+				var pb: Variant = pings.get(int(rb.get("rid", -1)))
 				var va := int(pa) if pa != null and int(pa) >= 0 else 0x7FFFFFFF
 				var vb := int(pb) if pb != null and int(pb) >= 0 else 0x7FFFFFFF
 				if va == 0x7FFFFFFF and vb == 0x7FFFFFFF:
@@ -701,7 +701,7 @@ func _selected_row() -> Dictionary:
 	var item := _server_tree.get_selected()
 	if item == null:
 		return {}
-	var row = item.get_metadata(0)
+	var row: Variant = item.get_metadata(0)
 	return row if row is Dictionary else {}
 
 
