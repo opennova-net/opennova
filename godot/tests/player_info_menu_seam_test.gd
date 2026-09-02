@@ -133,14 +133,13 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
 	var ids: Array = profile.get("character_ids", [])
 	var avatars: Array = profile.get("avatars", [])
-	var combo: Dictionary = db.get_combo(0, 0, 1)
-	var head: Dictionary = combo.get("head", {})
+	var combo := db.get_combo(0, 0, 1)
 
 	assert_eq(int(ids[0]), 0x0400,
 			"nat 0 / div 0 / combo id 2 packs into bits 0..14")
 	assert_eq(int(ids[1]), 0x8204,
 			"choosing side A does not erase side B's profile selection")
-	assert_eq(int(avatars[0]), int(head.get("voice", -1)),
+	assert_eq(int(avatars[0]), combo.get_head().voice,
 			"the selected combo supplies its retail avatar byte")
 	assert_eq(profile.get("player_classes", []), [6, 6],
 			"retail commits the chosen class to both side blocks")
@@ -148,25 +147,25 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 
 func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
 	var db := _load_db()
-	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
-	var red: Dictionary = db.resolve_character_id(0x8407, 1)
-	assert_false(blue.is_empty())
-	assert_false(red.is_empty())
+	var blue := db.resolve_character_id(0x0400, 0)
+	var red := db.resolve_character_id(0x8407, 1)
+	assert_not_null(blue)
+	assert_not_null(red)
 	var selected := {
 		"team": 0,
 		"side_profiles": [
 			{
 				"team": 0,
-				"nationality": int(blue.get("nationality_index", -1)),
-				"division": int(blue.get("division_index", -1)),
-				"combo": int(blue.get("combo_index", -1)),
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
 				"player_class": 5,
 			},
 			{
 				"team": 1,
-				"nationality": int(red.get("nationality_index", -1)),
-				"division": int(red.get("division_index", -1)),
-				"combo": int(red.get("combo_index", -1)),
+				"nationality": red.nationality_index,
+				"division": red.division_index,
+				"combo": red.combo_index,
 				"player_class": 9,
 			},
 		],
@@ -204,10 +203,8 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 
 	# Each combo row is "<head display> - <body display>". With no gametext table registered
 	# (before_each cleared Strings) the names fall back to their raw keys.
-	var c0: Dictionary = db.get_combo(0, 0, 0)
-	var head: Dictionary = c0.get("head", {})
-	var body: Dictionary = c0.get("body", {})
-	var expected := "%s - %s" % [String(head.get("display_name", "")), String(body.get("display_name", ""))]
+	var c0 := db.get_combo(0, 0, 0)
+	var expected := "%s - %s" % [c0.get_head().display_name, c0.get_body().display_name]
 	assert_eq(driver.item_text(combos, 0), expected, "combo row is the last - first character label")
 
 
@@ -222,11 +219,11 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 	# Map the exact keys this test asserts on to friendly text in a synthetic Avatars table.
 	var t := RtxtStringFile.new()
 	t.add_section("Avatars")
-	var nat0 := String(db.get_nationality(0).get("name_key", ""))
+	var nat0 := db.get_nationality(0).name_key
 	t.add_entry(nat0, "United States", 0, Vector2i())
-	var c0: Dictionary = db.get_combo(0, 0, 0)
-	var head_key := String(c0.get("head", {}).get("display_name", ""))
-	var body_key := String(c0.get("body", {}).get("display_name", ""))
+	var c0 := db.get_combo(0, 0, 0)
+	var head_key := c0.get_head().display_name
+	var body_key := c0.get_body().display_name
 	t.add_entry(head_key, "Boonie Hat", 0, Vector2i())
 	if body_key != head_key:
 		t.add_entry(body_key, "Camo BDU", 0, Vector2i())
@@ -268,7 +265,7 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	var good_rows: Array[int] = companion.nationality_rows()
 	assert_gt(good_rows.size(), 0, "at least one good nationality")
 	for i in good_rows:
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_GOOD,
+		assert_eq(db.get_nationality(i).alignment, AvatarDatabase.ALIGN_GOOD,
 			"team 0 shows only good-aligned nationalities")
 
 	# Switching to SIDE_RED (team 1) re-filters to evil-aligned nationalities.
@@ -279,7 +276,7 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
 	driver.widget_activated.emit(side_red, "SIDE_RED")
 	for i in companion.nationality_rows():
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_EVIL,
+		assert_eq(db.get_nationality(i).alignment, AvatarDatabase.ALIGN_EVIL,
 			"team 1 shows only evil-aligned nationalities")
 
 	# The two teams partition every nationality (good->blue, evil->red; D-PLAYERINFO-5).
@@ -414,8 +411,8 @@ func test_snapshot_reports_current_selection() -> void:
 
 func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	var db := _load_db()
-	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
-	var red: Dictionary = db.resolve_character_id(0x8407, 1)
+	var blue := db.resolve_character_id(0x0400, 0)
+	var red := db.resolve_character_id(0x8407, 1)
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_persisted_profile({
 		"name": "Persistent",
@@ -423,17 +420,17 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 		"side_profiles": [
 			{
 				"team": 0,
-				"nationality": int(blue.get("nationality_index", -1)),
-				"division": int(blue.get("division_index", -1)),
-				"combo": int(blue.get("combo_index", -1)),
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
 				"player_class": 8,
 				"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400,
 			},
 			{
 				"team": 1,
-				"nationality": int(red.get("nationality_index", -1)),
-				"division": int(red.get("division_index", -1)),
-				"combo": int(red.get("combo_index", -1)),
+				"nationality": red.nationality_index,
+				"division": red.division_index,
+				"combo": red.combo_index,
 				"player_class": 8,
 				"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407,
 			},
@@ -446,7 +443,7 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 		return
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
-			int(blue.get("combo_index", -1)))
+			blue.combo_index)
 	assert_eq(driver.get_widget_text(driver.widget_id("PLAYERNAME")), "Persistent")
 	var red_radio := driver.widget_id("SIDE_RED")
 	driver.set_widget_checked(red_radio, true)
@@ -454,11 +451,11 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	driver.widget_activated.emit(red_radio, "SIDE_RED")
 	var red_snapshot := companion.snapshot()
 	assert_eq(int(red_snapshot.get("nationality", -1)),
-			int(red.get("nationality_index", -1)))
+			red.nationality_index)
 	assert_eq(int(red_snapshot.get("division", -1)),
-			int(red.get("division_index", -1)))
+			red.division_index)
 	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
-			int(red.get("combo_index", -1)),
+			red.combo_index,
 			"switching side restores that side's persisted combo")
 	var saved_sides: Array = companion.snapshot().get("side_profiles", [])
 	assert_eq(int((saved_sides[0] as Dictionary).get("avatar_packed", -1)), 0x0400)

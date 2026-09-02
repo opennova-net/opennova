@@ -436,14 +436,12 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	else:
 		var retail_db := AvatarDatabase.new()
 		assert_eq(retail_db.load(retail_avatars), OK)
-		var resolved_blue: Dictionary = retail_db.resolve_character_id(0x0402, 0)
-		var combo: Dictionary = retail_db.resolve_combo(
-				int(resolved_blue.get("nationality_index", -1)),
-				int(resolved_blue.get("division_index", -1)),
-				int(resolved_blue.get("combo_index", -1)))
-		var arms: Dictionary = combo.get("arms", {})
-		assert_eq(String(arms.get("graphic", "")), "IndoArms.3di")
-		assert_eq(Array(arms.get("camo", [])), [1, 0, 0])
+		var combo := retail_db.resolve_character_id(0x0402, 0)
+		assert_not_null(combo)
+		var arms := combo.get_arms()
+		assert_not_null(arms, "blue 0x0402 authors an arms part")
+		assert_eq(arms.graphic, "IndoArms.3di")
+		assert_eq(arms.camo, Vector3i(1, 0, 0))
 	assert_true(RenderFixtureContract.verify_comparison_spawn(
 			world, contract).has("error"),
 			"the mission-overridden M4 spawn must not pass as matched evidence")

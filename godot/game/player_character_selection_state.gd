@@ -109,25 +109,25 @@ func make_selection(team: int, nat_index: int, div_index: int,
 		combo_index: int, selected_class: int = 8) -> Selection:
 	if _db == null or nat_index < 0 or nat_index >= _db.get_nationality_count():
 		return null
-	var nat: Dictionary = _db.get_nationality(nat_index)
-	if int(nat.get("alignment", -1)) != team:
+	var nat := _db.get_nationality(nat_index)
+	if nat == null or nat.alignment != team:
 		return null
 	if div_index < 0 or div_index >= _db.get_division_count(nat_index):
 		return null
 	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index):
 		return null
-	var div: Dictionary = _db.get_division(nat_index, div_index)
-	var combo: Dictionary = _db.get_combo(nat_index, div_index, combo_index)
+	var div := _db.get_division(nat_index, div_index)
+	var combo := _db.get_combo(nat_index, div_index, combo_index)
 	var selection := Selection.new()
 	selection.team = team
 	selection.nationality = nat_index
 	selection.division = div_index
 	selection.combo = combo_index
 	selection.player_class = selected_class
-	selection.avatar_a = int(nat.get("id", 0))
-	selection.avatar_b = int(div.get("id", 0))
+	selection.avatar_a = nat.id
+	selection.avatar_b = div.id
 	selection.avatar_packed = NetProtocol.pack_character_id(
-			selection.avatar_a, selection.avatar_b, int(combo.get("id", 0)), team)
+			selection.avatar_a, selection.avatar_b, combo.id, team)
 	return selection
 
 
@@ -175,14 +175,11 @@ func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 func _first_selection(side: int, selected_class: int) -> Selection:
 	if _db == null:
 		return null
-	var resolved: Dictionary = _db.resolve_character_id(
-			_db.first_character_id(side), side)
-	if resolved.is_empty():
+	var resolved := _db.resolve_character_id(_db.first_character_id(side), side)
+	if resolved == null:
 		return null
-	return make_selection(side,
-			int(resolved.get("nationality_index", -1)),
-			int(resolved.get("division_index", -1)),
-			int(resolved.get("combo_index", -1)), selected_class)
+	return make_selection(side, resolved.nationality_index, resolved.division_index,
+			resolved.combo_index, selected_class)
 
 
 # A saved side that still resolves against the mounted Avatars.def is kept as

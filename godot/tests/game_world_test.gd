@@ -39,7 +39,7 @@ class SelectedAvatarViewmodelPlacerStub:
 		return {
 			"fallback": false,
 			"arms": "SelectedArms",
-			"arms_camo": [17, 34, 51],
+			"arms_camo": Vector3i(17, 34, 51),
 		}
 	func build_model_from_graphic(graphic: String, _adm_name: String,
 			parent: Node3D, _clip_key: String, _rig_graphic: String):
@@ -82,7 +82,7 @@ class ChallengePrewarmPlacerStub:
 	# source (retail discards weapon.def gfx1a).
 	func resolve_player_visual_spec(_runtime_type_id: int,
 			_character_id: int = 0) -> Dictionary:
-		return {"fallback": false, "arms": "test_arms", "arms_camo": [0, 0, 0]}
+		return {"fallback": false, "arms": "test_arms", "arms_camo": Vector3i()}
 	func resolve_player_visual_item_id(_runtime_type_id: int) -> int:
 		return 101001
 	func graphic_for(_item_id: int) -> String:
@@ -2359,7 +2359,7 @@ func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
 	# writer (Avatar_SetArmsCamoCtrl runs before each arms submit, never at
 	# load); the gun part is never a camo target.
 	assert_eq(String(arms.get_meta("avatar_part", "")), "arms")
-	assert_eq(Array(arms.get_meta("avatar_camo", [])), [17, 34, 51],
+	assert_eq(Vector3i(arms.get_meta("avatar_camo", Vector3i())), Vector3i(17, 34, 51),
 			"first-person arms carry the authored raw CTRL bytes")
 	assert_false(gun.has_meta("avatar_part"),
 			"the arms' per-draw TEX_CAMO state does not leak into the gun")

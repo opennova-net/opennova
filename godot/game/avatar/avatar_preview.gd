@@ -16,9 +16,8 @@ extends Control
 
 const FlyCameraScript = preload("res://game/fly_camera.gd")
 
-# The standing character uses only the compatible third-person slots. `resolve_combo()`
-# also returns `arms`, but retail arm graphics reference bones outside this preview rig.
-const THIRD_PERSON_SLOTS := ["head", "body"]
+# The standing character uses only the compatible third-person slots. A combo row
+# also carries `arms`, but retail arm graphics reference bones outside this preview rig.
 # Portrait tuning: a front portrait of a standing soldier for
 # the player.mnu PLAYER_PREVIEW pane. Camera yaw 0 puts the orbit camera on +Z and the
 # .3di parts import +Z-forward (see MissionObjectPlacer.bms_to_godot_basis), so the
@@ -229,20 +228,15 @@ func _build_viewport() -> void:
 
 # --- Combo composition --------------------------------------------------------
 
-# Compose the resolved combo's third-person head/body parts into the scene. `combo` is a
-# resolve_combo() Dictionary: each present slot carries a part sub-Dictionary with
-# a `graphic` basename. A missing/unknown graphic simply skips that slot (no error).
-# Re-frames the camera on the composed bounds.
-func load_combo(combo: Dictionary) -> void:
+# Compose the resolved combo's third-person head/body parts into the scene (the
+# arms row is first-person only). A missing/unknown graphic simply skips that
+# slot (no error). Re-frames the camera on the composed bounds.
+func load_combo(combo: AvatarComboRow) -> void:
 	clear()
 	_missing_parts = PackedStringArray()
-	for slot in THIRD_PERSON_SLOTS:
-		var part: Variant = combo.get(slot, null)
-		if part == null or not (part is Dictionary):
-			continue
-		var part_dict := part as Dictionary
-		var graphic := String(part_dict.get("graphic", "")).strip_edges()
-		_load_part(slot, graphic, part_dict.get("camo", []))
+	if combo != null:
+		_load_part("head", combo.get_head().graphic.strip_edges(), combo.get_head().camo)
+		_load_part("body", combo.get_body().graphic.strip_edges(), combo.get_body().camo)
 	_refresh_status_label()
 	_refresh_portrait()
 
@@ -271,7 +265,7 @@ func preview_skeletal() -> SkeletalAnim:
 
 # Load one part .3di by basename into a sibling ObjectModel under the root.
 # No resource root, an empty name, or a load failure leaves the slot empty.
-func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
+func _load_part(slot: String, graphic: String, camo: Vector3i) -> void:
 	if graphic.is_empty():
 		_missing_parts.append("%s: empty graphic" % slot)
 		return

@@ -81,14 +81,14 @@ static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	for side in 2:
 		var raw: Dictionary = summary.get("blue" if side == 0 else "red", {})
 		var packed := int(raw.get("avatar_packed", -1))
-		var resolved: Dictionary = db.resolve_character_id(packed, side)
-		if resolved.is_empty():
+		var resolved := db.resolve_character_id(packed, side)
+		if resolved == null:
 			continue
 		sides[side] = {
 			"team": side,
-			"nationality": int(resolved.get("nationality_index", -1)),
-			"division": int(resolved.get("division_index", -1)),
-			"combo": int(resolved.get("combo_index", -1)),
+			"nationality": resolved.nationality_index,
+			"division": resolved.division_index,
+			"combo": resolved.combo_index,
 			"player_class": int(raw.get("player_class", 8)),
 			"avatar_a": int(raw.get("avatar_a", 0)),
 			"avatar_b": int(raw.get("avatar_b", 0)),

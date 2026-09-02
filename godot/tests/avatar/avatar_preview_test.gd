@@ -20,40 +20,40 @@ func before_each() -> void:
 	await get_tree().process_frame
 
 
-func _resolved_combo() -> Dictionary:
+func _resolved_combo() -> AvatarComboRow:
 	var path := ProjectSettings.globalize_path(AVATARS_FIXTURE)
 	if not FileAccess.file_exists(path):
-		return {}
+		return null
 	var db := AvatarDatabase.new()
 	if db.load(path) != OK:
-		return {}
+		return null
 	return _first_combo(db)
 
 
 # The shipped table from the reference fixture set: its parts name the retail
-# .3di the mounted install carries. {} without OPENNOVA_JO_ASSETS/fixtures.
-func _retail_resolved_combo() -> Dictionary:
+# .3di the mounted install carries. Null without OPENNOVA_JO_ASSETS/fixtures.
+func _retail_resolved_combo() -> AvatarComboRow:
 	var path := RetailData.fixture(RETAIL_AVATARS_REL)
 	if path.is_empty():
-		return {}
+		return null
 	var db := AvatarDatabase.new()
 	if db.load(path) != OK:
-		return {}
+		return null
 	return _first_combo(db)
 
 
 # First nationality/division with a combo.
-func _first_combo(db: AvatarDatabase) -> Dictionary:
+func _first_combo(db: AvatarDatabase) -> AvatarComboRow:
 	for n in range(db.get_nationality_count()):
 		for d in range(db.get_division_count(n)):
 			if db.get_combo_count(n, d) > 0:
-				return db.resolve_combo(n, d, 0)
-	return {}
+				return db.get_combo(n, d, 0)
+	return null
 
 
 func test_load_combo_composes_parts_when_root_mounted() -> void:
 	var combo := _resolved_combo()
-	if combo.is_empty():
+	if combo == null:
 		pending("Avatars.def fixture missing or has no combos")
 		return
 	var root = _resource_root_for_fixture()
@@ -78,9 +78,25 @@ func _model_fixture_root():
 	return root if root.set_root_dir(dir) == OK else null
 
 
-func _three_slot_fixture_combo() -> Dictionary:
-	var part := {"graphic": "person.3di"}
-	return {"head": part, "body": part, "arms": part}
+# A combo authoring every slot, through the format (an Avatars.def with three
+# parts and one combo), so the arms-exclusion policy is asset-independent.
+func _three_slot_fixture_combo() -> AvatarComboRow:
+	var path := ProjectSettings.globalize_path("user://avatar_preview_three_slot.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string("define head HEAD\n{\n graphic person.3di\n}\n"
+			+ "define body BODY\n{\n graphic person.3di\n}\n"
+			+ "define arms ARMS\n{\n graphic person.3di\n}\n"
+			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
+			+ "  combo 1 HEAD BODY ARMS\n }\n}\n")
+	file.close()
+	var db := AvatarDatabase.new()
+	assert_eq(db.load(path), OK)
+	DirAccess.remove_absolute(path)
+	var combo := db.get_combo(0, 0, 0)
+	assert_not_null(combo)
+	assert_true(combo.has_arms(), "the fixture combo authors all three slots")
+	return combo
 
 
 func test_combo_preview_excludes_incompatible_arm_rig() -> void:
@@ -118,7 +134,7 @@ func test_retail_combo_preview_excludes_incompatible_arm_rig() -> void:
 		pending("OPENNOVA_JO_DIR / retail PFFs not configured")
 		return
 	var combo := _retail_resolved_combo()
-	if combo.is_empty():
+	if combo == null:
 		pending(RetailData.fixture_pending_text(RETAIL_AVATARS_REL))
 		return
 	_preview.set_resource_root(root)
@@ -138,17 +154,16 @@ func test_retail_combo_preview_excludes_incompatible_arm_rig() -> void:
 
 # True when the combo's head part graphic exists in the mounted root, so part
 # composition is expected.
-func _head_graphic_resolves(root, combo: Dictionary) -> bool:
-	var head: Variant = combo.get("head", null)
-	if not (head is Dictionary):
+func _head_graphic_resolves(root, combo: AvatarComboRow) -> bool:
+	if combo == null:
 		return false
-	var graphic := String((head as Dictionary).get("graphic", "")).strip_edges()
+	var graphic := combo.get_head().graphic.strip_edges()
 	return not graphic.is_empty() and root.has_file(graphic)
 
 
 func test_clear_removes_part_models() -> void:
 	var combo := _resolved_combo()
-	if combo.is_empty():
+	if combo == null:
 		pending("Avatars.def fixture missing or has no combos")
 		return
 	var root = _resource_root_for_fixture()
@@ -289,7 +304,7 @@ func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> voi
 		pending("OPENNOVA_JO_DIR / retail PFFs not configured; skeletal idle bind verified live")
 		return
 	var combo := _retail_resolved_combo()
-	if combo.is_empty():
+	if combo == null:
 		pending(RetailData.fixture_pending_text(RETAIL_AVATARS_REL))
 		return
 	_preview.set_resource_root(root)
