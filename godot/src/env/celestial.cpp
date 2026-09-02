@@ -562,9 +562,9 @@ void Celestial::advance_frame(double p_delta) {
 	sun_veil_stopdown_ = 0;
 	if (bodies_.has("sun") && glare_occlusion_.is_valid() && cam != nullptr) {
 		const int sun_dim_fixed =
-				opennova::env::detail::to_fixed_16_16(state.sun_dim_pct());
+				opennova::io::float_to_fp16_16(state.sun_dim_pct());
 		const int overcast_fixed =
-				opennova::env::detail::to_fixed_16_16(state.overcast_blend());
+				opennova::io::float_to_fp16_16(state.overcast_blend());
 		const int view_dot_fixed = static_cast<int>(
 				forward.dot(sun_dir) * 65536.0f);
 		opennova::env::SunVeil veil = opennova::env::sun_veil_from_dot(
@@ -853,7 +853,7 @@ float Celestial::_advance_water_glint(
 			p_forward.dot(mirrored) * 65536.0f);
 	const float alpha = static_cast<float>(opennova::env::water_glint_alpha_fixed(
 			dot_fixed, water_glint_.brightness,
-			opennova::env::detail::to_fixed_16_16(p_state.sun_dim_pct()))) /
+			opennova::io::float_to_fp16_16(p_state.sun_dim_pct()))) /
 			65536.0f;
 	_set_body_parameter(p_body, "u_opacity", alpha);
 	p_body.model->set_visible(alpha > 0.0f && water_glint_.brightness > 0);

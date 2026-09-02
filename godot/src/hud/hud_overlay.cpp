@@ -10,6 +10,7 @@
 #include <net/npwire/game_type.h> // the conquest arm of the zone panel
 
 #include <godot_cpp/classes/image.hpp>
+#include <base/io/fixed.h>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -75,13 +76,6 @@ void fragment() {
 	COLOR = map_color;
 }
 )";
-
-int32_t q16_from_world(real_t value) {
-	const double scaled = static_cast<double>(value) * 65536.0;
-	return static_cast<int32_t>(std::clamp(scaled,
-			static_cast<double>(std::numeric_limits<int32_t>::min()),
-			static_cast<double>(std::numeric_limits<int32_t>::max())));
-}
 
 Color argb_to_color(uint32_t argb) {
 	return Color(((argb >> 16) & 0xFFu) / 255.0f, ((argb >> 8) & 0xFFu) / 255.0f,
@@ -1049,9 +1043,9 @@ void HudOverlay::set_waypoint(const String &p_name, int p_distance_m,
 	state_.waypoint.present = true;
 	state_.waypoint.name = p_name.utf8().get_data();
 	state_.waypoint.distance_m = p_distance_m;
-	state_.waypoint.world_x = q16_from_world(p_mission_position.x);
-	state_.waypoint.world_y = q16_from_world(p_mission_position.y);
-	state_.waypoint.world_z = q16_from_world(p_altitude_wu);
+	state_.waypoint.world_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.waypoint.world_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
+	state_.waypoint.world_z = opennova::io::float_to_fp16_16_sat(p_altitude_wu);
 	queue_redraw();
 }
 
@@ -1101,7 +1095,7 @@ void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
 		opennova::hud::HudFriendlyTag tag;
 		tag.screen_x = p_screens[i].x;
 		tag.screen_y = p_screens[i].y;
-		tag.dist_q16 = q16_from_world(p_dists_units[i]);
+		tag.dist_q16 = opennova::io::float_to_fp16_16_sat(p_dists_units[i]);
 		if (i < p_names.size()) tag.name = p_names[i].utf8().get_data();
 		if (i < p_entity_ids.size())
 			tag.entity_id = static_cast<uint16_t>(p_entity_ids[i]);
@@ -1169,7 +1163,7 @@ void HudOverlay::set_showhud_flags(int p_flags) {
 
 void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 		int p_speaking_level255) {
-	const int32_t fog_q16 = q16_from_world(p_fog_distance_units);
+	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
 	state_.speaking_level255 = p_speaking_level255;
 }
@@ -1221,9 +1215,9 @@ void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,
 		float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
 		int p_big_zoom_q16, int p_map_mode, bool p_flip_180,
 		const PackedInt32Array &p_snapshot) {
-	state_.minimap.player_x = q16_from_world(p_mission_position.x);
-	state_.minimap.player_y = q16_from_world(p_mission_position.y);
-	state_.minimap.player_z = q16_from_world(p_altitude_wu);
+	state_.minimap.player_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.minimap.player_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
+	state_.minimap.player_z = opennova::io::float_to_fp16_16_sat(p_altitude_wu);
 	state_.minimap.player_heading_bam = static_cast<int32_t>(p_heading_bam);
 	state_.minimap.zoom_q16 = std::clamp(p_zoom_q16,
 			opennova::hud::kSpinmapZoomMin, opennova::hud::kSpinmapZoomMax);
@@ -1281,8 +1275,8 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 	// The grid-label origin: the mission's type-2043 marker entity, if one
 	// exists (witness at HudMinimapInput::grid_origin_x).
 	state_.minimap.grid_origin_present = p_present;
-	state_.minimap.grid_origin_x = q16_from_world(p_mission_position.x);
-	state_.minimap.grid_origin_y = q16_from_world(p_mission_position.y);
+	state_.minimap.grid_origin_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.minimap.grid_origin_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
 	queue_redraw();
 }
 

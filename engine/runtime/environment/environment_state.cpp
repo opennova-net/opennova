@@ -1,4 +1,5 @@
 #include <runtime/environment/environment_state.h>
+#include <base/io/fixed.h>
 
 #include <formats/env/tod_clock.h>
 #include <formats/mission/bms.h>
@@ -32,14 +33,6 @@ Rgb rgb_scale(const Rgb &value, float factor) {
 
 float vec3_length(const Vec3 &v) {
 	return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-// The same world-units -> 16.16 clamp the EnvFile static used.
-uint32_t to_fixed_16_16(float units) {
-	if (units <= 0.0f) {
-		return 0u;
-	}
-	return static_cast<uint32_t>(units * 65536.0f);
 }
 
 } // namespace
@@ -722,7 +715,7 @@ Rgb EnvironmentState::double_rgb(const Rgb &value) {
 Rgb EnvironmentState::derive_skyfog_render_color(const Rgb &fog_raw,
 		const Rgb &skyfog_raw, float fog_distance) {
 	const Rgb blended = horizon_blend_skyfog(fog_raw, skyfog_raw,
-			to_fixed_16_16(fog_distance), to_fixed_16_16(1024.0f));
+			io::float_to_fp16_16_nonneg(fog_distance), io::float_to_fp16_16_nonneg(1024.0f));
 	return double_rgb(blended);
 }
 

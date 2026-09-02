@@ -18,10 +18,6 @@ opennova::env::Rgb to_rgb(const Color &color) {
 	};
 }
 
-int clamp_time(int time) {
-	return std::max(0, std::min(2359, time));
-}
-
 } // namespace
 
 EnvKeyframe::EnvKeyframe() {}
@@ -75,7 +71,7 @@ void EnvKeyframe::copy_from_native(const opennova::env::Keyframe &keyframe) {
 
 opennova::env::Keyframe EnvKeyframe::to_native() const {
 	opennova::env::Keyframe keyframe;
-	keyframe.time = clamp_time(time);
+	keyframe.time = opennova::env::clamp_tod_time(time);
 	keyframe.sun = to_rgb(sun_color);
 	keyframe.ground = to_rgb(ground_color);
 	keyframe.fog = to_rgb(fog_color);
@@ -91,7 +87,7 @@ opennova::env::Keyframe EnvKeyframe::to_native() const {
 	return keyframe;
 }
 
-void EnvKeyframe::set_time(int p_time) { time = clamp_time(p_time); emit_changed(); }
+void EnvKeyframe::set_time(int p_time) { time = opennova::env::clamp_tod_time(p_time); emit_changed(); }
 int EnvKeyframe::get_time() const { return time; }
 
 #define IMPL_COLOR(field, setter, getter) \

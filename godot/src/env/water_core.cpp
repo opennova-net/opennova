@@ -1,6 +1,7 @@
 #include "env/water_core.h"
 
 #include <cmath>
+#include <base/io/fixed.h>
 
 using namespace godot;
 
@@ -149,9 +150,9 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	// Camera position as 16.16, like the camera block the originals fild
 	// [orig: 0xA78364 (eng X = render z) / 0xA78368 (eng Y, negated =
 	// render x) / 0xA7836C (eng Z = render y)].
-	strip_view.cam_x_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.x) * 65536.0));
-	strip_view.cam_y_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.y) * 65536.0));
-	strip_view.cam_z_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.z) * 65536.0));
+	strip_view.cam_x_fp = opennova::io::float_to_fp16_16_round_sat(eye.x);
+	strip_view.cam_y_fp = opennova::io::float_to_fp16_16_round_sat(eye.y);
+	strip_view.cam_z_fp = opennova::io::float_to_fp16_16_round_sat(eye.z);
 
 	// Viewport rect + center, pixels [orig: 0xA78384..0xA783A8, see docs/env/env-tod-re.md]: min 0,
 	// max = px - 1 (the clip rect's right/bottom edges are max + 1 = px),
@@ -166,7 +167,7 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	// The pass fog end, 16.16 [orig: Environment_GetFogEndDistance @ 0x57e3e0,
 	// fetched with the underwater flag @ 0x5c28a2, see docs/env/env-tod-re.md]; clamped to one fp unit —
 	// the row colors integer-divide by it.
-	int32_t fog_end_fp = static_cast<int32_t>(std::lround(static_cast<double>(p_fog_end_world) * 65536.0));
+	int32_t fog_end_fp = opennova::io::float_to_fp16_16_round_sat(p_fog_end_world);
 	if (fog_end_fp < 1) {
 		fog_end_fp = 1;
 	}
@@ -184,7 +185,7 @@ int WaterCore::strip_build(float p_plane_height_world, float p_murk,
 	opennova::env::WaterStripParams params;
 	// Env_WaterHeightFixed is 16.16 render y (== godot y).
 	params.plane_height_fp =
-			static_cast<int32_t>(std::lround(static_cast<double>(p_plane_height_world) * 65536.0));
+			opennova::io::float_to_fp16_16_round_sat(p_plane_height_world);
 	params.underwater_view = p_underwater;
 	params.nightvision = p_nightvision;
 	params.water_murk = p_murk;

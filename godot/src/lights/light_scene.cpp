@@ -1,6 +1,8 @@
 #include "lights/light_scene.h"
+#include "env/env_axes.h"
 
 #include <array>
+#include <base/io/fixed.h>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -51,19 +53,6 @@ ObjectSelectInputs object_select_inputs(int p_time_ms, const Weather *weather,
 
 // godot (x, y, z) <-> mission (x, -z, y): the same conversion the mission
 // placer and the render fixtures use.
-int32_t clamp_fixed(double value) {
-	if (std::isnan(value)) {
-		return 0;
-	}
-	if (value <= static_cast<double>(std::numeric_limits<int32_t>::min())) {
-		return std::numeric_limits<int32_t>::min();
-	}
-	if (value >= static_cast<double>(std::numeric_limits<int32_t>::max())) {
-		return std::numeric_limits<int32_t>::max();
-	}
-	return static_cast<int32_t>(std::round(value));
-}
-
 int32_t clamp_int64(int64_t value) {
 	if (value <= static_cast<int64_t>(std::numeric_limits<int32_t>::min())) {
 		return std::numeric_limits<int32_t>::min();
@@ -76,14 +65,10 @@ int32_t clamp_int64(int64_t value) {
 
 std::array<int32_t, 3> mission_fixed_from_godot(const Vector3 &world) {
 	return {
-		clamp_fixed(static_cast<double>(world.x) * 65536.0),
-		clamp_fixed(-static_cast<double>(world.z) * 65536.0),
-		clamp_fixed(static_cast<double>(world.y) * 65536.0),
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(world.x)),
+		opennova::io::float_to_fp16_16_round_sat(-static_cast<double>(world.z)),
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(world.y)),
 	};
-}
-
-Vector3 godot_from_mission_float(const std::array<float, 3> &mission) {
-	return Vector3(mission[0], mission[2], -mission[1]);
 }
 
 void stamp_draw_bounds(const AABB &world_bounds,
@@ -148,7 +133,7 @@ int64_t LightScene::spawn_model_light(const Dictionary &p_config) {
 	// radius = atten_end * 65536 (the spawner scale; witness map in
 	// engine/runtime/renderer/light_scene.h).
 	params.radius_fixed = static_cast<int32_t>(Math::round(
-			static_cast<float>(p_config.get("atten_end", 0.0f)) * 65536.0f));
+			static_cast<float>(p_config.get("atten_end", 0.0f)) * opennova::io::kFp16One));
 	// The model-light spawn passes a white record color; the authored colors
 	// live in the gen block (light_scene.h witness map).
 	params.rgb = {255, 255, 255};
@@ -200,7 +185,7 @@ int64_t LightScene::spawn_glow(const Dictionary &p_config) {
 	params.position_fixed = mission_fixed_from_godot(
 			p_config.get("position", Vector3()));
 	params.radius_fixed = static_cast<int32_t>(Math::round(
-			static_cast<float>(p_config.get("radius", 0.0f)) * 65536.0f));
+			static_cast<float>(p_config.get("radius", 0.0f)) * opennova::io::kFp16One));
 	const Color color = p_config.get("color", Color(1, 1, 1));
 	params.rgb = {color_byte(color.r), color_byte(color.g), color_byte(color.b)};
 	params.fade_mode = static_cast<int>(p_config.get("fade_mode", 1));
@@ -310,8 +295,8 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 			mission_fixed_from_godot(p_camera_world);
 	const double radius = std::isfinite(static_cast<double>(p_query_radius)) ?
 			MAX(static_cast<double>(p_query_radius), 0.0) :
-			static_cast<double>(std::numeric_limits<int32_t>::max()) / 65536.0;
-	const int64_t half = static_cast<int64_t>(clamp_fixed(radius * 65536.0));
+			static_cast<double>(std::numeric_limits<int32_t>::max()) / opennova::io::kFp16OneD;
+	const int64_t half = static_cast<int64_t>(opennova::io::float_to_fp16_16_round_sat(radius));
 	std::array<int32_t, 3> qmin{};
 	std::array<int32_t, 3> qmax{};
 	for (int axis = 0; axis < 3; ++axis) {
@@ -381,7 +366,7 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	r_out.clear();
 	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
 	const int64_t half =
-			static_cast<int64_t>(clamp_fixed(MAX(p_radius, 0.0f) * 65536.0));
+			static_cast<int64_t>(opennova::io::float_to_fp16_16_round_sat(MAX(p_radius, 0.0f)));
 	std::array<int32_t, 3> qmin{};
 	std::array<int32_t, 3> qmax{};
 	for (int axis = 0; axis < 3; ++axis) {
@@ -405,7 +390,7 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	for (size_t i = 0; i < count; ++i) {
 		const opennova::renderer::SelectedLight &light = selected[i];
 		opennova::renderer::SlotPointLight point;
-		const Vector3 position = godot_from_mission_float(light.position);
+		const Vector3 position = mission_to_godot(light.position);
 		point.position = { float(position.x), float(position.y),
 			float(position.z) };
 		point.color = { light.color[0], light.color[1], light.color[2] };
@@ -513,7 +498,7 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		Vector4 color[opennova::renderer::LightScene::kSelectLimit]{};
 		for (size_t light = 0; light < selection.count; ++light) {
 			const opennova::renderer::SelectedLight &selected = selection.lights[light];
-			const Vector3 world = godot_from_mission_float(selected.position);
+			const Vector3 world = mission_to_godot(selected.position);
 			posr[light] = Vector4(world.x, world.y, world.z,
 					selected.attenuation[2]);
 			color[light] = Vector4(selected.color[0], selected.color[1],
@@ -683,7 +668,7 @@ int LightScene::render_static_frame(
 					const opennova::renderer::SelectedLight &selected =
 							selection.lights[light];
 					const Vector3 world =
-							godot_from_mission_float(selected.position);
+							mission_to_godot(selected.position);
 					const size_t base = (1 + light * 2) * 4;
 					row_texels[base + 0] = world.x;
 					row_texels[base + 1] = world.y;
@@ -750,7 +735,7 @@ int LightScene::render_static_frame(
 		}
 		for (size_t light = 0; light < selection.count; ++light) {
 			const opennova::renderer::SelectedLight &selected = selection.lights[light];
-			const Vector3 world = godot_from_mission_float(selected.position);
+			const Vector3 world = mission_to_godot(selected.position);
 			float *posr = atlas + (1 + light * 2) * 4;
 			float *color = posr + 4;
 			posr[0] = world.x;
@@ -859,9 +844,9 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	const std::array<int32_t, 3> &cam = inputs.camera_fixed;
 	inputs.depth_plane_normal = normal_mission;
 	inputs.depth_plane_w =
-			-(normal_mission[0] * static_cast<float>(cam[0]) / 65536.0f +
-					normal_mission[1] * static_cast<float>(cam[1]) / 65536.0f +
-					normal_mission[2] * static_cast<float>(cam[2]) / 65536.0f);
+			-(normal_mission[0] * static_cast<float>(cam[0]) / opennova::io::kFp16One +
+					normal_mission[1] * static_cast<float>(cam[1]) / opennova::io::kFp16One +
+					normal_mission[2] * static_cast<float>(cam[2]) / opennova::io::kFp16One);
 	inputs.ambient_scale = {
 		static_cast<float>(p_ambient_scale.x),
 		static_cast<float>(p_ambient_scale.y),
@@ -895,7 +880,7 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	TypedArray<Dictionary> rows;
 	for (const opennova::renderer::LightCoronaQuad &quad : quads) {
 		Dictionary row;
-		row["position"] = godot_from_mission_float(quad.center);
+		row["position"] = mission_to_godot(quad.center);
 		row["half_size"] = quad.half_size;
 		row["color"] = Color(quad.rgb[0], quad.rgb[1], quad.rgb[2]);
 		rows.push_back(row);
@@ -948,7 +933,7 @@ int LightScene::fill_corona_multimesh(const Vector3 &p_camera_pos,
 	for (int64_t i = 0; i < rows; ++i) {
 		const opennova::renderer::LightCoronaQuad &quad =
 				corona_quads_scratch_[static_cast<size_t>(i)];
-		const Vector3 center = godot_from_mission_float(quad.center);
+		const Vector3 center = mission_to_godot(quad.center);
 		const float half = quad.half_size;
 		float *out = w + i * kFloatsPerInstance;
 		out[0] = half;
@@ -1032,7 +1017,7 @@ Array LightScene::collect_terrain_light_rows_for_bounds(
 		for (size_t i = 0; i < patch.count; ++i) {
 			const opennova::renderer::TerrainLightRow &row = patch.rows[i];
 			Dictionary d;
-			d["position"] = godot_from_mission_float(row.position);
+			d["position"] = mission_to_godot(row.position);
 			d["inv_scale"] = row.inv_scale;
 			d["color"] = Vector3(row.pixel_rgb[0], row.pixel_rgb[1],
 					row.pixel_rgb[2]);
@@ -1104,7 +1089,7 @@ Dictionary LightScene::get_report() const {
 	for (size_t i = 0; i < selected_count_; ++i) {
 		const opennova::renderer::SelectedLight &light = selected_[i];
 		Dictionary row;
-		row["position"] = godot_from_mission_float(light.position);
+		row["position"] = mission_to_godot(light.position);
 		row["color"] = Color(light.color[0], light.color[1], light.color[2]);
 		row["range"] = light.range;
 		row["atten2"] = light.attenuation[2];
@@ -1136,7 +1121,7 @@ Color color_from_rgb(uint32_t rgb) {
 } // namespace
 
 float LightScene::muzzle_glow_radius() {
-	return static_cast<float>(opennova::renderer::LightScene::kMuzzleGlowRadiusFixed) / 65536.0f;
+	return static_cast<float>(opennova::renderer::LightScene::kMuzzleGlowRadiusFixed) / opennova::io::kFp16One;
 }
 Color LightScene::muzzle_glow_color() {
 	return color_from_rgb(opennova::renderer::LightScene::kMuzzleGlowColorRgb);
