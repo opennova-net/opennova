@@ -46,10 +46,24 @@ var _fx_provider := Callable()    # -> EffectWorld (or null)
 var _death_light := Callable()
 var _husked: Dictionary = {}      # canonical mission identity -> husk Node3D/null
 var _husk_restore: Dictionary = {} # canonical mission identity -> original state
-var _burning: Dictionary = {}     # canonical wreck owner key -> live crackle anchor
+var _burning: Dictionary = {}     # canonical wreck owner key -> WreckFire
 var _wreck_anchor_keys: Dictionary = {} # registered wreck owner keys
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
 var _piece_generation: Dictionary = {}  # piece slot -> presented allocation generation
+
+
+## One burning wreck's crackle anchor: the presented node when the wreck has
+## one, else `pinned` for a batched-static wreck anchored at its event pose.
+## `node` stays an untyped Variant so a despawned wreck can be validity-checked
+## before any typed read.
+class WreckFire:
+	extends RefCounted
+	var node: Variant
+	var pinned: bool
+
+	func _init(p_node: Variant, p_pinned: bool) -> void:
+		node = p_node
+		pinned = p_pinned
 
 
 ## Typed diagnostic counters (ADR 0017: cross-object contracts are typed
@@ -457,7 +471,7 @@ func _apply_effect(eff: DestructionEffectEvent) -> void:
 			_anchors.register_effect_anchor(key, func() -> Variant:
 				return node.global_transform if is_instance_valid(node) else null)
 			if family == 2:
-				_burning[key] = {"node": node}
+				_burning[key] = WreckFire.new(node, false)
 		else:
 			# Batched-static wreck: no node. Resolve the authoritative present
 			# pose while it settles, with the event pose as an identity fallback.
@@ -467,16 +481,10 @@ func _apply_effect(eff: DestructionEffectEvent) -> void:
 						else _present_transform_for_identity(bms_id, spawn_origin)
 				return live_v if live_v is Transform3D else fixed)
 			if family == 2:
-				if dynamic_identity:
-					# A missing runtime node has no sibling-safe positional lookup;
-					# retain its event pose instead of querying the shared sentinel.
-					_burning[key] = {"pos": pos}
-				else:
-					_burning[key] = {
-						"bms_id": bms_id,
-						"spawn_origin": spawn_origin,
-						"pos": pos,
-					}
+				# A dynamic identity with no runtime node has no sibling-safe
+				# positional lookup; either way the wreck stays pinned at its
+				# event pose instead of querying the shared sentinel.
+				_burning[key] = WreckFire.new(null, true)
 		_wreck_anchor_keys[key] = true
 
 
@@ -500,26 +508,26 @@ func _present_pieces(pieces: Array) -> void:
 	_stats.pieces_peak = maxi(_stats.pieces_peak, pieces.size())
 	var seen: Dictionary = {}
 	for piece_v in pieces:
-		var piece: Dictionary = piece_v
-		var slot := int(piece.get("slot", -1))
+		var piece: DeathPieceRow = piece_v
+		var slot := piece.slot
 		if slot < 0:
 			continue
 		seen[slot] = true
-		var pos: Vector3 = piece.get("pos", Vector3.ZERO)
+		var pos := piece.pos
 		_piece_pos[slot] = pos
-		var generation := int(piece.get("generation", 0))
+		var generation := piece.generation
 		var is_new_generation := int(_piece_generation.get(slot, -1)) != generation
 		if is_new_generation:
 			if _piece_generation.has(slot):
 				_unregister_piece_anchor(slot)
 			_piece_generation[slot] = generation
-		if bool(piece.get("settled", false)):
+		if piece.settled:
 			continue
 		if is_new_generation:
 			# The type's trail effect rides the drain row from the ONE native
 			# table (world/destruction death_piece_trail_effect, S12b)
 			# [orig: g_death_piece_types @ 0x8404f0 +0x2C].
-			var trail := String(piece.get("trail", ""))
+			var trail := piece.trail
 			if fx != null and not trail.is_empty():
 				var key := "piece:%d" % slot
 				fx.spawn_effect_owned(key, trail, pos, Vector3.UP)
@@ -551,10 +559,10 @@ func _tick_wreck_fires() -> void:
 	if _burning.is_empty():
 		return
 	for owner_key in _burning.keys():
-		var entry: Dictionary = _burning[owner_key]
-		var node: Variant = entry.get("node")
+		var entry: WreckFire = _burning[owner_key]
+		var node: Variant = entry.node
 		if node is Node3D and not is_instance_valid(node):
 			_burning.erase(owner_key)
 			continue
-		if node == null and not entry.has("bms_id") and not entry.has("pos"):
+		if node == null and not entry.pinned:
 			_burning.erase(owner_key)

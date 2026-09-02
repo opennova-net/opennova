@@ -170,6 +170,47 @@ PRESENT_RECORD_CLASS(WeatherSoundRow, WEATHER_SOUND_ROW_FIELDS)
 
 PRESENT_RECORD_CLASS(ChatLineRow, CHAT_LINE_ROW_FIELDS)
 
+// One SP objectives-panel row (Simulation::get_objectives_view): header
+// slot 1..8, its STRWINCOND text id, the show-win gate and the won bit.
+#define OBJECTIVE_ROW_FIELDS(X) \
+	X(int, slot, 0)             \
+	X(int, text_id, 0)          \
+	X(bool, shown, false)       \
+	X(bool, done, false)
+
+PRESENT_RECORD_CLASS(ObjectiveRow, OBJECTIVE_ROW_FIELDS)
+
+// One live death piece (Simulation::get_death_pieces): the pool slot and
+// its allocation generation (a same-slot reuse is a new piece), the husk
+// model source and the ONE section it renders, the debris-type row and its
+// trail effect, the render scale, the Godot-space position, the integrated
+// heading / pitch in degrees, and the settled (persistent ground debris) bit.
+#define DEATH_PIECE_ROW_FIELDS(X) \
+	X(int, slot, -1)              \
+	X(int64_t, generation, 0)     \
+	X(int, item_id, 0)            \
+	X(int, section, 0)            \
+	X(int, type_index, 0)         \
+	X(String, trail, String())    \
+	X(float, scale, 1.0f)         \
+	X(Vector3, pos, Vector3())    \
+	X(float, heading, 0.0f)       \
+	X(float, pitch, 0.0f)         \
+	X(bool, settled, false)
+
+PRESENT_RECORD_CLASS(DeathPieceRow, DEATH_PIECE_ROW_FIELDS)
+
+// One in-flight round glow (Simulation::get_round_glow_rows): the round's
+// presentation generation as the id, its Godot-space position and the
+// ammo's light_move radius / color.
+#define ROUND_GLOW_ROW_FIELDS(X)   \
+	X(int64_t, id, 0)              \
+	X(Vector3, pos, Vector3())     \
+	X(float, radius, 0.0f)         \
+	X(Color, color, Color(1, 1, 1))
+
+PRESENT_RECORD_CLASS(RoundGlowRow, ROUND_GLOW_ROW_FIELDS)
+
 // One World EffectLog entry (Simulation::drain_effects): the presentation-
 // only side effects of the mission tick ("text", "dialog", "win", "lose",
 // "round_end", "subgoal_won", "fx2ssn", the vehicle_control_* lifecycle

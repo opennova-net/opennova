@@ -831,10 +831,10 @@ private:
 public:
 	// The type-2043 grid-origin marker: present + Godot-space position.
 	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
-	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
-	// header slots 1..8, terminated at the first 0/255 win-condition id —
-	// exactly the panel's row walk (engine: runtime/mission/promote.cpp).
-	Array get_objectives_view() const;
+	// The objectives-panel rows for header slots 1..8, terminated at the
+	// first 0/255 win-condition id — exactly the panel's row walk
+	// (engine: runtime/mission/promote.cpp).
+	TypedArray<ObjectiveRow> get_objectives_view() const;
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
@@ -1140,12 +1140,11 @@ public:
 	PackedFloat32Array get_tracer_trails() const;
 
 	// The in-flight round glows: one row per active round whose ammo authors
-	// `light_move` — {id (presentation generation), pos (godot space), radius,
-	// color}. The presenter's light pool spawns a permanent (mode 1) light per
+	// `light_move`. The presenter's light pool spawns a permanent (mode 1) light per
 	// id, follows it per tick, and despawns dropped ids [orig:
 	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
 	// Projectile_ReleaseEffects clear — witness map on engine/runtime/renderer/light_scene.h].
-	Array get_round_glow_rows() const;
+	TypedArray<RoundGlowRow> get_round_glow_rows() const;
 
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
 	// the witnessed style tables and the camera-facing build
@@ -1162,10 +1161,9 @@ public:
 	// the effect/sound/husk-swap/death-light rows since the last drain plus the
 	// diagnostic counters. Null until a world is installed.
 	Ref<DestructionDrain> drain_destruction_events();
-	// The live death-piece pool as dictionaries {slot, generation, item_id,
-	// section, type_index, scale, pos, heading, pitch, settled} — each piece renders as its single
-	// husk-model section. (engine: runtime/world/destruction.cpp)
-	Array get_death_pieces() const;
+	// The live death-piece pool — each piece renders as its single husk-model
+	// section. (engine: runtime/world/destruction.cpp)
+	TypedArray<DeathPieceRow> get_death_pieces() const;
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
 	// bound_radius, flags, traits presence, KZ/bridge-DEAD anchors — the damage
 	// chain's gate inputs.

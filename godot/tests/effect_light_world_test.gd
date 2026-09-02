@@ -238,12 +238,10 @@ func test_director_muzzle_and_round_glow_routes() -> void:
 	assert_eq(director.get_report().live, 0,
 			"the cached shooter handle stays dead this life")
 	# The light_move round glow follows the sim rows and despawns with them.
-	director.sync_round_glows([{"id": 11, "pos": Vector3(5.0, 5.0, 5.0),
-			"radius": 6.0, "color": Color(0.5, 0.47, 0.31)}])
+	director.sync_round_glows([_round_glow(11, Vector3(5.0, 5.0, 5.0))])
 	assert_eq(director.get_report().live, 1,
 			"a live light_move round row spawns one glow")
-	director.sync_round_glows([{"id": 11, "pos": Vector3(9.0, 5.0, 5.0),
-			"radius": 6.0, "color": Color(0.5, 0.47, 0.31)}])
+	director.sync_round_glows([_round_glow(11, Vector3(9.0, 5.0, 5.0))])
 	assert_eq(director.get_report().live, 1,
 			"a moved round row follows instead of duplicating")
 	director.sync_round_glows([])
@@ -309,6 +307,16 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	assert_eq(director.get_report().live, 1,
 			"an MF_Light-off event is the negative control")
 	presenter.teardown()
+
+
+# One light_move round glow row as Simulation.get_round_glow_rows emits it.
+func _round_glow(id: int, pos: Vector3) -> RoundGlowRow:
+	var row := RoundGlowRow.new()
+	row.id = id
+	row.pos = pos
+	row.radius = 6.0
+	row.color = Color(0.5, 0.47, 0.31)
+	return row
 
 
 # A local-player fire event carrying only the muzzle-glow leg.

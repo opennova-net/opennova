@@ -52,7 +52,19 @@ var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on chang
 # Latest player-facing mission text. Presentation rides the message feed; this is
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
 var _hud_objective := ""
-var _pending_hud_messages: Array[Dictionary] = []
+var _pending_hud_messages: Array[PendingHudMessage] = []
+
+
+## One queued HUD message: literal text, or a mission-table triggered-text id
+## when the text is empty.
+class PendingHudMessage:
+	extends RefCounted
+	var text: String
+	var text_id: int
+
+	func _init(p_text: String, p_text_id: int) -> void:
+		text = p_text
+		text_id = p_text_id
 # The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
 # MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
@@ -1061,15 +1073,15 @@ func _apply_objectives() -> void:
 	if _objectives_visible and sim != null:
 		var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 		for raw in sim.get_objectives_view():
-			var row: Dictionary = raw
-			if not bool(row.get("shown", false)):
+			var row: ObjectiveRow = raw
+			if not row.shown:
 				continue
-			var key := "STRWINCOND%03d" % int(row.get("text_id", 0))
+			var key := "STRWINCOND%03d" % row.text_id
 			var text := ""
 			if table != null and table.has_string_in_section("WinConditions", key):
 				text = table.get_string_in_section("WinConditions", key)
 			texts.append(text)
-			done.append(1 if bool(row.get("done", false)) else 0)
+			done.append(1 if row.done else 0)
 	_game_hud.set_objectives(texts, done)
 
 
@@ -1080,7 +1092,7 @@ func pending_hud_message_count() -> int:
 
 
 func _queue_hud_message(text: String, text_id: int) -> void:
-	_pending_hud_messages.append({"text": text, "text_id": text_id})
+	_pending_hud_messages.append(PendingHudMessage.new(text, text_id))
 	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
 		_pending_hud_messages.pop_front()
 
@@ -1145,11 +1157,10 @@ func _flush_pending_hud_messages() -> void:
 	if _game_hud == null:
 		return
 	for pending in _pending_hud_messages:
-		var text := String(pending.get("text", ""))
-		if not text.is_empty():
-			_game_hud.push_message(text)
+		if not pending.text.is_empty():
+			_game_hud.push_message(pending.text)
 		else:
-			_show_triggered_text(int(pending.get("text_id", 0)))
+			_show_triggered_text(pending.text_id)
 	_pending_hud_messages.clear()
 
 
