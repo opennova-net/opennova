@@ -31,9 +31,6 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &ObjectData::get_user_point_info);
 	ClassDB::bind_method(D_METHOD("get_user_point_bone_mask", "name"),
 			&ObjectData::get_user_point_bone_mask);
-	ClassDB::bind_static_method("ObjectData",
-			D_METHOD("part_anim_step", "phase", "dir", "rate"),
-			&ObjectData::part_anim_step);
 	ClassDB::bind_method(D_METHOD("has_collision"), &ObjectData::has_collision);
 	ClassDB::bind_method(D_METHOD("has_occlusion"), &ObjectData::has_occlusion);
 	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &ObjectData::get_collision_volumes);

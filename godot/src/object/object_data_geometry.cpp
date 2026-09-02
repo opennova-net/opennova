@@ -98,16 +98,6 @@ int ObjectData::part_anim_rate_for_seconds(double p_seconds) {
 	return opennova::world::part_anim_rate_from_seconds(p_seconds);
 }
 
-Dictionary ObjectData::part_anim_step(int p_phase, int p_dir, int p_rate) {
-	int32_t phase = static_cast<int32_t>(p_phase);
-	const bool finished = opennova::world::part_anim_step(phase,
-			static_cast<int32_t>(p_dir), static_cast<int32_t>(p_rate));
-	Dictionary out;
-	out["phase"] = phase;
-	out["finished"] = finished;
-	return out;
-}
-
 bool ObjectData::has_collision() const {
 	// One implementation per engine fact (ADR 0016): the predicate lives in
 	// engine/runtime/simassets beside the collision model build it gates.

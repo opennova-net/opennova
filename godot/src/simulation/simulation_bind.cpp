@@ -38,9 +38,6 @@ static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
 void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("settle_weather_mission_start"),
 			&Simulation::settle_weather_mission_start);
-	ClassDB::bind_method(D_METHOD("compile_precipitation_frame", "camera", "camera_right",
-			"camera_up", "terrain_light_rgb"),
-			&Simulation::compile_precipitation_frame);
 	ClassDB::bind_method(D_METHOD("drain_weather_sounds"), &Simulation::drain_weather_sounds);
 	ClassDB::bind_method(D_METHOD("get_weather_state"), &Simulation::get_weather_state);
 	ClassDB::bind_method(D_METHOD("weather_state_bound"), &Simulation::weather_state_bound);

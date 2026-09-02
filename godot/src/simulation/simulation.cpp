@@ -230,12 +230,14 @@ bool Simulation::settle_weather_mission_start() {
 	return true;
 }
 
-Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
-		const Vector3 &p_camera_right, const Vector3 &p_camera_up,
+const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
+		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 		int p_terrain_light_rgb) {
-	Dictionary out;
-	out["drops"] = 0;
-	if (!world_installed_ || kernel_ == nullptr) return out;
+	if (!world_installed_ || kernel_ == nullptr) {
+		precipitation_frame_.clear();
+		precipitation_frame_.snow = false;
+		return precipitation_frame_;
+	}
 	opennova::world::WeatherState &weather = kernel_->world.weather;
 	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
 	const int32_t cam_q16[3] = {
@@ -258,22 +260,7 @@ Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
 			static_cast<uint32_t>(p_terrain_light_rgb), camera, precipitation_draw_, frame);
-	// The positions only: the per-drop uv triple {(0.5, 0), (0, 1), (1, 1)}
-	// is a constant of the streak build the presenter keeps in its static
-	// attribute stream.
-	PackedVector3Array positions;
-	const int64_t verts = static_cast<int64_t>(frame.drops) * 3;
-	positions.resize(verts);
-	Vector3 *pw = positions.ptrw();
-	for (int64_t i = 0; i < verts; ++i) {
-		const float *v = frame.vertices.data() + i * 5;
-		pw[i] = Vector3(v[0], v[1], v[2]);
-	}
-	out["positions"] = positions;
-	out["drops"] = frame.drops;
-	out["color"] = static_cast<int64_t>(frame.color_argb);
-	out["snow"] = frame.snow;
-	return out;
+	return frame;
 }
 
 Array Simulation::drain_weather_sounds() {
