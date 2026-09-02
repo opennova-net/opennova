@@ -981,9 +981,8 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_not_null(attach_db)
 	if attach_db == null:
 		return
-	var carrier_card: Dictionary = attach_db.extract_seat_specs_for_item(
-			root, 105004)
-	assert_eq((carrier_card.get("seats", []) as Array).size(), 1,
+	var carrier_card := attach_db.extract_seat_specs_for_item(root, 105004)
+	assert_eq(carrier_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -1107,8 +1106,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	# through the ONE native extractor on both peers.
 	var root := _native_asset_root()
 	var seat_db := _fixture_items_db()
-	var b50_card: Dictionary = seat_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+	var b50_card := seat_db.extract_seat_specs_for_item(root, 101419)
+	assert_eq(b50_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -2776,9 +2775,8 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
-	var b50_card: Dictionary = fixture_item_db.extract_seat_specs_for_item(
-			root, 101419)
-	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+	var b50_card := fixture_item_db.extract_seat_specs_for_item(root, 101419)
+	assert_eq(b50_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 
 	var host := Simulation.new()

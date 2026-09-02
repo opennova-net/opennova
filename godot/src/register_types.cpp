@@ -171,6 +171,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ItemParticleFx);
 	GDREGISTER_CLASS(ItemEmplacementAttachment);
 	GDREGISTER_CLASS(EnvsMarkerRow);
+	GDREGISTER_CLASS(ItemSeatAttachmentRow);
+	GDREGISTER_CLASS(ItemSeatCard);
 	GDREGISTER_CLASS(ItemDatabase);
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);

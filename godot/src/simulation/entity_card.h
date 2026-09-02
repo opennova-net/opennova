@@ -24,12 +24,20 @@ protected:
 
 public:
 	void assign(const opennova::world::inspect::SeatRow &p_value) { value_ = p_value; }
+	// The seat's index in its entity's seat table (-1 for a def-level spec row).
+	int get_index() const { return value_.index; }
+	// world::SeatType.
 	int get_type() const { return value_.type; }
+	// Fixed retail mountHandles slot (passengers 0..7, control 8, UseGun 9).
 	int get_retail_slot() const { return value_.retail_slot; }
+	// The 1-based USRP table row the wire byte names.
+	int get_bone_index() const { return value_.bone_index; }
 	int get_pose_index() const { return value_.pose_index; }
 	String get_source_name() const;
 	// The authored seat offset, raw mission components (Z-up).
 	Vector3 get_local() const;
+	// Gunner facing offset vs the vehicle yaw, degrees.
+	int get_yaw_offset() const { return value_.yaw_offset; }
 	bool is_occupied() const { return value_.occupied; }
 };
 

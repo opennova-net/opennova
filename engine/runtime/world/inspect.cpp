@@ -28,20 +28,6 @@ int32_t fixed_from_mission(float v) {
 	return static_cast<int32_t>(v * kFixed16);
 }
 
-SeatRow seat_row(const Seat &seat, int32_t index) {
-	SeatRow row;
-	row.index = index;
-	row.type = static_cast<int32_t>(seat.type);
-	row.retail_slot = static_cast<int32_t>(seat.retail_slot);
-	row.bone_index = static_cast<int32_t>(seat.bone_index);
-	row.pose_index = static_cast<int32_t>(seat.pose_index);
-	row.source_name = seat.source_name;
-	row.local = seat.seat_local;
-	row.yaw_offset = static_cast<int32_t>(seat.yaw_offset);
-	row.occupied = seat.occupant.valid();
-	return row;
-}
-
 // The AI half of the card — the old get_entity_debug body. A scripted remove
 // (VaporizeSingle / removeSSN) despawns the registry slot while the AiEntity
 // stays in the AI pool, so the registry block emits TYPED DEFAULTS rather
@@ -352,6 +338,20 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 }
 
 } // namespace
+
+SeatRow seat_row(const Seat &seat, int32_t index) {
+	SeatRow row;
+	row.index = index;
+	row.type = static_cast<int32_t>(seat.type);
+	row.retail_slot = static_cast<int32_t>(seat.retail_slot);
+	row.bone_index = static_cast<int32_t>(seat.bone_index);
+	row.pose_index = static_cast<int32_t>(seat.pose_index);
+	row.source_name = seat.source_name;
+	row.local = seat.seat_local;
+	row.yaw_offset = static_cast<int32_t>(seat.yaw_offset);
+	row.occupied = seat.occupant.valid();
+	return row;
+}
 
 std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) {
 	std::vector<EntityRow> out;

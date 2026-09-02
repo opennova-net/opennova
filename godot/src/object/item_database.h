@@ -20,6 +20,7 @@ namespace godot {
 class EnvsMarkerRow;
 class ItemEmplacementAttachment;
 class ItemParticleFx;
+class ItemSeatCard;
 class ResourceRoot;
 
 // Thin GDExtension wrapper over engine/formats/def items.def parsing (def_parse_items).
@@ -295,12 +296,11 @@ public:
 	// world::VehicleTraits table (resolve_item_traits). (engine: formats/def/def.h)
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
-	// S16 tooling: the native seat-spec extraction for ONE item, shaped like
-	// the retired GDScript seat_specs_for_item card (the MCP mission tools'
-	// static mount analysis). Static data only — "occupied" is always false;
+	// The native seat-spec extraction for ONE item as an inspection card
+	// (item_records.h ItemSeatCard). Static data only — no seat is occupied;
 	// seats/armory need the model, authored attachment rows survive without
 	// anchors, exactly like the production boot install.
-	Dictionary extract_seat_specs_for_item(
+	Ref<ItemSeatCard> extract_seat_specs_for_item(
 			const Ref<class ResourceRoot> &p_root, int p_item_id);
 	String get_launchups_closeattack(int id) const;
 	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC (the

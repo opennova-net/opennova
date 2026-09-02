@@ -62,12 +62,12 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var part_index := int(userpoint.get("subobject", -1))
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
-	var card: Dictionary = item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
-	var seats: Array = card.get("seats", []) as Array
+	var card := item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
+	var seats := card.get_seats()
 	assert_eq(seats.size(), 1)
-	var seat: Dictionary = seats[0]
-	assert_eq(String(seat.get("source_name", "")).to_lower(), "usegun")
-	assert_eq(int(seat.get("bone_index", 0)) - 1, userpoint_index,
+	var seat: EntityCardSeat = seats[0]
+	assert_eq(seat.get_source_name().to_lower(), "usegun")
+	assert_eq(seat.get_bone_index() - 1, userpoint_index,
 			"the runtime selected the exact retail Usegun row")
 
 	# S16: the seat/mount table is the native extraction over items.def rows +
