@@ -208,7 +208,7 @@ var _selected_class_value := 0
 
 func _populate_classes() -> void:
 	_selected_class_value = _resolve_selected_class()
-	var spin := _driver.widget_id("PLAYER_CLASS")
+	var spin := _id("PLAYER_CLASS")
 	if spin < 0:
 		return
 	var rows := PackedStringArray()
@@ -287,7 +287,7 @@ func _available_slot_weapons(slot: int, team_mask: int) -> Array:
 
 
 func _fill_slot(control: String, slot: int, team_mask: int) -> void:
-	var combo := _driver.widget_id(control)
+	var combo := _id(control)
 	if combo < 0:
 		return
 	var dicts: Array = _available_slot_weapons(slot, team_mask)
@@ -339,7 +339,7 @@ func _populate_grenades(team_mask: int) -> void:
 	for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
 		_grenade_rows.append(dicts[i])
 	for i in GRENADE_CONTROLS.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		if combo < 0:
 			continue
 		var w: Dictionary = _grenade_rows[i] if i < _grenade_rows.size() else {}
@@ -370,18 +370,18 @@ func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
 func _weapon_label(w: Dictionary) -> String:
 	var textid := String(w.get("display_textid", ""))
 	if not textid.is_empty():
-		var t: RtxtStringFile = Strings.get_table("gametext")
-		if t != null and t.has_string_in_section("WepDes", textid):
-			return t.get_string_in_section("WepDes", textid)
+		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
+			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
 	return String(w.get("name", ""))
 
 
 func _ammo_row_label(w: Dictionary, clips: int) -> String:
 	var round_label := String(w.get("round_type", ""))
 	if not round_label.is_empty():
-		var gametext: RtxtStringFile = Strings.get_table("gametext")
-		if gametext != null and gametext.has_string_in_section("WepDes", round_label):
-			round_label = gametext.get_string_in_section("WepDes", round_label)
+		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
+			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
 	return "%d - %s" % [
 		clips * int(w.get("clipsize", 0)),
 		round_label,
@@ -391,7 +391,7 @@ func _ammo_row_label(w: Dictionary, clips: int) -> String:
 # The slot's selected weapon dict (the WeaponDatabase transport dict; {} = NONE).
 # Public read seam (ADR 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> Dictionary:
-	var combo := _driver.widget_id(control)
+	var combo := _id(control)
 	if combo < 0:
 		return {}
 	var row := _driver.selected_row(combo)
@@ -412,7 +412,7 @@ func _on_slot_selected(control: String) -> void:
 # clipsize rounds, and serializes as 1; row maxclips-1 is the full load
 # [orig: @0x564c7d..0x564ce4, sprintf "%d - %s"].
 func _populate_ammo(control: String) -> void:
-	var combo := _driver.widget_id(control + "_AMMO1")
+	var combo := _id(control + "_AMMO1")
 	if combo < 0:
 		return
 	var w := selected_weapon(control)
@@ -441,7 +441,7 @@ func _populate_ammo(control: String) -> void:
 # The slot's selected clip count. Public read seam (ADR 0018), paired with
 # selected_weapon.
 func selected_clips(control: String) -> int:
-	var combo := _driver.widget_id(control + "_AMMO1")
+	var combo := _id(control + "_AMMO1")
 	if combo < 0 or _driver.selected_row(combo) < 0 \
 			or _driver.item_count(combo) == 0:
 		# -1 = the def default; the original's main leg takes adm[23] RAW as the total
@@ -453,7 +453,7 @@ func selected_clips(control: String) -> int:
 func _selected_grenade_loadout() -> Array[Dictionary]:
 	var selected: Array[Dictionary] = []
 	for i in _grenade_rows.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
@@ -494,7 +494,7 @@ func _update_weight() -> void:
 		counts.append(selected_clips(slot_name))  # -1 = the def default (maxclips)
 	var total := _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
@@ -509,7 +509,7 @@ func _update_weight() -> void:
 		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
 		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
-	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
 			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
@@ -527,7 +527,7 @@ func _update_icons() -> void:
 	if frame == null:
 		return
 	for control in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var holder := _driver.widget_id(control + "_ICON")
+		var holder := _id(control + "_ICON")
 		if holder < 0:
 			continue
 		var icon_rect: TextureRect = _icon_mounts.get(control)
@@ -550,7 +550,7 @@ func _update_icons() -> void:
 
 ## The rendered weight line (public read seam for tests/diagnostics).
 func weight_line() -> String:
-	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+	var label := _id("STATIC_TOTAL_WEIGHT")
 	return _driver.get_widget_text(label) if label >= 0 else ""
 
 
@@ -648,7 +648,7 @@ func _reposition_icon_mounts() -> void:
 		var mount: TextureRect = _icon_mounts[control]
 		if mount == null or not is_instance_valid(mount):
 			continue
-		var holder := _driver.widget_id(String(control) + "_ICON")
+		var holder := _id(String(control) + "_ICON")
 		if holder >= 0:
 			_place_icon_mount(mount, holder)
 
