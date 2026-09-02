@@ -43,11 +43,11 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var bg := LoadingScreen.resolve_background(root, "00TRg.bms")
-	assert_eq(String(bg["name"]).to_lower(), "00trg.pcx", "sidecar wins when present")
-	assert_true(bool(bg["custom"]))
+	assert_eq(bg.name.to_lower(), "00trg.pcx", "sidecar wins when present")
+	assert_true(bg.custom)
 	bg = LoadingScreen.resolve_background(root, "OTHER.bms")
-	assert_eq(String(bg["name"]), "loadscrn.pcx", "missing sidecar falls back")
-	assert_false(bool(bg["custom"]))
+	assert_eq(bg.name, "loadscrn.pcx", "missing sidecar falls back")
+	assert_false(bg.custom)
 
 
 func test_background_decodes_sidecar_from_language_archive_without_loose_mode() -> void:
@@ -60,7 +60,7 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 	assert_eq(root.mount_runtime(dir, "", false, "jo"), OK,
 			"the retail archive table mounts with loose lookup disabled")
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(),
 			"setup decodes the mission sidecar found only in language.pff")
 
@@ -76,7 +76,7 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 	assert_eq(root.mount_runtime(dir), OK,
 		"packed-default mode would normally select the archived PCX")
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 
 	assert_true(screen.has_background())
 	var texture := LoadingScreen.load_background_texture(root, "00trg.pcx")
@@ -154,7 +154,7 @@ func test_bar_fill_span_matches_the_original_arithmetic() -> void:
 # --- setup: SP draws no session text, MP does [orig: gate @ 0x521ebe] -----------
 
 func test_sp_setup_loads_image_only() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_false(screen.has_session_overlay())
 	assert_eq(screen.session_overlay_lines(), PackedStringArray(["", "", "", ""]))
 
@@ -162,14 +162,8 @@ func test_sp_setup_loads_image_only() -> void:
 func test_mp_setup_carries_the_session_variables() -> void:
 	if not _register_gametext_fixture():
 		return
-	var screen := _setup_screen({
-		"mission_file": "00TRg.bms",
-		"in_session": true,
-		"server_name": "DEMOHOST",
-		"mission_name": "Trainingsmission",
-		"game_type": 0x10010,
-		"custom_text": "Welcome aboard",
-	})
+	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "DEMOHOST",
+			"Trainingsmission", 0x10010, "Welcome aboard"))
 	assert_true(screen.has_session_overlay())
 	var lines := screen.session_overlay_lines()
 	assert_eq(lines[0], "DEMOHOST")
@@ -180,7 +174,7 @@ func test_mp_setup_carries_the_session_variables() -> void:
 
 
 func test_present_tracks_reported_progress_then_leads() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	screen.set_progress(50)
 	# Unthrottled while the displayed value trails the reported one; the first
 	# present catches the bar up to reported (not one step past a stale 0), so
@@ -199,13 +193,13 @@ func test_present_tracks_reported_progress_then_leads() -> void:
 
 
 func test_background_availability_is_publicly_observable() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(),
 		"tests and owners can observe whether setup found loading art")
 
 
 func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
 	var preparable := screen.has_method("prepare_for_blocking_load")
 	assert_true(preparable,
@@ -224,7 +218,7 @@ func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 
 
 func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	var preparable := screen.has_method("prepare_for_blocking_load")
 	assert_true(preparable)
 	if not preparable:
@@ -235,7 +229,7 @@ func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
 
 
 func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
 	var operation := WorldLoadOperation.new()
 	assert_true(operation.cancel())
@@ -245,7 +239,7 @@ func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
 
 # --- helpers -------------------------------------------------------------------
 
-func _setup_screen(info: Dictionary) -> LoadingScreen:
+func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	var dir := _make_temp_dir("loadscreen_setup")
 	_write_test_pcx(dir.path_join("00trg.pcx"))
 	_write_test_pcx(dir.path_join("loadscrn.pcx"))

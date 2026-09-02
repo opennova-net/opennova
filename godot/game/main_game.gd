@@ -623,7 +623,7 @@ func _on_start_requested(bms_name: String) -> void:
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
-		{"mission_file": bms_name},
+		LoadingScreenInfo.for_mission(bms_name),
 		_world.load_mission.bind(bms_name))
 
 
@@ -631,7 +631,7 @@ func _on_start_requested(bms_name: String) -> void:
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
-		{"mission_file": bms_name},
+		LoadingScreenInfo.for_mission(bms_name),
 		_world.load_loose_mission.bind(bms_name))
 
 
@@ -653,7 +653,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 		return ERR_FILE_CANT_OPEN
 	if not profile.is_empty():
 		set_local_player_profile(profile)
-	start_world_load({"mission_file": bms_name},
+	start_world_load(LoadingScreenInfo.for_mission(bms_name),
 			_world.load_mission_data.bind(mission, bms_name))
 	return OK
 
@@ -706,7 +706,7 @@ func join_lan_server(target: JoinTarget) -> void:
 
 ## The common mission-start seam; ShellPresentationSession owns its visibility
 ## transition while this shell owns load state and the operation handoff.
-func start_world_load(load_info: Dictionary, operation: Callable) -> void:
+func start_world_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 	if not _world_load.can_start():
 		return
 	if _lan_session != null:
@@ -714,8 +714,7 @@ func start_world_load(load_info: Dictionary, operation: Callable) -> void:
 	_world_load_pending = true
 	_world.set_local_player_spawn_loadout(_chosen_avatar)
 	_begin_world_load()
-	if _world_load.start(self, _root, _world,
-			load_info.duplicate(true), operation) == null:
+	if _world_load.start(self, _root, _world, load_info, operation) == null:
 		_on_world_load_failed("mission load handoff could not start")
 
 
