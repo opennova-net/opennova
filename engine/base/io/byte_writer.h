@@ -65,6 +65,16 @@ public:
             data_.push_back(0);
     }
 
+    // Fixed-size field copied verbatim: every one of the count bytes, including
+    // whatever follows an embedded NUL, so a parsed field round-trips byte-exactly
+    // (the .bms name slots; read back with ByteReader::read_fixed_string).
+    void write_raw(const char *src, size_t count)
+    {
+        data_.insert(data_.end(), src, src + count);
+    }
+
+    void write_zeros(size_t count) { data_.insert(data_.end(), count, 0); }
+
     size_t size() const { return data_.size(); }
     const std::vector<uint8_t> &data() const { return data_; }
     std::vector<uint8_t> take() { return std::move(data_); }
