@@ -139,22 +139,23 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	return out;
 }
 
-Array Simulation::drain_chat_lines() {
+TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
 	// The S2C 0x14 player-chat lines folded by the replica pipeline since the
 	// last drain, each already routed by the witnessed channel table
 	// (hud/feed_format.h): sink 0 = the SYSTEM ring, 1 = the CHAT ring,
 	// 2 = the message queue (no ring), 3 = channel 3 (the unported third ring).
-	Array out;
+	TypedArray<ChatLineRow> out;
 	if (!runtime_) return out;
 	for (const opennova::netsim::ClientChatLine &line :
 			runtime_->view().drain_chat_lines()) {
-		Dictionary d;
-		d["text"] = String::utf8(line.text.c_str());
-		d["argb"] = static_cast<int64_t>(
-				opennova::hud::chat_channel_color(line.channel));
-		d["sink"] = static_cast<int>(
-				opennova::hud::chat_channel_sink(line.channel));
-		d["channel"] = static_cast<int>(line.channel);
+		Ref<ChatLineRow> d;
+		d.instantiate();
+		d->set_text(String::utf8(line.text.c_str()));
+		d->set_argb(static_cast<int64_t>(
+				opennova::hud::chat_channel_color(line.channel)));
+		d->set_sink(static_cast<int>(
+				opennova::hud::chat_channel_sink(line.channel)));
+		d->set_channel(static_cast<int>(line.channel));
 		out.push_back(d);
 	}
 	return out;

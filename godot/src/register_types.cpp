@@ -97,6 +97,7 @@
 #include "simulation/weapon_profile_summary.h"
 #include "simulation/tracer_ribbon_frame.h"
 #include "simulation/weather_home_state.h"
+#include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
 #include "hud/hud_draw_list_stats.h"
@@ -307,6 +308,16 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TracerRibbonStrip);
 	GDREGISTER_CLASS(TracerRibbonFrame);
 	GDREGISTER_CLASS(WeatherHomeState);
+	GDREGISTER_CLASS(ThrowableVisualRow);
+	GDREGISTER_CLASS(FirePresentationEvent);
+	GDREGISTER_CLASS(FireSoundRow);
+	GDREGISTER_CLASS(SlotSoundRow);
+	GDREGISTER_CLASS(SoundEmitterRow);
+	GDREGISTER_CLASS(RoundImpactRow);
+	GDREGISTER_CLASS(TerrainScorchRow);
+	GDREGISTER_CLASS(WeatherSoundRow);
+	GDREGISTER_CLASS(ChatLineRow);
+	GDREGISTER_CLASS(MissionEffect);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);

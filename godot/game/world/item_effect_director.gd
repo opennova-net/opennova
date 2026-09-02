@@ -276,12 +276,8 @@ func _item_fx_identity_aliases(net_id: int, bms_id: int,
 	return aliases
 
 
-func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
-	return _item_fx_identity_aliases(
-			int(effect.get("a", 0)),
-			int(effect.get("b", 0)),
-			int(effect.get("c", 0)),
-			int(effect.get("wire_handle", -1)))
+func _item_fx_control_event_aliases(effect: MissionEffect) -> Array[String]:
+	return _item_fx_identity_aliases(effect.a, effect.b, effect.c, effect.wire_handle)
 
 
 func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
@@ -396,8 +392,8 @@ func _deactivate_item_fx_control_nodes(event_aliases: Array) -> void:
 ## Consume a vehicle-control lifecycle effect from the runtime's drained batch
 ## (called by the world's _on_runtime_effects router). Returns true when the
 ## effect was a control event and was handled here.
-func consume_control_effect(effect: Dictionary) -> bool:
-	var kind := String(effect.get("kind", ""))
+func consume_control_effect(effect: MissionEffect) -> bool:
+	var kind := effect.kind
 	if kind != "vehicle_control_started" and kind != "vehicle_control_stopped":
 		return false
 	var aliases := _item_fx_control_event_aliases(effect)

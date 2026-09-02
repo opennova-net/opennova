@@ -144,6 +144,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_inventory.cpp
     simulation/weapon_profile_summary.cpp
     simulation/tracer_ribbon_frame.cpp
+    simulation/present_event_records.cpp
     simulation/weather_home_state.cpp
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp

@@ -498,9 +498,10 @@ func is_gameplay_input_active() -> bool:
 # The sim's round_end effect arms MissionEndFlow; the flow's beat and screen run
 # from _process.
 func _on_shell_mission_effects(effects: Array) -> void:
-	for e in effects:
-		if e is Dictionary and String(e.get("kind", "")) == "round_end":
-			_end_flow.begin(int(e.get("a", 0)), _world.get_sim() if _world != null else null)
+	for e_v in effects:
+		var e := e_v as MissionEffect
+		if e != null and e.kind == "round_end":
+			_end_flow.begin(e.a, _world.get_sim() if _world != null else null)
 
 
 func _show_end_screen() -> void:

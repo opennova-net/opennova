@@ -297,28 +297,28 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	var presenter := FirePresentPass.new()
 	presenter.setup(null, null, Callable(), Callable(), Callable(), Callable(),
 			Callable(director, "on_muzzle_fire"))
-	presenter.present_fires([{
-		"shooter_handle": 77,
-		"origin": Vector3(1.0, 0.0, 0.0),
-		"mf_light": 1,
-		"is_local_player": true,
-	}])
+	presenter.present_fires([_muzzle_fire(77, Vector3(1.0, 0.0, 0.0), 1)])
 	assert_eq(director.get_report().live, 1,
-			"the presented MF_Light dictionary creates one muzzle glow")
+			"the presented MF_Light event creates one muzzle glow")
 	var camera := Camera3D.new()
 	world.add_child(camera)
 	director.render_frame(camera)
 	assert_eq(director.get_report().selected, 1,
 			"the owned muzzle glow reaches camera-global object output")
-	presenter.present_fires([{
-		"shooter_handle": 78,
-		"origin": Vector3.ZERO,
-		"mf_light": 0,
-		"is_local_player": true,
-	}])
+	presenter.present_fires([_muzzle_fire(78, Vector3.ZERO, 0)])
 	assert_eq(director.get_report().live, 1,
-			"an MF_Light-off dictionary is the negative control")
+			"an MF_Light-off event is the negative control")
 	presenter.teardown()
+
+
+# A local-player fire event carrying only the muzzle-glow leg.
+func _muzzle_fire(shooter_handle: int, origin: Vector3, mf_light: int) -> FirePresentationEvent:
+	var event := FirePresentationEvent.new()
+	event.shooter_handle = shooter_handle
+	event.origin = origin
+	event.mf_light = mf_light
+	event.is_local_player = true
+	return event
 
 
 func test_destruction_present_dictionary_routes_death_light_into_output() -> void:

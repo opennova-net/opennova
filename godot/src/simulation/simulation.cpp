@@ -265,13 +265,14 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 	return frame;
 }
 
-Array Simulation::drain_weather_sounds() {
-	Array out;
+TypedArray<WeatherSoundRow> Simulation::drain_weather_sounds() {
+	TypedArray<WeatherSoundRow> out;
 	if (!world_installed_ || kernel_ == nullptr) return out;
 	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.weather_sounds) {
-		Dictionary d;
-		d["distance"] = static_cast<float>(ev.distance_q16) / 65536.0f;
-		d["bearing"] = static_cast<int>(ev.bearing);
+		Ref<WeatherSoundRow> d;
+		d.instantiate();
+		d->set_distance(static_cast<float>(ev.distance_q16) / 65536.0f);
+		d->set_bearing(static_cast<int>(ev.bearing));
 		out.push_back(d);
 	}
 	kernel_->world.weather_sounds.clear();
@@ -470,45 +471,47 @@ void Simulation::set_water_z(double p_water_y) {
 	}
 }
 
-Array Simulation::drain_slot_sounds() {
-	Array out;
+TypedArray<SlotSoundRow> Simulation::drain_slot_sounds() {
+	TypedArray<SlotSoundRow> out;
 	if (!world_installed_) return out;
 	for (const opennova::world::SoundSlotEvent &ev : kernel_->world.slot_sounds) {
-		Dictionary d;
-		d["set"] = String(ev.set_name);
+		Ref<SlotSoundRow> d;
+		d.instantiate();
+		d->set_soundset(String(ev.set_name));
 		// Mission-frame 16.16 -> godot (x, z, -y), same mapping as the fire drain.
-		d["pos"] = Vector3(static_cast<float>(ev.pos[0]) / 65536.0f,
-		                   static_cast<float>(ev.pos[2]) / 65536.0f,
-		                   static_cast<float>(-ev.pos[1]) / 65536.0f);
-		d["handle"] = ev.source_handle;
-		d["slot"] = ev.slot;
+		d->set_pos(Vector3(static_cast<float>(ev.pos[0]) / 65536.0f,
+				static_cast<float>(ev.pos[2]) / 65536.0f,
+				static_cast<float>(-ev.pos[1]) / 65536.0f));
+		d->set_handle(static_cast<int>(ev.source_handle));
+		d->set_slot(static_cast<int>(ev.slot));
 		out.push_back(d);
 	}
 	kernel_->world.slot_sounds.clear();
 	return out;
 }
 
-Array Simulation::drain_sound_emitters() {
-	Array out;
+TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
+	TypedArray<SoundEmitterRow> out;
 	if (!world_installed_) return out;
 	const std::vector<opennova::world::SoundEmitterEvent> events =
 			kernel_->world.sound_emitters.drain();
 	for (const opennova::world::SoundEmitterEvent &ev : events) {
-		Dictionary d;
-		d["source_spawn_id"] = static_cast<int64_t>(ev.source_spawn_id);
-		d["handle"] = ev.source_handle;
-		d["source_bms_id"] = ev.source_bms_id;
+		Ref<SoundEmitterRow> d;
+		d.instantiate();
+		d->set_source_spawn_id(static_cast<int64_t>(ev.source_spawn_id));
+		d->set_handle(static_cast<int>(ev.source_handle));
+		d->set_source_bms_id(static_cast<int>(ev.source_bms_id));
 		// Mission coordinates -> Godot (x, z, -y), matching every other
 		// positional presentation drain.
-		d["pos"] = mission_to_godot(ev.pos);
-		d["lane"] = ev.lane;
-		d["slot"] = ev.slot;
-		d["lifetime"] = ev.lifetime_ticks;
-		d["emitted_tick"] = ev.emitted_tick;
-		d["pitch_q16"] = ev.pitch_q16;
-		d["volume_q8_8"] = ev.volume_q8_8;
-		d["source_only"] = ev.source_only;
-		d["set"] = String(ev.set_name.c_str());
+		d->set_pos(mission_to_godot(ev.pos));
+		d->set_lane(static_cast<int>(ev.lane));
+		d->set_slot(static_cast<int>(ev.slot));
+		d->set_lifetime(static_cast<int>(ev.lifetime_ticks));
+		d->set_emitted_tick(static_cast<int64_t>(ev.emitted_tick));
+		d->set_pitch_q16(static_cast<int>(ev.pitch_q16));
+		d->set_volume_q8_8(static_cast<int>(ev.volume_q8_8));
+		d->set_source_only(ev.source_only);
+		d->set_soundset(String(ev.set_name.c_str()));
 		out.push_back(d);
 	}
 	return out;

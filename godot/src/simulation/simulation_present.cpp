@@ -60,36 +60,37 @@ inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
 
 } // namespace
 
-Array Simulation::get_throwable_visuals() const {
-	Array out;
+TypedArray<ThrowableVisualRow> Simulation::get_throwable_visuals() const {
+	TypedArray<ThrowableVisualRow> out;
 	if (!kernel_) return out;
 	const double kDegPerBam = opennova::world::kDegreesPerBam;
 	auto push_entry = [&](int64_t key, int item_id, const opennova::world::Vec3 &pos,
 			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam,
 			const char *move_effect, bool move_effect_live) {
-		Dictionary d;
-		d["key"] = key;
-		d["item_id"] = item_id;
-		d["pos"] = mission_to_godot(pos);
+		Ref<ThrowableVisualRow> d;
+		d.instantiate();
+		d->set_key(key);
+		d->set_item_id(item_id);
+		d->set_pos(mission_to_godot(pos));
 		// the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
-		d["rotation_deg"] = Vector3(
+		d->set_rotation_deg(Vector3(
 				static_cast<float>(double(pitch_bam) * kDegPerBam),
 				static_cast<float>(
 						opennova::world::mission_yaw_deg_from_bam_heading(yaw_bam)),
-				static_cast<float>(double(roll_bam) * kDegPerBam));
+				static_cast<float>(double(roll_bam) * kDegPerBam)));
 		// effects_table tag 1 ("move") is a round-bound particle, not an
 		// impact. Retail copies it to AmmoDef+0x70 [orig: @0x409fc2],
 		// spawns/updates it through round+0x1cc [orig:
 		// @0x4e9f58/@0x4ea8ae/@0x5f7410], then releases it with the round
 		// [orig: Projectile_ReleaseEffects @0x4e8280].
-		d["move_effect"] = String(move_effect != nullptr ? move_effect : "");
+		d->set_move_effect(String(move_effect != nullptr ? move_effect : ""));
 		// The round's emitter liveness (the +0x1CC handle mirror): the shell
 		// spawns while this is set and holds no handle, and retires + forgets
 		// the handle when it clears, so a round that dips under water releases
 		// its plume and re-acquires one on surfacing [orig:
 		// Projectile_UpdatePhysics @0x4ea019..0x4ea03e, the lazy spawn
 		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md].
-		d["move_effect_live"] = move_effect_live;
+		d->set_move_effect_live(move_effect_live);
 		out.push_back(d);
 	};
 	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
@@ -305,8 +306,8 @@ Array Simulation::get_objectives_view() const {
 // the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
 // ballistic wrapper Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness
 // on world/round_sim.h RoundImpact].
-Array Simulation::drain_round_impacts() {
-	Array out;
+TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
+	TypedArray<RoundImpactRow> out;
 	if (!kernel_) return out;
 	const uint32_t now = kernel_->world.logic_tick;
 	for (const opennova::world::RoundImpact &imp : kernel_->world.round_sim.impacts) {
@@ -318,28 +319,30 @@ Array Simulation::drain_round_impacts() {
 		const bool has_effect = imp.present_effect && !row.effect.empty();
 		const bool has_sound = imp.present_sound && !row.sound.empty();
 		if (!has_effect && !has_sound) continue;
-		Dictionary d;
+		Ref<RoundImpactRow> d;
+		d.instantiate();
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
-		d["position"] = mission_to_godot(imp.position);
-		d["direction"] = mission_to_godot(imp.direction);
-		d["effect"] = has_effect ? String::utf8(row.effect.c_str()) : String();
-		d["sound"] = has_sound ? String::utf8(row.sound.c_str()) : String();
+		d->set_position(mission_to_godot(imp.position));
+		d->set_direction(mission_to_godot(imp.direction));
+		d->set_effect(has_effect ? String::utf8(row.effect.c_str()) : String());
+		d->set_sound(has_sound ? String::utf8(row.sound.c_str()) : String());
 		// A lifecycle rewind must never turn a future/stale source tick into an
 		// unsigned multi-billion-tick particle pre-age request.
 		const uint32_t age_ticks = now >= imp.tick ? now - imp.tick : 0u;
-		d["age_ticks"] = static_cast<int64_t>(age_ticks);
-		d["source_tick"] = static_cast<int64_t>(imp.tick);
-		d["source_order"] = static_cast<int64_t>(imp.source_order);
+		d->set_age_ticks(static_cast<int64_t>(age_ticks));
+		d->set_source_tick(static_cast<int64_t>(imp.tick));
+		d->set_source_order(static_cast<int64_t>(imp.source_order));
 		// The impact flash light rides the effect leg's own gate — retail
 		// requires the effect entry AND the ammo light_impact radius (the
 		// witness map on renderer/light_scene.h).
 		if (has_effect && ammo->light_impact_radius > 0.0f) {
-			d["light_radius"] = ammo->light_impact_radius;
-			d["light_color"] = Color(
+			d->set_has_light(true);
+			d->set_light_radius(ammo->light_impact_radius);
+			d->set_light_color(Color(
 					static_cast<float>((ammo->light_impact_color >> 16) & 0xFF) / 255.0f,
 					static_cast<float>((ammo->light_impact_color >> 8) & 0xFF) / 255.0f,
-					static_cast<float>(ammo->light_impact_color & 0xFF) / 255.0f);
-			d["light_ticks"] = ammo->light_impact_ticks;
+					static_cast<float>(ammo->light_impact_color & 0xFF) / 255.0f));
+			d->set_light_ticks(ammo->light_impact_ticks);
 		}
 		out.push_back(d);
 	}
@@ -347,45 +350,40 @@ Array Simulation::drain_round_impacts() {
 	return out;
 }
 
-Array Simulation::drain_terrain_scorches() {
-	Array out;
+TypedArray<TerrainScorchRow> Simulation::drain_terrain_scorches() {
+	TypedArray<TerrainScorchRow> out;
 	if (!kernel_) return out;
 	for (const opennova::world::TerrainScorchEvent &event :
 			kernel_->world.terrain_scorches.pending()) {
 		const opennova::terrain::TerrainScorchEntry &mission =
 				event.mission_bounds;
-		Dictionary row;
-		row["texture_index"] = static_cast<int64_t>(mission.texture_index);
-		row["minimum_x_q16"] = static_cast<int64_t>(mission.minimum_x_q16);
-		row["maximum_x_q16"] = static_cast<int64_t>(mission.maximum_x_q16);
+		Ref<TerrainScorchRow> row;
+		row.instantiate();
+		row->set_texture_index(static_cast<int64_t>(mission.texture_index));
+		row->set_minimum_x_q16(static_cast<int64_t>(mission.minimum_x_q16));
+		row->set_maximum_x_q16(static_cast<int64_t>(mission.maximum_x_q16));
 		// mission (x,y,z) -> Godot (x,z,-y): negation swaps the ordered
 		// extrema on the second ground-plane axis.
-		row["minimum_z_q16"] =
-				-static_cast<int64_t>(mission.maximum_z_q16);
-		row["maximum_z_q16"] =
-				-static_cast<int64_t>(mission.minimum_z_q16);
-		row["source_tick"] = static_cast<int64_t>(event.tick);
-		row["source_order"] = static_cast<int64_t>(event.source_order);
+		row->set_minimum_z_q16(-static_cast<int64_t>(mission.maximum_z_q16));
+		row->set_maximum_z_q16(-static_cast<int64_t>(mission.minimum_z_q16));
+		row->set_source_tick(static_cast<int64_t>(event.tick));
+		row->set_source_order(static_cast<int64_t>(event.source_order));
 		out.push_back(row);
 	}
 	kernel_->world.terrain_scorches.clear_pending();
 	return out;
 }
 
-Array Simulation::drain_effects() {
-	Array out;
+TypedArray<MissionEffect> Simulation::drain_effects() {
+	TypedArray<MissionEffect> out;
 	if (!world_installed_) return out;
 	for (const opennova::world::Effect &e : kernel_->world.effects.entries()) {
-		Dictionary d;
-		d["kind"] = String(e.kind.c_str());
-		d["a"] = e.a;
-		d["b"] = e.b;
-		d["c"] = e.c;
-		d["d"] = e.d;
+		Ref<MissionEffect> d = MissionEffect::make(String(e.kind.c_str()), e.a, e.b, e.c,
+				String(e.str.c_str()));
+		d->set_d(e.d);
 		if (e.kind == "vehicle_control_started" ||
 				e.kind == "vehicle_control_stopped")
-			d["wire_handle"] = e.d;
-		d["str"] = String(e.str.c_str());
+			d->set_wire_handle(e.d);
 		out.push_back(d);
 	}
 	kernel_->world.effects.clear();
@@ -395,37 +393,38 @@ Array Simulation::drain_effects() {
 // The shell fire-presentation drain — see the header note. Direction math mirrors
 // the round spawn's mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
 // [orig: RoundData_SpawnRound @0x4ec5e9], axis-mapped mission -> godot (x, z, -y).
-Array Simulation::drain_fire_presentation_events() {
-	Array out;
+TypedArray<FirePresentationEvent> Simulation::drain_fire_presentation_events() {
+	TypedArray<FirePresentationEvent> out;
 	if (!world_installed_) return out;
 	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
 	const bool have_local = kernel_->world.cached.local_player.valid();
 	for (const opennova::world::FireEvent &fe : kernel_->world.round_sim.fired) {
-		Dictionary d;
-		d["origin"] = mission_to_godot(fe.origin);
+		Ref<FirePresentationEvent> d;
+		d.instantiate();
+		d->set_origin(mission_to_godot(fe.origin));
 		// Retail's two receive arms are mutually exclusive and present differently.
 		// Bit 0 is tested first; only when it is CLEAR and bit 1 is set does the
 		// adm-indexed arm run, and that arm spawns no ammo-def sound or effect.
 		// A zero flags byte is host/AI-originated fire, which keeps the ammo-def
 		// legs because retail presents those inline at the shooter instead.
 		// [orig: @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2]
-		d["adm_arm"] = (fe.wire_round_flags & opennova::kRoundEventFlagAltFire) == 0 &&
-				(fe.wire_round_flags & opennova::kRoundEventFlagAdmIndexed) != 0;
-		d["adm_index"] = fe.adm_index;
+		d->set_adm_arm((fe.wire_round_flags & opennova::kRoundEventFlagAltFire) == 0 &&
+				(fe.wire_round_flags & opennova::kRoundEventFlagAdmIndexed) != 0);
+		d->set_adm_index(fe.adm_index);
 		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
 		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
 		const double cp = std::cos(pitch);
-		d["forward"] = Vector3(static_cast<real_t>(std::cos(bearing) * cp),
+		d->set_forward(Vector3(static_cast<real_t>(std::cos(bearing) * cp),
 				static_cast<real_t>(std::sin(pitch)),
-				static_cast<real_t>(-std::sin(bearing) * cp));
-		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
+				static_cast<real_t>(-std::sin(bearing) * cp)));
+		d->set_shooter_handle(static_cast<int>(fe.shooter_handle));
 		const opennova::world::Entity *shooter = kernel_->world.registry.get(fe.shooter);
-		d["source_bms_id"] = shooter != nullptr ? shooter->bms_id : 0;
-		d["is_local_player"] = have_local && fe.shooter == kernel_->world.cached.local_player;
-		d["ammo_index"] = fe.ammo_index;
+		d->set_source_bms_id(shooter != nullptr ? shooter->bms_id : 0);
+		d->set_is_local_player(have_local && fe.shooter == kernel_->world.cached.local_player);
+		d->set_ammo_index(fe.ammo_index);
 		const opennova::world::AmmoTableEntry *ammo = kernel_->world.ammo.by_index(fe.ammo_index);
-		d["effect"] = ammo ? String(ammo->ai_launch_effect.c_str()) : String();
-		d["mf_light"] = ammo ? ammo->mf_light : 0;
+		d->set_effect(ammo ? String(ammo->ai_launch_effect.c_str()) : String());
+		d->set_mf_light(ammo ? ammo->mf_light : 0);
 		// The SOUND legs of both arms moved onto the sim's logic clock with the
 		// propagation-delay queue (world/fire_sound.h; drain_fire_sounds) — this
 		// drain carries only the EFFECT legs.
@@ -445,13 +444,13 @@ Array Simulation::drain_fire_presentation_events() {
 				fired_def != nullptr
 						? &fired_def->action_fsm.actions[opennova::world::weapon_action::kFire]
 						: nullptr;
-		d["action_effect"] = fire_row ? String(fire_row->particle) : String();
+		d->set_action_effect(fire_row ? String(fire_row->particle) : String());
 		// Resolved against the THIRD-PERSON model (gfx3): ActionDef+57 is the gfx3
 		// userpoint index and +56 the gfx1 one — the opposite way round from three
 		// currently-tracked doc lines. [orig: loader @0x54506c/@0x545092, resolver
 		//  @0x54039e/@0x54040f]
-		d["action_userpoint"] =
-				fire_row ? String(fire_row->particle_userpoint) : String();
+		d->set_action_userpoint(
+				fire_row ? String(fire_row->particle_userpoint) : String());
 		// The 3P adm-arm anchor is the SHELL's: the rendered held-weapon node's
 		// own userpoint (WirePresentPass.muzzle_world_for), which is what retail
 		// spawns at — the muzzle-authority decision that closed the S12a
@@ -489,15 +488,16 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 // stays at play time in the audio bank (D-AI-8).
 // [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / the pending drain
 //  Sound_TickPendingSlots @ 0x529310]
-Array Simulation::drain_fire_sounds() {
-	Array out;
+TypedArray<FireSoundRow> Simulation::drain_fire_sounds() {
+	TypedArray<FireSoundRow> out;
 	if (!world_installed_) return out;
 	for (const opennova::world::ReadyFireSound &sound :
 			kernel_->world.fire_sounds.drain()) {
-		Dictionary d;
-		d["set"] = String(sound.set_name.c_str());
-		d["pos"] = mission_to_godot(sound.pos);
-		d["source_bms_id"] = sound.source_bms_id;
+		Ref<FireSoundRow> d;
+		d.instantiate();
+		d->set_soundset(String(sound.set_name.c_str()));
+		d->set_pos(mission_to_godot(sound.pos));
+		d->set_source_bms_id(sound.source_bms_id);
 		out.push_back(d);
 	}
 	return out;

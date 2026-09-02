@@ -329,16 +329,16 @@ func _retail_emplaced_50() -> WeaponDef:
 func _throwable_visual_count(sim: Simulation, item_id: int) -> int:
 	var count := 0
 	for value in sim.get_throwable_visuals():
-		if int((value as Dictionary).get("item_id", 0)) == item_id:
+		if (value as ThrowableVisualRow).item_id == item_id:
 			count += 1
 	return count
 
 
 func _throwable_move_effect(sim: Simulation, item_id: int) -> String:
 	for value in sim.get_throwable_visuals():
-		var visual := value as Dictionary
-		if int(visual.get("item_id", 0)) == item_id:
-			return String(visual.get("move_effect", ""))
+		var visual := value as ThrowableVisualRow
+		if visual.item_id == item_id:
+			return visual.move_effect
 	return ""
 
 
@@ -1398,8 +1398,7 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_eq(joiner_fire_events.size(), 1,
 			"one predicted fire presentation event was emitted")
 	if joiner_fire_events.size() == 1:
-		assert_true(bool((joiner_fire_events[0] as Dictionary).get(
-				"is_local_player", false)),
+		assert_true((joiner_fire_events[0] as FirePresentationEvent).is_local_player,
 				"the predicted event maps local L even though wire attribution uses H")
 
 	# The joiner has spent one round. One reload action must queue one C2S 0x25;
@@ -1864,8 +1863,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var authoritative_joiner_events: Array = []
 	var misattributed_host_events: Array = []
 	for value in host_fire_events:
-		var event: Dictionary = value
-		var shooter_handle := int(event.get("shooter_handle", -1))
+		var event: FirePresentationEvent = value
+		var shooter_handle := event.shooter_handle
 		if shooter_handle == joiner_wire_handle:
 			authoritative_joiner_events.append(event)
 		elif shooter_handle == host_wire_handle:
@@ -1875,10 +1874,10 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(misattributed_host_events.is_empty(),
 			"the same equipped gun never reattributes the shot to the listen host")
 	if authoritative_joiner_events.size() == 1:
-		var authoritative: Dictionary = authoritative_joiner_events[0]
-		assert_false(bool(authoritative.get("is_local_player", true)),
+		var authoritative: FirePresentationEvent = authoritative_joiner_events[0]
+		assert_false(authoritative.is_local_player,
 				"the authority treats the packet shooter as its remote joiner")
-		var origin: Vector3 = authoritative.get("origin", Vector3.INF)
+		var origin := authoritative.origin
 		assert_lt(origin.distance_to(joiner_player_position), 3.0,
 				"the authoritative muzzle event stays at the joiner's player")
 		assert_gt(origin.distance_to(host_player_position), 5.0,
@@ -1887,8 +1886,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var predicted_joiner_events: Array = []
 	var remote_host_events: Array = []
 	for value in joiner_fire_events:
-		var event: Dictionary = value
-		var shooter_handle := int(event.get("shooter_handle", -1))
+		var event: FirePresentationEvent = value
+		var shooter_handle := event.shooter_handle
 		if shooter_handle == joiner_wire_handle:
 			predicted_joiner_events.append(event)
 		elif shooter_handle == host_wire_handle:
@@ -1898,8 +1897,7 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(remote_host_events.is_empty(),
 			"the joiner never presents its own shot as a remote-host shot")
 	if predicted_joiner_events.size() == 1:
-		assert_true(bool((predicted_joiner_events[0] as Dictionary).get(
-				"is_local_player", false)),
+		assert_true((predicted_joiner_events[0] as FirePresentationEvent).is_local_player,
 				"wire attribution H resolves back to the joiner's local L")
 
 	joiner.free()
@@ -1973,10 +1971,10 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 		joiner_move_effect_survived_arm = joiner_move_effect_survived_arm \
 				and _throwable_move_effect(joiner, 1875) == "Effect_SmokeToss"
 		for value in host.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				host_arm_sounds += 1
 		for value in joiner.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				joiner_arm_sounds += 1
 		OS.delay_msec(1)
 
@@ -2011,10 +2009,10 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 		host.step()
 		joiner.step()
 		for value in host.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				host_fuse_sounds += 1
 		for value in joiner.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				joiner_fuse_sounds += 1
 		if _throwable_visual_count(host, 1875) == 0 \
 				and _throwable_visual_count(joiner, 1875) == 0:
@@ -2382,8 +2380,7 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	assert_eq(joiner_impacts.size(), 1,
 			"the shooter predicts exactly one visual impact on the decoded peer")
 	if joiner_impacts.size() == 1:
-		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
-				"position", Vector3.ZERO)
+		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
 				"the visual impact lands on the host, never a self-H/local-L alias")
 
@@ -2462,8 +2459,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_eq(joiner_impacts.size(), 1,
 			"the shooter predicts exactly one visual impact on the decoded AI")
 	if joiner_impacts.size() == 1:
-		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
-				"position", Vector3.ZERO)
+		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
 				"the visual impact lands at the DECODED wire pose (mission y=8), "
 				+ "never at the complete-BMS fixture copy (y=12)")

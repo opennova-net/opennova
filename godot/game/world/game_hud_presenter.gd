@@ -751,17 +751,18 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 # forms because PreMission effects can arrive before the lazy HUD and its mission
 # table exist. Public with hud_objective_line() as the ADR 0018 read seam.
 func apply_mission_effects(effects: Array) -> void:
-	for e in effects:
-		if not (e is Dictionary):
+	for e_v in effects:
+		var e := e_v as MissionEffect
+		if e == null:
 			continue
-		var kind := String(e.get("kind", ""))
+		var kind := e.kind
 		if kind == "text":
-			var t := String(e.get("str", ""))
+			var t := e.text
 			if not t.is_empty():
 				_hud_objective = t
 				_queue_hud_message(t, 0)
 			else:
-				var text_id := int(e.get("a", 0))
+				var text_id := e.a
 				if text_id != 0:
 					_queue_hud_message("", text_id)
 		elif kind == "lose":
@@ -772,7 +773,7 @@ func apply_mission_effects(effects: Array) -> void:
 			# MISSION FAILED screen composes, cleared at the next round start
 			# @0x5b71b0)]. The effect carries the gametext key; resolve against the
 			# 'Misc' section like the original.
-			var key := String(e.get("str", ""))
+			var key := e.text
 			if not key.is_empty():
 				var line := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Misc", key)
 				_endround_banner = line
@@ -783,10 +784,9 @@ func apply_mission_effects(effects: Array) -> void:
 			# a LOST subgoal also stamps the persistent banner. [orig: case 14
 			# @0x454543 STRWINMSG chat; case 15 @0x454612 STRLOSEMSG chat +
 			# GameMsg_SetBannerText @0x454647]
-			if int(e.get("c", 0)) != 0:
+			if e.c != 0:
 				var lost := kind == "subgoal_lost"
-				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") \
-						% int(e.get("b", 0))
+				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") % e.b
 				var section := "LoseConditions" if lost else "WinConditions"
 				var t: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 				if t != null and t.has_string_in_section(section, msg_key):

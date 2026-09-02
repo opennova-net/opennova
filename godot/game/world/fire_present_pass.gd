@@ -184,15 +184,13 @@ func present_slot_sounds(events: Array) -> void:
 	if audio == null:
 		return
 	for ev_v in events:
-		var ev: Dictionary = ev_v
-		var set_name := String(ev.get("set", ""))
-		if set_name.is_empty():
+		var ev: SlotSoundRow = ev_v
+		if ev.soundset.is_empty():
 			continue
-		var slot := int(ev.get("slot", 0))
 		var key := ""
-		if slot == 43 or slot == 44:
-			key = "%d:%d" % [int(ev.get("handle", 0)), slot]
-		if audio.slot_soundset(set_name, ev.get("pos", Vector3.ZERO), key):
+		if ev.slot == 43 or ev.slot == 44:
+			key = "%d:%d" % [ev.handle, ev.slot]
+		if audio.slot_soundset(ev.soundset, ev.pos, key):
 			_stats.sounds += 1
 
 
@@ -217,32 +215,31 @@ func present_fires(events: Array) -> void:
 		return
 	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
 	for ev_v in events:
-		var ev: Dictionary = ev_v
+		var ev: FirePresentationEvent = ev_v
 		# The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
 		# spawns it on both fire arms, the local player's included [orig:
 		# WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
 		# ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
 		# both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
 		# group gate scopes it to the shooter's own draws.
-		if _muzzle_light.is_valid() and int(ev.get("mf_light", 0)) != 0:
-			var glow_pos: Vector3 = ev.get("origin", Vector3.ZERO)
-			if bool(ev.get("adm_arm", false)) and _muzzle_provider.is_valid():
+		if _muzzle_light.is_valid() and ev.mf_light != 0:
+			var glow_pos := ev.origin
+			if ev.adm_arm and _muzzle_provider.is_valid():
 				var glow_anchor: Vector3 = _muzzle_provider.call(
-						int(ev.get("shooter_handle", -1)),
-						String(ev.get("action_userpoint", "")))
+						ev.shooter_handle, ev.action_userpoint)
 				if glow_anchor.is_finite():
 					glow_pos = glow_anchor
-			_muzzle_light.call(int(ev.get("shooter_handle", -1)), glow_pos)
+			_muzzle_light.call(ev.shooter_handle, glow_pos)
 		# The local player's own fire is presented by the action-slot legs
 		# [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
 		# else's rides the ammo-def legs below. (The SOUND legs of every arm
 		# run in the sim now — world/fire_sound.h — and arrive through
 		# _drain_fire_sounds; this drain owns the EFFECT legs.)
-		if bool(ev.get("is_local_player", false)):
+		if ev.is_local_player:
 			continue
 		_stats.fires += 1
-		var origin: Vector3 = ev.get("origin", Vector3.ZERO)
-		var effect := String(ev.get("effect", ""))
+		var origin := ev.origin
+		var effect := ev.effect
 		# THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
 		# arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
 		# no ammo-def effect: it executes the ADDRESSED def's FIRE action row
@@ -253,8 +250,8 @@ func present_fires(events: Array) -> void:
 		# the shooter's face, roughly a metre behind the barrel.
 		# [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
 		#  the fire row @0x42f777 / @0x42f98f]
-		if bool(ev.get("adm_arm", false)):
-			effect = String(ev.get("action_effect", ""))
+		if ev.adm_arm:
+			effect = ev.action_effect
 			# The anchor: this shooter's held weapon, not the wire point — the
 			# rendered gun's own userpoint, which is what retail spawns at (the
 			# authority DECISION closing the S12a shadow seam: the rendered-node
@@ -266,15 +263,14 @@ func present_fires(events: Array) -> void:
 			var anchored := Vector3.INF
 			if _muzzle_provider.is_valid():
 				anchored = _muzzle_provider.call(
-						int(ev.get("shooter_handle", -1)),
-						String(ev.get("action_userpoint", "")))
+						ev.shooter_handle, ev.action_userpoint)
 			if anchored.is_finite():
 				origin = anchored
 		if fx != null and not effect.is_empty():
 			# The muzzle effect at the fire origin along the fire direction
 			# [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
 			# @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
-			fx.spawn_effect(effect, origin, ev.get("forward", Vector3.FORWARD))
+			fx.spawn_effect(effect, origin, ev.forward)
 			_stats.effects += 1
 
 
@@ -292,9 +288,8 @@ func present_fire_sounds(sounds: Array) -> void:
 	if audio == null:
 		return
 	for row_v in sounds:
-		var row: Dictionary = row_v
-		audio.fire_soundset(String(row.get("set", "")), row.get("pos", Vector3.ZERO),
-				int(row.get("source_bms_id", 0)))
+		var row: FireSoundRow = row_v
+		audio.fire_soundset(row.soundset, row.pos, row.source_bms_id)
 		_stats.sounds += 1
 
 

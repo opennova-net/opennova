@@ -418,9 +418,9 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "dialog", "a": 3},
-		{"kind": "text", "str": "Proceed to the beach"},
-		{"kind": "text", "str": ""},
+		MissionEffect.make("dialog", 3),
+		MissionEffect.make("text", 0, 0, 0, "Proceed to the beach"),
+		MissionEffect.make("text"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Proceed to the beach",
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
@@ -433,8 +433,8 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "text", "str": "Hold this position"},
-		{"kind": "debug_text", "str": "trigger 17 entered"},
+		MissionEffect.make("text", 0, 0, 0, "Hold this position"),
+		MissionEffect.make("debug_text", 0, 0, 0, "trigger 17 entered"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Hold this position",
 		"debug_text stays off the player-facing HUD mission-text channel")
@@ -449,7 +449,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
+		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
 	])
 	assert_string_contains(presenter.endround_banner_line(), "STRMISC_KILLEDGREEN",
 			"the lose banner resolves (or marks) the Misc gametext key")

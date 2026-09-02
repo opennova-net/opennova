@@ -68,21 +68,18 @@ func before_each() -> void:
 			func(_handle: int, _userpoint: String): return MUZZLE)
 
 
-# One event dict shaped like Simulation::drain_fire_presentation_events emits.
-func _event(adm_arm: bool) -> Dictionary:
-	return {
-		"origin": WIRE_EYE,
-		"forward": Vector3(0.0, 0.0, -1.0),
-		"shooter_handle": 0x0011,
-		"source_bms_id": 0,
-		"is_local_player": false,
-		"adm_arm": adm_arm,
-		"adm_index": 24,
-		"effect": "AMMO_EFFECT",
-		"action_effect": "EFFECT_M16MF",
-		"action_userpoint": "MFLASH01",
-		"mf_light": 0,
-	}
+# One event shaped like Simulation::drain_fire_presentation_events emits.
+func _event(adm_arm: bool) -> FirePresentationEvent:
+	var event := FirePresentationEvent.new()
+	event.origin = WIRE_EYE
+	event.forward = Vector3(0.0, 0.0, -1.0)
+	event.shooter_handle = 0x0011
+	event.adm_arm = adm_arm
+	event.adm_index = 24
+	event.effect = "AMMO_EFFECT"
+	event.action_effect = "EFFECT_M16MF"
+	event.action_userpoint = "MFLASH01"
+	return event
 
 
 func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
@@ -123,7 +120,7 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
 	var ev := _event(true)
-	ev["action_effect"] = ""
+	ev.action_effect = ""
 	_fire.present_fires([ev])
 	assert_eq(_fx.spawns.size(), 0, "an unauthored fire row spawns no effect")
 	assert_eq(_audio.played.size(), 0, "and this pass plays no sound of its own")
