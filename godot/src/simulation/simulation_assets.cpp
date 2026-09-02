@@ -3,7 +3,6 @@
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/simulation_internal.h"
 #include "simulation/debug_cards.h"
-#include "network/item_replication_catalog_adapter.h"
 
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
@@ -15,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 using namespace sim_internal;
 
@@ -69,7 +69,13 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	if (!item_replication_catalog_ ||
 			item_replication_catalog_db_.ptr() != p_item_db.ptr() ||
 			item_replication_catalog_revision_ != p_item_db->get_revision()) {
-		item_replication_catalog_ = build_item_replication_catalog(p_item_db);
+		// Built straight off the retained parse: the per-row walk keeps
+		// duplicate definition ids so the catalog can classify them as
+		// ambiguous and fail closed.
+		item_replication_catalog_ =
+				std::make_shared<const opennova::netsim::ItemReplicationCatalog>(
+						opennova::netsim::ItemReplicationCatalog::from_items_def(
+								p_item_db->native_items()));
 		item_replication_catalog_db_ = p_item_db;
 		item_replication_catalog_revision_ = p_item_db->get_revision();
 	}
