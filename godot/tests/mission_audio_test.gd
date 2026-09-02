@@ -52,22 +52,6 @@ func _players(container: Node) -> Array[AudioStreamPlayer3D]:
 	return out
 
 
-func _active_ids(container: Node) -> Array[int]:
-	var out: Array[int] = []
-	for player in _players(container):
-		if player.has_meta("ambient_candidate_id"):
-			out.append(int(player.get_meta("ambient_candidate_id")))
-	out.sort()
-	return out
-
-
-func _active_player(container: Node, candidate_id: int) -> AudioStreamPlayer3D:
-	for player in _players(container):
-		if int(player.get_meta("ambient_candidate_id", -1)) == candidate_id:
-			return player
-	return null
-
-
 func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
 	for player in _players(container):
 		if player.position.is_equal_approx(pos):
@@ -268,15 +252,15 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 	audio.set_markers(markers, holder)
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
-	var candidate_one_stream := _active_player(holder, 1).stream
+	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
+	var candidate_one_stream := audio.ambient_player_for_candidate(1).stream
 	var pool_ids: Array[int] = []
 	for player in _players(holder):
 		pool_ids.append(player.get_instance_id())
 	pool_ids.sort()
 
 	audio.tick(Vector3(1100, 0, 0), 0.2)
-	assert_eq(_active_ids(holder), [5, 6, 7, 8, 9, 10, 11, 12],
+	assert_eq(audio.active_ambient_candidate_ids(), [5, 6, 7, 8, 9, 10, 11, 12],
 		"the closest eight virtual candidates replace the four dropouts")
 	var moved_pool_ids: Array[int] = []
 	for player in _players(holder):
@@ -285,8 +269,8 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 	assert_eq(moved_pool_ids, pool_ids, "entrant replacement allocates no ninth channel")
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
-	assert_ne(_active_player(holder, 1).stream, candidate_one_stream,
+	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
+	assert_ne(audio.ambient_player_for_candidate(1).stream, candidate_one_stream,
 		"a dropped candidate restarts when it becomes an entrant again")
 	assert_eq(_players(holder).size(), 8)
 
@@ -424,7 +408,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	# tick 1 as its refresh time rather than being reborn at the final tick.
 	audio.advance_ticks(32)
 	audio.tick(Vector3.ZERO)
-	var expiring_ids := _active_ids(container)
+	var expiring_ids := audio.active_ambient_candidate_ids()
 	assert_eq(expiring_ids.size(), 1,
 		"the slot is serviced once on the tick its lifetime reaches zero")
 	var first_id := int(expiring_ids[0]) if expiring_ids.size() == 1 else -1
@@ -432,7 +416,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	# The next same-clock mix releases the zero-lifetime slot and its physical
 	# channel. Only then can a later lane reuse the float-packed identity.
 	audio.tick(Vector3.ZERO)
-	assert_null(_active_player(container, first_id))
+	assert_null(audio.ambient_player_for_candidate(first_id))
 
 	var replacement := idle.duplicate()
 	replacement["source_spawn_id"] = 88
@@ -441,7 +425,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	audio.apply_sound_emitters([replacement])
 	audio.advance_ticks(33)
 	audio.tick(Vector3.ZERO)
-	assert_not_null(_active_player(container, first_id),
+	assert_not_null(audio.ambient_player_for_candidate(first_id),
 		"retired dynamic IDs stay float-exact by recycling after channel release")
 
 	audio.teardown()
