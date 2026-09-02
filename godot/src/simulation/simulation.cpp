@@ -1207,19 +1207,20 @@ int Simulation::get_mission_variable(int index) const {
 	return kernel_ ? kernel_->world.vars.get_mission(index) : 0;
 }
 
-Dictionary Simulation::get_round_outcome_debug() const {
-	Dictionary out;
-	if (!kernel_) return out;
-	out["ended"] = kernel_->world.match.outcome().ended;
-	out["winner_team"] = kernel_->world.match.outcome().winner_team;
-	out["bluekills"] = kernel_->world.kill_stats.bluekills_by_player;
-	out["greenkills"] = kernel_->world.kill_stats.greenkills_by_player;
-	out["enemy_kills"] = kernel_->world.kill_stats.enemy_kills_by_player;
-	out["team_kills_by_others"] = kernel_->world.kill_stats.team_kills_by_others;
-	out["friendly_kills_by_others"] = kernel_->world.kill_stats.friendly_kills_by_others;
-	out["enemy_kills_by_others"] = kernel_->world.kill_stats.enemy_kills_by_others;
-	out["humans"] = kernel_->world.cached.humans;
-	out["mp_session"] = kernel_->world.mp_session;
+Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
+	if (!kernel_) return Ref<RoundOutcome>();
+	Ref<RoundOutcome> out;
+	out.instantiate();
+	out->set_ended(kernel_->world.match.outcome().ended);
+	out->set_winner_team(kernel_->world.match.outcome().winner_team);
+	out->set_bluekills(kernel_->world.kill_stats.bluekills_by_player);
+	out->set_greenkills(kernel_->world.kill_stats.greenkills_by_player);
+	out->set_enemy_kills(kernel_->world.kill_stats.enemy_kills_by_player);
+	out->set_team_kills_by_others(kernel_->world.kill_stats.team_kills_by_others);
+	out->set_friendly_kills_by_others(kernel_->world.kill_stats.friendly_kills_by_others);
+	out->set_enemy_kills_by_others(kernel_->world.kill_stats.enemy_kills_by_others);
+	out->set_humans(kernel_->world.cached.humans);
+	out->set_mp_session(kernel_->world.mp_session);
 	return out;
 }
 

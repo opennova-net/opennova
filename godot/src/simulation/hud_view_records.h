@@ -174,6 +174,34 @@ private:
 	END_ROUND_STATISTICS_FIELDS(HUD_VIEW_MEMBER)
 };
 
+// The sim-side end-of-round state plus the SP kill-stat buckets the epilog
+// score screen and the WAC bluekills/greenkills builtins read
+// (Simulation::get_round_outcome_debug; engine: runtime/world/ai.h).
+#define ROUND_OUTCOME_FIELDS(X)         \
+	X(bool, ended)                      \
+	X(int, winner_team)                 \
+	X(int, bluekills)                   \
+	X(int, greenkills)                  \
+	X(int, enemy_kills)                 \
+	X(int, team_kills_by_others)        \
+	X(int, friendly_kills_by_others)    \
+	X(int, enemy_kills_by_others)       \
+	X(int, humans)                      \
+	X(bool, mp_session)
+
+class RoundOutcome : public RefCounted {
+	GDCLASS(RoundOutcome, RefCounted)
+
+public:
+	ROUND_OUTCOME_FIELDS(HUD_VIEW_ACCESSORS)
+
+protected:
+	static void _bind_methods();
+
+private:
+	ROUND_OUTCOME_FIELDS(HUD_VIEW_MEMBER)
+};
+
 // One attach label (Simulation::get_attach_labels): a free seat or armory
 // point inside the 4.0 u gate — its mission-space position, the seat type
 // (the bound SEAT_* codes), the armory-zone flag, the nearest-candidate
