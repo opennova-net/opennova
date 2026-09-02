@@ -13,7 +13,7 @@ class MinimapWorldHarness:
 	extends GameWorld
 
 	func rebuild_minimap_water_mask_for_test() -> void:
-		_build_minimap_water_mask()
+		load_stages().build_minimap_water_mask()
 
 
 class MinimapPresenterHarness:

@@ -173,13 +173,14 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 
 
 func test_game_world_attaches_and_detaches_the_mission_shadow_source() -> void:
-	var source := _source("res://game/world/game_world.gd")
-	var placed := source.find("_mission_stats = _placer.place(mission, self, options)")
-	var attached := source.find("_terrain.set_static_shadow_placer(_placer)")
+	# The stage bodies live in the world's load-stages lane (world_load_stages.gd).
+	var source := _source("res://game/world/world_load_stages.gd")
+	var placed := source.find(".place(mission, _world, options)")
+	var attached := source.find("set_static_shadow_placer(_world")
 	assert_gt(attached, placed,
 		"Only successfully placed ObjectData/transform sources may enter the page collector.")
 	var unload := source.find("func unload() -> void:")
-	var detached := source.find("_terrain.set_static_shadow_placer(null)", unload)
+	var detached := source.find("set_static_shadow_placer(null)", unload)
 	var release := source.find("_placer = null", unload)
 	assert_gt(detached, unload)
 	assert_gt(release, detached,

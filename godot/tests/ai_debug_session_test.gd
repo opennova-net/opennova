@@ -30,19 +30,19 @@ func test_view_requests_apply_to_the_live_world() -> void:
 	add_child_autofree(world)
 	session.begin_world(world)
 
-	assert_false(world.is_ai_debug(), "the overlay starts off")
+	assert_false(world.debug_views().is_ai_debug(), "the overlay starts off")
 	dev_tools.ai_view_request.emit(&"overlay", true)
-	assert_true(world.is_ai_debug(), "the master toggle builds the view")
+	assert_true(world.debug_views().is_ai_debug(), "the master toggle builds the view")
 	assert_not_null(world.get_node_or_null("AiDebug"), "the view node exists")
 
 	dev_tools.ai_view_request.emit(&"routes", false)
-	assert_false(bool(world.get_ai_view_state().get("routes", true)),
+	assert_false(bool(world.debug_views().get_ai_view_state().get("routes", true)),
 			"an element toggle lands in the retained state")
-	assert_true(bool(world.get_ai_view_state().get("labels", false)),
+	assert_true(bool(world.debug_views().get_ai_view_state().get("labels", false)),
 			"the other elements keep their defaults")
 
 	dev_tools.ai_view_request.emit(&"overlay", false)
-	assert_false(world.is_ai_debug(), "the master toggle frees the view")
+	assert_false(world.debug_views().is_ai_debug(), "the master toggle frees the view")
 	assert_null(world.get_node_or_null("AiDebug"))
 	await get_tree().process_frame
 
@@ -77,7 +77,7 @@ func test_pick_session_owns_and_forwards_the_ai_session() -> void:
 	picks.begin_world(world)
 
 	dev_tools.ai_view_request.emit(&"overlay", true)
-	assert_true(world.is_ai_debug(),
+	assert_true(world.debug_views().is_ai_debug(),
 			"the pick session's owned AI session wired the new world")
 	dev_tools.ai_view_request.emit(&"overlay", false)
 	await get_tree().process_frame

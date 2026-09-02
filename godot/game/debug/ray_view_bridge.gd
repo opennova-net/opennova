@@ -26,5 +26,5 @@ func _process(_delta: float) -> void:
 		return
 	var toggle: int = tools.take_ray_view_toggle()
 	if toggle >= 0:
-		world.set_ray_debug(toggle == 1)
-	tools.set_ray_view_shown(world.is_ray_debug())
+		world.debug_views().set_ray_debug(toggle == 1)
+	tools.set_ray_view_shown(world.debug_views().is_ray_debug())

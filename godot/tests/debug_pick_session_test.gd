@@ -8,9 +8,10 @@ extends GutTest
 # catcher installs.
 
 
-## Typed world double: IS a GameWorld, recording the click-catcher policy.
-class PolicyWorld:
-	extends GameWorld
+## Typed world double: IS a GameWorld whose debug views record the
+## click-catcher policy (the session reaches them through debug_views()).
+class PolicyViews:
+	extends DebugViewSet
 	var enabled_calls: Array[bool] = []
 	var pick_lists: Array = []
 
@@ -19,6 +20,22 @@ class PolicyWorld:
 
 	func set_pick_debug(pick_list: DebugPickList) -> void:
 		pick_lists.append(pick_list)
+
+
+class PolicyWorld:
+	extends GameWorld
+	var views := PolicyViews.new()
+
+	var enabled_calls: Array[bool]:
+		get:
+			return views.enabled_calls
+
+	var pick_lists: Array:
+		get:
+			return views.pick_lists
+
+	func debug_views() -> DebugViewSet:
+		return views
 
 
 func _pick(handle: int) -> Dictionary:
