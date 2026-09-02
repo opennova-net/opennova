@@ -94,8 +94,6 @@ void Simulation::_bind_methods() {
 			&Simulation::weapon_render_fov_h_deg_default);
 	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_team_byte", "team"),
 			&Simulation::viewmodel_team_byte);
-	ClassDB::bind_static_method("Simulation", D_METHOD("predict_mount_seat", "seats", "command_id"),
-			&Simulation::predict_mount_seat);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
 			&Simulation::tick_dt);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),

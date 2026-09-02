@@ -791,10 +791,6 @@ public:
 	static float viewmodel_rig_yaw_deg();
 	static float weapon_render_fov_h_deg_default();
 	static int viewmodel_team_byte(int p_team);
-	// The MCP/probe mirror of the attach-command seat selection over a flat
-	// seat list [{type, occupied, ...}] (world/vehicle_attach.h
-	// predict_seat_selection): {command, seat_index, seat, candidates}.
-	static Dictionary predict_mount_seat(const Array &p_seats, int p_command_id);
 	// The waypoint-track snapshot for the HUD label: {show, count, current,
 	// number, name_id, position (Godot space), done}. current is -1 with no
 	// selection; number is the 1-based display index [orig: hudInfo+373 =

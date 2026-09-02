@@ -221,13 +221,12 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	assert_eq(lit.get_light_count(), 1)
 	assert_eq(lit.get_light_info(0).subobject, 2,
 			"the fixture attaches the record to subobject 2")
+	var lit_source := StaticEffectSource.new()
+	lit_source.object_data = lit
+	lit_source.world_transform = Transform3D(Basis.IDENTITY, Vector3(1.5, 0.0, 0.0))
 	var director := EffectLightDirector.new()
 	director.setup(world, func() -> Array:
-		return [{
-			"object_data": lit,
-			"world_transform": Transform3D(Basis.IDENTITY,
-					Vector3(1.5, 0.0, 0.0)),
-		}], Callable())
+		return [lit_source], Callable())
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"the static source spawns its subobject-attached record")
@@ -281,20 +280,20 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 	# the corona passes like retail's non-building owners.
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, {})
+			owners, null)
 	assert_eq(rows.size(), 3,
 			"an owner without an occlusion verdict passes the gate")
 	# The occlusion pass hides section 2: the owned corona disappears.
 	owner_model.set_section_visibility_mask(~(1 << 2))
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, {})
+			owners, null)
 	assert_eq(rows.size(), 0,
 			"a hidden owner section suppresses the owned corona")
 	owner_model.set_section_visibility_mask(1 << 2)
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, {})
+			owners, null)
 	assert_eq(rows.size(), 3,
 			"a visible owner section admits the owned corona")
 

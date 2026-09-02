@@ -19,6 +19,17 @@ const SYN_ARMRY_LGHT0_SUB1 := "res://../fixtures/threedi/synth/armory_lght0_sub1
 # The static walk runs against the synthetic models: shed.3di carries one
 # authored light record (style 24, atten 0..3 at (0, 1.25, 0)), house.3di
 # carries none (tests/fixtures/minimal_3di_gen.cpp).
+# The environment fog the corona walk folds to black: the same EnvLightValues
+# record the director hands the scene from the mission environment.
+func _fog_values(enabled: bool, type: int, start: float, end: float) -> EnvLightValues:
+	var values := EnvLightValues.new()
+	values.fog_enabled = enabled
+	values.fog_type = type
+	values.fog_start = start
+	values.fog_end = end
+	return values
+
+
 func _fixture_object_data(model: String) -> ObjectData:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
@@ -451,16 +462,16 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 	var no_models: Array[Node3D] = []
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), {})
+			PackedInt64Array(), null)
 	assert_eq(rows.size(), 3, "an enabled corona draws three segments")
 	if rows.size() == 3:
-		var first: Dictionary = rows[0]
+		var first: CoronaRow = rows[0]
 		# Segments march 0.1 x radius toward the camera; half-size radius/2.
-		assert_almost_eq(float(first.get("half_size")), 2.0, 0.001)
-		var pos: Vector3 = first.get("position")
+		assert_almost_eq(first.half_size, 2.0, 0.001)
+		var pos := first.position
 		assert_almost_eq(pos.z, 0.4, 0.02,
 				"the first segment steps 0.1 x radius toward the camera")
-		var color: Color = first.get("color")
+		var color := first.color
 		# White record color x 1/16 at full fade.
 		assert_almost_eq(color.r, 255.0 / 256.0 / 16.0, 0.002)
 	assert_gt(scene.spawn_model_light({
@@ -470,18 +481,17 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 	}), 0)
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), {})
+			PackedInt64Array(), null)
 	assert_eq(rows.size(), 3,
 			"the corona-disabled record adds nothing to the first light's three segments")
 	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
 	# past the fog end the corona color folds to black but the quads remain.
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(),
-			{"enabled": true, "type": 1, "start": 2.0, "end": 8.0})
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0))
 	assert_eq(rows.size(), 3)
 	if rows.size() == 3:
-		var fogged: Color = rows[0].get("color")
+		var fogged: Color = (rows[0] as CoronaRow).color
 		assert_almost_eq(fogged.r, 0.0, 0.0001,
 				"a corona past the fog end fades fully to black")
 
@@ -501,7 +511,7 @@ func test_fill_corona_multimesh_matches_the_row_seam() -> void:
 		"atten_end": 6.0,
 	}), 0)
 	var no_models: Array[Node3D] = []
-	var fog := {"enabled": true, "type": 1, "start": 2.0, "end": 40.0}
+	var fog := _fog_values(true, 1, 2.0, 40.0)
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
 			PackedInt64Array(), fog)
@@ -516,10 +526,10 @@ func test_fill_corona_multimesh_matches_the_row_seam() -> void:
 	var buffer := scene.get_last_corona_buffer()
 	assert_true(buffer.size() >= count * 16, "one 16-float record per row")
 	for i in range(count):
-		var row: Dictionary = rows[i]
-		var half := float(row.get("half_size"))
-		var center: Vector3 = row.get("position")
-		var color: Color = row.get("color")
+		var row: CoronaRow = rows[i]
+		var half := row.half_size
+		var center := row.position
+		var color := row.color
 		var base := i * 16
 		assert_almost_eq(buffer[base + 0], half, 0.000001)
 		assert_almost_eq(buffer[base + 5], half, 0.000001)

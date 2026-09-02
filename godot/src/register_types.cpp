@@ -347,6 +347,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectSpawnReceipt);
 	GDREGISTER_CLASS(EffectOwnerPoseBatch);
 	GDREGISTER_CLASS(EffectScene);
+	GDREGISTER_CLASS(CoronaRow);
 	GDREGISTER_CLASS(EffectLightRow);
 	GDREGISTER_CLASS(EffectLightReport);
 	GDREGISTER_CLASS(LightScene);
