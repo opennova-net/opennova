@@ -70,6 +70,7 @@
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
+#include "simulation/hud_view_records.h"
 #include "simulation/player_weapon_view.h"
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
@@ -207,6 +208,14 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerLocalView);
 	GDREGISTER_CLASS(PlayerAimOverlay);
 	GDREGISTER_CLASS(PlayerWeaponView);
+	GDREGISTER_CLASS(WaypointHudView);
+	GDREGISTER_CLASS(HudMapGridOrigin);
+	GDREGISTER_CLASS(VehiclePanelView);
+	GDREGISTER_CLASS(ScoreFeedback);
+	GDREGISTER_CLASS(ScoreboardHeader);
+	GDREGISTER_CLASS(EndRoundOverlay);
+	GDREGISTER_CLASS(EndRoundStatistics);
+	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(WeaponKitEntry);
 	GDREGISTER_CLASS(PlayerInventorySlot);

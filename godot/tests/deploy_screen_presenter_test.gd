@@ -498,9 +498,9 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	# lists the player (no status line, no hold), while the other-player kill
 	# opened the 120-second revive window -> the MEDIC pair shows, the
 	# RESPAWN/PSPRESPAWN pair stays hidden, the list title shows.
-	var status: Dictionary = pair.joiner.get_deploy_status()
-	assert_eq(int(status.get("queued_kind", -1)), 0, "no penalty or wave line")
-	assert_true(bool(status.get("show_medic", false)),
+	var status: DeployStatus = pair.joiner.get_deploy_status()
+	assert_eq(status.queued_kind, 0, "no penalty or wave line")
+	assert_true(status.show_medic,
 			"the open revive window shows the medic pair")
 	for control_name in ["STATIC_RESPAWN_MSG1", "STATIC_PSPRESPAWN_MSG1"]:
 		var id := driver.widget_id(control_name)

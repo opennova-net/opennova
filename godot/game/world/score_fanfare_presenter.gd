@@ -20,10 +20,10 @@ var _enabled: bool = int(ConfigStore.read(CONFIG_PATH, CONFIG_SECTION, CONFIG_KE
 func update(sim: Simulation, world: GameWorld) -> void:
 	if sim == null:
 		return
-	var feedback: Dictionary = sim.take_score_feedback()
-	if feedback.is_empty():
+	var feedback := sim.take_score_feedback()
+	if feedback == null:
 		return
-	var tone := String(feedback.get("tone", ""))
+	var tone := feedback.tone
 	if tone.is_empty() or not _enabled or world == null:
 		return
 	var audio: MissionAudio = world.get_mission_audio()

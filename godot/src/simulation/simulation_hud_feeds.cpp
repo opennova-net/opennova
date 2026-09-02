@@ -7,6 +7,7 @@
 // for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape).
 
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
@@ -19,16 +20,15 @@ using namespace sim_internal;
 
 namespace godot {
 
-Dictionary Simulation::get_vehicle_panel_view() const {
+Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	// The panel describes the vehicle the local player rides — the attached
 	// gun child re-roots to its parent vehicle, and every mount qualifies
 	// (world::vehicle_panel_root carries the witness). The shell joins the
 	// root's items.def sid to its VEHICLE_HUD block; the panel's only gate is
 	// the block's interface texture [orig: HUD_DrawVehicleHealthBars
 	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md].
-	Dictionary out;
-	out["shown"] = false;
-	out["item_id"] = 0;
+	Ref<VehiclePanelView> out;
+	out.instantiate();
 	if (!kernel_->world.cached.local_player.valid()) return out;
 	const opennova::world::Entity *local =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
@@ -38,8 +38,8 @@ Dictionary Simulation::get_vehicle_panel_view() const {
 	const opennova::world::Entity *root =
 			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
 	if (root == nullptr) return out;
-	out["shown"] = true;
-	out["item_id"] = root->item_id;
+	out->set_shown(true);
+	out->set_item_id(root->item_id);
 	return out;
 }
 
@@ -120,21 +120,22 @@ int64_t Simulation::get_session_game_type() const {
 	return runtime_ ? static_cast<int64_t>(runtime_->game_type()) : 0;
 }
 
-Dictionary Simulation::take_score_feedback() {
+Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	// Revision-edge over the replica fold's 0x81 landing: every role's view
 	// folds it (the host's own loopback included), so the edge is
 	// role-agnostic [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
 	// every client, the listen host's own included].
-	Dictionary out;
-	if (!runtime_) return out;
+	if (!runtime_) return Ref<ScoreFeedback>();
 	const opennova::netsim::ClientState &cs = runtime_->state();
-	if (cs.score_feedback.updates == score_feedback_updates_seen_) return out;
+	if (cs.score_feedback.updates == score_feedback_updates_seen_) return Ref<ScoreFeedback>();
 	score_feedback_updates_seen_ = cs.score_feedback.updates;
 	const opennova::hud::ScoreTone tone =
 			opennova::hud::score_delta_tone(cs.score_feedback.delta, cs.exp_fanfare);
-	out["score"] = cs.score_feedback.score;
-	out["delta"] = cs.score_feedback.delta;
-	out["tone"] = String(opennova::hud::score_tone_set_name(tone));
+	Ref<ScoreFeedback> out;
+	out.instantiate();
+	out->set_score(static_cast<int>(cs.score_feedback.score));
+	out->set_delta(static_cast<int>(cs.score_feedback.delta));
+	out->set_tone(String(opennova::hud::score_tone_set_name(tone)));
 	return out;
 }
 

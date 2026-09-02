@@ -5,6 +5,7 @@
 // (hud/end_round_overlay.h) and the stat.mnu RESULTLIST feed
 // (npruntime/stat_screen_feed.h).
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 #include "simulation/end_round_state.h"
 
 #include "rtxt/rtxt_string_file.h"
@@ -123,11 +124,12 @@ opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const 
 	return in;
 }
 
-Dictionary Simulation::get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const {
+Ref<EndRoundOverlay> Simulation::get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const {
 	// The resolved ladder: keys through the gametext Overlays table, the
 	// empty-resolve folds and the printf forms applied by the engine
 	// (hud::end_round_overlay_resolve), plus the design-space safe area.
-	Dictionary out;
+	Ref<EndRoundOverlay> out;
+	out.instantiate();
 	PackedStringArray texts;
 	PackedInt32Array ys;
 	if (runtime_ && runtime_->state().end_round.header_known) {
@@ -140,10 +142,10 @@ Dictionary Simulation::get_end_round_overlay(const Ref<RtxtStringFile> &p_gamete
 			ys.push_back(l.y);
 		}
 	}
-	out["texts"] = texts;
-	out["ys"] = ys;
-	out["top"] = opennova::hud::kEndRoundOverlayTop;
-	out["bottom"] = opennova::hud::kEndRoundOverlayBottom;
+	out->set_texts(texts);
+	out->set_ys(ys);
+	out->set_top(opennova::hud::kEndRoundOverlayTop);
+	out->set_bottom(opennova::hud::kEndRoundOverlayBottom);
 	return out;
 }
 
@@ -230,14 +232,13 @@ TypedArray<Dictionary> Simulation::get_end_round_rows(int p_tab) const {
 }
 
 
-Dictionary Simulation::get_end_round_statistics() const {
+Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	// The SP Show Score panel's counters — the 0xC846xx stat block
 	// (hud/end_round_statistics.h documents the rows). Host-world data only:
 	// the panel's toggle is settable only outside a session, and a joiner has
 	// no tally world. [orig: HUD_DrawEndRoundStatistics @0x5b7600 reads the
 	// block; the toggle gate @0x49bd29 — see net-re §5.68]
-	Dictionary out;
-	if (kernel_ == nullptr) return out;
+	if (kernel_ == nullptr) return Ref<EndRoundStatistics>();
 	const opennova::world::World &w = kernel_->world;
 	opennova::hud::EndRoundStatisticsInput in;
 	int32_t won = 0;
@@ -254,15 +255,17 @@ Dictionary Simulation::get_end_round_statistics() const {
 	// The raised box: the between-rounds gate with a team-1 win
 	// [orig: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b].
 	in.raised = w.match.outcome().ended && w.match.outcome().winner_team == 1;
-	out["raised"] = in.raised;
-	TypedArray<Dictionary> rows;
+	Ref<EndRoundStatistics> out;
+	out.instantiate();
+	out->set_raised(in.raised);
+	PackedStringArray label_keys;
+	PackedStringArray values;
 	for (const opennova::hud::EndRoundStatisticsRow &row :
 			opennova::hud::end_round_statistics_rows(in)) {
-		Dictionary d;
-		d["label_key"] = String::utf8(row.label_key);
-		d["value"] = String::utf8(row.value.c_str());
-		rows.push_back(d);
+		label_keys.push_back(String::utf8(row.label_key));
+		values.push_back(String::utf8(row.value.c_str()));
 	}
-	out["rows"] = rows;
+	out->set_label_keys(label_keys);
+	out->set_values(values);
 	return out;
 }

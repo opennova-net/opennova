@@ -25,11 +25,11 @@ func update(hud: HudOverlay, hud_pos: HudPos, item_db: ItemDatabase,
 		sim: Simulation, stance: int) -> void:
 	if hud == null:
 		return
-	var view: Dictionary = sim.get_vehicle_panel_view() if sim != null else {}
-	if not bool(view.get("shown", false)) or hud_pos == null or item_db == null:
+	var view: VehiclePanelView = sim.get_vehicle_panel_view() if sim != null else null
+	if view == null or not view.shown or hud_pos == null or item_db == null:
 		_hide(hud)
 		return
-	var sid := item_db.get_sid(int(view.get("item_id", 0)))
+	var sid := item_db.get_sid(view.item_id)
 	var block: Dictionary = hud_pos.get_vehicle_hud(sid) if not sid.is_empty() else {}
 	if block.is_empty():
 		# No authored block for this vehicle: retail draws no panel for it

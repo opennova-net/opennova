@@ -5,6 +5,7 @@
 // roster names) and the authority's own facts into them, and routes the
 // C2S 0x2E medic request the way the reload request already travels.
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 
 #include <net/npruntime/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
@@ -64,12 +65,11 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 	opennova::np::set_server_text(ctx_, std::move(text));
 }
 
-Dictionary Simulation::get_deploy_status() {
+Ref<DeployStatus> Simulation::get_deploy_status() {
 	// The DEATH screen's STATIC facts for THIS client [orig: the client
 	// globals UI_UpdateDeathScreenContent @0x5536a0 reads — dword_A85B5C /
 	// A85B60 / A85B68 from the 0x0A sub-block 0, word_A85BC0 + entity+538/548
 	// from the 0x6E fold].
-	Dictionary out;
 	int penalty = 0;
 	int revive = 0;
 	int hold = 0;
@@ -108,17 +108,19 @@ Dictionary Simulation::get_deploy_status() {
 	statics_in.local_mounted = kernel_->view.mount.control_seat;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
-	out["penalty_seconds"] = penalty;
-	out["revive_seconds"] = revive;
-	out["hold_seconds"] = hold;
-	out["queued_kind"] = static_cast<int>(line.kind);
-	out["queued_zone_index"] = line.zone_index;
-	out["queued_seconds"] = line.seconds;
-	out["queued_numbered"] = line.numbered;
-	out["show_psp_respawn"] = statics.psp_respawn;
-	out["show_medic"] = statics.medic;
-	out["medic_cooldown_ticks"] = kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
-	out["medic_request_serial"] = kernel_ ? kernel_->medic_request_serial : 0;
+	Ref<DeployStatus> out;
+	out.instantiate();
+	out->set_penalty_seconds(penalty);
+	out->set_revive_seconds(revive);
+	out->set_hold_seconds(hold);
+	out->set_queued_kind(static_cast<int>(line.kind));
+	out->set_queued_zone_index(static_cast<int>(line.zone_index));
+	out->set_queued_seconds(static_cast<int>(line.seconds));
+	out->set_queued_numbered(line.numbered);
+	out->set_show_psp_respawn(statics.psp_respawn);
+	out->set_show_medic(statics.medic);
+	out->set_medic_cooldown_ticks(kernel_ ? static_cast<int>(kernel_->medic_request_cooldown_ticks) : 0);
+	out->set_medic_request_serial(kernel_ ? static_cast<int>(kernel_->medic_request_serial) : 0);
 	return out;
 }
 
@@ -127,13 +129,12 @@ String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext)
 	// status line get_deploy_status computes, with the gametext strings
 	// resolved here (GameText_GetString("Overlays", "STROVER_PENALTYTIMER") /
 	// ("WPNames", "STRWPNAME%03d") @0x5536a0, their shipped fallbacks).
-	const Dictionary status = get_deploy_status();
+	const Ref<DeployStatus> status = get_deploy_status();
 	opennova::world::DeployStatusLine line;
-	line.kind = static_cast<opennova::world::DeployStatusLine::Kind>(
-			static_cast<int>(status.get("queued_kind", 0)));
-	line.seconds = static_cast<int>(status.get("queued_seconds", 0));
-	line.numbered = static_cast<bool>(status.get("queued_numbered", false));
-	line.zone_index = static_cast<int>(status.get("queued_zone_index", -1));
+	line.kind = static_cast<opennova::world::DeployStatusLine::Kind>(status->get_queued_kind());
+	line.seconds = status->get_queued_seconds();
+	line.numbered = status->get_queued_numbered();
+	line.zone_index = status->get_queued_zone_index();
 	auto game_text = [&p_gametext](const char *section, const String &key, const char *fallback) {
 		if (!p_gametext.is_null() && p_gametext->has_string_in_section(section, StringName(key)))
 			return p_gametext->get_string_in_section(section, StringName(key));

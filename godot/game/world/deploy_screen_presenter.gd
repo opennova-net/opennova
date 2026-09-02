@@ -336,13 +336,13 @@ func _hide_team_service_buttons() -> void:
 #    "<STROVER_MEDICTIMER>  <cFF4040><n>" and STROVER_CALLMEDIC formatted with
 #    the MedicReq binding's display string (KeyBinding_FormatDisplayString).
 func _apply_statics(sim: Simulation) -> void:
-	var status: Dictionary = sim.get_deploy_status()
+	var status := sim.get_deploy_status()
 	var title_id := _driver.widget_id("STATIC_LIST_TITLE")
 	if title_id >= 0:
 		_driver.set_widget_shown(title_id, true)
 	var respawn_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
 	if respawn_id >= 0:
-		var kind := int(status.get("queued_kind", 0))
+		var kind := status.queued_kind
 		_driver.set_widget_shown(respawn_id, kind != 0)
 		if kind != 0:
 			# The three sprintf arms are the engine's deploy_status_text
@@ -351,22 +351,22 @@ func _apply_statics(sim: Simulation) -> void:
 					sim.get_deploy_status_text(Strings.get_table(Strings.TABLE_GAMETEXT)))
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:
-		var show_psp := bool(status.get("show_psp_respawn", false))
+		var show_psp := status.show_psp_respawn
 		_driver.set_widget_shown(psp_id, show_psp)
 		if show_psp:
 			_driver.set_widget_text(psp_id, "%s  <cFF4040>%d" % [
 					_game_text(Strings.SECTION_OVERLAYS, "STROVER_PSPRESPAWN", "Spawn point available in"),
-					int(status.get("hold_seconds", 0))])
+					status.hold_seconds])
 	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
 	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
 	if medic_id >= 0 and call_id >= 0:
-		var show_medic := bool(status.get("show_medic", false))
+		var show_medic := status.show_medic
 		_driver.set_widget_shown(medic_id, show_medic)
 		_driver.set_widget_shown(call_id, show_medic)
 		if show_medic:
 			_driver.set_widget_text(medic_id, "%s  <cFF4040>%d" % [
 					_game_text(Strings.SECTION_OVERLAYS, "STROVER_MEDICTIMER", "Medic time remaining"),
-					int(status.get("revive_seconds", 0))])
+					status.revive_seconds])
 			var key_label: String = ControlsBindings.model().display_text_for_token("MedicReq")
 			var call_format := _game_text(Strings.SECTION_OVERLAYS, "STROVER_CALLMEDIC", "Press %s to call a medic")
 			_driver.set_widget_text(call_id,

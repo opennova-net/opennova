@@ -43,7 +43,7 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 	var sim: Simulation = world.get_sim()
 	if sim == null:
 		return
-	var board: Dictionary = sim.get_scoreboard()
+	var board := sim.get_scoreboard()
 	_pushed = true
 	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var strings := {
@@ -53,10 +53,10 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 		# [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
 		#  "!PgUp and PgDn to change pages") @0x424272]
 		"footer": "!PgUp and PgDn to change pages",
-		"server": str(board.get("server", "")),
-		"mission": str(board.get("mission", "")),
+		"server": board.server,
+		"mission": board.mission,
 	}
-	var game_type := int(board.get("game_type", 0))
+	var game_type := board.game_type
 	if table != null:
 		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST"):
 			strings["title"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST")
@@ -68,11 +68,11 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 		# "<label> <count>": the counts are engine-computed — the players
 		# count is netsim's witnessed rows-minus-spectators header arithmetic
 		# (scoreboard_header); this lane only pairs them with the strings.
-		var spectators := int(board.get("spectators", 0))
+		var spectators := board.spectators
 		if table.has_string_in_section("Client", "STRCLI04"):
 			strings["players"] = "%s %d" % [
 					table.get_string_in_section("Client", "STRCLI04"),
-					int(board.get("players", 0))]
+					board.players]
 		if spectators > 0 and table.has_string_in_section("Client", "STRCLI23"):
 			strings["spectators"] = "%s %d" % [
 					table.get_string_in_section("Client", "STRCLI23"), spectators]
