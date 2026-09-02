@@ -99,16 +99,16 @@ func _refresh_from_sim(sim: Simulation) -> void:
 ## Render one collision snapshot (Simulation.get_collision_debug's shape).
 ## Split from the sim fetch so tests and probes can drive the view with
 ## report data directly.
-func render_report(debug: Dictionary) -> void:
-	var instances: Array = debug.get("instances", [])
-	var probe_boxes: Array = debug.get("probe_boxes", [])
-	var player: Dictionary = debug.get("player", {})
+func render_report(debug: CollisionDebugReport) -> void:
+	if debug == null:
+		debug = CollisionDebugReport.new()
+	var instances := debug.instances
+	var probe_boxes := debug.probe_boxes
+	var player := debug.player
 	_drawable_count = _count_drawables(instances, player) + probe_boxes.size()
 	_update_hulls(instances, probe_boxes)
 	_update_player(player)
-	_update_hits(instances,
-			debug.get("hits", PackedFloat32Array()),
-			maxi(1, int(debug.get("hit_ttl", 62))))
+	_update_hits(instances, debug.hits, maxi(1, debug.hit_ttl))
 
 
 func _clear_all() -> void:
@@ -129,13 +129,11 @@ func get_debug_drawable_count() -> int:
 	return _drawable_count
 
 
-func _count_drawables(instances: Array, player: Dictionary) -> int:
-	var count := 1 if bool(player.get("valid", false)) else 0
-	for inst_v in instances:
-		var inst: Dictionary = inst_v
-		for vol_v in inst.get("volumes", []):
-			var vol: Dictionary = vol_v
-			if (vol.get("corners", PackedVector3Array()) as PackedVector3Array).size() == 8:
+func _count_drawables(instances: Array, player: CollisionDebugPlayer) -> int:
+	var count := 1 if player != null and player.valid else 0
+	for inst: CollisionDebugInstance in instances:
+		for vol: CollisionDebugVolume in inst.volumes:
+			if vol.corners.size() == 8:
 				count += 1
 	return count
 
@@ -147,14 +145,17 @@ func _update_hulls(instances: Array, probe_boxes: Array = []) -> void:
 	# geometry changed. Vehicles can rotate without translating, and mission
 	# reloads can reuse entity handles at the same pose with different hulls.
 	var sig_parts := []
-	for inst in instances:
-		sig_parts.append(inst.get("entity_handle", -1))
-		sig_parts.append(inst.get("pos", Vector3.ZERO))
-		sig_parts.append(inst.get("heading", 0.0))
-		sig_parts.append(hash(inst.get("volumes", [])))
-	for box in probe_boxes:
-		sig_parts.append(box.get("entity_handle", -1))
-		sig_parts.append(hash(box.get("corners", PackedVector3Array())))
+	for inst: CollisionDebugInstance in instances:
+		sig_parts.append(inst.entity_handle)
+		sig_parts.append(inst.pos)
+		sig_parts.append(inst.heading)
+		# Volumes are fresh records every cadence: key on their values.
+		for vol: CollisionDebugVolume in inst.volumes:
+			sig_parts.append(vol.type)
+			sig_parts.append(hash(vol.corners))
+	for box: CollisionProbeBox in probe_boxes:
+		sig_parts.append(box.entity_handle)
+		sig_parts.append(hash(box.corners))
 	var sig := hash(sig_parts)
 	var has_geometry := not instances.is_empty() or not probe_boxes.is_empty()
 	if sig == _hull_signature and _hull_has_surface == has_geometry:
@@ -163,23 +164,22 @@ func _update_hulls(instances: Array, probe_boxes: Array = []) -> void:
 	_hull_mesh.clear_surfaces()
 	_hull_has_surface = false
 	var segments: Array = []
-	for inst in instances:
-		for vol in inst.get("volumes", []):
-			var corners: PackedVector3Array = vol.get("corners", PackedVector3Array())
+	for inst: CollisionDebugInstance in instances:
+		for vol: CollisionDebugVolume in inst.volumes:
+			var corners := vol.corners
 			if corners.size() != 8:
 				continue
-			var color: Color = type_color(int(vol.get("type", 0)))
+			var color: Color = type_color(vol.type)
 			for edge in BOX_EDGES:
 				segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": color })
 	# The vehicle platform probe boxes — where the solver rests wheels, not a
 	# BVOL family; drawn in their own colors so a floating hull reads at a
 	# glance (probe pair magenta, ground footprint dimmed).
-	for box in probe_boxes:
-		var corners: PackedVector3Array = box.get("corners", PackedVector3Array())
+	for box: CollisionProbeBox in probe_boxes:
+		var corners := box.corners
 		if corners.size() != 8:
 			continue
-		var color := COLOR_PROBE_FOOTPRINT \
-				if String(box.get("kind", "")) == "footprint" else COLOR_PROBE_BOX
+		var color := COLOR_PROBE_FOOTPRINT if box.kind == "footprint" else COLOR_PROBE_BOX
 		for edge in BOX_EDGES:
 			segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": color })
 	if segments.is_empty():
@@ -206,11 +206,10 @@ func _update_hits(instances: Array, hits: PackedFloat32Array, ttl: int) -> void:
 		return
 	# Box corners by target handle, from the same report the hulls drew.
 	var boxes_by_handle := {}
-	for inst_v in instances:
-		var inst: Dictionary = inst_v
-		var handle := int(inst.get("entity_handle", -1))
+	for inst: CollisionDebugInstance in instances:
+		var handle := inst.entity_handle
 		if handle >= 0:
-			boxes_by_handle[handle] = inst.get("volumes", [])
+			boxes_by_handle[handle] = inst.volumes
 	var segments: Array = []
 	var count := hits.size() / HIT_STRIDE
 	for i in range(count):
@@ -224,9 +223,8 @@ func _update_hits(instances: Array, hits: PackedFloat32Array, ttl: int) -> void:
 		var alpha := maxf(HIT_MIN_ALPHA, 1.0 - age / float(ttl))
 		var faded := Color(color, alpha)
 		_cross(segments, at, 0.25, faded)
-		for vol_v in boxes_by_handle.get(target, []):
-			var vol: Dictionary = vol_v
-			var corners: PackedVector3Array = vol.get("corners", PackedVector3Array())
+		for vol: CollisionDebugVolume in boxes_by_handle.get(target, []):
+			var corners := vol.corners
 			if corners.size() != 8:
 				continue
 			for edge in BOX_EDGES:
@@ -237,18 +235,18 @@ func _update_hits(instances: Array, hits: PackedFloat32Array, ttl: int) -> void:
 
 # --- The local player's capsule ------------------------------------------------
 
-func _update_player(player: Dictionary) -> void:
+func _update_player(player: CollisionDebugPlayer) -> void:
 	_player_mesh.clear_surfaces()
-	if not bool(player.get("valid", false)):
+	if player == null or not player.valid:
 		if _gap_label != null:
 			_gap_label.visible = false
 		return
-	var pos: Vector3 = player.get("position", Vector3.ZERO)
-	var bottom := float(player.get("capsule_bottom", 0.0))
-	var top := float(player.get("capsule_top", 0.0))
-	var gap := float(player.get("foot_clearance", 0.0))
-	var points: PackedVector3Array = player.get("points", PackedVector3Array())
-	var radii: PackedFloat32Array = player.get("radii", PackedFloat32Array())
+	var pos := player.position
+	var bottom := player.capsule_bottom
+	var top := player.capsule_top
+	var gap := player.foot_clearance
+	var points := player.points
+	var radii := player.radii
 
 	var segments: Array = []
 	# The 3 resolver test points (head / eye stand-in / feet): a cross at each,

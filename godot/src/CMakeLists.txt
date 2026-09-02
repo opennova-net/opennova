@@ -124,6 +124,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_weapon_event.cpp
     simulation/ai_debug_report.cpp
     simulation/destruction_events.cpp
+    simulation/collision_debug_report.cpp
     simulation/hitbox_debug_report.cpp
     simulation/occlusion_portal_report.cpp
     simulation/ray_debug_report.cpp

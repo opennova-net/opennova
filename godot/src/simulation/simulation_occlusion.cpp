@@ -2,6 +2,7 @@
 // occlusion) and the world debug views (collision/hitbox/round/occlusion
 // dictionaries + debug round spawn).
 #include "simulation/simulation_internal.h"
+#include "simulation/collision_debug_report.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/occlusion_portal_report.h"
 #include "simulation/ray_debug_report.h"
@@ -684,13 +685,9 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	return out;
 }
 
-Dictionary Simulation::get_collision_debug() const {
-	Dictionary out;
-	Array instances;
-	Dictionary player;
-	player["valid"] = false;
-	out["instances"] = instances;
-	out["player"] = player;
+Ref<CollisionDebugReport> Simulation::get_collision_debug() const {
+	Ref<CollisionDebugReport> out;
+	out.instantiate();
 	if (!kernel_) return out;
 
 	// Anchor the sweep on the local player when one is spawned (150u box, the
@@ -711,30 +708,30 @@ Dictionary Simulation::get_collision_debug() const {
 	    kernel_->collision_instances(lp != nullptr ? lp->position : opennova::world::Vec3{},
 	                                 lp != nullptr ? 150.0f : -1.0f, 128);
 	for (const opennova::world::CollisionWorld::DebugInstance &inst : insts) {
-		Dictionary d;
-		d["entity_handle"] = static_cast<int>(inst.handle.packed);
-		d["pos"] = godot_from_fixed3(inst.pos);
-		d["heading"] = static_cast<float>(
-		    opennova::world::mission_yaw_deg_from_bam_heading(inst.heading_bam));
-		Array vols;
+		Ref<CollisionDebugInstance> d;
+		d.instantiate();
+		d->set_entity_handle(static_cast<int>(inst.handle.packed));
+		d->set_pos(godot_from_fixed3(inst.pos));
+		d->set_heading(static_cast<float>(
+		    opennova::world::mission_yaw_deg_from_bam_heading(inst.heading_bam)));
 		for (const opennova::world::CollisionWorld::DebugVolume &v : inst.volumes) {
-			Dictionary vd;
-			vd["type"] = v.type;
-			vd["min_x"] = static_cast<float>(v.min[0] / kFixed16);
-			vd["max_x"] = static_cast<float>(v.max[0] / kFixed16);
-			vd["min_y"] = static_cast<float>(v.min[1] / kFixed16);
-			vd["max_y"] = static_cast<float>(v.max[1] / kFixed16);
-			vd["min_z"] = static_cast<float>(v.min[2] / kFixed16);
-			vd["max_z"] = static_cast<float>(v.max[2] / kFixed16);
+			Ref<CollisionDebugVolume> vd;
+			vd.instantiate();
+			vd->set_type(v.type);
+			vd->set_min_x(static_cast<float>(v.min[0] / kFixed16));
+			vd->set_max_x(static_cast<float>(v.max[0] / kFixed16));
+			vd->set_min_y(static_cast<float>(v.min[1] / kFixed16));
+			vd->set_max_y(static_cast<float>(v.max[1] / kFixed16));
+			vd->set_min_z(static_cast<float>(v.min[2] / kFixed16));
+			vd->set_max_z(static_cast<float>(v.max[2] / kFixed16));
 			PackedVector3Array corners;
 			corners.resize(8);
 			Vector3 *cw = corners.ptrw();
 			for (int c = 0; c < 8; ++c) cw[c] = godot_from_fixed3(v.corners[c]);
-			vd["corners"] = corners;
-			vols.push_back(vd);
+			vd->set_corners(corners);
+			d->add_volume(vd);
 		}
-		d["volumes"] = vols;
-		instances.push_back(d);
+		out->add_instance(d);
 	}
 
 	// The D-VEH-1 platform probe boxes (threedi_3di3_collision_probe_boxes ->
@@ -743,8 +740,6 @@ Dictionary Simulation::get_collision_debug() const {
 	// never enter the BVOL volume table above, so the collision view draws
 	// them from this dedicated list, posed by the vehicle's live full-Euler
 	// placement — the same matrix family every collision query uses.
-	Array probe_boxes;
-	out["probe_boxes"] = probe_boxes;
 	{
 		const size_t cap = kernel_->world.registry.pool_capacity(1);
 		for (size_t s = 0; s < cap; ++s) {
@@ -773,9 +768,10 @@ Dictionary Simulation::get_collision_debug() const {
 			const auto emit_box = [&](const char *kind, int32_t x_lo,
 			                          int32_t x_hi, int32_t y_lo, int32_t y_hi,
 			                          int32_t z_lo, int32_t z_hi) {
-				Dictionary bd;
-				bd["entity_handle"] = static_cast<int>(e->handle.packed);
-				bd["kind"] = kind;
+				Ref<CollisionProbeBox> bd;
+				bd.instantiate();
+				bd->set_entity_handle(static_cast<int>(e->handle.packed));
+				bd->set_kind(kind);
 				PackedVector3Array corners;
 				corners.resize(8);
 				Vector3 *cw = corners.ptrw();
@@ -788,8 +784,8 @@ Dictionary Simulation::get_collision_debug() const {
 							m.transform_point(local, world_pt);
 							cw[c++] = godot_from_fixed3(world_pt);
 						}
-				bd["corners"] = corners;
-				probe_boxes.push_back(bd);
+				bd->set_corners(corners);
+				out->add_probe_box(bd);
 			};
 			emit_box("probe", traits->box_x_lo, traits->box_x_hi,
 			         traits->box_y_lo, traits->box_y_hi, traits->box_z_lo,
@@ -807,8 +803,9 @@ Dictionary Simulation::get_collision_debug() const {
 	const opennova::world::CollisionWorld::LocalResolveDebug &lrd =
 	    kernel_->collision.local_resolve_debug;
 	if (lrd.valid) {
-		player["valid"] = true;
-		player["position"] = godot_from_fixed3(lrd.pos);
+		const Ref<CollisionDebugPlayer> player = out->get_player();
+		player->set_valid(true);
+		player->set_position(godot_from_fixed3(lrd.pos));
 		PackedVector3Array pts;
 		pts.resize(3);
 		Vector3 *pw = pts.ptrw();
@@ -819,11 +816,11 @@ Dictionary Simulation::get_collision_debug() const {
 			pw[i] = godot_from_fixed3(lrd.points[i]);
 			rw[i] = static_cast<float>(lrd.radii[i] / kFixed16);
 		}
-		player["points"] = pts;
-		player["radii"] = radii;
-		player["capsule_bottom"] = static_cast<float>(lrd.capsule_bottom / kFixed16);
-		player["capsule_top"] = static_cast<float>(lrd.capsule_top / kFixed16);
-		player["foot_clearance"] = static_cast<float>(lrd.foot_clearance / kFixed16);
+		player->set_points(pts);
+		player->set_radii(radii);
+		player->set_capsule_bottom(static_cast<float>(lrd.capsule_bottom / kFixed16));
+		player->set_capsule_top(static_cast<float>(lrd.capsule_top / kFixed16));
+		player->set_foot_clearance(static_cast<float>(lrd.foot_clearance / kFixed16));
 	}
 
 	// The contact-debug hits channel the overlay flashes boxes from: stride-6
@@ -833,9 +830,9 @@ Dictionary Simulation::get_collision_debug() const {
 		using CW = opennova::world::CollisionWorld;
 		const CW &collision = kernel_->collision;
 		const uint32_t now = kernel_->world.logic_tick;
-		out["tick"] = static_cast<int64_t>(now);
-		out["hit_stride"] = 6;
-		out["hit_ttl"] = static_cast<int64_t>(CW::kContactDebugTtlTicks);
+		static_assert(CollisionDebugReport::kHitStride == 6, "the overlay reads stride-6 hits");
+		out->set_tick(static_cast<int64_t>(now));
+		out->set_hit_ttl(static_cast<int64_t>(CW::kContactDebugTtlTicks));
 		PackedFloat32Array hits;
 		const CW::ContactDebugRing &ring = collision.contact_debug_ring();
 		if (ring.count > 0) {
@@ -859,7 +856,7 @@ Dictionary Simulation::get_collision_debug() const {
 				hits.push_back(pg.z);
 			}
 		}
-		out["hits"] = hits;
+		out->set_hits(hits);
 	}
 	return out;
 }
