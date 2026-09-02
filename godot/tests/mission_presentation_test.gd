@@ -120,7 +120,7 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([1419, 1419, 0])),
 			"the joiner prewarm installs from streamed wire type ids")
-	assert_eq(int(sim.debug_native_pose_stats()["mounted_graphic_sources"]), 1,
+	assert_eq(sim.debug_native_pose_stats().mounted_graphic_sources, 1,
 			"duplicate/zero type ids collapse to the one resolved model source")
 	# The metadata the install extracted, via the tooling card over the same
 	# native extractor (ItemDatabase.extract_seat_specs_for_item).

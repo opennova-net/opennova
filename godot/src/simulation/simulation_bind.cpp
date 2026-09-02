@@ -8,6 +8,7 @@
 #include "simulation/ai_debug_report.h" // the F3 AI overlay payload
 #include "simulation/collision_debug_report.h" // the F3 collision overlay payload
 #include "simulation/debug_pick_card.h" // the F3 entity picker card
+#include "simulation/debug_cards.h" // the WAC / pose-health / destruction cards
 #include "simulation/hitbox_debug_report.h" // the F3 hitbox view payload
 #include "simulation/occlusion_portal_report.h" // the F3 occlusion view payload
 #include "simulation/ray_debug_report.h" // the F3 rays view channel

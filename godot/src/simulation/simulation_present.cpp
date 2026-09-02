@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/destruction_events.h"
+#include "simulation/debug_cards.h"
 #include "env/env_axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
@@ -569,48 +570,49 @@ Array Simulation::get_death_pieces() const {
 
 // Per-entity destruction diagnostics (probe/F3 seam): the gate inputs the
 // damage chain reads, resolved by bms_id. {} = no such entity.
-Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
-	Dictionary out;
+Ref<DestructionDebugCard> Simulation::get_destruction_debug(int p_bms_id) const {
+	Ref<DestructionDebugCard> out;
+	out.instantiate();
 	if (!kernel_) return out;
 	const opennova::world::Entity *found = nullptr;
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (found == nullptr && e.bms_id == p_bms_id) found = &e;
 	});
 	if (found == nullptr) return out;
-	out["bms_id"] = found->bms_id;
-	out["net_id"] = static_cast<int>(found->net_id);
-	out["kind"] = static_cast<int>(found->kind);
-	out["pool"] = found->handle.pool();
-	out["item_id"] = found->item_id;
-	out["health"] = found->health;
-	out["health_max"] = found->health_max;
-	out["alive"] = found->alive;
-	out["bound_radius"] = found->bound_radius;
-	out["engine_flags"] = static_cast<int64_t>(found->engine_flags);
-	out["is_ai_capable"] = found->is_ai_capable;
-	out["has_collision_instance"] =
-			kernel_->collision.has_instance(kernel_->world, found->handle);
+	out->set_found(true);
+	out->set_bms_id(found->bms_id);
+	out->set_net_id(static_cast<int>(found->net_id));
+	out->set_kind(static_cast<int>(found->kind));
+	out->set_pool(found->handle.pool());
+	out->set_item_id(found->item_id);
+	out->set_health(static_cast<int>(found->health));
+	out->set_health_max(static_cast<int>(found->health_max));
+	out->set_alive(found->alive);
+	out->set_bound_radius(static_cast<float>(found->bound_radius));
+	out->set_engine_flags(static_cast<int64_t>(found->engine_flags));
+	out->set_is_ai_capable(found->is_ai_capable);
+	out->set_has_collision_instance(
+			kernel_->collision.has_instance(kernel_->world, found->handle));
 	const opennova::world::ItemDeathTraits *t =
 			kernel_->world.item_death_traits.get(found->item_id);
-	out["has_death_traits"] = t != nullptr;
+	out->set_has_death_traits(t != nullptr);
 	if (t != nullptr) {
-		out["armor_impact"] = t->armor_impact;
-		out["armor_blast"] = t->armor_blast;
-		out["unit_type"] = t->unit_type;
-		out["kz"] = t->kz;
-		out["has_husk"] = t->has_husk;
-		out["husk_model_loaded"] = t->husk_model_loaded;
+		out->set_armor_impact(static_cast<int>(t->armor_impact));
+		out->set_armor_blast(static_cast<int>(t->armor_blast));
+		out->set_unit_type(static_cast<int>(t->unit_type));
+		out->set_kz(static_cast<int>(t->kz));
+		out->set_has_husk(t->has_husk);
+		out->set_husk_model_loaded(t->husk_model_loaded);
 		PackedVector3Array kz_points;
 		for (const opennova::world::Vec3 &point : t->kz_points)
 			kz_points.push_back(Vector3(point.x, point.y, point.z));
-		out["kz_point_count"] = static_cast<int64_t>(t->kz_points.size());
-		out["kz_points"] = kz_points;
+		out->set_kz_point_count(static_cast<int>(t->kz_points.size()));
+		out->set_kz_points(kz_points);
 		PackedVector3Array bridge_dead_points;
 		for (const opennova::world::Vec3 &point : t->bridge_dead_points)
 			bridge_dead_points.push_back(Vector3(point.x, point.y, point.z));
-		out["bridge_dead_point_count"] =
-				static_cast<int64_t>(t->bridge_dead_points.size());
-		out["bridge_dead_points"] = bridge_dead_points;
+		out->set_bridge_dead_point_count(static_cast<int>(t->bridge_dead_points.size()));
+		out->set_bridge_dead_points(bridge_dead_points);
 		PackedVector3Array glass_positions;
 		PackedVector3Array glass_directions;
 		for (const opennova::world::GlassPointTrait &point : t->glass_points) {
@@ -619,12 +621,11 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 			glass_directions.push_back(Vector3(
 					point.local_dir.x, point.local_dir.y, point.local_dir.z));
 		}
-		out["glass_point_count"] =
-				static_cast<int64_t>(t->glass_points.size());
-		out["glass_point_positions"] = glass_positions;
-		out["glass_point_directions"] = glass_directions;
+		out->set_glass_point_count(static_cast<int>(t->glass_points.size()));
+		out->set_glass_point_positions(glass_positions);
+		out->set_glass_point_directions(glass_directions);
 	}
-	out["pos"] = mission_to_godot(found->position);
+	out->set_pos(mission_to_godot(found->position));
 	return out;
 }
 

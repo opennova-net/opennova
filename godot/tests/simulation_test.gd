@@ -3119,7 +3119,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
-	assert_eq(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 1,
+	assert_eq(sim.debug_native_pose_stats().mounted_graphic_sources, 1,
 			"the fixture model resolves as the one mounted-pose source")
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
@@ -4197,11 +4197,11 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	_native_asset_root(sim, husk_dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var debug := sim.get_destruction_debug(bms_id)
-	assert_true(bool(debug.get("husk_model_loaded", false)),
+	assert_true(debug.husk_model_loaded,
 			"a successfully opened first husk supplies the retail live-model gate")
-	assert_eq(int(debug.get("kz_point_count", -1)), expected.size(),
+	assert_eq(debug.kz_point_count, expected.size(),
 			"all first-husk KZ points reach the destruction traits")
-	var actual: PackedVector3Array = debug.get("kz_points", PackedVector3Array())
+	var actual: PackedVector3Array = debug.kz_points
 	assert_eq(actual.size(), expected.size())
 	for point_index in range(mini(actual.size(), expected.size())):
 		assert_eq(actual[point_index], expected[point_index],
@@ -4233,9 +4233,8 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	_native_asset_root(dead_sim, dead_dir)
 	assert_eq(dead_sim.resolve_collision_instances(item_db), 1)
 	var dead_debug := dead_sim.get_destruction_debug(bms_id)
-	assert_eq(int(dead_debug.get("bridge_dead_point_count", -1)), 1)
-	var actual_dead: PackedVector3Array = dead_debug.get(
-			"bridge_dead_points", PackedVector3Array())
+	assert_eq(dead_debug.bridge_dead_point_count, 1)
+	var actual_dead: PackedVector3Array = dead_debug.bridge_dead_points
 	assert_eq(actual_dead, expected_dead,
 			"the first-husk DEAD bank preserves retail mission-local axes")
 	dead_sim.free()
@@ -4283,9 +4282,9 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	assert_eq(final_only_sim.resolve_collision_instances(final_only_db), 1)
 	var final_only_debug := final_only_sim.get_destruction_debug(
 			int(final_only_placed.get("bms_id", 0)))
-	assert_true(bool(final_only_debug.get("husk_model_loaded", false)),
+	assert_true(final_only_debug.husk_model_loaded,
 			"a successfully opened final-only husk also supplies the retail gate")
-	assert_eq(int(final_only_debug.get("kz_point_count", -1)), 0,
+	assert_eq(final_only_debug.kz_point_count, 0,
 			"huskFinal alone does not replace retail's first-stage KZ source")
 	final_only_sim.free()
 
@@ -4300,9 +4299,9 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	_native_asset_root(missing_sim, missing_dir)
 	assert_eq(missing_sim.resolve_collision_instances(item_db), 1)
 	var missing_debug := missing_sim.get_destruction_debug(bms_id)
-	assert_true(bool(missing_debug.get("has_husk", false)),
+	assert_true(missing_debug.has_husk,
 			"items.def still records the authored husk name")
-	assert_false(bool(missing_debug.get("husk_model_loaded", true)),
+	assert_false(missing_debug.husk_model_loaded,
 			"missing/corrupt husk assets leave the retail live-model gate clear")
 	missing_sim.free()
 
@@ -4350,11 +4349,9 @@ end
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var debug := sim.get_destruction_debug(int(placed.get("bms_id", 0)))
-	assert_eq(int(debug.get("glass_point_count", -1)), 1)
-	var positions: PackedVector3Array = debug.get(
-			"glass_point_positions", PackedVector3Array())
-	var directions: PackedVector3Array = debug.get(
-			"glass_point_directions", PackedVector3Array())
+	assert_eq(debug.glass_point_count, 1)
+	var positions: PackedVector3Array = debug.glass_point_positions
+	var directions: PackedVector3Array = debug.glass_point_directions
 	assert_eq(positions, PackedVector3Array([expected_pos]),
 			"the GLASS1/GLASS mapping preserves mission-local point axes")
 	assert_eq(directions, PackedVector3Array([expected_dir]),
@@ -4382,7 +4379,7 @@ end
 	assert_eq(wrong_sim.resolve_collision_instances(wrong_db), 1)
 	var wrong_debug := wrong_sim.get_destruction_debug(
 			int(wrong_placed.get("bms_id", 0)))
-	assert_eq(int(wrong_debug.get("glass_point_count", -1)), 0,
+	assert_eq(wrong_debug.glass_point_count, 0,
 			"retail's model table is an exact case-insensitive match")
 	wrong_sim.free()
 
@@ -5025,8 +5022,7 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 			"the local avatar never renders posed or fallback hitboxes")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
-			"has_collision_instance", false)),
+	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
 			"the hidden local avatar was nevertheless attached on demand")
 	sim.free()
 
@@ -5116,8 +5112,7 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 			"the newly resolved local avatar remains hidden from F3")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
-			"has_collision_instance", false)),
+	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
 			"the old negative attempt cannot suppress the new slot identity")
 	sim.free()
 
@@ -5155,21 +5150,20 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	assert_true(bool(sim.get_destruction_debug(
-			bms_id).get("has_collision_instance", false)))
+	assert_true(sim.get_destruction_debug(
+			bms_id).has_collision_instance)
 	for _tick in 16:
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true((sim.get_hitbox_debug().organics as Array).is_empty())
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
-			"has_collision_instance", false)),
+	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
 			"the replacement local occupant receives the cached graphic")
 
 	sim.reset_session()
 	var restored := sim.get_destruction_debug(bms_id)
-	assert_true(bool(restored.get("has_collision_instance", false)),
+	assert_true(restored.has_collision_instance,
 			"restart rebinds the baseline before any F3 or round demand query")
 	var restored_rows: Array = sim.get_hitbox_debug().organics
 	assert_eq(restored_rows.size(), 19,
