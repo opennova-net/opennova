@@ -168,9 +168,9 @@ func _present_move_effect(key: int, effect: String,
 	var owner_key := _move_effect_owner_key(key)
 	_anchors.register_effect_anchor(owner_key, func() -> Variant:
 		return _move_effect_transforms.get(key) if _move_effects.has(key) else null)
-	var receipt: Dictionary = fx.spawn_effect_owned_request(
+	var receipt := fx.spawn_effect_owned_request(
 			owner_key, effect, transform.origin, transform.basis.z)
-	if not bool(receipt.get("spawned", false)):
+	if not receipt.spawned:
 		_anchors.unregister_effect_anchor(owner_key)
 		_move_effect_transforms.erase(key)
 		fx.release_effect_binding(owner_key)
@@ -178,7 +178,7 @@ func _present_move_effect(key: int, effect: String,
 	_move_effects[key] = {
 		"effect": effect,
 		"owner_key": owner_key,
-		"group_id": int(receipt.get("group_id", 0)),
+		"group_id": receipt.group_id,
 	}
 
 

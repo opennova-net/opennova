@@ -287,22 +287,16 @@ func _seed_owner_pose(owner_token: int, transform: Transform3D) -> void:
 	}])
 
 
-func _disabled_receipt() -> Dictionary:
-	return {
-		"status": -1,
-		"status_name": "particles_disabled",
-		"effect_handle": 0,
-		"group_id": 0,
-		"replaced_group_id": 0,
-		"spawned": false,
-		"accepted": false,
-	}
+func _disabled_receipt() -> EffectSpawnReceipt:
+	var receipt := EffectSpawnReceipt.new()
+	receipt.status_name = "particles_disabled"
+	return receipt
 
 
 ## Deep spawn seam. Admission, binding, and render domain are explicit values;
 ## arbitrary slot_key/owner_key Variants are interned to stable native tokens.
 func spawn_effect_request(name: String, transform: Transform3D,
-		options: Dictionary = {}) -> Dictionary:
+		options: Dictionary = {}) -> EffectSpawnReceipt:
 	if _particles_disabled:
 		return _disabled_receipt()
 	var handle := intern_effect(name)
@@ -325,27 +319,24 @@ func spawn_effect_request(name: String, transform: Transform3D,
 		seed_owner_after_spawn = admission == ADMISSION_REPLACE_OWNED
 		if not seed_owner_after_spawn:
 			_seed_owner_pose(owner_token, owner_transform)
-	var request := {
-		"effect_handle": handle,
-		"transform": transform,
-		"admission": admission,
-		"binding": binding,
-		"render_domain": int(options.get("render_domain", RENDER_DOMAIN_WORLD)),
-		"slot_token": slot_token,
-		"owner_token": owner_token,
-		"owner_relative_transform": options.get(
-				"owner_relative_transform", Transform3D.IDENTITY),
-		"initial_age_ticks": int(options.get("initial_age_ticks", 0)),
-		"source_tick": int(options.get("source_tick", 0)),
-		"source_order": int(options.get("source_order", 0)),
-		"color_tint": options.get("color_tint", Vector3.ONE),
-		"spring_const": float(options.get("spring_const", 0.0)),
-		"lod_divisor": int(options.get("lod_divisor", 1)),
-		"kill_plane": int(options.get("kill_plane", KILL_PLANE_DISABLED)),
-		"kill_plane_y": float(options.get("kill_plane_y", _water_height)),
-	}
-	var receipt: Dictionary = _scene.spawn(request)
-	if seed_owner_after_spawn and bool(receipt.get("spawned", false)):
+	var request := EffectSpawnRequest.make(handle, transform)
+	request.admission = admission
+	request.binding = binding
+	request.render_domain = int(options.get("render_domain", RENDER_DOMAIN_WORLD))
+	request.slot_token = slot_token
+	request.owner_token = owner_token
+	request.owner_relative_transform = options.get(
+			"owner_relative_transform", Transform3D.IDENTITY)
+	request.initial_age_ticks = int(options.get("initial_age_ticks", 0))
+	request.source_tick = int(options.get("source_tick", 0))
+	request.source_order = int(options.get("source_order", 0))
+	request.color_tint = options.get("color_tint", Vector3.ONE)
+	request.spring_const = float(options.get("spring_const", 0.0))
+	request.lod_divisor = int(options.get("lod_divisor", 1))
+	request.kill_plane = int(options.get("kill_plane", KILL_PLANE_DISABLED))
+	request.kill_plane_y = float(options.get("kill_plane_y", _water_height))
+	var receipt := _scene.spawn(request)
+	if seed_owner_after_spawn and receipt.spawned:
 		_seed_owner_pose(owner_token, owner_transform)
 	return receipt
 
@@ -415,7 +406,7 @@ func spawn_effect_transient(name: String, position: Vector3,
 		"source_tick": source_tick,
 		"source_order": source_order,
 	})
-	return int(receipt.get("effect_handle", 0))
+	return receipt.effect_handle
 
 
 func spawn_effect(name: String, position: Vector3,
@@ -424,7 +415,7 @@ func spawn_effect(name: String, position: Vector3,
 
 
 func spawn_effect_owned_request(owner_key: Variant, name: String, position: Vector3,
-		orientation: Vector3 = Vector3.ZERO) -> Dictionary:
+		orientation: Vector3 = Vector3.ZERO) -> EffectSpawnReceipt:
 	if _particles_disabled:
 		return _disabled_receipt()
 	var initial_transform := forward_pose(position, orientation)
@@ -441,12 +432,12 @@ func spawn_effect_owned_request(owner_key: Variant, name: String, position: Vect
 func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
 		orientation: Vector3 = Vector3.ZERO) -> int:
 	var receipt := spawn_effect_owned_request(owner_key, name, position, orientation)
-	return int(receipt.get("effect_handle", 0))
+	return receipt.effect_handle
 
 
 func spawn_effect_attached_request(owner_key: Variant, name: String,
 		initial_transform: Transform3D, local_pos: Vector3,
-		local_dir: Vector3) -> Dictionary:
+		local_dir: Vector3) -> EffectSpawnReceipt:
 	if _particles_disabled:
 		return _disabled_receipt()
 	var local_transform := forward_pose(local_pos, local_dir)
@@ -464,9 +455,9 @@ func spawn_effect_attached(owner_key: Variant, name: String,
 		local_dir: Vector3) -> int:
 	var receipt := spawn_effect_attached_request(owner_key, name,
 			initial_transform, local_pos, local_dir)
-	if not bool(receipt.get("spawned", false)):
+	if not receipt.spawned:
 		return 0
-	return int(receipt.get("effect_handle", 0))
+	return receipt.effect_handle
 
 
 func spawn_effect_unless_alive(owner_key: Variant, name: String,
@@ -477,19 +468,16 @@ func spawn_effect_unless_alive(owner_key: Variant, name: String,
 		"admission": ADMISSION_SUPPRESS_WHILE_OWNED,
 		"slot_key": owner_key,
 	})
-	return int(receipt.get("effect_handle", 0))
+	return receipt.effect_handle
 
 
 func spawn_effect_by_handle(handle: int, position: Vector3,
 		orientation: Vector3 = Vector3.ZERO) -> bool:
 	if _particles_disabled or effect_name_for_handle(handle).is_empty():
 		return false
-	var receipt: Dictionary = _scene.spawn({
-		"effect_handle": handle,
-		"transform": forward_pose(position, orientation),
-		"kill_plane_y": _water_height,
-	})
-	return bool(receipt.get("spawned", false))
+	var request := EffectSpawnRequest.make(handle, forward_pose(position, orientation))
+	request.kill_plane_y = _water_height
+	return _scene.spawn(request).spawned
 
 
 func stop_group(group_id: int) -> void:

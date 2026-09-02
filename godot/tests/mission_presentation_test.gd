@@ -182,11 +182,11 @@ class CatchupEffectWorld:
 		anchor_mount = mount
 
 	func spawn_effect_owned_request(key: Variant, _name: String,
-			_position: Vector3, _orientation: Vector3 = Vector3.ZERO) -> Dictionary:
+			_position: Vector3, _orientation: Vector3 = Vector3.ZERO) -> EffectSpawnReceipt:
 		owner_key = key
 		group_live = true
 		spawn_count += 1
-		return {"spawned": true, "effect_handle": 1, "group_id": 91}
+		return EffectSpawnReceipt.make(true, 1, 91)
 
 	func stop_group(group_id: int) -> void:
 		assert(group_id == 91)

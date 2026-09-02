@@ -206,13 +206,9 @@ func _water_order_particle_scene() -> EffectScene:
 	]:
 		var transform := Transform3D.IDENTITY
 		transform.origin = row[0]
-		var receipt := scene.spawn({
-			"effect_handle": scene.intern(effect.id),
-			"transform": transform,
-			"color_tint": row[1],
-		})
-		assert_eq(int(receipt.get("status", -1)),
-				EffectScene.SPAWN_STATUS_SPAWNED)
+		var request := EffectSpawnRequest.make(scene.intern(effect.id), transform)
+		request.color_tint = row[1]
+		assert_eq(scene.spawn(request).status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
 

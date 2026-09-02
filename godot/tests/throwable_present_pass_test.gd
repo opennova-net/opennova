@@ -57,7 +57,7 @@ class CaptureFx:
 	var allow_spawn := true
 
 	func spawn_effect_owned_request(owner_key: Variant, effect: String,
-			position: Vector3, orientation: Vector3 = Vector3.ZERO) -> Dictionary:
+			position: Vector3, orientation: Vector3 = Vector3.ZERO) -> EffectSpawnReceipt:
 		next_group_id += 1
 		spawns.append({
 			"owner_key": owner_key,
@@ -66,12 +66,8 @@ class CaptureFx:
 			"orientation": orientation,
 		})
 		if not allow_spawn:
-			return {"spawned": false, "effect_handle": 0, "group_id": 0}
-		return {
-			"spawned": true,
-			"effect_handle": 7,
-			"group_id": next_group_id,
-		}
+			return EffectSpawnReceipt.make(false)
+		return EffectSpawnReceipt.make(true, 7, next_group_id)
 
 	func stop_group(group_id: int) -> void:
 		stopped.append(group_id)
