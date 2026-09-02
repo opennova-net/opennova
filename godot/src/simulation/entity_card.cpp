@@ -20,7 +20,7 @@ Vector3 raw_mission(const opennova::world::Vec3 &p) {
 	return Vector3(p.x, p.y, p.z);
 }
 
-// The legacy AI card key set (the old Simulation::get_entity_debug shape).
+// The AI card's MCP JSON key set (docs/mcp.md).
 Dictionary ai_json(const AiDetail &d) {
 	Dictionary out;
 	out["kind"] = d.kind;
@@ -148,7 +148,7 @@ Dictionary ai_json(const AiDetail &d) {
 	return out;
 }
 
-// The legacy world card key set (the old Simulation::get_world_entity_debug shape).
+// The world card's MCP JSON key set (docs/mcp.md).
 Dictionary world_json(const WorldDetail &d) {
 	Dictionary out;
 	out["net_id"] = d.net_id;
@@ -199,7 +199,7 @@ Dictionary world_json(const WorldDetail &d) {
 	return out;
 }
 
-// The legacy client card key set (the old Simulation::get_client_entity_debug shape).
+// The client card's MCP JSON key set (docs/mcp.md).
 Dictionary replica_json(const opennova::np::ClientReplicaCard &d) {
 	Dictionary out;
 	out["handle"] = d.handle;
@@ -352,7 +352,7 @@ TypedArray<EntityCardSeat> EntityCard::get_seats() const {
 }
 
 Dictionary EntityCard::to_json_value() const {
-	// The legacy detail precedence: the AI card when a brain exists, else the
+	// The detail precedence: the AI card when a brain exists, else the
 	// world card; a replica-only row (a joiner handle with no local half)
 	// starts empty like the old empty-detail rows did.
 	Dictionary out;

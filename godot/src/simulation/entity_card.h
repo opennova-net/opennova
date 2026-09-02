@@ -43,7 +43,7 @@ public:
 // the registry/world half, the AI half, and — on a joiner — the decoded
 // replica section (np::ClientReplicaCard). Typed getters prefer the AI half
 // when present, matching the old per-shape Dictionary getters; to_json_value()
-// exists for the MCP boundary and reproduces the legacy card key sets.
+// exists for the MCP boundary and carries the card key sets docs/mcp.md names.
 class EntityCard : public RefCounted {
 	GDCLASS(EntityCard, RefCounted)
 
@@ -61,7 +61,7 @@ public:
 	bool has_ai() const { return value_.has_ai; }
 	bool has_world() const { return value_.has_world; }
 
-	// --- identity (AI half preferred, the legacy detail-card precedence) ----
+	// --- identity (AI half preferred, the detail-card precedence) ----
 	int get_wire_handle() const { return static_cast<int>(value_.handle); }
 	int get_ai_index() const { return value_.ai_index; }
 	int get_kind() const;
@@ -121,7 +121,7 @@ public:
 	String get_item_name() const;
 	int get_health_max() const { return value_.world.health_max; }
 
-	// The MCP boundary conversion only: the legacy get_entity_debug /
+	// The MCP boundary conversion only: the get_entity_debug /
 	// get_world_entity_debug key set for this card's shape, with the joiner's
 	// decoded replica attached as "client_entity_debug".
 	Dictionary to_json_value() const;

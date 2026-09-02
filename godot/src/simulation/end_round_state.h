@@ -48,7 +48,7 @@ public:
 	bool is_team_mode() const { return value_.team_mode; }
 	bool is_session_open() const { return value_.session_open; }
 
-	// The MCP boundary conversion only: the legacy key set.
+	// The MCP boundary conversion only: the docs/mcp.md key set.
 	Dictionary to_json_value() const;
 };
 
