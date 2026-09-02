@@ -13,7 +13,7 @@ namespace godot {
 // One typed row of the engine entity directory (world::inspect::EntityRow,
 // ADR 0042 d5). Data only: the join itself runs engine-side
 // (Simulation::entity_directory); to_json_value() exists for the MCP boundary
-// and reproduces the legacy discovery-row key set.
+// and carries the discovery-row key set docs/mcp.md names.
 class EntityRow : public RefCounted {
 	GDCLASS(EntityRow, RefCounted)
 
@@ -44,7 +44,7 @@ public:
 	Vector3 get_world_position() const;
 	Vector3 get_mission_position() const;
 
-	// The MCP boundary conversion only: the legacy discovery-summary keys.
+	// The MCP boundary conversion only: the discovery-summary keys.
 	Dictionary to_json_value() const;
 };
 

@@ -83,28 +83,3 @@ func test_synth_gamemus_slot_1_resolves_to_tone01():
 	# play sites are bare identifiers (no quotes) so the user can grep them
 	assert_false(text.contains("play sound_1"),
 		"play sound_1 placeholder is gone for slot 1")
-
-
-# Regression for the bind-aware compiler: the names-aware decompile must
-# RECOMPILE. Before the fix, "play GAMINT" failed ("expected 'sound_N'"), which
-# broke Compile / Compile&Run / Save whenever a bank was loaded. It must compile
-# clean AND to the same bytecode as the names-less form.
-func test_names_aware_decompile_recompiles_to_identical_bytecode():
-	var script := MusicScript.new()
-	script.load_from_path(SCRIPT_FIXTURE)
-	var bank := SbfBank.new()
-	bank.load_from_path(BANK_FIXTURE)
-	if script == null or bank == null:
-		pass_test("fixture missing; skipped")
-		return
-	var name := StringName(script.get_default_script_name())
-	var named_text: String = script.get_decompiled_text_with_bank(name, bank)
-	var named: Dictionary = script.compile_text(named_text)
-	assert_eq(int(named.get("rc", -1)), 0,
-		"names-aware decompile recompiles (err: %s)" % String(named.get("err_msg", "")))
-	var plain_text: String = script.get_decompiled_text(name)
-	var plain: Dictionary = script.compile_text(plain_text)
-	assert_eq(int(plain.get("rc", -1)), 0, "names-less decompile recompiles")
-	assert_eq(named.get("bytecode", PackedByteArray()),
-		plain.get("bytecode", PackedByteArray()),
-		"names-aware and names-less compile to identical bytecode")

@@ -11,7 +11,6 @@
 #include <godot_cpp/classes/file_access.hpp>
 
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cstdlib>
@@ -38,7 +37,6 @@ void MusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_section_names", "script_name"), &MusicScript::get_section_names);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &MusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &MusicScript::get_decompiled_text_with_bank);
-	ClassDB::bind_method(D_METHOD("compile_text", "text"), &MusicScript::compile_text);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&MusicScript::load_from_decrypted_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &MusicScript::load_from_path);
@@ -119,61 +117,6 @@ const MusScript *MusicScript::raw_script(const String &p_name) const {
 		}
 	}
 	return nullptr;
-}
-
-Dictionary MusicScript::compile_text(const String &p_text) {
-	Dictionary out;
-	out["rc"] = -1;
-	out["bytecode"] = PackedByteArray();
-	out["file_bytes"] = PackedByteArray();
-	out["err_line"] = 0;
-	out["err_col"] = 0;
-	out["err_msg"] = String();
-
-	MusScript script = {};
-	int err_line = 0;
-	int err_col = 0;
-	const char *err_msg = nullptr;
-	CharString utf8 = p_text.utf8();
-	int rc = mus_compile(utf8.get_data(), &script, &err_line, &err_col, &err_msg);
-	if (rc != 0) {
-		out["rc"] = rc;
-		out["err_line"] = err_line;
-		out["err_col"] = err_col;
-		out["err_msg"] = String(err_msg ? err_msg : "compile error");
-		return out;
-	}
-
-	// Keep the legacy raw-code field for narrow tests, but also encode the full
-	// SCR0/MU01 file so editor runs can replace script name, section table,
-	// debug names, locals frame offset, and bytecode together.
-	PackedByteArray bytecode;
-	if (script.code != nullptr && script.code_size > 0) {
-		bytecode.resize((int)script.code_size);
-		std::memcpy(bytecode.ptrw(), script.code, script.code_size);
-	}
-
-	PackedByteArray file_bytes;
-	const MusScript *scripts[1] = { &script };
-	uint8_t *encoded = nullptr;
-	size_t encoded_size = 0;
-	rc = mus_encode_file(scripts, 1, &encoded, &encoded_size);
-	if (rc != 0 || encoded == nullptr) {
-		mus_script_free(&script);
-		out["rc"] = rc != 0 ? rc : -1;
-		out["err_msg"] = String("encode failed");
-		return out;
-	}
-	file_bytes.resize((int)encoded_size);
-	std::memcpy(file_bytes.ptrw(), encoded, encoded_size);
-	mus_free(encoded);
-
-	mus_script_free(&script);
-
-	out["rc"] = 0;
-	out["bytecode"] = bytecode;
-	out["file_bytes"] = file_bytes;
-	return out;
 }
 
 String MusicScript::get_decompiled_text(const StringName &p_script_name) {
