@@ -4,8 +4,6 @@
 #include "object/object_data_internal.h"
 #include "object/model_inspection_records.h"
 
-#include <runtime/renderer/material_classify.h>
-#include <runtime/renderer/material_descriptor.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include "util/texture_path_resolver.h"
@@ -17,167 +15,43 @@ namespace {
 // The MTRL texture-slot array capacity (ThreediMaterial::textures).
 constexpr uint32_t kMaxMaterialTextures = 24;
 
-const char *shader_blend_name(opennova::renderer::ObjectBlendMode blend) {
-	switch (blend) {
-		case opennova::renderer::ObjectBlendMode::Opaque: return "opaque";
-		case opennova::renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
-		case opennova::renderer::ObjectBlendMode::Additive: return "additive";
-		case opennova::renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
-	}
-	return "opaque";
-}
-
-const char *shader_normal_space_name(opennova::renderer::ObjectNormalSpace normal_space) {
-	switch (normal_space) {
-		case opennova::renderer::ObjectNormalSpace::None: return "none";
-		case opennova::renderer::ObjectNormalSpace::Tangent: return "tangent";
-		case opennova::renderer::ObjectNormalSpace::Object: return "object";
-	}
-	return "none";
-}
-
-// Capability word for a shader tag: the descriptor table's shader_flags, or
-// the first row (FF_ST_OP, DIFFUSE only) for an unknown tag, the same fallback
-// the retail material-info registry gives an unregistered tag.
-uint32_t shader_flags_for_tag(const char *shader_name) {
-	if (const opennova::renderer::MaterialDescriptorRecord *descriptor =
-			opennova::renderer::find_material_descriptor(shader_name != nullptr ? shader_name : "")) {
-		return static_cast<uint32_t>(descriptor->shader_flags);
-	}
-	return static_cast<uint32_t>(opennova::renderer::kMaterialDescriptorTable[0].shader_flags);
-}
-
-// The boolean keys are the descriptor's capability word (shader_flags) and
-// descriptor_flags, bit for bit: what the TAG says the shader can do, not the
-// per-material runtime classification (which folds in MTRL overrides such as
-// is_glass and the authored UV generators). Family, blend and normal space
-// come from the runtime classification; they have no separate descriptor
-// meaning.
-void add_shader_classification_fields(Dictionary &item,
-		const ThreediMaterial &material) {
-	const opennova::renderer::MaterialDescriptorRecord *descriptor =
-			opennova::renderer::find_material_descriptor(material.shader_name);
-	const uint32_t flags = shader_flags_for_tag(material.shader_name);
-	const uint32_t descriptor_flags = descriptor != nullptr ? descriptor->descriptor_flags : 0;
-	const opennova::renderer::ObjectMaterialClassification classification =
-			opennova::renderer::classify_object_material(material.shader_name,
-					material.material_flags, material.emissive_type,
-					material.is_glass, material.alpha_test_value_byte);
-	item["shader_flags"] = static_cast<int64_t>(flags);
-	item["has_diffuse"] = (flags & opennova::renderer::MATERIAL_FLAG_DIFFUSE) != 0;
-	item["has_secondary"] = (flags & opennova::renderer::MATERIAL_FLAG_SECONDARY) != 0;
-	item["has_normal_a"] = (flags & opennova::renderer::MATERIAL_FLAG_NORMAL_A) != 0;
-	item["has_normal_b"] = (flags & opennova::renderer::MATERIAL_FLAG_NORMAL_B) != 0;
-	item["is_alpha"] = (flags & opennova::renderer::MATERIAL_FLAG_ALPHA) != 0;
-	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
-	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
-	// FFP_GLASS carries only the capability).
-	item["is_luminance"] = (flags & opennova::renderer::MATERIAL_FLAG_EMISSIVE) != 0;
-	item["is_glow_capable"] = (flags & opennova::renderer::MATERIAL_FLAG_GLOW) != 0;
-	item["is_glass_shader"] = (flags & opennova::renderer::MATERIAL_FLAG_GLASS) != 0;
-	item["is_skinned_shader"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	item["is_blending_shader"] = (flags & opennova::renderer::MATERIAL_FLAG_BLENDING) != 0;
-	item["uses_uv_generators"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
-	item["uses_environment"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
-	item["uses_specular"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
-	item["environment_textured"] =
-			(descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
-	item["uses_flag_animation"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
-	item["shader_family"] = from_native(
-			opennova::renderer::object_shader_family_name(classification.family));
-	item["shader_blend"] = from_native(shader_blend_name(classification.blend));
-	item["normal_space"] = from_native(
-			shader_normal_space_name(classification.normal_space));
-}
-
-Dictionary uv_params_to_dict(const ThreediUvParams &params) {
-	Dictionary dict;
-	dict["style"] = params.style;
-	dict["phase"] = params.phase;
-	dict["reg"] = params.reg;
-	dict["rate"] = params.gen_rate;
-	dict["start"] = params.start;
-	dict["end"] = params.end;
-	return dict;
-}
-
-Dictionary alpha_gen_to_dict(const ThreediAlphaGen &gen) {
-	Dictionary dict;
-	dict["style"] = gen.style;
-	dict["phase"] = gen.phase;
-	dict["reg"] = gen.reg;
-	dict["rate"] = gen.rate;
-	dict["start"] = gen.start;
-	dict["end"] = gen.end;
-	return dict;
-}
-
-Dictionary rgb_gen_to_dict(const ThreediRgbGen &gen) {
-	Dictionary dict;
-	dict["style"] = gen.style;
-	dict["phase"] = gen.phase;
-	dict["reg"] = gen.reg;
-	dict["rate"] = gen.rate;
-	dict["start_color"] = Color(gen.start_color[0], gen.start_color[1], gen.start_color[2], gen.start_color[3]);
-	dict["end_color"] = Color(gen.end_color[0], gen.end_color[1], gen.end_color[2], gen.end_color[3]);
-	return dict;
-}
-
-Dictionary texture_animation_to_dict(const ThreediTexAnim &anim) {
-	Dictionary dict;
-	dict["num_frames"] = anim.num_frames;
-	dict["animation_type"] = anim.animation_type;
-	dict["cycle_frame_time"] = anim.cycle_frame_time;
-	return dict;
-}
-
 } // namespace
 
 int ObjectData::get_material_count() const {
 	return has_source_model ? static_cast<int>(source_model.material_count) : 0;
 }
 
-Array ObjectData::get_materials() const {
-	Array result;
+int ObjectData::find_material_array_index(int p_material_index) const {
 	if (!has_source_model) {
-		return result;
+		return -1;
 	}
 	for (size_t i = 0; i < source_model.material_count; ++i) {
-		const ThreediMaterial &mat = source_model.materials[i];
-		Dictionary item;
-		item["index"] = static_cast<int64_t>(i);
-		item["material_index"] = mat.index;
-		item["shader"] = from_native(mat.shader_name);
-		add_shader_classification_fields(item, mat);
-		item["texture_count"] = mat.texture_count;
-		item["alpha_threshold"] = static_cast<float>(mat.alpha_test_value_byte) / 255.0f;
-		item["flags"] = static_cast<int64_t>(mat.material_flags);
-		item["u_params"] = uv_params_to_dict(mat.u_params);
-		item["v_params"] = uv_params_to_dict(mat.v_params);
-		item["alpha_gen"] = alpha_gen_to_dict(mat.alpha_gen);
-		item["rgb_gen"] = rgb_gen_to_dict(mat.rgb_gen);
-		item["animation"] = texture_animation_to_dict(mat.animation);
-		item["reflect_color"] = Color(mat.reflect_color[0], mat.reflect_color[1], mat.reflect_color[2], mat.reflect_color[3]);
-		item["is_glass"] = mat.is_glass != 0;
-		item["emissive_type"] = mat.emissive_type;
-		Array textures;
-		for (uint32_t t = 0; t < mat.texture_count && t < kMaxMaterialTextures; ++t) {
-			Dictionary tex;
-			tex["name"] = from_native(mat.textures[t].name);
-			tex["slot"] = mat.textures[t].slot;
-			tex["type"] = mat.textures[t].type;
-			tex["flags"] = mat.textures[t].flags;
-			tex["frame"] = mat.textures[t].frame;
-			// Resolve through the resource root when mounted (so PFF-resident textures
-			// report a path) and fall back to the loose source dir otherwise. Reuses the
-			// same root-aware logic as the per-texture resolver below.
-			tex["resolved_path"] = resolve_material_texture_path(static_cast<int>(i), static_cast<int>(t));
-			textures.push_back(tex);
+		if (source_model.materials[i].index == p_material_index) {
+			return static_cast<int>(i);
 		}
-		item["textures"] = textures;
-		result.push_back(item);
 	}
-	return result;
+	if (p_material_index >= 0 && static_cast<size_t>(p_material_index) < source_model.material_count) {
+		return p_material_index;
+	}
+	return -1;
+}
+
+Ref<Texture2D> ObjectData::load_material_slot_texture(int p_array_index, int p_slot) const {
+	if (!has_source_model || p_array_index < 0 ||
+			static_cast<size_t>(p_array_index) >= source_model.material_count) {
+		return Ref<Texture2D>();
+	}
+	const ThreediMaterial &mat = source_model.materials[p_array_index];
+	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
+		if (static_cast<int>(mat.textures[i].slot) != p_slot) {
+			continue;
+		}
+		const Ref<Texture2D> loaded = load_material_texture(p_array_index, static_cast<int>(i));
+		if (loaded.is_valid()) {
+			return loaded;
+		}
+	}
+	return Ref<Texture2D>();
 }
 
 Ref<MaterialInfo> ObjectData::get_material_info(int p_index) const {

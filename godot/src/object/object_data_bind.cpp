@@ -24,7 +24,10 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_lod_count"), &ObjectData::get_lod_count);
-	ClassDB::bind_method(D_METHOD("get_materials"), &ObjectData::get_materials);
+	ClassDB::bind_method(D_METHOD("find_material_array_index", "material_index"),
+			&ObjectData::find_material_array_index);
+	ClassDB::bind_method(D_METHOD("load_material_slot_texture", "array_index", "slot"),
+			&ObjectData::load_material_slot_texture);
 	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "material_index", "texture_index"), &ObjectData::load_material_texture);

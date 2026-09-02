@@ -223,31 +223,16 @@ static func aggregate_lod0_submeshes(submeshes: Array) -> ArrayMesh:
 
 
 ## Load the diffuse (slot 1, falling back to detail slot 2) texture for a .3di
-## material, mirroring object_model._load_texture_for_slot. Returns null if
-## the material has no resolvable texture.
+## material, the same row resolution ObjectModel's material builder uses.
+## Returns null if the material has no resolvable texture.
 static func _load_diffuse_texture(data: ObjectData, material_index: int) -> Texture2D:
-	var material_defs := {}
-	for material in data.get_materials():
-		var mi := int(material.get("material_index", material.get("index", 0)))
-		material_defs[mi] = material
-		var ai := int(material.get("index", mi))
-		if not material_defs.has(ai):
-			material_defs[ai] = material
-
-	var material_def: Dictionary = material_defs.get(material_index, {})
-	if material_def.is_empty():
-		return null
-	var array_index := int(material_def.get("index", -1))
+	var array_index := data.find_material_array_index(material_index)
 	if array_index < 0:
 		return null
-	var textures: Array = material_def.get("textures", [])
 	for want_slot in [1, 2]:
-		for i in range(textures.size()):
-			var texture: Dictionary = textures[i]
-			if int(texture.get("slot", 0)) == want_slot:
-				var loaded: Texture2D = data.load_material_texture(array_index, i)
-				if loaded != null:
-					return loaded
+		var loaded := data.load_material_slot_texture(array_index, want_slot)
+		if loaded != null:
+			return loaded
 	return null
 
 

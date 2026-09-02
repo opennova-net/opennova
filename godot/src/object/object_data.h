@@ -196,9 +196,16 @@ public:
 	int get_material_count() const;
 	Array get_lod_surfaces(int p_lod_index) const;
 	bool is_skinned(int p_lod_index) const;
-	Array get_materials() const;
 	// One MTRL row (object/model_inspection_records.h); null out of range.
 	Ref<MaterialInfo> get_material_info(int p_index) const;
+	// The MTRL array index a surface's material index addresses: the row whose
+	// authored index matches wins, else the array position itself when in
+	// range, else -1 (the alias fold the material cache keys on).
+	int find_material_array_index(int p_material_index) const;
+	// The first texture of `slot` (1 diffuse, 2 detail, 3/4 normal) on the
+	// MTRL row at `array_index` that resolves through the resource root or the
+	// loose source dir; null when none does.
+	Ref<Texture2D> load_material_slot_texture(int p_array_index, int p_slot) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	static String canonical_control_register_name(const String &p_name);
 	// Drops the register-name memo; the module terminator calls it so no

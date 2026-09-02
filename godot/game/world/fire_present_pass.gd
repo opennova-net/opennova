@@ -1,5 +1,10 @@
 extends RefCounted
 
+## The SndProf.def body slots that refire every body tick (chute flap /
+## freefall); the exclusive key folds the refires into one voice (D-SND-10).
+const SLOT_CHUTE_FLAP := 43
+const SLOT_FREEFALL := 44
+
 # THE viewing-client fire-presentation pass: presents the sim's authoritative
 # host rounds or decoded visual-only joiner rounds — AI/remote-player fire sound,
 # muzzle effect, and in-flight tracers. The local player's own predicted fire keeps
@@ -188,7 +193,7 @@ func present_slot_sounds(events: Array) -> void:
 		if ev.soundset.is_empty():
 			continue
 		var key := ""
-		if ev.slot == 43 or ev.slot == 44:
+		if ev.slot == SLOT_CHUTE_FLAP or ev.slot == SLOT_FREEFALL:
 			key = "%d:%d" % [ev.handle, ev.slot]
 		if audio.slot_soundset(ev.soundset, ev.pos, key):
 			_stats.sounds += 1
