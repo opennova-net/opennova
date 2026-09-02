@@ -140,8 +140,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 				"UseGun selects the animation-owned Gunner mode")
 		assert_true(local.mount_config_valid)
 		assert_eq(local.mount_config, config_value)
-		var local_angles: PackedVector3Array = local.get(
-				"angles", PackedVector3Array())
+		var local_angles := local.segment_angles
 		assert_eq(local_angles.size(), 9)
 
 		var snapshot := sim.get_present_snapshot()
