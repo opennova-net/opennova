@@ -21,6 +21,7 @@
 
 #include "mission/mission_data.h" // MissionData::EntityKind
 #include "object/item_database.h"
+#include "mission/player_visual_spec.h"
 #include "object/avatar_database.h"
 #include "object/avatar_records.h"
 #include "object/object_data.h"
@@ -180,7 +181,7 @@ public:
 	// owner-managed entity with no BMS placement (the local-player avatar).
 	ObjectModel *build_animated_model(int p_item_id, Node3D *p_parent);
 	int resolve_player_visual_item_id(int p_runtime_type_id);
-	Dictionary resolve_player_visual_spec(int p_runtime_type_id,
+	Ref<PlayerVisualSpec> resolve_player_visual_spec(int p_runtime_type_id,
 			int p_character_id);
 	ObjectModel *build_player_animated_model(int p_runtime_type_id,
 			Node3D *p_parent, int p_character_id = 0);

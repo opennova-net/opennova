@@ -1159,10 +1159,14 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
 // @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the
 // reimpl has no registry validation yet (D-NET-137) and shows the item model.
-Dictionary MissionObjectPlacer::resolve_player_visual_spec(
+Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
 	_ensure_item_db();
 	_ensure_avatar_db();
+	Ref<PlayerVisualSpec> out;
+	out.instantiate();
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	out->set_item_id(item_id);
 	if (avatar_db_.is_valid()) {
 		const Ref<AvatarComboRow> resolved = avatar_db_->resolve_character_id(
 				p_character_id);
@@ -1170,46 +1174,40 @@ Dictionary MissionObjectPlacer::resolve_player_visual_spec(
 			const Ref<AvatarPartRow> head = resolved->get_head();
 			const Ref<AvatarPartRow> body = resolved->get_body();
 			const Ref<AvatarPartRow> arms = resolved->get_arms();
-			Dictionary out;
-			out["character_id"] = p_character_id & 0xffff;
-			out["item_id"] = resolve_player_visual_item_id(
-					p_runtime_type_id);
-			out["head"] = head->get_graphic();
-			out["head_camo"] = head->get_camo();
-			out["body"] = body->get_graphic();
-			out["body_camo"] = body->get_camo();
-			out["arms"] = arms.is_valid() ? arms->get_graphic() : String();
-			out["arms_camo"] = arms.is_valid() ? arms->get_camo() : Vector3i();
-			out["avatar"] = head->get_voice();
-			out["sex"] = head->get_sex();
-			out["nationality_index"] = resolved->get_nationality_index();
-			out["division_index"] = resolved->get_division_index();
-			out["combo_index"] = resolved->get_combo_index();
-			out["fallback"] = false;
+			out->set_character_id(p_character_id & 0xffff);
+			out->set_head(head->get_graphic());
+			out->set_head_camo(head->get_camo());
+			out->set_body(body->get_graphic());
+			out->set_body_camo(body->get_camo());
+			if (arms.is_valid()) {
+				out->set_arms(arms->get_graphic());
+				out->set_arms_camo(arms->get_camo());
+			}
+			out->set_avatar(head->get_voice());
+			out->set_sex(head->get_sex());
+			out->set_nationality_index(resolved->get_nationality_index());
+			out->set_division_index(resolved->get_division_index());
+			out->set_combo_index(resolved->get_combo_index());
+			out->set_fallback(false);
 			return out;
 		}
 	}
-	Dictionary out;
-	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
-	out["character_id"] = p_character_id;
-	out["item_id"] = item_id;
-	out["head"] = String();
-	out["body"] = item_db_.is_valid() ? item_db_->get_graphic(item_id) : String();
-	out["arms"] = String();
-	out["fallback"] = true;
+	out->set_character_id(p_character_id);
+	out->set_body(item_db_.is_valid() ? item_db_->get_graphic(item_id) : String());
+	out->set_fallback(true);
 	return out;
 }
 
 ObjectModel *MissionObjectPlacer::build_player_animated_model(
 		int p_runtime_type_id, Node3D *p_parent, int p_character_id) {
 	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
-	const Dictionary spec = resolve_player_visual_spec(
+	const Ref<PlayerVisualSpec> spec = resolve_player_visual_spec(
 			p_runtime_type_id, p_character_id);
-	if (bool(spec.get("fallback", true))) {
+	if (spec->get_fallback()) {
 		return build_animated_model(item_id, p_parent);
 	}
-	const String body_graphic = spec.get("body", String());
-	const String head_graphic = spec.get("head", String());
+	const String body_graphic = spec->get_body();
+	const String head_graphic = spec->get_head();
 	// Retail composes head + body only when BOTH blip model handles are
 	// nonzero; either missing falls to the entity's own item model.
 	// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
@@ -1230,10 +1228,9 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
 	body->set_meta("avatar_part", "body");
 	body->set_meta("character_id", p_character_id & 0xffff);
-	body->set_meta("player_visual_spec", spec);
 	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
 	// @0x5c800f, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Vector3i()),
+	AvatarDatabase::apply_part_camo(body, spec->get_body_camo(),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_scale(body, item_id);
@@ -1257,7 +1254,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	head->set_meta("character_id", p_character_id & 0xffff);
 	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
 	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Vector3i()),
+	AvatarDatabase::apply_part_camo(head, spec->get_head_camo(),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_shadow(head, item_id);

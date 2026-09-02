@@ -107,6 +107,8 @@ add_library(${TARGET_NAME} SHARED
     object/avatar_database.cpp
     object/avatar_records.cpp
     object/character_join_profile.cpp
+    mission/player_visual_spec.cpp
+    simulation/fp_viewmodel_spec.cpp
     object/skeletal_anim.cpp
     hud/hud_overlay.cpp
     hud/feed_row.cpp
