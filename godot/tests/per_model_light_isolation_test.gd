@@ -368,10 +368,10 @@ func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> voi
 			PackedByteArray([1, 1, 0]), Vector3.ONE, 0, null), 2,
 			"both active rows receive at least the nearby world light")
 	var report := scene.get_report()
-	assert_eq(int(report.get("static_rows", -1)), 3)
-	assert_eq(int(report.get("static_draws", -1)), 2,
+	assert_eq(report.static_rows, 3)
+	assert_eq(report.static_draws, 2,
 			"the inactive stable row is not submitted for selection")
-	assert_eq(int(report.get("lit_static_draws", -1)), 2)
+	assert_eq(report.lit_static_draws, 2)
 	assert_has(RenderingServer.global_shader_parameter_get_list(),
 			&"opennova_static_point_light_rows",
 			"the shader global declares the atlas as a project-wide sampler")
@@ -402,9 +402,9 @@ func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> voi
 	assert_almost_eq(atlas.get_pixel(0, 1).r, 0.0, 0.001,
 			"camera loss synchronously zeroes every published static row")
 	report = scene.get_report()
-	assert_eq(int(report.get("static_rows", -1)), 0)
-	assert_eq(int(report.get("static_draws", -1)), 0)
-	assert_eq(int(report.get("lit_static_draws", -1)), 0)
+	assert_eq(report.static_rows, 0)
+	assert_eq(report.static_draws, 0)
+	assert_eq(report.lit_static_draws, 0)
 
 
 func test_static_building_rows_rescope_owned_lights_per_robj() -> void:
@@ -561,5 +561,5 @@ func test_building_owned_lights_are_selected_per_robj() -> void:
 				"u_point_light_count"))
 		assert_eq(count, 1.0 if section == 2 or section == 4 else 0.0,
 				"ROBJ %d receives only its section-owned light" % section)
-	assert_eq(String(scene.get_report().get("owner_isolation", "")),
+	assert_eq(scene.get_report().owner_isolation,
 			"per_robj_buildings")
