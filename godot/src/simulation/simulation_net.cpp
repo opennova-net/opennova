@@ -77,9 +77,9 @@ void Simulation::bringup_host_runtime() {
 	// ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
 	// points straight at the kernel's adopted document, which outlives the match.
 	host_loop_.clear();
-	// Reload: a fresh host_owner_ drops any stale connections / peers from a prior mission. A reload is a
-	// new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
-	// D-NET-124). serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
+	// Reload: a fresh host_owner_ drops stale owner peers, while create_session owns the protocol
+	// connection-table reset at this new-match boundary. No live configuration mutator can clear
+	// admitted peers mid-match. serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
 	// fold it into ClientState (runtime_) to render the host's own view.
 	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
 	// host's own player); isolated test/tooling MissionPresentation instantiations keep that default too.
@@ -128,8 +128,8 @@ void Simulation::bringup_host_runtime() {
 	}
 
 	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
-	// (mode 3 -> set_transport_mode -> create_session(&host_loop_) [+ Server_InitNewRoundState] ->
-	// configure_session_runtime; then, when serve_and_play, FAITHFUL auto-spawn of the host's own player
+	// (mode 3 -> set_transport_mode -> create_session(&host_loop_) [connection reset +
+	// Server_InitNewRoundState]; then, when serve_and_play, FAITHFUL auto-spawn of the host's own player
 	// at the start marker + latch its loopback in-match so Server_TickUpdate fans it the per-frame
 	// whole-world 0x0A its local view renders from). host_owner_.host_loopback / .serve_and_play + ctx_.world
 	// were set above; this replaces the copy that had drifted out of the helper. [orig: SinglePlayer_StartMission
@@ -716,7 +716,7 @@ bool Simulation::enable_host_listen(int p_port) {
 	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). host_session_config_ keeps the GDScript-facing session options
-	// (the Dictionary getter + the §5.1 reactive-reply config fed to configure_session_runtime).
+	// (the Dictionary getter + the §5.1 reactive-reply config consumed by create_session).
 	// The port actually bound (the scan may have stepped past the requested
 	// one) is what the session advertises.
 	host_bind_port_ = static_cast<uint16_t>(pump_->local_port());

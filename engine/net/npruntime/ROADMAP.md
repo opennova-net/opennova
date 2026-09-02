@@ -111,16 +111,17 @@ ordering, tag51, tag46, non-JO), `npruntime_joiner_connection` (real legs ↔ re
 ↔ real `NetSystem` apply), `npruntime_golden_lan_join_session` — all green; full `novaworld`/`netsim`
 suite unaffected.
 
-> Refinement vs plan (lifecycle composition): P0/P1/P2 compose into one authoritative listen-host
-> bring-up — `set_connection_mode` → `set_transport_mode` → `create_session(..., local_client)`
-> (P1: `is_in_session`/`host_running`, registers the type-2 loopback) → `configure_session_runtime`
-> (P2: builds the runtime, clears only the **type-1 remote-joiner** nodes so the host's own loopback
-> survives). The live legs are gated faithfully: `handle_client_hello`/`_join` reject until
+> Lifecycle reconciliation (2026-09-01): the authoritative listen-host bring-up is
+> `set_connection_mode` → `set_transport_mode` → `create_session(..., local_client)`.
+> `create_session` is the only whole-table reset: it clears every prior role, resets the joiner-id
+> allocator, stores the runtime config, starts the host, and installs the new type-2 loopback.
+> The former post-create mutator was removed because calling it live erased admitted type-1 peers.
+> The live legs are gated faithfully: `handle_client_hello`/`_join` reject until
 > `is_authority && host_running` (`[orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0]`), and
 > `handle_client_join` re-validates the JO identity + HK echo (`classify(pn)==JointOperations`,
 > `host_key==0 || auth.hk==host_key`; `[orig: NapiNPProtocol_HandleClientJoin @0x62b750]`) so a
 > non-JO or wrong-HK 0x42 is dropped. The tests now walk the real lifecycle (`bring_up_host`) and
-> add `run_listen_host_lifecycle` (loopback preserved through reconfigure),
+> add `run_listen_host_lifecycle` (loopback installed at create),
 > `run_handshake_rejected_when_host_down`, and non-JO/wrong-HK 0x42 rejection coverage.
 
 > Refinement vs plan (golden parity): the golden `retail-lan-host-join-session.pcapng` is a LAN

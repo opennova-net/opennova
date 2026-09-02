@@ -145,7 +145,11 @@ int main() {
 		testrig::NullDatagramSocket socket;
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
-		for (int i = 0; i < 8; ++i)
+		// Pin the single-owner invariant at one frame, then across a short run.
+		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
+		CHECK(kernel.world.logic_tick == tick0 + 1);
+		CHECK(host.host_owner.now_tick == now0 + 1);
+		for (int i = 0; i < 7; ++i)
 			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
 		CHECK(kernel.world.logic_tick == tick0 + 8);
 		CHECK(host.host_owner.now_tick == now0 + 8);

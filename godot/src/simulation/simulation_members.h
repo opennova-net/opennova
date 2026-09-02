@@ -200,7 +200,7 @@ private:
 	// binds the socket (it implies the listen server); host_pump drives the owner loop, and
 	// dispatch_event/admit_peer admit joiners + stream the named dcb-bearing 0x0C. host_session_config_
 	// holds the GDScript-facing session options (the Dictionary getter + the §5.1 reactive-reply config
-	// fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
+	// consumed by create_session). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<UdpPump> pump_;
 	String capture_pcap_path_;
@@ -533,8 +533,8 @@ private:
 	void install_app_id();
 	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
 	void install_join_cd_cookie();
-	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
-	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn, over the kernel's
+	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) [connection-table reset +
+	// Server_InitNewRoundState] -> the faithful host-player auto-spawn, over the kernel's
 	// world/mission. Mirrors apps/nw_server; the Godot-fed context installs (mission text,
 	// .til bytes, GameConfig from the UI host config) sit beside the shared core.
 	void bringup_host_runtime();

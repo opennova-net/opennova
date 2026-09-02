@@ -1234,9 +1234,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
 	// initial-state stream via tick_connections (which skips spawned peers, napi_np_protocol.cpp:509)
 	// and has no per-frame C2S 0x0C uplink yet. [orig: PumpRecvQueues walks connection_list.]
-	// [D-NET-124] This fan assumes the spawned remote-peer (type-1) nodes stay resident in
-	// connection_list; a mid-match configure_session_runtime() erases them (napi_np_protocol.cpp),
-	// which would silently drop those peers from drain+replicate — revisit when reconfigure lands.
+	// Spawned remote-peer (type-1) nodes stay resident until explicit disconnect/drop. The only
+	// whole-table reset is create_session, so a live configuration update cannot evict this fan.
 	// drain_connection_c2s null-checks conn.link.transport internally + enforces the owner gate.
 	// [D-NET-122] is_in_match(conn) is the single predicate shared with the emit fan below (was an
 	// inline burst.spawned in each); the host's own loopback satisfies it once its §5.2a burst

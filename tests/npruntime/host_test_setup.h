@@ -1,8 +1,7 @@
 #pragma once
 
-// Shared P0->P1->P2 listen-host bring-up for the npruntime tests, so every test stands the host up
-// through the REAL lifecycle (set_connection_mode -> set_transport_mode -> create_session ->
-// configure_session_runtime) rather than a bare configure_session_runtime(). After this the host is
+// Shared listen-host bring-up for the npruntime tests, so every test stands the host up through the
+// real lifecycle (set_connection_mode -> set_transport_mode -> create_session). After this the host
 // is_in_session + (when authority) host_running, so the gated handshake legs admit a join.
 
 #include <net/npruntime/napi_np_protocol.h>
@@ -30,7 +29,6 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	for (NapiNPConnection &connection : ctx.np_protocol.connection_list) {
 		if (connection.type == 2) connection.char_vars = retail_fresh_profile_character_vars();
 	}
-	configure_session_runtime(ctx);                     // P2: drops type-1 joiners, keeps the loopback
 }
 
 } // namespace opennova::np::test

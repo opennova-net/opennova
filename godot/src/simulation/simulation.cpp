@@ -602,8 +602,8 @@ void Simulation::apply_host_session_mission_header(const opennova::bms::File &fi
 			host_session_config_.spawn_names.push_back(mission_name);
 		}
 	}
-	// P7: host_session_config_ is consumed at the next load by bringup_host_runtime
-	// (configure_session_runtime + the §5.1 reactive-reply config); nothing to refresh live.
+	// host_session_config_ is consumed by create_session at the next load through
+	// bringup_host_runtime; there is deliberately nothing to refresh live.
 }
 
 // The production boot (S9/ADR 0042 d3): the kernel owns the ordered step

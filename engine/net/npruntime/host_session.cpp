@@ -330,8 +330,8 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 		admit_peer(owner, sock, peer, ev);
 		break;
 	case HostAcceptEvent::Kind::PeerC2SInMatch:
-		// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain
-		// (D-NET-125 — never apply inline).
+		// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain,
+		// so receive dispatch never applies it inline.
 		apply_in_match_c2s(owner.ctx, ev);
 		break;
 	case HostAcceptEvent::Kind::PeerGoodbye:
@@ -632,8 +632,6 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		owner.ctx.world->round_sim.no_tracers_rule =
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
 	}
-	configure_session_runtime(owner.ctx);
-
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
 		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
 		// per-frame 0x0A its local view renders from. A dedicated/headless HostOnly session has no
