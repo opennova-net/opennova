@@ -361,15 +361,14 @@ void ObjectModel::apply_level_surfaces() {
 			FrameFx::unregister_q3_source(instance);
 		}
 		if (surface.auxiliary_material.is_valid()) {
-			MeshInstance3D *auxiliary = slot.auxiliary;
+			PostMultiplyDraw *auxiliary = slot.auxiliary;
 			if (auxiliary == nullptr) {
-				auxiliary = memnew(MeshInstance3D);
+				auxiliary = memnew(PostMultiplyDraw);
 				++geometry_instance_count_;
 				++live_geometry_instance_count_;
 				auxiliary->set_name("PostMultiply");
 				auxiliary->set_cast_shadows_setting(presentation_cast_setting(true));
 				auxiliary->set_layer_mask(presentation_layer_mask(true));
-				auxiliary->set_meta("_opennova_auxiliary_draw", true);
 				parent->add_child(auxiliary);
 				slot.auxiliary = auxiliary;
 				// Minted between the terrain-frame and viewmodel legs: it

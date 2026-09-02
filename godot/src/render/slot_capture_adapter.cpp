@@ -1,4 +1,5 @@
 #include "render/slot_capture_adapter.h"
+#include "object/post_multiply_draw.h"
 #include "render/q3_geometry_cache.h"
 #include "render/q3_source_registry.h"
 #include "render/rd_timestamp_span.h"
@@ -302,7 +303,7 @@ void collect_visible_geometry(Node *p_node,
 		return;
 	if (GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(p_node)) {
 		if (geometry->is_visible_in_tree() &&
-				!bool(geometry->get_meta("_opennova_auxiliary_draw", false)))
+				Object::cast_to<PostMultiplyDraw>(geometry) == nullptr)
 			r_instances.push_back(geometry);
 	}
 	for (int index = 0; index < p_node->get_child_count(); ++index)

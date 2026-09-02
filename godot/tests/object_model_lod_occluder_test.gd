@@ -40,7 +40,7 @@ func _visible_slot_count(instances: Array[MeshInstance3D]) -> int:
 	var count := 0
 	for instance in instances:
 		if instance.visible and instance.mesh != null \
-				and not bool(instance.get_meta("_opennova_auxiliary_draw", false)):
+				and not (instance is PostMultiplyDraw):
 			count += 1
 	return count
 
