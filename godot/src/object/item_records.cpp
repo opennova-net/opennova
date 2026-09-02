@@ -100,7 +100,6 @@ void ItemSeatAttachmentRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_id"), &ItemSeatAttachmentRow::get_item_id);
 	ClassDB::bind_method(D_METHOD("get_kind"), &ItemSeatAttachmentRow::get_kind);
 	ClassDB::bind_method(D_METHOD("get_stored_slot"), &ItemSeatAttachmentRow::get_stored_slot);
-	ClassDB::bind_method(D_METHOD("is_anchor_found"), &ItemSeatAttachmentRow::is_anchor_found);
 	ClassDB::bind_method(D_METHOD("get_angle_count"), &ItemSeatAttachmentRow::get_angle_count);
 	ClassDB::bind_method(D_METHOD("get_down_limit_bam"), &ItemSeatAttachmentRow::get_down_limit_bam);
 	ClassDB::bind_method(D_METHOD("get_up_limit_bam"), &ItemSeatAttachmentRow::get_up_limit_bam);
@@ -135,10 +134,6 @@ void ItemSeatCard::assign_spec(const opennova::mission::ItemSeatSpec &p_spec) {
 		row->assign(opennova::world::inspect::seat_row(seat, -1));
 		seats_.push_back(row);
 	}
-	armory_points_.clear();
-	for (const opennova::world::Vec3 &p : p_spec.armory_points) {
-		armory_points_.push_back(Vector3(p.x, p.y, p.z));
-	}
 	emplacement_attachments_.clear();
 	for (const opennova::mission::ItemEmplacementAttachmentSpec &attachment :
 			p_spec.emplacement_attachments) {
@@ -163,7 +158,6 @@ void ItemSeatCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_mount_config_valid"), &ItemSeatCard::is_mount_config_valid);
 	ClassDB::bind_method(D_METHOD("get_mount_config"), &ItemSeatCard::get_mount_config);
 	ClassDB::bind_method(D_METHOD("get_seats"), &ItemSeatCard::get_seats);
-	ClassDB::bind_method(D_METHOD("get_armory_points"), &ItemSeatCard::get_armory_points);
 	ClassDB::bind_method(D_METHOD("get_emplacement_attachments"), &ItemSeatCard::get_emplacement_attachments);
 	ITEM_RECORD_READ_ONLY(Variant::INT, "item_id", "get_item_id");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "type_id", "get_type_id");

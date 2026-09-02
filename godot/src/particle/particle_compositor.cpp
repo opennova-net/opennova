@@ -1462,8 +1462,6 @@ ParticleCompositorEffect::ParticleCompositorEffect() :
 ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 
 void ParticleCompositorEffect::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("release_device_resources"),
-			&ParticleCompositorEffect::release_device_resources);
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&ParticleCompositorEffect::get_backend_report);
 }

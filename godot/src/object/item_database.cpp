@@ -59,7 +59,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &ItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
-	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &ItemDatabase::is_ai_capable);
 	ClassDB::bind_method(
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&ItemDatabase::extract_seat_specs_for_item);

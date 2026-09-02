@@ -1302,9 +1302,6 @@ public:
 	static String infantry_anim_key(int p_state);
 	// The adjacent retail transition-arbitration flags table (off_8139E8).
 	static int64_t infantry_anim_flags(int p_state);
-	// The queue gate over two of those flag words (world/infantry.h) — the one
-	// rule the netsim record fold and the presenter body FSM both apply.
-	static bool remote_body_state_defers(int64_t p_current_flags, int64_t p_next_flags);
 
 	// Entity query. The (kind, index) pair lets the shell map a sim entity back to
 	// its promoted mission record and already-rendered node.
@@ -1530,7 +1527,6 @@ public:
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
 	Ref<RayDebugReport> get_ray_debug() const;
 	void set_ray_debug_recording(bool p_enabled);
-	bool is_ray_debug_recording() const;
 	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
 	void clear_ray_debug();
 	bool native_rays_snapshot(opennova::devtools::RaysSnapshot &out) const;
@@ -1539,7 +1535,6 @@ public:
 	// ride get_collision_debug's "hits" channel, counts ride
 	// native_physics_snapshot (ADR 0042 d6). Mask setter clamps to the kinds.
 	void set_contact_debug_capture(bool p_enabled);
-	bool is_contact_debug_capture() const;
 	void set_contact_debug_kind_mask(int64_t p_mask);
 	void clear_contact_debug();
 	bool native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const;

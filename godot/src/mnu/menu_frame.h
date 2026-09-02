@@ -140,15 +140,11 @@ public:
 	int hit_test(const Vector2 &p_position) const;
 	int list_row_at(int p_index, const Vector2 &p_position) const;
 	int list_visible_rows(int p_index) const;
-	Rect2 combo_popup_rect(int p_index) const;
 	bool combo_popup_contains(int p_index, const Vector2 &p_position) const;
 	int combo_popup_row_at(int p_index, const Vector2 &p_position) const;
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
 	int table_row_at(int p_index, const Vector2 &p_position) const;
 	int hotkey_widget(const String &p_key, bool p_virtual) const;
-	// Multiline wrapped-line counts: x = rows that fit, y = total rows —
-	// scroll range = [0, y - x] (engine multiline_line_counts).
-	Vector2i multiline_line_counts(int p_index) const;
 
 	// Edit-input routing over the engine module (menu/menu_edit.h): applies
 	// the witnessed insert/key ops to the widget's effective text/caret

@@ -53,8 +53,6 @@ static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
               opennova::world::kPlayerCameraFovHDeg);
 
 void Simulation::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("settle_weather_mission_start"),
-			&Simulation::settle_weather_mission_start);
 	ClassDB::bind_method(D_METHOD("drain_weather_sounds"), &Simulation::drain_weather_sounds);
 	ClassDB::bind_method(D_METHOD("get_weather_state"), &Simulation::get_weather_state);
 	ClassDB::bind_method(D_METHOD("weather_state_bound"), &Simulation::weather_state_bound);
@@ -70,9 +68,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_time_of_day_minutes", "minute_of_day"),
 			&Simulation::debug_set_time_of_day_minutes);
 	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Simulation::command_fog_type);
-	ClassDB::bind_method(D_METHOD("command_lightning_flash"), &Simulation::command_lightning_flash);
-	ClassDB::bind_method(D_METHOD("command_lightning_far_flash"), &Simulation::command_lightning_far_flash);
-	ClassDB::bind_method(D_METHOD("command_wind_scale", "value"), &Simulation::command_wind_scale);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
 			"item_db", "terrain", "terrain_til",
@@ -427,7 +422,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation", D_METHOD("ai_state_name", "state"), &Simulation::ai_state_name);
 	ClassDB::bind_static_method("Simulation", D_METHOD("infantry_anim_key", "state"), &Simulation::infantry_anim_key);
 	ClassDB::bind_static_method("Simulation", D_METHOD("infantry_anim_flags", "state"), &Simulation::infantry_anim_flags);
-	ClassDB::bind_static_method("Simulation", D_METHOD("remote_body_state_defers", "current_flags", "next_flags"), &Simulation::remote_body_state_defers);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &Simulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &Simulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_position", "index"), &Simulation::get_entity_position);
@@ -514,18 +508,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ray_debug"), &Simulation::get_ray_debug);
 	ClassDB::bind_method(D_METHOD("set_ray_debug_recording", "enabled"),
 	                     &Simulation::set_ray_debug_recording);
-	ClassDB::bind_method(D_METHOD("is_ray_debug_recording"),
-	                     &Simulation::is_ray_debug_recording);
-	ClassDB::bind_method(D_METHOD("set_ray_debug_filter", "mask", "ttl_ticks"),
-	                     &Simulation::set_ray_debug_filter);
-	ClassDB::bind_method(D_METHOD("clear_ray_debug"), &Simulation::clear_ray_debug);
 	ClassDB::bind_method(D_METHOD("set_contact_debug_capture", "enabled"),
 	                     &Simulation::set_contact_debug_capture);
-	ClassDB::bind_method(D_METHOD("is_contact_debug_capture"),
-	                     &Simulation::is_contact_debug_capture);
-	ClassDB::bind_method(D_METHOD("set_contact_debug_kind_mask", "mask"),
-	                     &Simulation::set_contact_debug_kind_mask);
-	ClassDB::bind_method(D_METHOD("clear_contact_debug"), &Simulation::clear_contact_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

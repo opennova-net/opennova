@@ -78,8 +78,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_rain_current);
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
-	ClassDB::bind_method(D_METHOD("get_precipitation_kind"),
-			&MissionEnvironment::get_precipitation_kind);
 	ClassDB::bind_method(D_METHOD("is_raining"), &MissionEnvironment::is_raining);
 	ClassDB::bind_method(D_METHOD("set_overcast_data", "data"),
 			&MissionEnvironment::set_overcast_data);
@@ -539,10 +537,6 @@ float MissionEnvironment::get_rain_current() const {
 
 float MissionEnvironment::get_overcast_blend() const {
 	return state_.overcast_blend();
-}
-
-int MissionEnvironment::get_precipitation_kind() const {
-	return state_.precipitation_kind();
 }
 
 bool MissionEnvironment::is_raining() const {

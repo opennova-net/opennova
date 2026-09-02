@@ -11,10 +11,8 @@ String FeedRow::get_extra() const { return opennova::to_gd(value_.extra); }
 String FeedRow::get_wpname_key() const { return opennova::to_gd(value_.wpname_key); }
 
 void FeedRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_event_type"), &FeedRow::get_event_type);
 	ClassDB::bind_method(D_METHOD("get_kind"), &FeedRow::get_kind);
 	ClassDB::bind_method(D_METHOD("is_camp"), &FeedRow::is_camp);
-	ClassDB::bind_method(D_METHOD("is_own"), &FeedRow::is_own);
 	ClassDB::bind_method(D_METHOD("get_key"), &FeedRow::get_key);
 	ClassDB::bind_method(D_METHOD("get_attacker"), &FeedRow::get_attacker);
 	ClassDB::bind_method(D_METHOD("get_victim"), &FeedRow::get_victim);

@@ -624,16 +624,6 @@ int MenuFrame::list_visible_rows(int p_index) const {
 	return compiler_.list_visible_rows(p_index, state_);
 }
 
-Rect2 MenuFrame::combo_popup_rect(int p_index) const {
-	opennova::mnu::RectEdges rect;
-	if (!compiler_.combo_popup_rect(p_index, state_, &rect)) {
-		return Rect2();
-	}
-	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
-			static_cast<float>(rect.right - rect.left),
-			static_cast<float>(rect.bottom - rect.top));
-}
-
 bool MenuFrame::combo_popup_contains(int p_index,
 		const Vector2 &p_position) const {
 	if (!configured_) {
@@ -686,15 +676,6 @@ int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {
 		return -1;
 	}
 	return compiler_.hotkey_widget(to_std(p_key), p_virtual, state_);
-}
-
-Vector2i MenuFrame::multiline_line_counts(int p_index) const {
-	int fit = 0;
-	int total = 0;
-	if (configured_) {
-		compiler_.multiline_line_counts(p_index, state_, &fit, &total);
-	}
-	return Vector2i(fit, total);
 }
 
 bool MenuFrame::edit_char(int p_index, int p_unicode) {
@@ -1186,8 +1167,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::hit_test);
 	ClassDB::bind_method(D_METHOD("list_row_at", "index", "position"),
 			&MenuFrame::list_row_at);
-	ClassDB::bind_method(D_METHOD("combo_popup_rect", "index"),
-			&MenuFrame::combo_popup_rect);
 	ClassDB::bind_method(
 			D_METHOD("combo_popup_contains", "index", "position"),
 			&MenuFrame::combo_popup_contains);
@@ -1199,8 +1178,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::table_row_at);
 	ClassDB::bind_method(D_METHOD("hotkey_widget", "key", "is_virtual"),
 			&MenuFrame::hotkey_widget);
-	ClassDB::bind_method(D_METHOD("multiline_line_counts", "index"),
-			&MenuFrame::multiline_line_counts);
 	ClassDB::bind_method(D_METHOD("edit_char", "index", "unicode"),
 			&MenuFrame::edit_char);
 	ClassDB::bind_method(D_METHOD("edit_key", "index", "key", "shift"),

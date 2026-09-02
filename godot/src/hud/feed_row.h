@@ -25,14 +25,11 @@ protected:
 public:
 	void assign(const opennova::hud::FeedRow &p_value) { value_ = p_value; }
 
-	int get_event_type() const { return value_.event_type; }
 	// hud::GameEventKind as its byte.
 	int get_kind() const { return value_.kind; }
 	// The compose form: a camp line takes the level's WPNames string, an
 	// actor line the attacker/victim names.
 	bool is_camp() const { return value_.camp; }
-	// The local player took part (attacker or victim).
-	bool is_own() const { return value_.own; }
 	// The "Canned Msg" template key.
 	String get_key() const;
 	String get_attacker() const;

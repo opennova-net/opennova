@@ -126,10 +126,6 @@ void DestructionDrain::_bind_methods() {
 	DESTRUCTION_DRAIN_ROWS(husk_swaps, HuskSwapEvent)
 	DESTRUCTION_DRAIN_ROWS(death_lights, DeathLightEvent)
 #undef DESTRUCTION_DRAIN_ROWS
-	ClassDB::bind_method(D_METHOD("add_effect", "event"), &DestructionDrain::add_effect);
-	ClassDB::bind_method(D_METHOD("add_sound", "event"), &DestructionDrain::add_sound);
-	ClassDB::bind_method(D_METHOD("add_husk_swap", "event"), &DestructionDrain::add_husk_swap);
-	ClassDB::bind_method(D_METHOD("add_death_light", "event"), &DestructionDrain::add_death_light);
 	ClassDB::bind_static_method("DestructionDrain",
 			D_METHOD("make", "husk_swaps", "effects", "sounds", "death_lights", "debris_triangles",
 					"glass_points", "crackles"),

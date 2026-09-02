@@ -67,7 +67,6 @@ public:
 	int get_quake_ticks() const;
 	float get_rain_current() const;
 	float get_overcast_blend() const;
-	int get_precipitation_kind() const;
 	bool is_raining() const;
 	// The overcast table (.trn + overcast.def keyframes) the overcast blend
 	// cross-fades the .env colors against; null clears it.

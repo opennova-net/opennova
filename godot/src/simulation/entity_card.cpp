@@ -244,7 +244,6 @@ void EntityCardSeat::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pose_index"), &EntityCardSeat::get_pose_index);
 	ClassDB::bind_method(D_METHOD("get_source_name"), &EntityCardSeat::get_source_name);
 	ClassDB::bind_method(D_METHOD("get_local"), &EntityCardSeat::get_local);
-	ClassDB::bind_method(D_METHOD("get_yaw_offset"), &EntityCardSeat::get_yaw_offset);
 	ClassDB::bind_method(D_METHOD("is_occupied"), &EntityCardSeat::is_occupied);
 }
 
