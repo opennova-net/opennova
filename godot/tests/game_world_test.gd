@@ -443,7 +443,7 @@ class WarmGameWorldHarness:
 		_effect_world = effects
 
 	func warm_effect_catalog() -> int:
-		return _warm_effect_world_catalog()
+		return load_stages().warm_effect_world_catalog()
 
 
 # The staged ammo.def for the impact-routing tests: the minimal fixture rows
@@ -754,7 +754,7 @@ func test_round_light_move_rows_reach_world_selected_output() -> void:
 	assert_gte(int(world.get_sim().debug_spawn_round(
 			camera.position, Vector3.RIGHT, "AM_556MM")), 0)
 	world.tick(camera.position, camera.global_transform, ONE_TICK_DELTA)
-	world.render_light_frame()
+	world.device_frame().render_light_frame()
 	var report := world.get_effect_light_report()
 	var report_contract: Variant = report
 	assert_true(report_contract is EffectLightReport,
@@ -816,7 +816,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	camera.position = Vector3(16, 60, -16)
 	world.add_child(camera)
 	camera.make_current()
-	world.render_light_frame()
+	world.device_frame().render_light_frame()
 	assert_eq(world.get_effect_light_report().selected, 1,
 			"the impact flash reaches camera-global object output")
 
@@ -1535,7 +1535,7 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 		effect_world.advance_fixed_tick(0.016)
 	camera.global_position = Vector3(2.0, 1.5, 12.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
-	world.render_particle_frame()
+	world.device_frame().render_particle_frame()
 	var before: Dictionary = effect_world.get_debug_draw_list_report().get(
 			"world_camera_side", {})
 	assert_gt(int(before.get("rendered_quad_count", 0)), 0,
@@ -2464,15 +2464,15 @@ func test_skeleton_debug_builds_and_frees_the_view() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
-	assert_false(world.is_skeleton_debug(), "off by default")
+	assert_false(world.debug_views().is_skeleton_debug(), "off by default")
 	assert_null(world.get_node_or_null("SkeletonDebug"), "...with no view node")
 
-	world.set_skeleton_debug(true)
-	assert_true(world.is_skeleton_debug())
+	world.debug_views().set_skeleton_debug(true)
+	assert_true(world.debug_views().is_skeleton_debug())
 	assert_not_null(world.get_node_or_null("SkeletonDebug"), "enabling builds the 3D view")
 
-	world.set_skeleton_debug(false)
-	assert_false(world.is_skeleton_debug())
+	world.debug_views().set_skeleton_debug(false)
+	assert_false(world.debug_views().is_skeleton_debug())
 	await get_tree().process_frame  # queue_free lands at frame end
 	assert_null(world.get_node_or_null("SkeletonDebug"), "disabling frees it")
 
@@ -2481,22 +2481,22 @@ func test_user_point_debug_builds_frees_and_cleans_up_on_unload() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
-	assert_false(world.is_user_point_debug(), "off by default")
+	assert_false(world.debug_views().is_user_point_debug(), "off by default")
 	assert_null(world.get_node_or_null("UserPointDebug"), "...with no view node")
 
-	world.set_user_point_debug(true)
-	assert_true(world.is_user_point_debug())
+	world.debug_views().set_user_point_debug(true)
+	assert_true(world.debug_views().is_user_point_debug())
 	assert_not_null(world.get_node_or_null("UserPointDebug"),
 			"enabling builds the world-wide user-point view")
 
 	world.unload()
-	assert_true(world.is_user_point_debug(),
+	assert_true(world.debug_views().is_user_point_debug(),
 			"the checked toggle survives teardown so the next load can re-arm it")
 	assert_null(world.get_node_or_null("UserPointDebug"),
 			"teardown detaches the view immediately, before deferred destruction")
 
-	world.set_user_point_debug(false)
-	assert_false(world.is_user_point_debug())
+	world.debug_views().set_user_point_debug(false)
+	assert_false(world.debug_views().is_user_point_debug())
 
 
 func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
@@ -2509,12 +2509,12 @@ func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
-	world.set_skeleton_debug(true)
-	world.set_user_point_debug(true)
-	world.set_collision_debug(true)
-	world.set_occlusion_debug(true)
-	world.set_round_debug(true)
-	world.set_hitbox_debug(true)
+	world.debug_views().set_skeleton_debug(true)
+	world.debug_views().set_user_point_debug(true)
+	world.debug_views().set_collision_debug(true)
+	world.debug_views().set_occlusion_debug(true)
+	world.debug_views().set_round_debug(true)
+	world.debug_views().set_hitbox_debug(true)
 	var debug_names := [
 		"SkeletonDebug",
 		"UserPointDebug",
@@ -2528,12 +2528,12 @@ func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
 				"%s exists before reload" % debug_name)
 
 	world.unload()
-	assert_true(world.is_skeleton_debug())
-	assert_true(world.is_user_point_debug())
-	assert_true(world.is_collision_debug())
-	assert_true(world.is_occlusion_debug())
-	assert_true(world.is_round_debug())
-	assert_true(world.is_hitbox_debug())
+	assert_true(world.debug_views().is_skeleton_debug())
+	assert_true(world.debug_views().is_user_point_debug())
+	assert_true(world.debug_views().is_collision_debug())
+	assert_true(world.debug_views().is_occlusion_debug())
+	assert_true(world.debug_views().is_round_debug())
+	assert_true(world.debug_views().is_hitbox_debug())
 	for debug_name in debug_names:
 		assert_null(world.get_node_or_null(NodePath(debug_name)),
 				"%s detaches immediately during unload" % debug_name)
@@ -2552,10 +2552,10 @@ func test_pick_helpers_keep_stable_names_on_same_frame_replacement() -> void:
 	var first_picks := DebugPickList.new()
 	var replacement_picks := DebugPickList.new()
 
-	world.set_pick_debug(first_picks)
+	world.debug_views().set_pick_debug(first_picks)
 	var first_view := world.get_node_or_null("PickDebug")
 	assert_not_null(first_view)
-	world.set_pick_debug(replacement_picks)
+	world.debug_views().set_pick_debug(replacement_picks)
 	var replacement_view := world.get_node_or_null("PickDebug")
 	assert_not_null(replacement_view)
 	assert_ne(replacement_view, first_view)
@@ -2563,10 +2563,10 @@ func test_pick_helpers_keep_stable_names_on_same_frame_replacement() -> void:
 			"the old view detaches before its deferred destruction")
 	assert_eq(replacement_view.name, &"PickDebug")
 
-	world.set_pick_click_enabled(true)
+	world.debug_views().set_pick_click_enabled(true)
 	var first_catcher := world.get_node_or_null("PickClickCatcher")
 	assert_not_null(first_catcher)
-	world.set_pick_click_enabled(true)
+	world.debug_views().set_pick_click_enabled(true)
 	var replacement_catcher := world.get_node_or_null("PickClickCatcher")
 	assert_not_null(replacement_catcher)
 	assert_ne(replacement_catcher, first_catcher)
@@ -3305,13 +3305,13 @@ func test_occlusion_debug_view_builds_and_frees() -> void:
 	# built view clears instead of erroring.
 	var world := _make_world()
 	add_child_autofree(world)
-	world.set_occlusion_debug(true)
+	world.debug_views().set_occlusion_debug(true)
 	var view := world.get_node_or_null(NodePath("OcclusionDebug"))
 	assert_not_null(view, "enabling builds the occlusion debug child")
-	assert_true(world.is_occlusion_debug())
+	assert_true(world.debug_views().is_occlusion_debug())
 	view.refresh_now()  # no sim resolved: clears, no error
-	world.set_occlusion_debug(false)
-	assert_false(world.is_occlusion_debug())
+	world.debug_views().set_occlusion_debug(false)
+	assert_false(world.debug_views().is_occlusion_debug())
 	assert_true(view.is_queued_for_deletion(), "disabling frees the view")
 
 

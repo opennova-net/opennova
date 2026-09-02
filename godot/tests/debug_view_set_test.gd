@@ -9,7 +9,7 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame
 
-	var initial := _status_by_id(world.get_debug_view_statuses())
+	var initial := _status_by_id(world.debug_views().get_debug_view_statuses())
 	var initial_skeleton: DebugViewStatus = initial[&"show_skeletons"]
 	assert_false(initial_skeleton.enabled)
 	assert_false(initial_skeleton.installed)
@@ -19,9 +19,9 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 	var skeleton := Skeleton3D.new()
 	skeleton.add_bone("root")
 	world.add_child(skeleton)
-	world.set_skeleton_debug(true)
+	world.debug_views().set_skeleton_debug(true)
 	await get_tree().process_frame
-	var enabled := _status_by_id(world.get_debug_view_statuses())
+	var enabled := _status_by_id(world.debug_views().get_debug_view_statuses())
 	var enabled_skeleton: DebugViewStatus = enabled[&"show_skeletons"]
 	assert_true(enabled_skeleton.enabled)
 	assert_true(enabled_skeleton.installed)
@@ -29,7 +29,7 @@ func test_world_reports_overlay_installation_and_drawable_state() -> void:
 	assert_eq(enabled_skeleton.reason, "Drawing 1 skeleton")
 
 	world.unload()
-	var waiting := _status_by_id(world.get_debug_view_statuses())
+	var waiting := _status_by_id(world.debug_views().get_debug_view_statuses())
 	var waiting_skeleton: DebugViewStatus = waiting[&"show_skeletons"]
 	assert_true(waiting_skeleton.enabled)
 	assert_false(waiting_skeleton.installed)
@@ -43,15 +43,15 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 	add_child_autofree(world)
 	await get_tree().process_frame
 
-	world.set_skeleton_debug(true)
-	world.set_user_point_debug(true)
-	world.set_collision_debug(true)
-	world.set_particle_debug(true)
-	world.set_occlusion_debug(true)
-	world.set_round_debug(true)
-	world.set_ray_debug(true)
-	world.set_hitbox_debug(true)
-	world.set_ai_debug_option(&"show_ai_overlay", true)
+	world.debug_views().set_skeleton_debug(true)
+	world.debug_views().set_user_point_debug(true)
+	world.debug_views().set_collision_debug(true)
+	world.debug_views().set_particle_debug(true)
+	world.debug_views().set_occlusion_debug(true)
+	world.debug_views().set_round_debug(true)
+	world.debug_views().set_ray_debug(true)
+	world.debug_views().set_hitbox_debug(true)
+	world.debug_views().set_ai_debug_option(&"show_ai_overlay", true)
 
 	var expected_empty_reasons := {
 		"show_skeletons": "No skeletons to draw",
@@ -64,7 +64,7 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 		"show_hit_meshes": "No hit meshes in range",
 		"show_ai_overlay": "No AI brains to draw",
 	}
-	var status := _status_by_id(world.get_debug_view_statuses())
+	var status := _status_by_id(world.debug_views().get_debug_view_statuses())
 	assert_eq(status.size(), expected_empty_reasons.size(),
 			"every F3 world-overlay option has one status row")
 	for option_id in expected_empty_reasons:
@@ -75,15 +75,15 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 				"%s distinguishes an empty view from an unknowable one" % option_id)
 		assert_eq(row.reason, expected_empty_reasons[option_id])
 
-	world.set_skeleton_debug(false)
-	world.set_user_point_debug(false)
-	world.set_collision_debug(false)
-	world.set_particle_debug(false)
-	world.set_occlusion_debug(false)
-	world.set_round_debug(false)
-	world.set_ray_debug(false)
-	world.set_hitbox_debug(false)
-	world.set_ai_debug_option(&"show_ai_overlay", false)
+	world.debug_views().set_skeleton_debug(false)
+	world.debug_views().set_user_point_debug(false)
+	world.debug_views().set_collision_debug(false)
+	world.debug_views().set_particle_debug(false)
+	world.debug_views().set_occlusion_debug(false)
+	world.debug_views().set_round_debug(false)
+	world.debug_views().set_ray_debug(false)
+	world.debug_views().set_hitbox_debug(false)
+	world.debug_views().set_ai_debug_option(&"show_ai_overlay", false)
 	await get_tree().process_frame
 
 

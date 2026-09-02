@@ -21,6 +21,11 @@ extends RefCounted
 # invoked as _world.<name>() so subclass overrides keep binding).
 var _world: GameWorld
 
+# Godot reserves this many vec4 values of the global shader buffer per
+# geometry instance whose shader declares instance uniforms (see
+# get_runtime_perf_counters' estimate).
+const INSTANCE_UNIFORM_VALUES_PER_GEOMETRY := 16
+
 var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the
 # engine's exit teardown when a test leaks a GameWorld instance (Godot 4.6
@@ -122,7 +127,7 @@ func drive_network_frame() -> bool:
 	if not (_world._world_ready and _world._runtime != null
 			and _world._runtime.is_playing()):
 		return true
-	if _world._join_wire_assets_pending and not _world._apply_join_wire_til_if_ready():
+	if _world._join_wire_assets_pending and not _world.load_stages().apply_join_wire_til_if_ready():
 		_world.report_join_wire_asset_failure(
 				"join: host sent an incomplete or invalid S2C 0x45 terrain stream")
 		return false
@@ -592,7 +597,7 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 		# at this pose first, then publish it through the normal frame.
 		_world._celestial.settle_glare_occlusion()
 		_world._celestial.advance_frame(0.0)
-	_world.render_sun_veil_frame()
+	render_sun_veil_frame()
 	_stamp_iris_samples(_frame_camera_xform)
 	var settle_weather := _world.get_weather_node()
 	if settle_weather != null:
@@ -600,10 +605,10 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# Keep the same camera-producer order as GameFramePipeline, omitting every
 	# time-owning leg. Terrain publishes the detail-cell handoff consumed by
 	# foliage; occlusion then resolves the world visibility for this exact view.
-	_world.apply_scene_environment_frame()
-	_world.render_terrain_frame()
-	_world.render_foliage_frame()
-	_world.apply_occlusion_frame()
+	apply_scene_environment_frame()
+	render_terrain_frame()
+	render_foliage_frame()
+	apply_occlusion_frame()
 
 	# These native devices advance as GameFramePipeline legs (sky/celestial
 	# before terrain, water between terrain and foliage). A fixture freezes
@@ -622,15 +627,15 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# now-current view. Without this the last pre-freeze draw list — built for
 	# the old camera pose — is all that renders, and captures lose every live
 	# emitter (the 00TRa fire-barrel flame was the exposing case).
-	_world.render_particle_frame()
+	render_particle_frame()
 	# Reselect the point lights for the fixture camera the same way (the
 	# flicker phase freezes with the weather ring, matching the phase
 	# contract).
-	_world.render_light_frame()
+	render_light_frame()
 	# Re-plan the render-slot ground shadows for the moved capture camera
 	# (slot priority and the capture poses are camera-relative).
-	_world.render_slot_shadow_frame()
-	_world.update_clear_frame()
+	render_slot_shadow_frame()
+	update_clear_frame()
 	return OK
 
 
@@ -697,3 +702,51 @@ func _update_frame_clear_color() -> void:
 	_world._clear_above_water = above
 	_world._clear_color.environment.background_color = (
 			_world._env.frame_clear_color_for(false, above))
+
+
+func get_runtime_perf_counters() -> Dictionary:
+	var foliage_backend: Dictionary = (
+			_world._dispatcher.get_backend_report() if _world._dispatcher != null else {})
+	return {
+		"tick_us": _world._perf_tick_us,
+		"foliage_us": _world._perf_foliage_us,
+		"runtime_us": _world._perf_runtime_us,
+		"audio_us": _world._perf_audio_us,
+		"runtime": _world._runtime.get_perf_counters() if _world._runtime != null else {},
+		"foliage": _world._dispatcher.get_frame_stats() if _world._dispatcher != null else {},
+		"foliage_backend": foliage_backend,
+		"framefx": _world._framefx.get_backend_report() if _world._framefx != null else {},
+		"mission_placement": _world._mission_stats.duplicate(true),
+		"static_live_populations": _world.get_static_live_population_count(),
+		"audio": _world._mission_audio.get_perf_counters() if _world._mission_audio != null else {},
+		"instance_uniform_geometry_estimate":
+				_instance_uniform_geometry_estimate(foliage_backend),
+	}
+
+
+# Godot reserves INSTANCE_UNIFORM_VALUES_PER_GEOMETRY vec4 values of the global
+# shader buffer for every geometry instance whose shader declares instance
+# uniforms, visible or not, and prints "Too many instances using shader
+# instance variables. Increase buffer size in Project Settings." once the
+# buffer_size budget is exhausted (16384 instances with the project's setting;
+# shader_resource_validation_test.gd pins it). Godot does not expose the live
+# allocation, so this sums the retained instance-uniform geometry the shell
+# itself owns: the foliage draw pools (FoliageDispatcher), the placer's static
+# populations (visible batches plus their shadow twins), and every surface
+# instance of every live ObjectModel scene. Terrain patches, water, and the
+# per-model shadow twins the placer parents under animated models are not
+# counted: read the total as a floor on the allocation, not the exact figure.
+func _instance_uniform_geometry_estimate(foliage_backend: Dictionary) -> Dictionary:
+	var foliage_pool := int(foliage_backend.get("pool_size", 0))
+	var static_populations := (int(_world._mission_stats.get("batches", 0))
+			+ int(_world._mission_stats.get("static_shadow_batches", 0)))
+	var object_geometry := int(ObjectModel.get_live_geometry_instance_count())
+	var buffer_size := int(ProjectSettings.get_setting(
+			"rendering/limits/global_shader_variables/buffer_size", 0))
+	return {
+		"total": foliage_pool + static_populations + object_geometry,
+		"budget": buffer_size / INSTANCE_UNIFORM_VALUES_PER_GEOMETRY,
+		"foliage_pool": foliage_pool,
+		"static_populations": static_populations,
+		"object_geometry": object_geometry,
+	}

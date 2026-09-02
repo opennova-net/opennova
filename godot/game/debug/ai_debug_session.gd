@@ -29,8 +29,8 @@ func begin_world(world: GameWorld) -> void:
 			_dev_tools.set_ai_view_state_provider(Callable())
 		return
 	if _dev_tools != null:
-		_dev_tools.set_ai_view_state_provider(world.get_ai_view_state)
-		world.set_ai_debug_selection_provider(_dev_tools.selected_entity_handle)
+		_dev_tools.set_ai_view_state_provider(world.debug_views().get_ai_view_state)
+		world.debug_views().set_ai_debug_selection_provider(_dev_tools.selected_entity_handle)
 
 
 func _on_view_request(id: StringName, enabled: bool) -> void:
@@ -38,12 +38,12 @@ func _on_view_request(id: StringName, enabled: bool) -> void:
 		return
 	match id:
 		&"overlay":
-			_world.set_ai_debug_option(&"show_ai_overlay", enabled)
+			_world.debug_views().set_ai_debug_option(&"show_ai_overlay", enabled)
 		&"labels":
-			_world.set_ai_debug_option(&"show_ai_labels", enabled)
+			_world.debug_views().set_ai_debug_option(&"show_ai_labels", enabled)
 		&"routes":
-			_world.set_ai_debug_option(&"show_ai_routes", enabled)
+			_world.debug_views().set_ai_debug_option(&"show_ai_routes", enabled)
 		&"targets":
-			_world.set_ai_debug_option(&"show_ai_targets", enabled)
+			_world.debug_views().set_ai_debug_option(&"show_ai_targets", enabled)
 		&"rings":
-			_world.set_ai_debug_option(&"show_ai_rings", enabled)
+			_world.debug_views().set_ai_debug_option(&"show_ai_rings", enabled)

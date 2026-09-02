@@ -27,9 +27,9 @@ func setup(dev_tools: DevTools) -> void:
 ## its providers on it.
 func begin_world(world: GameWorld) -> void:
 	list.clear()
-	world.set_pick_debug(list)
+	world.debug_views().set_pick_debug(list)
 	if _click_active:
-		world.set_pick_click_enabled(true)
+		world.debug_views().set_pick_click_enabled(true)
 	ai.begin_world(world)
 
 
@@ -39,7 +39,7 @@ func sync_click_policy(world: GameWorld, enabled: bool) -> void:
 	if world == null or enabled == _click_active:
 		return
 	_click_active = enabled
-	world.set_pick_click_enabled(enabled)
+	world.debug_views().set_pick_click_enabled(enabled)
 
 
 func is_click_active() -> bool:

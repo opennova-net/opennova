@@ -31,6 +31,9 @@ class FakeWorld:
 	var foliage_camera_generation := -1
 	var framefx_camera_generation := -1
 
+	func device_frame() -> Object:
+		return self
+
 	func begin_device_frame(_camera_pos: Vector3, _camera_xform: Transform3D,
 			_delta: float) -> void:
 		trace.append("begin")

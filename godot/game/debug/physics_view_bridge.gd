@@ -27,6 +27,6 @@ func _process(_delta: float) -> void:
 		return
 	var toggle: int = tools.take_physics_view_toggle()
 	if toggle >= 0:
-		world.set_collision_debug(toggle == 1)
-	tools.set_physics_view_state(world.is_collision_debug(),
-			world.collision_debug_drawable_count())
+		world.debug_views().set_collision_debug(toggle == 1)
+	tools.set_physics_view_state(world.debug_views().is_collision_debug(),
+			world.debug_views().collision_debug_drawable_count())

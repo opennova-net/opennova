@@ -8,12 +8,16 @@ extends RefCounted
 ## method over the one renderer we ship.
 
 var _world: Node
+# The device legs (WorldDeviceFrame; the GUT double answers device_frame()
+# with itself), resolved once at setup like the world.
+var _legs: Object = null
 # The active FrameStats for the frame being advanced (null = no timing).
 var _frame_stats: FrameStats = null
 
 
 func setup(world: Node) -> void:
 	_world = world
+	_legs = world.device_frame()
 
 
 # One leg timer pair for every device leg below: _begin_leg samples the clock
@@ -35,12 +39,12 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 		input = MissionFrameInput.new()
 	input.delta_seconds = delta
 	input.set_camera_sample(camera_pos, -camera_xform.basis.z, true)
-	_world.begin_device_frame(camera_pos, camera_xform, delta)
+	_legs.begin_device_frame(camera_pos, camera_xform, delta)
 	_frame_stats = _world.get_active_frame_stats()
 	var device_timing: bool = _world.is_device_frame_timing_enabled()
 	var leg_start := 0
 
-	var presentation = _world.get_runtime()
+	var presentation: Variant = _world.get_runtime() # the sanctioned duck seam (the GUT double)
 	var outcome: MissionFrameOutcome = null
 	if presentation != null and presentation.is_playing():
 		var runtime_start := Time.get_ticks_usec() if device_timing else 0
@@ -54,20 +58,20 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	# Place the local-player camera/viewmodel from the state the session tick
 	# just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	leg_start = _begin_leg()
-	_world.present_local_view_frame()
+	_legs.present_local_view_frame()
 	_end_leg(FrameStats.WORLD_LOCAL_VIEW, leg_start)
 	# Retail re-applies fog/ambient per scene pass. Classify the adjusted render
 	# eye after camera placement and publish that pass payload before terrain,
 	# foliage, objects, viewmodel, and particles consume it.
 	leg_start = _begin_leg()
-	_world.apply_scene_environment_frame()
+	_legs.apply_scene_environment_frame()
 	_end_leg(FrameStats.WORLD_SCENE_ENV, leg_start)
 	# The environment presenters (weather smoothing, sun direction, sky dome,
 	# celestial bodies): ex-self-clocked _process nodes, now ordered here so
 	# they take THIS frame's render eye and every later leg consumes what they
 	# published this frame, never last frame's.
 	leg_start = _begin_leg()
-	_world.render_environment_nodes_frame()
+	_legs.render_environment_nodes_frame()
 	_end_leg(FrameStats.WORLD_ENV_NODES, leg_start)
 	# Terrain samples the viewport camera directly and tracks the visible
 	# terrain bounds the water leg's g_WaterActive test reads, so it runs
@@ -78,65 +82,65 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	# the previous frame's, exactly as the original water pass regenerates it
 	# after the terrain draw.
 	leg_start = _begin_leg()
-	_world.render_terrain_frame()
+	_legs.render_terrain_frame()
 	_end_leg(FrameStats.WORLD_TERRAIN, leg_start)
 	leg_start = _begin_leg()
-	_world.render_water_frame()
+	_legs.render_water_frame()
 	_end_leg(FrameStats.WORLD_WATER, leg_start)
 	# Foliage receives the same live render transform and consumes this
 	# frame's detail-cell handoff, so it follows terrain.
-	_world.render_foliage_frame()
+	_legs.render_foliage_frame()
 	leg_start = _begin_leg()
-	var network_frame_ok: bool = _world.drive_network_frame()
+	var network_frame_ok: bool = _legs.drive_network_frame()
 	_end_leg(FrameStats.WORLD_NETWORK_FRAME, leg_start)
 	if not network_frame_ok:
 		return outcome
 	if outcome != null and outcome.did_tick():
-		_world.apply_blink_frame()
-	_world.apply_occlusion_frame()
-	_world.sample_iris_frame()
+		_legs.apply_blink_frame()
+	_legs.apply_occlusion_frame()
+	_legs.sample_iris_frame()
 	# The sun-veil stop-down feed for the weather ticks banked above (the
 	# veil alpha itself rides the Celestial shader-global push).
 	leg_start = _begin_leg()
-	_world.render_sun_veil_frame()
+	_legs.render_sun_veil_frame()
 	_end_leg(FrameStats.WORLD_SUN_VEIL, leg_start)
 	# The EffectWorld point-light select for this camera (after iris publishes
 	# the frame's ambient scale, before the lit material draws consume the
 	# pushed globals).
 	leg_start = _begin_leg()
-	_world.render_light_frame()
+	_legs.render_light_frame()
 	_end_leg(FrameStats.WORLD_LIGHT, leg_start)
 	# Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	# occlusion resolves visibility, before the particle composite over it.
 	leg_start = _begin_leg()
-	_world.render_material_frame()
+	_legs.render_material_frame()
 	_end_leg(FrameStats.WORLD_MATERIAL, leg_start)
 	# Compile focused Q3 only after this frame's celestial, water, occlusion,
 	# and object-material producers have published their final transforms and
 	# parameters. The typed snapshot is consumed by the terminal compositor;
 	# it is never self-clocked from a stale process callback.
 	leg_start = _begin_leg()
-	_world.sync_framefx_frame()
+	_legs.sync_framefx_frame()
 	_end_leg(FrameStats.WORLD_FRAMEFX, leg_start)
 	# The render-slot ground shadows plan against the light select published
 	# above and stamp the model subtrees the material frame just rebuilt
 	# (ex-self-clocked SlotShadow _process, which ran after the whole frame).
 	leg_start = _begin_leg()
-	_world.render_slot_shadow_frame()
+	_legs.render_slot_shadow_frame()
 	_end_leg(FrameStats.WORLD_SLOT_SHADOW, leg_start)
 	leg_start = _begin_leg()
-	_world.render_particle_frame()
+	_legs.render_particle_frame()
 	_end_leg(FrameStats.WORLD_PARTICLES, leg_start)
 	# The precipitation streaks after the particle pass and the trails,
 	# before the murk overlay (retail Terrain_RenderSceneWithReflection
 	# @ 0x5c96a6).
-	_world.render_precipitation_frame()
-	_world.mix_audio_frame(outcome.get_ticks_run() if outcome != null else 0)
+	_legs.render_precipitation_frame()
+	_legs.mix_audio_frame(outcome.get_ticks_run() if outcome != null else 0)
 	leg_start = _begin_leg()
-	_world.update_clear_frame()
+	_legs.update_clear_frame()
 	_end_leg(FrameStats.WORLD_CLEAR, leg_start)
 	leg_start = _begin_leg()
-	_world.render_environment_cube_frame()
+	_legs.render_environment_cube_frame()
 	_end_leg(FrameStats.WORLD_ENV_CUBE, leg_start)
-	_world.finish_device_frame()
+	_legs.finish_device_frame()
 	return outcome
