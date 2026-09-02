@@ -703,21 +703,17 @@ static func apply_comparison_weapon_fallback(
 		return {"error": "comparison Armory fallback has no requested weapon"}
 	var profile := comparison_spawn_profile(contract)
 	var soldier_class := int(profile.get("player_class", 0))
-	var kit: Array = [{
-		"name": weapon,
-		"ammo_primary": COMPARISON_PRIMARY_CLIPS,
-		"ammo_secondary": -1,
-		"flags": -1,
-	}]
+	var kit: Array[WeaponKitEntry] = [
+		WeaponKitEntry.make(weapon, COMPARISON_PRIMARY_CLIPS)]
 	if not bool(sim_object.call(
 			"apply_local_player_loadout", kit, soldier_class)):
 		return {"error": "production Armory apply rejected comparison weapon %s" % weapon}
 	var inventory_value: Variant = sim_object.call("get_local_player_inventory")
-	if not (inventory_value is Dictionary):
+	if not (inventory_value is PlayerInventory):
 		return {"error": "production Armory apply produced no inventory witness"}
-	var inventory := inventory_value as Dictionary
-	var equipped := String(inventory.get("equipped_name", ""))
-	if not bool(inventory.get("valid", false)) or equipped != weapon:
+	var inventory := inventory_value as PlayerInventory
+	var equipped := inventory.equipped_name
+	if not inventory.valid or equipped != weapon:
 		return {"error": (
 				"production Armory apply equipped %s, expected %s") % [equipped, weapon]}
 	if not bool(world.call("set_local_player_weapon_by_name", equipped)):
@@ -772,12 +768,12 @@ static func verify_comparison_spawn(
 			return {"error": "comparison simulation has no %s witness" % method_name}
 	var expected_weapon := comparison_weapon_name(contract)
 	var inventory_value: Variant = sim_object.call("get_local_player_inventory")
-	if not (inventory_value is Dictionary):
+	if not (inventory_value is PlayerInventory):
 		return {"error": "comparison spawn produced no inventory witness"}
-	var inventory := inventory_value as Dictionary
-	var equipped := String(inventory.get("equipped_name", ""))
+	var inventory := inventory_value as PlayerInventory
+	var equipped := inventory.equipped_name
 	var sim_weapon := String(sim_object.call("get_local_player_weapon_name"))
-	if not bool(inventory.get("valid", false)) or equipped != expected_weapon \
+	if not inventory.valid or equipped != expected_weapon \
 			or sim_weapon != expected_weapon:
 		return {"error": (
 				"comparison spawn weapon mismatch: inventory=%s sim=%s expected=%s") \

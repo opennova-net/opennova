@@ -1132,7 +1132,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	var expected_names := ["WPN_M4AUTO", "WPN_SATCHEL_CHARGE"]
 	var before_names: Array[String] = []
 	for value in sim.get_local_player_loadout():
-		before_names.append(String((value as Dictionary).get("name", "")))
+		before_names.append((value as WeaponKitEntry).name)
 	assert_eq(before_names, expected_names,
 		"the production world promoted the PLAYER_INFO-style canonical profile")
 
@@ -1154,7 +1154,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var after_names: Array[String] = []
 	for value in sim.get_local_player_loadout():
-		after_names.append(String((value as Dictionary).get("name", "")))
+		after_names.append((value as WeaponKitEntry).name)
 	assert_eq(after_names, expected_names,
 		"accepting the untouched first-open rows preserves the exact canonical kit")
 	world.unload()

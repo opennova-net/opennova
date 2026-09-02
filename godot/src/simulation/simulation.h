@@ -53,6 +53,8 @@ class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/pla
 class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
+class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
+class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -887,15 +889,10 @@ public:
 	// p_filter_by_availability, the kit is filtered through the availability table
 	// with the knife fallback — the SP .bms promote leg (engine: runtime/world/player_loadout.cpp); the armory/profile legs store unfiltered (the server validates).
 	// An empty kit resets to the engine default {WPN_M4AUTO} (engine: runtime/mission/mission_kernel.cpp).
-	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
+	void set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit, bool p_filter_by_availability);
 	// True only after a mission/profile explicitly supplied a spawn kit; the
 	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
 	bool has_explicit_spawn_loadout() const { return kernel_->loadout.spawn_kit_set; }
-	// The map weapon-availability rules (engine: net/npruntime/napi_np_server_ctx.h):
-	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
-	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)
-	// (engine: formats/mission/mission.h).
-	void set_weapon_availability(const TypedArray<Dictionary> &p_pairs);
 	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
 	// (engine: runtime/world/weapon_inventory.h).
@@ -905,7 +902,7 @@ public:
 	// re-selects. Rows whose weapon is availability-banned are refused (the server
 	// 0x2F validation shape, availability 2 requires the armory zone the ACCEPT is
 	// gated on anyway [orig: @ 0x515a4a]). Also stamps player_class when 5..9.
-	bool apply_local_player_loadout(const TypedArray<Dictionary> &p_kit, int p_player_class);
+	bool apply_local_player_loadout(const TypedArray<WeaponKitEntry> &p_kit, int p_player_class);
 	// Commit the profile class without replacing a mission-authored weapon kit.
 	bool set_local_player_class(int p_player_class);
 	// Load the player's weapon profile (weapon.sav) from an ABSOLUTE filesystem path.
@@ -992,13 +989,12 @@ public:
 	void request_local_player_weapon_category(WeaponCategory p_category);
 	// Next/previous weapon (engine: runtime/controls/controls.h).
 	void request_local_player_weapon_cycle(int p_direction);
-	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
-	// [{combo, name, clip}], pools: {class_name: rounds}, carry_flags}.
-	Dictionary get_local_player_inventory() const;
+	// Inventory snapshot for hosts/tests (simulation/player_inventory.h).
+	Ref<PlayerInventory> get_local_player_inventory() const;
 	// Canonical, unexpanded current tuples for the armory host. Retail preselects
 	// visible parent rows from g_armoryLoadoutBufferByClass, never from the expanded
 	// weaponSlotArrayBase [orig: populate_ammo_type_combo_boxes @ 0x564930].
-	TypedArray<Dictionary> get_local_player_loadout() const;
+	TypedArray<WeaponKitEntry> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (WacProgram). Applied now if

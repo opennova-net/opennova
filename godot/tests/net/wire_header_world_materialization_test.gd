@@ -547,7 +547,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		"WPN_EMPLCD50NA": mounted_weapon,
 	}
 	assert_true(joiner.apply_local_player_loadout(
-			[{"name": "WPN_M4AUTO"}], 8))
+			[WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(personal, {})
 	for _settle in range(80):
 		joiner.step()

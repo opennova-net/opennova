@@ -343,10 +343,10 @@ func _throwable_move_effect(sim: Simulation, item_id: int) -> String:
 
 
 func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
-	for value in sim.get_local_player_inventory().get("slots", []):
-		var slot: Dictionary = value
-		if String(slot.get("name", "")) == weapon_name:
-			return int(slot.get("clip", -1))
+	for value in sim.get_local_player_inventory().slots:
+		var slot: PlayerInventorySlot = value
+		if slot.name == weapon_name:
+			return slot.clip
 	return -1
 
 
@@ -1007,7 +1007,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
@@ -1166,7 +1166,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		"WPN_EMPLCD50NA": mounted,
 	}
 	assert_true(joiner.apply_local_player_loadout(
-			[{"name": "WPN_M4AUTO"}], 8))
+			[WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(personal, {})
 	for _settle in range(80):
 		joiner.step()
@@ -1350,13 +1350,12 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 
 	assert_eq(joiner.get_join_assigned_team(), 1,
 			"the pre-spawn 0x04 advertises the co-op team the host entity received")
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
-	assert_eq(String(joiner.get_local_player_inventory().get(
-			"equipped_name", "")), "WPN_M4AUTO",
+	assert_eq(joiner.get_local_player_inventory().equipped_name, "WPN_M4AUTO",
 			"the host's team-filtered 0x5A preserves the accepted co-op weapon")
 
 	var host_target := _organic_index_at_x(host, 0.0)
@@ -1773,8 +1772,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		host.free()
 		return
 
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(_retail_m4(), {})
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(8):
@@ -1931,7 +1930,7 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 		return
 
 	var smoke := _retail_smoke_grenade()
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_GRENADESM"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_GRENADESM")], 8))
 	host.set_local_player_weapon(smoke, {})
 	for _settle in range(20):
 		host.step()
@@ -2059,8 +2058,8 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 		return
 
 	var m4 := _retail_m4()
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(m4, {})
 	joiner.set_local_player_weapon(m4, {})
 	for _settle in range(3):
@@ -2081,8 +2080,7 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 			"the listen host spent a magazine round before reloading")
 	var host_reload_before := spent.reload_serial
 	var host_applied_before := spent.reload_applied_serial
-	var expected_reload_combo := int(host.get_local_player_inventory().get(
-			"equipped_combo", -1))
+	var expected_reload_combo := host.get_local_player_inventory().equipped_combo
 	var joiner_received_before := joiner.get_local_player_weapon_state().reload_received_serial
 
 	host.set_local_player_weapon_input(false, false, true)
@@ -2146,8 +2144,8 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 		return
 
 	assert_true(joiner.apply_local_player_loadout([
-		{"name": "WPN_M4AUTO"},
-		{"name": "WPN_M9Beretta"},
+		WeaponKitEntry.make("WPN_M4AUTO"),
+		WeaponKitEntry.make("WPN_M9Beretta"),
 	], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
@@ -2203,8 +2201,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	var switched := false
 	for _tick in range(120):
 		joiner.step()
-		if String(joiner.get_local_player_inventory().get(
-				"equipped_name", "")) == "WPN_M9Beretta":
+		if joiner.get_local_player_inventory().equipped_name == "WPN_M9Beretta":
 			switched = true
 			break
 	assert_true(switched, "the joiner switched to its secondary before the echo")
@@ -2223,8 +2220,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	var after_echo := joiner.get_local_player_weapon_state()
 	assert_eq(after_echo.reload_applied_serial, applied_before + 1,
 			"the delayed S2C 0x49 applies exactly once")
-	assert_eq(String(joiner.get_local_player_inventory().get(
-			"equipped_name", "")), "WPN_M9Beretta",
+	assert_eq(joiner.get_local_player_inventory().equipped_name, "WPN_M9Beretta",
 			"the late echo does not change the selected weapon")
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), 30,
 			"the payload-addressed M4 slot receives the delayed refill")
@@ -2260,7 +2256,7 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2350,7 +2346,7 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2440,7 +2436,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2492,7 +2488,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(_retail_m4(), {})
 
 	var joiner := Simulation.new()
@@ -2572,11 +2568,11 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 
 	# Mirror _apply_local_player_spawn_loadout: apply, then sync the FSM only on
 	# success + a valid inventory — the shell's exact gate chain.
-	var applied := bool(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	var applied := bool(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	var inventory_valid := false
 	if applied:
-		var inventory: Dictionary = joiner.get_local_player_inventory()
-		inventory_valid = bool(inventory.get("valid", false))
+		var inventory := joiner.get_local_player_inventory()
+		inventory_valid = inventory.valid
 		if inventory_valid:
 			joiner.set_local_player_weapon(_retail_m4(), {})
 

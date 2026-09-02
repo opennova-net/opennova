@@ -155,9 +155,8 @@ func open() -> bool:
 	var weapon_db: WeaponDatabase = _world.get_weapon_database()
 	if weapon_db != null and weapon_db.is_loaded():
 		current_primary = ""
-		for value in sim.get_local_player_loadout():
-			var row := value as Dictionary
-			var weapon_name := String(row.get("name", ""))
+		for row: WeaponKitEntry in sim.get_local_player_loadout():
+			var weapon_name := row.name
 			var index: int = weapon_db.find_weapon(weapon_name)
 			if index < 0:
 				continue
@@ -165,20 +164,24 @@ func open() -> bool:
 				WeaponDatabase.SLOT_PRIMARY:
 					if current_primary.is_empty():
 						current_primary = weapon_name
-						current_parent_clips["PRIMARY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["PRIMARY"] = row.ammo_primary
 				WeaponDatabase.SLOT_SECONDARY:
 					if current_secondary.is_empty():
 						current_secondary = weapon_name
-						current_parent_clips["SECONDARY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["SECONDARY"] = row.ammo_primary
 				WeaponDatabase.SLOT_ACCESSORY:
 					if current_accessory.is_empty():
 						current_accessory = weapon_name
-						current_parent_clips["ACCESSORY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["ACCESSORY"] = row.ammo_primary
 				WeaponDatabase.SLOT_GRENADE:
-					current_grenades.append(row.duplicate(true))
+					# The companion's grenade rows keep the persisted-profile shape
+					# (the loadout profile's "grenades" entries).
+					current_grenades.append({
+						"name": row.name,
+						"ammo_primary": row.ammo_primary,
+						"ammo_secondary": row.ammo_secondary,
+						"flags": row.flags,
+					})
 	_armory.set_current_loadout(
 			current_primary, current_secondary, current_accessory, current_grenades,
 			current_parent_clips)
@@ -331,28 +334,22 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _world != null:
 		var sim: Simulation = _world.get_sim()
-		var kit: Array[Dictionary] = []
+		var kit: Array[WeaponKitEntry] = []
 		for slot_key in ["primary", "secondary", "accessory"]:
 			var weapon_name := String(loadout.get(slot_key, ""))
 			if weapon_name.is_empty():
 				continue
-			kit.append({
-				"name": weapon_name,
-				"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
-				"ammo_secondary": -1,
-				"flags": -1,
-			})
+			kit.append(WeaponKitEntry.make(weapon_name,
+					int(loadout.get(slot_key + "_clips", -1))))
 		for value in loadout.get("grenades", []):
 			var grenade := value as Dictionary
 			var weapon_name := String(grenade.get("name", ""))
 			if weapon_name.is_empty():
 				continue
-			kit.append({
-				"name": weapon_name,
-				"ammo_primary": int(grenade.get("ammo_primary", -1)),
-				"ammo_secondary": int(grenade.get("ammo_secondary", -1)),
-				"flags": int(grenade.get("flags", -1)),
-			})
+			kit.append(WeaponKitEntry.make(weapon_name,
+					int(grenade.get("ammo_primary", -1)),
+					int(grenade.get("ammo_secondary", -1)),
+					int(grenade.get("flags", -1))))
 		var applied := false
 		if sim != null:
 			applied = bool(sim.apply_local_player_loadout(
@@ -373,8 +370,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 		# the viewmodel for it now (the commit event would also catch up next tick).
 		var equipped := primary
 		if sim != null:
-			var inv: Dictionary = sim.get_local_player_inventory()
-			var equipped_name := String(inv.get("equipped_name", ""))
+			var equipped_name := sim.get_local_player_inventory().equipped_name
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \

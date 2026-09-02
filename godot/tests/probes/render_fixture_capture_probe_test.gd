@@ -57,18 +57,18 @@ class ComparisonSim:
 		})
 		if kit.is_empty():
 			return false
-		equipped_name = String((kit[0] as Dictionary).get("name", ""))
-		if int((kit[0] as Dictionary).get("ammo_primary", -1)) == 9:
+		equipped_name = (kit[0] as WeaponKitEntry).name
+		if (kit[0] as WeaponKitEntry).ammo_primary == 9:
 			weapon_clip = 30
 			weapon_reserve = 270
 		player_class = requested_class
 		return not equipped_name.is_empty()
 
-	func get_local_player_inventory() -> Dictionary:
-		return {
-			"valid": true,
-			"equipped_name": equipped_name,
-		}
+	func get_local_player_inventory() -> PlayerInventory:
+		var inventory := PlayerInventory.new()
+		inventory.valid = true
+		inventory.equipped_name = equipped_name
+		return inventory
 
 	func get_local_player_weapon_name() -> String:
 		return equipped_name
@@ -451,15 +451,16 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	assert_false(fallback.has("error"))
 	assert_eq(fallback.weapon_install_source,
 			"production_armory_fallback_after_spawn_override")
-	assert_eq(world.sim.loadout_calls, [{
-		"kit": [{
-			"name": "WPN_M16BURST",
-			"ammo_primary": 9,
-			"ammo_secondary": -1,
-			"flags": -1,
-		}],
-		"player_class": 9,
-	}])
+	assert_eq(world.sim.loadout_calls.size(), 1, "one production Armory apply")
+	var applied: Dictionary = world.sim.loadout_calls[0]
+	assert_eq(int(applied.get("player_class", -1)), 9)
+	var applied_kit: Array = applied.get("kit", [])
+	assert_eq(applied_kit.size(), 1)
+	var applied_row := applied_kit[0] as WeaponKitEntry
+	assert_eq(applied_row.name, "WPN_M16BURST")
+	assert_eq(applied_row.ammo_primary, 9)
+	assert_eq(applied_row.ammo_secondary, -1)
+	assert_eq(applied_row.flags, -1)
 	assert_eq(presenter.refresh_calls, 1)
 	assert_false(RenderFixtureContract.verify_comparison_spawn(world, contract).has("error"))
 	var pose: Dictionary = RenderFixtureContract.teleport_comparison_player(world, contract)

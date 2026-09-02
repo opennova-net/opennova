@@ -3,6 +3,8 @@
 // profile, and the weapon/ammo table feeds.
 #include "simulation/simulation_internal.h"
 #include "simulation/fp_viewmodel_spec.h"
+#include "simulation/player_inventory.h"
+#include "simulation/weapon_kit_entry.h"
 
 #include <net/npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
@@ -33,6 +35,21 @@
 #endif
 
 using namespace sim_internal;
+
+namespace {
+
+// The typed kit rows a GDScript producer hands the sim (null / nameless rows drop).
+std::vector<opennova::world::WeaponKitEntry> kit_rows_from(const TypedArray<WeaponKitEntry> &p_kit) {
+	std::vector<opennova::world::WeaponKitEntry> kit;
+	for (int i = 0; i < p_kit.size(); ++i) {
+		const Ref<WeaponKitEntry> row = p_kit[i];
+		if (row.is_null() || row->value().name.empty()) continue;
+		kit.push_back(row->value());
+	}
+	return kit;
+}
+
+} // namespace
 
 namespace {
 
@@ -294,36 +311,10 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 // --- the local player's loadout: slot pool, spawn kit, map rules -----------------------
 // (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)
 
-namespace {
-
-opennova::world::WeaponKitEntry kit_entry_from_dict(const Dictionary &d) {
-	opennova::world::WeaponKitEntry e;
-	e.name = dictionary_string(d, "name", std::string());
-	e.ammo_primary = int(int64_t(d.get("ammo_primary", -1)));
-	e.ammo_secondary = int(int64_t(d.get("ammo_secondary", -1)));
-	e.flags = int(int64_t(d.get("flags", -1)));
-	return e;
-}
-
-Dictionary kit_entry_to_dict(const opennova::world::WeaponKitEntry &e) {
-	Dictionary d;
-	d["name"] = String::utf8(e.name.c_str());
-	d["ammo_primary"] = e.ammo_primary;
-	d["ammo_secondary"] = e.ammo_secondary;
-	d["flags"] = e.flags;
-	return d;
-}
-
-} // namespace
-
-void Simulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
+void Simulation::set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit,
                                        bool p_filter_by_availability) {
 	if (!kernel_) return;
-	std::vector<opennova::world::WeaponKitEntry> kit;
-	for (int i = 0; i < p_kit.size(); ++i) {
-		opennova::world::WeaponKitEntry e = kit_entry_from_dict(p_kit[i]);
-		if (!e.name.empty()) kit.push_back(std::move(e));
-	}
+	std::vector<opennova::world::WeaponKitEntry> kit = kit_rows_from(p_kit);
 	opennova::world::local_loadout_set_spawn_kit(kernel_->world, kernel_->loadout,
 			std::move(kit), p_filter_by_availability);
 	// A promoted kit changes what the joiner's 0x2F pair should carry; re-arm the
@@ -331,21 +322,6 @@ void Simulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
 	push_joiner_loadout_kit();
 }
 
-void Simulation::set_weapon_availability(const TypedArray<Dictionary> &p_pairs) {
-	if (!kernel_) {
-		kernel_->loadout.availability.reset();
-		return;
-	}
-	std::vector<std::pair<std::string, int32_t>> pairs;
-	for (int i = 0; i < p_pairs.size(); ++i) {
-		const Dictionary d = p_pairs[i];
-		std::string name = dictionary_string(d, "name", std::string());
-		if (name.empty()) continue;
-		pairs.emplace_back(std::move(name), int32_t(int64_t(d.get("value", 1))));
-	}
-	opennova::world::local_loadout_apply_availability_pairs(kernel_->world,
-			kernel_->loadout, pairs);
-}
 
 int Simulation::get_weapon_availability(const String &p_weapon_name) const {
 	if (!kernel_) return opennova::world::weapon_availability_value::kAllowed;
@@ -373,14 +349,14 @@ bool Simulation::set_local_player_class(int p_player_class) {
 	return true;
 }
 
-bool Simulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_kit,
+bool Simulation::apply_local_player_loadout(const TypedArray<WeaponKitEntry> &p_kit,
                                                 int p_player_class) {
 	return apply_local_player_loadout_impl(
 			p_kit, p_player_class, /*p_submit_joiner_request=*/true);
 }
 
 bool Simulation::apply_local_player_loadout_impl(
-		const TypedArray<Dictionary> &p_kit, int p_player_class,
+		const TypedArray<WeaponKitEntry> &p_kit, int p_player_class,
 		bool p_submit_joiner_request) {
 	// The armory ACCEPT apply — world/player_loadout.h local_loadout_apply_accept
 	// [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline leg]. A joiner
@@ -390,12 +366,7 @@ bool Simulation::apply_local_player_loadout_impl(
 	// block. Dropping the kit here left the joiner unable to fire, reload, or
 	// switch (the two-GUI regression).
 	if (!kernel_) return false;
-	std::vector<opennova::world::WeaponKitEntry> kit;
-	for (int i = 0; i < p_kit.size(); ++i) {
-		opennova::world::WeaponKitEntry entry = kit_entry_from_dict(p_kit[i]);
-		if (!entry.name.empty()) kit.push_back(std::move(entry));
-	}
-	return apply_local_player_loadout_rows(std::move(kit), p_player_class,
+	return apply_local_player_loadout_rows(kit_rows_from(p_kit), p_player_class,
 			p_submit_joiner_request);
 }
 
@@ -690,13 +661,13 @@ void Simulation::apply_joiner_authoritative_loadout() {
 		joiner_applied_loadout_revision_ = revision;
 }
 
-Dictionary Simulation::get_local_player_inventory() const {
-	Dictionary out;
-	out["valid"] = kernel_->inventory_valid;
-	out["equipped_combo"] = kernel_->inventory.equipped_combo;
-	out["carry_flags"] = int64_t(kernel_->inventory.carry_flags);
+Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
+	Ref<PlayerInventory> out;
+	out.instantiate();
+	out->set_valid(kernel_->inventory_valid);
+	out->set_equipped_combo(kernel_->inventory.equipped_combo);
+	out->set_carry_flags(static_cast<int>(kernel_->inventory.carry_flags));
 	String equipped_name;
-	Array slots;
 	Dictionary pools;
 	if (kernel_ != nullptr) {
 		const opennova::world::WeaponTable &table = kernel_->world.weapons;
@@ -707,11 +678,10 @@ Dictionary Simulation::get_local_player_inventory() const {
 			const opennova::world::WeaponTableEntry *def =
 					table.by_index(static_cast<uint8_t>(s->adm_index));
 			if (def == nullptr) continue;
-			Dictionary row;
-			row["combo"] = combo;
-			row["name"] = String::utf8(def->name.c_str());
-			row["clip"] = s->clip;
-			slots.push_back(row);
+			Ref<PlayerInventorySlot> row;
+			row.instantiate();
+			row->assign(combo, String::utf8(def->name.c_str()), s->clip);
+			out->add_slot(row);
 			if (combo == kernel_->inventory.equipped_combo)
 				equipped_name = String::utf8(def->name.c_str());
 		}
@@ -723,18 +693,21 @@ Dictionary Simulation::get_local_player_inventory() const {
 					kernel_->inventory.pools[i];
 		}
 	}
-	out["equipped_name"] = equipped_name;
-	out["slots"] = slots;
-	out["pools"] = pools;
+	out->set_equipped_name(equipped_name);
+	out->set_pools(pools);
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_local_player_loadout() const {
-	TypedArray<Dictionary> out;
+TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
+	TypedArray<WeaponKitEntry> out;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
 			kernel_->loadout.spawn_kit_set ? kernel_->loadout.spawn_kit : opennova::world::weapon_kit_default();
-	for (const opennova::world::WeaponKitEntry &entry : kit)
-		out.push_back(kit_entry_to_dict(entry));
+	for (const opennova::world::WeaponKitEntry &entry : kit) {
+		Ref<WeaponKitEntry> row;
+		row.instantiate();
+		row->assign(entry);
+		out.push_back(row);
+	}
 	return out;
 }
 

@@ -229,10 +229,10 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	# catalog load and silently shipped the defaults.
 	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
 
-	var inv: Dictionary = sim.get_local_player_inventory()
+	var inv := sim.get_local_player_inventory()
 	var held := []
-	for row in Array(inv.get("slots", [])):
-		held.append(String((row as Dictionary).get("name", "")))
+	for row in inv.slots:
+		held.append((row as PlayerInventorySlot).name)
 	for name in RED_PAGE:
 		assert_does_not_have(held, name,
 				"%s is on the RED page; an unlatched team must not commit a side" % name)
