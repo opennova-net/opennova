@@ -1,4 +1,5 @@
 #include <formats/lwf/wav_pcm.h>
+#include <base/io/le.h>
 
 #include <cstring>
 
@@ -7,14 +8,6 @@ namespace lwf {
 
 namespace {
 
-// Little-endian readers over the raw buffer (bounds-checked by caller).
-uint16_t rd_u16(const uint8_t *p) {
-	return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
-}
-uint32_t rd_u32(const uint8_t *p) {
-	return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-			(static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
-}
 bool tag_eq(const uint8_t *p, const char *tag) {
 	return p[0] == static_cast<uint8_t>(tag[0]) && p[1] == static_cast<uint8_t>(tag[1]) &&
 			p[2] == static_cast<uint8_t>(tag[2]) && p[3] == static_cast<uint8_t>(tag[3]);
@@ -86,7 +79,7 @@ std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
 		int pred[2] = { 0, 0 };
 		int idx[2] = { 0, 0 };
 		for (int c = 0; c < channels; ++c) {
-			pred[c] = static_cast<int16_t>(rd_u16(b + 4 * c));
+			pred[c] = static_cast<int16_t>(io::read_u16_le(b + 4 * c));
 			idx[c] = b[4 * c + 2];
 			if (idx[c] > 88) {
 				idx[c] = 88;
@@ -156,7 +149,7 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	int64_t pos = 12;
 	while (pos + 8 <= total) {
 		const uint8_t *chunk = bytes + pos;
-		const uint32_t chunk_size = rd_u32(chunk + 4);
+		const uint32_t chunk_size = io::read_u32_le(chunk + 4);
 		const int64_t body = pos + 8;
 		if (body + static_cast<int64_t>(chunk_size) > total) {
 			// Truncated chunk; clamp the data chunk so we still play what we have.
@@ -167,11 +160,11 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 			break;
 		}
 		if (tag_eq(chunk, "fmt ") && chunk_size >= 16) {
-			audio_format = rd_u16(chunk + 8);
-			channels = rd_u16(chunk + 10);
-			sample_rate = rd_u32(chunk + 12);
-			block_align = rd_u16(chunk + 20);
-			bits_per_sample = rd_u16(chunk + 22);
+			audio_format = io::read_u16_le(chunk + 8);
+			channels = io::read_u16_le(chunk + 10);
+			sample_rate = io::read_u32_le(chunk + 12);
+			block_align = io::read_u16_le(chunk + 20);
+			bits_per_sample = io::read_u16_le(chunk + 22);
 			have_fmt = true;
 		} else if (tag_eq(chunk, "data")) {
 			data_off = body;
