@@ -92,10 +92,9 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# Initialize the exact mission clock and the reset weather owner before the
 	# runtime is constructed. The authority publishes this T0 sample after setup
 	# but before play, so its first network tick cannot observe stale/default data.
-	var mission_info: Dictionary = mission.get_info()
-	_world._mission_clock_start_q8_8 = int(mission_info.get("start_time", 0))
-	_world._mission_clock_minutes_per_day = int(mission_info.get(
-			"minutes_per_day", MissionEnvironment.DEFAULT_MINUTES_PER_DAY))
+	var mission_info := mission.get_info()
+	_world._mission_clock_start_q8_8 = mission_info.start_time
+	_world._mission_clock_minutes_per_day = mission_info.minutes_per_day
 	if _world._env != null:
 		_world._env.configure_mission_clock(_world._mission_clock_start_q8_8, _world._mission_clock_minutes_per_day)
 	_prepare_world_driven_weather()
@@ -112,7 +111,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_world._loaded_mission = mission
 	# The mission attribute that forces the indoors accum bit every frame.
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
-	_world._mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & MissionData.ATTRIB_FORCE_INDOORS) != 0
+	_world._mission_forces_indoors = (mission.get_info().attrib_flags & MissionData.ATTRIB_FORCE_INDOORS) != 0
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
@@ -360,7 +359,7 @@ func _load_environment(env_path: String) -> bool:
 func _apply_mission_environment_overrides(mission: MissionData) -> void:
 	if mission == null:
 		return
-	var overrides: Dictionary = mission.get_environment_overrides()
+	var overrides := mission.get_environment_overrides()
 	# EnvFile owns the other live-view overrides, while water keeps the BMS
 	# rung distinct so a flagged zero still beats a nonzero TRN height.
 	if _world._env != null:
@@ -371,8 +370,8 @@ func _apply_mission_environment_overrides(mission: MissionData) -> void:
 			else:
 				env_data.apply_mission_overrides(overrides)
 	var mission_water := NAN
-	if overrides.has("water_height_world"):
-		mission_water = float(overrides["water_height_world"])
+	if overrides.has_water_height:
+		mission_water = overrides.water_height_world
 	_set_mission_water_height_override(mission_water)
 
 

@@ -568,12 +568,12 @@ func _restore_shell() -> void:
 
 func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) -> void:
 	var mission := world.get_loaded_mission()
-	var mission_info: Dictionary = mission.get_info() if mission != null else {}
+	var mission_info: MissionInfo = mission.get_info() if mission != null else null
 	_logv(["[spawn-capture] mission metadata: ", {
 		"environment_ref": mission.get_environment_ref() if mission != null else "",
 		"terrain_ref": mission.get_terrain_ref() if mission != null else "",
-		"start_time_raw_q8_8": int(mission_info.get("start_time", -1)),
-		"minutes_per_day": int(mission_info.get("minutes_per_day", -1)),
+		"start_time_raw_q8_8": mission_info.start_time if mission_info != null else -1,
+		"minutes_per_day": mission_info.minutes_per_day if mission_info != null else -1,
 	}])
 	_logv(["[spawn-capture] environment lighting: ", {
 		"sun_direction": environment.get_sun_direction(),

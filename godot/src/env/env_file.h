@@ -15,6 +15,8 @@
 
 namespace godot {
 
+class MissionEnvironmentOverrides;
+
 // Resource wrapper for a stock .env environment/TOD file.
 // Native data and all format behavior live in engine/formats/env; this class is the
 // Godot-facing equivalent of the (engine: formats/env/env.cpp) /
@@ -240,10 +242,9 @@ public:
 	// docs/env/env-honored-matrix.md and flip only with grill citations.
 	static Dictionary get_field_consumption();
 
-	// BMS mission override layer. Recognized keys: water_height (float),
-	// fog_level (float), fog_color (Color), water_color (Color),
-	// water_murk (float), start_time (int HHMM).
-	void apply_mission_overrides(const Dictionary &p_overrides);
+	// BMS mission override layer (env/mission_environment_overrides.h): the
+	// armed fields land on a copy of the base config.
+	void apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides);
 	void clear_mission_overrides();
 	bool has_mission_overrides() const;
 

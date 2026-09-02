@@ -1,5 +1,7 @@
 #include "env/env_file.h"
 
+#include "env/mission_environment_overrides.h"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <base/io/fixed.h>
 #include <godot_cpp/classes/mesh.hpp>
@@ -716,38 +718,17 @@ Dictionary EnvFile::get_field_consumption() {
 	return table;
 }
 
-void EnvFile::apply_mission_overrides(const Dictionary &p_overrides) {
+void EnvFile::apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides) {
+	if (p_overrides.is_null()) {
+		clear_mission_overrides();
+		return;
+	}
 	if (!mission_overrides_active) {
 		_sync_env_from_properties();
 		env_base = env;
 	}
-	opennova::env::BmsEnvOverrides overrides;
-	if (p_overrides.has("water_height")) {
-		overrides.has_water_height = true;
-		overrides.water_height = static_cast<float>(p_overrides["water_height"]);
-	}
-	if (p_overrides.has("fog_level")) {
-		overrides.has_fog_level = true;
-		overrides.fog_level = static_cast<float>(p_overrides["fog_level"]);
-	}
-	if (p_overrides.has("fog_color")) {
-		overrides.has_fog_color = true;
-		overrides.fog_color = to_rgb(p_overrides["fog_color"]);
-	}
-	if (p_overrides.has("water_color")) {
-		overrides.has_water_color = true;
-		overrides.water_color = to_rgb(p_overrides["water_color"]);
-	}
-	if (p_overrides.has("water_murk")) {
-		overrides.has_water_murk = true;
-		overrides.water_murk = static_cast<float>(p_overrides["water_murk"]);
-	}
-	if (p_overrides.has("start_time")) {
-		overrides.has_start_time = true;
-		overrides.start_time = static_cast<int>(p_overrides["start_time"]);
-	}
 	env = env_base;
-	opennova::env::apply_bms_overrides(env, overrides);
+	opennova::env::apply_bms_overrides(env, p_overrides->value());
 	mission_overrides_active = true;
 	_sync_properties_from_env();
 	emit_signal("environment_changed");

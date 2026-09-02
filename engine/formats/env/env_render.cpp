@@ -1785,6 +1785,37 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 	}
 }
 
+BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
+                                              int fog_override, const int fog_color[3],
+                                              const int water_color[3], int water_murk) {
+	// [orig: Game_LoadTerrainDuringConnect @ 0x520710 + Game_StartMission @ 0x525371]
+	BmsEnvOverrides overrides;
+	constexpr uint32_t kWaterOverrideEnable = 0x1;
+	constexpr uint32_t kFogDistanceOverrideEnable = 0x2;
+	constexpr uint32_t kFogColorOverrideEnable = 0x4;
+	if ((attrib_flags & kWaterOverrideEnable) != 0) {
+		overrides.has_water_height = true;
+		overrides.water_height = static_cast<float>(water_override);
+	}
+	if ((attrib_flags & kFogDistanceOverrideEnable) != 0) {
+		overrides.has_fog_level = true;
+		overrides.fog_level = static_cast<float>(fog_override);
+	}
+	if ((attrib_flags & kFogColorOverrideEnable) != 0) {
+		overrides.has_fog_color = true;
+		overrides.fog_color = {fog_color[0] / 255.0f, fog_color[1] / 255.0f, fog_color[2] / 255.0f};
+	}
+	if (water_color[0] != 0 || water_color[1] != 0 || water_color[2] != 0) {
+		overrides.has_water_color = true;
+		overrides.water_color = {water_color[0] / 255.0f, water_color[1] / 255.0f, water_color[2] / 255.0f};
+	}
+	if (water_murk != 0) {
+		overrides.has_water_murk = true;
+		overrides.water_murk = static_cast<float>(water_murk) * 0.01f;
+	}
+	return overrides;
+}
+
 float iris_luminance(const Rgb &c) {
     // [orig: @ 0x5c7550] lum = 0.25*(r+b) + 0.5*g.
     return 0.25f * (c.r + c.b) + 0.5f * c.g;

@@ -226,7 +226,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 	_stats = Stats.new()
 	if mission == null or container == null or _resource_root == null:
 		return _stats
-	var mission_info: Dictionary = mission.get_info()
+	var mission_info := mission.get_info()
 	# A repeated setup is not the normal owner lifecycle, but it must not orphan
 	# an earlier physical pool or carry dialog state into the next mission.
 	_stop_all_ambient_channels()
@@ -333,8 +333,8 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 			"missing" if _item_db == null else "loaded"])
 
 	_feed_mixer()
-	_apply_reverb(int(mission_info.get("reverb", 0)))
-	_apply_music(int(mission_info.get("music", 0)))
+	_apply_reverb(mission_info.reverb)
+	_apply_music(mission_info.music)
 	return _stats
 
 

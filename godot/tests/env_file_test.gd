@@ -130,11 +130,11 @@ func test_mission_overrides_apply_as_live_view_only() -> void:
 	env.set_water_murk(0.8)
 	var base_bytes := env.to_bytes()
 
-	env.apply_mission_overrides({
-		"fog_level": 250.0,
-		"water_color": Color(0.1, 0.2, 0.3),
-		"water_murk": 0.4,
-	})
+	var overrides := MissionEnvironmentOverrides.new()
+	overrides.fog_level = 250.0
+	overrides.water_color = Color(0.1, 0.2, 0.3)
+	overrides.water_murk = 0.4
+	env.apply_mission_overrides(overrides)
 	assert_true(env.has_mission_overrides(), "Applying overrides should set the active flag.")
 	assert_almost_eq(env.get_fog_level(), 250.0, 0.5, "Getters should see the overridden fog level.")
 	assert_almost_eq(env.get_water_murk(), 0.4, 0.01, "Getters should see the overridden murk.")

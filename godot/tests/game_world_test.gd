@@ -1051,7 +1051,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	assert_true(mission.set_header_string("environment", "mnml"))
 	assert_true(mission.set_header_int("water_override", 0))
 	assert_true(mission.set_header_flag(0x1, true))
-	assert_true(mission.get_environment_overrides().has("water_height"))
+	assert_true(mission.get_environment_overrides().has_water_height)
 
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
 	var water := world.get_node("Water") as Water

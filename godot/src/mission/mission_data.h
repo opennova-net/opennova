@@ -19,6 +19,9 @@
 
 namespace godot {
 
+class MissionEnvironmentOverrides;
+class MissionInfo;
+
 class ResourceRoot;
 
 // Thin GDExtension wrapper over opennova::mission::MissionDocument (engine/runtime/mission).
@@ -149,9 +152,11 @@ public:
 	// Header references (basenames, no extension): e.g. "dvxi5", "full_00".
 	String get_terrain_ref() const;
 	String get_environment_ref() const;
-	Dictionary get_info() const;
-	// EnvFile.apply_mission_overrides() payload from the attrib-gated header.
-	Dictionary get_environment_overrides() const;
+	// The header as a record (mission/mission_info.h).
+	Ref<MissionInfo> get_info() const;
+	// EnvFile.apply_mission_overrides() payload from the attrib-gated header
+	// (env/mission_environment_overrides.h; env::bms_env_overrides_from_header).
+	Ref<MissionEnvironmentOverrides> get_environment_overrides() const;
 
 	int get_entity_count(EntityKind kind) const;
 	// Array of dictionaries; see entity_to_dictionary() for the fields.

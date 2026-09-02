@@ -54,6 +54,7 @@ add_library(${TARGET_NAME} SHARED
     cbin/credits_player.cpp
     env/env_keyframe.cpp
     env/env_file.cpp
+    env/mission_environment_overrides.cpp
     env/color_smoother.cpp
     env/mission_environment.cpp
     mission/mission_catalog.cpp
@@ -126,6 +127,7 @@ add_library(${TARGET_NAME} SHARED
     devtools/oned_ui.cpp
     hud/hud_pos.cpp
     mission/mission_data.cpp
+    mission/mission_info.cpp
     simulation/present_applier.cpp
     simulation/present_applier_wire.cpp
     simulation/present_stats.cpp
