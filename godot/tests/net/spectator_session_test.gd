@@ -15,15 +15,15 @@ func _mission() -> MissionData:
 
 func _host(mission: MissionData) -> Simulation:
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Spectator Session",
-		"mission_name": "Spectator Session",
-		"mission_file": "SPECTATOR_TEST.BMS",
-		"gametype": 0x30020,
-		"max_players": 4,
-		"spectator_slots": -1,
-		"spectator_password": "watch",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Spectator Session"
+	host_options.mission_name = "Spectator Session"
+	host_options.mission_file = "SPECTATOR_TEST.BMS"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.spectator_slots = -1
+	host_options.spectator_password = "watch"
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	return host

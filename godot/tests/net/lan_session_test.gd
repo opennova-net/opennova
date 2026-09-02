@@ -36,16 +36,16 @@ func test_browse_defaults_pin_the_retail_game_port_range() -> void:
 
 func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> void:
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Kitchen LAN",
-		"mission_name": "Discovery Island",
-		"mission_file": "DISCOVERY_A1.BMS",
-		"expansion": "jox01",
-		"gametype": 0x30020,
-		"max_players": 6,
-		"spectator_slots": -1,
-		"spectator_password": "watch",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Kitchen LAN"
+	host_options.mission_name = "Discovery Island"
+	host_options.mission_file = "DISCOVERY_A1.BMS"
+	host_options.expansion = "jox01"
+	host_options.game_type = 0x30020
+	host_options.max_players = 6
+	host_options.spectator_slots = -1
+	host_options.spectator_password = "watch"
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(_mission()))
 	var port := host.get_host_listen_port()
@@ -90,11 +90,11 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 
 func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Duplicate Reply LAN",
-		"gametype": 0x30020,
-		"max_players": 4,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Duplicate Reply LAN"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(_mission()))
 	var host_port := host.get_host_listen_port()

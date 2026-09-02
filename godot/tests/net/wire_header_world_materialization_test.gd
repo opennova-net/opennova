@@ -248,11 +248,11 @@ func _player_index(sim: Simulation) -> int:
 
 
 func _configure_dedicated_host(host: Simulation) -> void:
-	host.configure_host_session({
-		"serve_and_play": false,
-		"gametype": 0x30020,
-		"mission_file": "WIRE_HEADER_PARITY.BMS",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.serve_and_play = false
+	host_options.game_type = 0x30020
+	host_options.mission_file = "WIRE_HEADER_PARITY.BMS"
+	host.configure_host_session(host_options)
 
 
 func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:

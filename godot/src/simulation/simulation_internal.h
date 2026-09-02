@@ -204,35 +204,6 @@ inline std::string dictionary_string(const Dictionary &d, const char *key, const
 	return std::string(value.utf8().get_data());
 }
 
-inline void apply_dictionary_string(const Dictionary &d, const char *key, std::string &out) {
-	if (d.has(key)) {
-		out = dictionary_string(d, key, out);
-	}
-}
-
-inline uint16_t dictionary_u16(const Dictionary &d, const char *key, uint16_t fallback) {
-	if (!d.has(key)) return fallback;
-	const int value = static_cast<int>(d.get(key, static_cast<int>(fallback)));
-	return static_cast<uint16_t>(std::clamp(value, 0, 0xFFFF));
-}
-
-inline uint32_t dictionary_u32(const Dictionary &d, const char *key, uint32_t fallback) {
-	if (!d.has(key)) return fallback;
-	const int64_t value = static_cast<int64_t>(d.get(key, static_cast<int64_t>(fallback)));
-	if (value < 0) return 0;
-	if (value > 0xFFFFFFFFll) return 0xFFFFFFFFu;
-	return static_cast<uint32_t>(value);
-}
-
-inline int32_t dictionary_i32(const Dictionary &d, const char *key, int32_t fallback) {
-	if (!d.has(key)) return fallback;
-	const int64_t value = static_cast<int64_t>(d.get(key, static_cast<int64_t>(fallback)));
-	return static_cast<int32_t>(std::clamp(
-			value,
-			static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
-			static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
-}
-
 // The collision/occlusion/bound-radius builders and the model predicates
 // moved to the engine (ADR 0028): engine/runtime/simassets. The using
 // declarations keep this header's call sites unchanged.

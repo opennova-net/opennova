@@ -47,6 +47,7 @@ class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
+class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -280,8 +281,14 @@ public:
 	bool is_host_listening() const { return host_listen_; }
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	void configure_host_session(Dictionary p_options);
-	Dictionary get_host_session_config() const;
+	// The hosted-session request (network/host_session_options.h): every
+	// user-facing field lands; the sim-owned fields (the mission header blob,
+	// the score tables) are untouched. Call BEFORE loading a mission.
+	void configure_host_session(const Ref<HostSessionOptions> &p_options);
+	// A snapshot of the live host session as the same record.
+	Ref<HostSessionOptions> get_host_session_config() const;
+	// The BMS header the tag=0x0B join reply carries: 0 until a mission loaded.
+	int get_mission_header_size() const;
 	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space
 	// position, exercising the admit_peer + connection wiring without a live
 	// socket handshake (the handshake itself is unit-tested in libs —

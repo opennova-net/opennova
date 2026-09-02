@@ -67,6 +67,8 @@
     "HostOnly",
     "HostOwner",
     "HostSessionConfig",
+    "HostSessionOptions",
+    "host_session_options",
     "HostSessionPerf",
     "ListenHost",
     "ListenHostState",

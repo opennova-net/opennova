@@ -496,11 +496,13 @@ func _network_state(sim: Simulation) -> Dictionary:
 			"diagnostics": sim.get_joiner_network_diagnostics(),
 		}
 	if bool(sim.is_host_listening()):
+		var session := sim.get_host_session_config().to_json_value()
+		session["mission_header_size"] = sim.get_mission_header_size()
 		return {
 			"role": "host",
 			"port": sim.get_host_listen_port(),
 			"peers": sim.get_host_peer_count(),
-			"session": sim.get_host_session_config(),
+			"session": session,
 		}
 	return {"role": "local"}
 

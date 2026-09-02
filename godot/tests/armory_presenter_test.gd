@@ -373,7 +373,9 @@ func test_multiplayer_open_is_live() -> void:
 	# server-authoritatively, so the armory opens in MP like retail
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94].
 	var sim := _real_sim(2)
-	sim.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the MP armory rides a real listen host")
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
@@ -391,10 +393,10 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 	var sim := _real_sim(2)
 	assert_true(sim.apply_local_player_loadout([], 8),
 			"the staged player carries the disallowed rifleman class")
-	sim.configure_host_session({
-		"gametype": 0x30020,
-		"class_allow_mask": 1 << 9, # rifleman disallowed; engineer is next allowed
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.class_allow_mask = 1 << 9  # rifleman disallowed; engineer is next allowed
+	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the session class policy rides a real host")
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
