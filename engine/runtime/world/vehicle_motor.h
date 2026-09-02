@@ -22,17 +22,17 @@
 // light @0x479600 for cbik/Bike — client subsets: pad probes at wheel height,
 // per-corner lifts, the 4-normal/axle attitude fits, the positive-corner or
 // mean-wheel rest Z; vehicle-client-movers-re.md §7-§9; boxless/terrain-less
-// rows keep the bilinear terrain-clamp stand-in). Tracked deferrals (D-NET-161):
-// the air/helicopter AUTHORITY mover (`move_function chel` — Super Pumas stay
-// parked), the skid/tire-slip model (`tireSlip`/`slip_speed`; the ASH buggy
-// authors slip_speed 0), the pool-1 vehicle-vs-vehicle collision loop +
-// collision-avoid damping, the authority drown-drain countdown, the solve's
-// contact-direction store feeding a slope-following velocity re-derive
-// (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the tank keeps
-// its full-basis drive with the same store deferred), the AI
-// autopilot/waypoint drive (states 16/18), specialized vehicle sound families
-// beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, and the
-// vehicle AI state machine's non-drive states
+// rows keep the bilinear terrain-clamp stand-in). The air family's authority
+// half (the CHel/cpln AI flight block, health machine, rotor gate and drains)
+// lives in vehicle_motor_air.cpp + AiSystem::chel_ai_drive (2026-09-01).
+// Tracked deferrals (D-NET-161): the skid/tire-slip model (`tireSlip`/
+// `slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
+// vehicle-vs-vehicle collision loop, the authority drown-drain countdown, the
+// solve's contact-direction store feeding a slope-following velocity
+// re-derive (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the
+// tank keeps its full-basis drive with the same store deferred), specialized
+// vehicle sound families beyond the ground idle/drive/reverse pass in
+// vehicle_sound.cpp, and the vehicle AI state machine's non-drive states
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
 #ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
 #define OPENNOVA_WORLD_VEHICLE_MOTOR_H

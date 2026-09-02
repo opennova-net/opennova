@@ -4617,11 +4617,21 @@ convoys drove full-speed into parked neighbors and the (ported) hull contact
 DEFLECTED them off their routes — braking behind obstacles, not deflection, is
 the retail path-follow behavior. ctest `vehicle_mount`
 (`test_ai_drive_avoid_brake` — exact factor ahead, no damp behind).
-The wait-for-boarders stop stays deferred WITH its witness: it only fires for
-a live unmounted pool-0 entity whose brain runs the boarding think (mode
-`f[37] == 125` keyed to this vehicle's DcbId in `f[38]`) — moot until the
-boarding think (D-AI-11) lands. The handbrake byte-973 latch and the aim-lock
-stop stay deferred (D-NET-161).
+2026-09-01: the rest of leg 3 is ported — the wait-for-boarders stop (the
+existing `vehicle_waits_for_boarders` helper, now on the ground and boat AI
+legs), the minAI crew clamp (`AiSystem::apply_min_ai_crew_clamp` over
+`vehicle_at_spawn_anchor` [orig: Entity_IsBoneInProximity @ 0x434F90 — the
+"bone" is the +0x24C spawn pose, Z halved, 8 u] and `count_mounted_entities`
+[orig: Entity_CountMountedEntities @ 0x435970]), the handbrake byte-973 latch
+and the crashed stop [orig: @ 0x48c03a..0x48c095 — `occupant && Flags & 8 &&
+itemDef->handBrake`; Flags bit 3 is the player leg's lean-right mirror, so the
+handbrake IS the lean-right key], the MoveOrder bit-0x10 merge [orig:
+@ 0x48b847..0x48b897], and the parked leg's `AI_CheckVehicleStuckState
+@ 0x465290` (`AiSystem::check_vehicle_stuck`: the +0x148 counter, the 16-count
+cadence, the pool-0 proximity reset past 32, the 12 u spawn-anchor test past
+3410 with `slideDecay += 1024`, the kill past 3720). ctest `vehicle_mount`
+(`test_stuck_check`, `test_min_ai_crew_clamp`, `test_handbrake_latch`,
+`test_ground_waits_for_boarders`).
 
 **Hull-vs-world collision (witnessed 2026-07-17, ported the same session).**
 The physics tick runs `Entity_CheckCollisionState @ 0x462a30` (twice — the
@@ -6864,7 +6874,21 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
    0x27B0 both sides, team/FF gates, authority-only, death anim cause 2 by
    approach quadrant, killer = carrier occupant +0x170, groundEntity-riders
    exempt) is witnessed for the D-NET-161/00TRg authority arc — not a
-   client-subset item.
+   client-subset item. PORTED 2026-09-01 into `CollisionWorld::resolve_movement`
+   with the gates in `vehicle_collision_damage.h`: the pusher is the last
+   pass-0 force candidate [orig: the var_80 store @ 0x4b30a9]; the vehicle test
+   `itemDef+0x5C == 1` @ 0x4b37dc, the victim's +0x28 ride exemption @ 0x4b37e8,
+   both dead tests @ 0x4b37f3 / @ 0x4b380b, BOTH the pusher's own and its
+   relative planar displacement `> 0x27B0` @ 0x4b38e5..0x4b38f8, the team test
+   with the BERSERK (`AiSlot+4 & 0x200`) override on either side
+   @ 0x4b389d..0x4b38d2, authority @ 0x4b38d8, the indestructible refusal
+   @ 0x4b3901; the kill = anim cause 2 at bone 2 by the quadrant
+   `(Yaw − atan2BAM(rel) + 0x1FFFFFFF) >>> 30` @ 0x4b395d..0x4b39b7, `+0x178 =
+   pusher occupant` @ 0x4b39d1, Health 0 @ 0x4b39d7, Score_ProcessKillEvent
+   @ 0x4b39e2 (our RoundDeath credits the occupant). Not modeled: the player
+   victim's `+0x124` dword gate @ 0x4b391f and the spectator slot byte
+   `+0x188D7` @ 0x4b393f. ctest `vehicle_collision_damage`
+   (`test_run_over_gates`).
 
 ## 30. The ladder climb state machine — the D-COL-5 port (engine-research + port, 2026-08-15)
 

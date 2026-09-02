@@ -196,6 +196,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_attach.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor_air.cpp # the CHel/cpln mover: input block, prediction leg, authority legs (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_part_anim.cpp # the rotor spin machine + wheel phase (split of the mover tails)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_suspension.cpp # the spring leg: latch pick + per-wheel step (split of the contact solves)

@@ -12516,6 +12516,31 @@ still deferred here: the per-wheel point array/radii, the v84/v85 slope-threshol
 grading (caller locals, unwitnessed), the graded ¼/⅛ bands, the size-class crush leg
 (`@ 0x462e94`), the severity-3 authority damage block (`@ 0x47cd00`), and the second
 averaged-suspension pass (`@ 0x47d213`).
+2026-09-01 update (the parked-leg tail, the AIR authority half, the run-over kill;
+vehicle-client-movers-re §1.12 + §2.12, world-wac-ai-re §23.3 + §29.3): PORTED —
+`AI_CheckVehicleStuckState @ 0x465290` (`AiSystem::check_vehicle_stuck`, from the three
+parked legs `@ 0x48c01e` / `@ 0x48e808` / `@ 0x491c5e`); the minAI crew clamp
+(`@ 0x48bc4e..0x48bc94` / `@ 0x48E27F..0x48E2C7` / `@ 0x4915b2..0x4915e2`) over
+`Entity_IsBoneInProximity @ 0x434F90` + `Entity_CountMountedEntities @ 0x435970`, with the
+def's minAI/criticalHp on `VehicleTraits`; the handbrake byte-973 latch + the crashed stop
+(`@ 0x48c03a..0x48c095` — the driver's lean-right key is the handbrake; items.def
+`hand_brake`/`tire_slip` parsed with retail's 1/5 defaults); the MoveOrder bit-0x10 merge
+(`@ 0x48b847..0x48b897` / `@ 0x48DE04..0x48DE7B`); the boarders hold on the ground/boat AI
+legs; the boat submerged-driver cut (`@ 0x48DFD3..0x48DFDF`); the CHel/cpln **AI flight
+block** (`@ 0x491672..0x491998`, `AiSystem::chel_ai_drive`) with the air turn budget, the
+node-slope altitude target, the [548] climb register (`VehicleMotorState::net_climb`, the
+engine flag's witnessed source `@ 0x491dfd`), the 132-scaled cyclic seeds, the floor and
+landing legs, the cos² heading damp and the separation damp; the air health machine
+(`@ 0x4903F0..0x490480` regen/burn + the 2886390 yaw spiral, `noncriticalregen` parsed),
+the rotor-up gate (`@ 0x490592..0x4905a6` / `@ 0x491ca7..0x491cc2`), the water drain
+(`@ 0x4924e2`) and crash drain (`@ 0x492637`); and the movement resolver's run-over kill
+(`@ 0x4b37c2..0x4b39f7`, `CollisionWorld::resolve_movement` + the gates in
+`vehicle_collision_damage.h`). Pinned by `vehicle_mount` (stuck check, minAI, handbrake,
+ground boarders hold, helo AI flight, helo health machine), `watercraft_client_motor`
+(submerged cut), `def_parse_items`, `vehicle_collision_damage`. Still deferred: the air
+flare scan, the pilot analog collective and the pilot yaw follow of the burn spiral, the
+spawn-parent (+0x264) anchor lift, the run-over player gates (+0x124 / the spectator
+slot byte +0x188D7), the FX/sound seams of every leg above.
 
 **D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
 learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire

@@ -21,6 +21,7 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
 | Watercraft mover AUTHORITY half (`@ 0x48D480`, gate `@ 0x48DF8C`) | MATCHING — ported (`tick_watercraft_motor` + `AiSystem::watercraft_ai_drive`; shared `watercraft_motor_core`) | §1.12 spec (witnessed 2026-08-06); `watercraft_client_motor` ctest authority legs; `00trg_defense_probe.gd` (host boats drive their event routes) |
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
+| Aircraft mover AUTHORITY half (`@ 0x490310`: the AI flight block, the health machine, the rotor gate, the drains) | MATCHING — ported 2026-09-01 (`AiSystem::chel_ai_drive` + the authority legs of `aircraft_client_tick`) | §1.13 spec; `vehicle_mount` (`test_helo_ai_flight`, `test_helo_authority_health`) |
 | Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
 | Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the wreck-tumble machinery unported | §4 |
 | cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
@@ -591,9 +592,78 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
   Both legs fall into the steer integrator @ 0x48E82C (§3, the ported core).
 
 Deferrals staying with D-NET-161: the every-8th-tick groundEntity refresh
-[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the MoveOrder
-merge, the submerged-driver cut, the minAI clamp, the [135] mirror, the
-boarding-wait hold, the stuck check, and the wake-anim lerp.
+[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the [135]
+mirror, and the wake-anim lerp. Ported 2026-09-01: the MoveOrder merge (the
+occupant's own word, wire-visible in the echo), the submerged-driver cut
+(`watercraft_driver_submerged` — a body with no derived eye height keeps the
+wheel), the minAI clamp (`AiSystem::apply_min_ai_crew_clamp`), the boarding-wait
+hold, and the stuck check (`AiSystem::check_vehicle_stuck`); ctest
+`watercraft_client_motor` (`run_submerged_driver_hands_to_ai_leg`) and
+`vehicle_mount`.
+
+### 1.13 The AIR authority half (witnessed + ported 2026-09-01)
+
+The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
+`@ 0x490310`, decompiled this session and ported as `AiSystem::chel_ai_drive`
+(ai_waypoints.cpp) + the authority legs of `aircraft_client_tick`
+(vehicle_motor_air.cpp). Block map, in retail order:
+
+1. **Health machine** [@ 0x4903F0..0x490480, on the `(tick + 9*DcbId) & 0x3F`
+   cadence]: above `criticalHp` (+0x180) the hull regens `nonCriticalRegen`
+   (+0x184) while `Health < healthMax − regen` [@ 0x4903f9..0x49042d]; at or
+   below it the hull BURNS `criticalDrain` (+0x182) per cadence
+   [@ 0x490434..0x490480] and, airborne (Flags 0x2000) with `[524] − ground >
+   1 u`, `Yaw −= 2886390` every tick — the tail-rotor spiral [@ 0x49048e..
+   0x4904be; the pilot's own Yaw follows unless free-looking — a look write the
+   client owns, deferred]. Smoke (`Health < healthMax/4`) and fire emitters +
+   the every-64th-tick fire sound are presentation seams.
+2. **Rotor gate** [@ 0x490592..0x4905a6]: `updated = Health > 0 && !(Flags & 1)
+   ? Entity_UpdateHeloRotorSpin(...) : 0`, whose return is `!is_authority ||
+   speed >= 0x0CCCCCC0`; at LABEL_328 [@ 0x491ca7..0x491cc2] a false `updated`
+   parks every command (`[548] = 0, [524] = ground − 0x2000, [544] = [540] = 0,
+   [528] = Yaw`) — a cold helicopter commands nothing through the ~18 s
+   spool-up. Port: `m.part_spin.speed >= kRotorSpeedMax` read one tick late
+   (our part-anim machine runs at the mover tail).
+3. **The AI leg** (an occupant WITHOUT Flags 0x100, or a submerged pilot):
+   state 14 → 7 [@ 0x491590]; `[540] = brain[127]; [544] = brain[128]`
+   [@ 0x4915a3..0x4915a9 — brain[127] has no live SM writer, brain[128] is the
+   SM mover's out-speed]; the minAI clamp [@ 0x4915b2..0x4915f2]; the AIR turn
+   budget on the budget refresh `[32] = 8 * (|Yaw − brain[21]| /
+   ((brain[35] >> 15) + 32))` — divide THEN ×8 [@ 0x49160d..0x491663]; then,
+   only with a node (`brain[16]`, nulled when both `brain[14]`/`brain[15]` are
+   zero [@ 0x491576..0x49159a]) and state 7 [@ 0x491671], the **flight block**
+   [@ 0x491672..0x491998]: node Z floored at `ground − 0x4000`; planar
+   distance/bearing (fpatan) and planar speed, zero lengths → 1
+   [@ 0x491694..0x4916dd]; `v104 = speed * dz / dist` (64-bit), `[524] = Z +
+   4*v104`, `slideDecay = (v104 + slideDecay) >> 1` [@ 0x49175c..0x491796];
+   `[548] = [524] − ground − 0x4000`, negative → `[548] = 0, [524] = ground −
+   0x2000` [@ 0x4917a5..0x4917c9]; beyond 6 u planar a ZERO `[540]`/`[544]`
+   takes `132 * sin/cos(err) >> 22` [@ 0x4917f3..0x491834]; two ground samples
+   (self @ 0x491845, the node @ 0x491855): en route (node > 6 u above its
+   ground, or planar > 6 u) a target under `ground + bound/4` lifts to `+16 u`
+   with `[544] ×= 1/8` [@ 0x491862..0x4918aa]; else, landing under that floor,
+   `[544] ×= 1/8`, `X/Y += (node − pos) >> 6`, `[524] = ground − 0x2000`
+   [@ 0x4918b0..0x4918fc]; `[528] = Yaw + clamp(err, ±[32])` [@ 0x491928..
+   0x49195c]; `[544] ×= |cos err|` twice [@ 0x491970..0x49198a]. Then the
+   pool-1 separation damp on `[544]` [@ 0x4919fc..0x491b67 — the ground brake's
+   ellipse/cone/id-frame factor; the air walk gates on `entity+0x1C == 1`] and
+   the boarders hold [@ 0x491b7a..0x491c01]. The parked block (no pilot / dead)
+   [@ 0x491be6..0x491c6d] zeroes the registers, calls the stuck check
+   [@ 0x491c5e] and clears Flags 0x80.
+4. **Engine flag** [@ 0x491dfd..0x491e11]: `Flags 0x80 = [548] != 0` — port:
+   `VehicleMotorState::net_climb` carries [548] on the authority (the client
+   path keeps folding it into `net_alt_target`).
+5. **Drains**: submerged (Flags 0x8000) `Health −= 100`/tick [@ 0x4924e2..
+   0x492503]; `|Roll| or |Pitch| > 0x471C7180` → `Health −= 200`/tick
+   [@ 0x492637..0x49266f]; both floor at 0 and zero `+0x178` at the kill edge
+   (unmodeled slot).
+
+Residuals: the flare scan over the weapon-slot list [@ 0x4911xx], the pilot's
+analog collective, the pilot's Yaw follow of the burn spiral, the FX/sound
+seams, and `brain[127]`'s savegame-only producer. ctest `vehicle_mount`
+(`test_helo_ai_flight`: climbs and closes on the node, routeless hold,
+cold-rotor park; `test_helo_authority_health`: regen, burn + spin, crash
+drain).
 
 ---
 
@@ -1102,7 +1172,8 @@ Z IS part of the mover, and the client runs all of it:
   if the carrier is itself simulated that tick (same ordering dependency as the boat).
 - The AI leg, pool-1 separation, wait-to-board, stuck check, flare release, collective
   jump: all inside the (authority || local-driver) gate — NOT residuals, simply absent
-  from the client subset.
+  from the client subset (the authority half is witnessed + ported in §1.13,
+  2026-09-01; the flare release and the collective jump stay deferred there).
 
 ---
 
