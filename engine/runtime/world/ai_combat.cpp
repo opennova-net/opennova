@@ -1,4 +1,5 @@
 #include <runtime/world/ai.h>
+#include <base/io/fixed.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -102,9 +103,9 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             }
             AiCandidate cand;
             cand.handle = h;
-            cand.pos[0] = static_cast<int32_t>(c->position.x * 65536.0f);
-            cand.pos[1] = static_cast<int32_t>(c->position.y * 65536.0f);
-            cand.pos[2] = static_cast<int32_t>(c->position.z * 65536.0f);
+            cand.pos[0] = static_cast<int32_t>(c->position.x * io::kFp16One);
+            cand.pos[1] = static_cast<int32_t>(c->position.y * io::kFp16One);
+            cand.pos[2] = static_cast<int32_t>(c->position.z * io::kFp16One);
             cand.team = c->team;
             cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
             cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
@@ -313,9 +314,9 @@ void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(e.position.x * 65536.0f);
-    out[1] = static_cast<int32_t>(e.position.y * 65536.0f);
-    out[2] = static_cast<int32_t>(e.position.z * 65536.0f);
+    out[0] = static_cast<int32_t>(e.position.x * io::kFp16One);
+    out[1] = static_cast<int32_t>(e.position.y * io::kFp16One);
+    out[2] = static_cast<int32_t>(e.position.z * io::kFp16One);
 }
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
@@ -355,9 +356,9 @@ void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) 
     // Else the model collision-bbox center entity+0x1FC through the same
     // matrix [orig: @0x43b619].
     const int32_t center[3] = {
-        static_cast<int32_t>(e.bbox_center.x * 65536.0f),
-        static_cast<int32_t>(e.bbox_center.y * 65536.0f),
-        static_cast<int32_t>(e.bbox_center.z * 65536.0f)};
+        static_cast<int32_t>(e.bbox_center.x * io::kFp16One),
+        static_cast<int32_t>(e.bbox_center.y * io::kFp16One),
+        static_cast<int32_t>(e.bbox_center.z * io::kFp16One)};
     entity_placement_matrix(e).transform_point(center, out);
 }
 
@@ -488,9 +489,9 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     RoundSpawnParams rp;
     rp.owner = e.handle;
     rp.shooter_handle = e.handle.packed;
-    rp.origin.x = static_cast<float>(origin[0]) / 65536.0f;
-    rp.origin.y = static_cast<float>(origin[1]) / 65536.0f;
-    rp.origin.z = static_cast<float>(origin[2]) / 65536.0f;
+    rp.origin.x = static_cast<float>(origin[0]) / io::kFp16One;
+    rp.origin.y = static_cast<float>(origin[1]) / io::kFp16One;
+    rp.origin.z = static_cast<float>(origin[2]) / io::kFp16One;
     rp.dir_yaw_bam = yaw_bam;
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
@@ -563,9 +564,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // R_yaw(entity+0x10) * (distance, 0, 0) added to the target position and
     // restored after the solve].
     if (target == nullptr) return false;
-    int32_t aim[3] = {static_cast<int32_t>(target->position.x * 65536.0f),
-                      static_cast<int32_t>(target->position.y * 65536.0f),
-                      static_cast<int32_t>(target->position.z * 65536.0f)};
+    int32_t aim[3] = {static_cast<int32_t>(target->position.x * io::kFp16One),
+                      static_cast<int32_t>(target->position.y * io::kFp16One),
+                      static_cast<int32_t>(target->position.z * io::kFp16One)};
     if (aim_offset != 0) {
         const double theta = static_cast<double>(e.heading) / kBamPerRadian;
         aim[0] += static_cast<int32_t>(std::cos(theta) * static_cast<double>(aim_offset));
@@ -792,7 +793,7 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         // the x87 indefinite 0x80000000 — the branch below).
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;
-        const double scaled = value * 1000.0 * 4.444444584805751e-06 * 65536.0;
+        const double scaled = value * 1000.0 * 4.444444584805751e-06 * io::kFp16OneD;
         const int32_t fixed =
                 (scaled >= 2147483648.0 || scaled < -2147483648.0)
                         ? static_cast<int32_t>(0x80000000u)

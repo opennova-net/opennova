@@ -72,6 +72,11 @@
   sink), `io/strutil.h` ASCII case-insensitive helpers. Do not hand-roll a new byte
   reader; migrate existing per-lib copies on-touch (delegate the
   body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
+  The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`
+  (double), `kFp16OneInt`, `kInvFp16One` and `kFp14One`, and the logic clock is
+  `io/tick_rate.h`'s `kTickHz` (62.5) / `kTicksPerSecondInt` (62): name a raw
+  65536 / 16384 / 62 on touch with the constant of the SAME type (a float divide
+  and a double divide round differently; a cited line keeps its literal spelling).
 - Two byte-cursor CONTRACTS exist on purpose, and a copy is only duplication if it
   matches one of them. `io::ByteReader` is the FORMAT-PARSER contract: a clipped read
   yields 0, the cursor does not advance, and parsing continues, so a file still

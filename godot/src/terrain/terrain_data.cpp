@@ -5,6 +5,7 @@
 #include "terrain/terrain_tile_info.h"
 
 #include <formats/til/til_io.h>
+#include <base/io/fixed.h>
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -206,7 +207,7 @@ struct RaycastSubstrate {
 };
 
 inline int32_t raycast_height_to_1616(double height_world) {
-	return static_cast<int32_t>(std::llround(height_world * 65536.0));
+	return static_cast<int32_t>(std::llround(height_world * opennova::io::kFp16OneD));
 }
 
 // The editor-mode transform rejected the point: split the shared valid=false
@@ -228,8 +229,8 @@ inline opennova::terrain::TerrainRaycastSample::Kind raycast_classify_invalid(
 opennova::terrain::TerrainRaycastSample raycast_sample_point(void *ctx, int32_t world_x_1616,
                                                              int32_t world_y_1616) {
 	const RaycastSubstrate &s = *static_cast<const RaycastSubstrate *>(ctx);
-	const double wx = world_x_1616 / 65536.0;
-	const double wz = world_y_1616 / 65536.0;
+	const double wx = world_x_1616 / opennova::io::kFp16OneD;
+	const double wz = world_y_1616 / opennova::io::kFp16OneD;
 	opennova::terrain::TerrainRaycastSample out;
 	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
 	        s.layout, wx, wz, opennova::terrain::coords_editor_options());
@@ -258,8 +259,8 @@ opennova::terrain::TerrainRaycastSample raycast_sample_point(void *ctx, int32_t 
 opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32_t world_x_1616,
                                                                 int32_t world_y_1616) {
 	const RaycastSubstrate &s = *static_cast<const RaycastSubstrate *>(ctx);
-	const double wx = world_x_1616 / 65536.0;
-	const double wz = world_y_1616 / 65536.0;
+	const double wx = world_x_1616 / opennova::io::kFp16OneD;
+	const double wz = world_y_1616 / opennova::io::kFp16OneD;
 	opennova::terrain::TerrainRaycastSample out;
 	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
 	        s.layout, wx, wz, opennova::terrain::coords_editor_options());
@@ -1126,7 +1127,7 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 		return miss;
 	}
 
-	const auto to_1616 = [](double v) { return static_cast<int32_t>(std::llround(v * 65536.0)); };
+	const auto to_1616 = [](double v) { return static_cast<int32_t>(std::llround(v * opennova::io::kFp16OneD)); };
 	const int32_t start[3] = {
 		to_1616(static_cast<double>(p_from.x) + dx * t0),
 		to_1616(static_cast<double>(p_from.z) + dz * t0),
@@ -1146,9 +1147,9 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 	if (!opennova::terrain::terrain_raycast_refined(sampler, start, end, hit)) {
 		return miss;
 	}
-	return Vector3(static_cast<real_t>(hit[0] / 65536.0),
-	               static_cast<real_t>(hit[2] / 65536.0),
-	               static_cast<real_t>(hit[1] / 65536.0));
+	return Vector3(static_cast<real_t>(hit[0] / opennova::io::kFp16OneD),
+	               static_cast<real_t>(hit[2] / opennova::io::kFp16OneD),
+	               static_cast<real_t>(hit[1] / opennova::io::kFp16OneD));
 }
 
 int TerrainData::get_tile_count() const {

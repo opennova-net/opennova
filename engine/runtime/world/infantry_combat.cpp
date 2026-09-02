@@ -63,9 +63,9 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
                 if (!scanner_berserk && !candidate_berserk)
                     continue;
             }
-            const int32_t cpos[3] = {static_cast<int32_t>(c->position.x * 65536.0f),
-                                     static_cast<int32_t>(c->position.y * 65536.0f),
-                                     static_cast<int32_t>(c->position.z * 65536.0f)};
+            const int32_t cpos[3] = {static_cast<int32_t>(c->position.x * io::kFp16One),
+                                     static_cast<int32_t>(c->position.y * io::kFp16One),
+                                     static_cast<int32_t>(c->position.z * io::kFp16One)};
             const int64_t ddx = static_cast<int64_t>(cpos[0]) - e.pos[0];
             const int64_t ddy = static_cast<int64_t>(cpos[1]) - e.pos[1];
             const int64_t d2 = ddx * ddx + ddy * ddy;
@@ -135,9 +135,9 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (found.valid()) {
             const Entity *t = world.registry.get(found);
             if (t != nullptr) {
-                inf.aim_point[0] = static_cast<int32_t>(t->position.x * 65536.0f);
-                inf.aim_point[1] = static_cast<int32_t>(t->position.y * 65536.0f);
-                inf.aim_point[2] = static_cast<int32_t>(t->position.z * 65536.0f);
+                inf.aim_point[0] = static_cast<int32_t>(t->position.x * io::kFp16One);
+                inf.aim_point[1] = static_cast<int32_t>(t->position.y * io::kFp16One);
+                inf.aim_point[2] = static_cast<int32_t>(t->position.z * io::kFp16One);
                 inf.ai_focus = found;
                 if (inf.damage_timer < 15) inf.damage_timer += 12; // stay alerted on sight
                 if (inf.combat_target == found) ++inf.same_target_ticks;
@@ -168,8 +168,8 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         inf.combat_target.valid() ? world.registry.get(inf.combat_target) : nullptr;
     if (tent != nullptr && tent->health <= 0) {
         // Target died: play post_attack when close + clear. [orig: anim 151 + focus clear]
-        const int64_t ddx = static_cast<int64_t>(tent->position.x * 65536.0f) - e.pos[0];
-        const int64_t ddy = static_cast<int64_t>(tent->position.y * 65536.0f) - e.pos[1];
+        const int64_t ddx = static_cast<int64_t>(tent->position.x * io::kFp16One) - e.pos[0];
+        const int64_t ddy = static_cast<int64_t>(tent->position.y * io::kFp16One) - e.pos[1];
         if (ddx * ddx + ddy * ddy < static_cast<int64_t>(196608) * 196608 &&
             avail(anim_state::kPostAttack)) {
             commit_body_state(inf, anim_state::kPostAttack, root_motion);
@@ -185,9 +185,9 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         return;
     }
 
-    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * 65536.0f),
-                             static_cast<int32_t>(tent->position.y * 65536.0f),
-                             static_cast<int32_t>(tent->position.z * 65536.0f)};
+    const int32_t tpos[3] = {static_cast<int32_t>(tent->position.x * io::kFp16One),
+                             static_cast<int32_t>(tent->position.y * io::kFp16One),
+                             static_cast<int32_t>(tent->position.z * io::kFp16One)};
     // The witnessed distance metric: sqrt(dx^2 + dy^2 + (dz/2)^2), 16.16.
     // [orig: outPitch[0] = dZ >> 1 into the fsqrt chain @0x4bd0xx]
     const double fdx = static_cast<double>(tpos[0]) - e.pos[0];
@@ -453,9 +453,9 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     if (target == nullptr || target->health <= 0) return;
 
     const int32_t target_pos[3] = {
-        static_cast<int32_t>(target->position.x * 65536.0f),
-        static_cast<int32_t>(target->position.y * 65536.0f),
-        static_cast<int32_t>(target->position.z * 65536.0f)};
+        static_cast<int32_t>(target->position.x * io::kFp16One),
+        static_cast<int32_t>(target->position.y * io::kFp16One),
+        static_cast<int32_t>(target->position.z * io::kFp16One)};
     const uint32_t stagger = static_cast<uint32_t>(target_pos[0]) -
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;
