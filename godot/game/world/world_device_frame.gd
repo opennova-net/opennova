@@ -32,7 +32,7 @@ var _frame_camera_pos := Vector3()
 # quirk, bisected 2026-08-09); the Variant carries the camera transform.
 # Several GUT files still construct GameWorld.new() without autofree, so the
 # leak is not pinned to one test.
-var _frame_camera_xform = Transform3D()
+var _frame_camera_xform := Transform3D()
 var _frame_delta := 0.0
 var _frame_probe_enabled := false
 var _frame_stats_on := false
