@@ -129,6 +129,12 @@ struct VehicleTraits {
     // to criticalHp (AiSystem::apply_min_ai_crew_clamp).
     int32_t min_ai = 0;        // itemDef+0x8D8 raw — the crew count threshold
     int32_t critical_hp = 0;   // itemDef+0x180 i16 raw — the clamp ceiling
+    // The aircraft mover's authority health machine [orig: the every-64th-tick
+    // block of Entity_UpdateAircraftPhysics @0x4903F4..0x4904A7]: above
+    // criticalHp the hull regens nonCriticalRegen up to healthMax - regen; at or
+    // below it the hull burns criticalDrain per 64 ticks.
+    int32_t critical_drain = 0;     // itemDef+0x182 i16 raw
+    int32_t non_critical_regen = 0; // itemDef+0x184 i16 raw
     // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
     // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904 —
     //  ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10]. The def's

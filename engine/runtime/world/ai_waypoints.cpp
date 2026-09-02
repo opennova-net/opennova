@@ -686,6 +686,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.cmd_lateral_speed = 0;
         m.steer_target_bam = m.yaw_bam;
         m.net_alt_target = ground - 0x4000;
+        m.net_climb = 0;
         m.net_engine_on = false;
         check_vehicle_stuck(world, veh);
         return;
@@ -704,77 +705,145 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // Entity_CountMountedEntities @0x4915d2, criticalHp @0x4915e2].
     apply_min_ai_crew_clamp(world, veh, traits);
 
-    // The patrol height stand-in until the HELO .aip profile rows are plumbed
-    // to vehicle brains (stage-1 parse landed; patrol_altitude authored ~40u).
-    constexpr int32_t kPatrolAglStandIn = 40 << 16;
+    // The command seeds [orig: `[540] = brain[127]; [544] = brain[128]`
+    // @0x4915a3..0x4915a9 — [128] is the SM mover's out-speed (the state-16
+    // tick's AI_UpdateWaypointMovement / the state-17 fire tick write it);
+    // [127] has no live SM writer, so the lateral seed is the zero it holds].
+    m.cmd_lateral_speed = b.f[AiBrain::kTargetRef];
+    m.cmd_speed = b.f[AiBrain::kOutSpeed];
 
-    // NO ROUTE -> the aircraft does not fly. Retail reads its waypoint target
-    // and then THROWS IT AWAY unless the brain carries a channel or a node, so
-    // the whole flight computation below - including the altitude command - is
-    // skipped. The altitude target therefore keeps whatever the parked leg last
-    // wrote (ground - 0x4000, collective off), which is why a crewed helicopter
-    // with no orders sits on its skids with the engine running and the blades
-    // turning instead of lifting off.
-    //
-    // This is 05TRcoop's whole co-op choreography: its WAC watches what the
-    // player is riding (`if area(24) and eq(v2,1) and not meride(423) then
-    // set(v2,2)`) and the BMS misvar triggers hand the group its route, so the
-    // helicopters wait on the ground until the script sends them.
-    //
-    // We previously gated on kWpType and, worse, commanded a 40 u AGL patrol
-    // hover here - so every routeless helicopter climbed and hovered the moment
-    // anyone sat in it.
-    // [orig: Entity_UpdateAircraftPhysics @0x490310, kong 120676 —
-    //  `v91 = brain[16]; if (!brain[15] && !brain[14]) v91 = nullptr;` and the
-    //  flight block's `if (v91 && brain[4] == 7)` guard; the altitude store
-    //  brain[131] lives INSIDE that guard @ kong 120816]
-    if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) {
-        m.cmd_speed = 0;
-        m.cmd_lateral_speed = 0;
-        m.steer_target_bam = m.yaw_bam;
-        // net_alt_target deliberately untouched — retail does not write it here.
-        return;
+    // The per-leg turn budget, the AIR form: recomputed when the node advance
+    // cleared it and the waypoint block is live [orig: @0x49160d..0x491663 —
+    // `!brain[32] && brain[13]` -> AIWaypoint_UpdateTarget @0x491633, then
+    // [32] = 8 * (|Yaw - brain[21]| / ((brain[35] >> 15) + 32)) — divide THEN
+    // x8, unlike the ground leg's 32*err/denom].
+    if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
+        ai_waypoint_update_target(b, ve->pos, nav);
+        const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
+        const int32_t err = iabs32(m.yaw_bam - b.f[AiBrain::kWpBearing]);
+        b.f[AiBrain::kAnimFlag] = 8 * (err / denom);
     }
 
-    // Waypoint target through the shared SM mover: refreshes bearing/distance,
-    // marks arrivals, advances nodes, honors one-shot ends.
-    // [orig: AIWaypoint_UpdateTarget from inside the physics @0x490310, with
-    //  the same turn-budget seed (f[35]>>15)+32 the ground mover uses]
-    update_waypoint_movement(*ve, world);
-    if (b.f[AiBrain::kWpType] == 0) { // the route just completed (one-shot end)
-        m.cmd_speed = 0;
-        m.cmd_lateral_speed = 0;
-        m.steer_target_bam = m.yaw_bam;
-        m.net_alt_target = ground + kPatrolAglStandIn;
-        return;
+    // NO ROUTE -> the aircraft does not fly. Retail reads its waypoint node and
+    // then THROWS IT AWAY unless the brain carries a channel or a node, so the
+    // whole flight computation below - including the altitude command - is
+    // skipped and the altitude target keeps whatever the parked leg last wrote
+    // (ground - 0x4000, collective off): a crewed helicopter with no orders sits
+    // on its skids with the engine running and the blades turning. This is
+    // 05TRcoop's whole co-op choreography (the WAC hands the group its route).
+    // A completed one-shot route (brain[13] = 0) keeps its LAST node: the hull
+    // holds station over it.
+    // [orig: `v91 = brain[16]; if (!brain[15] && !brain[14]) v91 = nullptr`
+    //  @0x491576..0x49159a and the flight block's `if (v91 && brain[4] == 7)`
+    //  guard @0x491671]
+    const NavEntry *node = nav.entry(b.f[AiBrain::kWpResolved]);
+    if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) node = nullptr;
+    if (node != nullptr && b.f[AiBrain::kCurState] == 16) {
+        // ---- The flight block [orig: @0x491672..0x491998].
+        const int32_t px = ve->pos[0], py = ve->pos[1], pz = ve->pos[2];
+        // The node's Z, floored 0x4000 under the hull's own average ground
+        // [orig: @0x491672..0x491684].
+        int32_t tz = node->f[3];
+        if (tz < ground - 0x4000) tz = ground - 0x4000;
+        const int32_t dx = node->f[1] - px;
+        const int32_t dy = node->f[2] - py;
+        const int32_t dz = tz - pz;
+        // Planar distance and bearing to the node (fpatan x 2^32/2pi), the
+        // planar speed; zero lengths become 1 [orig: @0x491694..0x4916dd].
+        const double fdx = static_cast<double>(dx), fdy = static_cast<double>(dy);
+        const double dd = std::sqrt(fdx * fdx + fdy * fdy);
+        int32_t dist = dd >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dd);
+        const int32_t bearing = static_cast<int32_t>(
+                std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+        const double fvx = static_cast<double>(m.vel_x);
+        const double fvy = static_cast<double>(m.vel_y);
+        const double sd = std::sqrt(fvx * fvx + fvy * fvy);
+        int32_t speed = sd >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(sd);
+        if (speed == 0) speed = 1;
+        if (dist == 0) dist = 1;
+        // The climb-per-tick the node's slope asks for at the current speed,
+        // folded into the altitude target and the vertical velocity
+        // [orig: @0x49175c..0x491796 — v104 = speed * dz / dist (64-bit);
+        //  [524] = Z + 4*v104; slideDecay = (v104 + slideDecay) >> 1].
+        const int32_t v104 = static_cast<int32_t>(
+                static_cast<int64_t>(speed) * dz / dist);
+        m.net_alt_target = pz + 4 * v104;
+        m.slide_z = (v104 + m.slide_z) >> 1;
+        // The climb register against the hull's ground, floored at zero — a
+        // target under the ground parks 0x2000 below it
+        // [orig: @0x4917a5..0x4917c9].
+        int32_t climb = m.net_alt_target - ground - 0x4000;
+        if (climb < 0) {
+            climb = 0;
+            m.net_alt_target = ground - 0x2000;
+        }
+        m.net_climb = climb;
+        // The heading error's trig at 2^22 [orig: @0x4917d4..0x491821].
+        const int32_t err = bearing - m.yaw_bam;
+        const int32_t c22 = avoid_cos22(err);
+        const int32_t s22 = avoid_sin22(err);
+        // Beyond 6 u planar, a zero command seeds the 132-scaled cyclic pair
+        // from the heading error [orig: @0x4917f3..0x491834 — only a ZERO
+        // register takes the seed].
+        if (dist > 0x60000) {
+            if (m.cmd_lateral_speed == 0)
+                m.cmd_lateral_speed = static_cast<int32_t>((132LL * s22) >> 22);
+            if (m.cmd_speed == 0)
+                m.cmd_speed = static_cast<int32_t>((132LL * c22) >> 22);
+        }
+        // The two ground samples: the hull's own and the node's
+        // [orig: Entity_CalcAverageGroundHeight @0x491845 (self) / @0x491855
+        //  (the node entity)].
+        int32_t node_ground = INT32_MIN;
+        if (world.terrain != nullptr) {
+            const int32_t npos[3] = {node->f[1], node->f[2], node->f[3]};
+            const GroundClearance clearance{};
+            node_ground = calc_average_ground_height(*world.terrain, npos, 0, clearance);
+        }
+        const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
+        const int32_t floor = ground + (to_fixed(veh.bound_radius) >> 2);
+        if (node_agl > 0x60000 || dist > 0x60000) {
+            // En route (or the node hangs in the air): never below the hull's
+            // ground + bound/4 — a low target lifts 16 u above that floor and
+            // the forward command drops to an eighth [orig: @0x491862..0x4918aa].
+            if (m.net_alt_target < floor) {
+                m.net_alt_target = floor + 0x100000;
+                m.cmd_speed = static_cast<int32_t>(
+                        ((static_cast<int64_t>(m.cmd_speed) << 13) + 0x8000) >> 16);
+            }
+        } else if (pz < floor) {
+            // LANDING at a node on the ground: an eighth of the forward command,
+            // the hull slides a sixty-fourth of the way onto the node each tick
+            // and the target parks 0x2000 under the ground
+            // [orig: @0x4918b0..0x4918fc].
+            m.cmd_speed = static_cast<int32_t>(
+                    ((static_cast<int64_t>(m.cmd_speed) << 13) + 0x8000) >> 16);
+            const int32_t nx = px + ((node->f[1] - px) >> 6);
+            const int32_t ny = py + ((node->f[2] - py) >> 6);
+            ve->pos[0] = nx;
+            ve->pos[1] = ny;
+            veh.position.x = static_cast<float>(from_fixed(nx));
+            veh.position.y = static_cast<float>(from_fixed(ny));
+            m.net_alt_target = ground - 0x2000;
+        }
+        // Steer: the heading error clamped to the per-leg budget
+        // [orig: @0x491928..0x49195c — [528] = Yaw + clamp(err, +-[32])].
+        int32_t delta = err;
+        const int32_t budget = b.f[AiBrain::kAnimFlag];
+        if (delta > budget) delta = budget;
+        if (delta < -budget) delta = -budget;
+        m.steer_target_bam = m.yaw_bam + delta;
+        // The forward command scales by cos^2 of the heading error — a hull
+        // still turning onto its leg creeps [orig: @0x491970..0x49198a].
+        const int32_t ac = iabs32(c22);
+        m.cmd_speed = static_cast<int32_t>((static_cast<int64_t>(m.cmd_speed) * ac) >> 22);
+        m.cmd_speed = static_cast<int32_t>((static_cast<int64_t>(m.cmd_speed) * ac) >> 22);
     }
-    const int32_t bearing = b.f[AiBrain::kWpBearing];
-    m.steer_target_bam = bearing;
 
-    // Cyclic pair from the heading error [orig: (132 * sin/cos) >> 22 over the
-    // Q22 trig of the target bearing; forward dominates as the nose lines up].
-    const double rad = static_cast<double>(io::bam_sub(bearing, m.yaw_bam)) *
-                       io::kRadiansPerBam;
-    const int32_t cos_q22 = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
-    const int32_t sin_q22 = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-    int32_t fwd = static_cast<int32_t>((132LL * cos_q22) >> 22);
-    int32_t lat = static_cast<int32_t>((132LL * sin_q22) >> 22);
-    if (fwd < 0) fwd = 0; // behind the nose: turn in place, no reverse thrust
-    // Near-ground damp [orig: the <<13 >>16 (x1/8) fold under 6.0u AGL].
-    if (ve->pos[2] - ground < 0x60000) {
-        fwd >>= 3;
-        lat >>= 3;
-    }
-    m.cmd_speed = fwd;
-    m.cmd_lateral_speed = lat;
-
-    // Target altitude: patrol height AGL. Retail flies the node's authored Z
-    // only when the .aip profile's use-waypoint-z key says so [orig: the
-    // slope-based target + the AGL floor avgGround + bound/4]; until the HELO
-    // profile rows are plumbed to vehicle brains, hold the AGL stand-in —
-    // feeding node Z unconditionally sends the hull to authored-garbage
-    // altitudes on routes that never meant to fly it.
-    m.net_alt_target = ground + kPatrolAglStandIn;
+    // The pool-1 separation damp on the forward command [orig: @0x4919fc..0x491b67
+    // — the same footprint ellipse, dead-ahead cone and id/frame factor as the
+    // ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`].
+    m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed);
 
     // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
     // live, unmounted body is still walking over to board it: heading pinned to
@@ -792,6 +861,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.steer_target_bam = m.yaw_bam;
         m.cmd_speed = 0;
         m.cmd_lateral_speed = 0;
+        m.net_climb = 0;          // [orig: [548] = 0 @0x491c4e]
         m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
     }
 }

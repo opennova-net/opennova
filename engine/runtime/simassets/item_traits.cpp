@@ -241,6 +241,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.hand_brake = def->hand_brake;
                 vt.min_ai = def->min_ai;
                 vt.critical_hp = def->critical_hp;
+                vt.critical_drain = def->critical_drain;
+                vt.non_critical_regen = def->non_critical_regen;
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;

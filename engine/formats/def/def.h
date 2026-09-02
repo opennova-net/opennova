@@ -642,6 +642,9 @@ typedef struct DefItemDef {
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */
+    int non_critical_regen; /* +0x184 i16 raw ("noncriticalregen" @0x7c8620) — the
+                               above-critical regen per 64 ticks the aircraft mover
+                               applies on the authority [orig: @0x490410..0x490433] */
     int radar_sig;      /* +0x178 u16 raw ("radarsig") — copied to entity+422 as the AI
                            acquisition primary-FOV engage cap [orig: Entity_InitFromModel
                            @0x40e136; AI_FindBestTargetB cap read @0x467277] */

@@ -2009,7 +2009,9 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
             // [orig: LABEL_175 @0x4912xx -- `if ([548] < 0) { [548] = 0;
             //  [524] = v78; }` with v78 the average ground height]
             m.net_alt_target = ground;
+            climb = 0;
         }
+        m.net_climb = climb; // the authority's [548] (engine flag source)
     }
     (void)pz;
     // Hover/flight steer source: no analog input -> the pilot's LOOK steers
@@ -2062,6 +2064,35 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         if (g != INT32_MIN) m.ground_cache = g;
     }
     const int32_t ground = m.ground_cache;
+
+    // ---- 0. The authority health machine at the mover head [orig:
+    // @0x4903F0..0x490480, on the (tick + 9*DcbId) & 0x3F cadence]: above
+    // criticalHp the hull regens nonCriticalRegen up to healthMax - regen
+    // (@0x4903f9..0x49042d); at or below it the hull BURNS — criticalDrain per
+    // cadence (@0x490434..0x490480) and, airborne with the altitude target more
+    // than 1 u above the ground, the yaw spins 2886390 BAM per tick — the
+    // tail-rotor-loss spiral (@0x49048e..0x4904be; the pilot's own yaw follows
+    // it unless free-looking, a look write the client owns — D-NET-161). The
+    // smoke/fire emitters and the every-64th-tick fire sound are presentation
+    // seams. A dead hull takes none of it.
+    const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
+    if (motor_is_authority && veh.health > 0) {
+        const bool cadence64 =
+                ((world.logic_tick + 9u * static_cast<uint32_t>(veh.net_id)) & 0x3Fu) == 0;
+        if (veh.health > traits.critical_hp) {
+            if (cadence64 && traits.non_critical_regen != 0 &&
+                veh.health < veh.health_max - traits.non_critical_regen)
+                veh.health += traits.non_critical_regen;
+        } else {
+            if (cadence64) {
+                veh.health -= traits.critical_drain;
+                if (veh.health < 0) veh.health = 0;
+            }
+            if ((veh.flags & kEntityFlagInAir) != 0 && ground != INT32_MIN &&
+                m.net_alt_target - ground > 0x10000)
+                m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
+        }
+    }
 
     // ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
     // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
@@ -2185,11 +2216,27 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     //  test @0x491dfd, `Flags |= 0x80` @0x491e05 / `&= ~0x80` @0x491e11, reached
     //  only when is_authority; the client engine-off override is the other arm
     //  (its `&= ~0x80` @0x491c6d precedes the is_authority test @0x491c88)]
-    const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
     if (motor_is_authority) {
-        const int32_t climb =
-                ground != INT32_MIN ? io::bam_sub(m.net_alt_target, ground) : 0;
-        m.net_engine_on = climb != 0;
+        // The rotor gate [orig: `updated = Health > 0 && !(Flags & 1) ?
+        //  Entity_UpdateHeloRotorSpin(...) : 0` @0x490592..0x4905a6, whose
+        //  return is `!is_authority || speed >= 0x0CCCCCC0`; the LABEL_328 arm
+        //  @0x491ca7..0x491cc2 parks every command until it holds]. A hull
+        // commands nothing until its rotor reaches full speed — the spool-up a
+        // cold helicopter sits through. Our part-anim machine runs at the mover
+        // tail, so the gate reads the previous tick's speed.
+        const bool rotor_up = veh.health > 0 && (veh.flags & 0x1u) == 0 &&
+                              m.part_spin.speed >= kRotorSpeedMax;
+        if (!rotor_up) {
+            if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
+            m.net_climb = 0;
+            m.cmd_speed = 0;
+            m.cmd_lateral_speed = 0;
+            m.steer_target_bam = m.yaw_bam;
+        }
+        // The engine flag IS the climb register's non-zero test; the register
+        // is clamped at zero on every write, so a parked target under the
+        // ground reads as engine off [orig: @0x491dfd..0x491e11].
+        m.net_engine_on = m.net_climb != 0;
     } else if (!m.net_engine_on) {
         if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
         m.cmd_speed = 0;
@@ -2405,6 +2452,12 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
                             io::bam_sar(m.air_pitch_rate, 31)));
     }
     if (in_water) {
+        // A submerged hull drowns on the authority: 100 health per tick to
+        // zero [orig: @0x4924e2..0x492503].
+        if (motor_is_authority && veh.health > 0) {
+            veh.health -= 100;
+            if (veh.health < 0) veh.health = 0;
+        }
         m.vel_x -= ((m.vel_x + 4) >> 3) + (m.vel_x >> 31);
         m.vel_y -= ((m.vel_y + 4) >> 3) + (m.vel_y >> 31);
         m.slide_z -= ((m.slide_z + 4) >> 3) + (m.slide_z >> 31);
@@ -2446,6 +2499,16 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     m.air_pitch_bam = io::bam_add(m.air_pitch_bam, m.air_pitch_rate);
     m.air_roll_bam = io::bam_add(m.air_roll_bam, m.air_roll_rate);
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
+    // The crash drain: past 100 deg of roll OR pitch the hull loses 200 health
+    // per tick on the authority, floored at zero [orig: @0x492637..0x49266f —
+    // |+0x18| / |+0x14| > 0x471C7180; the kill edge's +0x178 zero is the
+    // attacker slot, an unmodeled write].
+    if (motor_is_authority && veh.health > 0 &&
+        (io::bam_abs(m.air_roll_bam) > 0x471C7180 ||
+         io::bam_abs(m.air_pitch_bam) > 0x471C7180)) {
+        veh.health -= 200;
+        if (veh.health < 0) veh.health = 0;
+    }
 
     veh.position.x = static_cast<float>(from_fixed(px));
     veh.position.y = static_cast<float>(from_fixed(py));
