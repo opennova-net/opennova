@@ -33,6 +33,22 @@ String WeaponSightRow::get_texture() const {
 	return String(value_.texture);
 }
 
+Ref<WeaponSightRow> WeaponSightRow::make(const String &p_texture, int p_x1, int p_y1, int p_x2,
+		int p_y2, int p_blend, bool p_scale, bool p_slide, int p_slide_frames) {
+	Ref<WeaponSightRow> row;
+	row.instantiate();
+	set_text(row->value_.texture, p_texture);
+	row->value_.x1 = p_x1;
+	row->value_.y1 = p_y1;
+	row->value_.x2 = p_x2;
+	row->value_.y2 = p_y2;
+	row->value_.blend = p_blend;
+	row->value_.scale = p_scale ? 1 : 0;
+	row->value_.slide = p_slide ? 1 : 0;
+	row->value_.slide_frames = p_slide_frames;
+	return row;
+}
+
 void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture"), &WeaponSightRow::get_texture);
 	ClassDB::bind_method(D_METHOD("get_x1"), &WeaponSightRow::get_x1);
@@ -43,6 +59,10 @@ void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_scale"), &WeaponSightRow::is_scale);
 	ClassDB::bind_method(D_METHOD("is_slide"), &WeaponSightRow::is_slide);
 	ClassDB::bind_method(D_METHOD("get_slide_frames"), &WeaponSightRow::get_slide_frames);
+	ClassDB::bind_static_method("WeaponSightRow",
+			D_METHOD("make", "texture", "x1", "y1", "x2", "y2", "blend", "scale", "slide",
+					"slide_frames"),
+			&WeaponSightRow::make, DEFVAL(false), DEFVAL(false), DEFVAL(0));
 }
 
 // --- WeaponActionRow ------------------------------------------------------------

@@ -18,6 +18,7 @@ namespace godot {
 // One authored SIGHTS card row of a weapon.def entry (DefSightEntry): the
 // texture and its virtual 1024x768 rect, the blend mode, the scale/slide
 // flags. Draw order is the authored order (see <runtime/hud/hud_frame.h>).
+// Authorable through make(): a test builds a card from these.
 class WeaponSightRow : public RefCounted {
 	GDCLASS(WeaponSightRow, RefCounted)
 
@@ -39,6 +40,12 @@ public:
 	bool is_scale() const { return value_.scale != 0; }
 	bool is_slide() const { return value_.slide != 0; }
 	int get_slide_frames() const { return value_.slide_frames; }
+
+	// A row from its texture, 1024x768 rect and blend mode plus the optional
+	// scale/slide flags.
+	static Ref<WeaponSightRow> make(const String &p_texture, int p_x1, int p_y1, int p_x2,
+			int p_y2, int p_blend, bool p_scale = false, bool p_slide = false,
+			int p_slide_frames = 0);
 };
 
 // One ACTION block of a weapon.def entry (DefWeaponAction): the action name,

@@ -60,9 +60,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var candidate_pos: Vector2 = camera.unproject_position(chest)
 		if not rect.has_point(candidate_pos):
 			continue
-		var pick: Dictionary = DebugEntityPicker.pick_with_camera(
-				sim, camera, candidate_pos, "probe")
-		if bool(pick.get("hit", false)) and int(pick.get("entity_handle", -1)) == row.get_wire_handle():
+		var pick := DebugEntityPicker.pick_with_camera(sim, camera, candidate_pos, "probe")
+		if pick.hit and pick.entity_handle == row.get_wire_handle():
 			target = row
 			screen_pos = candidate_pos
 			break
@@ -95,13 +94,12 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# Leg 2: the crosshair pick (Shift+F6's seam): whatever the centre ray
 	# meets is what the window must select.
 	dev_tools.select_entity(-1)
-	var centre_pick: Dictionary = DebugEntityPicker.pick_at_crosshair(sim, camera)
-	var centre_handle := int(centre_pick.get("entity_handle", -1)) \
-			if bool(centre_pick.get("hit", false)) else -1
+	var centre_pick := DebugEntityPicker.pick_at_crosshair(sim, camera)
+	var centre_handle := centre_pick.entity_handle if centre_pick.hit else -1
 	main_game.pick_at_crosshair()
 	await ctx.wait_frames(2)
 	ctx.log("crosshair ray: %s -> selected handle %d" % [
-			str(centre_pick.get("name", "")) if centre_handle >= 0 else "no entity",
+			centre_pick.name if centre_handle >= 0 else "no entity",
 			dev_tools.selected_entity_handle()])
 	if centre_handle >= 0:
 		_check(dev_tools.selected_entity_handle() == centre_handle,
