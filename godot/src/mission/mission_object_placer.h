@@ -22,6 +22,7 @@
 
 #include "mission/mission_data.h" // MissionData::EntityKind
 #include "mission/mission_placement_stats.h"
+#include "mission/static_source_records.h"
 #include "object/item_database.h"
 #include "mission/player_visual_spec.h"
 #include "object/avatar_database.h"
@@ -83,6 +84,32 @@ public:
 		Transform3D world_transform;
 		Ref<ObjectData> object_data;
 		bool active = true;
+	};
+	// The retained static read-back rows behind the get_static_* seams; the
+	// getters mint fresh records from these so no consumer holds the
+	// placer's own row.
+	struct StaticUserPointGroup {
+		String graphic;
+		Ref<ObjectData> object_data;
+		Vector<Transform3D> transforms;
+	};
+	struct StaticEffectSourceRow {
+		int kind = -1;
+		int entity_index = -1;
+		int bms_id = 0;
+		int item_id = 0;
+		String graphic;
+		Transform3D world_transform;
+		Ref<ObjectData> object_data;
+	};
+	struct StaticLightDrawRow {
+		int source_index = -1;
+		int kind = -1;
+		int entity_index = -1;
+		int bms_id = 0;
+		int item_id = 0;
+		int robj_index = 0;
+		AABB world_bounds;
 	};
 
 	enum {
@@ -205,15 +232,15 @@ public:
 	void set_placed_models(const TypedArray<ObjectModel> &p_models) {
 		placed_models_ = p_models;
 	}
-	Array get_static_user_point_sources();
-	Array get_static_item_effect_sources();
+	TypedArray<StaticUserPointSource> get_static_user_point_sources();
+	TypedArray<StaticEffectSource> get_static_item_effect_sources();
 	// One row per retained static entity/ROBJ light draw. Row order is the
 	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
 	// descriptors carry the source identity, exact world AABB, and live carve
 	// state. The EffectWorld device selects this row's <=4 lights into the
 	// shared RGBAF atlas [orig: collect_render_objects_for_batch @0x5d8ff7,
 	// see docs/render/render-lighting-re.md].
-	Array get_static_light_draw_sources();
+	TypedArray<StaticLightDrawSource> get_static_light_draw_sources();
 	// Advances whenever a row is appended, the table is reset, or a carve
 	// changes any row's `active` state: consumers rebuild their packed row
 	// arrays only on a change instead of re-reading the rows every frame.
@@ -222,7 +249,7 @@ public:
 	uint64_t get_static_terrain_shadow_source_revision();
 	// Dictionary mirror for focused shell/asset diagnostics. Production
 	// consumers use the typed snapshot above.
-	Array get_static_terrain_shadow_source_diagnostics();
+	TypedArray<StaticTerrainShadowSourceRow> get_static_terrain_shadow_source_diagnostics();
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
@@ -397,7 +424,7 @@ private:
 			const String &p_suffix);
 	Node3D *_ensure_container(Node3D *p_parent);
 	void _record_static_user_point_group(const String &p_graphic,
-			const Array &p_transforms);
+			const Vector<Transform3D> &p_transforms);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
@@ -416,9 +443,9 @@ private:
 	Ref<PanmClock> panm_clock_;
 
 	TypedArray<ObjectModel> placed_models_;
-	Array static_user_point_sources_;
-	Array static_item_effect_sources_;
-	Array static_light_draw_sources_;
+	Vector<StaticUserPointGroup> static_user_point_sources_;
+	Vector<StaticEffectSourceRow> static_item_effect_sources_;
+	Vector<StaticLightDrawRow> static_light_draw_sources_;
 	uint64_t static_light_draw_source_revision_ = 1;
 	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
 	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;

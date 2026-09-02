@@ -191,6 +191,15 @@ class FxWorldStub:
 class ItemFxPlacerStub:
 	extends RefCounted
 	var item_db: ItemDatabase
+	static func static_source(kind: int, item_id: int, graphic: String,
+			world_transform: Transform3D, object_data: ObjectData) -> StaticEffectSource:
+		var source := StaticEffectSource.new()
+		source.kind = kind
+		source.item_id = item_id
+		source.graphic = graphic
+		source.world_transform = world_transform
+		source.object_data = object_data
+		return source
 	var static_sources: Array = []
 	var static_light_draw_sources: Array = []
 	func get_item_db() -> ItemDatabase:
@@ -299,7 +308,7 @@ class ItemFxDirectorProbe:
 	# implicit-self inside the subclass, keeping the private-poke ratchet flat.
 	func attach_to_node(node: ObjectModel, kind: int, item_id: int) -> int:
 		return _attach_item_effect_to_node(node, kind, item_id)
-	func attach_to_static(source: Dictionary, source_index: int) -> int:
+	func attach_to_static(source: StaticEffectSource, source_index: int) -> int:
 		return _attach_item_effect_to_static(source, source_index)
 	func pending_node_count() -> int:
 		return _item_fx_pending_nodes.size()
@@ -341,7 +350,7 @@ class ItemFxGameWorldHarness:
 		return fx.attach_to_node(node, kind, item_id)
 	func attach_all_item_fx() -> void:
 		fx.reattach()
-	func present_static_item_fx(source: Dictionary, source_index: int) -> int:
+	func present_static_item_fx(source: StaticEffectSource, source_index: int) -> int:
 		return fx.attach_to_static(source, source_index)
 	func pending_item_fx_count() -> int:
 		return fx.pending_node_count()
@@ -2959,26 +2968,15 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 			Basis(Vector3.UP, PI * 0.5), Vector3(10, 20, 30))
 	var fallback_transform := Transform3D(
 			Basis(Vector3.RIGHT, PI * 0.25), Vector3(-5, 6, 7))
-	placer.static_sources = [{
-		"kind": MissionData.KIND_ITEM,
-		"item_id": 2,
-		"graphic": "StaticVehicle1",
-		"world_transform": entity_transform,
-		"object_data": matched_data,
-	}, {
-		"kind": MissionData.KIND_BUILDING,
-		"item_id": 9,
-		"graphic": "StaticBuilding1",
-		"world_transform": fallback_transform,
-		"object_data": fallback_data,
-	}, {
+	placer.static_sources = [
+		ItemFxPlacerStub.static_source(MissionData.KIND_ITEM, 2, "StaticVehicle1",
+				entity_transform, matched_data),
+		ItemFxPlacerStub.static_source(MissionData.KIND_BUILDING, 9, "StaticBuilding1",
+				fallback_transform, fallback_data),
 		# Pool-1 attrib 0x40 is excluded before any effect request.
-		"kind": MissionData.KIND_ITEM,
-		"item_id": 3,
-		"graphic": "BlockedStatic",
-		"world_transform": Transform3D.IDENTITY,
-		"object_data": matched_data,
-	}]
+		ItemFxPlacerStub.static_source(MissionData.KIND_ITEM, 3, "BlockedStatic",
+				Transform3D.IDENTITY, matched_data),
+	]
 	world.configure_item_fx(effects, placer)
 
 	world.attach_all_item_fx()
@@ -3067,13 +3065,10 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 		{"id": 2, "effect": "Effect_Test", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
-	placer.static_sources = [{
-		"kind": MissionData.KIND_ITEM,
-		"item_id": 2,
-		"graphic": "StaticVehicle1",
-		"world_transform": Transform3D(Basis.IDENTITY, Vector3(3, 4, 5)),
-		"object_data": _fx_anchor_data(),
-	}]
+	placer.static_sources = [
+		ItemFxPlacerStub.static_source(MissionData.KIND_ITEM, 2, "StaticVehicle1",
+				Transform3D(Basis.IDENTITY, Vector3(3, 4, 5)), _fx_anchor_data()),
+	]
 	world.configure_item_fx(effects, placer)
 
 	world.set_particles_hidden(true)

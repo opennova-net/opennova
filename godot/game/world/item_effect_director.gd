@@ -227,8 +227,8 @@ func reattach() -> void:
 			attached += _attach_item_effect_to_node(node, ref.kind, ref.item_id, item_db)
 	var static_sources: Array = _static_sources.call()
 	for source_index in range(static_sources.size()):
-		attached += _attach_item_effect_to_static(
-				static_sources[source_index], source_index, item_db)
+		var source: StaticEffectSource = static_sources[source_index]
+		attached += _attach_item_effect_to_static(source, source_index, item_db)
 	if attached > 0:
 		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
 
@@ -512,15 +512,15 @@ func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
 	return receipt.spawned
 
 
-func _attach_item_effect_to_static(source: Dictionary, source_index: int,
+func _attach_item_effect_to_static(source: StaticEffectSource, source_index: int,
 		item_db_override: ItemDatabase = null) -> int:
 	var effect_world: EffectWorld = _world.get_effect_world()
-	if effect_world == null or source_index < 0:
+	if effect_world == null or source == null or source_index < 0:
 		return 0
 	if _item_fx_registered_static.has(source_index):
 		return 0
-	var item_id := int(source.get("item_id", 0))
-	var kind := int(source.get("kind", -1))
+	var item_id := source.item_id
+	var kind := source.kind
 	if item_id <= 0:
 		return 0
 	var item_db: ItemDatabase = item_db_override
@@ -531,14 +531,13 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 	var fx := item_db.get_particle_fx(item_id)
 	var effect := fx.effect if fx != null else ""
 	var userpoint := fx.userpoint if fx != null else ""
-	var data: ObjectData = source.get("object_data")
+	var data: ObjectData = source.object_data
 	if effect.is_empty() or data == null:
 		return 0
 	if effect_world.are_particles_hidden():
-		_item_fx_pending_static[source_index] = source.duplicate()
+		_item_fx_pending_static[source_index] = source
 		return 0
-	var entity_transform: Transform3D = source.get(
-			"world_transform", Transform3D.IDENTITY)
+	var entity_transform: Transform3D = source.world_transform
 	var attached := 0
 	var matched := 0
 	if not userpoint.is_empty():
@@ -595,5 +594,5 @@ func _retry_pending_item_effects() -> void:
 	var static_ids := _item_fx_pending_static.keys().duplicate()
 	for source_index_v in static_ids:
 		var source_index := int(source_index_v)
-		var source: Dictionary = _item_fx_pending_static.get(source_index, {})
+		var source: StaticEffectSource = _item_fx_pending_static.get(source_index)
 		_attach_item_effect_to_static(source, source_index)
