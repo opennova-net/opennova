@@ -1,4 +1,5 @@
 #include "hud/hud_overlay.h"
+#include "hud/hud_draw_list_stats.h"
 #include "hud/vehicle_hud_block.h"
 
 #include "hud/friendly_tag_flags.h"
@@ -1250,8 +1251,9 @@ Vector2 HudOverlay::draw_surface_() const {
 	return Vector2(1024.0f, 768.0f);
 }
 
-Dictionary HudOverlay::get_draw_list_stats() {
-	Dictionary out;
+Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
+	Ref<HudDrawListStats> out;
+	out.instantiate();
 	int64_t quads_filled = 0;
 	int64_t quads_wire = 0;
 	int64_t quads_textured = 0;
@@ -1317,68 +1319,65 @@ Dictionary HudOverlay::get_draw_list_stats() {
 		big_map_labels = static_cast<int64_t>(list.big_map.labels.size());
 		big_map_glyphs = static_cast<int64_t>(list.big_map_glyphs.size());
 	}
-	out["quads"] = quads_filled + quads_wire;
-	out["quads_filled"] = quads_filled;
-	out["quads_wire"] = quads_wire;
-	out["quads_textured"] = quads_textured;
-	out["quads_additive"] = quads_additive;
-	out["tris"] = tris;
-	out["lines"] = lines;
-	out["glyphs"] = glyphs;
-	out["underlines"] = underlines;
-	out["elements_drawn"] = elements;
-	out["map_visible"] = map_visible;
-	out["map_backing_tris"] = map_backing_tris;
-	out["map_terrain_tris"] = map_terrain_tris;
-	out["map_footprint_tris"] = map_footprint_tris;
-	out["map_sprites"] = map_sprites;
-	out["map_lines_under"] = map_lines_under;
-	out["map_lines"] = map_lines;
-	out["map_labels"] = map_labels;
-	out["big_map_visible"] = big_map_visible;
-	out["big_map_backing_tris"] = big_map_backing_tris;
-	out["big_map_terrain_tris"] = big_map_terrain_tris;
-	out["big_map_footprint_tris"] = big_map_footprint_tris;
-	out["big_map_sprites"] = big_map_sprites;
-	out["big_map_lines_under"] = big_map_lines_under;
-	out["big_map_lines"] = big_map_lines;
-	out["big_map_labels"] = big_map_labels;
-	out["big_map_glyphs"] = big_map_glyphs;
+	out->set_quads(quads_filled + quads_wire);
+	out->set_quads_filled(quads_filled);
+	out->set_quads_wire(quads_wire);
+	out->set_quads_textured(quads_textured);
+	out->set_quads_additive(quads_additive);
+	out->set_tris(tris);
+	out->set_lines(lines);
+	out->set_glyphs(glyphs);
+	out->set_underlines(underlines);
+	out->set_elements_drawn(elements);
+	out->set_map_visible(map_visible);
+	out->set_map_backing_tris(map_backing_tris);
+	out->set_map_terrain_tris(map_terrain_tris);
+	out->set_map_footprint_tris(map_footprint_tris);
+	out->set_map_sprites(map_sprites);
+	out->set_map_lines_under(map_lines_under);
+	out->set_map_lines(map_lines);
+	out->set_map_labels(map_labels);
+	out->set_big_map_visible(big_map_visible);
+	out->set_big_map_backing_tris(big_map_backing_tris);
+	out->set_big_map_terrain_tris(big_map_terrain_tris);
+	out->set_big_map_footprint_tris(big_map_footprint_tris);
+	out->set_big_map_sprites(big_map_sprites);
+	out->set_big_map_lines_under(big_map_lines_under);
+	out->set_big_map_lines(big_map_lines);
+	out->set_big_map_labels(big_map_labels);
+	out->set_big_map_glyphs(big_map_glyphs);
 	const Ref<Texture2D> map_icons = textures_[opennova::hud::kHudTexMapIcons];
 	const Ref<Image> map_icon_image =
 			map_icons.is_valid() ? map_icons->get_image() : Ref<Image>();
-	out["map_icon_mipmaps"] =
-			map_icon_image.is_valid() && map_icon_image->has_mipmaps();
-	out["map_icon_width"] =
-			map_icon_image.is_valid() ? map_icon_image->get_width() : 0;
-	out["map_icon_height"] =
-			map_icon_image.is_valid() ? map_icon_image->get_height() : 0;
-	out["map_texture_filter"] = map_top_sampling_configured_
+	out->set_map_icon_mipmaps(map_icon_image.is_valid() && map_icon_image->has_mipmaps());
+	out->set_map_icon_width(map_icon_image.is_valid() ? map_icon_image->get_width() : 0);
+	out->set_map_icon_height(map_icon_image.is_valid() ? map_icon_image->get_height() : 0);
+	out->set_map_texture_filter(map_top_sampling_configured_
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["map_texture_repeat"] = map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_map_texture_repeat(map_top_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["map_water_texture_filter"] = map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_map_water_texture_filter(map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["map_water_texture_repeat"] = map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_map_water_texture_repeat(map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["big_map_texture_filter"] = big_map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_big_map_texture_filter(big_map_top_sampling_configured_
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["big_map_texture_repeat"] = big_map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_big_map_texture_repeat(big_map_top_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["big_map_water_texture_filter"] = big_map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_big_map_water_texture_filter(big_map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["big_map_water_texture_repeat"] = big_map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_big_map_water_texture_repeat(big_map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
 	return out;
 }
 

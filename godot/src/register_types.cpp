@@ -88,6 +88,7 @@
 #include "simulation/weapon_kit_entry.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
+#include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
 #include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
@@ -138,6 +139,7 @@
 #include "pff/pff_document.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mns_stylesheet.h"
+#include "mnu/menu_draw_list_stats.h"
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
 #include "mnu/menu_video_underlay.h"
@@ -272,6 +274,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(VehicleHudBlock);
+	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(MissionInfo);
@@ -337,6 +340,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PffDocument);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnsStyleSheet);
+	GDREGISTER_CLASS(MenuDrawListStats);
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuVideoUnderlay);

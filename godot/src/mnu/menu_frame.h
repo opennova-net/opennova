@@ -22,6 +22,8 @@
 
 namespace godot {
 
+class MenuDrawListStats;
+
 class MnuDocument;
 class MnsStyleSheet;
 class ResourceRoot;
@@ -195,7 +197,7 @@ public:
 	// standard control-activation contract the Control-tree buttons had).
 
 	// Debug/test accessor: compile at the current size and report counts.
-	Dictionary get_draw_list_stats();
+	Ref<MenuDrawListStats> get_draw_list_stats();
 
 	void _draw() override;
 

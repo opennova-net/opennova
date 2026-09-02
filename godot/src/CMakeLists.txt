@@ -136,6 +136,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_inventory.cpp
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
+    hud/hud_draw_list_stats.cpp
     hud/hud_overlay.cpp
     hud/feed_row.cpp
     devtools/frame_stats.cpp
@@ -199,6 +200,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/mnu_document.cpp
     mnu/mnu_document_state.cpp
     mnu/mns_stylesheet.cpp
+    mnu/menu_draw_list_stats.cpp
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
     mnu/menu_video_underlay.cpp

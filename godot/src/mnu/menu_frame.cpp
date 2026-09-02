@@ -1,4 +1,5 @@
 #include "mnu/menu_frame.h"
+#include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
 
 #include <runtime/menu/options_policy.h>
@@ -858,8 +859,9 @@ Vector2 MenuFrame::design_scale_() const {
 	return Vector2(1.0f, 1.0f);
 }
 
-Dictionary MenuFrame::get_draw_list_stats() {
-	Dictionary out;
+Ref<MenuDrawListStats> MenuFrame::get_draw_list_stats() {
+	Ref<MenuDrawListStats> out;
+	out.instantiate();
 	int64_t quads = 0;
 	int64_t quads_textured = 0;
 	int64_t lines = 0;
@@ -879,11 +881,11 @@ Dictionary MenuFrame::get_draw_list_stats() {
 		glyphs = static_cast<int64_t>(list.glyphs.size());
 		widgets = list.widgets_drawn;
 	}
-	out["quads"] = quads;
-	out["quads_textured"] = quads_textured;
-	out["lines"] = lines;
-	out["glyphs"] = glyphs;
-	out["widgets_drawn"] = widgets;
+	out->set_quads(quads);
+	out->set_quads_textured(quads_textured);
+	out->set_lines(lines);
+	out->set_glyphs(glyphs);
+	out->set_widgets_drawn(widgets);
 	return out;
 }
 
