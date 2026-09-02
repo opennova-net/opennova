@@ -939,9 +939,10 @@ public:
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
     //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
     //    delta + delta/8, and fill `out` (ai_drive = true).
-    // Tracked deferrals (D-NET-161): the minAI crew health clamp, the
-    // wait-for-boarders stop, the handbrake byte-973 latch and the aim-lock stop.
-    // (The pool-1 collision-avoid brake is ported inline.)
+    // The pool-1 collision-avoid brake, the minAI crew health clamp and the
+    // wait-for-boarders stop are inline; the parked branch runs the stuck
+    // escalation; the handbrake byte-973 latch and the crashed stop sit in
+    // tick_vehicle_motor past the input block.
     void vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                           const VehicleTraits &traits, VehicleDriveCmd &out);
 
@@ -954,11 +955,10 @@ public:
     //    delta clamp, 0.75x speed damps at 15/30/45 deg of residual turn, steer =
     //    heading + delta (no delta/8 term), the slip counter-steer + its 4-tier
     //    speed damps, and the shared pool-1 avoid brake.
-    // Tracked deferrals (D-NET-161): the minAI crew health clamp
-    // (@0x48E27F..0x48E2C7, def minai/criticalHp), the aiComp[135] <- brain[127]
-    // target mirror (unmodeled slot), the wait-for-boarders stop
-    // (@0x48E75B..0x48E7EC, rides the boarding think) and the stuck check
-    // (AI_CheckVehicleStuckState @0x465290).
+    // The minAI crew health clamp (@0x48E27F..0x48E2C7), the wait-for-boarders
+    // stop (@0x48E75B..0x48E7EC) and the parked leg's stuck check
+    // (AI_CheckVehicleStuckState @0x465290) are inline; the aiComp[135] <-
+    // brain[127] mirror stays an unmodeled slot (D-NET-161).
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
 
