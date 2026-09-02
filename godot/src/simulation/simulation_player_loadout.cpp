@@ -5,6 +5,7 @@
 #include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
+#include "simulation/weapon_profile_summary.h"
 
 #include <net/npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
@@ -53,20 +54,21 @@ std::vector<opennova::world::WeaponKitEntry> kit_rows_from(const TypedArray<Weap
 
 namespace {
 
-Dictionary weapon_profile_side_summary(const opennova::playersav::Side &side,
+Ref<WeaponProfileSide> weapon_profile_side_summary(const opennova::playersav::Side &side,
 		bool include_kit) {
-	Dictionary out;
-	out["player_class"] = int(side.player_class);
-	out["avatar_a"] = int(side.avatar_a);
-	out["avatar_b"] = int(side.avatar_b);
-	out["avatar_packed"] = int(side.avatar_packed);
+	Ref<WeaponProfileSide> out;
+	out.instantiate();
+	out->set_player_class(int(side.player_class));
+	out->set_avatar_a(int(side.avatar_a));
+	out->set_avatar_b(int(side.avatar_b));
+	out->set_avatar_packed(int(side.avatar_packed));
 	if (include_kit) {
-		Array names;
+		PackedStringArray names;
 		if (const opennova::playersav::KitPage *page = side.selected_page()) {
 			for (const opennova::playersav::KitEntry &entry : page->entries)
 				names.push_back(String::utf8(entry.name.c_str()));
 		}
-		out["kit"] = names;
+		out->set_kit(names);
 	}
 	return out;
 }
@@ -481,20 +483,21 @@ String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
 					.c_str());
 }
 
-Dictionary Simulation::read_weapon_profile_summary(const String &p_path) {
+Ref<WeaponProfileSummary> Simulation::read_weapon_profile_summary(const String &p_path) {
 	opennova::playersav::File profile = opennova::playersav::make_defaults();
 	// Raw bytes for the menu: the PLAYER_INFO screen selects its rows straight
 	// from the profile globals; the [5,9] class clamp is a SESSION-START step
 	// (apply_session_settings_to_globals) that load_weapon_profile applies.
 	const Error error = read_weapon_profile_file(p_path, profile);
-	Dictionary out;
-	out["error"] = int(error);
-	out["loaded"] = error == OK;
+	Ref<WeaponProfileSummary> out;
+	out.instantiate();
+	out->set_error(int(error));
+	out->set_loaded(error == OK);
 	// OpenNova's active profile is slot 0. Retail indexes the same five-record
 	// array by g_curProfileSlot @0x25506B8 (0x1080C stride) before reading or
 	// writing its record; see docs/playerinfo/avatars-re.md.
-	out["blue"] = weapon_profile_side_summary(profile.slots[0].blue, false);
-	out["red"] = weapon_profile_side_summary(profile.slots[0].red, false);
+	out->set_blue(weapon_profile_side_summary(profile.slots[0].blue, false));
+	out->set_red(weapon_profile_side_summary(profile.slots[0].red, false));
 	return out;
 }
 
@@ -635,11 +638,12 @@ Error Simulation::load_weapon_profile(const String &p_path) {
 	return result;
 }
 
-Dictionary Simulation::get_weapon_profile_summary() const {
-	Dictionary out;
-	out["loaded"] = weapon_profile_loaded_;
-	out["blue"] = weapon_profile_side_summary(weapon_profile_.blue, true);
-	out["red"] = weapon_profile_side_summary(weapon_profile_.red, true);
+Ref<WeaponProfileSummary> Simulation::get_weapon_profile_summary() const {
+	Ref<WeaponProfileSummary> out;
+	out.instantiate();
+	out->set_loaded(weapon_profile_loaded_);
+	out->set_blue(weapon_profile_side_summary(weapon_profile_.blue, true));
+	out->set_red(weapon_profile_side_summary(weapon_profile_.red, true));
 	return out;
 }
 

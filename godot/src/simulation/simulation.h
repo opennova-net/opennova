@@ -55,6 +55,7 @@ class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weap
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
+class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 // The small per-frame HUD view records (simulation/hud_view_records.h).
@@ -934,11 +935,11 @@ public:
 	// caller can warn. (engine: base/gameprofile/required_resources.c)
 	Error load_weapon_profile(const String &p_path);
 	// Read slot 0's two character headers (raw bytes, no session clamp) without
-	// requiring a live Simulation. Returns {error, loaded, blue, red}; each side
-	// carries player_class, avatar_a (nationality id), avatar_b (division id),
-	// and avatar_packed. This is the menu boot seam over the same five-record
-	// file as load_weapon_profile().
-	static Dictionary read_weapon_profile_summary(const String &p_path);
+	// requiring a live Simulation: a WeaponProfileSummary (error, loaded, the
+	// blue and red WeaponProfileSide with player_class, avatar_a (nationality
+	// id), avatar_b (division id) and avatar_packed). This is the menu boot
+	// seam over the same five-record file as load_weapon_profile().
+	static Ref<WeaponProfileSummary> read_weapon_profile_summary(const String &p_path);
 	// Persist PLAYER_INFO's ACCEPT snapshot into active profile slot 0:
 	// `profile.player_class` (5..9) is written to BOTH side blocks and each
 	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
@@ -995,10 +996,10 @@ public:
 	}
 	static Ref<FpViewmodelSpec> fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_character_arms, const String &p_animadm, int p_flags);
-	// Read-only view of the active profile record for the shell's status copy:
-	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},
-	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.
-	Dictionary get_weapon_profile_summary() const;
+	// Read-only view of the active profile record for the shell's status copy
+	// (a WeaponProfileSummary: loaded, the blue and red sides with their kit
+	// names). The kit array is the SELECTED page — the one the class byte picks.
+	Ref<WeaponProfileSummary> get_weapon_profile_summary() const;
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
 	// default — the Player_InitPlayer weapon leg (engine: net/npruntime/host_session.h). Runs automatically after load_weapon_table; call
 	// again on respawn.

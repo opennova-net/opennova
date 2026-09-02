@@ -4,6 +4,7 @@
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
+#include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
 #include "simulation/destruction_events.h" // the destruction drain record
 #include "simulation/ai_debug_report.h" // the F3 AI overlay payload
 #include "simulation/collision_debug_report.h" // the F3 collision overlay payload
