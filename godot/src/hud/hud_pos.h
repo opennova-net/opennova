@@ -20,6 +20,7 @@
 namespace godot {
 
 class ResourceRoot;
+class VehicleHudBlock;
 
 // Thin GDExtension wrapper over engine/formats/def hudpos.def parsing (def_parse_hudpos).
 //
@@ -202,10 +203,8 @@ public:
 	Array get_stances() const;
 	// [{ texture:String, pos:Vector2i }]
 	Array get_static_frames() const;
-	// One VEHICLE_HUD block by items.def sid; empty when unknown.
-	Dictionary get_vehicle_hud(const String &p_sid) const;
-	Dictionary get_parachute_icon() const;
-	Dictionary get_armor_icon() const;
+	// One VEHICLE_HUD block by items.def sid (hud/vehicle_hud_block.h); null when unknown.
+	Ref<VehicleHudBlock> get_vehicle_hud(const String &p_sid) const;
 	Rect2i get_spinmap_bounds() const;
 	int get_spinmap_wp_dist_off() const;
 	// MAPCOORDS x, y, suppressor. The suppressor is 0 when unauthored (the

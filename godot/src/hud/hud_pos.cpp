@@ -1,4 +1,5 @@
 #include "hud/hud_pos.h"
+#include "hud/vehicle_hud_block.h"
 
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
@@ -365,42 +366,23 @@ Array HudPos::get_static_frames() const {
 
 // One VEHICLE_HUD block by items.def sid, case-insensitively -- matching the
 // _stricmp the original commits the block with. The witness for the block and
-// its grammar lives with the parse, in engine/formats/def/def.h; this is only
-// the projection into a Dictionary.
+// its grammar lives with the parse, in engine/formats/def/def.h; this only
+// hands the block out.
 //
-// An unknown sid returns an EMPTY dictionary rather than a default-filled one:
-// a vehicle with no authored panel draws none.
-Dictionary HudPos::get_vehicle_hud(const String &p_sid) const {
-	Dictionary out;
-	if (!loaded_ || p_sid.is_empty()) return out;
+// An unknown sid returns NULL rather than a default-filled block: a vehicle
+// with no authored panel draws none.
+Ref<VehicleHudBlock> HudPos::get_vehicle_hud(const String &p_sid) const {
+	if (!loaded_ || p_sid.is_empty()) return Ref<VehicleHudBlock>();
 	const String want = p_sid.to_lower();
 	for (size_t i = 0; i < file_.hud.vehicle_huds_count; ++i) {
 		const DefVehicleHudBlock &v = file_.hud.vehicle_huds[i];
 		if (String::utf8(v.sid).to_lower() != want) continue;
-		out["sid"] = String::utf8(v.sid);
-		out["icon"] = String::utf8(v.icon);
-		out["interface"] = String::utf8(v.interface_texture);
-		out["static_texture"] = String::utf8(v.static_texture);
-		out["driver"] = Vector2i(v.driver_x, v.driver_y);
-		Array emplace;
-		for (int e = 0; e < v.emplace_count; ++e)
-			emplace.push_back(Vector2i(v.emplace_x[e], v.emplace_y[e]));
-		out["emplace"] = emplace;
-		Array seats;
-		for (int st = 0; st < v.seat_count; ++st)
-			seats.push_back(Vector2i(v.seat_x[st], v.seat_y[st]));
-		out["seats"] = seats;
+		Ref<VehicleHudBlock> out;
+		out.instantiate();
+		out->assign(v);
 		return out;
 	}
-	return out;
-}
-
-Dictionary HudPos::get_parachute_icon() const {
-	return loaded_ ? graphic_to_dict(file_.hud.parachute_icon) : Dictionary();
-}
-
-Dictionary HudPos::get_armor_icon() const {
-	return loaded_ ? graphic_to_dict(file_.hud.armor_icon) : Dictionary();
+	return Ref<VehicleHudBlock>();
 }
 
 Rect2i HudPos::get_spinmap_bounds() const {
@@ -521,8 +503,8 @@ Dictionary HudPos::to_dictionary() const {
 	out["colors"] = get_colors();
 	out["stances"] = get_stances();
 	out["static_frames"] = get_static_frames();
-	out["parachute_icon"] = get_parachute_icon();
-	out["armor_icon"] = get_armor_icon();
+	out["parachute_icon"] = loaded_ ? graphic_to_dict(h.parachute_icon) : Dictionary();
+	out["armor_icon"] = loaded_ ? graphic_to_dict(h.armor_icon) : Dictionary();
 
 	Array declutter;
 	for (size_t i = 0; i < h.declutter_count; ++i) {

@@ -1,4 +1,5 @@
 #include "hud/hud_overlay.h"
+#include "hud/vehicle_hud_block.h"
 
 #include "hud/friendly_tag_flags.h"
 #include "hud/hud_pos.h"
@@ -107,42 +108,6 @@ HudPosRecord pos_record2(const Vector2i &v) {
 	r.y = v.y;
 	r.present = true;
 	return r;
-}
-
-// HudPos::get_vehicle_hud's Dictionary back into the def block the engine
-// feed reads (field widths are the block's own: 16-byte sid, 32-byte names,
-// the 4/8 pair caps).
-void copy_fixed(char *dst, size_t cap, const String &src) {
-	const CharString utf8 = src.utf8();
-	snprintf(dst, cap, "%s", utf8.get_data());
-}
-
-DefVehicleHudBlock vehicle_hud_block_from_dict(const Dictionary &d) {
-	DefVehicleHudBlock block{};
-	copy_fixed(block.sid, sizeof(block.sid), d.get("sid", String()));
-	copy_fixed(block.icon, sizeof(block.icon), d.get("icon", String()));
-	copy_fixed(block.interface_texture, sizeof(block.interface_texture),
-			d.get("interface", String()));
-	copy_fixed(block.static_texture, sizeof(block.static_texture),
-			d.get("static_texture", String()));
-	const Vector2i driver = d.get("driver", Vector2i());
-	block.driver_x = driver.x;
-	block.driver_y = driver.y;
-	const Array emplace = d.get("emplace", Array());
-	for (int64_t i = 0; i < emplace.size() && i < DEF_VEHICLE_HUD_MAX_EMPLACE; ++i) {
-		const Vector2i p = emplace[i];
-		block.emplace_x[i] = p.x;
-		block.emplace_y[i] = p.y;
-		block.emplace_count = static_cast<int>(i) + 1;
-	}
-	const Array seats = d.get("seats", Array());
-	for (int64_t i = 0; i < seats.size() && i < DEF_VEHICLE_HUD_MAX_SEATS; ++i) {
-		const Vector2i p = seats[i];
-		block.seat_x[i] = p.x;
-		block.seat_y[i] = p.y;
-		block.seat_count = static_cast<int>(i) + 1;
-	}
-	return block;
 }
 
 HudRectRecord rect_record(const Rect2i &rect) {
@@ -935,23 +900,23 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	queue_redraw();
 }
 
-void HudOverlay::set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
+void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
 		Simulation *p_sim) {
 	opennova::hud::HudVehiclePanelState &vp = state_.vehicle_panel;
-	if (!p_shown) {
+	if (!p_shown || p_block.is_null()) {
 		vp = opennova::hud::HudVehiclePanelState{};
 		textures_[opennova::hud::kHudTexVehiclePanel] = Ref<Texture2D>();
 		vehicle_panel_sid_ = String();
 		queue_redraw();
 		return;
 	}
-	const DefVehicleHudBlock block = vehicle_hud_block_from_dict(p_block);
+	const DefVehicleHudBlock &block = p_block->native();
 	// The silhouette is per item: reload the slot when the rider's vehicle
 	// changes (the set_weapon per-weapon art idiom).
-	const String sid = p_block.get("sid", String());
+	const String sid = p_block->get_sid();
 	if (sid != vehicle_panel_sid_ || textures_[opennova::hud::kHudTexVehiclePanel].is_null()) {
 		textures_[opennova::hud::kHudTexVehiclePanel] =
-				load_hud_texture_(p_block.get("interface", String()));
+				load_hud_texture_(p_block->get_interface_texture());
 		vehicle_panel_sid_ = sid;
 	}
 	const Ref<Texture2D> silhouette = textures_[opennova::hud::kHudTexVehiclePanel];

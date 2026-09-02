@@ -82,6 +82,7 @@
 #include "devtools/frame_stats.h"
 #include "devtools/oned_ui.h"
 #include "hud/hud_pos.h"
+#include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
 #include "simulation/entity_card.h"
@@ -120,6 +121,7 @@
 #include "audio/sbf_audio_stream_playback.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
+#include "audio/music_pair_names.h"
 #include "pff/pff_document.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mns_stylesheet.h"
@@ -223,6 +225,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);
+	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(MissionInfo);
@@ -280,6 +283,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SbfAudioStreamPlayback);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
+	GDREGISTER_CLASS(MusicPairNames);
 	GDREGISTER_CLASS(MusicDirector);
 	GDREGISTER_CLASS(PffDocument);
 	GDREGISTER_CLASS(MnuDocument);

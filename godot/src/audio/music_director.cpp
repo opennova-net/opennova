@@ -9,6 +9,7 @@
 //   Jointops.exe!Intrinsic_GEcho @ 0x6720C0            -> _on_echo
 
 #include "audio/music_director.h"
+#include "audio/music_pair_names.h"
 
 #include "audio/music_script.h"
 #include "audio/sbf_audio_stream.h"
@@ -103,22 +104,20 @@ void MusicDirector::_bind_methods() {
 
 // --- Witnessed music-pair naming (pure re-export) -----------------------
 
-static Dictionary music_pair_to_dict(const opennova::audio::MusicPairNames &names) {
-	Dictionary out;
-	out["stem"] = String::utf8(names.stem.c_str());
-	out["bank_file"] = String::utf8(names.bank_file.c_str());
-	out["script_file"] = String::utf8(names.script_file.c_str());
-	out["subdir"] = String::utf8(names.subdir.c_str());
+static Ref<MusicPairNames> music_pair_record(const opennova::audio::MusicPairNames &names) {
+	Ref<MusicPairNames> out;
+	out.instantiate();
+	out->assign(names);
 	return out;
 }
 
-Dictionary MusicDirector::resolve_menu_music_pair(const String &p_expansion_name) {
-	return music_pair_to_dict(opennova::audio::menu_music_pair_names(
+Ref<MusicPairNames> MusicDirector::resolve_menu_music_pair(const String &p_expansion_name) {
+	return music_pair_record(opennova::audio::menu_music_pair_names(
 			p_expansion_name.utf8().get_data()));
 }
 
-Dictionary MusicDirector::resolve_game_music_pair(const String &p_expansion_name) {
-	return music_pair_to_dict(opennova::audio::game_music_pair_names(
+Ref<MusicPairNames> MusicDirector::resolve_game_music_pair(const String &p_expansion_name) {
+	return music_pair_record(opennova::audio::game_music_pair_names(
 			p_expansion_name.utf8().get_data()));
 }
 
