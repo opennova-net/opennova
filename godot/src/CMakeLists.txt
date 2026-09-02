@@ -137,6 +137,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/ray_debug_report.cpp
     simulation/round_debug_report.cpp
     simulation/hud_view_records.cpp
+    simulation/deploy_rows.cpp
     simulation/player_weapon_view.cpp
     simulation/player_inventory.cpp
     simulation/weapon_kit_entry.cpp

@@ -6,6 +6,7 @@
 // C2S 0x2E medic request the way the reload request already travels.
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
 #include <net/npruntime/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
@@ -152,48 +153,30 @@ String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext)
 			penalty_label.utf8().get_data(), zone_name.utf8().get_data()).c_str());
 }
 
-TypedArray<Dictionary> Simulation::get_deploy_list_rows(const String &p_default_key,
+TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_default_key,
 		const String &p_default_home, const Dictionary &p_zone_names) {
 	// The compiled SPAWNPOINTS_LIST: the engine builder runs both witnessed
-	// loops over the zone rows this sim exposes (get_deploy_spawn_zones), the
-	// team colour tag, and the embedder-resolved WPNames strings.
-	TypedArray<Dictionary> out;
+	// loops over the zone rows this sim exposes (deploy_zone_rows), the team
+	// colour tag, and the embedder-resolved WPNames strings.
+	TypedArray<DeployListRow> out;
 	if (!kernel_ || !joiner_ || !runtime_) return out;
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
 	in.default_key = p_default_key.utf8().get_data();
 	in.default_home = p_default_home.utf8().get_data();
-	const TypedArray<Dictionary> zones = get_deploy_spawn_zones();
-	for (int i = 0; i < zones.size(); ++i) {
-		const Dictionary z = zones[i];
-		opennova::world::DeployZoneRow row;
-		row.index = static_cast<int>(int64_t(z.get("param", 0))) - 1;
-		row.letter = static_cast<char>('A' + row.index);
-		row.name_key = String(z.get("name_key", "")).utf8().get_data();
-		row.secured = bool(z.get("secured", false));
-		row.wave_countdown = static_cast<uint16_t>(int64_t(z.get("wave_countdown", 0)));
-		const Array occupants = z.get("occupants", Array());
-		for (int k = 0; k < occupants.size(); ++k) {
-			const Dictionary o = occupants[k];
-			opennova::world::DeployOccupant occ;
-			occ.handle = static_cast<uint16_t>(int64_t(o.get("handle", 0xFFFF)));
-			occ.name = String(o.get("name", "")).utf8().get_data();
-			occ.self = bool(o.get("self", false));
-			row.occupants.push_back(occ);
-		}
-		in.zones.push_back(row);
-	}
+	in.zones = deploy_zone_rows();
 	in.zone_name = [&p_zone_names](const std::string &key) {
 		const String k = String::utf8(key.c_str());
 		if (p_zone_names.has(k)) return std::string(String(p_zone_names[k]).utf8().get_data());
 		return key;
 	};
 	for (const opennova::world::DeployListRow &row : opennova::world::build_deploy_rows(in)) {
-		Dictionary d;
-		d["text"] = String::utf8(row.text.c_str());
-		d["value"] = row.value;
-		out.push_back(d);
+		Ref<DeployListRow> record;
+		record.instantiate();
+		record->set_text(String::utf8(row.text.c_str()));
+		record->set_value(row.value);
+		out.push_back(record);
 	}
 	return out;
 }

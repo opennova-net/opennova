@@ -445,6 +445,9 @@ private:
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
 	// load (engine: runtime/hud/hud_lfp_panel.h).
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
+	// The DEATH screen's zone rows over the registry: the record feed and
+	// the compiled list builder both read this one walk.
+	std::vector<opennova::world::DeployZoneRow> deploy_zone_rows();
 	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
 	bool deploy_zone_registry_built_ = false;
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------

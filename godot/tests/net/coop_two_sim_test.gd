@@ -652,7 +652,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var deploy_rows := joiner.get_deploy_spawn_zones()
 	assert_eq(deploy_rows.size(), 1,
 			"the fixture exposes one team-owned non-default spawn-zone row")
-	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0)) \
+	var zone_param := (deploy_rows[0] as DeployZoneRow).param \
 			if not deploy_rows.is_empty() else 0
 	assert_gt(zone_param, 0)
 	assert_true(joiner.send_deployment_pick(zone_param),

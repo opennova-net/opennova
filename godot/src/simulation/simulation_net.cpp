@@ -3,6 +3,7 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
@@ -1224,7 +1225,7 @@ const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 	return deploy_zone_registry_;
 }
 
-TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
+std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
 	// The DEATH screen's zone rows [orig: UI_UpdateDeathScreenContent @0x5536a0 —
 	// def present, team match, SECURED (a numbered zone lists only at full control:
 	// the zone-timer EntryById[9] >= [10] gate), attrib 0x40000; letter = 'A' +
@@ -1233,7 +1234,7 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 	// TEAM zone is emitted with its `secured` verdict: the second (occupant)
 	// loop of the populate has no secured gate, so the engine builder decides
 	// which rows list and where the occupants land.
-	TypedArray<Dictionary> rows;
+	std::vector<opennova::world::DeployZoneRow> rows;
 	if (!kernel_ || !joiner_ || !runtime_) return rows;
 	const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 	const uint8_t team = runtime_->assigned_team();
@@ -1258,24 +1259,22 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 			}
 		}
 		if (effective_team != team) continue;
-		Dictionary row;
-		row["param"] = static_cast<int>(i) + 1;
-		row["letter"] = String::chr('A' + static_cast<int>(i));
-		row["name_key"] = vformat("STRWPNAME%03d", static_cast<int>(i) + 1);
-		row["secured"] = !(e->zone_number != 0 && effective_control < effective_limit);
+		opennova::world::DeployZoneRow row;
+		row.index = static_cast<int>(i);
+		row.letter = static_cast<char>('A' + static_cast<int>(i));
+		row.name_key = vformat("STRWPNAME%03d", static_cast<int>(i) + 1).utf8().get_data();
+		row.secured = !(e->zone_number != 0 && effective_control < effective_limit);
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
 		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
-		int wave_countdown = 0;
-		Array occupants;
 		if (cs.spawn_waves.known) {
 			for (const opennova::SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
 				if (g.zone_handle != e->handle.packed) continue;
-				wave_countdown = g.wave_countdown;
+				row.wave_countdown = static_cast<uint16_t>(g.wave_countdown);
 				for (uint16_t member : g.members) {
-					Dictionary o;
-					o["handle"] = static_cast<int>(member);
+					opennova::world::DeployOccupant o;
+					o.handle = member;
 					std::string name;
 					const opennova::world::EntityHandle mh{member};
 					for (const opennova::netsim::ClientRosterSlot &slot : cs.roster) {
@@ -1288,17 +1287,40 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 						if (const opennova::netsim::ClientEntityState *row_state = cs.find(member))
 							name = row_state->name;
 					}
-					o["name"] = String::utf8(name.c_str());
-					o["self"] = member == self_handle;
-					occupants.push_back(o);
+					o.name = name;
+					o.self = member == self_handle;
+					row.occupants.push_back(o);
 				}
 			}
 		}
-		row["wave_countdown"] = wave_countdown;
-		row["occupants"] = occupants;
 		rows.push_back(row);
 	}
 	return rows;
+}
+
+TypedArray<DeployZoneRow> Simulation::get_deploy_spawn_zones() {
+	TypedArray<DeployZoneRow> out;
+	for (const opennova::world::DeployZoneRow &row : deploy_zone_rows()) {
+		Ref<DeployZoneRow> record;
+		record.instantiate();
+		record->set_param(row.index + 1);
+		record->set_letter(String::chr(row.letter));
+		record->set_name_key(String::utf8(row.name_key.c_str()));
+		record->set_secured(row.secured);
+		record->set_wave_countdown(row.wave_countdown);
+		TypedArray<DeployOccupantRow> occupants;
+		for (const opennova::world::DeployOccupant &o : row.occupants) {
+			Ref<DeployOccupantRow> occupant;
+			occupant.instantiate();
+			occupant->set_handle(o.handle);
+			occupant->set_name(String::utf8(o.name.c_str()));
+			occupant->set_self(o.self);
+			occupants.push_back(occupant);
+		}
+		record->set_occupants(occupants);
+		out.push_back(record);
+	}
+	return out;
 }
 
 bool Simulation::send_deployment_pick(int p_param) {

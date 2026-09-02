@@ -256,9 +256,9 @@ func _make_presenter(sim: Simulation) -> DeployPresenter:
 # The visible list row carrying a node PARAM (the sorted list's row order is
 # retail's text sort, so tests never assume fixed indices).
 func _row_index_for_param(presenter: DeployPresenter, param: int) -> int:
-	var rows: Array = presenter.get_spawn_rows()
+	var rows := presenter.get_spawn_rows()
 	for row in rows.size():
-		if int((rows[row] as Dictionary).get("param", -2)) == param:
+		if rows[row].param == param:
 			return row
 	return -1
 
@@ -266,10 +266,10 @@ func _row_index_for_param(presenter: DeployPresenter, param: int) -> int:
 # The presenter's row PARAM at a visible list row (the old ItemList metadata's
 # successor: the presenter row model carries the node parameter per row).
 func _row_param(presenter: DeployPresenter, row: int) -> int:
-	var rows: Array = presenter.get_spawn_rows()
+	var rows := presenter.get_spawn_rows()
 	if row < 0 or row >= rows.size():
 		return -1
-	return int((rows[row] as Dictionary).get("param", -1))
+	return rows[row].param
 
 
 # The shell leaves State.WORLD on `opened` and returns on `closed`; without those
@@ -342,10 +342,10 @@ func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
 		OS.delay_msec(2)
 	await get_tree().process_frame
 	assert_true(presenter.is_open(), "the host-held overlay keeps the screen open")
-	var rows: Array = presenter.get_spawn_rows()
+	var rows := presenter.get_spawn_rows()
 	var row := -1
 	for i in rows.size():
-		if int((rows[i] as Dictionary).get("param", -1)) != -1:
+		if rows[i].param != -1:
 			row = i
 			break
 	assert_gte(row, 0, "the spawn list carries a selectable row")
@@ -439,7 +439,7 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 			"default plus the secured zone")
 	assert_eq(presenter.get_spawn_rows().size(), 1 + zone_rows.size(),
 			"the presenter row model aligns with the compiled list")
-	var zone_param := int((zone_rows[0] as Dictionary).get("param", 0))
+	var zone_param := (zone_rows[0] as DeployZoneRow).param
 	assert_gt(zone_param, 0)
 	# The whole-list text sort orders "'A' zone" before "'D' Home Base": find
 	# the zone row by its param, never by a fixed index.
@@ -482,7 +482,7 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	# Every real row is a pick (0 default, index+1 zone) — the fixture's wave
 	# groups are empty, so no node -1 rows exist yet.
 	for row in presenter.get_spawn_rows():
-		assert_gte(int((row as Dictionary).get("param", -1)), 0,
+		assert_gte(row.param, 0,
 				"list rows without occupants are all picks")
 	# The engine builder's row model IS what a wave group would insert: a
 	# synthetic occupant row at the presenter seam proves the guard.
