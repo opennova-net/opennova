@@ -67,6 +67,7 @@ class EndRoundStatistics;
 class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
+class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
 }
 
 #include "wac/wac_program.h"
@@ -1500,15 +1501,13 @@ public:
 	// filtered) + "hit_stride"/"hit_ttl"/"tick" — the overlay's flash channel.
 	Dictionary get_collision_debug() const;
 
-	// The AI overlay's per-frame payload (godot-space, the collision-debug
-	// shape family): { valid, logic_tick, rows: [ per-brain state/alert/
-	// target/aim_dir/muzzle/ranges/timers ], channels: [ nav routes as
-	// PackedVector3Array node runs + radii + followers ], groups, counters }.
-	// {"valid": false} without a kernel and on a joiner (the tooling AI pool
-	// never joins the decoded view); an unloaded kernel reports valid with no
-	// rows (the collision-debug contract). Aim directions are Godot-space
-	// unit vectors computed natively — GDScript does no BAM math.
-	Dictionary get_ai_debug() const;
+	// The AI overlay's per-frame payload as an AiDebugReport
+	// (simulation/ai_debug_report.h): per-brain rows, nav channels, groups and
+	// the system counters. `valid` false without a kernel and on a joiner (the
+	// tooling AI pool never joins the decoded view); an unloaded kernel reports
+	// valid with no rows (the collision-debug contract). Aim directions are
+	// Godot-space unit vectors computed natively — GDScript does no BAM math.
+	Ref<AiDebugReport> get_ai_debug() const;
 	// Native (unbound) form for the F3 AI window's pushed record: the same
 	// engine join as the engine struct, no Variant round-trip. False without a
 	// kernel or on a joiner.

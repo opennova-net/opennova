@@ -110,12 +110,12 @@ func _selected_handle() -> int:
 
 ## Render one AI snapshot (Simulation.get_ai_debug's shape). Split from the
 ## sim fetch so tests and probes can drive the view with report data directly.
-func render_report(debug: Dictionary) -> void:
+func render_report(debug: AiDebugReport) -> void:
 	_clear_all()
-	if not bool(debug.get("valid", false)):
+	if debug == null or not debug.valid:
 		return
-	var rows: Array = debug.get("rows", [])
-	var channels: Array = debug.get("channels", [])
+	var rows := debug.rows
+	var channels := debug.channels
 	_drawable_count = rows.size() + channels.size()
 
 	var camera: Camera3D = null
@@ -139,8 +139,8 @@ func _render_labels(rows: Array, camera: Camera3D, cam_pos: Vector3) -> void:
 	for raw in rows:
 		if label_i >= _labels.size():
 			break
-		var row: Dictionary = raw
-		var pos: Vector3 = row.get("pos", Vector3.ZERO)
+		var row: AiDebugRow = raw
+		var pos: Vector3 = row.pos
 		# Distance-gate only when a camera exists (headless tests have none).
 		if camera != null and cam_pos.distance_to(pos) > LABEL_RANGE:
 			continue
@@ -148,35 +148,35 @@ func _render_labels(rows: Array, camera: Camera3D, cam_pos: Vector3) -> void:
 		label_i += 1
 		lb.visible = true
 		lb.position = pos + Vector3(0.0, LABEL_LIFT, 0.0)
-		var alive := bool(row.get("alive", false))
-		lb.modulate = alert_color(int(row.get("alert", 0))) if alive else DEAD_COLOR
+		var alive := row.alive
+		lb.modulate = alert_color(row.alert) if alive else DEAD_COLOR
 		lb.text = _label_text(row)
 
 
-static func _label_text(row: Dictionary) -> String:
-	var row_name := String(row.get("name", ""))
+static func _label_text(row: AiDebugRow) -> String:
+	var row_name := row.name
 	var text := row_name if not row_name.is_empty() \
-			else "ai %d" % int(row.get("ai_index", -1))
-	if not bool(row.get("alive", false)):
+			else "ai %d" % row.ai_index
+	if not row.alive:
 		return text + "\nDEAD"
 	# ai_state_name is "?" for the unnamed gaps (state 0 = the infantry
 	# motor's SM default); the number reads better than a bare "?".
-	var state_name := String(row.get("state_name", ""))
+	var state_name := row.state_name
 	if state_name.is_empty() or state_name == "?":
-		state_name = "state %d" % int(row.get("state", 0))
+		state_name = "state %d" % row.state
 	text += "\n%s" % state_name
-	if bool(row.get("infantry", false)):
-		text += "  m%d" % int(row.get("move_mode", 0))
-	var speed := int(row.get("out_speed", 0))
+	if row.infantry:
+		text += "  m%d" % row.move_mode
+	var speed := row.out_speed
 	if speed != 0:
 		text += "  spd %d" % speed
-	var channel := int(row.get("wp_channel", 0))
+	var channel := row.wp_channel
 	if channel > 0:
-		text += "\nch %d node %d" % [channel, int(row.get("wp_node", 0))]
-	if bool(row.get("target_valid", false)):
-		var target := String(row.get("target_name", ""))
+		text += "\nch %d node %d" % [channel, row.wp_node]
+	if row.target_valid:
+		var target := row.target_name
 		text += "\n-> %s" % (target if not target.is_empty() else "?")
-		var fire_delay := int(row.get("fire_delay", 0))
+		var fire_delay := row.fire_delay
 		if fire_delay > 0:
 			text += "  fd %d" % fire_delay
 	return text
@@ -187,40 +187,40 @@ func _render_routes(rows: Array, channels: Array) -> void:
 	# Current node per follower needs the channel's node run by channel index.
 	var nodes_by_channel: Dictionary = {}
 	for raw in channels:
-		var channel: Dictionary = raw
-		var index := int(channel.get("index", 0))
-		var nodes: PackedVector3Array = channel.get("nodes", PackedVector3Array())
+		var channel: AiDebugChannel = raw
+		var index := channel.index
+		var nodes: PackedVector3Array = channel.nodes
 		nodes_by_channel[index] = nodes
 		if nodes.size() == 0:
 			continue
 		# Only routes something is walking: a mission authors far more
 		# channels than its brains use (the F3 AI window's table lists all).
-		if int(channel.get("followers", 0)) <= 0:
+		if channel.followers <= 0:
 			continue
 		var color := Color.from_hsv(IndexHue.hue_for_index(index), 0.75, 1.0)
 		var line_color := Color(color, SEGMENT_DIM)
 		for k in range(nodes.size() - 1):
 			segments.append({ "a": nodes[k], "b": nodes[k + 1], "color": line_color })
-		if not bool(channel.get("once", false)) and nodes.size() > 2:
+		if not channel.once and nodes.size() > 2:
 			# A looping path closes back on node 0.
 			segments.append({ "a": nodes[nodes.size() - 1], "b": nodes[0],
 					"color": line_color })
-		var radii: PackedFloat32Array = channel.get("radii", PackedFloat32Array())
+		var radii: PackedFloat32Array = channel.radii
 		for k2 in range(nodes.size()):
 			var r := radii[k2] if k2 < radii.size() else 0.5
 			_diamond(segments, nodes[k2], maxf(r, 0.35), color)
 	# Each follower's current node: a bright marker + a line from the brain.
 	for raw2 in rows:
-		var row: Dictionary = raw2
-		var channel_id := int(row.get("wp_channel", 0))
+		var row: AiDebugRow = raw2
+		var channel_id := row.wp_channel
 		if channel_id <= 0 or not nodes_by_channel.has(channel_id):
 			continue
 		var run: PackedVector3Array = nodes_by_channel[channel_id]
-		var node_i := int(row.get("wp_node", 0))
+		var node_i := row.wp_node
 		if node_i < 0 or node_i >= run.size():
 			continue
 		var color2 := Color.from_hsv(IndexHue.hue_for_index(channel_id), 0.75, 1.0)
-		segments.append({ "a": row.get("pos", Vector3.ZERO), "b": run[node_i],
+		segments.append({ "a": row.pos, "b": run[node_i],
 				"color": Color(color2, 0.8) })
 		_cross(segments, run[node_i], 0.5, color2)
 	MissionOverlayUtil.emit_line_segments(_route_mesh, segments)
@@ -229,20 +229,20 @@ func _render_routes(rows: Array, channels: Array) -> void:
 func _render_targets(rows: Array) -> void:
 	var segments: Array = []
 	for raw in rows:
-		var row: Dictionary = raw
-		if not bool(row.get("alive", false)):
+		var row: AiDebugRow = raw
+		if not row.alive:
 			continue
-		var pos: Vector3 = row.get("pos", Vector3.ZERO)
+		var pos: Vector3 = row.pos
 		var eye := pos + Vector3(0.0, 1.5, 0.0)
-		if bool(row.get("target_valid", false)):
-			segments.append({ "a": eye, "b": row.get("target_pos", Vector3.ZERO),
+		if row.target_valid:
+			segments.append({ "a": eye, "b": row.target_pos,
 					"color": Color(TARGET_COLOR, 0.6) })
-		if bool(row.get("muzzle_valid", false)):
-			_cross(segments, row.get("muzzle", Vector3.ZERO), 0.15, AIM_COLOR)
-		if bool(row.get("aim_valid", false)):
-			var origin: Vector3 = row.get("muzzle", Vector3.ZERO) \
-					if bool(row.get("muzzle_valid", false)) else eye
-			var dir: Vector3 = row.get("aim_dir", Vector3.ZERO)
+		if row.muzzle_valid:
+			_cross(segments, row.muzzle, 0.15, AIM_COLOR)
+		if row.aim_valid:
+			var origin: Vector3 = row.muzzle \
+					if row.muzzle_valid else eye
+			var dir: Vector3 = row.aim_dir
 			if dir != Vector3.ZERO:
 				segments.append({ "a": origin, "b": origin + dir * AIM_RAY_LENGTH,
 						"color": AIM_COLOR })
@@ -254,26 +254,26 @@ func _render_rings(rows: Array, camera: Camera3D, cam_pos: Vector3,
 	var segments: Array = []
 	var ring_count := 0
 	for raw in rows:
-		var row: Dictionary = raw
-		if not bool(row.get("alive", false)):
+		var row: AiDebugRow = raw
+		if not row.alive:
 			continue
-		var handle := int(row.get("handle", -1))
+		var handle := row.handle
 		var is_selected := selected >= 0 and handle == selected
 		# Rings for the selection always; otherwise only engaged brains near
 		# the camera, capped -- a full battlefield of circles is noise.
 		if not is_selected:
-			if not bool(row.get("target_valid", false)):
+			if not row.target_valid:
 				continue
 			if ring_count >= RING_MAX:
 				continue
-			var pos_check: Vector3 = row.get("pos", Vector3.ZERO)
+			var pos_check: Vector3 = row.pos
 			if camera != null and cam_pos.distance_to(pos_check) > LABEL_RANGE:
 				continue
 		ring_count += 1
-		var pos: Vector3 = row.get("pos", Vector3.ZERO)
-		var color := alert_color(int(row.get("alert", 0)))
-		var sight := float(row.get("sight_range", 0.0))
-		var attack := float(row.get("attack_range", 0.0))
+		var pos: Vector3 = row.pos
+		var color := alert_color(row.alert)
+		var sight := row.sight_range
+		var attack := row.attack_range
 		if sight > 0.0:
 			_ring(segments, pos, sight, Color(color, 0.25))
 		if attack > 0.0:
