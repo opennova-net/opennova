@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_static_shadow.h>
+#include <base/io/hash.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; static admission
 // @0x60D421..0x60D450; projected bounds/page reject @0x60D465..0x60D54F;
@@ -19,8 +20,6 @@ namespace {
 // same way [orig: fixed clamp @ 0x60d325..0x60d32c, float clamp
 // @ 0x60d33f..0x60d341].
 constexpr float kMinimumVerticalProjection = 0.25f;
-constexpr uint64_t kFnvOffset = UINT64_C(1469598103934665603);
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
 
 // Buildings (BMS pool 2) collect before items (pool 1) [orig: pool indirection
 // selects pool 2 then pool 1 @ 0x60d3a2/0x60d3b1 in
@@ -89,18 +88,6 @@ bool intersects_page(const Footprint &footprint,
 	const float page_max_z = page_min_z + static_cast<float>(span);
 	return footprint.max_x > page_min_x && footprint.min_x < page_max_x &&
 			footprint.max_z > page_min_z && footprint.min_z < page_max_z;
-}
-
-uint64_t hash_bytes(uint64_t hash, const void *data, std::size_t size) noexcept {
-	const auto *bytes = static_cast<const uint8_t *>(data);
-	for (std::size_t index = 0; index < size; ++index)
-		hash = (hash ^ bytes[index]) * kFnvPrime;
-	return hash;
-}
-
-template <typename T>
-uint64_t hash_value(uint64_t hash, const T &value) noexcept {
-	return hash_bytes(hash, &value, sizeof(value));
 }
 
 // Retail defaults to the first shadow mesh and takes the second only when the
@@ -195,16 +182,16 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 		return job;
 	}
 
-	uint64_t hash = kFnvOffset;
-	hash = hash_value(hash, input.page.sector_origin_x);
-	hash = hash_value(hash, input.page.sector_origin_z);
-	hash = hash_value(hash, input.page.page_local_x);
-	hash = hash_value(hash, input.page.page_local_z);
-	hash = hash_value(hash, input.page.page_lod_level);
+	uint64_t hash = io::kFnv1a64Offset;
+	hash = io::fnv1a64_value(hash, input.page.sector_origin_x);
+	hash = io::fnv1a64_value(hash, input.page.sector_origin_z);
+	hash = io::fnv1a64_value(hash, input.page.page_local_x);
+	hash = io::fnv1a64_value(hash, input.page.page_local_z);
+	hash = io::fnv1a64_value(hash, input.page.page_lod_level);
 	for (const uint8_t light_byte : input.light_epoch) {
-		hash = hash_value(hash, light_byte);
+		hash = io::fnv1a64_value(hash, light_byte);
 	}
-	hash = hash_value(hash, input.receiver_height);
+	hash = io::fnv1a64_value(hash, input.receiver_height);
 
 	for (const TerrainStaticShadowCandidate &candidate : admitted_) {
 		const Footprint footprint = projected_footprint(
@@ -213,12 +200,12 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 		// Bounds participate directly in projection, so they must invalidate a
 		// resident page even if an binding has not yet advanced its optional
 		// transform revision.
-		hash = hash_value(hash, candidate.world_bounds.min_x);
-		hash = hash_value(hash, candidate.world_bounds.min_y);
-		hash = hash_value(hash, candidate.world_bounds.min_z);
-		hash = hash_value(hash, candidate.world_bounds.max_x);
-		hash = hash_value(hash, candidate.world_bounds.max_y);
-		hash = hash_value(hash, candidate.world_bounds.max_z);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_x);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_y);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.min_z);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_x);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_y);
+		hash = io::fnv1a64_value(hash, candidate.world_bounds.max_z);
 		const uint8_t lod = selected_lod(candidate,
 				input.page.page_lod_level);
 		const uint16_t render_object_count =
@@ -235,13 +222,13 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 			draw.geometry.render_object_index = render_object;
 			job.draws.push_back(draw);
 
-			hash = hash_value(hash, draw.bms_id);
-			hash = hash_value(hash, draw.caster_key);
-			hash = hash_value(hash, draw.collector_order);
-			hash = hash_value(hash, draw.transform_revision);
-			hash = hash_value(hash, draw.geometry.geometry_key);
-			hash = hash_value(hash, draw.geometry.lod_index);
-			hash = hash_value(hash, draw.geometry.render_object_index);
+			hash = io::fnv1a64_value(hash, draw.bms_id);
+			hash = io::fnv1a64_value(hash, draw.caster_key);
+			hash = io::fnv1a64_value(hash, draw.collector_order);
+			hash = io::fnv1a64_value(hash, draw.transform_revision);
+			hash = io::fnv1a64_value(hash, draw.geometry.geometry_key);
+			hash = io::fnv1a64_value(hash, draw.geometry.lod_index);
+			hash = io::fnv1a64_value(hash, draw.geometry.render_object_index);
 		}
 	}
 	job.content.value = hash;

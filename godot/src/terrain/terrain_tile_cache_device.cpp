@@ -5,12 +5,14 @@
 // class header's witness block and docs/terrain/terrain-re.md; retail's
 // device-side twin is the D3D tile-texture pool the record maps).
 #include "terrain/terrain_tile_cache_device.h"
+#include "util/data_format.h"
 
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_surface_inputs.h"
 #include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
+#include <base/io/hash.h>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -65,15 +67,6 @@ bool texture_to_rgba8(const Ref<Texture2D> &p_texture,
 	return p_texture.is_valid() && image_to_rgba8(p_texture->get_image(), r_output);
 }
 
-PackedByteArray packed_bytes(const std::vector<uint8_t> &p_bytes) {
-	PackedByteArray result;
-	result.resize(static_cast<int64_t>(p_bytes.size()));
-	if (!p_bytes.empty()) {
-		std::memcpy(result.ptrw(), p_bytes.data(), p_bytes.size());
-	}
-	return result;
-}
-
 Ref<Image> image_from_rgba8(const opennova::terrain::Rgba8Image &p_source) {
 	if (!p_source.is_valid()) {
 		return {};
@@ -81,17 +74,13 @@ Ref<Image> image_from_rgba8(const opennova::terrain::Rgba8Image &p_source) {
 	return Image::create_from_data(
 			static_cast<int32_t>(p_source.width),
 			static_cast<int32_t>(p_source.height), false,
-			Image::FORMAT_RGBA8, packed_bytes(p_source.pixels));
+			Image::FORMAT_RGBA8, to_packed_bytes(p_source.pixels));
 }
 
 uint8_t quantize_unorm(float p_value) {
 	return static_cast<uint8_t>(std::clamp(
 			static_cast<int>(std::lround(
 					std::clamp(p_value, 0.0f, 1.0f) * 255.0f)), 0, 255));
-}
-
-uint64_t mix_byte(uint64_t p_hash, uint8_t p_value) {
-	return (p_hash ^ p_value) * UINT64_C(1099511628211);
 }
 
 bool same_page_key(const opennova::TerrainTilePageKey &p_left,
@@ -103,15 +92,6 @@ bool same_page_key(const opennova::TerrainTilePageKey &p_left,
 			p_left.page_lod_level == p_right.page_lod_level;
 }
 
-template <typename T>
-uint64_t mix_value_bytes(uint64_t p_hash, const T &p_value) {
-	const auto *bytes = reinterpret_cast<const uint8_t *>(&p_value);
-	for (std::size_t index = 0; index < sizeof(T); ++index) {
-		p_hash = mix_byte(p_hash, bytes[index]);
-	}
-	return p_hash;
-}
-
 // The page's resident-output identity: the page key plus its pixels. The
 // pixel fold consumes eight bytes per step (a 256 KB page per upload, up to
 // two uploads a frame, on the main thread) — only relative equality of these
@@ -119,12 +99,12 @@ uint64_t mix_value_bytes(uint64_t p_hash, const T &p_value) {
 uint64_t page_output_hash(
 		const opennova::TerrainTileCompositionJob &p_job,
 		const opennova::terrain::Rgba8Image &p_pixels) {
-	uint64_t hash = UINT64_C(1469598103934665603);
-	hash = mix_value_bytes(hash, p_job.target.page.sector_origin_x);
-	hash = mix_value_bytes(hash, p_job.target.page.sector_origin_z);
-	hash = mix_value_bytes(hash, p_job.target.page.page_local_x);
-	hash = mix_value_bytes(hash, p_job.target.page.page_local_z);
-	hash = mix_value_bytes(hash, p_job.target.page.page_lod_level);
+	uint64_t hash = opennova::io::kFnv1a64Offset;
+	hash = opennova::io::fnv1a64_value(hash, p_job.target.page.sector_origin_x);
+	hash = opennova::io::fnv1a64_value(hash, p_job.target.page.sector_origin_z);
+	hash = opennova::io::fnv1a64_value(hash, p_job.target.page.page_local_x);
+	hash = opennova::io::fnv1a64_value(hash, p_job.target.page.page_local_z);
+	hash = opennova::io::fnv1a64_value(hash, p_job.target.page.page_lod_level);
 	const uint8_t *bytes = p_pixels.pixels.data();
 	const std::size_t size = p_pixels.pixels.size();
 	std::size_t index = 0;
@@ -134,7 +114,7 @@ uint64_t page_output_hash(
 		hash = (hash ^ word) * UINT64_C(1099511628211);
 		hash ^= hash >> 29;
 	}
-	for (; index < size; ++index) hash = mix_byte(hash, bytes[index]);
+	for (; index < size; ++index) hash = opennova::io::fnv1a64_byte(hash, bytes[index]);
 	return hash;
 }
 
@@ -690,7 +670,7 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id) {
 		frame_shadow_rgb_changed_bytes_ = 0;
 		frame_shadow_base_nonzero_alpha_bytes_ = 0;
 		frame_output_pages_ = 0;
-		frame_output_hash_ = UINT64_C(1469598103934665603);
+		frame_output_hash_ = opennova::io::kFnv1a64Offset;
 		_refresh_shadow_snapshot();
 		cache_.begin_frame(p_frame_id);
 		_drain_completed();
@@ -900,18 +880,18 @@ void TerrainTileCacheDevice::_drain_completed() {
 		ready_page_output_hashes_[job.target.layer] =
 				page_output_hash(job, completion.pixels);
 		if (capture_diagnostics_) {
-			frame_output_hash_ = mix_value_bytes(frame_output_hash_,
+			frame_output_hash_ = opennova::io::fnv1a64_value(frame_output_hash_,
 					job.target.page.sector_origin_x);
-			frame_output_hash_ = mix_value_bytes(frame_output_hash_,
+			frame_output_hash_ = opennova::io::fnv1a64_value(frame_output_hash_,
 					job.target.page.sector_origin_z);
-			frame_output_hash_ = mix_value_bytes(frame_output_hash_,
+			frame_output_hash_ = opennova::io::fnv1a64_value(frame_output_hash_,
 					job.target.page.page_local_x);
-			frame_output_hash_ = mix_value_bytes(frame_output_hash_,
+			frame_output_hash_ = opennova::io::fnv1a64_value(frame_output_hash_,
 					job.target.page.page_local_z);
-			frame_output_hash_ = mix_value_bytes(frame_output_hash_,
+			frame_output_hash_ = opennova::io::fnv1a64_value(frame_output_hash_,
 					job.target.page.page_lod_level);
 			for (uint8_t value : completion.pixels.pixels) {
-				frame_output_hash_ = mix_byte(frame_output_hash_, value);
+				frame_output_hash_ = opennova::io::fnv1a64_byte(frame_output_hash_, value);
 			}
 		}
 	}
@@ -948,13 +928,13 @@ uint64_t TerrainTileCacheDevice::_content_stamp(
 		r_sources.light_bytes[channel] = light[channel];
 	}
 
-	uint64_t hash = UINT64_C(1469598103934665603);
+	uint64_t hash = opennova::io::kFnv1a64Offset;
 	for (int shift = 0; shift < 64; shift += 8) {
-		hash = mix_byte(hash,
+		hash = opennova::io::fnv1a64_byte(hash,
 				static_cast<uint8_t>(source_revision_ >> shift));
 	}
-	for (uint8_t value : tint) hash = mix_byte(hash, value);
-	for (uint8_t value : light) hash = mix_byte(hash, value);
+	for (uint8_t value : tint) hash = opennova::io::fnv1a64_byte(hash, value);
+	for (uint8_t value : light) hash = opennova::io::fnv1a64_byte(hash, value);
 	return hash;
 }
 
@@ -1024,7 +1004,7 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 	const opennova::terrain::TerrainScorchPageStamp scorch_stamp =
 			scorch_registry_.stamp(request.page);
 	if (scorch_stamp.valid) {
-		request.content.value = mix_value_bytes(
+		request.content.value = opennova::io::fnv1a64_value(
 				request.content.value, scorch_stamp.content_stamp);
 	}
 
@@ -1118,9 +1098,9 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 				}
 				return a.page_lod_level < b.page_lod_level;
 			});
-	uint64_t resident_output_hash = UINT64_C(1469598103934665603);
+	uint64_t resident_output_hash = opennova::io::kFnv1a64Offset;
 	for (std::size_t layer : ready_layers) {
-		resident_output_hash = mix_value_bytes(resident_output_hash,
+		resident_output_hash = opennova::io::fnv1a64_value(resident_output_hash,
 				ready_page_output_hashes_[layer]);
 	}
 	diagnostics["available"] = is_ready();
