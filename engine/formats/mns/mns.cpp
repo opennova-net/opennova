@@ -1,4 +1,5 @@
 #include <formats/mns/mns.h>
+#include <base/io/strutil.h>
 
 #include <formats/mns/mns_document.h>
 
@@ -15,17 +16,10 @@ namespace opennova::mns {
 
 namespace {
 
-std::string to_upper(const std::string &s) {
-	std::string result = s;
-	std::transform(result.begin(), result.end(), result.begin(),
-				   [](unsigned char c) { return std::toupper(c); });
-	return result;
-}
-
 }  // namespace
 
 std::string StyleSheet::get(const std::string &name) const {
-	auto it = variables.find(to_upper(name));
+	auto it = variables.find(strutil::to_upper(name));
 	if (it != variables.end()) {
 		return it->second;
 	}
@@ -33,7 +27,7 @@ std::string StyleSheet::get(const std::string &name) const {
 }
 
 bool StyleSheet::has(const std::string &name) const {
-	return variables.find(to_upper(name)) != variables.end();
+	return variables.find(strutil::to_upper(name)) != variables.end();
 }
 
 std::string StyleSheet::substitute(const std::string &text) const {
@@ -51,7 +45,7 @@ std::string StyleSheet::substitute(const std::string &text) const {
 			if (j < text.size() && text[j] == '%' && j > i + 1) {
 				// Found a variable reference.
 				std::string var_name = text.substr(i + 1, j - i - 1);
-				auto it = variables.find(to_upper(var_name));
+				auto it = variables.find(strutil::to_upper(var_name));
 				if (it != variables.end()) {
 					result += it->second;
 				} else {

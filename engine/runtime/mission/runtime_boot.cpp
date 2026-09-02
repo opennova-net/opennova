@@ -2,6 +2,7 @@
 // contract. The file-resolution rules here are structural translations of the
 // shell resolvers they replace; each carries its witness.
 #include <runtime/mission/runtime_boot.h>
+#include <base/io/strutil.h>
 
 #include <formats/aip/aip.h>
 
@@ -13,23 +14,12 @@ namespace opennova::mission {
 namespace {
 
 // Lowercased, whitespace-trimmed copy of a fixed char field (the shell
-// resolver's strip_edges().to_lower()).
+// resolver's strip_edges().to_lower()); the field is an ASCII .bms name, so
+// strutil's C-locale whitespace set matches the shell's.
 std::string ascii_lower(const char *data, std::size_t max_len) {
-	std::string out;
-	out.reserve(max_len);
-	for (std::size_t i = 0; i < max_len && data[i] != '\0'; ++i) {
-		char c = data[i];
-		if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-		out.push_back(c);
-	}
-	const auto is_ws = [](char c) {
-		return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-	};
-	std::size_t begin = 0;
-	while (begin < out.size() && is_ws(out[begin])) ++begin;
-	std::size_t end = out.size();
-	while (end > begin && is_ws(out[end - 1])) --end;
-	return out.substr(begin, end - begin);
+	std::size_t len = 0;
+	while (len < max_len && data[len] != '\0') ++len;
+	return strutil::to_lower(strutil::trim_view(std::string_view(data, len)));
 }
 
 } // namespace

@@ -136,9 +136,6 @@ std::string format_miss_marker(const std::string &section, const std::string &ke
 std::string lookup_with_override(const File *override_table, const File *table,
                                  const std::string &section, const std::string &key);
 
-// Convert a key to uppercase for case-insensitive comparison.
-std::string to_upper(const std::string &s);
-
 // Strip the {hot} accelerator marker, reporting its char index (-1 = none).
 std::string strip_hotkey(const std::string &text, int &hotkey_index);
 

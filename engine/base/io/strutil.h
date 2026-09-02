@@ -28,6 +28,19 @@ inline std::string to_lower(std::string_view s)
     return out;
 }
 
+inline char ascii_toupper(char c)
+{
+    return (c >= 'a' && c <= 'z') ? (char)(c - ('a' - 'A')) : c;
+}
+
+inline std::string to_upper(std::string_view s)
+{
+    std::string out(s);
+    for (char &c : out)
+        c = ascii_toupper(c);
+    return out;
+}
+
 inline bool iequals(std::string_view a, std::string_view b)
 {
     if (a.size() != b.size())

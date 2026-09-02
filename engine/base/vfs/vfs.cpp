@@ -38,18 +38,6 @@ std::string pff_entry_name(const PffEntry &e) {
     return std::string(e.filename, e.filename + len);
 }
 
-char ascii_upper(char c) {
-    return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
-}
-
-bool ascii_case_equal(const std::string &a, const std::string &b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (ascii_upper(a[i]) != ascii_upper(b[i])) return false;
-    }
-    return true;
-}
-
 // Retail copies the query into a 32-byte local buffer, uppercases it, and compares it
 // against the uppercased raw directory name. The apparent trailing-space trim begins on
 // the terminating NUL and is dead, so spaces remain significant.
@@ -59,7 +47,7 @@ bool retail_archive_query_key(const std::string &name, std::string &key) {
     key.clear();
     if (name.empty()) return false;
     key.assign(name.data(), std::min(name.size(), kRetailQueryCapacity));
-    for (char &c : key) c = ascii_upper(c);
+    for (char &c : key) c = strutil::ascii_toupper(c);
     return true;
 }
 
@@ -67,7 +55,7 @@ std::string retail_archive_entry_key(const PffEntry &entry) {
     size_t len = 0;
     while (len < PFF_NAME_SIZE && entry.filename[len] != '\0') ++len;
     std::string key(entry.filename, entry.filename + len);
-    for (char &c : key) c = ascii_upper(c);
+    for (char &c : key) c = strutil::ascii_toupper(c);
     return key;
 }
 
@@ -111,7 +99,7 @@ bool path_is_within(const fs::path &root, const fs::path &candidate) {
     for (; root_it != root.end(); ++root_it, ++candidate_it) {
         if (candidate_it == candidate.end()) return false;
 #ifdef _WIN32
-        const bool same_component = ascii_case_equal(root_it->string(), candidate_it->string());
+        const bool same_component = strutil::iequals(root_it->string(), candidate_it->string());
 #else
         // Canonical POSIX paths are case-sensitive. Treating sibling roots that differ only
         // by case as equal would let an in-root symlink bypass the containment check.
@@ -153,7 +141,7 @@ bool resolve_retail_loose_file(const std::string &search_root,
             if (ec) return false;
             for (; it != end; it.increment(ec)) {
                 if (ec) return false;
-                if (ascii_case_equal(it->path().filename().string(), wanted)) {
+                if (strutil::iequals(it->path().filename().string(), wanted)) {
                     selected = it->path();
                     break;
                 }
@@ -693,12 +681,12 @@ bool read_expansion_text_bytes(const fs::path &exp_dir, const std::string &expan
 //  key within it; case-insensitive like every rtxt lookup]
 const rtxt::Entry *find_in_section(const rtxt::File &file, const char *section,
                                    const char *key) {
-    const std::string want_section = rtxt::to_upper(section);
-    const std::string want_key = rtxt::to_upper(key);
+    const std::string want_section = strutil::to_upper(section);
+    const std::string want_key = strutil::to_upper(key);
     for (uint32_t s = 0; s < file.sections.size(); ++s) {
-        if (rtxt::to_upper(file.sections[s].name) != want_section) continue;
+        if (strutil::to_upper(file.sections[s].name) != want_section) continue;
         for (const rtxt::Entry &e : file.entries) {
-            if (e.section_index == s && rtxt::to_upper(e.key) == want_key) return &e;
+            if (e.section_index == s && strutil::to_upper(e.key) == want_key) return &e;
         }
     }
     return nullptr;
