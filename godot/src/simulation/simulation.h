@@ -30,6 +30,7 @@
 #include <runtime/mission/promote.h>
 #include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
 #include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
+#include <runtime/world/deploy_screen_feed.h> // DeployZoneRow (the DEATH screen's zone feed)
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/deploy_screen_feed.h> // kDeployRefreshTicks (the death deploy screen cadence)
@@ -132,6 +133,7 @@ class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlus
 #include <net/npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/inmatch_session_values.h"
+#include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
 #include "devtools/frame_stats.h"
 
 namespace opennova::hud {
@@ -517,17 +519,18 @@ public:
 	// clears when the host drops the bit). The shell calls it only while no
 	// other screen is up and opens the presenter on true.
 	bool take_join_deploy_overlay_open();
-	// The DEATH screen's SPAWNPOINTS_LIST rows: {param:int, letter:String,
-	// name_key:String} per team-owned secured deploy zone, letters/names keyed by the
-	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
+	// The DEATH screen's spawn-zone rows (simulation/deploy_rows.h): one
+	// DeployZoneRow per team-owned deploy zone with its SECURED verdict, wave
+	// countdown and occupants, letters/names keyed by the spawn-zone registry
+	// index. Row 0 (the Default Spawn, param 0) is the shell's.
 	// (engine: net/netsim/client_state.h)
-	TypedArray<Dictionary> get_deploy_spawn_zones();
-	// The compiled SPAWNPOINTS_LIST rows {text, value}: the engine builder's two
-	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
-	// team colour tag, the Menu default-row tokens and the embedder-resolved
-	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
-	// -1 = occupant/blank (never a pick). (engine: net/netsim/client_state.h)
-	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
+	TypedArray<DeployZoneRow> get_deploy_spawn_zones();
+	// The compiled SPAWNPOINTS_LIST rows (DeployListRow): the engine builder's
+	// two witnessed loops (world/deploy_screen_feed.h) over the zone rows
+	// above, the team colour tag, the Menu default-row tokens and the
+	// embedder-resolved WPNames strings (name_key -> text). value 0 = default,
+	// index+1 = zone, -1 = occupant/blank (never a pick).
+	TypedArray<DeployListRow> get_deploy_list_rows(const String &p_default_key,
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.

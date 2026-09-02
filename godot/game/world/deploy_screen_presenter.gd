@@ -64,7 +64,17 @@ var _refresh_accum := 0.0
 # visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
 # compiled list carries labels only, so the node parameter the pick serializes
 # lives here (the old ItemList's item metadata).
-var _spawn_rows: Array = []
+## One visible list row: its stripped label and the node PARAM the pick sends
+## (0 default, index + 1 zone, -1 occupant/blank — never a pick).
+class SpawnRow extends RefCounted:
+	var label: String
+	var param: int
+
+	func _init(p_label: String, p_param: int) -> void:
+		label = p_label
+		param = p_param
+
+var _spawn_rows: Array[SpawnRow] = []
 
 
 func setup(world: GameWorld, ui_parent: Node) -> void:
@@ -97,17 +107,17 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The presenter-side spawn row model ({label, param} per visible list row,
+## The presenter-side spawn row model (one SpawnRow per visible list row,
 ## aligned with the compiled list's rows) — ADR 0018 read seam for tests.
-func get_spawn_rows() -> Array:
+func get_spawn_rows() -> Array[SpawnRow]:
 	return _spawn_rows
 
 
 ## ADR 0018 test seams over the row model: append one presenter row (the shape
-## the engine builder emits — an occupant row is {label, param: -1}) and fire
-## the list select the compiled list would raise for a row.
+## the engine builder emits — an occupant row carries param -1) and fire the
+## list select the compiled list would raise for a row.
 func append_spawn_row(label: String, param: int) -> void:
-	_spawn_rows.append({"label": label, "param": param})
+	_spawn_rows.append(SpawnRow.new(label, param))
 
 
 func select_spawn_row(row: int) -> void:
@@ -242,7 +252,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
 	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick; the
 	#  occupant/blank rows carry node -1 and the callback guards node != -1]
-	var param := int((_spawn_rows[index] as Dictionary).get("param", 0))
+	var param := _spawn_rows[index].param
 	if param == -1:
 		return
 	if not bool(sim.is_join_deploy_pick_pending()):
@@ -270,7 +280,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	var keep_param := -1
 	var selected := _driver.selected_row(list_id)
 	if selected >= 0 and selected < _spawn_rows.size():
-		keep_param = int((_spawn_rows[selected] as Dictionary).get("param", -1))
+		keep_param = _spawn_rows[selected].param
 	# The compiled row set comes from the engine builder (world/deploy_screen_feed):
 	# the Default row, the secured team zones, the whole-list text sort, then
 	# each zone's wave occupants + blank separator at node -1. The row texts
@@ -280,26 +290,24 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	_spawn_rows = []
 	var labels := PackedStringArray()
 	var zone_names := {}
-	for value in sim.get_deploy_spawn_zones():
-		var zone := value as Dictionary
-		var key := String(zone.get("name_key", ""))
+	for zone: DeployZoneRow in sim.get_deploy_spawn_zones():
+		var key := zone.name_key
 		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
-	for value in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
+	for row: DeployListRow in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
 			_menu_text("HOME", "Home Base"), zone_names):
-		var row := value as Dictionary
 		# The compiled list has no inline markup channel yet (the row-style
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
 		# tagged text, so the row order is retail's.
-		var label := _strip_inline_tags(String(row.get("text", "")))
+		var label := _strip_inline_tags(row.text)
 		labels.append(label)
-		_spawn_rows.append({"label": label, "param": int(row.get("value", -1))})
+		_spawn_rows.append(SpawnRow.new(label, row.value))
 	# set_widget_items resets the selection to row 0; restore the previous pick by
 	# parameter without emitting (picks ride user clicks only, never the refill).
 	_driver.set_widget_items(list_id, labels)
 	if keep_param >= 0:
 		for row in _spawn_rows.size():
-			if int((_spawn_rows[row] as Dictionary).get("param", -1)) == keep_param:
+			if _spawn_rows[row].param == keep_param:
 				_driver.select_row(list_id, row, false)
 				break
 	_apply_statics(sim)

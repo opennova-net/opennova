@@ -89,6 +89,7 @@
 #include "simulation/ray_debug_report.h"
 #include "simulation/round_debug_report.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/deploy_rows.h"
 #include "simulation/player_weapon_view.h"
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
@@ -254,6 +255,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundOverlay);
 	GDREGISTER_CLASS(EndRoundStatistics);
 	GDREGISTER_CLASS(DeployStatus);
+	GDREGISTER_CLASS(DeployOccupantRow);
+	GDREGISTER_CLASS(DeployZoneRow);
+	GDREGISTER_CLASS(DeployListRow);
 	GDREGISTER_CLASS(DestructionEffectEvent);
 	GDREGISTER_CLASS(DestructionSoundEvent);
 	GDREGISTER_CLASS(HuskSwapEvent);

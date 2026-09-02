@@ -514,7 +514,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		host.step()
 		joiner.step()
 	var deploy_rows := joiner.get_deploy_spawn_zones()
-	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0))
+	var zone_param := (deploy_rows[0] as DeployZoneRow).param
 	assert_gt(zone_param, 0)
 	assert_true(joiner.send_deployment_pick(zone_param))
 	var deployed := false
