@@ -23,7 +23,7 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 	var profile := NetSessionDrive.character_join_profile_from_database(
 			avatar_db, selected)
 	var character_id := int(profile.get("character_ids", [0])[0])
-	var combo := avatar_db.resolve_combo(0, 0, 1)
+	var combo := avatar_db.get_combo(0, 0, 1)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
@@ -33,10 +33,8 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 	var spec := placer.resolve_player_visual_spec(0x14B9, character_id)
 
 	assert_eq(character_id, 0x0400, "the chosen combo reaches the visual seam")
-	assert_eq(String(spec.get("head", "")),
-			String(combo.get("head", {}).get("graphic", "")))
-	assert_eq(String(spec.get("body", "")),
-			String(combo.get("body", {}).get("graphic", "")))
+	assert_eq(String(spec.get("head", "")), combo.get_head().graphic)
+	assert_eq(String(spec.get("body", "")), combo.get_body().graphic)
 	assert_false(bool(spec.get("fallback", true)),
 			"a valid non-default character must not use Player #1 / US01")
 

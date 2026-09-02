@@ -1164,28 +1164,27 @@ Dictionary MissionObjectPlacer::resolve_player_visual_spec(
 	_ensure_item_db();
 	_ensure_avatar_db();
 	if (avatar_db_.is_valid()) {
-		const Dictionary resolved = avatar_db_->resolve_character_id(
+		const Ref<AvatarComboRow> resolved = avatar_db_->resolve_character_id(
 				p_character_id);
-		if (!resolved.is_empty()) {
-			const Dictionary head = resolved.get("head", Dictionary());
-			const Dictionary body = resolved.get("body", Dictionary());
-			const Dictionary arms = resolved.get("arms", Dictionary());
+		if (resolved.is_valid()) {
+			const Ref<AvatarPartRow> head = resolved->get_head();
+			const Ref<AvatarPartRow> body = resolved->get_body();
+			const Ref<AvatarPartRow> arms = resolved->get_arms();
 			Dictionary out;
 			out["character_id"] = p_character_id & 0xffff;
 			out["item_id"] = resolve_player_visual_item_id(
 					p_runtime_type_id);
-			out["head"] = head.get("graphic", String());
-			out["head_camo"] = head.get("camo", Array());
-			out["body"] = body.get("graphic", String());
-			out["body_camo"] = body.get("camo", Array());
-			out["arms"] = arms.get("graphic", String());
-			out["arms_camo"] = arms.get("camo", Array());
-			out["avatar"] = head.get("voice", 1);
-			out["sex"] = head.get("sex", 0);
-			out["nationality_index"] = resolved.get(
-					"nationality_index", -1);
-			out["division_index"] = resolved.get("division_index", -1);
-			out["combo_index"] = resolved.get("combo_index", -1);
+			out["head"] = head->get_graphic();
+			out["head_camo"] = head->get_camo();
+			out["body"] = body->get_graphic();
+			out["body_camo"] = body->get_camo();
+			out["arms"] = arms.is_valid() ? arms->get_graphic() : String();
+			out["arms_camo"] = arms.is_valid() ? arms->get_camo() : Vector3i();
+			out["avatar"] = head->get_voice();
+			out["sex"] = head->get_sex();
+			out["nationality_index"] = resolved->get_nationality_index();
+			out["division_index"] = resolved->get_division_index();
+			out["combo_index"] = resolved->get_combo_index();
 			out["fallback"] = false;
 			return out;
 		}
@@ -1234,7 +1233,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	body->set_meta("player_visual_spec", spec);
 	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
 	// @0x5c800f, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Array()),
+	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Vector3i()),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_scale(body, item_id);
@@ -1258,7 +1257,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	head->set_meta("character_id", p_character_id & 0xffff);
 	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
 	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
+	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Vector3i()),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_shadow(head, item_id);

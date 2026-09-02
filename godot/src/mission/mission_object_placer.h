@@ -22,6 +22,7 @@
 #include "mission/mission_data.h" // MissionData::EntityKind
 #include "object/item_database.h"
 #include "object/avatar_database.h"
+#include "object/avatar_records.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
 #include "object/skeletal_anim.h"

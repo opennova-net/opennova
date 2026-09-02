@@ -666,13 +666,13 @@ func _populate_nationalities() -> void:
 	var rows := PackedStringArray()
 	if _db != null:
 		for i in _db.get_nationality_count():
-			var nat: Dictionary = _db.get_nationality(i)
-			var align := int(nat.get("alignment", 0))
+			var nat := _db.get_nationality(i)
+			var align := nat.alignment
 			# show only when (alignment != 0) == (team != 0): good->blue(0), evil->red(1)
 			if (align != 0) != (_team != 0):
 				continue
 			_nat_db_index.append(i)
-			rows.append(_display_name(String(nat.get("name_key", ""))))
+			rows.append(_display_name(nat.name_key))
 	_set_combo_items(combo, rows)
 	_sel_nat = _nat_db_index[0] if not _nat_db_index.is_empty() else -1
 	_populate_divisions()
@@ -686,8 +686,8 @@ func _populate_divisions() -> void:
 	var rows := PackedStringArray()
 	if _db != null and _sel_nat >= 0:
 		for i in _db.get_division_count(_sel_nat):
-			var div: Dictionary = _db.get_division(_sel_nat, i)
-			rows.append(_display_name(String(div.get("name_key", ""))))
+			var div := _db.get_division(_sel_nat, i)
+			rows.append(_display_name(div.name_key))
 	_set_combo_items(combo, rows)
 	_sel_div = 0 if rows.size() > 0 else -1
 	_populate_combos()
@@ -702,11 +702,9 @@ func _populate_combos() -> void:
 	var rows := PackedStringArray()
 	if _db != null and _sel_nat >= 0 and _sel_div >= 0:
 		for i in _db.get_combo_count(_sel_nat, _sel_div):
-			var c: Dictionary = _db.get_combo(_sel_nat, _sel_div, i)
-			var head: Dictionary = c.get("head", {})
-			var body: Dictionary = c.get("body", {})
-			var last := _display_name(String(head.get("display_name", "")))
-			var first := _display_name(String(body.get("display_name", "")))
+			var c := _db.get_combo(_sel_nat, _sel_div, i)
+			var last := _display_name(c.get_head().display_name)
+			var first := _display_name(c.get_body().display_name)
 			rows.append("%s - %s" % [last, first])
 	_set_combo_items(combo, rows)
 	_populate_voices()
@@ -736,9 +734,7 @@ func _selected_combo_head_voice() -> int:
 		idx = 0
 	if idx >= _db.get_combo_count(_sel_nat, _sel_div):
 		return -1
-	var c: Dictionary = _db.get_combo(_sel_nat, _sel_div, idx)
-	var head: Dictionary = c.get("head", {})
-	return int(head.get("voice", -1))
+	return _db.get_combo(_sel_nat, _sel_div, idx).get_head().voice
 
 
 func _preview_voice() -> void:
@@ -796,7 +792,7 @@ func _refresh_preview() -> void:
 		return
 	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the
 	# portrait stops at the resolved part .3di geometry.]
-	_preview.load_combo(_db.resolve_combo(_sel_nat, _sel_div, idx))
+	_preview.load_combo(_db.get_combo(_sel_nat, _sel_div, idx))
 
 
 func _selected_combo_index() -> int:

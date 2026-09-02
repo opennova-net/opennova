@@ -2,102 +2,58 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
 
+#include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
 #include <net/npruntime/character_registry.h>
 
 #include <cstdint>
 #include <vector>
 
-// The parsed Avatars.def records (engine/formats/avatars/avatars.h, C structs).
-struct AvatarsFile;
-struct AvatarPartSnapshot;
-
 namespace godot {
 
+class AvatarComboRow;
+class AvatarDiagnosticRow;
+class AvatarDivisionRow;
+class AvatarNationalityRow;
+class AvatarPartRow;
+class ObjectModel;
 class ResourceRoot;
 
-// GDExtension wrapper over engine/formats/avatars (Avatars.def parse + write). Surfaces the
+// GDExtension wrapper over engine/formats/avatars (the Avatars.def parse): the
 // player-character model -- head/body/arms parts composed into combos under a
-// nationality -> division tree -- to format tooling (mutation + save) and the
-// runtime PLAYER_INFO menu (read + resolve). Witnessed format/behavior:
+// nationality -> division tree -- read by the runtime PLAYER_INFO menu, the
+// portrait preview and the player visual. The binding retains the parsed
+// engine file and hands out by-value row records. Witnessed format/behavior:
 // docs/playerinfo/avatars-re.md. The combo -> 3D-model load is the open
-// D-PLAYERINFO-1 seam; resolve_combo() stops at the resolved part graphic names.
-class ObjectModel;
-
+// D-PLAYERINFO-1 seam; a combo row stops at the resolved part graphic names.
 class AvatarDatabase : public RefCounted {
 	GDCLASS(AvatarDatabase, RefCounted)
 
 private:
-	struct Part {
-		int kind = 0;
-		String name;
-		String display_name;
-		String graphic;
-		String graphic_j;
-		String graphic_s;
-		int camo[3] = { 0, 0, 0 };
-		int voice = 0;
-		int sex = 0;
-	};
-	struct Combo {
-		String raw_id;
-		int id = 0;
-		String head_name;
-		String body_name;
-		String arms_name;
-		Part head;
-		Part body;
-		Part arms;
-		bool has_arms = false;
-	};
-	struct Division {
-		String raw_id;
-		int id = 0;
-		String name_key;
-		String flags;
-		std::vector<Combo> combos;
-	};
-	struct Nationality {
-		String raw_id;
-		int id = 0;
-		String name_key;
-		String flags;
-		int alignment = 0;
-		bool has_alignment = false;
-		std::vector<Division> divisions;
-	};
-	struct Diagnostic {
-		int line = 0;
-		int severity = 0;
-		String code;
-		String message;
-	};
-
-	std::vector<Part> parts;
-	std::vector<Nationality> nationalities;
-	std::vector<Diagnostic> diagnostics;
-	// The engine's wire-identity registry over the tree above (rebuilt lazily
-	// after any model mutation): every packed-id decode, per-side default and
-	// sex row is its witnessed walk.
+	AvatarsFile file_ = {};
+	bool loaded = false;
+	// The engine's wire-identity registry over the parsed tree (rebuilt lazily
+	// after a load): every packed-id decode, per-side default and sex row is
+	// its witnessed walk.
 	mutable opennova::npruntime::CharacterRegistry registry_;
 	mutable bool registry_dirty_ = true;
 	const opennova::npruntime::CharacterRegistry &character_registry() const;
 	String source_path;
 	String last_error;
-	bool loaded = false;
 
 	void clear();
-	void adopt_parsed(const AvatarsFile &avatars_file);
-	const Part *find_part(int kind, const String &name) const; // case-insensitive
-	Part part_from_snapshot(const AvatarPartSnapshot &snapshot) const;
-	void resolve_combo_snapshots(Combo &combo);
-	Dictionary part_dict(const Part &p) const;
-	Dictionary diagnostic_dict(const Diagnostic &d) const;
+	Error adopt_bytes(const PackedByteArray &p_bytes, const String &p_label);
+	const AvatarPart *find_part(int kind, const String &name) const; // case-insensitive
+	const AvatarNationality *nationality_at(int nat_index) const;
+	const AvatarDivision *division_at(int nat_index, int div_index) const;
+	const AvatarCombo *combo_at(int nat_index, int div_index, int combo_index) const;
+	Ref<AvatarComboRow> combo_row(int nat_index, int div_index, int combo_index) const;
 
 	// The witnessed menu preview-animation constants, re-exported from engine
 	// avatars/preview_animation.h (float/String values cannot be class
@@ -114,6 +70,8 @@ protected:
 	static void _bind_methods();
 
 public:
+	~AvatarDatabase();
+
 	struct CharacterSexRow {
 		uint16_t character_id = 0;
 		bool female = false;
@@ -126,11 +84,11 @@ public:
 		PART_ARMS = AVATAR_PART_ARMS,
 	};
 	// AvatarSex.
-	enum { SEX_MALE = 0, SEX_FEMALE = 1 };
+	enum { SEX_MALE = AVATAR_SEX_MALE, SEX_FEMALE = AVATAR_SEX_FEMALE };
 	// AvatarAlignment (the PLAYER_INFO team filter: good -> team 0, evil -> team 1).
-	enum { ALIGN_GOOD = 0, ALIGN_EVIL = 1 };
+	enum { ALIGN_GOOD = AVATAR_ALIGN_GOOD, ALIGN_EVIL = AVATAR_ALIGN_EVIL };
 	// AvatarDiagnosticSeverity.
-	enum { DIAG_WARNING = 1, DIAG_ERROR = 2 };
+	enum { DIAG_WARNING = AVATAR_DIAG_WARNING, DIAG_ERROR = AVATAR_DIAG_ERROR };
 	// The preview initial-yaw span: a fresh preview model spawns at
 	// rand() % PREVIEW_INITIAL_YAW_RANGE_DEG degrees (engine
 	// avatars/preview_animation.h carries the witness).
@@ -146,53 +104,48 @@ public:
 	// @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0; world submits @0x5c7fec/@0x5c800f,
 	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md].
 	static PackedStringArray part_camo_registers();
-	// Store one part's raw camo bytes ([r, g, b] as parsed) on `p_model` under
-	// `p_owner`. Fewer than three bytes stores nothing.
-	static void apply_part_camo(ObjectModel *p_model, const Array &p_camo,
+	// Store one part's raw camo bytes (AvatarPartRow.camo) on `p_model` under
+	// `p_owner`.
+	static void apply_part_camo(ObjectModel *p_model, const Vector3i &p_camo,
 			const String &p_owner);
 
 	// Load Avatars.def from an absolute/res path (decrypts if needed) or via the
-	// mounted resource root (VFS/PFF). Both emit "changed".
+	// mounted resource root (VFS/PFF).
 	Error load(const String &path);
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
-	// Serialize the current model from scratch (docs/adr/0021) to path.
-	Error save_to_path(const String &path);
-	// Reset to an empty model (the "New" document case). Emits "changed".
-	void create_empty();
 
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;
-	Array get_diagnostics() const;
+	TypedArray<AvatarDiagnosticRow> get_diagnostics() const;
 
 	int get_part_count() const;
 	int get_nationality_count() const;
 
-	// Parts of a kind (PART_HEAD/BODY/ARMS), sorted by name; get_part() looks one up
-	// by (kind, name). Dictionaries carry name/display_name/graphic/graphic_j/
-	// graphic_s/camo (Vector3i-as-Array)/voice/sex/kind.
+	// Parts of a kind (PART_HEAD/BODY/ARMS), sorted by name; get_part() looks one
+	// up by (kind, name) — the last prior definition wins, as at parse time.
+	// Null when the name is unknown.
 	PackedStringArray get_part_names(PartKind kind) const;
-	Dictionary get_part(PartKind kind, const String &name) const;
+	Ref<AvatarPartRow> get_part(PartKind kind, const String &name) const;
 
-	// Tree navigation by index (the order they appear in the file).
-	Dictionary get_nationality(int nat_index) const;
+	// Tree navigation by index (the order they appear in the file); null out of
+	// range. A combo row is fully resolved: its part snapshots, the owning
+	// nationality's alignment, its tree indices and its packed character id.
+	// The part resolve stops before any .3di load (D-PLAYERINFO-1).
+	Ref<AvatarNationalityRow> get_nationality(int nat_index) const;
 	int get_division_count(int nat_index) const;
-	Dictionary get_division(int nat_index, int div_index) const;
+	Ref<AvatarDivisionRow> get_division(int nat_index, int div_index) const;
 	int get_combo_count(int nat_index, int div_index) const;
-	Dictionary get_combo(int nat_index, int div_index, int combo_index) const;
+	Ref<AvatarComboRow> get_combo(int nat_index, int div_index, int combo_index) const;
 
-	// Resolve a combo's referenced parts into their data (graphic basenames, camo,
-	// voice, sex), the surface the menu/preview consume. Stops before any .3di load
-	// (D-PLAYERINFO-1). Missing part references resolve to empty entries.
-	Dictionary resolve_combo(int nat_index, int div_index, int combo_index) const;
 	// Resolve the packed character identity (npwire/character_id.h: authored
 	// nationality bits 0..4, division 5..8, combo 9..14, alignment 15) the
 	// ClientAuth CI0/CI1, the entity+0x15C wire NetId, and the weapon.sav header
-	// all carry. Returns the resolved combo plus its tree indices, or an empty
-	// Dictionary when no combo matches (or the alignment bit contradicts
-	// `expected_alignment` when that is ALIGN_GOOD/ALIGN_EVIL)
+	// all carry. Returns the resolved combo row, or null when no combo matches
+	// (or the alignment bit contradicts `expected_alignment` when that is
+	// ALIGN_GOOD/ALIGN_EVIL)
 	// [orig: MinimapSlot_FindByPackedId @0x57a270, see docs/playerinfo/avatars-re.md].
-	Dictionary resolve_character_id(int character_id,
+	Ref<AvatarComboRow> resolve_character_id(int character_id,
 			int expected_alignment = -1) const;
 	// Retail's per-side default character: the packed id of the first combo (file
 	// order) whose nationality alignment matches; no match -> the first combo of
@@ -208,11 +161,6 @@ public:
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.
 	std::vector<CharacterSexRow> character_sex_rows() const;
-
-	// Whole-model bridge for tools: read the full nested model, edit it in
-	// GDScript, set it back, then save_to_path(). set_model() emits "changed".
-	Dictionary get_model() const;
-	void set_model(const Dictionary &model);
 };
 
 } // namespace godot

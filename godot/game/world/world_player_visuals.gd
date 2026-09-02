@@ -303,7 +303,7 @@ func build_local_player_viewmodel() -> Node3D:
 		# immediately before each FP arms submit @0x4df008/@0x4df070].
 		arms.set_meta("avatar_part", "arms")
 		arms.set_meta("avatar_graphic", arms_name)
-		arms.set_meta("avatar_camo", character_spec.get("arms_camo", []))
+		arms.set_meta("avatar_camo", character_spec.get("arms_camo", Vector3i()))
 		_world._local_viewmodel_parts.append(arms)
 	if gun != null:
 		_world._local_viewmodel_parts.append(gun)
@@ -333,7 +333,7 @@ func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
 	var witness := FirstPersonArmsWitness.new()
 	var character_spec := _local_player_visual_spec()
 	var expected_graphic := String(character_spec.get("arms", ""))
-	var expected_camo := Array(character_spec.get("arms_camo", []))
+	var expected_camo: Vector3i = character_spec.get("arms_camo", Vector3i())
 	for part: ObjectModel in _world._local_viewmodel_parts:
 		if part == null or not is_instance_valid(part) \
 				or String(part.get_meta("avatar_part", "")) != "arms":
@@ -342,14 +342,14 @@ func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
 			witness.error = "submitted first-person arms are not visible in tree"
 			return witness
 		var actual_graphic := String(part.get_meta("avatar_graphic", ""))
-		var actual_camo := Array(part.get_meta("avatar_camo", []))
+		var actual_camo: Vector3i = part.get_meta("avatar_camo", Vector3i())
 		if actual_graphic != expected_graphic or actual_camo != expected_camo:
 			witness.error = (
 					"submitted first-person arms do not match the resolved character")
 			return witness
 		witness.character_id = _world.local_player_character_id()
 		witness.arms_graphic = actual_graphic
-		witness.arms_camo = PackedInt32Array(actual_camo)
+		witness.arms_camo = PackedInt32Array([actual_camo.x, actual_camo.y, actual_camo.z])
 		return witness
 	witness.error = "no submitted first-person arms are available"
 	return witness

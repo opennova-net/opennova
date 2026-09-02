@@ -387,7 +387,7 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		if String(visual.get_meta("avatar_part", "")) == "arms":
 			if submit_viewmodel:
 				AvatarDatabase.apply_part_camo(visual,
-						visual.get_meta("avatar_camo", []), CTRL_OWNER_FP_ARMS_CAMO)
+						visual.get_meta("avatar_camo", Vector3i()), CTRL_OWNER_FP_ARMS_CAMO)
 			else:
 				for register in AvatarDatabase.part_camo_registers():
 					visual.clear_ctrl_override(CTRL_OWNER_FP_ARMS_CAMO, register)
