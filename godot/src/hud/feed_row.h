@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstdint>
 #include <runtime/hud/feed_format.h>
 
 namespace godot {
