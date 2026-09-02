@@ -504,11 +504,11 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 
 func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
 	var effect_world: EffectWorld = _world.get_effect_world()
-	var receipt := effect_world.spawn_effect_request(effect, transform, {
-		"admission": EffectScene.ADMISSION_ALWAYS,
-		"binding": EffectScene.BINDING_WORLD,
-		"render_domain": EffectScene.RENDER_DOMAIN_WORLD,
-	})
+	var options := EffectSpawnOptions.new()
+	options.admission = EffectScene.ADMISSION_ALWAYS
+	options.binding = EffectScene.BINDING_WORLD
+	options.render_domain = EffectScene.RENDER_DOMAIN_WORLD
+	var receipt := effect_world.spawn_effect_request(effect, transform, options)
 	return receipt.spawned
 
 

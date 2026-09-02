@@ -123,13 +123,13 @@ class FxWorldStub:
 	var stopped_groups: Array[int] = []
 	var timeline: Array[String] = []
 	func spawn_effect_request(effect: String, transform: Transform3D,
-			options: Dictionary = {}) -> EffectSpawnReceipt:
+			options: EffectSpawnOptions = null) -> EffectSpawnReceipt:
 		if are_particles_hidden():
 			return EffectSpawnReceipt.make(false)
 		request_spawns.append({
 			"effect": effect,
 			"transform": transform,
-			"options": options.duplicate(),
+			"options": options if options != null else EffectSpawnOptions.new(),
 		})
 		return EffectSpawnReceipt.make(true, 1, request_spawns.size())
 	func spawn_effect(effect: String, position: Vector3,
@@ -1532,12 +1532,12 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	assert_not_null(renderer)
 	if renderer != null:
 		renderer.procedural_fallback_enabled = true
+	var options := EffectSpawnOptions.new()
+	options.admission = EffectScene.ADMISSION_ALWAYS
+	options.binding = EffectScene.BINDING_WORLD
+	options.render_domain = EffectScene.RENDER_DOMAIN_WORLD
 	var receipt := effect_world.spawn_effect_request(
-			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), {
-				"admission": EffectScene.ADMISSION_ALWAYS,
-				"binding": EffectScene.BINDING_WORLD,
-				"render_domain": EffectScene.RENDER_DOMAIN_WORLD,
-			})
+			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), options)
 	assert_true(receipt.spawned, "the probe effect spawns")
 	for _i in range(3):
 		effect_world.advance_fixed_tick(0.016)
@@ -2984,13 +2984,12 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	assert_eq(effects.request_spawns.size(), 2,
 			"one matched anchor plus one origin fallback; the gated row is excluded")
 	var first: Dictionary = effects.request_spawns[0]
-	var first_options: Dictionary = first.get("options", {})
-	assert_eq(int(first_options.get("admission", -1)), EffectScene.ADMISSION_ALWAYS)
-	assert_eq(int(first_options.get("binding", -1)), EffectScene.BINDING_WORLD)
-	assert_eq(int(first_options.get("render_domain", -1)),
-			EffectScene.RENDER_DOMAIN_WORLD)
-	assert_false(first_options.has("owner_key"), "static batches never invent follow owners")
-	assert_false(first_options.has("slot_key"), "Always spawns need no synthetic slot identity")
+	var first_options: EffectSpawnOptions = first.get("options")
+	assert_eq(first_options.admission, EffectScene.ADMISSION_ALWAYS)
+	assert_eq(first_options.binding, EffectScene.BINDING_WORLD)
+	assert_eq(first_options.render_domain, EffectScene.RENDER_DOMAIN_WORLD)
+	assert_null(first_options.owner_key, "static batches never invent follow owners")
+	assert_null(first_options.slot_key, "Always spawns need no synthetic slot identity")
 	var anchor_info := _fx_anchor_info()
 	var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
 	assert_true(first_transform.origin.is_equal_approx(
