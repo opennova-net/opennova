@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "mission/mission_data.h" // MissionData::EntityKind
+#include "mission/mission_placement_stats.h"
 #include "object/item_database.h"
 #include "mission/player_visual_spec.h"
 #include "object/avatar_database.h"
@@ -132,20 +133,15 @@ public:
 	// carry "progress" (a per-model Callable pulse, mirroring the original's
 	// per-model loading-screen presents — witness: placement_traits.h
 	// ledger) and "skip_kinds"
-	// (the joiner places the mission minus organics). Returns a stats
-	// Dictionary (placed/batched/animated/unresolved/markers/graphics/
-	// batches/static_bins/static_binned_batches/static_global_batches/
-	// static_instances_retained/static_lod_populations/static_shadow_batches/
-	// authored_occluder_models + per-stage "spans" usec timings).
-	// "batched" and "animated" are the honest individual/batched split:
-	// a multi-RLOD graphic never leaves the batched count on its own.
+	// (the joiner places the mission minus organics). Returns the placement
+	// census as a MissionPlacementStats record (mission/mission_placement_stats.h).
 	// Place from entity dictionaries in MissionData.get_all_entities() shape
 	// (kind, index, bms_id, item_id, position, rotation_deg, team, group,
 	// ai_flags): the joiner's streamed statics take this entry with the
 	// records the sim stamped at the world-stream fence.
-	Dictionary place_entities(const Array &p_entities, Node3D *p_parent,
+	Ref<MissionPlacementStats> place_entities(const Array &p_entities, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
-	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
+	Ref<MissionPlacementStats> place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
 
 	// Per-frame RLOD selection for every retained static instance, driven by

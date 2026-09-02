@@ -461,7 +461,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	add_child_autofree(container)
 	var placer := MissionObjectPlacer.create(root, item_db)
 	var placement_stats := placer.place(mission, container)
-	assert_eq(int(placement_stats.get("animated", 0)), 1,
+	assert_eq(placement_stats.animated, 1,
 			"the driven DBuggy has an individually presentable model")
 	var mission_objects := container.get_node_or_null(
 			"MissionObjects") as Node3D

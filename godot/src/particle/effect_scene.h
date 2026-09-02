@@ -16,6 +16,8 @@
 
 namespace godot {
 
+class EffectLoadReport;
+
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
 // Godot values to the portable interface and converts snapshots back to
@@ -73,7 +75,9 @@ public:
 
 	// options keys: simulation_tick_seconds, max_live_groups,
 	// max_live_emitters, random_seed.
-	Dictionary open(const TypedArray<ParticleFile> &p_files,
+	// Loads the catalog documents; the report (particle/effect_load_report.h)
+	// carries the engine's load counters plus the input / ignored document counts.
+	Ref<EffectLoadReport> open(const TypedArray<ParticleFile> &p_files,
 			const Dictionary &p_options = Dictionary());
 	int64_t intern(const String &p_effect_name);
 	String effect_name(int64_t p_effect_handle) const;

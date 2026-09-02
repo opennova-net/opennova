@@ -373,7 +373,7 @@ bool MissionObjectPlacer::_placement_is_mirror_reflected(
 
 // --- placement ---------------------------------------------------------------
 
-Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
+Ref<MissionPlacementStats> MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		Node3D *p_parent, const Dictionary &p_options) {
 	if (p_mission.is_null()) {
 		return place_entities(Array(), nullptr, p_options);
@@ -381,25 +381,11 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	return place_entities(p_mission->get_all_entities(), p_parent, p_options);
 }
 
-Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
+Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_entities,
 		Node3D *p_parent, const Dictionary &p_options) {
 	_check_epoch();
-	Dictionary stats;
-	stats["placed"] = 0;
-	stats["batched"] = 0;
-	stats["animated"] = 0;
-	stats["unresolved"] = 0;
-	stats["markers"] = 0;
-	stats["graphics"] = 0;
-	stats["batches"] = 0;
-	stats["static_bins"] = 0;
-	stats["static_binned_batches"] = 0;
-	stats["static_global_batches"] = 0;
-	stats["static_instances_retained"] = 0;
-	stats["static_lod_populations"] = 0;
-	stats["static_live_populations"] = 0;
-	stats["static_shadow_batches"] = 0;
-	stats["authored_occluder_models"] = 0;
+	Ref<MissionPlacementStats> stats;
+	stats.instantiate();
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
 	static_lod_profiles_.clear();
@@ -422,9 +408,7 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 	}
 	_ensure_item_db();
 
-	// Per-stage usec spans returned in the stats (the editor merges them into
-	// its own load timeline; replaces the old GDScript timeline seam).
-	Dictionary spans;
+	// Per-stage usec spans returned in the stats.
 	Time *clock = Time::get_singleton();
 	uint64_t stage_begin = clock->get_ticks_usec();
 
@@ -551,8 +535,8 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 		source["world_transform"] = xform;
 		group->effect_sources.push_back(source);
 	}
-	stats["markers"] = markers;
-	spans["bucket_entities"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_markers(markers);
+	stats->set_span_bucket_entities_usec(clock->get_ticks_usec() - stage_begin);
 	stage_begin = clock->get_ticks_usec();
 
 	// Opaque and alpha-tested statics are divided into the same 512-world-unit
@@ -985,7 +969,7 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 		batched += instance_count;
 		placed += instance_count;
 	}
-	spans["static_batches"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_span_static_batches_usec(clock->get_ticks_usec() - stage_begin);
 	stage_begin = clock->get_ticks_usec();
 
 	// Animated: an individual ObjectModel per entity.
@@ -1072,25 +1056,24 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 		++animated_count;
 		++placed;
 	}
-	spans["animated_models"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_span_animated_models_usec(clock->get_ticks_usec() - stage_begin);
 
-	stats["placed"] = placed;
-	stats["batched"] = batched;
-	stats["animated"] = animated_count;
-	stats["unresolved"] = unresolved;
-	stats["graphics"] = graphics;
-	stats["batches"] = batch_count;
-	stats["static_bins"] = occupied_static_bins.size();
-	stats["static_binned_batches"] = binned_batch_count;
-	stats["static_global_batches"] = global_batch_count;
-	stats["static_instances_retained"] = static_lod_instances_.size();
-	stats["static_lod_populations"] = lod_population_count;
-	stats["static_live_populations"] = get_static_live_population_count();
+	stats->set_placed(placed);
+	stats->set_batched(batched);
+	stats->set_animated(animated_count);
+	stats->set_unresolved(unresolved);
+	stats->set_graphics(graphics);
+	stats->set_batches(batch_count);
+	stats->set_static_bins(static_cast<int>(occupied_static_bins.size()));
+	stats->set_static_binned_batches(binned_batch_count);
+	stats->set_static_global_batches(global_batch_count);
+	stats->set_static_instances_retained(static_cast<int>(static_lod_instances_.size()));
+	stats->set_static_lod_populations(lod_population_count);
+	stats->set_static_live_populations(get_static_live_population_count());
 	// The shadow-only twins a mixed-caster population emits beside its visible
 	// batch: one more geometry instance (and instance-uniform allocation) each.
-	stats["static_shadow_batches"] = shadow_batch_count;
-	stats["authored_occluder_models"] = authored_occluder_models;
-	stats["spans"] = spans;
+	stats->set_static_shadow_batches(shadow_batch_count);
+	stats->set_authored_occluder_models(authored_occluder_models);
 	return stats;
 }
 

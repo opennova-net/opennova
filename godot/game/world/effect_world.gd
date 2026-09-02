@@ -19,7 +19,7 @@ const RENDER_DOMAIN_FIRST_PERSON := EffectScene.RENDER_DOMAIN_FIRST_PERSON
 const KILL_PLANE_DISABLED := EffectScene.KILL_PLANE_DISABLED
 
 var _files: Array[ParticleFile] = []
-var _load_report: Dictionary = {}
+var _load_report: EffectLoadReport = null
 var _scene: EffectScene
 var _renderer: ParticleRenderer
 var _root: ResourceRoot
@@ -91,7 +91,7 @@ func get_files() -> Array[ParticleFile]:
 
 
 func effect_count() -> int:
-	return int(_load_report.get("effect_count", 0))
+	return _load_report.effect_count if _load_report != null else 0
 
 
 func live_group_count() -> int:

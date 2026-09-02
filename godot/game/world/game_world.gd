@@ -116,7 +116,7 @@ var _loaded_mission_file: String = ""
 var _runtime: MissionPresentation = null  # the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _panm_clock := PanmClock.new()
 var _frame_pipeline: GameFramePipeline
-var _mission_stats: Dictionary = {}
+var _mission_stats: MissionPlacementStats = null
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database); untyped
              # because game_world_test's ViewmodelWorldHarness installs a RefCounted double
 var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
@@ -578,7 +578,7 @@ func is_occlusion_culling_enabled() -> bool:
 ## How many placed buildings carry authored OOBJ occluders in the loaded
 ## mission (0 = the occluder pass has nothing to cull with).
 func get_authored_occluder_model_count() -> int:
-	return int(_mission_stats.get("authored_occluder_models", 0))
+	return _mission_stats.authored_occluder_models if _mission_stats != null else 0
 
 
 func get_loaded_mission() -> MissionData:
@@ -617,7 +617,7 @@ func get_runtime() -> MissionPresentation:
 	return _runtime
 
 
-func get_mission_stats() -> Dictionary:
+func get_mission_stats() -> MissionPlacementStats:
 	return _mission_stats
 
 

@@ -1,4 +1,5 @@
 #include "network/udp_pump.h"
+#include "network/udp_datagram.h"
 
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -157,14 +158,13 @@ bool UdpPump::take_inbound_native(opennova::PeerAddr &from, PackedByteArray &byt
 	return true;
 }
 
-Dictionary UdpPump::take_inbound() {
-	Dictionary d;
-	if (inbound_.empty()) return d;
+Ref<UdpDatagram> UdpPump::take_inbound() {
+	if (inbound_.empty()) return Ref<UdpDatagram>();
 	Inbound in = std::move(inbound_.front());
 	inbound_.pop_front();
-	d["ip"] = in.ip;
-	d["port"] = in.port;
-	d["bytes"] = in.bytes;
+	Ref<UdpDatagram> d;
+	d.instantiate();
+	d->assign(in.ip, in.port, in.bytes);
 	return d;
 }
 
