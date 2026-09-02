@@ -486,6 +486,17 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 
 // --- the tick ---------------------------------------------------------------
 
+void MissionKernel::collect_attach_labels(std::vector<w::AttachLabel> &out) {
+	out.clear();
+	const w::Entity *player = world.registry.get(world.cached.local_player);
+	if (player == nullptr || !player->alive || player->health <= 0) return;
+	// [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4]
+	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
+	const w::AiEntity *body =
+			world.ai != nullptr ? world.ai->for_handle(world.cached.local_player) : nullptr;
+	w::collect_attach_labels(world, *player, armory_mode, local_player_can_fire(body), out);
+}
+
 bool MissionKernel::local_player_can_fire(const w::AiEntity *body) const {
 	// The Player_CanFireWeapon verdict the body updater and the HUD share
 	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper

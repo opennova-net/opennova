@@ -20,6 +20,7 @@
 // interposes at boot through the bringup_net_session hook.
 
 #include <base/resource_index/resource_index.h>
+#include <runtime/world/vehicle_attach.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -274,6 +275,12 @@ public:
 	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
 	// @0x4dcd30].
 	bool local_player_can_fire(const world::AiEntity *body) const;
+	// The seat/armory labels the HUD draws around the local player: nothing
+	// for a dead or absent player; armory mode is the raw entity flag [orig:
+	// is_armory_mode = entity Flags & 0x400000 @0x5a32c4]; the nearest-only
+	// gate is the CanFire verdict above, computed here so camera changes
+	// cannot lag one logic tick.
+	void collect_attach_labels(std::vector<world::AttachLabel> &out);
 	// The authority's read of the local player's dead bit (the entity flags;
 	// a joiner reads its replica through np::ClientRuntime::local_player_dead).
 	bool local_player_dead() const;
