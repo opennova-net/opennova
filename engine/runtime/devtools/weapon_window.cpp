@@ -1,4 +1,5 @@
 #include <runtime/devtools/weapon_window.h>
+#include <base/io/tick_rate.h>
 
 #include <imgui.h>
 
@@ -16,8 +17,7 @@ namespace wp = world::weapon_phase;
 
 // The logic clock. 1000 / 62.5 is exactly 16, so a tick is 16 ms and the ms
 // readouts carry no rounding noise.
-constexpr double kTickHz = 62.5;
-constexpr double kMsPerTick = 1000.0 / kTickHz;
+constexpr double kMsPerTick = 1000.0 / io::kTickHz;
 
 constexpr float kChannelWidth = 176.0f;  // name at the left, timing right-aligned
 constexpr float kRowHeight = 22.0f;
@@ -915,7 +915,7 @@ void WeaponWindow::draw_trace(float height) {
 		char label[96];
 		if (span >= 1.0) {
 			std::snprintf(label, sizeof(label), "%.0f ticks  %.0f ms  %.0f rpm", span,
-					span * kMsPerTick, kTickHz / span * 60.0);
+					span * kMsPerTick, io::kTickHz / span * 60.0);
 		} else {
 			std::snprintf(label, sizeof(label), "%.0f ticks", span);
 		}

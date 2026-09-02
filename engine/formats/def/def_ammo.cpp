@@ -1,4 +1,5 @@
 #include <formats/def/def.h>
+#include <base/io/tick_rate.h>
 
 // Split out of def.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -83,7 +84,7 @@ static int ammo_tracer_type_from_name(const char *s, size_t len) {
 /* Parsed 16.16 seconds -> 62 Hz ticks with rounding. [orig: AmmoDef_ParseSecondsToTicks (ex sub_40A0F0) @0x40a0f0 —
  * (62 * fp16 + 0x8000) >> 16] */
 static int parse_age_ticks_n(const char *s, size_t len) {
-    return (int)(((long long)62 * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
+    return (int)(((long long)opennova::io::kTicksPerSecondInt * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
 }
 
 static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);

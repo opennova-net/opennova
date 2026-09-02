@@ -1,4 +1,5 @@
 #include <runtime/world/match.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -15,7 +16,7 @@ namespace {
 
 namespace gt = opennova::game_type;
 
-constexpr int32_t kTicksPerMinute = 60 * 62;
+constexpr int32_t kTicksPerMinute = 60 * io::kTicksPerSecondInt;
 // The objective item ids retail compares the item def's +0x50 type id against.
 // Flags: GameEvent_ProcessScoring @0x52F550 routes a capture by the flag's id
 // (4091 -> the blue team block @0x52f7e1, 4093 -> red @0x52f7ef, 4095 -> the

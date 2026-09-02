@@ -1,4 +1,5 @@
 #include <runtime/devtools/rays_window.h>
+#include <base/io/tick_rate.h>
 
 #include <imgui.h>
 
@@ -114,7 +115,7 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		enqueue_request({RaysRequest::Kind::SetTtlTicks, ttl_edit_});
 	}
 	ImGui::SameLine();
-	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / 62.0f);
+	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / static_cast<float>(io::kTicksPerSecondInt));
 
 	if (ImGui::SmallButton("All")) {
 		mask_edit_ = kRayCategoryMaskAll;

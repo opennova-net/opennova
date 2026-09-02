@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <base/io/tick_rate.h>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -28,7 +29,7 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
 	return static_cast<uint32_t>(
 			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) /
-					static_cast<uint64_t>(JO_ENGINE_TICK_RATE));
+					static_cast<uint64_t>(io::kTicksPerSecondInt));
 }
 
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at

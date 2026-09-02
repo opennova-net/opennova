@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <net/npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
+#include <base/io/tick_rate.h>
 
 #include <net/npwire/session_hello.h> // DisconnectEvent
 
@@ -19,9 +19,9 @@ namespace opennova::np {
 // 0x136 emits again after exactly 310 further Server_TickUpdate calls.
 inline constexpr uint32_t NETWORK_QUALITY_BROADCAST_PERIOD_TICKS = 0x136u;
 inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS =
-		30u * uint32_t(JO_ENGINE_TICK_RATE);
+		30u * uint32_t(io::kTicksPerSecondInt);
 inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS =
-		12u * uint32_t(JO_ENGINE_TICK_RATE);
+		12u * uint32_t(io::kTicksPerSecondInt);
 
 // Optional attribution for one authoritative Server_TickUpdate. Callers pass
 // nullptr outside an active diagnostics capture; the zero-initialized value is

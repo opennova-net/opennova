@@ -1,6 +1,7 @@
 // Round flight and presentation, with authoritative consequences carried explicitly
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include <runtime/world/round_sim.h>
+#include <base/io/tick_rate.h>
 
 #include <runtime/world/fire_sound.h>
 
@@ -395,7 +396,7 @@ const std::array<int32_t, kDragTableSize> &projectile_drag_table() {
                 std::pow(static_cast<double>(feet_per_second), band->exponent) *
                 band->coefficient * 19975.3728);
             if (destination >= 0 && destination < kDragTableSize)
-                values[static_cast<size_t>(destination)] = static_cast<int32_t>(raw / 62);
+                values[static_cast<size_t>(destination)] = static_cast<int32_t>(raw / io::kTicksPerSecondInt);
         }
         return values;
     }();
@@ -424,7 +425,7 @@ int32_t wrapped_signed_product(int32_t lhs, int32_t rhs) {
 }
 
 int32_t drag_speed_index(int32_t magnitude_q16) {
-    const int64_t scaled = static_cast<int64_t>(magnitude_q16) * 62;
+    const int64_t scaled = static_cast<int64_t>(magnitude_q16) * io::kTicksPerSecondInt;
     if (scaled <= 0) return 0;
     const int64_t index = scaled >> 16;
     return static_cast<int32_t>(index > 1219 ? 1219 : index);
@@ -451,7 +452,7 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     const int32_t raw = projectile_drag_table()[static_cast<size_t>(old_index)];
     const int64_t first_division =
         (static_cast<int64_t>(raw) << 16) / ammo.drag_fp16;
-    const int64_t scaled_drag = first_division / 62;
+    const int64_t scaled_drag = first_division / io::kTicksPerSecondInt;
     const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
     const int64_t drag_step = underwater ? scaled_drag * 25 : scaled_drag;
 
@@ -533,7 +534,7 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
         if (world.one_shot_kill) return 2000;
     }
     int32_t speed_scaled = arithmetic_shift_right_16(
-        wrapped_signed_product(fixed_magnitude(velocity_q16), 62));
+        wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
     if (speed_scaled >= 1219) speed_scaled = 1219;
     int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
     if (target.item_type == 3) {
@@ -931,7 +932,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     const double bearing = double(final_yaw) * kRadPerBam;
     const double pitch = double(final_pitch) * kRadPerBam;
     const double cp = std::cos(pitch);
-    double speed_per_tick = double(ammo->velocity) / 62.0; // [orig: speed/62 @0x4ec508]
+    double speed_per_tick = double(ammo->velocity) / io::kTicksPerSecondInt; // [orig: speed/62 @0x4ec508]
     // The PowerThrow charge byte scales the launch speed for 1..254; 0 and 255
     // mean full [orig: (charge - 1) <= 0xFD gate @ 0x4ec5bb, x charge/256].
     if (static_cast<uint8_t>(params.charge - 1u) <= 0xFDu)
@@ -1099,7 +1100,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         const double bearing = double(yaw) * kRadPerBam;
         const double pitch_rad = double(pitch) * kRadPerBam;
         const double cp = std::cos(pitch_rad);
-        const double speed = double(ammo.velocity) / 62.0;
+        const double speed = double(ammo.velocity) / io::kTicksPerSecondInt;
         LiveRound &r = rounds[static_cast<size_t>(slot)];
         r = LiveRound{};
         r.active = true;

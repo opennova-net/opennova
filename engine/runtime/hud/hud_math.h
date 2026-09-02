@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <base/io/tick_rate.h>
 #include <string>
 
 // The HUD view-helper math cluster (the ENG-4/FNT pattern: math + constants
@@ -33,7 +34,7 @@ double pixel_delta_to_design(double delta, double surface, double design_extent)
 // included (one 62 Hz tick of latency).
 
 inline constexpr double kPercentToAlpha = 2.55;
-inline constexpr double kSecondsToTicks = 62.0;
+inline constexpr double kSecondsToTicks = io::kTicksPerSecondInt;
 
 int fade_decay(int elapsed_ticks, int ramp_ticks);
 // The ammo/clip flash: base + decay clamped by the ALPHAFADE max
