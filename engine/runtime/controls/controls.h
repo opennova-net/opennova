@@ -82,6 +82,21 @@ const ActionDef *catalog(std::size_t *out_count);
 //  Player_CycleWeaponSlot @0x4dfe70]
 inline constexpr int kWeaponCategoryFirstRow = 28;
 inline constexpr int kWeaponCategoryCount = 9;
+// The nine categories by the action id they fire (action - 200), in the
+// catalog's row order [orig: the 200..210 cases @0x4e1144].
+enum class WeaponCategory : int {
+  kKnife = 1,
+  kSecondary = 2,
+  kPrimary = 3,
+  kFlashbang = 4,
+  kFragGrenade = 5,
+  kSmokeGrenade = 6,
+  kAccessory = 7,
+  kDetonator = 8,
+  kMedpack = 9,
+};
+static_assert(static_cast<int>(WeaponCategory::kMedpack) == kWeaponCategoryCount,
+              "the category enum spans the catalog's nine rows");
 // The config token of weapon category `index` (0..8), nullptr out of range.
 const char *weapon_category_token(int index);
 

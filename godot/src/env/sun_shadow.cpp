@@ -24,13 +24,11 @@ void SunShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SunShadow::advance_frame);
 
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_DYNAMIC", PROJECTION_DYNAMIC);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_STATIC_TERRAIN", PROJECTION_STATIC_TERRAIN);
+	BIND_ENUM_CONSTANT(PROJECTION_DYNAMIC);
+	BIND_ENUM_CONSTANT(PROJECTION_STATIC_TERRAIN);
 }
 
-void SunShadow::set_projection_mode(int p_mode) {
+void SunShadow::set_projection_mode(ProjectionMode p_mode) {
 	projection_mode_ = p_mode;
 	_apply_projection_masks();
 }

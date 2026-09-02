@@ -21,7 +21,7 @@ bool attrib_has(uint32_t attrib_flags, opennova::bms::AttribFlags bit) {
 	return (attrib_flags & static_cast<uint32_t>(bit)) != 0;
 }
 
-opennova::mission::EntityKind to_native_kind(int kind) {
+opennova::mission::EntityKind to_native_kind(MissionData::EntityKind kind) {
 	switch (kind) {
 		case MissionData::KIND_MARKER:
 			return opennova::mission::EntityKind::Marker;
@@ -130,10 +130,10 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
 	ClassDB::bind_method(D_METHOD("structure_fingerprint"), &MissionData::structure_fingerprint);
 
-	BIND_CONSTANT(KIND_MARKER);
-	BIND_CONSTANT(KIND_ITEM);
-	BIND_CONSTANT(KIND_BUILDING);
-	BIND_CONSTANT(KIND_ORGANIC);
+	BIND_ENUM_CONSTANT(KIND_MARKER);
+	BIND_ENUM_CONSTANT(KIND_ITEM);
+	BIND_ENUM_CONSTANT(KIND_BUILDING);
+	BIND_ENUM_CONSTANT(KIND_ORGANIC);
 	BIND_CONSTANT(WP_FLAG_DOES_NOT_LOOP);
 	BIND_CONSTANT(ATTRIB_FORCE_INDOORS);
 	BIND_CONSTANT(LOAD_STAGE_ENVIRONMENT);
@@ -397,11 +397,11 @@ Dictionary MissionData::entity_to_dictionary(const opennova::mission::EntityReco
 	return out;
 }
 
-int MissionData::get_entity_count(int kind) const {
+int MissionData::get_entity_count(EntityKind kind) const {
 	return static_cast<int>(document.entity_count(to_native_kind(kind)));
 }
 
-Array MissionData::get_entities(int kind) const {
+Array MissionData::get_entities(EntityKind kind) const {
 	Array out;
 	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
 	const size_t count = document.entity_count(native_kind);
@@ -414,7 +414,7 @@ Array MissionData::get_entities(int kind) const {
 	return out;
 }
 
-Dictionary MissionData::get_entity(int kind, int index) const {
+Dictionary MissionData::get_entity(EntityKind kind, int index) const {
 	if (index < 0) {
 		return Dictionary();
 	}
@@ -427,8 +427,8 @@ Dictionary MissionData::get_entity(int kind, int index) const {
 
 Array MissionData::get_all_entities() const {
 	Array out;
-	const int kinds[] = { KIND_MARKER, KIND_ITEM, KIND_BUILDING, KIND_ORGANIC };
-	for (int kind : kinds) {
+	const EntityKind kinds[] = { KIND_MARKER, KIND_ITEM, KIND_BUILDING, KIND_ORGANIC };
+	for (EntityKind kind : kinds) {
 		const Array entities = get_entities(kind);
 		for (int i = 0; i < entities.size(); ++i) {
 			out.push_back(entities[i]);
@@ -437,7 +437,7 @@ Array MissionData::get_all_entities() const {
 	return out;
 }
 
-bool MissionData::set_entity_transform(int kind, int index, const Vector3 &position, const Vector3 &rotation_deg) {
+bool MissionData::set_entity_transform(EntityKind kind, int index, const Vector3 &position, const Vector3 &rotation_deg) {
 	if (index < 0) {
 		return false;
 	}
@@ -456,7 +456,7 @@ bool MissionData::set_entity_transform(int kind, int index, const Vector3 &posit
 	return true;
 }
 
-bool MissionData::set_entity_property_int(int kind, int index, const String &property, int value) {
+bool MissionData::set_entity_property_int(EntityKind kind, int index, const String &property, int value) {
 	if (index < 0) {
 		return false;
 	}
@@ -471,7 +471,7 @@ bool MissionData::set_entity_property_int(int kind, int index, const String &pro
 	return true;
 }
 
-bool MissionData::set_entity_property_string(int kind, int index, const String &property, const String &value) {
+bool MissionData::set_entity_property_string(EntityKind kind, int index, const String &property, const String &value) {
 	if (index < 0) {
 		return false;
 	}
@@ -519,7 +519,7 @@ bool MissionData::set_header_float(const String &field, float value) {
 	return true;
 }
 
-Dictionary MissionData::add_entity(int kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
+Dictionary MissionData::add_entity(EntityKind kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
 	opennova::mission::EntityTransform transform;
 	transform.x = position.x;
 	transform.y = position.y;
@@ -536,7 +536,7 @@ Dictionary MissionData::add_entity(int kind, int item_id, const Vector3 &positio
 	return entity_to_dictionary(record);
 }
 
-bool MissionData::remove_entity(int kind, int index) {
+bool MissionData::remove_entity(EntityKind kind, int index) {
 	if (index < 0) {
 		return false;
 	}

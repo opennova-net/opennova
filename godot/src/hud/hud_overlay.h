@@ -18,6 +18,7 @@
 
 #include <formats/fnt/fnt.h>
 #include <runtime/hud/hud_config_tokens.h>
+#include <runtime/hud/hud_math.h> // FriendlyTagMode
 #include <runtime/hud/hud_frame.h>
 
 #include <array>
@@ -167,10 +168,18 @@ public:
 			const PackedInt32Array &p_entity_ids,
 			const PackedInt32Array &p_health_ratios_fp16,
 			const PackedInt32Array &p_flags);
-	// Mode 0 off / 1 text < 300 m / 2 text always (default) / 3 tick marks
-	// (retail g_friendlyTagsMode; the witnessed rules live in hud_math).
-	void set_friendly_tag_mode(int p_mode);
-	int get_friendly_tag_mode() const;
+	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
+	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
+	enum FriendlyTagMode {
+		FRIENDLY_TAGS_OFF = static_cast<int>(opennova::hud::FriendlyTagMode::kOff),
+		FRIENDLY_TAGS_FAR_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kFarBrief),
+		FRIENDLY_TAGS_FULL = static_cast<int>(opennova::hud::FriendlyTagMode::kFull),
+		FRIENDLY_TAGS_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kBrief),
+	};
+	// The friendly-tags mode (retail g_friendlyTagsMode; the witnessed rules
+	// live in hud_math). Out-of-range values clamp to the last mode.
+	void set_friendly_tag_mode(FriendlyTagMode p_mode);
+	FriendlyTagMode get_friendly_tag_mode() const;
 	void set_hud_color_index(int p_index);
 	int get_hud_color_index() const;
 	// The HUD declutter level 0..3 [orig: the persisted cfg int
@@ -237,7 +246,8 @@ public:
 	static int next_hud_detail_level(int p_level);
 	static int showhud_flags_default();
 	static int next_showhud_flags(int p_flags);
-	static int friendly_tag_mode_default();
+	static FriendlyTagMode friendly_tag_mode_default();
+	static FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode p_mode);
 	static float friendly_tag_lift();
 
 protected:
@@ -349,3 +359,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::HudOverlay::ShowHudFlag);
+VARIANT_ENUM_CAST(godot::HudOverlay::FriendlyTagMode);

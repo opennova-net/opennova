@@ -191,11 +191,24 @@ bool crosshair_should_draw(bool aimed_shot_available, bool keep_while_aimed);
 // ("FARBRIEF") / 2 text always ("FULL", the boot default @0x4a7fed) / 3 tick
 // marks ("BRIEF") [orig: input action case 30 @0x49b573].
 
-inline constexpr int kFriendlyTagModeOff = 0;
-inline constexpr int kFriendlyTagModeFarBrief = 1;
-inline constexpr int kFriendlyTagModeFull = 2;
-inline constexpr int kFriendlyTagModeBrief = 3;
+enum class FriendlyTagMode : int {
+	kOff = 0,
+	kFarBrief = 1,  // text under 300 m
+	kFull = 2,      // text always
+	kBrief = 3,     // tick marks
+};
+inline constexpr int kFriendlyTagModeOff = static_cast<int>(FriendlyTagMode::kOff);
+inline constexpr int kFriendlyTagModeFarBrief = static_cast<int>(FriendlyTagMode::kFarBrief);
+inline constexpr int kFriendlyTagModeFull = static_cast<int>(FriendlyTagMode::kFull);
+inline constexpr int kFriendlyTagModeBrief = static_cast<int>(FriendlyTagMode::kBrief);
 inline constexpr int kFriendlyTagModeCount = 4;
+// Boot default FULL, process-lifetime like retail's global
+// [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed].
+inline constexpr FriendlyTagMode kFriendlyTagModeDefault = FriendlyTagMode::kFull;
+// The cycle 0 -> 1 -> 2 -> 3 -> 0 [orig: input action case 30 @0x49b573].
+inline FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode mode) {
+	return static_cast<FriendlyTagMode>((static_cast<int>(mode) + 1) % kFriendlyTagModeCount);
+}
 
 // The minimum draw distance (0.5 u) [orig: @0x5a3b0c] and the mode-1 text
 // cutoff (300.0 u) [orig: @0x5a3fcf], both 16.16 world units.

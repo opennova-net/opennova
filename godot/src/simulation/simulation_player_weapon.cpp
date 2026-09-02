@@ -35,7 +35,7 @@ static_assert(opennova::world::weapon_flag2::kInset ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG2_INSET),
 		"kInset drifted from def.h");
 
-void Simulation::request_local_player_weapon_category(int p_category) {
+void Simulation::request_local_player_weapon_category(WeaponCategory p_category) {
 	if (kernel_->view.binoculars_view_active) return;
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
 	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no

@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <runtime/controls/controls.h> // WeaponCategory (the bound enum's value authority)
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 #include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
@@ -594,7 +595,7 @@ public:
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
 	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
 	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: net/npruntime/client_runtime.h)
-	bool request_local_player_stance(int p_stance);
+	bool request_local_player_stance(Stance p_stance);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
@@ -645,12 +646,12 @@ public:
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
 	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
-	int get_local_player_stance_latch() const { return kernel_->stance_latch(); }
+	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->stance_latch()); }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
 	// source is the body state, never the anim clip name.
-	int get_local_player_stance() const;
+	Stance get_local_player_stance() const;
 	int get_local_player_anim_phase_ticks() const;
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
@@ -970,7 +971,7 @@ public:
 	// The category keys (engine: runtime/controls/controls.h). Category 1..9 =
 	// the retail Knife/Sidearm/Primary/Flashbang/Frag/Smoke/Accessory/Detonator/
 	// Medpack keys ('1'..'9').
-	void request_local_player_weapon_category(int p_category);
+	void request_local_player_weapon_category(WeaponCategory p_category);
 	// Next/previous weapon (engine: runtime/controls/controls.h).
 	void request_local_player_weapon_cycle(int p_direction);
 	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
@@ -1686,3 +1687,5 @@ VARIANT_ENUM_CAST(godot::Simulation::SeatCode);
 VARIANT_ENUM_CAST(godot::Simulation::MountCommand);
 VARIANT_ENUM_CAST(godot::Simulation::JoinTerrainTilState);
 VARIANT_ENUM_CAST(godot::Simulation::SessionRole);
+VARIANT_ENUM_CAST(godot::Simulation::Stance);
+VARIANT_ENUM_CAST(godot::Simulation::WeaponCategory);

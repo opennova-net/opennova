@@ -118,8 +118,13 @@ public:
 		uint16_t character_id = 0;
 		bool female = false;
 	};
-	// AvatarPartKind (engine/formats/avatars/avatars.h).
-	enum { PART_HEAD = 0, PART_BODY = 1, PART_ARMS = 2 };
+	// AvatarPartKind (engine/formats/avatars/avatars.h), bound as an enum so
+	// the part lookups take a typed kind.
+	enum PartKind {
+		PART_HEAD = AVATAR_PART_HEAD,
+		PART_BODY = AVATAR_PART_BODY,
+		PART_ARMS = AVATAR_PART_ARMS,
+	};
 	// AvatarSex.
 	enum { SEX_MALE = 0, SEX_FEMALE = 1 };
 	// AvatarAlignment (the PLAYER_INFO team filter: good -> team 0, evil -> team 1).
@@ -166,8 +171,8 @@ public:
 	// Parts of a kind (PART_HEAD/BODY/ARMS), sorted by name; get_part() looks one up
 	// by (kind, name). Dictionaries carry name/display_name/graphic/graphic_j/
 	// graphic_s/camo (Vector3i-as-Array)/voice/sex/kind.
-	PackedStringArray get_part_names(int kind) const;
-	Dictionary get_part(int kind, const String &name) const;
+	PackedStringArray get_part_names(PartKind kind) const;
+	Dictionary get_part(PartKind kind, const String &name) const;
 
 	// Tree navigation by index (the order they appear in the file).
 	Dictionary get_nationality(int nat_index) const;
@@ -211,3 +216,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::AvatarDatabase::PartKind);
