@@ -463,9 +463,12 @@ private:
 
 	TodState tod_{};
 	bool tod_valid_ = false;
-	Vec3 sun_dir_{0.0f, 0.70710678f, 0.70710678f};
+	// The unseeded default light direction: 45 degrees up, in the render-float
+	// basis (a unit vector, not a weight; sqrt(2)/2 by construction).
+	static constexpr Vec3 kDefaultSunDirRender{0.0f, 0.70710678f, 0.70710678f};
+	Vec3 sun_dir_ = kDefaultSunDirRender;
 	Vec3 moon_dir_{};
-	Vec3 light_dir_{0.0f, 0.70710678f, 0.70710678f};
+	Vec3 light_dir_ = kDefaultSunDirRender;
 	bool is_night_ = false;
 	float day_phase_blend_ = 1.0f;
 	Rgb fill_light_{0.4f, 0.45f, 0.55f};
