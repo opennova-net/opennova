@@ -209,6 +209,7 @@ add_library(${TARGET_NAME} SHARED
     audio/music_director.cpp
     audio/music_pair_names.cpp
     mnu/mnu_document.cpp
+    mnu/mnu_rows.cpp
     mnu/mns_stylesheet.cpp
     mnu/menu_draw_list_stats.cpp
     mnu/menu_frame.cpp

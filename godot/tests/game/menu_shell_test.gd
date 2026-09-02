@@ -1463,17 +1463,17 @@ func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
 # dispatched through the driver's own executor, so the pin is on game.mnu's
 # SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER, never on literals a test typed.
 func _raise_confirm(driver: MenuDriver) -> void:
-	var rows: Array = driver.widget_actions(driver.widget_id("ABORT"))
+	var rows: Array[MnuActionRow] = driver.widget_actions(driver.widget_id("ABORT"))
 	var shape: Array[String] = []
-	for row: Dictionary in rows:
-		shape.append("%s %s %s" % [String(row.get("type", "")).to_lower(),
-				String(row.get("target", "")).to_upper(),
-				String(row.get("state", "")).to_lower()])
+	for row: MnuActionRow in rows:
+		shape.append("%s %s %s" % [row.type.to_lower(),
+				row.target.to_upper(),
+				row.state.to_lower()])
 	assert_eq(shape, ["window CONFIRM_EXIT show", "window MAIN_WRAPPER hide"],
 			"game.mnu's ABORT authors SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER")
-	for row: Dictionary in rows:
+	for row: MnuActionRow in rows:
 		assert_true(driver.dispatch_action_row(row),
-				"the authored %s row dispatches" % String(row.get("target", "")))
+				"the authored %s row dispatches" % row.target)
 
 
 func _pause_key(keycode: Key) -> InputEventKey:

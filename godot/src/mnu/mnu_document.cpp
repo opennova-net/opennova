@@ -52,30 +52,6 @@ const opennova::mnu::Items *items_container(const opennova::mnu::Window *w) {
 	return items_container(const_cast<opennova::mnu::Window *>(w));
 }
 
-Dictionary item_to_dict(const opennova::mnu::Item &it) {
-	Dictionary d;
-	d["type"] = to_gd(it.type);
-	d["value"] = to_gd(it.value);
-	d["text"] = to_gd(it.text);
-	return d;
-}
-
-Dictionary sound_to_dict(const opennova::mnu::Sound &s) {
-	Dictionary d;
-	d["state"] = to_gd(s.state);
-	d["trigger"] = to_gd(s.trigger);
-	d["file"] = to_gd(s.file);
-	return d;
-}
-
-TypedArray<Dictionary> sounds_to_array(const std::vector<opennova::mnu::Sound> &sounds) {
-	TypedArray<Dictionary> out;
-	for (const opennova::mnu::Sound &s : sounds) {
-		out.push_back(sound_to_dict(s));
-	}
-	return out;
-}
-
 } // namespace
 
 MnuDocument::MnuDocument() {
@@ -395,42 +371,32 @@ String MnuDocument::get_widget_orientation(int p_id) const {
 	return w ? to_gd(w->orientation) : String();
 }
 
-TypedArray<Dictionary> MnuDocument::get_widget_sounds(int p_id) const {
-	TypedArray<Dictionary> out;
+TypedArray<MnuSoundRow> MnuDocument::get_widget_sounds(int p_id) const {
+	TypedArray<MnuSoundRow> out;
 	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
 	for (const opennova::mnu::Sound &s : w->sounds) {
-		Dictionary d;
-		d["state"] = to_gd(s.state);
-		d["trigger"] = to_gd(s.trigger);
-		d["file"] = to_gd(s.file);
-		out.push_back(d);
+		Ref<MnuSoundRow> row;
+		row.instantiate();
+		row->assign(s);
+		out.push_back(row);
 	}
 	return out;
 }
 
-TypedArray<Dictionary> MnuDocument::get_widget_actions(int p_id) const {
-	TypedArray<Dictionary> out;
+TypedArray<MnuActionRow> MnuDocument::get_widget_actions(int p_id) const {
+	TypedArray<MnuActionRow> out;
 	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
 	for (const opennova::mnu::Action &a : w->actions) {
-		Dictionary d;
-		d["type"] = to_gd(a.type);
-		d["target"] = to_gd(a.target);
-		d["state"] = to_gd(a.state);
-		d["file"] = to_gd(a.file);
-		d["source"] = to_gd(a.source);
-		d["field"] = to_gd(a.field);
-		d["test"] = to_gd(a.test);
-		d["has_target_form"] = a.has_target_form;
-		d["target_form"] = a.target_form;
-		d["toggle"] = a.toggle;
-		d["external_browser"] = a.external_browser;
-		out.push_back(d);
+		Ref<MnuActionRow> row;
+		row.instantiate();
+		row->assign(a);
+		out.push_back(row);
 	}
 	return out;
 }
@@ -454,12 +420,20 @@ int MnuDocument::find_item_row_by_value(int p_id, const String &p_value) const {
 			*items, std::string(p_value.utf8().get_data()));
 }
 
-Dictionary MnuDocument::get_item(int p_id, int p_index) const {
+String MnuDocument::get_item_text(int p_id, int p_index) const {
 	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
-		return Dictionary();
+		return String();
 	}
-	return item_to_dict(items->items[p_index]);
+	return to_gd(items->items[p_index].text);
+}
+
+String MnuDocument::get_item_value(int p_id, int p_index) const {
+	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
+		return String();
+	}
+	return to_gd(items->items[p_index].value);
 }
 
 // --- M10: table column template (headers / bodies) ---
@@ -582,7 +556,8 @@ void MnuDocument::_bind_methods() {
 			&MnuDocument::find_item_row_by_value);
 	ClassDB::bind_method(D_METHOD("get_widget_sounds", "id"), &MnuDocument::get_widget_sounds);
 	ClassDB::bind_method(D_METHOD("get_widget_actions", "id"), &MnuDocument::get_widget_actions);
-	ClassDB::bind_method(D_METHOD("get_item", "id", "index"), &MnuDocument::get_item);
+	ClassDB::bind_method(D_METHOD("get_item_text", "id", "index"), &MnuDocument::get_item_text);
+	ClassDB::bind_method(D_METHOD("get_item_value", "id", "index"), &MnuDocument::get_item_value);
 
 
 	ClassDB::bind_method(D_METHOD("get_widget_color", "id", "slot"), &MnuDocument::get_widget_color);
