@@ -1,18 +1,9 @@
 #include "env/mission_environment_overrides.h"
+#include "util/color_convert.h"
 
 using namespace godot;
 
 namespace {
-
-Color color_from_rgb(const opennova::env::Rgb &rgb) { return Color(rgb.r, rgb.g, rgb.b); }
-
-opennova::env::Rgb rgb_from_color(const Color &color) {
-	opennova::env::Rgb rgb;
-	rgb.r = color.r;
-	rgb.g = color.g;
-	rgb.b = color.b;
-	return rgb;
-}
 
 } // namespace
 
@@ -31,18 +22,18 @@ void MissionEnvironmentOverrides::set_fog_level(float p_value) {
 	value_.fog_level = p_value;
 }
 
-Color MissionEnvironmentOverrides::get_fog_color() const { return color_from_rgb(value_.fog_color); }
+Color MissionEnvironmentOverrides::get_fog_color() const { return opennova::color_from_env_rgb(value_.fog_color); }
 
 void MissionEnvironmentOverrides::set_fog_color(const Color &p_value) {
 	value_.has_fog_color = true;
-	value_.fog_color = rgb_from_color(p_value);
+	value_.fog_color = opennova::env_rgb_from_color(p_value);
 }
 
-Color MissionEnvironmentOverrides::get_water_color() const { return color_from_rgb(value_.water_color); }
+Color MissionEnvironmentOverrides::get_water_color() const { return opennova::color_from_env_rgb(value_.water_color); }
 
 void MissionEnvironmentOverrides::set_water_color(const Color &p_value) {
 	value_.has_water_color = true;
-	value_.water_color = rgb_from_color(p_value);
+	value_.water_color = opennova::env_rgb_from_color(p_value);
 }
 
 void MissionEnvironmentOverrides::set_water_murk(float p_value) {

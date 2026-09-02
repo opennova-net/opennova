@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/color_convert.h"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -26,10 +28,7 @@ class RenderingDevice;
 // (0x00FFFFFF, white RGB and alpha 0) decoded once for the capture pass's
 // clear and for a fresh resolve target that no capture has landed on yet.
 inline Color slot_capture_clear_color() {
-	const uint32_t argb = opennova::renderer::kSlotCaptureClearArgb;
-	return Color(float((argb >> 16) & 0xFF) / 255.0f,
-			float((argb >> 8) & 0xFF) / 255.0f, float(argb & 0xFF) / 255.0f,
-			float((argb >> 24) & 0xFF) / 255.0f);
+	return opennova::color_from_argb(opennova::renderer::kSlotCaptureClearArgb);
 }
 
 // One armed render-slot silhouette capture for this frame: the typed request

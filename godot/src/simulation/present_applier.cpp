@@ -1,4 +1,5 @@
 #include "simulation/present_applier.h"
+#include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
@@ -92,9 +93,6 @@ void PresentApplier::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&PresentApplier::get_stats_record);
 	ClassDB::bind_method(D_METHOD("present"), &PresentApplier::present);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("bms_to_godot_basis", "rot_deg"),
-			&PresentApplier::bms_to_godot_basis);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
 					"hand_frame"),
@@ -227,14 +225,6 @@ void PresentApplier::present() {
 	}
 	present_snapshot(native_sim->get_present_snapshot(), stride,
 			native_sim->get_present_layout_revision());
-}
-
-Basis PresentApplier::bms_to_godot_basis(const Vector3 &rot_deg) {
-	const opennova::mission::PlacementBasis b =
-			opennova::mission::bms_to_presentation_basis(rot_deg.x, rot_deg.y,
-					rot_deg.z);
-	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
-			Vector3(b.z.x, b.z.y, b.z.z));
 }
 
 namespace {

@@ -1,4 +1,5 @@
 #include "mnu/menu_frame.h"
+#include "util/color_convert.h"
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
 
@@ -35,12 +36,6 @@ static_assert(MenuFrame::EDIT_RESULT_CHANGED == 1);
 static_assert(MenuFrame::EDIT_RESULT_COMMIT == 2);
 
 namespace {
-
-Color argb_to_color(uint32_t argb) {
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
-}
 
 int positive_mod(int value, int divisor) {
 	const int result = value % divisor;
@@ -901,7 +896,7 @@ void MenuFrame::_draw() {
 	RID target = get_canvas_item();
 	const auto apply_quad = [&](const opennova::menu::MenuQuad &quad) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		const Color color = argb_to_color(quad.color);
+		const Color color = opennova::color_from_argb(quad.color);
 		Ref<Texture2D> tex;
 		if (quad.texture >= 0 &&
 				quad.texture < static_cast<int32_t>(textures_.size())) {
@@ -938,7 +933,7 @@ void MenuFrame::_draw() {
 	};
 	const auto apply_line = [&](const opennova::menu::MenuLine &line) {
 		rs->canvas_item_add_line(target, Vector2(line.x0, line.y0),
-				Vector2(line.x1, line.y1), argb_to_color(line.color), 1.0f);
+				Vector2(line.x1, line.y1), opennova::color_from_argb(line.color), 1.0f);
 	};
 	const auto apply_font_run =
 			[&](const opennova::menu::MenuDrawList::FontRun &run) {
@@ -974,7 +969,7 @@ void MenuFrame::_draw() {
 					uvs.set(2, Vector2(glyph.u1, glyph.v1));
 					uvs.set(3, Vector2(glyph.u0, glyph.v1));
 					PackedColorArray colors;
-					colors.push_back(argb_to_color(glyph.color));
+					colors.push_back(opennova::color_from_argb(glyph.color));
 					rs->canvas_item_add_polygon(target, points, colors, uvs,
 							page->get_rid());
 				}
@@ -987,7 +982,7 @@ void MenuFrame::_draw() {
 							list.underlines[static_cast<size_t>(i)];
 					rs->canvas_item_add_line(target, Vector2(underline.x0, underline.y),
 							Vector2(underline.x1, underline.y),
-							argb_to_color(underline.color), 1.0f);
+							opennova::color_from_argb(underline.color), 1.0f);
 				}
 			};
 	for (size_t op_index = 0; op_index < list.draw_ops.size(); ++op_index) {

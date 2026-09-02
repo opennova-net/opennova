@@ -1,8 +1,10 @@
 #pragma once
 
+#include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/env/env.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <array>
 
@@ -57,6 +59,18 @@ inline Vector3 mission_to_godot(const std::array<float, 3> &v) {
 inline opennova::env::Vec3 godot_to_mission(const Vector3 &v) {
 	return opennova::env::Vec3{static_cast<float>(v.x),
 			static_cast<float>(-v.z), static_cast<float>(v.y)};
+}
+
+// The one BMS rotation -> Godot basis wrapper over the engine's witnessed
+// converter (runtime/mission/placement_traits.h carries the derivation and
+// citations); MissionObjectPlacer.bms_to_godot_basis is its bound face.
+inline Basis bms_to_godot_basis(const Vector3 &rot_deg) {
+	const opennova::mission::PlacementBasis b =
+			opennova::mission::bms_to_presentation_basis(
+					static_cast<float>(rot_deg.x), static_cast<float>(rot_deg.y),
+					static_cast<float>(rot_deg.z));
+	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
+			Vector3(b.z.x, b.z.y, b.z.z));
 }
 
 } // namespace godot

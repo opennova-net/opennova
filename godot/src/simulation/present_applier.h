@@ -87,12 +87,6 @@ public:
 
 	Ref<class MissionPresentStats> get_stats_record() const;
 
-	// The one placement convention — a thin wrapper over the engine's
-	// witnessed converter (engine/runtime/mission placement_traits.h carries
-	// the derivation and citations; MissionObjectPlacer.bms_to_godot_basis is
-	// the same wrapper).
-	static Basis bms_to_godot_basis(const Vector3 &rot_deg);
-
 	// Aim-overlay presentation (aim_overlay_present_pass.gd delegates here so the
 	// mission and wire passes share one implementation). root_basis: aim-valid
 	// rows own the body rotation; others keep the fallback entity rotation.

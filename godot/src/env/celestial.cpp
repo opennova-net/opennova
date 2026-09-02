@@ -12,7 +12,7 @@
 
 #include <runtime/renderer/render_order.h>
 
-#include "env/env_axes.h"
+#include "util/axes.h"
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
 #include "object/object_data.h"
@@ -225,7 +225,7 @@ void Celestial::_rebuild_if_needed() {
 		// under an identity basis leaves the quad facing Godot +Z (south) -
 		// edge-on at a sunrise/sunset pose, the "squashed oval sun". The
 		// +90 degree yaw about +Y is the exact composition
-		// R * import(v) == render_float_to_godot(v) (env_axes.h), restoring
+		// R * import(v) == render_float_to_godot(v) (util/axes.h), restoring
 		// the retail east-facing placement. Positive axis on purpose:
 		// godot-cpp Basis(axis, angle) diverges from core for negative axes.
 		model->set_basis(Basis(Vector3(0.0f, 1.0f, 0.0f),
@@ -465,11 +465,11 @@ void Celestial::advance_frame(double p_delta) {
 	// cull (celestial_frame.h carries the cite). Deliberately the RAW
 	// render-float tuple: the star instance directions it dots against live
 	// in the same axes engine-side, and the instance PLACEMENT crosses the
-	// env_axes.h swap where the transforms are stamped, so the culled star
+	// util/axes.h swap where the transforms are stamped, so the culled star
 	// and the placed star agree.
 	_update_star_field(to_vector3(state.light_direction()));
 
-	// The GODOT-world sun direction and view forward (env_axes.h swap — the
+	// The GODOT-world sun direction and view forward (util/axes.h swap — the
 	// 2026-08-20 correction: the earlier identity mapping placed every body
 	// 90 degrees off in yaw and mirrored, the 03tr-sun-sky "sun rises in the
 	// wrong place" half of the fixture's divergence).
@@ -481,7 +481,7 @@ void Celestial::advance_frame(double p_delta) {
 		Body &body = kv.value;
 		opennova::env::CelestialBodyFrame frame;
 		// The frame builders run in the witnessed render-float axes; the
-		// camera enters and the placement leaves through the env_axes.h swap.
+		// camera enters and the placement leaves through the util/axes.h swap.
 		const opennova::env::Vec3 cam_rf = godot_to_render_float(cam_pos);
 		if (kv.key == "moon") {
 			frame = opennova::env::build_moon_frame(state, cam_rf);
@@ -692,7 +692,7 @@ void Celestial::_update_star_field(const Vector3 &p_light_dir) {
 			continue;
 		}
 		// The instance offsets arrive in the render-float axes
-		// (star_offset_render_float3); place them through the env_axes.h
+		// (star_offset_render_float3); place them through the util/axes.h
 		// swap so the near-light cull's hidden star is the one the viewer
 		// sees beside the bright body.
 		const Vector3 offset(buf[o + 2], buf[o + 1], buf[o]);

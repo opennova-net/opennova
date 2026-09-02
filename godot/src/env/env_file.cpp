@@ -1,4 +1,5 @@
 #include "env/env_file.h"
+#include "util/color_convert.h"
 
 #include "env/mission_environment_overrides.h"
 
@@ -21,18 +22,6 @@
 using namespace godot;
 
 namespace {
-
-Color to_color(const opennova::env::Rgb &rgb) {
-	return Color(rgb.r, rgb.g, rgb.b);
-}
-
-opennova::env::Rgb to_rgb(const Color &color) {
-	return {
-		static_cast<float>(color.r),
-		static_cast<float>(color.g),
-		static_cast<float>(color.b),
-	};
-}
 
 Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 	return Vector3(rgb.r, rgb.g, rgb.b);
@@ -243,15 +232,15 @@ void EnvFile::_sync_env_from_properties() {
 	env.curtime = curtime;
 	env.fog_level = fog_level;
 	env.fog_type = fog_type;
-	env.terrain_rgb = to_rgb(terrain_tint);
-	env.water_rgb = to_rgb(water_color);
+	env.terrain_rgb = opennova::env_rgb_from_color(terrain_tint);
+	env.water_rgb = opennova::env_rgb_from_color(water_color);
 	env.water_height = water_height;
 	env.water_height_set = water_height_set;
-	env.cloud_rgb = to_rgb(cloud_tint);
-	env.vertex_rgb = to_rgb(vertex_tint);
-	env.lightning_rgb = to_rgb(lightning_color);
-	env.ceiling_rgb = to_rgb(ceiling_color);
-	env.floor_rgb = to_rgb(floor_color);
+	env.cloud_rgb = opennova::env_rgb_from_color(cloud_tint);
+	env.vertex_rgb = opennova::env_rgb_from_color(vertex_tint);
+	env.lightning_rgb = opennova::env_rgb_from_color(lightning_color);
+	env.ceiling_rgb = opennova::env_rgb_from_color(ceiling_color);
+	env.floor_rgb = opennova::env_rgb_from_color(floor_color);
 	env.water_murk = water_murk;
 	env.iris_percent = iris_percent;
 	env.iris_center = iris_center;
@@ -283,15 +272,15 @@ void EnvFile::_sync_properties_from_env() {
 	curtime = env.curtime;
 	fog_level = env.fog_level;
 	fog_type = env.fog_type;
-	terrain_tint = to_color(env.terrain_rgb);
-	water_color = to_color(env.water_rgb);
+	terrain_tint = opennova::color_from_env_rgb(env.terrain_rgb);
+	water_color = opennova::color_from_env_rgb(env.water_rgb);
 	water_height = env.water_height;
 	water_height_set = env.water_height_set;
-	cloud_tint = to_color(env.cloud_rgb);
-	vertex_tint = to_color(env.vertex_rgb);
-	lightning_color = to_color(env.lightning_rgb);
-	ceiling_color = to_color(env.ceiling_rgb);
-	floor_color = to_color(env.floor_rgb);
+	cloud_tint = opennova::color_from_env_rgb(env.cloud_rgb);
+	vertex_tint = opennova::color_from_env_rgb(env.vertex_rgb);
+	lightning_color = opennova::color_from_env_rgb(env.lightning_rgb);
+	ceiling_color = opennova::color_from_env_rgb(env.ceiling_rgb);
+	floor_color = opennova::color_from_env_rgb(env.floor_rgb);
 	water_murk = env.water_murk;
 	iris_percent = env.iris_percent;
 	iris_center = env.iris_center;
@@ -538,21 +527,21 @@ Ref<EnvDayPhase> EnvFile::get_day_phase(float p_time) const {
 }
 
 Color EnvFile::double_saturate_color(const Color &p_color) {
-	return to_color(opennova::env::double_saturate(to_rgb(p_color)));
+	return opennova::color_from_env_rgb(opennova::env::double_saturate(opennova::env_rgb_from_color(p_color)));
 }
 
 Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
-	return to_color(opennova::env::combine_terrain_light(to_rgb(p_light), to_rgb(p_sky)));
+	return opennova::color_from_env_rgb(opennova::env::combine_terrain_light(opennova::env_rgb_from_color(p_light), opennova::env_rgb_from_color(p_sky)));
 }
 
 Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
-	return to_color(opennova::env::lit_water_color(to_rgb(p_water), to_rgb(p_light)));
+	return opennova::color_from_env_rgb(opennova::env::lit_water_color(opennova::env_rgb_from_color(p_water), opennova::env_rgb_from_color(p_light)));
 }
 
 Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 		float p_fog_distance, float p_fog_distance_reference) {
-	return to_color(opennova::env::horizon_blend_skyfog(
-			to_rgb(p_fog), to_rgb(p_skyfog),
+	return opennova::color_from_env_rgb(opennova::env::horizon_blend_skyfog(
+			opennova::env_rgb_from_color(p_fog), opennova::env_rgb_from_color(p_skyfog),
 			opennova::io::float_to_fp16_16_nonneg(p_fog_distance),
 			opennova::io::float_to_fp16_16_nonneg(p_fog_distance_reference)));
 }
@@ -561,8 +550,8 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 	// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md] — DIFFUSE(HALF) x TEXTURE under
 	// MODULATE2X, folded to one multiply for the shader.
 	const opennova::env::TerrainTint tint =
-			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
-	return to_color(opennova::env::tile_overlay_tint_factor(tint));
+			opennova::env::terrain_tint_from_rgb(opennova::env_rgb_from_color(p_terrain_tint));
+	return opennova::color_from_env_rgb(opennova::env::tile_overlay_tint_factor(tint));
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {

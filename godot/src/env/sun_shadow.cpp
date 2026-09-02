@@ -116,7 +116,7 @@ void SunShadow::_update_direction() {
 		return;
 	}
 	set_visible(true);
-	// get_light_direction serves the Godot-axes vector: the env_axes x/z
+	// get_light_direction serves the Godot-axes vector: the util/axes.h x/z
 	// swap of the raw getter tuple g = (-Y_bms, Z_bms, X_bms) IS the
 	// (g2, g1, g0) surface->light reduction, applied once at the getter
 	// [orig: Environment_GetLightDirectionFloat @0x57d870;
