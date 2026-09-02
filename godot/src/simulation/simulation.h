@@ -1297,7 +1297,7 @@ public:
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
 	// screen and the WAC bluekills/greenkills builtins read (probe + HUD source).
 	// (engine: runtime/world/ai.h)
-	Dictionary get_round_outcome_debug() const;
+	Ref<RoundOutcome> get_round_outcome_debug() const;
 	// Human-readable AI state name, "?" for the id gaps (engine: runtime/world/ai.h).
 	static String ai_state_name(int p_state);
 	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.

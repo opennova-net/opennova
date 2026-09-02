@@ -56,11 +56,13 @@ func show_screen(sim: Simulation, banner: String, root: ResourceRoot, mount: Nod
 		on_exit: Callable) -> void:
 	if _screen != null:
 		return
-	var outcome: Dictionary = {}
+	var outcome: RoundOutcome = null
 	if sim != null:
 		outcome = sim.get_round_outcome_debug()
-	if outcome.is_empty():
-		outcome = {"ended": true, "winner_team": _winner}
+	if outcome == null:
+		outcome = RoundOutcome.new()
+		outcome.ended = true
+		outcome.winner_team = _winner
 	_screen = MissionEndScreen.new()
 	_screen.name = "MissionEndScreen"
 	_screen.setup(outcome, banner, root)
