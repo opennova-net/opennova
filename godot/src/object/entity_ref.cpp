@@ -30,7 +30,6 @@ void EntityRef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_graphic"), &EntityRef::get_graphic);
 	ClassDB::bind_method(D_METHOD("set_graphic", "graphic"), &EntityRef::set_graphic);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic"), "set_graphic", "get_graphic");
-	ClassDB::bind_method(D_METHOD("has_wire_handle"), &EntityRef::has_wire_handle);
 	ClassDB::bind_static_method("EntityRef",
 			D_METHOD("make", "kind", "index", "bms_id", "item_id", "wire_handle"),
 			&EntityRef::make, DEFVAL(0), DEFVAL(-1));

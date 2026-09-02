@@ -41,7 +41,6 @@ public:
 		PING_NEVER_ATTEMPTED = opennova::kPingNeverAttempted,
 	};
 
-	static bool row_is_locked(const Ref<NovaWorldServerRow> &p_row);
 	static String ping_text(int p_ping);
 	static PackedStringArray row_cells(const Ref<NovaWorldServerRow> &p_row, int p_ping);
 	static TypedArray<NovaWorldServerRow> filter_rows(const TypedArray<NovaWorldServerRow> &p_rows,

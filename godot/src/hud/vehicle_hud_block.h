@@ -32,13 +32,7 @@ public:
 	Vector2i get_driver() const;
 	void set_driver(const Vector2i &p_value);
 	int get_emplace_count() const { return block_.emplace_count; }
-	Vector2i get_emplace_point(int p_index) const;
-	// Appends one authored pair; retail caps the list at 4 (a fifth is dropped).
-	void add_emplace_point(const Vector2i &p_point);
 	int get_seat_count() const { return block_.seat_count; }
-	Vector2i get_seat_point(int p_index) const;
-	// Appends one authored pair; retail caps the list at 8 (a ninth is dropped).
-	void add_seat_point(const Vector2i &p_point);
 
 protected:
 	static void _bind_methods();

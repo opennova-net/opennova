@@ -30,7 +30,6 @@ void ObjectData::_bind_methods() {
 			&ObjectData::load_material_slot_texture);
 	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
-	ClassDB::bind_method(D_METHOD("load_material_texture", "material_index", "texture_index"), &ObjectData::load_material_texture);
 	ClassDB::bind_method(D_METHOD("get_light_count"), &ObjectData::get_light_count);
 	ClassDB::bind_method(D_METHOD("get_light_info", "index"), &ObjectData::get_light_info);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &ObjectData::get_user_point_count);

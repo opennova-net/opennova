@@ -122,7 +122,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
 	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
-	ClassDB::bind_static_method("HudPos", D_METHOD("power_throw_progress_fp16", "held_ticks"), &HudPos::power_throw_progress_fp16);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &HudPos::loading_bar_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);
@@ -631,10 +630,6 @@ int HudPos::heat_fill_span(int p_extent_px, int p_heat) {
 
 bool HudPos::heat_bar_is_horizontal(const Vector2 &p_bar_size) {
 	return opennova::hud::heat_bar_is_horizontal(p_bar_size.x, p_bar_size.y);
-}
-
-int HudPos::power_throw_progress_fp16(int p_held_ticks) {
-	return opennova::hud::power_throw_progress_fp16(p_held_ticks);
 }
 
 int HudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {

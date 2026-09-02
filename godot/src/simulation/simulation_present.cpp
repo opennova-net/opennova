@@ -821,11 +821,6 @@ int64_t Simulation::infantry_anim_flags(int p_state) {
 	return static_cast<int64_t>(opennova::world::kInfantryAnimFlags[p_state]);
 }
 
-bool Simulation::remote_body_state_defers(int64_t p_current_flags, int64_t p_next_flags) {
-	return opennova::world::remote_body_state_defers(
-			static_cast<uint32_t>(p_current_flags), static_cast<uint32_t>(p_next_flags));
-}
-
 int Simulation::get_entity_count() const {
 	return kernel_ ? kernel_->ai.count() : 0;
 }

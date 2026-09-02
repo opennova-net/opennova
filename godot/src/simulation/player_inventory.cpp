@@ -32,7 +32,6 @@ void PlayerInventory::_bind_methods() {
 #undef PLAYER_INVENTORY_PROPERTY
 	ClassDB::bind_method(D_METHOD("get_slots"), &PlayerInventory::get_slots);
 	ClassDB::bind_method(D_METHOD("set_slots", "value"), &PlayerInventory::set_slots);
-	ClassDB::bind_method(D_METHOD("add_slot", "slot"), &PlayerInventory::add_slot);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slots", PROPERTY_HINT_ARRAY_TYPE, "PlayerInventorySlot"),
 			"set_slots", "get_slots");
 }

@@ -36,8 +36,6 @@ public:
 	String get_source_name() const;
 	// The authored seat offset, raw mission components (Z-up).
 	Vector3 get_local() const;
-	// Gunner facing offset vs the vehicle yaw, degrees.
-	int get_yaw_offset() const { return value_.yaw_offset; }
 	bool is_occupied() const { return value_.occupied; }
 };
 

@@ -1218,10 +1218,6 @@ void Simulation::set_ray_debug_recording(bool p_enabled) {
 	kernel_->collision.set_ray_debug_enabled(p_enabled);
 }
 
-bool Simulation::is_ray_debug_recording() const {
-	return kernel_ && kernel_->collision.ray_debug_enabled();
-}
-
 void Simulation::set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks) {
 	if (!kernel_) return;
 	if (p_mask >= 0) {
@@ -1267,10 +1263,6 @@ bool Simulation::native_rays_snapshot(opennova::devtools::RaysSnapshot &out) con
 void Simulation::set_contact_debug_capture(bool p_enabled) {
 	if (!kernel_) return;
 	kernel_->collision.set_contact_debug_enabled(p_enabled);
-}
-
-bool Simulation::is_contact_debug_capture() const {
-	return kernel_ && kernel_->collision.contact_debug_enabled();
 }
 
 void Simulation::set_contact_debug_kind_mask(int64_t p_mask) {

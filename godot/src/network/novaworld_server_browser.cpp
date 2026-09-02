@@ -27,10 +27,6 @@ TypedArray<NovaWorldServerRow> pick(const TypedArray<NovaWorldServerRow> &p_rows
 
 } // namespace
 
-bool NovaWorldServerBrowser::row_is_locked(const Ref<NovaWorldServerRow> &p_row) {
-	return p_row.is_valid() && opennova::browser_row_is_locked(p_row->value());
-}
-
 String NovaWorldServerBrowser::ping_text(int p_ping) {
 	return String(opennova::browser_ping_text(p_ping).c_str());
 }
@@ -96,8 +92,6 @@ void NovaWorldServerBrowser::_bind_methods() {
 	BIND_ENUM_CONSTANT(PING_PENDING);
 	BIND_ENUM_CONSTANT(PING_FAILED);
 	BIND_ENUM_CONSTANT(PING_NEVER_ATTEMPTED);
-	ClassDB::bind_static_method("NovaWorldServerBrowser", D_METHOD("row_is_locked", "row"),
-			&NovaWorldServerBrowser::row_is_locked);
 	ClassDB::bind_static_method("NovaWorldServerBrowser", D_METHOD("ping_text", "ping"),
 			&NovaWorldServerBrowser::ping_text);
 	ClassDB::bind_static_method("NovaWorldServerBrowser", D_METHOD("row_cells", "row", "ping"),

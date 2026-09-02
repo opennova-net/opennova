@@ -32,30 +32,6 @@ void VehicleHudBlock::set_driver(const Vector2i &p_value) {
 	block_.driver_y = p_value.y;
 }
 
-Vector2i VehicleHudBlock::get_emplace_point(int p_index) const {
-	if (p_index < 0 || p_index >= block_.emplace_count) return Vector2i();
-	return Vector2i(block_.emplace_x[p_index], block_.emplace_y[p_index]);
-}
-
-void VehicleHudBlock::add_emplace_point(const Vector2i &p_point) {
-	if (block_.emplace_count >= DEF_VEHICLE_HUD_MAX_EMPLACE) return;
-	block_.emplace_x[block_.emplace_count] = p_point.x;
-	block_.emplace_y[block_.emplace_count] = p_point.y;
-	++block_.emplace_count;
-}
-
-Vector2i VehicleHudBlock::get_seat_point(int p_index) const {
-	if (p_index < 0 || p_index >= block_.seat_count) return Vector2i();
-	return Vector2i(block_.seat_x[p_index], block_.seat_y[p_index]);
-}
-
-void VehicleHudBlock::add_seat_point(const Vector2i &p_point) {
-	if (block_.seat_count >= DEF_VEHICLE_HUD_MAX_SEATS) return;
-	block_.seat_x[block_.seat_count] = p_point.x;
-	block_.seat_y[block_.seat_count] = p_point.y;
-	++block_.seat_count;
-}
-
 void VehicleHudBlock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sid"), &VehicleHudBlock::get_sid);
 	ClassDB::bind_method(D_METHOD("set_sid", "value"), &VehicleHudBlock::set_sid);
@@ -76,12 +52,8 @@ void VehicleHudBlock::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "emplace_count", PROPERTY_HINT_NONE, "",
 						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
 			"", "get_emplace_count");
-	ClassDB::bind_method(D_METHOD("get_emplace_point", "index"), &VehicleHudBlock::get_emplace_point);
-	ClassDB::bind_method(D_METHOD("add_emplace_point", "point"), &VehicleHudBlock::add_emplace_point);
 	ClassDB::bind_method(D_METHOD("get_seat_count"), &VehicleHudBlock::get_seat_count);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seat_count", PROPERTY_HINT_NONE, "",
 						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
 			"", "get_seat_count");
-	ClassDB::bind_method(D_METHOD("get_seat_point", "index"), &VehicleHudBlock::get_seat_point);
-	ClassDB::bind_method(D_METHOD("add_seat_point", "point"), &VehicleHudBlock::add_seat_point);
 }

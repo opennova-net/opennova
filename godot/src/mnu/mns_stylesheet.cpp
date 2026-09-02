@@ -304,7 +304,6 @@ void MnsStyleSheet::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_variable", "name", "value"), &MnsStyleSheet::set_variable);
 	ClassDB::bind_method(D_METHOD("remove_variable", "name"), &MnsStyleSheet::remove_variable);
-	ClassDB::bind_method(D_METHOD("set_variables", "variables"), &MnsStyleSheet::set_variables);
 	ClassDB::bind_method(D_METHOD("clear"), &MnsStyleSheet::clear);
 
 	ClassDB::bind_method(D_METHOD("get_entries"), &MnsStyleSheet::get_entries);

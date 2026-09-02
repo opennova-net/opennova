@@ -384,10 +384,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(GlowSpawn);
 	GDREGISTER_CLASS(ModelLightSpawn);
-	GDREGISTER_CLASS(GlowSpawn);
-	GDREGISTER_CLASS(ModelLightSpawn);
-	GDREGISTER_CLASS(GlowSpawn);
-	GDREGISTER_CLASS(ModelLightSpawn);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);

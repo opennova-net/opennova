@@ -47,10 +47,6 @@ public:
 	String get_graphic() const { return graphic_; }
 	void set_graphic(const String &p_graphic) { graphic_ = p_graphic; }
 
-	// True for a wire-spawned model (a joiner replica, or a wire row the
-	// local listen session presents).
-	bool has_wire_handle() const { return wire_handle_ >= 0; }
-
 	// Fixture factory: the placed-identity core plus the wire handle.
 	static Ref<EntityRef> make(int p_kind, int p_index, int p_bms_id, int p_item_id,
 			int p_wire_handle);

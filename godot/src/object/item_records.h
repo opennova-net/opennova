@@ -126,7 +126,6 @@ public:
 	// ItemDatabase.EMPLACEMENT_ADDEWEAP / _G / _C.
 	int get_kind() const { return static_cast<int>(value_.kind); }
 	int get_stored_slot() const { return value_.stored_slot; }
-	bool is_anchor_found() const { return value_.anchor_found; }
 	int get_angle_count() const { return value_.angle_count; }
 	int get_down_limit_bam() const { return value_.down_limit_bam; }
 	int get_up_limit_bam() const { return value_.up_limit_bam; }
@@ -152,7 +151,6 @@ class ItemSeatCard : public RefCounted {
 	bool mount_config_valid_ = false;
 	int mount_config_ = 0;
 	TypedArray<EntityCardSeat> seats_;
-	PackedVector3Array armory_points_;
 	TypedArray<ItemSeatAttachmentRow> emplacement_attachments_;
 
 protected:
@@ -179,8 +177,6 @@ public:
 	int get_mount_config() const { return mount_config_; }
 	// The seat rows (static data: never occupied).
 	TypedArray<EntityCardSeat> get_seats() const { return seats_; }
-	// "armory*" userpoint locals (mission space, Z-up).
-	PackedVector3Array get_armory_points() const { return armory_points_; }
 	TypedArray<ItemSeatAttachmentRow> get_emplacement_attachments() const { return emplacement_attachments_; }
 };
 
