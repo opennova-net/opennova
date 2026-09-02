@@ -136,8 +136,7 @@ static func configure_ambient_player(
 	player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
 	if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
 		player.bus = bus
-	var base_pitch := float(descriptor.get("base_pitch", 1.0))
-	player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
+	player.pitch_scale = effective_base_pitch(descriptor)
 
 
 ## Spawn the looping ambient voices for the named sound set at `world_pos`,
@@ -290,8 +289,7 @@ func spawn_oneshot_2d(parent: Node, name: String, bus: StringName) -> AudioStrea
 		var player := AudioStreamPlayer.new()
 		if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
 			player.bus = bus
-		var base_pitch := float(member.get("base_pitch", 1.0))
-		player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
+		player.pitch_scale = effective_base_pitch(member)
 		var volume := int(member.get("volume", 255))
 		player.volume_db = volume_db_from_255(volume)
 		player.stream = stream
@@ -335,13 +333,19 @@ func _make_player(stream: AudioStreamWAV, member: Dictionary, bus: StringName, l
 	# so a missing/renamed bus can never silence the voice.
 	if bus != StringName() and AudioServer.get_bus_index(bus) >= 0:
 		player.bus = bus
-	var base_pitch := float(member.get("base_pitch", 1.0))
-	player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
+	player.pitch_scale = effective_base_pitch(member)
 	player.volume_db = volume_db_from_255(vol255)
 	return player
 
 
 ## dB for a 0..255 engine channel volume; 0 -> hard silent (the engine's law).
+## An LWF member's / layer descriptor's base pitch as the player plays it: an
+## unauthored or degenerate value (<= 0.01) plays at unity.
+static func effective_base_pitch(member: Dictionary) -> float:
+	var base_pitch := float(member.get("base_pitch", 1.0))
+	return base_pitch if base_pitch > 0.01 else 1.0
+
+
 static func volume_db_from_255(vol255: int) -> float:
 	return SoundSelector.volume_db_from_255(vol255)
 

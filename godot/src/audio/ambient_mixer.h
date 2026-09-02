@@ -23,8 +23,9 @@ class Simulation;
 // Simulation natively (tests inject a Callable override — the typed seam).
 //
 // The curve family is exposed as statics so the GDScript sound bank keeps its
-// public seams (calc_distance_volume / emitter_layer_volume /
-// crossfade_volume_byte / time_of_day_region) as one-line delegates.
+// public seams (calc_distance_volume / emitter_layer_volume) as one-line
+// delegates; the time-of-day region and the crossfade byte are consumed
+// natively (ctest ambient_mixer pins them) and are not bound.
 class AmbientMixer : public RefCounted {
 	GDCLASS(AmbientMixer, RefCounted)
 
@@ -84,9 +85,9 @@ public:
 			int64_t falloff_q16, int member_vol, int clamp_vol);
 	static int emitter_layer_volume(int64_t dist_q16, int falloff_u, int min_u,
 			int vol_byte, int member_vol, int clamp_vol);
-	static int crossfade_volume_byte(float blend);
-	// { "region": int, "adjacent": int, "blend": float }
-	static Dictionary time_of_day_region(float hours);
+	// A 16.16 word (the mix rows' pitch_q16, the emitter registrations) as a
+	// float factor (io/fixed.h kFp16One).
+	static float q16_to_float(int q16);
 	// The global sound-bank load chain in the engine's slot order
 	// (audio/bank_chain.h): the expansion pair when one is active, then the
 	// four static banks. The shell iterates this instead of re-minting the

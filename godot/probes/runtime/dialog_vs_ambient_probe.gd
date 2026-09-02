@@ -61,9 +61,9 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		if is_instance_valid(container):
 			container.queue_free())
 	if not ambient:
-		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still
-		# load, zero ambient candidates resolve: the "ambient disabled" arm.
-		audio.set_resolution_strategy(MissionAudio.STRATEGY_TARGET_ID)
+		# Banks + .DBF still load, zero ambient candidates resolve: the
+		# "ambient disabled" arm.
+		audio.set_ambient_markers_enabled(false)
 	var stats := audio.setup(mission, mission_name, container)
 	ctx.log("setup: %s" % str(stats.to_dict()))
 	data["setup"] = stats.to_dict()
