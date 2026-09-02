@@ -61,18 +61,6 @@ bool ascii_istarts_with(std::string_view value, std::string_view prefix) {
 			ascii_iequals(value.substr(0, prefix.size()), prefix);
 }
 
-std::string_view trim(std::string_view value) {
-	while (!value.empty() &&
-	       std::isspace(static_cast<unsigned char>(value.front())) != 0) {
-		value.remove_prefix(1);
-	}
-	while (!value.empty() &&
-	       std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-		value.remove_suffix(1);
-	}
-	return value;
-}
-
 void write_u32(CharAttrChallengeRow &row, std::size_t offset, uint32_t value) {
 	row[offset + 0] = static_cast<uint8_t>(value);
 	row[offset + 1] = static_cast<uint8_t>(value >> 8);
@@ -140,9 +128,9 @@ void write_attributes(
 }
 
 int character_section_index(std::string_view line) {
-	line = trim(line);
+	line = opennova::strutil::trim_view(line);
 	if (line.size() < 3 || line.front() != '[' || line.back() != ']') return -1;
-	std::string_view name = trim(line.substr(1, line.size() - 2));
+	std::string_view name = opennova::strutil::trim_view(line.substr(1, line.size() - 2));
 	constexpr std::string_view prefix = "CHARACTER";
 	if (!ascii_istarts_with(name, prefix)) return -1;
 	name.remove_prefix(prefix.size());
@@ -194,7 +182,7 @@ bool parse_charattr_challenge_table(
 			}
 		}
 
-		line = trim(line);
+		line = opennova::strutil::trim_view(line);
 		if (line.empty() || ascii_istarts_with(line, "//")) continue;
 		if (line.front() == '[') {
 			const int index = character_section_index(line);
@@ -214,15 +202,15 @@ bool parse_charattr_challenge_table(
 
 		const std::size_t equals = line.find('=');
 		if (equals == std::string_view::npos) continue;
-		const std::string_view key = trim(line.substr(0, equals));
-		std::string_view value = trim(line.substr(equals + 1));
+		const std::string_view key = opennova::strutil::trim_view(line.substr(0, equals));
+		std::string_view value = opennova::strutil::trim_view(line.substr(equals + 1));
 		// ConfigFile_ReadKeyValue's sscanf value conversion ends at ';'.
 		const std::size_t semicolon = value.find(';');
 		if (semicolon != std::string_view::npos)
-			value = trim(value.substr(0, semicolon));
+			value = opennova::strutil::trim_view(value.substr(0, semicolon));
 		const std::size_t comment = value.find("//");
 		if (comment != std::string_view::npos)
-			value = trim(value.substr(0, comment));
+			value = opennova::strutil::trim_view(value.substr(0, comment));
 		if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
 			value = value.substr(1, value.size() - 2);
 

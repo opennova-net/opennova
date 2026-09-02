@@ -1,4 +1,5 @@
 #include <formats/aip/aip.h>
+#include <base/io/strutil.h>
 
 #include <cstdlib>
 #include <string>
@@ -7,13 +8,6 @@
 namespace opennova::aip {
 
 namespace {
-
-std::string ascii_lower(const std::string &s) {
-    std::string out = s;
-    for (char &c : out)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    return out;
-}
 
 // atoi-shape numeric read: leading sign + digits, junk tails ignored.
 int32_t parse_int(const std::string &s) {
@@ -57,7 +51,7 @@ int32_t climb_fixed(const std::string &s) {
 // The WEAPON_* flag token loop, shared by primary_flags/secondary_flags.
 void apply_weapon_flags(uint32_t &flags, const std::vector<std::string> &toks) {
     for (std::size_t k = 2; k < toks.size(); ++k) {
-        const std::string t = ascii_lower(toks[k]);
+        const std::string t = strutil::to_lower(toks[k]);
         if (t == "weapon_slow") flags |= kWeaponSlow;
         else if (t == "weapon_turret") flags |= kWeaponTurret;
         else if (t == "weapon_fast") flags |= kWeaponFast;
@@ -70,7 +64,7 @@ void apply_weapon_flags(uint32_t &flags, const std::vector<std::string> &toks) {
 // COMBAT_FLAGS-only in retail and simply never appear in evade lines.
 void apply_mode_flags(uint32_t &flags, const std::vector<std::string> &toks) {
     for (std::size_t k = 2; k < toks.size(); ++k) {
-        const std::string t = ascii_lower(toks[k]);
+        const std::string t = strutil::to_lower(toks[k]);
         if (t == "follow_wp") flags |= 0x1;
         else if (t == "no_action") flags |= 0x2;
         else if (t == "flee") flags |= 0x4;
@@ -122,11 +116,11 @@ Profile parse_profile(const uint8_t *text, size_t size) {
         }
         i = end + 1;
         if (toks.size() < 2) continue;
-        const std::string key = ascii_lower(toks[0]);
+        const std::string key = strutil::to_lower(toks[0]);
         const std::string &value = toks[1];
 
         if (key == "type") {
-            const std::string v = ascii_lower(value);
+            const std::string v = strutil::to_lower(value);
             if (v == "helo") prof.type = 1;
             else if (v == "ground") prof.type = 2;
             else if (v == "organic") prof.type = 3;
