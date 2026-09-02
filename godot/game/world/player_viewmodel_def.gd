@@ -49,11 +49,9 @@ static func from_weapon_def(def: WeaponDef) -> PlayerViewmodelDef:
 	out.gfx1 = def.gfx1
 	out.gfx3 = def.gfx3
 	out.animadm = def.animadm
-	var pos := def.pos
-	out.pos_units = Vector3(pos[0], pos[1], pos[2])
-	out.rot_bias_deg = Vector3(pos[3], pos[4], pos[5])
-	var tpos := def.tpos
-	out.tpos_units = Vector3(tpos[0], tpos[1], tpos[2])
+	out.pos_units = def.pos_units
+	out.rot_bias_deg = def.rot_bias_deg
+	out.tpos_units = def.tpos_units
 	out.renderfov_h_deg = def.renderfov
 	out.flags = def.flags
 	out.scope_max_mag = def.scope_max_mag

@@ -178,6 +178,18 @@ void WeaponDef::set_tpos(const PackedFloat32Array &p_value) { set_six(value_.tpo
 PackedFloat32Array WeaponDef::get_error() const { return six(value_.error); }
 void WeaponDef::set_error(const PackedFloat32Array &p_value) { set_six(value_.error, p_value); }
 
+Vector3 WeaponDef::get_pos_units() const {
+	return Vector3(value_.pos[0], value_.pos[1], value_.pos[2]);
+}
+
+Vector3 WeaponDef::get_rot_bias_deg() const {
+	return Vector3(value_.pos[3], value_.pos[4], value_.pos[5]);
+}
+
+Vector3 WeaponDef::get_tpos_units() const {
+	return Vector3(value_.tpos[0], value_.tpos[1], value_.tpos[2]);
+}
+
 Vector2i WeaponDef::get_hudclipgfx_offset() const {
 	return Vector2i(value_.hudclipgfx_offset[0], value_.hudclipgfx_offset[1]);
 }
@@ -278,6 +290,18 @@ void WeaponDef::_bind_methods() {
 	WEAPON_DEF_PROP(Variant::PACKED_FLOAT32_ARRAY, error);
 	WEAPON_DEF_PROP(Variant::STRING, hudclipgfx_texture);
 	WEAPON_DEF_PROP(Variant::VECTOR2I, hudclipgfx_offset);
+	ClassDB::bind_method(D_METHOD("get_pos_units"), &WeaponDef::get_pos_units);
+	ClassDB::bind_method(D_METHOD("get_rot_bias_deg"), &WeaponDef::get_rot_bias_deg);
+	ClassDB::bind_method(D_METHOD("get_tpos_units"), &WeaponDef::get_tpos_units);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "pos_units", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
+			"", "get_pos_units");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "rot_bias_deg", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
+			"", "get_rot_bias_deg");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "tpos_units", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
+			"", "get_tpos_units");
 	WEAPON_DEF_PROP(Variant::STRING, hudrndgfx_texture);
 	WEAPON_DEF_PROP(Variant::VECTOR2I, hudrndgfx_offset);
 	WEAPON_DEF_PROP(Variant::VECTOR3I, hudrndgfx_layout);

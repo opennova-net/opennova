@@ -323,6 +323,14 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 	return static_cast<int>(selected_count_);
 }
 
+int64_t LightScene::owner_id_for_wire(int64_t p_wire_handle) {
+	return p_wire_handle >= 0 ? (WIRE_OWNER_TAG | (p_wire_handle & WIRE_HANDLE_MASK)) : 0;
+}
+
+int64_t LightScene::owner_id_for_static_source(int64_t p_source_index) {
+	return p_source_index >= 0 ? (STATIC_OWNER_TAG | p_source_index) : 0;
+}
+
 int LightScene::corona_texture_size() {
 	return opennova::renderer::kCoronaTextureSize;
 }
@@ -1174,6 +1182,13 @@ void LightScene::_bind_methods() {
 			&LightScene::get_last_corona_buffer);
 	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_size"),
 			&LightScene::corona_texture_size);
+	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_wire", "wire_handle"),
+			&LightScene::owner_id_for_wire);
+	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_static_source", "source_index"),
+			&LightScene::owner_id_for_static_source);
+	BIND_CONSTANT(WIRE_OWNER_TAG);
+	BIND_CONSTANT(STATIC_OWNER_TAG);
+	BIND_CONSTANT(WIRE_HANDLE_MASK);
 	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgba8"),
 			&LightScene::corona_texture_rgba8);
 	ClassDB::bind_method(D_METHOD("collect_terrain_light_rows_for_bounds",

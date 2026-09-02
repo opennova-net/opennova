@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
 
 #include <formats/def/def.h>
@@ -164,6 +165,11 @@ public:
 	PackedFloat32Array get_error() const;
 	void set_error(const PackedFloat32Array &p_value);
 	Vector2i get_hudclipgfx_offset() const;
+	// The authored POS six as presentation reads it -- xyz in mission units
+	// and the rotation bias in degrees -- and TPOS's xyz (the ADS variant).
+	Vector3 get_pos_units() const;
+	Vector3 get_rot_bias_deg() const;
+	Vector3 get_tpos_units() const;
 	void set_hudclipgfx_offset(const Vector2i &p_value);
 	Vector2i get_hudrndgfx_offset() const;
 	void set_hudrndgfx_offset(const Vector2i &p_value);

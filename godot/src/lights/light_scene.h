@@ -123,6 +123,16 @@ public:
 	static int corona_texture_size();
 	static PackedByteArray corona_texture_rgba8();
 
+	// Light owner ids for the two identity domains that are not Godot
+	// ObjectIDs: a decoded wire handle (16-bit, zero valid) and a static
+	// source index, each tagged into a nonzero range disjoint from ObjectIDs
+	// so zero stays retail's unowned/world sentinel. 0 for a negative input.
+	static constexpr int64_t WIRE_OWNER_TAG = int64_t(1) << 48;
+	static constexpr int64_t STATIC_OWNER_TAG = int64_t(2) << 48;
+	static constexpr int64_t WIRE_HANDLE_MASK = 0xFFFF;
+	static int64_t owner_id_for_wire(int64_t p_wire_handle);
+	static int64_t owner_id_for_static_source(int64_t p_source_index);
+
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
 	// [orig: RenderSlot_UpdateEntityLight @0x5d6a30, see
