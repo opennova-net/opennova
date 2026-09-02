@@ -1,6 +1,7 @@
 // ObjectData — geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
 #include "object/object_data_internal.h"
+#include "object/model_inspection_records.h"
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 
@@ -186,19 +187,19 @@ Array ObjectData::get_collision_volumes() const {
 	return out;
 }
 
-Dictionary ObjectData::get_render_lod_info(int p_lod_index) const {
-	Dictionary info;
+Ref<RenderLodInfo> ObjectData::get_render_lod_info(int p_lod_index) const {
 	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
-		return info;
+		return Ref<RenderLodInfo>();
 	}
 	const ThreediLod &lod = source_model.lods[p_lod_index];
-	info["render_function"] = from_native(lod.model_type);
-	info["threshold"] = lod.lod_threshold;
-	info["part_count"] = static_cast<int>(lod.render_object_count);
-	info["render_object_count"] = static_cast<int>(lod.render_object_count);
-	info["strip_count"] = static_cast<int>(lod.strip_count);
-	info["vertex_count"] = static_cast<int>(lod.vertices.count);
-	info["index_count"] = static_cast<int>(lod.indices.count);
+	Ref<RenderLodInfo> info;
+	info.instantiate();
+	info->set_render_function(from_native(lod.model_type));
+	info->set_threshold(static_cast<int>(lod.lod_threshold));
+	info->set_part_count(static_cast<int>(lod.render_object_count));
+	info->set_strip_count(static_cast<int>(lod.strip_count));
+	info->set_vertex_count(static_cast<int>(lod.vertices.count));
+	info->set_index_count(static_cast<int>(lod.indices.count));
 	return info;
 }
 

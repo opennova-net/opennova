@@ -1246,7 +1246,7 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	assert_not_null(data, "fixture data loads")
 	if data == null:
 		return
-	var lod_count := int(data.get_summary().get("lod_count", 0))
+	var lod_count := data.get_lod_count()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(

@@ -58,7 +58,7 @@ func test_authored_lod_switch_swaps_the_level_onto_the_retained_slots() -> void:
 	add_child_autofree(model)
 	model.set_authored_lod_enabled(true)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the pump fixture carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -97,7 +97,7 @@ func test_preview_lod_switch_keeps_the_single_lod_memory_contract() -> void:
 	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1)
 	if lod_count <= 1:
 		return
@@ -124,7 +124,7 @@ func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> voi
 	add_child_autofree(parent)
 	parent.set_authored_lod_enabled(true)
 	parent.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(parent.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := parent.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the parent carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -165,7 +165,7 @@ func test_level_bound_visual_follows_the_owner_switch() -> void:
 	add_child_autofree(model)
 	model.set_authored_lod_enabled(true)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1)
 	if lod_count <= 1:
 		return
@@ -196,7 +196,7 @@ func test_attachment_takes_its_owner_level_clamped_to_its_own_count() -> void:
 	add_child_autofree(owner)
 	owner.set_authored_lod_enabled(true)
 	owner.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(owner.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := owner.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the owner carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -229,7 +229,7 @@ func test_attachment_takes_its_owner_level_clamped_to_its_own_count() -> void:
 	single.position = Vector3(0.0, 0.0, 50.0)
 	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
 	assert_eq(single.get_active_lod(),
-			mini(lod_count - 1, int(single.get_object_data().get_summary().get("lod_count", 1)) - 1),
+			mini(lod_count - 1, single.get_object_data().get_lod_count() - 1),
 			"the owner's level clamps to the attachment's own count")
 
 	# A freed owner reads as level 0.

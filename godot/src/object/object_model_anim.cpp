@@ -6,6 +6,7 @@
 // script-double eval fallbacks are gone.
 
 #include "object/object_model.h"
+#include "object/model_inspection_records.h"
 #include "object/model_user_point.h"
 
 #include <godot_cpp/core/math.hpp>
@@ -750,17 +751,26 @@ void ObjectModel::clear_part_anims() {
 	part_anim_tick_accum_s_ = 0.0;
 }
 
-Dictionary ObjectModel::get_active_part_anims() const {
-	Dictionary result;
+TypedArray<PartAnimChannelState> ObjectModel::get_active_part_anims() const {
+	TypedArray<PartAnimChannelState> result;
 	for (const KeyValue<String, PartAnimChannel> &kv : part_anims_) {
-		Dictionary entry;
-		entry["register"] = kv.key;
-		entry["dir"] = kv.value.dir;
-		entry["rate"] = kv.value.rate;
-		entry["value"] = kv.value.value;
-		result[kv.key] = entry;
+		result.push_back(get_active_part_anim(kv.key));
 	}
 	return result;
+}
+
+Ref<PartAnimChannelState> ObjectModel::get_active_part_anim(const String &p_register) const {
+	const PartAnimChannel *channel = part_anims_.getptr(p_register);
+	if (channel == nullptr) {
+		return Ref<PartAnimChannelState>();
+	}
+	Ref<PartAnimChannelState> row;
+	row.instantiate();
+	row->set_register(p_register);
+	row->set_dir(channel->dir);
+	row->set_rate(channel->rate);
+	row->set_value(channel->value);
+	return row;
 }
 
 // Advance at retail's fixed 16 ms cadence with wrapping signed-dword ADD/SUB.
@@ -839,18 +849,19 @@ void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks,
 	body_pose_dirty_ = true;
 }
 
-Dictionary ObjectModel::get_weapon_channel() const {
-	Dictionary out;
+Ref<WeaponChannelState> ObjectModel::get_weapon_channel() const {
 	if (wpn_key_.is_empty() && wpn_phase_ticks_ < 0) {
-		return out;
+		return Ref<WeaponChannelState>();
 	}
-	out["key"] = wpn_key_;
-	out["phase_ticks"] = wpn_phase_ticks_;
-	out["prev_key"] = wpn_prev_key_;
-	out["prev_phase_ticks"] = wpn_prev_phase_ticks_;
-	out["blend_weight"] = wpn_blend_weight_;
-	out["variant"] = wpn_variant_;
-	out["prev_variant"] = wpn_prev_variant_;
+	Ref<WeaponChannelState> out;
+	out.instantiate();
+	out->set_key(wpn_key_);
+	out->set_phase_ticks(wpn_phase_ticks_);
+	out->set_prev_key(wpn_prev_key_);
+	out->set_prev_phase_ticks(wpn_prev_phase_ticks_);
+	out->set_blend_weight(wpn_blend_weight_);
+	out->set_variant(wpn_variant_);
+	out->set_prev_variant(wpn_prev_variant_);
 	return out;
 }
 
@@ -922,14 +933,15 @@ Array ObjectModel::get_aim_overlay() const {
 	return out;
 }
 
-Dictionary ObjectModel::get_body_blend() const {
-	Dictionary out;
+Ref<BodyBlendState> ObjectModel::get_body_blend() const {
 	if (body_blend_source_key_.is_empty() && body_blend_weight_ >= 1.0f) {
-		return out;
+		return Ref<BodyBlendState>();
 	}
-	out["source_key"] = body_blend_source_key_;
-	out["source_time"] = body_blend_source_time_;
-	out["weight"] = body_blend_weight_;
+	Ref<BodyBlendState> out;
+	out.instantiate();
+	out->set_source_key(body_blend_source_key_);
+	out->set_source_time(static_cast<float>(body_blend_source_time_));
+	out->set_weight(body_blend_weight_);
 	return out;
 }
 

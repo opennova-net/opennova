@@ -28,15 +28,15 @@ func _open(path: String) -> ObjectData:
 
 func _controlled_track(data: ObjectData, local_ordinal: int) -> Dictionary:
 	for anim_index in range(data.get_part_anim_count(0)):
-		var anim: Dictionary = data.get_part_anim_info(0, anim_index)
+		var anim := data.get_part_anim_info(0, anim_index)
 		for track_name in TRACK_NAMES:
-			var track: Dictionary = anim.get(track_name, {})
-			if int(track.get("control", 0)) == 113 and \
-					int(track.get("control_param", -1)) == local_ordinal:
+			var track := anim.get_track(track_name)
+			if track.control == 113 and \
+					track.control_param == local_ordinal:
 				return {
 					"anim_index": anim_index,
 					"track_name": track_name,
-					"part_index": int(anim.get("transform_as", -1)),
+					"part_index": anim.transform_as,
 				}
 	return {}
 
@@ -151,15 +151,15 @@ func test_wave_styles_receive_the_loader_resolved_phase_ordinal() -> void:
 	var track_name := String(pristine_track.get("track_name", ""))
 
 	var normal := _open(SYN_YAW_STYLE114)
-	var normal_track: Dictionary = normal.get_part_anim_info(0, anim_index).get(track_name, {})
-	assert_eq(int(normal_track.get("control", 0)), 114,
+	var normal_track := normal.get_part_anim_info(0, anim_index).get_track(track_name)
+	assert_eq(normal_track.control, 114,
 			"the normal fixture authors the yaw track as style 114")
 
 	var patched := _open(SYN_CTRL1_LOD_FRAC_YAW_STYLE114)
 	assert_eq(_register_name(patched, 1), "LOD_FRAC",
 			"the patched fixture authors CTRL 1 as LOD_FRAC")
-	var patched_track: Dictionary = patched.get_part_anim_info(0, anim_index).get(track_name, {})
-	assert_eq(int(patched_track.get("control", 0)), 114,
+	var patched_track := patched.get_part_anim_info(0, anim_index).get_track(track_name)
+	assert_eq(patched_track.control, 114,
 			"the patched fixture authors the yaw track as style 114")
 
 	var part := int(pristine_track.get("part_index", -1))
@@ -186,10 +186,10 @@ func test_light_controls_share_the_case_insensitive_global_bus() -> void:
 
 func test_material_case_aliases_collapse_in_dictionary_order() -> void:
 	var data := _open(SYN_MTRL0_RGBGEN113_REG1)
-	var material: Dictionary = data.get_material_info(0)
-	assert_eq(int(material.get("rgb_gen_style", -1)), 113,
+	var material := data.get_material_info(0)
+	assert_eq(material.rgb_gen_style, 113,
 			"the fixture authors MTRL 0 with a register-driven RGB generator")
-	assert_eq(int(material.get("rgb_gen_reg", -1)), 1)
+	assert_eq(material.rgb_gen_reg, 1)
 
 	var high: Vector3 = data.eval_material_runtime(0, 0, {
 		"EWEAP_GUNYAW": 0,

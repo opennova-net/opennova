@@ -2,6 +2,7 @@
 // classification, and texture resolution through a resource root or loose
 // source directory.
 #include "object/object_data_internal.h"
+#include "object/model_inspection_records.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -179,69 +180,68 @@ Array ObjectData::get_materials() const {
 	return result;
 }
 
-Dictionary ObjectData::get_material_info(int p_index) const {
-	Dictionary info;
+Ref<MaterialInfo> ObjectData::get_material_info(int p_index) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
-		return info;
+		return Ref<MaterialInfo>();
 	}
 	const ThreediMaterial &mat = source_model.materials[p_index];
-	info["name"] = from_native(mat.shader_name);
-	info["shader_tag"] = from_native(mat.shader_name);
-	info["alpha_test"] = static_cast<int>(mat.alpha_test_value_byte);
-	info["alpha_invert"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0;
-	info["two_sided"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) != 0;
-	info["alpha_test_enabled"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0;
-	info["is_glass"] = mat.is_glass != 0;
-	info["emissive"] = mat.emissive_type == THREEDI_EMISSIVE_FULL;
-	info["diffuse_a"] = String();
-	info["detail_a"] = String();
-	info["normal_a"] = String();
+	Ref<MaterialInfo> info;
+	info.instantiate();
+	info->set_name(from_native(mat.shader_name));
+	info->set_shader_tag(from_native(mat.shader_name));
+	info->set_alpha_test(static_cast<int>(mat.alpha_test_value_byte));
+	info->set_alpha_invert((mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0);
+	info->set_two_sided((mat.material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) != 0);
+	info->set_alpha_test_enabled((mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0);
+	info->set_is_glass(mat.is_glass != 0);
+	info->set_emissive(mat.emissive_type == THREEDI_EMISSIVE_FULL);
+	// The first live (non-animated-frame) texture of each slot family.
 	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
 		const ThreediMaterialTexture &tex = mat.textures[i];
 		if ((tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0 && tex.frame != 0) {
 			continue;
 		}
-		if (tex.slot == THREEDI_TEX_SLOT_DIFFUSE && String(info["diffuse_a"]).is_empty()) {
-			info["diffuse_a"] = from_native(tex.name);
-		} else if (tex.slot == THREEDI_TEX_SLOT_DETAIL && String(info["detail_a"]).is_empty()) {
-			info["detail_a"] = from_native(tex.name);
+		if (tex.slot == THREEDI_TEX_SLOT_DIFFUSE && info->get_diffuse_a().is_empty()) {
+			info->set_diffuse_a(from_native(tex.name));
+		} else if (tex.slot == THREEDI_TEX_SLOT_DETAIL && info->get_detail_a().is_empty()) {
+			info->set_detail_a(from_native(tex.name));
 		} else if ((tex.slot == THREEDI_TEX_SLOT_NORMAL || tex.slot == THREEDI_TEX_SLOT_NORMAL_B) &&
-				String(info["normal_a"]).is_empty()) {
-			info["normal_a"] = from_native(tex.name);
+				info->get_normal_a().is_empty()) {
+			info->set_normal_a(from_native(tex.name));
 		}
 	}
-	info["reflect_color"] = Color(mat.reflect_color[0], mat.reflect_color[1], mat.reflect_color[2], mat.reflect_color[3]);
-	info["rgb_gen_style"] = static_cast<int>(mat.rgb_gen.style);
-	info["rgb_gen_rate"] = mat.rgb_gen.rate;
-	info["rgb_gen_phase"] = mat.rgb_gen.phase;
-	info["rgb_gen_start_color"] = Color(mat.rgb_gen.start_color[0], mat.rgb_gen.start_color[1], mat.rgb_gen.start_color[2], mat.rgb_gen.start_color[3]);
-	info["rgb_gen_end_color"] = Color(mat.rgb_gen.end_color[0], mat.rgb_gen.end_color[1], mat.rgb_gen.end_color[2], mat.rgb_gen.end_color[3]);
-	info["rgb_gen_reg"] = mat.rgb_gen.reg;
-	info["rgb_gen_reg_name"] = control_register_name_for(source_model, mat.rgb_gen.reg);
-	info["alpha_gen_style"] = static_cast<int>(mat.alpha_gen.style);
-	info["alpha_gen_rate"] = mat.alpha_gen.rate;
-	info["alpha_gen_phase"] = mat.alpha_gen.phase;
-	info["alpha_gen_start"] = static_cast<int>(mat.alpha_gen.start);
-	info["alpha_gen_end"] = static_cast<int>(mat.alpha_gen.end);
-	info["alpha_gen_reg"] = mat.alpha_gen.reg;
-	info["alpha_gen_reg_name"] = control_register_name_for(source_model, mat.alpha_gen.reg);
-	info["uv_u_style"] = static_cast<int>(mat.u_params.style);
-	info["uv_u_rate"] = mat.u_params.gen_rate;
-	info["uv_u_phase"] = mat.u_params.phase;
-	info["uv_u_start"] = mat.u_params.start;
-	info["uv_u_end"] = mat.u_params.end;
-	info["uv_u_reg"] = mat.u_params.reg;
-	info["uv_u_reg_name"] = control_register_name_for(source_model, mat.u_params.reg);
-	info["uv_v_style"] = static_cast<int>(mat.v_params.style);
-	info["uv_v_rate"] = mat.v_params.gen_rate;
-	info["uv_v_phase"] = mat.v_params.phase;
-	info["uv_v_start"] = mat.v_params.start;
-	info["uv_v_end"] = mat.v_params.end;
-	info["uv_v_reg"] = mat.v_params.reg;
-	info["uv_v_reg_name"] = control_register_name_for(source_model, mat.v_params.reg);
-	info["anim_frames"] = static_cast<int>(mat.animation.num_frames);
-	info["anim_type"] = static_cast<int>(mat.animation.animation_type);
-	info["anim_frame_time"] = static_cast<int>(mat.animation.cycle_frame_time);
+	info->set_reflect_color(Color(mat.reflect_color[0], mat.reflect_color[1], mat.reflect_color[2], mat.reflect_color[3]));
+	info->set_rgb_gen_style(static_cast<int>(mat.rgb_gen.style));
+	info->set_rgb_gen_rate(mat.rgb_gen.rate);
+	info->set_rgb_gen_phase(mat.rgb_gen.phase);
+	info->set_rgb_gen_start_color(Color(mat.rgb_gen.start_color[0], mat.rgb_gen.start_color[1], mat.rgb_gen.start_color[2], mat.rgb_gen.start_color[3]));
+	info->set_rgb_gen_end_color(Color(mat.rgb_gen.end_color[0], mat.rgb_gen.end_color[1], mat.rgb_gen.end_color[2], mat.rgb_gen.end_color[3]));
+	info->set_rgb_gen_reg(mat.rgb_gen.reg);
+	info->set_rgb_gen_reg_name(control_register_name_for(source_model, mat.rgb_gen.reg));
+	info->set_alpha_gen_style(static_cast<int>(mat.alpha_gen.style));
+	info->set_alpha_gen_rate(mat.alpha_gen.rate);
+	info->set_alpha_gen_phase(mat.alpha_gen.phase);
+	info->set_alpha_gen_start(static_cast<int>(mat.alpha_gen.start));
+	info->set_alpha_gen_end(static_cast<int>(mat.alpha_gen.end));
+	info->set_alpha_gen_reg(mat.alpha_gen.reg);
+	info->set_alpha_gen_reg_name(control_register_name_for(source_model, mat.alpha_gen.reg));
+	info->set_uv_u_style(static_cast<int>(mat.u_params.style));
+	info->set_uv_u_rate(mat.u_params.gen_rate);
+	info->set_uv_u_phase(mat.u_params.phase);
+	info->set_uv_u_start(mat.u_params.start);
+	info->set_uv_u_end(mat.u_params.end);
+	info->set_uv_u_reg(mat.u_params.reg);
+	info->set_uv_u_reg_name(control_register_name_for(source_model, mat.u_params.reg));
+	info->set_uv_v_style(static_cast<int>(mat.v_params.style));
+	info->set_uv_v_rate(mat.v_params.gen_rate);
+	info->set_uv_v_phase(mat.v_params.phase);
+	info->set_uv_v_start(mat.v_params.start);
+	info->set_uv_v_end(mat.v_params.end);
+	info->set_uv_v_reg(mat.v_params.reg);
+	info->set_uv_v_reg_name(control_register_name_for(source_model, mat.v_params.reg));
+	info->set_anim_frames(static_cast<int>(mat.animation.num_frames));
+	info->set_anim_type(static_cast<int>(mat.animation.animation_type));
+	info->set_anim_frame_time(static_cast<int>(mat.animation.cycle_frame_time));
 	return info;
 }
 
