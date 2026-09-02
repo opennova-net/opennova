@@ -110,22 +110,22 @@ func _clear_pending_session() -> void:
 # (net/npruntime/join_character_profile.h via AvatarDatabase); `selection` is
 # the PLAYER_INFO profile (PlayerCharacterSelectionState's shape).
 static func character_join_profile_from_database(
-		db: AvatarDatabase, selection: Dictionary = {}) -> Dictionary:
+		db: AvatarDatabase, selection: Dictionary = {}) -> CharacterJoinProfile:
 	if db == null:
-		return {}
+		return null
 	return db.character_join_profile(selection)
 
 
 func _build_join_character_profile(
-		resource_root: ResourceRoot, selection: Dictionary) -> Dictionary:
+		resource_root: ResourceRoot, selection: Dictionary) -> CharacterJoinProfile:
 	if resource_root == null:
-		return {}
+		return null
 	var db := AvatarDatabase.new()
 	if db.load_from_resource_root(resource_root, "Avatars.def") != OK \
 			or not db.is_loaded():
 		push_warning("NetSessionDrive: Avatars.def not loaded for LAN join profile (%s)"
 				% db.get_last_error())
-		return {}
+		return null
 	return character_join_profile_from_database(db, selection)
 
 

@@ -196,7 +196,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 				avatar_db, _world._local_player_spawn_loadout)
 	else:
 		push_warning("GameWorld: Avatars.def unavailable; players draw their item model")
-		_world._local_character_profile = {}
+		_world._local_character_profile = null
 	_world._panm_clock.sample_frame()
 	_world._placer.set_panm_clock(_world._panm_clock)
 	var options := {}
@@ -255,7 +255,7 @@ func unload() -> void:
 		_world._env.set_underwater_view(false)
 		_world._env.set_underwater_overlay_view(false)
 	_world._local_player_spawn_loadout = {}
-	_world._local_character_profile = {}
+	_world._local_character_profile = null
 	_clear_mission_tile_info()
 	_world._device_frame._restore_idle_frame_clear_color()
 	# Point-light output is a RenderingServer global, so retire it before the
@@ -706,8 +706,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# The placer's item database (item_id -> anim_def), so each soldier grounds off its own
 	# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
 	opts.item_db = _world._placer.get_item_db() if _world._placer != null else null
-	if not _world._local_character_profile.is_empty():
-		opts.local_character_profile = _world._local_character_profile.duplicate(true)
+	opts.local_character_profile = _world._local_character_profile
 	# Serve-and-play hosts run the listen server AND spawn their own player (ADR 0011/0012, net-re
 	# §5.2b/§5.38). A DEDICATED host (config "dedicated") serves WITHOUT a local player — same listen
 	# server, just no own-player spawn; main_game skips the HUD when there is no local player. Diagnostic

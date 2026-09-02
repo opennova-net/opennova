@@ -108,7 +108,7 @@ func setup(mission: MissionData, container: Node,
 	# same profile is what a joiner uploads through ClientAuth.
 	# [orig: apply_session_settings_to_globals @0x551500;
 	#  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
-	if not options.local_character_profile.is_empty():
+	if options.local_character_profile != null:
 		_sim.set_local_character_profile(options.local_character_profile)
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
@@ -129,7 +129,7 @@ func setup(mission: MissionData, container: Node,
 		var needs_join_connection := not _sim.is_joiner()
 		if needs_join_connection and options.resource_root != null:
 			_sim.load_charattr_challenge(options.resource_root)
-		if needs_join_connection and not options.join_character_profile.is_empty():
+		if needs_join_connection and options.join_character_profile != null:
 			_sim.set_join_character_profile(options.join_character_profile)
 		if needs_join_connection and not join_target.integrity_profile.is_empty() and not \
 				_sim.set_join_integrity_profile(join_target.integrity_profile):

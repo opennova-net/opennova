@@ -95,24 +95,29 @@ func _make_avatar_driver(include_preview := false) -> MenuDriver:
 	return MenuDriverFixture.driver_over(self, _doc_from_xml(_avatar_screen_xml(include_preview)), "player.mnu")
 
 
+func _character_ids(profile: CharacterJoinProfile) -> Array[int]:
+	return [profile.get_character_id(0), profile.get_character_id(1)]
+
+
+func _player_classes(profile: CharacterJoinProfile) -> Array[int]:
+	return [profile.get_player_class(0), profile.get_player_class(1)]
+
+
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var db := _load_db()
 	var profile := NetSessionDrive.character_join_profile_from_database(db)
-	var ids: Array = profile.get("character_ids", [])
-	var classes: Array = profile.get("player_classes", [])
-	var avatars: Array = profile.get("avatars", [])
 
 	# The first combo of each alignment in table order (N00 D00 combo 1; N04 D00
 	# combo 1). The shipped table yields 0x8207 there (its first evil entry is N07).
-	assert_eq(ids, [0x0200, 0x8204],
+	assert_eq(_character_ids(profile), [0x0200, 0x8204],
 			"fresh profile selects the first good/evil avatar-table entries")
-	assert_eq(classes, [8, 8],
+	assert_eq(_player_classes(profile), [8, 8],
 			"fresh retail profile is rifleman on both sides")
 	# SYN_HEAD_BOONIE (N00 D00 combo 1) carries voice 1; N04 D00 combo 1 wears
 	# SYN_HEAD_11, voice 3 (tests/fixtures/minimal_avatars_gen.cpp).
-	assert_eq(avatars, [1, 3],
+	assert_eq([profile.get_avatar(0), profile.get_avatar(1)], [1, 3],
 			"zero voice overrides resolve through each selected combo's head voice")
-	assert_eq(int(profile.get("team_request", 0)), -1,
+	assert_eq(profile.team_request, -1,
 			"fresh profile asks the companion to assign a side")
 
 
@@ -131,17 +136,15 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 		],
 	}
 	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
-	var ids: Array = profile.get("character_ids", [])
-	var avatars: Array = profile.get("avatars", [])
 	var combo := db.get_combo(0, 0, 1)
 
-	assert_eq(int(ids[0]), 0x0400,
+	assert_eq(profile.get_character_id(0), 0x0400,
 			"nat 0 / div 0 / combo id 2 packs into bits 0..14")
-	assert_eq(int(ids[1]), 0x8204,
+	assert_eq(profile.get_character_id(1), 0x8204,
 			"choosing side A does not erase side B's profile selection")
-	assert_eq(int(avatars[0]), combo.get_head().voice,
+	assert_eq(profile.get_avatar(0), combo.get_head().voice,
 			"the selected combo supplies its retail avatar byte")
-	assert_eq(profile.get("player_classes", []), [6, 6],
+	assert_eq(_player_classes(profile), [6, 6],
 			"retail commits the chosen class to both side blocks")
 
 
@@ -171,9 +174,9 @@ func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
 		],
 	}
 	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
-	assert_eq(profile.get("character_ids", []), [0x0400, 0x8407],
+	assert_eq(_character_ids(profile), [0x0400, 0x8407],
 			"assignment to either team receives that side's persisted character")
-	assert_eq(profile.get("player_classes", []), [5, 9],
+	assert_eq(_player_classes(profile), [5, 9],
 			"an untouched loaded profile retains its two retail class bytes")
 
 

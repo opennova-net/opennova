@@ -27,13 +27,12 @@ var playable := false
 var host_session: HostSessionConfig = null
 ## Co-op LAN JOINER dial target — the non-authority client.
 var join_target: JoinTarget = null
-## The host's two per-side character selections (the PLAYER_INFO profile shape;
-## FFI Dictionary for Simulation.set_local_character_profile). Empty = keep the
-## sim's shipped defaults.
-var local_character_profile: Dictionary = {}
-## The joiner's profile-to-wire projection (FFI Dictionary for
-## Simulation.set_join_character_profile). Empty = none staged.
-var join_character_profile: Dictionary = {}
+## The host's two per-side character selections projected to the wire
+## (Simulation.set_local_character_profile). Null = keep the sim's shipped defaults.
+var local_character_profile: CharacterJoinProfile = null
+## The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
+## Null = none staged.
+var join_character_profile: CharacterJoinProfile = null
 ## Host-session spawn-name list; empty falls back to [mission_name].
 var spawn_names := PackedStringArray()
 

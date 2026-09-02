@@ -116,6 +116,27 @@ int main() {
 		check(p.player_classes[1] == 9, "class 9 is kept");
 	}
 
+	// The wire projection: ids and bytes narrowed, a side request outside
+	// {0, 1} is the absent 0xFF.
+	{
+		JoinCharacterProfile p;
+		p.character_ids[0] = 0x0400;
+		p.character_ids[1] = 0x8207;
+		p.player_classes[0] = 6;
+		p.player_classes[1] = 300;
+		p.avatars[0] = 3;
+		p.avatars[1] = -1;
+		const opennova::np::CharacterJoinVars vars = character_join_vars(p);
+		check(vars.char_id[0] == 0x0400 && vars.char_id[1] == 0x8207, "packed ids ride as-is");
+		check(vars.char_class[0] == 6 && vars.char_class[1] == 0xFF, "class bytes clamp to a byte");
+		check(vars.avatar[0] == 3 && vars.avatar[1] == 0, "avatar bytes clamp to a byte");
+		check(vars.team_request == 0xFF, "team_request -1 is the absent 0xFF");
+		p.team_request = 1;
+		check(character_join_vars(p).team_request == 1, "a side request in {0, 1} rides");
+		p.team_request = 2;
+		check(character_join_vars(p).team_request == 0xFF, "a side request past 1 is absent");
+	}
+
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return EXIT_FAILURE;

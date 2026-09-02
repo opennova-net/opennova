@@ -22,6 +22,7 @@ class AvatarDiagnosticRow;
 class AvatarDivisionRow;
 class AvatarNationalityRow;
 class AvatarPartRow;
+class CharacterJoinProfile;
 class ObjectModel;
 class ResourceRoot;
 
@@ -154,9 +155,8 @@ public:
 	// The joiner's profile-to-wire projection (net/npruntime/
 	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape
 	// (side_profiles [blue, red] each carrying nationality/division/combo tree
-	// indices and player_class). Returns character_ids / player_classes /
-	// avatars (two each) and team_request -1.
-	Dictionary character_join_profile(const Dictionary &p_selection = Dictionary()) const;
+	// indices and player_class).
+	Ref<CharacterJoinProfile> character_join_profile(const Dictionary &p_selection = Dictionary()) const;
 	// Native projection consumed by Simulation's portable character-traits
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.

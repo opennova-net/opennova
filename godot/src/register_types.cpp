@@ -57,6 +57,7 @@
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
 #include "object/avatar_records.h"
+#include "object/character_join_profile.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
 #include "hud/hud_overlay.h"
@@ -175,6 +176,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AvatarNationalityRow);
 	GDREGISTER_CLASS(AvatarDivisionRow);
 	GDREGISTER_CLASS(AvatarDiagnosticRow);
+	GDREGISTER_CLASS(CharacterJoinProfile);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);

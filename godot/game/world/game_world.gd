@@ -191,7 +191,7 @@ var _light_director: EffectLightDirector
 var _local_player_spawn_loadout: Dictionary = {}
 # The local player's two per-side character selections + classes projected for
 # the sim (the listen host's own type-2 connection / a joiner's ClientAuth).
-var _local_character_profile: Dictionary = {}
+var _local_character_profile: CharacterJoinProfile = null
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
