@@ -27,9 +27,8 @@ struct RaysSnapshot {
 	bool valid = false;
 	uint64_t logic_tick = 0;
 	bool recording = false;   // CollisionWorld ray capture enabled
-	bool view_shown = false;  // the shell's 3D ray view is built (show_rays)
 	uint32_t category_mask = kRayCategoryMaskAll; // bit i = draw category i
-	int32_t ttl_ticks = 0;           // the view's fade window
+	int32_t ttl_ticks = 0;           // the capture's fade window
 	RaysCategoryCount categories[kRayCategoryCount];
 };
 

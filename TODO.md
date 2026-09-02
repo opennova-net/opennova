@@ -110,6 +110,17 @@ hardening, and project health. Divergences from the original engine belong in
       retired `DebugSnapshotWriter` produced for `pose_replay_probe` /
       `terrain_seam_probe`), and the `PerfTimeline` ring. Data the shell alone
       has crosses as VALUE slots or typed records, never Godot objects.
+- [ ] World-space debug overlays with no ImGui home (the GDScript F3 views and
+      their `DebugViewSet` owner were retired 2026-09-02, ADR 0039 §6
+      amendment; the AI / Rays / Physics windows keep their data panes and
+      capture controls but draw nothing in-world): AI routes/labels/targets/
+      rings, collision boxes + hit flashes, hitbox meshes, portal faces, ray
+      lines, round trails, skeleton bones, user-point markers, particle effect
+      boxes. Each returns as an engine window (or a draw layer of its window)
+      when wanted; the native feeds that survive are
+      `Simulation.get_hitbox_debug()` / `get_round_debug()` and the ray /
+      contact capture rings behind `native_rays_snapshot` /
+      `native_physics_snapshot`.
 - [ ] Stats window info cells not carried over from the retired page (they read
       Godot objects at refresh): Performance draws/objs/prims/nodes on the Render
       row, the a11y flag on Flush tail, effects live count,

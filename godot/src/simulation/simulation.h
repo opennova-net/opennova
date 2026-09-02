@@ -71,15 +71,11 @@ class EndRoundStatistics;
 class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
-class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
-class CollisionDebugReport; // the F3 collision overlay payload (simulation/collision_debug_report.h)
 class DebugPickCard;     // the F3 entity picker's card (simulation/debug_pick_card.h)
 class WacState;          // the WAC VM state card (simulation/debug_cards.h)
 class NativePoseStats;   // the native pose-path health card (simulation/debug_cards.h)
 class DestructionDebugCard; // the per-entity destruction gate card (simulation/debug_cards.h)
 class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
-class RayDebugReport;    // the F3 rays view channel (simulation/ray_debug_report.h)
-class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlusion_portal_report.h)
 }
 
 #include "wac/wac_program.h"
@@ -1489,31 +1485,10 @@ public:
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
 
-	// Read-only collision-world geometry for the F3 "Show collision" debug view:
-	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw
-	//   deg), volumes: [ { type, min_x..max_z (section-local units), corners:
-	//   PackedVector3Array[8] (Godot world; index bit0/1/2 = max x/y/z in
-	//   mission axes) } ] } ], player: { valid, position, points
-	//   (PackedVector3Array[3]), radii (PackedFloat32Array[3]), capsule_bottom,
-	//   capsule_top, foot_clearance } }. Volumes use the SAME fixed-point path
-	// the resolver queries (CollisionWorld::debug_instances -> target_view ->
-	// collision_matrix_from_heading): the drawn boxes ARE what movement
-	// resolves against. Capped to instances within 150u of the local player
-	// (first 128 with no player spawned). While the contact capture is armed
-	// the report adds "hits" (stride-6 [target, age, kind, x, y, z], mask+TTL
-	// filtered) + "hit_stride"/"hit_ttl"/"tick" — the overlay's flash channel.
-	Ref<CollisionDebugReport> get_collision_debug() const;
-
-	// The AI overlay's per-frame payload as an AiDebugReport
-	// (simulation/ai_debug_report.h): per-brain rows, nav channels, groups and
-	// the system counters. `valid` false without a kernel and on a joiner (the
-	// tooling AI pool never joins the decoded view); an unloaded kernel reports
-	// valid with no rows (the collision-debug contract). Aim directions are
-	// Godot-space unit vectors computed natively — GDScript does no BAM math.
-	Ref<AiDebugReport> get_ai_debug() const;
-	// Native (unbound) form for the F3 AI window's pushed record: the same
-	// engine join as the engine struct, no Variant round-trip. False without a
-	// kernel or on a joiner.
+	// The F3 AI window's pushed record (native, unbound): the ONE engine join,
+	// world::inspect::ai_debug_report, as the engine struct with no Variant
+	// round-trip. False without a kernel or on a joiner (the tooling AI pool
+	// never joins the decoded view).
 	bool native_ai_debug(opennova::world::inspect::AiDebugReport &r_out) const;
 	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
 	// { tick, events: [ { tick, kind, kind_name, material, section, face,
@@ -1523,16 +1498,14 @@ public:
 	// every resolved outcome, face-miss fly-ons included.
 	Ref<RoundDebugReport> get_round_debug() const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
-	// draw filter) behind the F3 "Show rays" view and Rays window; counts ride
+	// draw filter) behind the F3 Rays window; counts + filter state ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
-	Ref<RayDebugReport> get_ray_debug() const;
 	void set_ray_debug_recording(bool p_enabled);
 	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
 	void clear_ray_debug();
 	bool native_rays_snapshot(opennova::devtools::RaysSnapshot &out) const;
 	// Engine contact-debug capture (the CollisionWorld hit/contact ring) behind
-	// the collision view's hit flashes and the F3 Physics window; the flashes
-	// ride get_collision_debug's "hits" channel, counts ride
+	// the F3 Physics window; counts + capture state ride
 	// native_physics_snapshot (ADR 0042 d6). Mask setter clamps to the kinds.
 	void set_contact_debug_capture(bool p_enabled);
 	void set_contact_debug_kind_mask(int64_t p_mask);
@@ -1585,17 +1558,6 @@ public:
 	// Returns the round slot, -1 on bad ammo/full pool.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
 	                      const String &p_ammo_name);
-
-	// World-space portal-face geometry for the F3 "Show portal faces" 3D view:
-	// { buildings: [ { bms_id, pos, visible, records: [ { type, section_a,
-	//   section_b, pos, radius, glow, segments (PackedVector3Array a,b pairs) } ] } ] }.
-	// Segments are each record's boundary outline — the OFAC edge words whose
-	// low-15-bit shared-edge identity appears once (interior edges pair up and
-	// drop, the same cancellation identity the occluder pass uses) — transformed
-	// through the SAME render_matrix_from_pose path the engine's frame runs, then
-	// mapped to Godot space. p_anchor (Godot) + p_range_units bound the sweep
-	// per horizontal axis (range <= 0 = everything), capped at 128 buildings.
-	Ref<OcclusionPortalReport> get_occlusion_portal_debug(const Vector3 &p_anchor, double p_range_units) const;
 
 	// Local-player blink state (engine: runtime/world/collision.h). The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;

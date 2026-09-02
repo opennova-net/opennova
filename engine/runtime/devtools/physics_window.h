@@ -1,11 +1,8 @@
-// The Physics window (ADR 0042 d6): the collision debug view's control
-// surface over the PhysicsSnapshot the embedder pushes — the "Show collision"
-// overlay toggle (wireframe boxes for what movement actually resolves
-// against), the contact capture that flashes those boxes on hits, per-kind
-// counts (held in ring / lifetime total) with draw-filter checkboxes, and
-// Clear — leaving typed PhysicsRequests the embedder drains (mask/clear/
-// capture into the Simulation contact-debug seam, the view toggle out to the
-// shell, which owns building the 3D view).
+// The Physics window (ADR 0042 d6): the engine contact-debug capture's
+// control surface over the PhysicsSnapshot the embedder pushes — the capture
+// arm, per-kind counts (held in ring / lifetime total) with draw-filter
+// checkboxes, and Clear — leaving typed PhysicsRequests the embedder drains
+// into the Simulation contact-debug seam.
 //
 // The window holds only the pushed value record — it never reaches into a
 // live World. Visibility-armed: while hidden it drops its snapshot and the
@@ -62,7 +59,6 @@ private:
 	std::deque<PhysicsRequest> requests_;
 	// Edit state mirrored from every push (these controls display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
-	bool view_edit_ = false;
 	bool capture_edit_ = false;
 	uint32_t mask_edit_ = 0x3F;
 };

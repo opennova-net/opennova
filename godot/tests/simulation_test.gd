@@ -519,35 +519,6 @@ func test_demo_mission_promotes() -> void:
 	sim.free()
 
 
-func test_ai_debug_payload_reports_brains_headless() -> void:
-	# The AI overlay's bulk accessor (godot/game/debug/ai_debug_view.gd's
-	# feed): {"valid": false} without a kernel; over the demo mission it
-	# reports every brain in Godot space with the engine join's shape.
-	var empty := Simulation.new()
-	var empty_debug := empty.get_ai_debug()
-	assert_true(empty_debug.valid,
-			"a fresh sim has a kernel (the collision-debug contract)")
-	assert_eq(empty_debug.rows.size(), 0,
-			"...but no brains before a load")
-	empty.free()
-
-	var sim := Simulation.new()
-	sim.build_demo_mission()
-	var debug := sim.get_ai_debug()
-	assert_true(debug.valid, "a loaded world reports")
-	var rows := debug.rows
-	assert_eq(rows.size(), 2, "one overlay row per brain")
-	var row: AiDebugRow = rows[0]
-	assert_eq(row.state, 16, "the routed organic's state rides along")
-	assert_eq(row.state_name, "GROUND_FOLLOWWP")
-	assert_true(row.pos is Vector3, "positions land as Godot vectors")
-	assert_true(row.aim_dir is Vector3, "aim_dir is precomputed natively")
-	assert_eq(debug.brain_count, 2)
-	assert_true(debug.channels is Array, "route channels ride along")
-	assert_true(debug.groups is Array, "group rows ride along")
-	sim.free()
-
-
 func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
 	var sim := Simulation.new()
 	assert_false(sim.is_runtime_profiling_enabled(),

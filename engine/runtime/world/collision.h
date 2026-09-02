@@ -374,8 +374,8 @@ inline constexpr uint32_t kTouchChangeTeam = 0x200;
 inline constexpr uint32_t kTouchVehicleLoadout = 0x400;
 inline constexpr uint32_t kTouchFlagGrounded = 0x800;
 
-// Collision-face flag bits [orig: face tests @0x4e5073-family; the GDScript
-// debug view mirrors these in hitbox_debug_view.gd].
+// Collision-face flag bits [orig: face tests @0x4e5073-family]; the F3 hitbox
+// report (godot/src/simulation/hitbox_debug_report.h) carries them per face.
 inline constexpr uint32_t kFaceFlagBothSides = 0x1;
 inline constexpr uint32_t kFaceFlagNeverHit = 0x100;
 inline constexpr uint32_t kFaceFlagDoubleSided = 0x800;

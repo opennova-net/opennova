@@ -4,7 +4,6 @@
 // on its visibility edges and formats a drained window, and the ImGui ABI
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
 #include <runtime/devtools/ai_debug_snapshot.h>
-#include <runtime/devtools/ai_view_request.h>
 #include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/entities_window.h>
@@ -33,7 +32,6 @@
 #include <utility>
 
 using opennova::devtools::AiDebugSnapshot;
-using opennova::devtools::AiViewRequest;
 using opennova::devtools::AiWindow;
 using opennova::devtools::CaptureWindow;
 using opennova::devtools::DebugRequest;
@@ -1390,7 +1388,6 @@ void test_rays_window_formats_the_pushed_record() {
 	snapshot.valid = true;
 	snapshot.logic_tick = 620;
 	snapshot.recording = true;
-	snapshot.view_shown = true;
 	snapshot.category_mask = 0x7FFF;
 	snapshot.ttl_ticks = 93;
 	snapshot.categories[0].name = "Uncategorized";
@@ -1427,8 +1424,8 @@ void test_rays_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL,
-// clear and view-toggle requests in order and drains exactly once.
+// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL
+// and clear requests in order and drains exactly once.
 void test_rays_request_queue() {
 	GameDevTools tools;
 	RaysRequest request;
@@ -1436,7 +1433,6 @@ void test_rays_request_queue() {
 	tools.rays_window().enqueue_request({RaysRequest::Kind::SetCategoryMask, 0x0003});
 	tools.rays_window().enqueue_request({RaysRequest::Kind::SetTtlTicks, 310});
 	tools.rays_window().enqueue_request({RaysRequest::Kind::Clear, 0});
-	tools.rays_window().enqueue_request({RaysRequest::Kind::SetViewShown, 1});
 	CHECK(tools.take_rays_request(request) &&
 					request.kind == RaysRequest::Kind::SetCategoryMask && request.a == 0x0003,
 			"the mask request round-trips first");
@@ -1445,15 +1441,12 @@ void test_rays_request_queue() {
 			"the TTL request follows");
 	CHECK(tools.take_rays_request(request) && request.kind == RaysRequest::Kind::Clear,
 			"the clear request follows");
-	CHECK(tools.take_rays_request(request) &&
-					request.kind == RaysRequest::Kind::SetViewShown && request.a == 1,
-			"the view toggle carries its state for the shell");
 	CHECK(!tools.take_rays_request(request), "the queue drains exactly once");
 }
 
 // The Physics window formats per-kind contact rows from the pushed record,
-// mirrors the capture/view state into its edit controls, and drops everything
-// on the visibility close.
+// mirrors the capture state into its edit controls, and drops everything on
+// the visibility close.
 void test_physics_window_formats_the_pushed_record() {
 	NullBackend backend;
 	GameDevTools tools;
@@ -1467,9 +1460,7 @@ void test_physics_window_formats_the_pushed_record() {
 	snapshot.valid = true;
 	snapshot.logic_tick = 620;
 	snapshot.capturing = true;
-	snapshot.view_shown = true;
 	snapshot.kind_mask = 0x3F;
-	snapshot.boxes_drawn = 42;
 	snapshot.recent = 3;
 	snapshot.kinds[0].name = "Projectile hit";
 	snapshot.kinds[0].held = 12;
@@ -1505,8 +1496,8 @@ void test_physics_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear,
-// capture and view-toggle requests in order and drains exactly once.
+// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear
+// and capture requests in order and drains exactly once.
 void test_physics_request_queue() {
 	GameDevTools tools;
 	PhysicsRequest request;
@@ -1514,7 +1505,6 @@ void test_physics_request_queue() {
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetKindMask, 0x0005});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::Clear, 0});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, 1});
-	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetViewShown, 1});
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetKindMask && request.a == 0x0005,
 			"the mask request round-trips first");
@@ -1523,9 +1513,6 @@ void test_physics_request_queue() {
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetCaptureEnabled && request.a == 1,
 			"the capture arm carries its state");
-	CHECK(tools.take_physics_request(request) &&
-					request.kind == PhysicsRequest::Kind::SetViewShown && request.a == 1,
-			"the view toggle carries its state for the shell");
 	CHECK(!tools.take_physics_request(request), "the queue drains exactly once");
 }
 
@@ -1535,9 +1522,6 @@ AiDebugSnapshot ai_snapshot() {
 	AiDebugSnapshot snapshot;
 	snapshot.valid = true;
 	snapshot.logic_tick = 62;
-	snapshot.overlay.available = true;
-	snapshot.overlay.master = true;
-	snapshot.overlay.routes = false;
 	opennova::world::inspect::AiGroupRow group;
 	group.id = 5;
 	group.alert = 2;
@@ -1627,46 +1611,6 @@ void test_ai_window_formats_the_pushed_snapshot() {
 	CHECK(!tools.needs_ai_debug(), "...and the pushes stop on the same edge");
 }
 
-// The overlay toggle strip: requests-out / pushed-truth. A toggle queues one
-// typed request and flips no local state; the checkbox state reads the pushed
-// overlay block; availability follows the snapshot.
-void test_ai_window_toggle_requests() {
-	NullBackend backend;
-	GameDevTools tools;
-	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
-	tools.pass().set_open(true);
-	AiWindow &ai = tools.ai_window();
-	ai.open = true;
-
-	CHECK(!ai.overlay_available(), "no snapshot: the strip is unavailable");
-	tools.set_ai_debug(ai_snapshot());
-	CHECK(ai.overlay_available(), "the pushed overlay state arms the strip");
-	CHECK(ai.element_enabled(AiViewRequest::Element::Master), "master reads pushed truth");
-	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes), "routes reads pushed truth (off)");
-	CHECK(ai.element_enabled(AiViewRequest::Element::Labels), "labels default on");
-
-	AiViewRequest request;
-	CHECK(!tools.take_ai_view_request(request), "no request before a toggle");
-	ai.toggle_element(AiViewRequest::Element::Routes, true);
-	ai.toggle_element(AiViewRequest::Element::Master, false);
-	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes),
-			"a toggle changes no local state (the next push carries the truth)");
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Routes && request.enabled,
-			"the first toggle drains first");
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Master && !request.enabled,
-			"the second follows in order");
-	CHECK(!tools.take_ai_view_request(request), "the queue drains exactly once");
-
-	// Requests queued before a close still drain (the drain is unconditional).
-	ai.toggle_element(AiViewRequest::Element::Rings, false);
-	tools.pass().set_open(false);
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Rings,
-			"a queued toggle survives the visibility close");
-}
-
 // The deep pane rides the Entities selection and the same detail push the
 // Entity Properties window receives; the widened needs_entity_detail keeps
 // the card flowing for the AI window alone.
@@ -1750,7 +1694,6 @@ int main() {
 	test_environment_window_formats_the_pushed_record();
 	test_environment_request_queue();
 	test_ai_window_formats_the_pushed_snapshot();
-	test_ai_window_toggle_requests();
 	test_ai_window_detail_pane_follows_the_selection();
 	test_rays_window_formats_the_pushed_record();
 	test_rays_request_queue();

@@ -180,10 +180,6 @@ bool GameDevTools::needs_ai_debug() const {
 	return pass_.is_open() && ai_window_->open;
 }
 
-bool GameDevTools::take_ai_view_request(AiViewRequest &request) {
-	return ai_window_->take_request(request);
-}
-
 void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
 	rays_window_->set_snapshot(snapshot);
 }

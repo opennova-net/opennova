@@ -2,7 +2,6 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -78,28 +77,6 @@ public:
 	void select_entity(int p_handle);
 	int selected_entity_handle() const;
 
-	// The AI window's overlay-state readback: a shell-installed Callable
-	// (() -> Dictionary {available, overlay, labels, routes, targets, rings})
-	// polled into each AI snapshot so the F3 toggle strip shows the world
-	// view's pushed truth (MCP flips the same debug-control rows). An invalid
-	// Callable reads as unavailable. The toggles themselves leave through the
-	// "ai_view_request" signal the shell session applies to the world.
-	void set_ai_view_state_provider(const Callable &p_provider);
-
-	// The Rays window's shell seam: the window's "Show rays" checkbox queues a
-	// view toggle the SHELL drains per frame (the GDScript debug-view set owns
-	// building the 3D ray view) — -1 none pending, else 0/1 — and the shell
-	// mirrors the live toggle state back so the checkbox stays honest.
-	int take_ray_view_toggle();
-	void set_ray_view_shown(bool p_shown);
-
-	// The Physics window's shell seam (the same shape): the window's "Show
-	// collision" checkbox queues a view toggle the shell drains per frame,
-	// and the shell mirrors the live toggle plus the overlay's drawable count
-	// back so the checkbox and the "boxes drawn" line stay honest.
-	int take_physics_view_toggle();
-	void set_physics_view_state(bool p_shown, int p_boxes_drawn);
-
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
 	// "Reset layout" menu item's seam, and what a probe asks for before it
@@ -158,7 +135,6 @@ private:
 	void apply_weapon_requests();
 	void apply_environment_requests();
 	void push_environment_snapshot();
-	void apply_ai_view_requests();
 	void push_ai_debug();
 	void apply_rays_requests();
 	void push_rays_snapshot();
@@ -188,14 +164,8 @@ private:
 	bool weapon_records_live_ = false;
 	int64_t last_environment_push_ms_ = -1;
 	int64_t last_ai_push_ms_ = -1;
-	Callable ai_view_state_provider_;
 	int64_t last_rays_push_ms_ = -1;
-	bool ray_view_shown_ = false;      // the shell-mirrored show_rays state
-	int pending_ray_view_toggle_ = -1; // -1 none, else 0/1 for the shell
 	int64_t last_physics_push_ms_ = -1;
-	bool physics_view_shown_ = false;      // the shell-mirrored show_collision state
-	int physics_boxes_drawn_ = 0;          // the overlay's live drawable count
-	int pending_physics_view_toggle_ = -1; // -1 none, else 0/1 for the shell
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

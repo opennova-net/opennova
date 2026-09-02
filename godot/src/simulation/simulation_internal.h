@@ -297,16 +297,11 @@ inline bool resolve_client_eweap_attachment_pose(
 			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
 
-// Coordinate converters shared by the debug views and present getters.
+// Coordinate converter shared by the debug reports and present getters.
 // Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	return Vector3(static_cast<float>(p[0] / 65536.0), static_cast<float>(p[2] / 65536.0),
 	               static_cast<float>(-p[1] / 65536.0));
-}
-// Render float world -> Godot world: the render frame is Godot with X/Z
-// swapped ((-my, mz, mx)/65536 == (gz, gy, gx)), so the inverse is the same swap.
-inline Vector3 godot_from_render_float3(const float p[3]) {
-	return Vector3(p[2], p[1], p[0]);
 }
 
 } // namespace sim_internal

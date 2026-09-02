@@ -83,14 +83,10 @@
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
-#include "simulation/ai_debug_report.h"
 #include "simulation/destruction_events.h"
-#include "simulation/collision_debug_report.h"
 #include "simulation/debug_cards.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
-#include "simulation/occlusion_portal_report.h"
-#include "simulation/ray_debug_report.h"
 #include "simulation/round_debug_report.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h"
@@ -283,26 +279,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HitboxDebugEntity);
 	GDREGISTER_CLASS(HitboxDebugOrganic);
 	GDREGISTER_CLASS(HitboxDebugReport);
-	GDREGISTER_CLASS(AiDebugRow);
-	GDREGISTER_CLASS(AiDebugChannel);
-	GDREGISTER_CLASS(AiDebugGroup);
-	GDREGISTER_CLASS(AiDebugReport);
-	GDREGISTER_CLASS(CollisionDebugVolume);
-	GDREGISTER_CLASS(CollisionDebugInstance);
-	GDREGISTER_CLASS(CollisionProbeBox);
-	GDREGISTER_CLASS(CollisionDebugPlayer);
-	GDREGISTER_CLASS(CollisionDebugReport);
 	GDREGISTER_CLASS(DebugPickCard);
 	GDREGISTER_CLASS(WacState);
 	GDREGISTER_CLASS(NativePoseStats);
 	GDREGISTER_CLASS(DestructionDebugCard);
 	GDREGISTER_CLASS(RoundDebugEvent);
 	GDREGISTER_CLASS(RoundDebugReport);
-	GDREGISTER_CLASS(RayDebugCount);
-	GDREGISTER_CLASS(RayDebugReport);
-	GDREGISTER_CLASS(OcclusionPortalRecord);
-	GDREGISTER_CLASS(OcclusionPortalBuilding);
-	GDREGISTER_CLASS(OcclusionPortalReport);
 	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(WeaponKitEntry);
 	GDREGISTER_CLASS(PlayerInventorySlot);
