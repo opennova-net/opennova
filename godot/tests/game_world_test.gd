@@ -2345,10 +2345,10 @@ func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
 	# The arms carry their authored raw triplet for the rig's per-submit FP
 	# writer (Avatar_SetArmsCamoCtrl runs before each arms submit, never at
 	# load); the gun part is never a camo target.
-	assert_eq(String(arms.get_meta("avatar_part", "")), "arms")
-	assert_eq(Vector3i(arms.get_meta("avatar_camo", Vector3i())), Vector3i(17, 34, 51),
+	assert_eq(arms.avatar_part, ObjectModel.AVATAR_PART_ARMS)
+	assert_eq(arms.avatar_camo, Vector3i(17, 34, 51),
 			"first-person arms carry the authored raw CTRL bytes")
-	assert_false(gun.has_meta("avatar_part"),
+	assert_eq(gun.avatar_part, ObjectModel.AVATAR_PART_NONE,
 			"the arms' per-draw TEX_CAMO state does not leak into the gun")
 	assert_true(arms.get_ctrl_values().is_empty(),
 			"no FP CTRL writer runs at build time")

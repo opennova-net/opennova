@@ -384,10 +384,10 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		# The character arms' own raw camo triplet is stored immediately before
 		# each arms submit -- the same per-submit writer family, arms part only.
 		# [orig: Avatar_SetArmsCamoCtrl @0x57a3b0 at @0x4df008/@0x4df070]
-		if String(visual.get_meta("avatar_part", "")) == "arms":
+		if visual.avatar_part == ObjectModel.AVATAR_PART_ARMS:
 			if submit_viewmodel:
 				AvatarDatabase.apply_part_camo(visual,
-						visual.get_meta("avatar_camo", Vector3i()), CTRL_OWNER_FP_ARMS_CAMO)
+						visual.avatar_camo, CTRL_OWNER_FP_ARMS_CAMO)
 			else:
 				for register in AvatarDatabase.part_camo_registers():
 					visual.clear_ctrl_override(CTRL_OWNER_FP_ARMS_CAMO, register)

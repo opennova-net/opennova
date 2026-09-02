@@ -21,6 +21,7 @@
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -192,6 +193,16 @@ public:
 	// [orig: BoneCallback_org0_World @0x4e3940 the body submit gate;
 	// Player_RenderFirstPersonViewModel @0x4ded60, see
 	// docs/world/world-wac-ai-re.md section 13.1].
+	// Which part of a composed player avatar this model is, when it is one:
+	// the placer's body/head submits (the head follows the body's every
+	// presentation call) and the FP rig's arms (which carry the per-submit
+	// camo triplet). Every other model is AVATAR_PART_NONE.
+	enum AvatarPart {
+		AVATAR_PART_NONE = 0,
+		AVATAR_PART_BODY = 1,
+		AVATAR_PART_HEAD = 2,
+		AVATAR_PART_ARMS = 3,
+	};
 	enum PresentationLayer {
 		// The ordinary entity: the mirror-policy world layer plus this model's
 		// shadow-caster markers; casts when it carries a marker.
@@ -372,6 +383,10 @@ private:
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
+	AvatarPart avatar_part_ = AVATAR_PART_NONE;
+	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
+	Vector3i avatar_camo_; // the arms' raw camo triplet for the per-submit FP writer
+	String graphic_name_; // the object graphic the placer built this model from
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
@@ -629,6 +644,14 @@ public:
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
+	void set_avatar_part(AvatarPart p_part) { avatar_part_ = p_part; }
+	AvatarPart get_avatar_part() const { return avatar_part_; }
+	void set_character_id(int p_id) { character_id_ = p_id; }
+	int get_character_id() const { return character_id_; }
+	void set_avatar_camo(const Vector3i &p_camo) { avatar_camo_ = p_camo; }
+	Vector3i get_avatar_camo() const { return avatar_camo_; }
+	void set_graphic_name(const String &p_name) { graphic_name_ = p_name; }
+	String get_graphic_name() const { return graphic_name_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;
@@ -877,4 +900,5 @@ public:
 
 } // namespace godot
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);
+VARIANT_ENUM_CAST(godot::ObjectModel::AvatarPart);
 VARIANT_ENUM_CAST(godot::ObjectModel::PresentationLayer);
