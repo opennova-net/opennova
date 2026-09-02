@@ -201,7 +201,6 @@ private:
 	// The kernel boot's bringup_net_session hook for this sim's role.
 	std::function<void()> role_bringup_hook();
 	void apply_host_session_mission_header(const opennova::bms::File &file);
-	void refresh_host_accept_config();
 
 protected:
 	static void _bind_methods();
@@ -512,12 +511,11 @@ public:
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
 	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
 	Ref<EndRoundState> get_end_round_state() const;
-	TypedArray<Dictionary> get_end_round_lines() const;
 	// The retail is_in_session fact for the shell's round-cycle and HUD
 	// arms: the world's mp_session bit (the 0x1D header form).
 	bool is_mp_session() const;
 	// The ladder's input from this role's view (C++ only, not bound): the
-	// shared producer of get_end_round_lines / get_end_round_overlay.
+	// producer behind get_end_round_overlay.
 	opennova::hud::EndRoundOverlayInput end_round_overlay_input() const;
 	// The overlay ladder resolved through the gametext Overlays table (the
 	// folds + printf forms are the engine's end_round_overlay_resolve):
@@ -1095,7 +1093,8 @@ public:
 	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
 	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
 	// bytes) — parsed into world.sound_profiles now and re-applied on
-	// reset_world; per-entity bindings resolve in resolve_ai_weapons.
+	// reset_world; per-entity bindings resolve in the kernel boot's
+	// simassets::resolve_ai_weapons step.
 	void set_sound_profiles(const PackedByteArray &p_sndprof_text);
 	// The mission water plane (godot Y units) the footstep water pick and the
 	// landing legs compare feet against [orig: Env_WaterHeightFixed @ 0x26C6454].
@@ -1216,9 +1215,6 @@ public:
 	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
 	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
 	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
-	// Native (unbound): the AI pool index behind a packed wire handle (-1 = no brain / no kernel) —
-	// the dev-tools drain resolves a queued request's handle onto the ai_index the delegates key on.
-	int native_ai_index_for_handle(int p_handle) const;
 	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5), for the C++
 	// embedders (DevTools) that already hold a handle; null without a kernel.
 	opennova::world::EntityCommands *entity_commands();
@@ -1413,15 +1409,6 @@ public:
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
-	// The D-AI-5 host weapon seed: stamp every AI entity's anim-fire round from its
-	// items.def ammo_closeattack + clipsize (AiProfile::ammo_primary/clip_size — the
-	// single-ammo stand-in for the entity+0x358..0x35B family, whose load-time
-	// block-copy writer is unwitnessed; world-wac-ai-re §17.4/§17.7 item 1), and seed
-	// the spawn magazine [orig: Entity_ResetToSpawnState @ 0x4b97a9 — word
-	// entity+0x35C = itemDef+0x894]. Ammo NAMES resolve against the mission ammo
-	// table, so call AFTER load_ammo_table; unresolved/absent leaves the NPC unarmed
-	// (ammo_primary -1, the fire pass skips). Idempotent; returns armed-NPC count.
-	int resolve_ai_weapons(const Ref<class ItemDatabase> &p_item_db);
 	// Install the packed Avatars.def character-sex registry used by the
 	// portable sound-profile selector. Retained across reset_world; returns the
 	// number of unique packed character ids installed.

@@ -217,7 +217,6 @@ public:
 	// set_part_phase; local runtime controllers use the same helpers.
 	static int part_anim_rate_for_seconds(double p_seconds);
 	static Dictionary part_anim_step(int p_phase, int p_dir, int p_rate);
-	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked

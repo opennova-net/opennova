@@ -108,23 +108,6 @@ Dictionary ObjectData::part_anim_step(int p_phase, int p_dir, int p_rate) {
 	return out;
 }
 
-Vector3 ObjectData::get_ground_anchor(int p_lod_index) const {
-	// The model-space point that should sit at a placed object's stored position:
-	// the "ground" userpoint if present, else the model origin (see
-	// threedi_3di3_ground_anchor). The helper returns model axis order; godot_vec3
-	// applies the single negate-x that maps it into render/model space, exactly as
-	// get_user_point_info / build_lod_submeshes do for userpoints and part origins.
-	(void)p_lod_index; // userpoints are model-global
-	if (!has_source_model) {
-		return Vector3();
-	}
-	float anchor[3];
-	if (!threedi_3di3_ground_anchor(&source_model, anchor)) {
-		return Vector3();
-	}
-	return godot_vec3(anchor);
-}
-
 bool ObjectData::has_collision() const {
 	// One implementation per engine fact (ADR 0016): the predicate lives in
 	// engine/runtime/simassets beside the collision model build it gates.

@@ -53,10 +53,6 @@ public:
 	// Below the rain gate the drawer never touches the device (retail
 	// returns @ 0x5dee48): hide the last frame's streaks once and stay idle.
 	void hide_frame();
-	// The last frame's drop count (probes/tests) and whether the snow
-	// texture was bound.
-	int get_last_drop_count() const { return last_drops_; }
-	bool is_last_frame_snow() const { return last_snow_; }
 
 	void _ready() override;
 

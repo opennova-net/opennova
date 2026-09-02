@@ -301,11 +301,6 @@ void MnsStyleSheet::set_native(const opennova::mns::StyleSheet &p_sheet) {
 	_refresh();
 }
 
-void MnsStyleSheet::set_native_document(const opennova::mns::Document &p_doc) {
-	doc_ = p_doc;
-	_refresh();
-}
-
 void MnsStyleSheet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_variable", "name"), &MnsStyleSheet::get_variable);
 	ClassDB::bind_method(D_METHOD("has_variable", "name"), &MnsStyleSheet::has_variable);

@@ -109,8 +109,6 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("update_static_lods", "camera_transform",
 					"vertical_fov_degrees", "viewport_width", "viewport_height"),
 			&MissionObjectPlacer::update_static_lods);
-	ClassDB::bind_method(D_METHOD("get_static_lod_switch_count"),
-			&MissionObjectPlacer::get_static_lod_switch_count);
 	ClassDB::bind_method(D_METHOD("get_static_instance_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_lod);
 	ClassDB::bind_method(

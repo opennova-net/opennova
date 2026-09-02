@@ -456,11 +456,6 @@ void Simulation::respawn_local_player_loadout() {
 	hud_map_control_.reset_spawn();
 }
 
-void Simulation::sync_local_player_damage_classes() {
-	if (!kernel_) return;
-	opennova::world::local_loadout_sync_damage_classes(kernel_->world, kernel_->loadout);
-}
-
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg — world/player_loadout.h
 	// local_loadout_rebuild [orig: @ 0x4e15f0]. The 0x2F pair's SECOND submit

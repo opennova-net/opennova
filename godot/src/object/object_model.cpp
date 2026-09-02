@@ -744,15 +744,6 @@ void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_nam
 	finish_ctrl_change(true);
 }
 
-void ObjectModel::clear_ctrl_values() {
-	if (ctrl_values_.is_empty() && ctrl_value_owners_.is_empty()) {
-		return;
-	}
-	ctrl_values_.clear();
-	ctrl_value_owners_.clear();
-	finish_ctrl_change(true);
-}
-
 Dictionary ObjectModel::get_ctrl_values() const {
 	return ctrl_values_.duplicate(true);
 }
@@ -1760,8 +1751,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_active_lod);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_enabled", "enabled"),
 			&ObjectModel::set_authored_lod_enabled);
-	ClassDB::bind_method(D_METHOD("is_authored_lod_enabled"),
-			&ObjectModel::is_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner"),
 			&ObjectModel::set_authored_lod_owner);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
@@ -1776,8 +1765,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::add_level_bound_visual);
 	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
 			&ObjectModel::set_authored_occluders_enabled);
-	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
-			&ObjectModel::are_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("get_authored_occluder_count"),
 			&ObjectModel::get_authored_occluder_count);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
@@ -1796,7 +1783,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_ctrl_override);
 	ClassDB::bind_method(D_METHOD("clear_ctrl_override", "owner", "name"),
 			&ObjectModel::clear_ctrl_override);
-	ClassDB::bind_method(D_METHOD("clear_ctrl_values"), &ObjectModel::clear_ctrl_values);
 	ClassDB::bind_method(D_METHOD("get_ctrl_values"), &ObjectModel::get_ctrl_values);
 
 	ClassDB::bind_method(D_METHOD("set_skeletal_anim", "skeletal"),

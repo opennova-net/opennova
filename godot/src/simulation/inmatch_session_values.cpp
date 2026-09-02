@@ -118,7 +118,6 @@ void MissionTickOutcome::assign(const opennova::inmatch::TickOutcome &p_value) {
 void MissionFrameOutcome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status"), &MissionFrameOutcome::get_status);
 	ClassDB::bind_method(D_METHOD("get_state"), &MissionFrameOutcome::get_state);
-	ClassDB::bind_method(D_METHOD("get_ticks"), &MissionFrameOutcome::get_ticks);
 	ClassDB::bind_method(D_METHOD("get_ticks_run"), &MissionFrameOutcome::get_ticks_run);
 	ClassDB::bind_method(D_METHOD("get_tick_us"), &MissionFrameOutcome::get_tick_us);
 	ClassDB::bind_method(D_METHOD("get_error"), &MissionFrameOutcome::get_error);
@@ -126,7 +125,6 @@ void MissionFrameOutcome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("did_tick"), &MissionFrameOutcome::did_tick);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "status"), "", "get_status");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "state"), "", "get_state");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "ticks"), "", "get_ticks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ticks_run"), "", "get_ticks_run");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_us"), "", "get_tick_us");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "error"), "", "get_error");

@@ -14,18 +14,6 @@ void ParticleCurveRef::set_name(const String &p_value) {
 }
 String ParticleCurveRef::get_name() const { return name; }
 
-void ParticleCurveRef::set_reverse(bool p_value) {
-	reverse = p_value;
-	emit_changed();
-}
-bool ParticleCurveRef::get_reverse() const { return reverse; }
-
-void ParticleCurveRef::set_inverse(bool p_value) {
-	inverse = p_value;
-	emit_changed();
-}
-bool ParticleCurveRef::get_inverse() const { return inverse; }
-
 void ParticleCurveRef::set_present(bool p_value) {
 	present = p_value;
 	emit_changed();

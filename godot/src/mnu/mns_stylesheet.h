@@ -88,8 +88,6 @@ public:
 	// the map (documented lossy); the document accessors are the lossless path.
 	void set_native(const opennova::mns::StyleSheet &p_sheet);
 	const opennova::mns::StyleSheet &get_native() const { return sheet_; }
-	void set_native_document(const opennova::mns::Document &p_doc);
-	const opennova::mns::Document &get_native_document() const { return doc_; }
 };
 
 } // namespace godot

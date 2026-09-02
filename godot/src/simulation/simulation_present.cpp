@@ -777,12 +777,6 @@ std::vector<opennova::world::inspect::EntityRow> Simulation::native_entity_direc
 			kernel_->world, joiner_ ? nullptr : &kernel_->ai);
 }
 
-int Simulation::native_ai_index_for_handle(int p_handle) const {
-	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return -1;
-	return kernel_->ai.index_for_handle(
-			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)});
-}
-
 opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle) const {
 	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return {};
 	// The directory's rule: a joiner's non-authoritative tooling AI pool never

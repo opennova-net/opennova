@@ -27,7 +27,6 @@ public:
 
 	int get_index() const { return value_.index; }
 	int get_ai_index() const { return value_.ai_index; }
-	bool is_editable() const { return value_.editable; }
 	int get_kind() const { return value_.kind; }
 	int get_source_index() const { return value_.source_index; }
 	int get_bms_id() const { return value_.bms_id; }

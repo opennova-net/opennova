@@ -21,14 +21,9 @@ bool decode_pcx_with_palette(const uint8_t *data,
                              uint8_t out_palette[256][3],
                              int &out_w,
                              int &out_h);
-godot::PackedByteArray encode_pcx_indices(const uint8_t *indices,
-                                          int width,
-                                          int height,
-                                          const uint8_t palette[256][3]);
 godot::Ref<godot::Texture2D> build_indexed_texture(const std::vector<uint8_t> &indices,
                                                    const uint8_t palette[256][3],
                                                    int width,
                                                    int height);
-std::vector<uint8_t> load_pcx_indices(const godot::String &path, int &out_w, int &out_h);
 
 } // namespace opennova

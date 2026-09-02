@@ -454,10 +454,6 @@ private:
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
 	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
 	bool deploy_zone_registry_built_ = false;
-	// Copy each accepted kit row's fourth value into the retail per-ammo
-	// shooter damage-class table (1 = x0.9, 2 = x1.1).
-	void sync_local_player_damage_classes();
-
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// The view state and its trackers live on the kernel (kernel_->view /
 	// kernel_->view_tracker; the witnessed gates in world/local_player_view.h);

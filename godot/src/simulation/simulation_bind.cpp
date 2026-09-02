@@ -445,7 +445,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &Simulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &Simulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &Simulation::resolve_item_traits);
-	ClassDB::bind_method(D_METHOD("resolve_ai_weapons", "item_db"), &Simulation::resolve_ai_weapons);
 	ClassDB::bind_method(D_METHOD("set_character_avatar_database", "avatar_db"),
 	                     &Simulation::set_character_avatar_database);
 	ClassDB::bind_method(D_METHOD("set_asset_root", "resource_root"),

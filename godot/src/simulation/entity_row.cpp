@@ -57,7 +57,6 @@ Dictionary EntityRow::to_json_value() const {
 void EntityRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_index"), &EntityRow::get_index);
 	ClassDB::bind_method(D_METHOD("get_ai_index"), &EntityRow::get_ai_index);
-	ClassDB::bind_method(D_METHOD("is_editable"), &EntityRow::is_editable);
 	ClassDB::bind_method(D_METHOD("get_kind"), &EntityRow::get_kind);
 	ClassDB::bind_method(D_METHOD("get_source_index"), &EntityRow::get_source_index);
 	ClassDB::bind_method(D_METHOD("get_bms_id"), &EntityRow::get_bms_id);

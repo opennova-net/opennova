@@ -157,7 +157,6 @@ public:
 	int update_static_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
 			float p_viewport_height);
-	int get_static_lod_switch_count() const { return static_lod_switches_; }
 	// The level currently live for a placed static entity (-1 = below the
 	// sub-pixel floor or no level available, -2 = not a retained static).
 	int get_static_instance_lod(int p_bms_id) const;

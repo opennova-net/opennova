@@ -213,18 +213,11 @@ IMPL_SET_GET(sun_3di, set_sun_3di, get_sun_3di, const String &, String)
 IMPL_SET_GET(moon_3di, set_moon_3di, get_moon_3di, const String &, String)
 IMPL_SET_GET(glare_3di, set_glare_3di, get_glare_3di, const String &, String)
 IMPL_SET_GET(star_3di, set_star_3di, get_star_3di, const String &, String)
-IMPL_SET_GET(sky_map1_tex, set_sky_map1_tex, get_sky_map1_tex, const Ref<Texture2D> &, Ref<Texture2D>)
-IMPL_SET_GET(sky_map2_tex, set_sky_map2_tex, get_sky_map2_tex, const Ref<Texture2D> &, Ref<Texture2D>)
+Ref<Texture2D> EnvFile::get_sky_map1_tex() const { return sky_map1_tex; }
+Ref<Texture2D> EnvFile::get_sky_map2_tex() const { return sky_map2_tex; }
 IMPL_SET_GET(advanced_clouds, set_advanced_clouds, get_advanced_clouds, int, int)
 
 #undef IMPL_SET_GET
-
-void EnvFile::set_tod_keyframes(const TypedArray<EnvKeyframe> &p_keyframes) {
-	_disconnect_keyframes();
-	tod_keyframes = p_keyframes;
-	_connect_keyframes();
-	_notify_environment_changed();
-}
 
 TypedArray<EnvKeyframe> EnvFile::get_tod_keyframes() const { return tod_keyframes; }
 

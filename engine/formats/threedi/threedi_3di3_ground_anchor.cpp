@@ -14,8 +14,8 @@
 //      by its center height.
 //
 // Returned in model space (threedi_user_point_position's axis order) so callers
-// apply their own coordinate convention exactly once (see
-// ObjectData::get_ground_anchor, which feeds the result through godot_vec3).
+// apply their own coordinate convention exactly once (the placement consumers
+// feed the result through their single negate-x model-space map).
 
 #include <formats/threedi/threedi_3di3.h>
 

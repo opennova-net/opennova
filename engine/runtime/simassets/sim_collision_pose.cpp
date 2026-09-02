@@ -55,7 +55,7 @@ anim::Quat quat_axis_z(double angle) {
 }
 
 // The model-frame orientation of one overlay class — the native twin of the
-// binding's godot_model_basis_from_overlay: Ry(yaw) * Rz(pitch) * Rx(roll)
+// binding's bms_to_godot_basis (mission_object_placer): Ry(yaw) * Rz(pitch) * Rx(roll)
 // with the trailing +90° model-forward correction. The correction does NOT
 // cancel in the body-relative delta below — it conjugates the delta into the
 // node frame apply_aim_overlay expects.

@@ -232,7 +232,6 @@ private:
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
 	void collect_font_names_(const void *p_window,
 			std::vector<String> &r_names) const;
-	void load_assets_();
 	void free_fonts_();
 	Vector2 design_scale_() const;
 

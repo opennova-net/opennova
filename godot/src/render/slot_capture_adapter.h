@@ -99,9 +99,6 @@ public:
 	void release_device(RenderingDevice *p_rd);
 
 	SlotCaptureFrameCounters frame_counters() const;
-	// The surfaces compiled for one order in the published frame (0 when the
-	// order was not armed); an inspection seam for the GUT pins.
-	int compiled_surface_count(int p_order) const;
 	Dictionary get_report() const;
 
 private:

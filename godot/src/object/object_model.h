@@ -731,7 +731,6 @@ public:
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
 	void set_authored_lod_enabled(bool p_enabled);
-	bool is_authored_lod_enabled() const { return authored_lod_enabled_; }
 	// Attachment RLOD: an attached model (the third-person held weapon, the
 	// NVG/binocular items, a mounted child) never runs its own threshold
 	// walk; it draws at its owner's selected level clamped to its own LOD
@@ -778,9 +777,6 @@ public:
 	// until the next rebuild (which frees every child).
 	void add_level_bound_visual(int p_lod_index, VisualInstance3D *p_visual);
 	void set_authored_occluders_enabled(bool p_enabled);
-	bool are_authored_occluders_enabled() const {
-		return authored_occluders_enabled_;
-	}
 	// The retained OccluderInstance3D children the last build created (0 when
 	// authored occluders are off or the model carries no eligible records).
 	// The world decides from this whether to switch Godot's occlusion culling
@@ -808,7 +804,6 @@ public:
 	void clear_ctrl_value(const String &p_name);
 	void set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value);
 	void clear_ctrl_override(const String &p_owner, const String &p_name);
-	void clear_ctrl_values();
 	Dictionary get_ctrl_values() const;
 
 	// --- main-body skeletal + part channels ---

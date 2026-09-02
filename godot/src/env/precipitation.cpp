@@ -58,10 +58,6 @@ void Precipitation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera"),
 			&Precipitation::render_frame);
 	ClassDB::bind_method(D_METHOD("hide_frame"), &Precipitation::hide_frame);
-	ClassDB::bind_method(D_METHOD("get_last_drop_count"),
-			&Precipitation::get_last_drop_count);
-	ClassDB::bind_method(D_METHOD("is_last_frame_snow"),
-			&Precipitation::is_last_frame_snow);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {

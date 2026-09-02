@@ -753,21 +753,6 @@ Array MissionData::get_weapon_loadout() const {
 	return out;
 }
 
-Array MissionData::get_item_availability() const {
-	// The .bms secondary chunk's per-map weapon rules ({name, status} pairs); the
-	// runtime feeds these to Simulation.set_weapon_availability
-	// [orig: build_item_restriction_table @0x54DDB0 name-list mode].
-	Array out;
-	for (const opennova::mission::ItemAvailabilityEntry &entry :
-	     document.item_availability()) {
-		Dictionary d;
-		d["name"] = String::utf8(entry.name.c_str());
-		d["value"] = entry.status;
-		out.push_back(d);
-	}
-	return out;
-}
-
 bool MissionData::set_weapon_loadout(const Array &entries) {
 	std::vector<opennova::mission::WeaponLoadoutEntry> records;
 	records.reserve(entries.size());
