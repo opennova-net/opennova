@@ -181,7 +181,7 @@ func _send_weapon_switch_input(captured: bool) -> void:
 		if captured and ControlsBindings.pressed(_WEAPON_CATEGORY_TOKENS[i]):
 			down_mask |= 1 << i
 			if (_category_was_down & (1 << i)) == 0 and sim != null:
-				sim.request_local_player_weapon_category(i + 1)
+				sim.request_local_player_weapon_category((i + 1) as Simulation.WeaponCategory)
 	_category_was_down = down_mask
 	var prev_down := captured and ControlsBindings.pressed("cycleweaponP")
 	if prev_down and not _cycle_prev_was_down and sim != null:
@@ -279,7 +279,7 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 	return false
 
 
-func _request_stance(stance: int) -> void:
+func _request_stance(stance: Simulation.Stance) -> void:
 	var sim := _sim()
 	if sim != null:
 		sim.request_local_player_stance(stance)

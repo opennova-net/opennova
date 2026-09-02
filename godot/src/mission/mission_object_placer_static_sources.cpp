@@ -342,7 +342,7 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 	return true;
 }
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
-		int p_kind, int p_index, const Transform3D &p_xform) {
+		MissionData::EntityKind p_kind, int p_index, const Transform3D &p_xform) {
 	_check_epoch();
 	bool matched = false;
 	bool saw_source_match = false;

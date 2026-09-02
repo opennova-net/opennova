@@ -348,9 +348,9 @@ bool MissionObjectPlacer::item_casts_dynamic_shadow(int item_type,
 	return opennova::mission::item_casts_dynamic_shadow(item_type, attrib2);
 }
 
-bool MissionObjectPlacer::item_casts_static_terrain_shadow(int kind,
+bool MissionObjectPlacer::item_casts_static_terrain_shadow(MissionData::EntityKind kind,
 		uint32_t entity_attrib, uint32_t item_attrib, uint32_t item_attrib2) {
-	return opennova::mission::item_casts_static_terrain_shadow(kind,
+	return opennova::mission::item_casts_static_terrain_shadow(static_cast<int>(kind),
 			entity_attrib, item_attrib, item_attrib2);
 }
 
@@ -532,7 +532,7 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 			static_order.push_back(group_key);
 		}
 		group->xforms.push_back(xform);
-		group->shadow_slots.push_back(item_casts_static_terrain_shadow(kind,
+		group->shadow_slots.push_back(item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
 				uint32_t(entity.get("ai_flags", 0)),
 				item_db_->get_attrib(item_id), item_db_->get_attrib2(item_id)));
 		group->bms_ids.push_back(int(entity.get("bms_id", 0)));
@@ -1039,7 +1039,7 @@ Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
 		if (model->get_authored_occluder_count() > 0) {
 			++authored_occluder_models;
 		}
-		if (item_casts_static_terrain_shadow(kind,
+		if (item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
 					uint32_t(a.get("ai_flags", 0)),
 					item_db_->get_attrib(item_id),
 					item_db_->get_attrib2(item_id))) {

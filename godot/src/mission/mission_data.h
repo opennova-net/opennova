@@ -69,14 +69,18 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Mirrors opennova::mission::EntityKind. Bound as plain constants. Fixed uint32_t underlying type
-	// so the high game-mode bits (ATTRIB_SEARCH_AND_DESTROY 0x80000000, ATTRIB_GAME_MODE_MASK 0xFF830000)
-	// bind to GDScript as positive values instead of wrapping to negative signed-int.
+	// The BMS record families (opennova::mission::EntityKind), bound as an enum
+	// so the entity API's `kind` parameters are typed.
+	enum EntityKind : int {
+		KIND_MARKER = static_cast<int>(opennova::mission::EntityKind::Marker),
+		KIND_ITEM = static_cast<int>(opennova::mission::EntityKind::Item),
+		KIND_BUILDING = static_cast<int>(opennova::mission::EntityKind::Building),
+		KIND_ORGANIC = static_cast<int>(opennova::mission::EntityKind::Organic),
+	};
+	// Bound as plain constants. Fixed uint32_t underlying type so the high game-mode bits
+	// (ATTRIB_SEARCH_AND_DESTROY 0x80000000, ATTRIB_GAME_MODE_MASK 0xFF830000) bind to
+	// GDScript as positive values instead of wrapping to negative signed-int.
 	enum : uint32_t {
-		KIND_MARKER = 0,
-		KIND_ITEM = 1,
-		KIND_BUILDING = 2,
-		KIND_ORGANIC = 3,
 		// Mirrors opennova::mission::bms::WaypointFlags (engine/runtime/mission). Bound as constants so
 		// GDScript composes a path's flags without magic numbers. A path with DOES_NOT_LOOP
 		// clear loops back to its first marker; BLUE_TEAM / RED_TEAM scope it to a side.
@@ -149,19 +153,19 @@ public:
 	// EnvFile.apply_mission_overrides() payload from the attrib-gated header.
 	Dictionary get_environment_overrides() const;
 
-	int get_entity_count(int kind) const;
+	int get_entity_count(EntityKind kind) const;
 	// Array of dictionaries; see entity_to_dictionary() for the fields.
-	Array get_entities(int kind) const;
+	Array get_entities(EntityKind kind) const;
 	// One entity by (kind, index) as a dictionary (same fields as get_entities), or {}
 	// if out of range. O(1) — prefer this over scanning get_entities for a single hit.
-	Dictionary get_entity(int kind, int index) const;
+	Dictionary get_entity(EntityKind kind, int index) const;
 	Array get_all_entities() const;
 
 	// --- Authoring (Phase 1) --------------------------------------------------
 	// Move an existing entity. `position` is mission-space (x, y, z); `rotation_deg`
 	// is (pitch, yaw, roll) in degrees, rounded to the int fields the format stores.
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
-	bool set_entity_transform(int kind, int index, const Vector3 &position, const Vector3 &rotation_deg);
+	bool set_entity_transform(EntityKind kind, int index, const Vector3 &position, const Vector3 &rotation_deg);
 	// Mutate a single editable scalar property on the entity at (kind, index). The
 	// property name matches the entity dictionary key it edits; the editable set is:
 	// "team", "group", "waypoint_id", "wp_number", "perception", "accuracy",
@@ -171,11 +175,11 @@ public:
 	// once, so this reads the entity's current properties, overwrites only the named
 	// one, then writes the lot back. Returns false if (kind, index) is out of range or
 	// `property` is not a known editable name. Sets the dirty flag on success.
-	bool set_entity_property_int(int kind, int index, const String &property, int value);
+	bool set_entity_property_int(EntityKind kind, int index, const String &property, int value);
 	// String counterpart for the fixed-string entity fields "name1" (AI class / iai_name) and
 	// "name2" (AI script / ai_textfile). Same seed-then-overwrite-one model as the int setter;
 	// the value is truncated to the format's 8-byte slot. Sets the dirty flag on success.
-	bool set_entity_property_string(int kind, int index, const String &property, const String &value);
+	bool set_entity_property_string(EntityKind kind, int index, const String &property, const String &value);
 	// Set one mission-header field, mirroring MissionDocument::set_header_*. String fields:
 	// mission_name|designer|briefing|terrain|environment. Int fields: climate|weather|mission_type|
 	// attrib_flags|start_time|minutes_per_day|player_health|max_saves|music|reverb|wind_speed|wind_direction.
@@ -197,12 +201,12 @@ public:
 	// defaults (see make_default_entity). Returns the new entity as a dictionary
 	// (same fields as get_entity, including its assigned "index"), or {} if no mission
 	// is loaded or the kind is invalid. Sets the dirty flag on success.
-	Dictionary add_entity(int kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg);
+	Dictionary add_entity(EntityKind kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg);
 	// Remove the entity at (kind, index). The lib erases it from its kind's list, so
 	// every later entity of that kind shifts down by one index (callers holding indices
 	// must re-fetch). Markers also repair the waypoint paths that referenced them.
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
-	bool remove_entity(int kind, int index);
+	bool remove_entity(EntityKind kind, int index);
 
 	// --- Waypoints ------------------------------------------------------------
 	// A mission carries 128 fixed waypoint paths; a path is an ordered list of marker
@@ -343,3 +347,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::MissionData::EntityKind);

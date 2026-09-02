@@ -166,6 +166,21 @@
 				opennova::world::InfantryState::Stance::kProne),
 	};
 
+	// The manual weapon-switch categories request_local_player_weapon_category
+	// consumes — the engine's controls::WeaponCategory (runtime/controls/
+	// controls.h carries the witness: the 200..210 input cases).
+	enum WeaponCategory {
+		WEAPON_CATEGORY_KNIFE = static_cast<int>(opennova::controls::WeaponCategory::kKnife),
+		WEAPON_CATEGORY_SECONDARY = static_cast<int>(opennova::controls::WeaponCategory::kSecondary),
+		WEAPON_CATEGORY_PRIMARY = static_cast<int>(opennova::controls::WeaponCategory::kPrimary),
+		WEAPON_CATEGORY_FLASHBANG = static_cast<int>(opennova::controls::WeaponCategory::kFlashbang),
+		WEAPON_CATEGORY_FRAG_GRENADE = static_cast<int>(opennova::controls::WeaponCategory::kFragGrenade),
+		WEAPON_CATEGORY_SMOKE_GRENADE = static_cast<int>(opennova::controls::WeaponCategory::kSmokeGrenade),
+		WEAPON_CATEGORY_ACCESSORY = static_cast<int>(opennova::controls::WeaponCategory::kAccessory),
+		WEAPON_CATEGORY_DETONATOR = static_cast<int>(opennova::controls::WeaponCategory::kDetonator),
+		WEAPON_CATEGORY_MEDPACK = static_cast<int>(opennova::controls::WeaponCategory::kMedpack),
+	};
+
 	// Collision-face flag bits (world/collision.h kFaceFlag* carries the
 	// witness) — the hitbox debug view's face styling reads them.
 	enum FaceFlag {

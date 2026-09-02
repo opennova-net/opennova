@@ -16,11 +16,12 @@ inline constexpr int kItemTypeVehicle = 1;
 inline constexpr int kItemTypePerson = 3;
 inline constexpr int kItemTypeBuilding = 5;
 
-// Mission entity kinds (the BMS record families).
-inline constexpr int kEntityKindMarker = 0;
-inline constexpr int kEntityKindItem = 1;
-inline constexpr int kEntityKindBuilding = 2;
-inline constexpr int kEntityKindOrganic = 3;
+// Mission entity kinds (the BMS record families) as the plain ints the
+// dictionary/int seams carry; the value authority is EntityKind above.
+inline constexpr int kEntityKindMarker = static_cast<int>(EntityKind::Marker);
+inline constexpr int kEntityKindItem = static_cast<int>(EntityKind::Item);
+inline constexpr int kEntityKindBuilding = static_cast<int>(EntityKind::Building);
+inline constexpr int kEntityKindOrganic = static_cast<int>(EntityKind::Organic);
 
 // Attrib bits (DEF_ITEM_ATTRIB_NOSHADOW mirrors engine/formats/def).
 inline constexpr uint32_t kItemAttribNoShadow = 0x04000000u;

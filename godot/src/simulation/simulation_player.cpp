@@ -90,7 +90,7 @@ void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 	kernel_->look_settings.invert_y = p_invert_y;
 }
 
-bool Simulation::request_local_player_stance(int p_stance) {
+bool Simulation::request_local_player_stance(Stance p_stance) {
 	// The SELECT gates and the mutual-exclusion latch are the kernel's
 	// [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60].
 	if (!kernel_->request_stance(p_stance)) return false;
@@ -207,14 +207,14 @@ String Simulation::get_local_player_anim_key() const {
 	return infantry_anim_key(p->inf.anim_state);
 }
 
-int Simulation::get_local_player_stance() const {
+Simulation::Stance Simulation::get_local_player_stance() const {
 	// [orig: HUD_BuildEntityInfo @0x4b860c — entity+300 flags 0x200=crouch -> 1,
 	// 0x100=prone -> 2]; InfantryState::Stance already carries the icon order
 	// (kStand 0 / kCrouch 1 / kProne 2).
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0;
+	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return STANCE_STAND;
 	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
-	if (!p) return 0;
-	return static_cast<int>(p->inf.stance);
+	if (!p) return STANCE_STAND;
+	return static_cast<Stance>(static_cast<int>(p->inf.stance));
 }
 
 int Simulation::get_local_player_anim_phase_ticks() const {

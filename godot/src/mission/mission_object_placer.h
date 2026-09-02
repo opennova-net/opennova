@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "mission/mission_data.h" // MissionData::EntityKind
 #include "object/item_database.h"
 #include "object/avatar_database.h"
 #include "object/object_data.h"
@@ -28,7 +29,6 @@
 
 namespace godot {
 
-class MissionData;
 
 // Placement of a mission's entities into the runtime 3D scene. Given a parsed
 // MissionData, a resource root, and an item database, it resolves each placed
@@ -118,7 +118,7 @@ public:
 	// --- witnessed eligibility (engine policy re-exported for shell/tests) -
 	static bool item_casts_dynamic_shadow(int item_type, uint32_t attrib,
 			uint32_t attrib2);
-	static bool item_casts_static_terrain_shadow(int kind,
+	static bool item_casts_static_terrain_shadow(MissionData::EntityKind kind,
 			uint32_t entity_attrib, uint32_t item_attrib,
 			uint32_t item_attrib2);
 
@@ -250,7 +250,7 @@ public:
 	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
 	bool show_static_instance(int p_bms_id);
-	bool update_static_terrain_shadow_source_transform(int p_kind,
+	bool update_static_terrain_shadow_source_transform(MissionData::EntityKind p_kind,
 			int p_index, const Transform3D &p_xform);
 	bool set_static_terrain_shadow_replacement(int p_bms_id,
 			const String &p_graphic, const Transform3D &p_xform,

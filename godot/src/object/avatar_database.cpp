@@ -137,9 +137,9 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_model"), &AvatarDatabase::get_model);
 	ClassDB::bind_method(D_METHOD("set_model", "model"), &AvatarDatabase::set_model);
 
-	BIND_CONSTANT(PART_HEAD);
-	BIND_CONSTANT(PART_BODY);
-	BIND_CONSTANT(PART_ARMS);
+	BIND_ENUM_CONSTANT(PART_HEAD);
+	BIND_ENUM_CONSTANT(PART_BODY);
+	BIND_ENUM_CONSTANT(PART_ARMS);
 	BIND_CONSTANT(SEX_MALE);
 	BIND_CONSTANT(ALIGN_GOOD);
 	BIND_CONSTANT(ALIGN_EVIL);
@@ -481,7 +481,7 @@ Dictionary AvatarDatabase::diagnostic_dict(const Diagnostic &d) const {
 	return out;
 }
 
-PackedStringArray AvatarDatabase::get_part_names(int kind) const {
+PackedStringArray AvatarDatabase::get_part_names(PartKind kind) const {
 	std::vector<const Part *> sel;
 	for (const Part &p : parts) {
 		if (p.kind == kind) {
@@ -499,7 +499,7 @@ PackedStringArray AvatarDatabase::get_part_names(int kind) const {
 	return out;
 }
 
-Dictionary AvatarDatabase::get_part(int kind, const String &name) const {
+Dictionary AvatarDatabase::get_part(PartKind kind, const String &name) const {
 	const Part *p = find_part(kind, name);
 	return p ? part_dict(*p) : Dictionary();
 }

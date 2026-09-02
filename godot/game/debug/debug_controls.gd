@@ -716,7 +716,7 @@ func _register_terrain_rows() -> void:
 		var terrain := _terrain()
 		if terrain == null:
 			return ERR_UNAVAILABLE
-		terrain.set_debug_mode(int(value))
+		terrain.set_debug_mode(int(value) as Terrain.DebugMode)
 		return OK
 
 	var lod := _slider(&"terrain_lod_quality", &"Terrain", "Terrain detail",

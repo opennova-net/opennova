@@ -59,11 +59,6 @@ inline uint32_t next_showhud_flags(uint32_t flags) {
 	return (flags + 1) & 3;
 }
 
-// The friendly-tags mode: 0 off / 1 text < 300 m / 2 text always / 3 tick
-// marks. Boot default 2 = FULL, process-lifetime like retail's global.
-// [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed]
-inline constexpr int kFriendlyTagModeDefault = 2;
-
 // The overhead-anchor addend above the entity's eye offset: 0x4000 = 0.25 u
 // [orig: anchor z = z + entity[+116] + 0x4000 @0x5a3a84..0x5a3a98 — +116 is
 // the stance-driven eye offset the sim restamps per body tick and feeds per

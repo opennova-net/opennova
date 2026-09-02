@@ -676,7 +676,7 @@ func _apply_friendly_tags() -> void:
 	var ratios := PackedInt32Array()
 	var flags := PackedInt32Array()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim != null and _game_hud.get_friendly_tag_mode() != 0:
+	if sim != null and _game_hud.get_friendly_tag_mode() != HudOverlay.FRIENDLY_TAGS_OFF:
 		var tags: Array = sim.get_friendly_tags()
 		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
 				if not tags.is_empty() else null
@@ -827,7 +827,7 @@ const FRIENDLY_TAG_TOAST_KEYS: Array[String] = ["STRMISC_FRIENDLYTAGS_OFF",
 ## message feed. [orig: Input_HandleActionBinding case 30 @0x49b573 ->
 ##  GameText("Misc", STRMISC_FRIENDLYTAGS_*) -> Chat_AddDebugMessage @0x49bc60]
 func cycle_friendly_tags() -> void:
-	_friendly_tag_mode = (_friendly_tag_mode + 1) % 4
+	_friendly_tag_mode = HudOverlay.next_friendly_tag_mode(_friendly_tag_mode)
 	if _game_hud == null:
 		return
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
