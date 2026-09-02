@@ -11,6 +11,7 @@
 #define OPENNOVA_WORLD_VEHICLE_ATTACH_H
 
 #include <cstdint>
+#include <string>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_mount.h>
@@ -158,6 +159,10 @@ struct AttachLabel {
     bool armory = false;
     bool nearest = false;             // the full-bright highlight; others draw half-bright
     Vec3 world_pos;
+    // The USEGUN label text key: the gun entity's primary weapon -> its
+    // weapon.def attachtextid; empty for every other seat kind
+    // [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
+    std::string attach_text_key;
 };
 
 // Optional deterministic work counters for attach-label performance tests and probes.

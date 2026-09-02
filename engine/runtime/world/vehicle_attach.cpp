@@ -501,6 +501,13 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
         label.armory = armory;
         label.nearest = cand.handle == nearest.vehicle && index == nearest.seat_index;
         label.world_pos = lifted;
+        if (type == SeatType::Gunner && !cand.primary_weapon.empty()) {
+            // [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d]
+            const int wi = world.weapons.index_of(cand.primary_weapon.c_str());
+            if (wi >= 0)
+                label.attach_text_key =
+                        world.weapons.entries[static_cast<size_t>(wi)].attach_text_id;
+        }
         out.push_back(label);
     };
 
