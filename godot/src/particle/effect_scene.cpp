@@ -170,26 +170,6 @@ bool valid_kill_plane(int value) noexcept {
 			value <= EffectScene::KILL_PLANE_AT_OR_BELOW;
 }
 
-std::vector<opennova::particle::EffectOwnerPoseUpdate> owner_pose_updates(
-		const Array &values) {
-	std::vector<opennova::particle::EffectOwnerPoseUpdate> updates;
-	updates.reserve(static_cast<std::size_t>(values.size()));
-	for (int64_t i = 0; i < values.size(); ++i) {
-		const Variant item = values[i];
-		if (item.get_type() != Variant::DICTIONARY)
-			continue;
-		const Dictionary value = item;
-		opennova::particle::EffectOwnerPoseUpdate update;
-		update.owner.value = token_from_godot(
-				static_cast<int64_t>(value.get("owner_token", 0)));
-		update.pose = native_pose(static_cast<Transform3D>(
-				value.get("transform", Transform3D())));
-		update.present = static_cast<bool>(value.get("present", true));
-		updates.push_back(update);
-	}
-	return updates;
-}
-
 // The inspect() diagnostic embed of the scene's retained load counters.
 Dictionary load_report_dictionary(const opennova::particle::EffectLoadReport &report) {
 	Dictionary result;
@@ -305,9 +285,9 @@ void EffectScene::_bind_methods() {
 			&EffectScene::effect_name);
 	ClassDB::bind_method(D_METHOD("spawn", "request"),
 			&EffectScene::spawn);
-	ClassDB::bind_method(D_METHOD("apply_owner_poses_in_place", "updates"),
+	ClassDB::bind_method(D_METHOD("apply_owner_poses_in_place", "batch"),
 			&EffectScene::apply_owner_poses_in_place);
-	ClassDB::bind_method(D_METHOD("apply_owner_poses", "updates"),
+	ClassDB::bind_method(D_METHOD("apply_owner_poses", "batch"),
 			&EffectScene::apply_owner_poses);
 	ClassDB::bind_method(D_METHOD("get_active_owner_tokens"),
 			&EffectScene::get_active_owner_tokens);
@@ -439,13 +419,40 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	return spawn_receipt_record(receipt);
 }
 
-void EffectScene::apply_owner_poses_in_place(const Array &p_updates) {
-	scene_.apply_owner_poses(owner_pose_updates(p_updates));
+void EffectOwnerPoseBatch::add(int64_t p_owner_token, const Transform3D &p_transform) {
+	opennova::particle::EffectOwnerPoseUpdate update;
+	update.owner.value = token_from_godot(p_owner_token);
+	update.pose = native_pose(p_transform);
+	update.present = true;
+	updates_.push_back(update);
+}
+
+void EffectOwnerPoseBatch::add_absent(int64_t p_owner_token) {
+	opennova::particle::EffectOwnerPoseUpdate update;
+	update.owner.value = token_from_godot(p_owner_token);
+	update.present = false;
+	updates_.push_back(update);
+}
+
+void EffectOwnerPoseBatch::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("clear"), &EffectOwnerPoseBatch::clear);
+	ClassDB::bind_method(D_METHOD("add", "owner_token", "transform"),
+			&EffectOwnerPoseBatch::add);
+	ClassDB::bind_method(D_METHOD("add_absent", "owner_token"),
+			&EffectOwnerPoseBatch::add_absent);
+	ClassDB::bind_method(D_METHOD("get_count"), &EffectOwnerPoseBatch::get_count);
+}
+
+void EffectScene::apply_owner_poses_in_place(const Ref<EffectOwnerPoseBatch> &p_batch) {
+	if (p_batch.is_null()) {
+		return;
+	}
+	scene_.apply_owner_poses(p_batch->updates());
 	snapshot_dirty_ = true;
 }
 
-void EffectScene::apply_owner_poses(const Array &p_updates) {
-	apply_owner_poses_in_place(p_updates);
+void EffectScene::apply_owner_poses(const Ref<EffectOwnerPoseBatch> &p_batch) {
+	apply_owner_poses_in_place(p_batch);
 	advance_in_place(0.0);
 }
 

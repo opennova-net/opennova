@@ -37,6 +37,9 @@ var _slot_tokens: Dictionary = {}
 var _owner_tokens: Dictionary = {}
 var _owner_keys_by_token: Dictionary = {}
 var _owner_pose_cache: Dictionary = {}
+# The one pose-update batch, cleared and refilled per push so the per-frame
+# owner sync allocates nothing once warm.
+var _owner_pose_batch := EffectOwnerPoseBatch.new()
 var _next_token := 1
 
 
@@ -280,11 +283,9 @@ static func forward_pose(position: Vector3, forward_value: Vector3) -> Transform
 
 func _seed_owner_pose(owner_token: int, transform: Transform3D) -> void:
 	_owner_pose_cache[owner_token] = transform
-	_scene.apply_owner_poses([{
-		"owner_token": owner_token,
-		"transform": transform,
-		"present": true,
-	}])
+	_owner_pose_batch.clear()
+	_owner_pose_batch.add(owner_token, transform)
+	_scene.apply_owner_poses(_owner_pose_batch)
 
 
 func _disabled_receipt() -> EffectSpawnReceipt:
@@ -494,10 +495,9 @@ func release_effect_binding(owner_key: Variant) -> void:
 	# A group may already be detached by stop_group(), but explicitly retiring
 	# the native pose keeps this safe for rejected spawns and callers that only
 	# know the owner identity.
-	_scene.apply_owner_poses([{
-		"owner_token": owner_token,
-		"present": false,
-	}])
+	_owner_pose_batch.clear()
+	_owner_pose_batch.add_absent(owner_token)
+	_scene.apply_owner_poses(_owner_pose_batch)
 	_owner_pose_cache.erase(owner_token)
 	_owner_keys_by_token.erase(owner_token)
 	_owner_tokens.erase(owner_key)
@@ -530,7 +530,8 @@ func has_no_owner_bindings() -> bool:
 func _sync_owner_poses(refresh_frame := true) -> void:
 	if not _owner_position_provider.is_valid():
 		return
-	var updates: Array = []
+	var batch := _owner_pose_batch
+	batch.clear()
 	for owner_token_v in _scene.get_active_owner_tokens():
 		var owner_token := int(owner_token_v)
 		if not _owner_keys_by_token.has(owner_token):
@@ -545,11 +546,7 @@ func _sync_owner_poses(refresh_frame := true) -> void:
 				if cached_transform.is_equal_approx(owner_transform):
 					continue
 			_owner_pose_cache[owner_token] = owner_transform
-			updates.append({
-				"owner_token": owner_token,
-				"transform": owner_transform,
-				"present": true,
-			})
+			batch.add(owner_token, owner_transform)
 		elif state is Vector3:
 			var had_cached := _owner_pose_cache.has(owner_token)
 			var cached: Transform3D = _owner_pose_cache.get(
@@ -558,19 +555,15 @@ func _sync_owner_poses(refresh_frame := true) -> void:
 			if had_cached and cached.is_equal_approx(translated):
 				continue
 			_owner_pose_cache[owner_token] = translated
-			updates.append({
-				"owner_token": owner_token,
-				"transform": translated,
-				"present": true,
-			})
+			batch.add(owner_token, translated)
 		else:
 			_owner_pose_cache.erase(owner_token)
-			updates.append({"owner_token": owner_token, "present": false})
-	if not updates.is_empty():
+			batch.add_absent(owner_token)
+	if batch.get_count() > 0:
 		if refresh_frame:
-			_scene.apply_owner_poses(updates)
+			_scene.apply_owner_poses(batch)
 		else:
-			_scene.apply_owner_poses_in_place(updates)
+			_scene.apply_owner_poses_in_place(batch)
 
 
 ## The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
