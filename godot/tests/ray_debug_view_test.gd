@@ -15,9 +15,14 @@ func _make_view() -> Node3D:
 	return view
 
 
-func _report(tick: int, events: PackedFloat32Array) -> Dictionary:
-	return {"tick": tick, "stride": 12, "events": events, "counts": [],
-			"mask": 0x7FFF, "ttl": 93, "recording": true}
+func _report(tick: int, events: PackedFloat32Array) -> RayDebugReport:
+	var report := RayDebugReport.new()
+	report.tick = tick
+	report.events = events
+	report.mask = 0x7FFF
+	report.ttl = 93
+	report.recording = true
+	return report
 
 
 func _event(category: int, age: float, result: int,

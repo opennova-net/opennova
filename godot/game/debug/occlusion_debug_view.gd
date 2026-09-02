@@ -90,8 +90,8 @@ func _refresh_from_sim(sim: Simulation) -> void:
 ## Render one portal snapshot (Simulation.get_occlusion_portal_debug's
 ## shape). Split from the sim fetch so tests and probes can drive the view
 ## with report data directly.
-func render_report(debug: Dictionary) -> void:
-	_update_geometry(debug.get("buildings", []))
+func render_report(debug: OcclusionPortalReport) -> void:
+	_update_geometry(debug.buildings if debug != null else [])
 
 
 func _clear_all() -> void:
@@ -120,10 +120,18 @@ func _update_geometry(buildings: Array) -> void:
 	# flicking on and off never forces a rebuild.
 	var sig_parts := []
 	for b_v in buildings:
-		var b: Dictionary = b_v
-		sig_parts.append(b.get("bms_id", 0))
-		sig_parts.append(b.get("pos", Vector3.ZERO))
-		sig_parts.append(hash(b.get("records", [])))
+		var b: OcclusionPortalBuilding = b_v
+		sig_parts.append(b.bms_id)
+		sig_parts.append(b.pos)
+		# Records are fresh objects every cadence: key on their values.
+		for rec: OcclusionPortalRecord in b.records:
+			sig_parts.append(rec.type)
+			sig_parts.append(rec.section_a)
+			sig_parts.append(rec.section_b)
+			sig_parts.append(rec.pos)
+			sig_parts.append(rec.radius)
+			sig_parts.append(rec.glow)
+			sig_parts.append(hash(rec.segments))
 	var sig := hash(sig_parts)
 	if sig == _signature and _has_surface == (not buildings.is_empty()):
 		return
@@ -136,12 +144,12 @@ func _update_geometry(buildings: Array) -> void:
 	var segments: Array = []
 	var label_count := 0
 	for b_v in buildings:
-		var b: Dictionary = b_v
-		for rec_v in b.get("records", []):
-			var rec: Dictionary = rec_v
-			var rtype := int(rec.get("type", 0))
+		var b: OcclusionPortalBuilding = b_v
+		for rec_v in b.records:
+			var rec: OcclusionPortalRecord = rec_v
+			var rtype := rec.type
 			var color := type_color(rtype)
-			var pts: PackedVector3Array = rec.get("segments", PackedVector3Array())
+			var pts: PackedVector3Array = rec.segments
 			if pts.size() >= 2:
 				_drawable_count += 1
 			for i in range(0, pts.size() - 1, 2):
@@ -158,14 +166,14 @@ func _update_geometry(buildings: Array) -> void:
 	_has_surface = true
 
 
-func _make_label(rec: Dictionary, rtype: int, color: Color) -> Label3D:
+func _make_label(rec: OcclusionPortalRecord, rtype: int, color: Color) -> Label3D:
 	var label := Label3D.new()
 	label.text = "%s %s->%s" % [
 		type_name(rtype),
-		section_name(int(rec.get("section_a", 0))),
-		section_name(int(rec.get("section_b", 0))),
+		section_name(rec.section_a),
+		section_name(rec.section_b),
 	]
-	label.position = rec.get("pos", Vector3.ZERO)
+	label.position = rec.pos
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.fixed_size = false
 	label.pixel_size = 0.005

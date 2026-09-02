@@ -349,9 +349,8 @@ func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
 	var expired_tick := -1
 	for t in 300:
 		_sim.step()
-		for ev in _sim.get_round_debug().get("events", []):
-			var d := ev as Dictionary
-			if int(d.get("kind", -1)) == 4 and expired_tick < 0:  # kExpired
+		for ev: RoundDebugEvent in _sim.get_round_debug().events:
+			if ev.kind == 4 and expired_tick < 0:  # kExpired
 				expired_tick = t
 	assert_between(expired_tick, 240, 260, "the fuse, not an impact, ends the round")
 

@@ -7,6 +7,9 @@
 #include "simulation/destruction_events.h" // the destruction drain record
 #include "simulation/ai_debug_report.h" // the F3 AI overlay payload
 #include "simulation/hitbox_debug_report.h" // the F3 hitbox view payload
+#include "simulation/occlusion_portal_report.h" // the F3 occlusion view payload
+#include "simulation/ray_debug_report.h" // the F3 rays view channel
+#include "simulation/round_debug_report.h" // the F3 rounds view trail
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
