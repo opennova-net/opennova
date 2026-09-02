@@ -863,4 +863,4 @@ func sync_round_glows(rows: Array) -> void:
 
 func get_report() -> EffectLightReport:
 	run_census_now()
-	return EffectLightReport.from_ffi_dictionary(_scene.get_report())
+	return _scene.get_report()

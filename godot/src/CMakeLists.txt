@@ -82,6 +82,7 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_graphic_layer.cpp
     particle/particle_def.cpp
     particle/particle_file.cpp
+    lights/effect_light_report.cpp
     lights/light_scene.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp

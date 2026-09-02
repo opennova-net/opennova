@@ -26,6 +26,8 @@
 
 namespace godot {
 
+class EffectLightReport;
+
 class MultiMesh;
 class Weather;
 
@@ -207,7 +209,8 @@ public:
 	static PackedByteArray terrain_light_disc_rgba8();
 	static PackedByteArray terrain_light_strip_rgba8();
 
-	Dictionary get_report() const;
+	// The pool's diagnostic snapshot (lights/effect_light_report.h).
+	Ref<EffectLightReport> get_report() const;
 	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
 	// returned Image owns copied bytes; tests/tools cannot mutate render state.
 	Ref<Image> get_static_light_rows_image() const;

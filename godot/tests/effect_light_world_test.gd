@@ -53,26 +53,26 @@ func test_spawn_select_and_global_push_round_trip() -> void:
 			Vector3.ONE, 0, null)
 	assert_eq(selected, 1, "the light selects for a nearby camera")
 	var report := scene.get_report()
-	assert_eq(int(report.get("live", 0)), 1)
-	assert_eq(int(report.get("selected", 0)), 1)
-	var rows: Array = report.get("rows", [])
+	assert_eq(report.live, 1)
+	assert_eq(report.selected, 1)
+	var rows := report.rows
 	assert_eq(rows.size(), 1)
-	var row: Dictionary = rows[0]
-	assert_eq(int(row.get("handle", 0)), handle,
+	var row: EffectLightRow = rows[0]
+	assert_eq(row.handle, handle,
 			"diagnostics retain the opaque lease returned to gameplay")
-	assert_eq(int(row.get("retail_handle", 0)), handle & 0xffff,
+	assert_eq(row.retail_handle, handle & 0xffff,
 			"diagnostics expose the retail slot word separately for provenance")
-	assert_almost_eq(float(row.get("range", 0.0)), 10.0, 0.001,
+	assert_almost_eq(row.range, 10.0, 0.001,
 			"range = atten_end * 1.25 [orig: Light_GetPointLightParams]")
-	assert_almost_eq(float(row.get("atten2", 0.0)), 0.15, 0.001,
+	assert_almost_eq(row.attenuation_quadratic, 0.15, 0.001,
 			"atten2 = 15 / range^2")
-	var world_pos: Vector3 = row.get("position", Vector3.ZERO)
+	var world_pos: Vector3 = row.position
 	assert_true(world_pos.is_equal_approx(Vector3(4.0, 1.0, -2.0)),
 			"the mission<->godot conversion round-trips")
 	scene.despawn(handle)
 	assert_false(scene.is_alive(handle))
 	scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0, Vector3.ONE, 0, null)
-	assert_eq(int(scene.get_report().get("selected", -1)), 0,
+	assert_eq(scene.get_report().selected, 0,
 			"despawn clears the selection on the next frame")
 
 
@@ -89,8 +89,8 @@ func test_camera_global_object_select_admits_an_owned_muzzle_light() -> void:
 			Vector3.ONE, 0, null), 1,
 			"the camera-global fallback keeps an owned MF_Light visible")
 	var report := scene.get_report()
-	assert_eq(report.get("selection_mode", ""), "camera_global_objects")
-	assert_eq(report.get("owner_isolation", ""), "unavailable")
+	assert_eq(report.selection_mode, "camera_global_objects")
+	assert_eq(report.owner_isolation, "unavailable")
 
 
 func test_camera_global_object_select_filters_disabled_lights_before_the_cap() -> void:
@@ -153,11 +153,11 @@ func test_clear_render_output_preserves_the_live_pool() -> void:
 	assert_eq(scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null), 1)
 	scene.clear_render_output()
 	var report := scene.get_report()
-	assert_eq(int(report.get("live", -1)), 1,
+	assert_eq(report.live, 1,
 			"dropping camera output does not destroy mission lights")
-	assert_eq(int(report.get("selected", -1)), 0,
+	assert_eq(report.selected, 0,
 			"dropping camera output synchronously retires the published selection")
-	assert_eq(report.get("selection_mode", ""), "none",
+	assert_eq(report.selection_mode, "none",
 			"dropping camera output resets the selection mode")
 
 
@@ -207,7 +207,7 @@ func test_director_muzzle_and_round_glow_routes() -> void:
 	var director := EffectLightDirector.new()
 	var report_contract: Variant = director.get_report()
 	assert_true(report_contract is EffectLightReport,
-			"the native LightScene dictionary is decoded at the director FFI seam")
+			"the director hands out the native LightScene report record")
 	# The muzzle glow: spawn-once per shooter, re-armed per shot, dead five
 	# ticks after the last shot — and the cached handle stays dead (the
 	# witnessed per-life behavior, light_scene.h map).

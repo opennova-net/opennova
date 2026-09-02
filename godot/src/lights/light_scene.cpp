@@ -1,4 +1,5 @@
 #include "lights/light_scene.h"
+#include "lights/effect_light_report.h"
 #include "env/env_axes.h"
 
 #include <array>
@@ -1071,33 +1072,33 @@ PackedByteArray LightScene::terrain_light_strip_rgba8() {
 			&opennova::renderer::falloff_texture_spot1d_argb);
 }
 
-Dictionary LightScene::get_report() const {
+Ref<EffectLightReport> LightScene::get_report() const {
 	const opennova::renderer::LightSceneReport report = scene_.inspect();
-	Dictionary out;
-	out["live"] = static_cast<int>(report.live);
-	out["high_water"] = static_cast<int>(report.high_water);
-	out["last_query"] = static_cast<int>(report.last_query);
-	out["selected"] = static_cast<int>(selected_count_);
-	out["selection_mode"] = selection_mode_;
-	out["owner_isolation"] = owner_isolation_;
-	out["models"] = last_models_;
-	out["lit_models"] = last_lit_models_;
-	out["static_rows"] = static_row_count_;
-	out["static_draws"] = last_static_draws_;
-	out["lit_static_draws"] = last_lit_static_draws_;
-	TypedArray<Dictionary> rows;
+	Ref<EffectLightReport> out;
+	out.instantiate();
+	out->set_live(static_cast<int>(report.live));
+	out->set_high_water(static_cast<int>(report.high_water));
+	out->set_last_query(static_cast<int>(report.last_query));
+	out->set_selected(static_cast<int>(selected_count_));
+	out->set_selection_mode(selection_mode_);
+	out->set_owner_isolation(owner_isolation_);
+	out->set_models(last_models_);
+	out->set_lit_models(last_lit_models_);
+	out->set_static_rows(static_row_count_);
+	out->set_static_draws(last_static_draws_);
+	out->set_lit_static_draws(last_lit_static_draws_);
 	for (size_t i = 0; i < selected_count_; ++i) {
 		const opennova::renderer::SelectedLight &light = selected_[i];
-		Dictionary row;
-		row["position"] = mission_to_godot(light.position);
-		row["color"] = Color(light.color[0], light.color[1], light.color[2]);
-		row["range"] = light.range;
-		row["atten2"] = light.attenuation[2];
-		row["handle"] = encode_handle(light.handle);
-		row["retail_handle"] = static_cast<int>(light.handle.retail_value);
-		rows.push_back(row);
+		Ref<EffectLightRow> row;
+		row.instantiate();
+		row->set_position(mission_to_godot(light.position));
+		row->set_color(Color(light.color[0], light.color[1], light.color[2]));
+		row->set_range(light.range);
+		row->set_attenuation_quadratic(light.attenuation[2]);
+		row->set_handle(encode_handle(light.handle));
+		row->set_retail_handle(static_cast<int>(light.handle.retail_value));
+		out->add_row(row);
 	}
-	out["rows"] = rows;
 	return out;
 }
 
