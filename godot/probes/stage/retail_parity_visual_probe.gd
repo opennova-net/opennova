@@ -207,12 +207,9 @@ func _build_debris_stage() -> bool:
 				0.85 + row * 1.33, -2.48)
 		var foliage := index in [1, 7, 12, 16]
 		var direction := (point - blast).normalized()
-		effects.append({
-			"effect": "Effect_TreeFoliageExp" if foliage else "Effect_TreeWoodExp",
-			"pos": point,
-			"dir": direction,
-			"family": 0,
-		})
+		effects.append(DestructionEffectEvent.make(
+				"Effect_TreeFoliageExp" if foliage else "Effect_TreeWoodExp", point,
+				0, direction))
 		_add_centroid_marker(point,
 				Color("57e58c") if foliage else Color("ffb55e"))
 		_add_direction_line(point, point + direction * 1.25,
@@ -220,10 +217,7 @@ func _build_debris_stage() -> bool:
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, null, null, null, null, null, Callable(),
 			func(): return _fx)
-	presenter.present_drained({
-		"effects": effects,
-		"debris_triangles": effects.size(),
-	}, [])
+	presenter.present_drained(DestructionDrain.make([], effects, [], [], effects.size()), [])
 	_add_legend([
 		{"color": Color("57e58c"), "text": "material 17  →  Effect_TreeFoliageExp"},
 		{"color": Color("ffb55e"), "text": "all other materials  →  Effect_TreeWoodExp"},
@@ -244,14 +238,14 @@ func _build_glass_stage() -> bool:
 	var point := Vector3(-2.7, 2.7, -2.02)
 	var direction := Vector3(0.0, 0.0, 1.0)
 	var effects := [
-		{"effect": "Effect_BldGlassExp", "pos": point, "dir": direction, "family": 0},
-		{"effect": "Effect_BldPaperExp", "pos": point, "dir": direction, "family": 0},
-		{"effect": "Effect_BldDustExp", "pos": point, "dir": direction, "family": 0},
+		DestructionEffectEvent.make("Effect_BldGlassExp", point, 0, direction),
+		DestructionEffectEvent.make("Effect_BldPaperExp", point, 0, direction),
+		DestructionEffectEvent.make("Effect_BldDustExp", point, 0, direction),
 	]
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, null, null, null, null, null, Callable(),
 			func(): return _fx)
-	presenter.present_drained({"effects": effects, "glass_points": 1}, [])
+	presenter.present_drained(DestructionDrain.make([], effects, [], [], 0, 1), [])
 	_add_marker(point + Vector3(0, 0, 0.2), Color("66dcff"),
 			"eurhr2  →  GLASS\nBROKEN ONCE", 0.26)
 	_add_marker(Vector3(2.7, 2.7, -2.02), Color("94a9bd"),

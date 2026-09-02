@@ -159,24 +159,22 @@ func present() -> void:
 
 ## The pure-data presentation leg (the present_snapshot precedent): production
 ## present() drains the typed sim; tests feed the same event/piece rows.
-func present_drained(events: Dictionary, pieces: Array) -> void:
-	if not events.is_empty():
-		for husk_v in events.get("husk_swaps", []):
-			_apply_husk_swap(husk_v as Dictionary)
-		for eff_v in events.get("effects", []):
-			_apply_effect(eff_v as Dictionary)
-		for snd_v in events.get("sounds", []):
-			_apply_sound(snd_v as Dictionary)
+func present_drained(events: DestructionDrain, pieces: Array) -> void:
+	if events != null:
+		for husk: HuskSwapEvent in events.husk_swaps:
+			_apply_husk_swap(husk)
+		for eff: DestructionEffectEvent in events.effects:
+			_apply_effect(eff)
+		for snd: DestructionSoundEvent in events.sounds:
+			_apply_sound(snd)
 		if _death_light.is_valid():
-			for light_v in events.get("death_lights", []):
-				var light: Dictionary = light_v
-				_death_light.call(light.get("pos", Vector3.ZERO),
-						float(light.get("radius", 0.0)))
-		_stats.debris_triangles += int(events.get("debris_triangles", 0))
-		_stats.glass_points += int(events.get("glass_points", 0))
+			for light: DeathLightEvent in events.death_lights:
+				_death_light.call(light.pos, light.radius)
+		_stats.debris_triangles += events.debris_triangles
+		_stats.glass_points += events.glass_points
 		# Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
 		# drain above; its sound rides the fire pass's drain_fire_sounds.
-		_stats.crackles += int(events.get("crackles", 0))
+		_stats.crackles += events.crackles
 	_sync_static_husks()
 	_present_pieces(pieces)
 	_tick_wreck_fires()
@@ -186,34 +184,31 @@ func present_drained(events: Dictionary, pieces: Array) -> void:
 # BMS id plus packed (kind,index), with the origin as the zero-id leg. Synthetic
 # runtime entities instead use their packed wire handle because siblings share
 # both zero BMS id and the non-BMS origin sentinel.
-func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
-	if spawn_origin_v == null:
-		return Vector2i(-1, -1)
-	var spawn_origin := int(spawn_origin_v)
+func _spawn_origin_parts(spawn_origin: int) -> Vector2i:
 	return Vector2i(SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
 
 
-func _uses_dynamic_husk_identity(bms_id: int, spawn_origin_v: Variant,
+func _uses_dynamic_husk_identity(bms_id: int, spawn_origin: int,
 		wire_handle: int) -> bool:
 	if wire_handle < 0 or wire_handle == WireHandle.INVALID or bms_id != 0:
 		return false
 	# A real authored origin remains canonical even when its BMS id is zero.
 	# Runtime-only entities carry either no origin or the promotion sentinel.
-	return spawn_origin_v == null or int(spawn_origin_v) == SpawnOrigin.NONE
+	return spawn_origin == SpawnOrigin.NONE
 
 
-func _husk_identity_key(bms_id: int, spawn_origin_v: Variant,
+func _husk_identity_key(bms_id: int, spawn_origin: int,
 		wire_handle: int = -1) -> String:
-	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
+	if _uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle):
 		return 'wire:%d' % wire_handle
-	var origin := _spawn_origin_parts(spawn_origin_v)
+	var origin := _spawn_origin_parts(spawn_origin)
 	return '%d:%d:%d' % [bms_id, origin.x, origin.y]
 
 
-func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null,
+func _resolve_entity_node(bms_id: int, spawn_origin: int = SpawnOrigin.NONE,
 		wire_handle: int = -1) -> Node3D:
 	var dynamic_identity := _uses_dynamic_husk_identity(
-			bms_id, spawn_origin_v, wire_handle)
+			bms_id, spawn_origin, wire_handle)
 	if dynamic_identity:
 		# A runtime-only owner has no authored mission identity. Never fall
 		# through to the BMS/static lookup when its wire node is unavailable.
@@ -222,7 +217,7 @@ func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null,
 		return _dynamic_node_resolver.resolve_wire_handle(wire_handle)
 	if _index == null:
 		return null
-	var origin := _spawn_origin_parts(spawn_origin_v)
+	var origin := _spawn_origin_parts(spawn_origin)
 	var node := _index.resolve(bms_id, origin.x, origin.y)
 	return node if node != null and is_instance_valid(node) else null
 
@@ -234,15 +229,15 @@ func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null,
 # husk grafts into the mission container at the placed transform. No husk
 # authored -> the intact graphic keeps standing, dead — the witnessed
 # render-pick fallback (batched statics stay in their batches).
-func _apply_husk_swap(husk: Dictionary) -> void:
-	var bms_id := int(husk.get("bms_id", 0))
-	var spawn_origin_v: Variant = husk.get('spawn_origin')
-	var wire_handle := int(husk.get('wire_handle', -1))
-	var husk_key := _husk_identity_key(bms_id, spawn_origin_v, wire_handle)
+func _apply_husk_swap(husk: HuskSwapEvent) -> void:
+	var bms_id := husk.bms_id
+	var spawn_origin := husk.spawn_origin
+	var wire_handle := husk.wire_handle
+	var husk_key := _husk_identity_key(bms_id, spawn_origin, wire_handle)
 	if _husked.has(husk_key):
 		return
 	_stats.husk_swaps += 1
-	var item_id := int(husk.get("item_id", 0))
+	var item_id := husk.item_id
 	var def_id := item_id + MissionData.ITEM_ID_OFFSET  # wire type id -> items.def id
 	var husk_graphic := ""
 	if _item_db != null:
@@ -253,7 +248,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		_husked[husk_key] = null
 		_stats.no_husk += 1
 		return
-	var node := _resolve_entity_node(bms_id, spawn_origin_v, wire_handle)
+	var node := _resolve_entity_node(bms_id, spawn_origin, wire_handle)
 	if node != null and is_instance_valid(node):
 		# A qualifying intact model transfers its static-caster role to the husk.
 		var individual_casts_static_shadow := \
@@ -286,7 +281,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		_husk_restore[husk_key] = {
 			'kind': 'individual',
 			'bms_id': bms_id,
-			'spawn_origin': spawn_origin_v,
+			'spawn_origin': spawn_origin,
 			'wire_handle': wire_handle,
 			'children': child_visibility,
 		}
@@ -296,7 +291,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 					husk_graphic, node.transform,
 					individual_casts_static_shadow)
 		return
-	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
+	if _uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle):
 		# The dynamic row may already have retired or failed model resolution.
 		# There is no safe static fallback: bms_id zero is a valid authored key.
 		_husked[husk_key] = null
@@ -330,7 +325,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	_husk_restore[husk_key] = {
 		'kind': 'static',
 		'bms_id': bms_id,
-		'spawn_origin': spawn_origin_v,
+		'spawn_origin': spawn_origin,
 		'placed_transform': xform_v,
 		'husk_graphic': husk_graphic,
 		'casts_static_shadow': batched_casts_static_shadow,
@@ -369,14 +364,13 @@ func _set_husk_static_shadow(model: ObjectModel, enabled: bool) -> void:
 # Node-less wrecks still move while death physics settles them. Resolve the
 # same compact present pose consumed by the other shell presentation paths.
 func _present_transform_for_identity(bms_id: int,
-		spawn_origin_v: Variant = null) -> Variant:
+		spawn_origin: int = SpawnOrigin.NONE) -> Variant:
 	if _sim == null:
 		return null
 	var state := PackedVector3Array()
 	if bms_id > 0:
 		state = _sim.get_present_effect_state_for_bms_id(bms_id)
-	if state.size() != Simulation.EFFECT_STATE_COUNT and spawn_origin_v != null:
-		var spawn_origin := int(spawn_origin_v)
+	if state.size() != Simulation.EFFECT_STATE_COUNT and spawn_origin != SpawnOrigin.NONE:
 		state = _sim.get_present_effect_state_for_origin(
 				SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
 	if state.size() != Simulation.EFFECT_STATE_COUNT:
@@ -388,7 +382,7 @@ func _present_transform_for_identity(bms_id: int,
 	# when pitch/roll are unavailable. Host/listen poses carry the full Euler
 	# angles and take the live-basis path above.
 	if is_zero_approx(rotation_deg.x) and is_zero_approx(rotation_deg.z):
-		var husk_key := _husk_identity_key(bms_id, spawn_origin_v)
+		var husk_key := _husk_identity_key(bms_id, spawn_origin)
 		var restore_v: Variant = _husk_restore.get(husk_key)
 		if restore_v is Dictionary:
 			var placed_v: Variant = (restore_v as Dictionary).get('placed_transform')
@@ -409,7 +403,8 @@ func _sync_static_husks() -> void:
 		if not (graft_v is Node3D) or not is_instance_valid(graft_v):
 			continue
 		var live_v: Variant = _present_transform_for_identity(
-				int(restore.get('bms_id', 0)), restore.get('spawn_origin'))
+				int(restore.get('bms_id', 0)),
+				int(restore.get('spawn_origin', SpawnOrigin.NONE)))
 		if live_v is Transform3D:
 			var graft := graft_v as Node3D
 			var live := live_v as Transform3D
@@ -426,23 +421,23 @@ func _sync_static_husks() -> void:
 						bool(restore.get('casts_static_shadow', false)))
 
 
-func _apply_effect(eff: Dictionary) -> void:
+func _apply_effect(eff: DestructionEffectEvent) -> void:
 	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
 	if fx == null:
 		return
-	var effect := String(eff.get("effect", ""))
+	var effect := eff.effect
 	if effect.is_empty():
 		return
-	var pos: Vector3 = eff.get("pos", Vector3.ZERO)
-	var family := int(eff.get("family", 0))
-	var net_id := int(eff.get("attach_net_id", 0))
-	var bms_id := int(eff.get("attach_bms_id", 0))
-	var spawn_origin_v: Variant = eff.get('attach_spawn_origin')
-	var wire_handle := int(eff.get('attach_wire_handle', -1))
+	var pos := eff.pos
+	var family := eff.family
+	var net_id := eff.attach_net_id
+	var bms_id := eff.attach_bms_id
+	var spawn_origin := eff.attach_spawn_origin
+	var wire_handle := eff.attach_wire_handle
 	var dynamic_identity := _uses_dynamic_husk_identity(
-			bms_id, spawn_origin_v, wire_handle)
+			bms_id, spawn_origin, wire_handle)
 	if family == 0 or (net_id == 0 and not dynamic_identity):
-		fx.spawn_effect(effect, pos, eff.get("dir", Vector3.ZERO))
+		fx.spawn_effect(effect, pos, eff.dir)
 		_stats.effects += 1
 		return
 	# Attached families (death smoke / fire / other): one owned group per
@@ -455,7 +450,7 @@ func _apply_effect(eff: Dictionary) -> void:
 	if _anchors != null:
 		var node: Node3D = null
 		if dynamic_identity:
-			node = _resolve_entity_node(bms_id, spawn_origin_v, wire_handle)
+			node = _resolve_entity_node(bms_id, spawn_origin, wire_handle)
 		elif _index != null and bms_id != 0:
 			node = _index.resolve_single(bms_id)
 		if node != null and is_instance_valid(node):
@@ -469,7 +464,7 @@ func _apply_effect(eff: Dictionary) -> void:
 			var fixed := Transform3D(Basis.IDENTITY, pos)
 			_anchors.register_effect_anchor(key, func() -> Variant:
 				var live_v: Variant = null if dynamic_identity \
-						else _present_transform_for_identity(bms_id, spawn_origin_v)
+						else _present_transform_for_identity(bms_id, spawn_origin)
 				return live_v if live_v is Transform3D else fixed)
 			if family == 2:
 				if dynamic_identity:
@@ -479,21 +474,21 @@ func _apply_effect(eff: Dictionary) -> void:
 				else:
 					_burning[key] = {
 						"bms_id": bms_id,
-						"spawn_origin": spawn_origin_v,
+						"spawn_origin": spawn_origin,
 						"pos": pos,
 					}
 		_wreck_anchor_keys[key] = true
 
 
-func _apply_sound(snd: Dictionary) -> void:
+func _apply_sound(snd: DestructionSoundEvent) -> void:
 	var audio: MissionAudio = _audio_provider.call() \
 			if _audio_provider.is_valid() else null
 	if audio == null:
 		return
-	var name := String(snd.get("sound", ""))
+	var name := snd.sound
 	if name.is_empty():
 		return
-	audio.fire_soundset(name, snd.get("pos", Vector3.ZERO), 0)
+	audio.fire_soundset(name, snd.pos, 0)
 	_stats.sounds += 1
 
 

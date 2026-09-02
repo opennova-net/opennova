@@ -319,9 +319,8 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, null, null, null, null, null, Callable(), Callable(),
 			null, Callable(director, "on_death_light"))
-	presenter.present_drained({
-		"death_lights": [{"pos": Vector3(2.0, 0.0, 0.0), "radius": 6.0}],
-	}, [])
+	presenter.present_drained(DestructionDrain.make([], [], [],
+			[DeathLightEvent.make(Vector3(2.0, 0.0, 0.0), 6.0)]), [])
 	assert_eq(director.get_report().live, 1,
 			"the destruction drain creates one death flash")
 	var camera := Camera3D.new()
