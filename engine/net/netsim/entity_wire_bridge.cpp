@@ -10,7 +10,6 @@
 #include <runtime/world/geom.h>        // to_fixed / from_fixed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
 #include <runtime/world/infantry.h>    // kInfantryAirborneGap / remote body state
-#include <runtime/world/spawn_select.h> // is_player_spawn_marker_type
 #include <runtime/world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {

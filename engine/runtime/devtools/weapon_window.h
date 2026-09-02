@@ -58,7 +58,6 @@ public:
 	void set_live(WeaponLiveSnapshot live);
 	// (pass open && window open): the embedder skips building records nobody shows.
 	bool wants_records() const { return shown_; }
-	uint64_t definition_serial() const { return definition_.serial; }
 
 	// --- the typed request queue the embedder drains ---
 	// enqueue_request is the one path the drawn controls feed, and the headless
@@ -77,7 +76,6 @@ public:
 	bool definition_valid() const { return definition_.valid; }
 	bool live_valid() const { return live_.valid; }
 	const char *weapon_name() const { return definition_.weapon_name.c_str(); }
-	int selected_action() const { return selected_; }
 	void select_action(int action_id);
 	// "0 / 5" for explicit delays, "0 / auto(31)" where the row authored `auto`.
 	const char *action_timing(int action_id) const;

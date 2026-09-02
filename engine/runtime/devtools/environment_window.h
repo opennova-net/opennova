@@ -57,7 +57,6 @@ public:
 
 	// The control strip's edit seeds (tests read what a click would send).
 	int32_t rain_percent_edit() const { return rain_pct_edit_; }
-	int32_t transition_seconds_edit() const { return seconds_edit_; }
 
 private:
 	void format_rows();

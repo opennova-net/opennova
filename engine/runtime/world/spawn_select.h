@@ -29,20 +29,6 @@ struct SpawnPointResult {
     int16_t roll = 0;
 };
 
-// The marker ids admitted to the retail player-start registry. Keep the
-// classification private behind a predicate; callers must not infer a spawn
-// priority from this unordered family.
-// [orig: build_entity_position_list @0x509660]
-constexpr bool is_player_spawn_marker_type(int32_t item_id) {
-    switch (item_id) {
-    case 6001: case 6002: case 6003: case 6004:
-    case 6090: case 6091: case 6094: case 6095:
-    case 6096: case 6097: case 6098: case 6099:
-        return true;
-    default:
-        return false;
-    }
-}
 
 // Resolve one complete spawn pose. A valid target selects the picked-zone path
 // (including numbered-zone 6007 scatter). Without one, the retail mode chain is

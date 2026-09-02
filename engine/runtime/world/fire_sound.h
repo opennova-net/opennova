@@ -116,7 +116,6 @@ public:
     void clear();
 
     int pending_count() const;
-    size_t ready_count() const { return ready_.size(); }
 
 private:
     void push_ready(const char *set_name, const Vec3 &pos,

@@ -551,7 +551,6 @@ public:
 	// feed the 0x04 it expects.
 	uint8_t assigned_team() const { return assigned_team_; }
 	bool spectator() const { return spectator_mode_; }
-	JoinRole requested_role() const { return join_role_; }
 	// Retail's host-global class availability word, replaced by every S2C 0x76.
 	// The malformed/short handler value is zero; before the initial-state message,
 	// retain the stock all-ten-classes default used by the local UI.

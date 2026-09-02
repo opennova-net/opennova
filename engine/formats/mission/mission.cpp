@@ -315,7 +315,7 @@ bool MissionDocument::set_header_string(const std::string &field, const std::str
 	bms::Header &header = impl_->file.header;
 	if (field == "mission_name") {
 		// These are fixed-width on-disk slots read back at full width via fixed_string(., sizeof)
-		// (see info()), so use copy_fixed_field, not copy_cstr: a name/designer/briefing that fills
+		// (see info()), so use copy_fixed_field, not a NUL-forcing copy: a name/designer/briefing that fills
 		// every byte would otherwise lose its last byte to a forced NUL and break the byte-exact
 		// round-trip, exactly the truncation the terrain / environment / name1 / name2 fields below
 		// (and apply_properties) already avoid.
@@ -327,14 +327,14 @@ bool MissionDocument::set_header_string(const std::string &field, const std::str
 	} else if (field == "terrain") {
 		// header.terrain[48] is three 16-byte fixed slots: terrain@+0, cnv_file@+16, tt_file@+32
 		// (see mission_mis_writer.cpp's write_mis_general_information). Write only the first slot so a terrain edit does not
-		// zero-fill (and lose) the cnv_file / tt_file references. copy_fixed_field (not copy_cstr)
+		// zero-fill (and lose) the cnv_file / tt_file references. copy_fixed_field (not a NUL-forcing copy)
 		// keeps all 16 bytes: a slot a shipped mission fills completely would otherwise lose its
 		// 16th byte to a forced NUL, mirroring the name1/name2 fix in apply_properties. The
 		// inspector / get_terrain reads are bounded to 16 so a full slot never bleeds into cnv_file.
 		copy_fixed_field(header.terrain, 16, value);
 	} else if (field == "environment") {
 		// environment[16] is a standalone fixed slot read back with fixed_string(.,16); copy_fixed_field
-		// preserves a full 16-char name (copy_cstr would force a NUL into byte 15 and truncate it).
+		// preserves a full 16-char name (a NUL-forcing copy would truncate it at byte 15).
 		copy_fixed_field(header.environment, sizeof(header.environment), value);
 	} else {
 		impl_->last_error = "Unknown header string field: " + field;

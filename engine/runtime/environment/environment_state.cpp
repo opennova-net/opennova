@@ -170,10 +170,6 @@ void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 	}
 }
 
-int EnvironmentState::mission_advance_per_tick() const {
-	return static_cast<int>(weather_->tod_advance_per_tick);
-}
-
 void EnvironmentState::advance_mission_clock(int ticks) {
 	if (ticks <= 0 || !weather_is_standalone()) {
 		return;

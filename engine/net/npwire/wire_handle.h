@@ -66,12 +66,6 @@ constexpr bool is_batch_end_sentinel(uint16_t slot_id) {
 	return slot_id == kInvalid || pool(slot_id) >= kPoolCount;
 }
 
-// True when a compact record's parent/vehicle handle denotes a real mount —
-// the complement of the sentinel test on parent handles.
-constexpr bool is_real_mount_parent(uint16_t parent) {
-	return !is_batch_end_sentinel(parent);
-}
-
 static_assert((kPoolCount << kPoolShift) == 0x5000,
               "the witnessed batch-end test is (id & 0xF000) >= 0x5000");
 static_assert(make(2, 0x123) == 0x2123);
@@ -79,6 +73,5 @@ static_assert(pool(0x2123) == 2 && slot(0x2123) == 0x123);
 static_assert(is_batch_end_sentinel(0xFFFF));
 static_assert(is_batch_end_sentinel(0x5000));
 static_assert(!is_batch_end_sentinel(0x4FFF));
-static_assert(!is_real_mount_parent(0xFFFF) && is_real_mount_parent(0x2001));
 
 }  // namespace opennova::wire_handle

@@ -64,7 +64,6 @@ public:
 	uint16_t selected_handle() const;
 	// The selected row of the held snapshot; null while none or pending.
 	const world::inspect::EntityRow *selected_row() const;
-	uint16_t pending_select_handle() const { return pending_select_handle_; }
 	bool wants_scroll_to_selected() const { return scroll_to_selected_; }
 
 	// The typed request queue the embedder drains (the GameWindowRequest

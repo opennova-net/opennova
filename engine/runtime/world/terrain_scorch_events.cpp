@@ -28,16 +28,6 @@ bool TerrainScorchEvents::emit_standard(int32_t center_x_q16,
 	return append_resolved(resolved, tick);
 }
 
-bool TerrainScorchEvents::emit_sized(int32_t center_x_q16,
-		int32_t center_y_q16, int scorch_id, int32_t half_extent_q16,
-		uint32_t tick) {
-	const terrain::TerrainScorchResolved resolved =
-			terrain::resolve_sized_terrain_scorch(
-					center_x_q16, center_y_q16, scorch_id,
-					half_extent_q16, producer_roll(scorch_id));
-	return append_resolved(resolved, tick);
-}
-
 bool TerrainScorchEvents::append_resolved(
 		const terrain::TerrainScorchResolved &resolved, uint32_t tick) {
 	if (!resolved.valid) return false;

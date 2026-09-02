@@ -106,7 +106,6 @@ public:
 	void set_weapon_definition(WeaponDefinitionSnapshot definition);
 	void set_weapon_live(WeaponLiveSnapshot live);
 	bool needs_weapon_records() const;
-	uint64_t weapon_definition_serial() const;
 	bool take_weapon_request(WeaponRequest &request);
 
 	// The Environment window's record/request channel (the same shape): the
