@@ -17,6 +17,8 @@
 namespace godot {
 
 class EffectLoadReport;
+class EffectSpawnReceipt;
+class EffectSpawnRequest;
 
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
@@ -82,11 +84,9 @@ public:
 	int64_t intern(const String &p_effect_name);
 	String effect_name(int64_t p_effect_handle) const;
 
-	// request keys: effect_handle, transform, admission, binding,
-	// render_domain, slot_token, owner_token, owner_relative_transform,
-	// initial_age_ticks, source_tick, source_order, color_tint,
-	// spring_const, lod_divisor, kill_plane, kill_plane_y.
-	Dictionary spawn(const Dictionary &p_request);
+	// One spawn (particle/effect_spawn_records.h): a null or invalid request
+	// answers an invalid-request receipt naming the failing field.
+	Ref<EffectSpawnReceipt> spawn(const Ref<EffectSpawnRequest> &p_request);
 
 	// Each update is a Dictionary with owner_token, transform, and present.
 	// Removing an owner (present=false) detaches all of its following groups.

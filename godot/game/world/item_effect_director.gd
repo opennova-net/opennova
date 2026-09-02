@@ -330,13 +330,13 @@ func _register_item_fx_control_node(node: ObjectModel, kind: int,
 
 
 func _track_item_fx_control_spawn(node_id: int, owner_key: String,
-		receipt: Dictionary) -> void:
+		receipt: EffectSpawnReceipt) -> void:
 	var instance: Dictionary = _item_fx_control_instances.get(node_id, {
 		"group_ids": [],
 		"owner_keys": [],
 	})
 	var group_ids: Array = instance.get("group_ids", [])
-	var group_id := int(receipt.get("group_id", 0))
+	var group_id := receipt.group_id
 	if group_id > 0 and not group_ids.has(group_id):
 		group_ids.append(group_id)
 	var owner_keys: Array = instance.get("owner_keys", [])
@@ -473,11 +473,11 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 				continue
 			var info := data.get_user_point_info(i)
 			var key := "itemfx:%d:%d" % [node_id, i]
-			var receipt: Dictionary = effect_world.spawn_effect_attached_request(
+			var receipt := effect_world.spawn_effect_attached_request(
 					key, effect, node.global_transform,
 					info.position,
 					info.rotation)
-			if bool(receipt.get("spawned", false)):
+			if receipt.spawned:
 				_item_fx_nodes[key] = node
 				_item_fx_owner_refs[key] = entity_ref
 				if controller_active:
@@ -490,9 +490,9 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 		# [orig: Entity_SpawnBoneTrailEffect @ 0x43c097 -> submit_effect_descriptor
 		#  @ 0x43c0a4 at entity->Position].
 		var key := "itemfx:%d:origin" % node_id
-		var receipt: Dictionary = effect_world.spawn_effect_attached_request(
+		var receipt := effect_world.spawn_effect_attached_request(
 				key, effect, node.global_transform, Vector3.ZERO, Vector3.ZERO)
-		if bool(receipt.get("spawned", false)):
+		if receipt.spawned:
 			_item_fx_nodes[key] = node
 			_item_fx_owner_refs[key] = entity_ref
 			if controller_active:
@@ -506,12 +506,12 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 
 func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
 	var effect_world: EffectWorld = _world.get_effect_world()
-	var receipt: Dictionary = effect_world.spawn_effect_request(effect, transform, {
+	var receipt := effect_world.spawn_effect_request(effect, transform, {
 		"admission": EffectScene.ADMISSION_ALWAYS,
 		"binding": EffectScene.BINDING_WORLD,
 		"render_domain": EffectScene.RENDER_DOMAIN_WORLD,
 	})
-	return bool(receipt.get("spawned", false))
+	return receipt.spawned
 
 
 func _attach_item_effect_to_static(source: Dictionary, source_index: int,

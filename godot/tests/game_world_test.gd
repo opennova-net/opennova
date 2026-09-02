@@ -123,20 +123,15 @@ class FxWorldStub:
 	var stopped_groups: Array[int] = []
 	var timeline: Array[String] = []
 	func spawn_effect_request(effect: String, transform: Transform3D,
-			options: Dictionary = {}) -> Dictionary:
+			options: Dictionary = {}) -> EffectSpawnReceipt:
 		if are_particles_hidden():
-			return {"spawned": false, "accepted": false, "effect_handle": 0}
+			return EffectSpawnReceipt.make(false)
 		request_spawns.append({
 			"effect": effect,
 			"transform": transform,
 			"options": options.duplicate(),
 		})
-		return {
-			"spawned": true,
-			"accepted": true,
-			"effect_handle": 1,
-			"group_id": request_spawns.size(),
-		}
+		return EffectSpawnReceipt.make(true, 1, request_spawns.size())
 	func spawn_effect(effect: String, position: Vector3,
 			orientation: Vector3 = Vector3.ZERO) -> int:
 		spawns.append({
@@ -175,18 +170,12 @@ class FxWorldStub:
 			initial_transform: Transform3D, local_pos: Vector3, local_dir: Vector3) -> int:
 		var receipt := spawn_effect_attached_request(
 				owner_key, effect, initial_transform, local_pos, local_dir)
-		return int(receipt.get("effect_handle", 0)) if bool(
-				receipt.get("spawned", false)) else 0
+		return receipt.effect_handle if receipt.spawned else 0
 	func spawn_effect_attached_request(owner_key: Variant, effect: String,
 			initial_transform: Transform3D, local_pos: Vector3,
-			local_dir: Vector3) -> Dictionary:
+			local_dir: Vector3) -> EffectSpawnReceipt:
 		if are_particles_hidden():
-			return {
-				"spawned": false,
-				"accepted": false,
-				"effect_handle": 0,
-				"group_id": 0,
-			}
+			return EffectSpawnReceipt.make(false)
 		attached_spawns.append({
 			"owner": owner_key,
 			"effect": effect,
@@ -194,12 +183,7 @@ class FxWorldStub:
 			"local_pos": local_pos,
 			"local_dir": local_dir,
 		})
-		return {
-			"spawned": true,
-			"accepted": true,
-			"effect_handle": 1,
-			"group_id": attached_spawns.size(),
-		}
+		return EffectSpawnReceipt.make(true, 1, attached_spawns.size())
 	func stop_group(group_id: int) -> void:
 		stopped_groups.append(group_id)
 
@@ -1539,13 +1523,13 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	assert_not_null(renderer)
 	if renderer != null:
 		renderer.procedural_fallback_enabled = true
-	var receipt: Dictionary = effect_world.spawn_effect_request(
+	var receipt := effect_world.spawn_effect_request(
 			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), {
 				"admission": EffectScene.ADMISSION_ALWAYS,
 				"binding": EffectScene.BINDING_WORLD,
 				"render_domain": EffectScene.RENDER_DOMAIN_WORLD,
 			})
-	assert_true(bool(receipt.get("spawned", false)), "the probe effect spawns")
+	assert_true(receipt.spawned, "the probe effect spawns")
 	for _i in range(3):
 		effect_world.advance_fixed_tick(0.016)
 	camera.global_position = Vector3(2.0, 1.5, 12.0)

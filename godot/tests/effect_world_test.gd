@@ -412,13 +412,13 @@ func test_release_effect_binding_drops_generation_scoped_token_and_pose_state() 
 	var owner_key := "throwable-move:1024"
 	var receipt := world.spawn_effect_owned_request(
 			owner_key, "puff", Vector3(1, 2, 3), Vector3.UP)
-	assert_true(bool(receipt.get("spawned", false)))
+	assert_true(receipt.spawned)
 	assert_true(world.has_owner_binding(owner_key),
 			"a live owned spawn holds its binding identity in every table")
 	assert_true(world.has_cached_owner_pose(owner_key),
 			"a live owned spawn seeds a native owner pose")
 
-	world.stop_group(int(receipt.get("group_id", 0)))
+	world.stop_group(receipt.group_id)
 	world.release_effect_binding(owner_key)
 
 	assert_true(world.has_no_owner_bindings(),
@@ -435,7 +435,7 @@ func test_release_effect_binding_cleans_a_rejected_spawn_identity() -> void:
 	var owner_key := "throwable-move:2048"
 	var receipt := world.spawn_effect_owned_request(
 			owner_key, "missing-effect", Vector3.ZERO, Vector3.UP)
-	assert_false(bool(receipt.get("spawned", false)))
+	assert_false(receipt.spawned)
 	assert_true(world.has_owner_binding(owner_key),
 			"a rejected ReplaceOwned spawn still allocates its binding identities")
 	assert_false(world.has_cached_owner_pose(owner_key),

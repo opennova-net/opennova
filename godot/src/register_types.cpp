@@ -47,6 +47,7 @@
 #include "lights/light_scene.h"
 #include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
+#include "particle/effect_spawn_records.h"
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
@@ -319,6 +320,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ParticleDef);
 	GDREGISTER_CLASS(ParticleFile);
 	GDREGISTER_CLASS(EffectLoadReport);
+	GDREGISTER_CLASS(EffectSpawnRequest);
+	GDREGISTER_CLASS(EffectSpawnReceipt);
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(EffectLightRow);
 	GDREGISTER_CLASS(EffectLightReport);

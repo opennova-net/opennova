@@ -1,5 +1,6 @@
 #include "particle/effect_scene.h"
 #include "particle/effect_load_report.h"
+#include "particle/effect_spawn_records.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -25,7 +26,6 @@ using opennova::particle::Color3;
 using opennova::particle::CurveRef;
 using opennova::particle::EffectBounds;
 using opennova::particle::EffectPose;
-using opennova::particle::EffectSpawnReceipt;
 using opennova::particle::EffectSpawnStatus;
 using opennova::particle::GraphicLayer;
 using opennova::particle::ParticleDef;
@@ -128,29 +128,25 @@ String spawn_status_name(EffectSpawnStatus status) {
 	return "unknown";
 }
 
-Dictionary spawn_receipt_dictionary(const EffectSpawnReceipt &receipt) {
-	Dictionary result;
-	result["status"] = static_cast<int>(receipt.status);
-	result["status_name"] = spawn_status_name(receipt.status);
-	result["effect_handle"] = static_cast<int64_t>(receipt.effect.value);
-	result["group_id"] = token_to_godot(receipt.group.value);
-	result["replaced_group_id"] =
-			token_to_godot(receipt.replaced_group.value);
-	result["spawned"] = receipt.spawned();
-	result["accepted"] = receipt.accepted();
+Ref<EffectSpawnReceipt> spawn_receipt_record(const opennova::particle::EffectSpawnReceipt &receipt) {
+	Ref<EffectSpawnReceipt> result;
+	result.instantiate();
+	result->set_status(static_cast<int>(receipt.status));
+	result->set_status_name(spawn_status_name(receipt.status));
+	result->set_effect_handle(static_cast<int64_t>(receipt.effect.value));
+	result->set_group_id(token_to_godot(receipt.group.value));
+	result->set_replaced_group_id(token_to_godot(receipt.replaced_group.value));
+	result->set_spawned(receipt.spawned());
+	result->set_accepted(receipt.accepted());
 	return result;
 }
 
-Dictionary invalid_spawn_request(const String &message) {
-	Dictionary result;
-	result["status"] = EffectScene::SPAWN_STATUS_INVALID_REQUEST;
-	result["status_name"] = "invalid_request";
-	result["message"] = message;
-	result["effect_handle"] = 0;
-	result["group_id"] = 0;
-	result["replaced_group_id"] = 0;
-	result["spawned"] = false;
-	result["accepted"] = false;
+Ref<EffectSpawnReceipt> invalid_spawn_request(const String &message) {
+	Ref<EffectSpawnReceipt> result;
+	result.instantiate();
+	result->set_status(EffectScene::SPAWN_STATUS_INVALID_REQUEST);
+	result->set_status_name("invalid_request");
+	result->set_message(message);
 	return result;
 }
 
@@ -390,13 +386,14 @@ String EffectScene::effect_name(int64_t p_effect_handle) const {
 			}));
 }
 
-Dictionary EffectScene::spawn(const Dictionary &p_request) {
-	const int admission = p_request.get("admission", ADMISSION_ALWAYS);
-	const int binding = p_request.get("binding", BINDING_WORLD);
-	const int render_domain =
-			p_request.get("render_domain", RENDER_DOMAIN_WORLD);
-	const int kill_plane =
-			p_request.get("kill_plane", KILL_PLANE_DISABLED);
+Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_request) {
+	if (p_request.is_null()) {
+		return invalid_spawn_request("null request");
+	}
+	const int admission = p_request->get_admission();
+	const int binding = p_request->get_binding();
+	const int render_domain = p_request->get_render_domain();
+	const int kill_plane = p_request->get_kill_plane();
 
 	if (!valid_admission(admission)) {
 		return invalid_spawn_request("invalid admission");
@@ -412,50 +409,34 @@ Dictionary EffectScene::spawn(const Dictionary &p_request) {
 	}
 
 	opennova::particle::EffectSpawnRequest request;
-	request.effect.value = handle_from_godot(
-			static_cast<int64_t>(p_request.get("effect_handle", 0)));
-	request.pose = native_pose(
-			static_cast<Transform3D>(p_request.get(
-					"transform", Transform3D())));
+	request.effect.value = handle_from_godot(p_request->get_effect_handle());
+	request.pose = native_pose(p_request->get_transform());
 	request.admission =
 			static_cast<opennova::particle::EffectAdmission>(admission);
 	request.binding =
 			static_cast<opennova::particle::EffectBinding>(binding);
 	request.render_domain =
 			static_cast<opennova::particle::EffectRenderDomain>(render_domain);
-	request.slot.value = token_from_godot(
-			static_cast<int64_t>(p_request.get("slot_token", 0)));
-	request.owner.value = token_from_godot(
-			static_cast<int64_t>(p_request.get("owner_token", 0)));
+	request.slot.value = token_from_godot(p_request->get_slot_token());
+	request.owner.value = token_from_godot(p_request->get_owner_token());
 
-	request.owner_relative_pose = native_pose(
-			static_cast<Transform3D>(p_request.get(
-					"owner_relative_transform", Transform3D())));
-	request.initial_age_ticks = non_negative_u32(
-			static_cast<int64_t>(p_request.get("initial_age_ticks", 0)));
-	request.source_tick = token_from_godot(
-			static_cast<int64_t>(p_request.get("source_tick", 0)));
-	request.source_order = token_from_godot(
-			static_cast<int64_t>(p_request.get("source_order", 0)));
-	request.color_tint = native_vector(
-			static_cast<Vector3>(p_request.get(
-					"color_tint", Vector3(1.0, 1.0, 1.0))));
-	request.spring_const = static_cast<float>(
-			static_cast<double>(p_request.get("spring_const", 0.0)));
+	request.owner_relative_pose = native_pose(p_request->get_owner_relative_transform());
+	request.initial_age_ticks = non_negative_u32(p_request->get_initial_age_ticks());
+	request.source_tick = token_from_godot(p_request->get_source_tick());
+	request.source_order = token_from_godot(p_request->get_source_order());
+	request.color_tint = native_vector(p_request->get_color_tint());
+	request.spring_const = p_request->get_spring_const();
 	request.lod_divisor = std::max<std::uint32_t>(
-			non_negative_u32(
-					static_cast<int64_t>(p_request.get("lod_divisor", 1))),
-			1u);
+			non_negative_u32(p_request->get_lod_divisor()), 1u);
 
 	request.kill_plane =
 			static_cast<opennova::particle::EffectKillPlane>(kill_plane);
-	request.kill_plane_y = static_cast<float>(
-			static_cast<double>(p_request.get("kill_plane_y", 0.0)));
-	const EffectSpawnReceipt receipt = scene_.spawn(request);
+	request.kill_plane_y = p_request->get_kill_plane_y();
+	const opennova::particle::EffectSpawnReceipt receipt = scene_.spawn(request);
 	if (receipt.spawned()) {
 		advance_in_place(0.0);
 	}
-	return spawn_receipt_dictionary(receipt);
+	return spawn_receipt_record(receipt);
 }
 
 void EffectScene::apply_owner_poses_in_place(const Array &p_updates) {

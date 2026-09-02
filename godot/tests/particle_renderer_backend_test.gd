@@ -58,11 +58,8 @@ func _live_world_scene_at_heights(heights: PackedFloat32Array) -> EffectScene:
 	for height in heights:
 		var transform := Transform3D.IDENTITY
 		transform.origin.y = height
-		var receipt := scene.spawn({
-			"effect_handle": scene.intern(effect.id),
-			"transform": transform,
-		})
-		assert_eq(int(receipt.get("status", -1)), EffectScene.SPAWN_STATUS_SPAWNED)
+		var receipt := scene.spawn(EffectSpawnRequest.make(scene.intern(effect.id), transform))
+		assert_eq(receipt.status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
 
@@ -73,12 +70,9 @@ func _live_world_scene() -> EffectScene:
 
 func _live_first_person_scene() -> EffectScene:
 	var scene := _live_world_scene_at_heights(PackedFloat32Array())
-	var receipt := scene.spawn({
-		"effect_handle": scene.intern("GPU effect"),
-		"transform": Transform3D.IDENTITY,
-		"render_domain": EffectScene.RENDER_DOMAIN_FIRST_PERSON,
-	})
-	assert_eq(int(receipt.get("status", -1)), EffectScene.SPAWN_STATUS_SPAWNED)
+	var request := EffectSpawnRequest.make(scene.intern("GPU effect"), Transform3D.IDENTITY)
+	request.render_domain = EffectScene.RENDER_DOMAIN_FIRST_PERSON
+	assert_eq(scene.spawn(request).status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
 
