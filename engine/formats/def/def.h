@@ -616,6 +616,14 @@ typedef struct DefItemDef {
     int pitch_velocity;
     int bob;
     int flip;
+    /* The handbrake/tire-slip pair — raw atol, defaulted 1 / 5 by the allocator
+       [orig: ItemDef_ParsePhysicsProperty keys "hand_brake" @0x7c7d60 -> +0x944,
+        "tire_slip" @0x7c7d6c -> +0x940; ItemDef_AllocateWithDefaults @0x49E3B0].
+       Consumers: hand_brake gates the vehicle motor's byte-973 stop latch
+       (`occupant && Flags & 8 && handBrake` @0x48c03a); tire_slip is the skid
+       model's slip threshold (D-NET-161 deferral). */
+    int hand_brake;
+    int tire_slip;
     /* The suspension spring block — raw atol like the rest of the physics block
        [orig: ItemDef_ParsePhysicsProperty stores: spring @0x49db5c (+0x8FC),
         spring_comp @0x49dbd4 (+0x900), shock @0x49dc10 (+0x904),

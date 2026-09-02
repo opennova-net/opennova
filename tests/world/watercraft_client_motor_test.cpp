@@ -2002,6 +2002,45 @@ bool run_authority_player_drive_uses_waterspeed() {
 	return ok;
 }
 
+// A PLAYER driver whose head is under the water plane hands the boat to the
+// AI leg: the player input block is skipped, so with no AI command staged the
+// hull holds its registers [orig: the submerged-driver cut @0x48DFD3..0x48DFDF
+// -> the AI leg @0x48E247]. A body that never derived an eye height keeps the
+// wheel.
+bool run_submerged_driver_hands_to_ai_leg() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	r.traits.water_speed = 5000;
+	r.traits.player_speed = 0;
+	w::Entity *drv = mount_ai_driver(r);
+	if (drv == nullptr) return false;
+	drv->player_class = 2;
+	drv->flags |= 0x100u;
+	drv->yaw = 90;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	boat->yaw = 90;
+	drv->net_move_input = 0x08u | 0x01u;
+	bool ok = true;
+	// Eye above the plane: the player leg commands waterSpeed.
+	drv->eye_offset_z = 1 << 16;
+	drv->position.z = static_cast<float>(r.world.env.water_z) / 65536.0f;
+	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "eye above the plane");
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000, "surfaced driver commands waterSpeed");
+	// Eye at/below the plane: the cut routes to the AI leg (none staged: hold).
+	boat->veh.cmd_speed = 0;
+	drv->position.z -= 1.0f;
+	ok &= expect(w::watercraft_driver_submerged(r.world, *drv), "eye at the plane is submerged");
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 0, "submerged driver's input is cut");
+	// No derived eye height: never cut.
+	drv->eye_offset_z = 0;
+	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "no eye height -> no cut");
+	return ok;
+}
+
 // The AI leg caps command at def waterSpeed and steers Yaw + delta with no
 // ground-style delta/8 term [orig: @0x48E260..0x48E279 / @0x48E3F0..0x48E3F5].
 bool run_authority_ai_leg_caps_at_waterspeed() {
@@ -2041,6 +2080,7 @@ int main() {
 	ok &= run_authority_capsize_drain_and_dead_skip();
 	ok &= run_authority_ai_leg_caps_at_waterspeed();
 	ok &= run_authority_player_drive_uses_waterspeed();
+	ok &= run_submerged_driver_hands_to_ai_leg();
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();

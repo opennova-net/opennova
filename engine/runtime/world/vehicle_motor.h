@@ -122,6 +122,13 @@ struct VehicleTraits {
     int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
+    int32_t hand_brake = 0;    // itemDef+0x944 raw — arms the byte-973 stop latch
+                               // [orig: @0x48c03a `occupant && Flags & 8 && handBrake`]
+    // The AI crew clamp pair [orig: minAI +0x8D8 @0x48bc51, criticalHp +0x180
+    // @0x48bc7d]: an undercrewed AI hull that has left its spawn anchor bleeds
+    // to criticalHp (AiSystem::apply_min_ai_crew_clamp).
+    int32_t min_ai = 0;        // itemDef+0x8D8 raw — the crew count threshold
+    int32_t critical_hp = 0;   // itemDef+0x180 i16 raw — the clamp ceiling
     // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
     // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904 —
     //  ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10]. The def's

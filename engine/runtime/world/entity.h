@@ -900,6 +900,14 @@ struct Entity {
         uint8_t has_been_driven = 0; // +0x3DE — the bike's driven byte
         uint32_t airborne_stamp_2f8 = 0; // +0x2F8 — the client crash window's stamp
         float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
+        // The driverless stuck counter [orig: entity+0x148 moveTimer — ++ per
+        // AI_CheckVehicleStuckState @0x465290 call, zeroed while occupied
+        // (@0x48DFB9 boat / the air AI leg @0x491185)].
+        int32_t stuck_ticks = 0;
+        // The handbrake stop latch [orig: entity byte +0x3CD @0x48c03a..0x48c074]:
+        // 1 while `occupant && Flags & 8 && itemDef->handBrake`, and the
+        // command word is forced to zero for as long as it holds.
+        uint8_t handbrake_latched = 0;
     };
     VehicleMotorState veh;
 };

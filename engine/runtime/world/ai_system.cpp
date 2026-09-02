@@ -640,8 +640,14 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
                 // [orig: infantry death detach @0x4b9c57..0x4b9c60]
                 const bool ctrl_alive =
                         ctrl != nullptr && ctrl->alive && ctrl->health > 0;
-                const bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
-                                         ctrl->player_class != 0;
+                bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
+                                   ctrl->player_class != 0;
+                // A boat whose PLAYER driver has their head under the water plane
+                // is driven by the AI leg [orig: the submerged-driver cut
+                // @0x48DFD3..0x48DFDF routes to the AI leg @0x48E247].
+                if (player_ctrl && traits->family == VehicleFamily::Watercraft &&
+                    watercraft_driver_submerged(world, *ctrl))
+                    player_ctrl = false;
                 if (player_ctrl) {
                     // A player drive freezes the SM mover exactly like the parked leg —
                     // the route never advances under a human driver [orig: the player

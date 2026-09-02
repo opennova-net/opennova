@@ -532,6 +532,25 @@ struct StateRow {
 // be resolved (channel 0, missing count) or the type is unknown.
 int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTable &nav);
 
+// The spawn-anchor proximity test [orig: Entity_IsBoneInProximity @0x434F90 —
+// the "bone" is the entity's own +0x24C spawn pose; a spawn PARENT (+0x264)
+// lifts it to world first and a dead parent fails the test]: planar deltas
+// full, the Z delta HALVED, 3D length <= 8 u (0x80000). Consumers: the minAI
+// crew clamp and Entity_CanEnterVehicle's at-spawn arm. Body in ai_waypoints.cpp.
+bool vehicle_at_spawn_anchor(const Entity &veh);
+
+// The rider count [orig: Entity_CountMountedEntities @0x435970 — live pool-0
+// entities with an ItemDef whose ground link (+0x28) is the vehicle, or whose
+// ground link's own ground link is (a body on a carried gun)]. Body in
+// ai_waypoints.cpp.
+int count_mounted_entities(const World &world, const Entity &veh);
+
+// A PLAYER driver whose head is under the water plane hands the boat to the
+// AI leg [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF —
+// `occupant->Position.z + CameraOffset.z <= Env_WaterHeightFixed`]. Body in
+// ai_waypoints.cpp.
+bool watercraft_driver_submerged(const World &world, const Entity &occ);
+
 // [orig: Entity_ApplyCommand @0x43ab60] Apply the command arms which write the
 // 812-byte brain directly: AIUSEWPZ/AICLEARWPZ (subs 0x20/0x21) and
 // PLAYPARTANIM (sub 0x22). Controller-slot/entity-flag mutations and commands
@@ -958,6 +977,25 @@ public:
     bool vehicle_waits_for_boarders(World &world, const Entity &veh);
     void chel_ai_drive(World &world, Entity &veh, const Entity *controller,
                        const VehicleTraits &traits);
+
+    // The driverless stuck escalation every family's parked leg runs
+    // [orig: AI_CheckVehicleStuckState @0x465290 — call sites: the ground parked
+    //  stamp @0x48c01e, the boat parked leg @0x48e808, the air parked block
+    //  @0x491c5e]. The +0x148 counter climbs once per call while the entity's
+    //  think cooldown is not 1; on the authority, every 16th count past 32 a
+    //  live pool-0 body within (both bound radii + 12 u) resets it, and past
+    //  3410 counts a hull more than 12 u from its spawn anchor is nudged upward
+    //  (slideDecay += 1024 per check) until 3720, then killed (Health = 0).
+    //  Body in ai_waypoints.cpp.
+    void check_vehicle_stuck(World &world, Entity &veh);
+
+    // The minAI crew clamp at the head of every AI-driver leg [orig: ground
+    //  @0x48bc4e..0x48bc94, boat @0x48E27F..0x48E2C7, air @0x4915b2..0x4915e2]:
+    //  `minAI > 1`, the hull is no longer at its spawn anchor
+    //  (Entity_IsBoneInProximity @0x434F90) and fewer than minAI bodies ride it
+    //  (Entity_CountMountedEntities @0x435970) -> Health = min(Health,
+    //  criticalHp). Undercrewed AI hulls bleed to critical once they move off.
+    void apply_min_ai_crew_clamp(World &world, Entity &veh, const VehicleTraits &traits);
 
     // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
     // and wrapping SUB for every other nonzero direction. Clamp/stop only on
