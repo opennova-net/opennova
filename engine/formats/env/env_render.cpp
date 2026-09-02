@@ -1,4 +1,5 @@
 #include <formats/env/env_celestial.h>
+#include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
 
@@ -525,7 +526,7 @@ CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
 
 float cloud_uv_rate_per_second(const CloudScrollState &scroll) {
 	// 62 ticks of the current rate through the layer-1 2^-28 UV scale.
-	return static_cast<float>(scroll.rate * 62.0 * kCloudUvScaleLayer1);
+	return static_cast<float>(scroll.rate * static_cast<double>(io::kTicksPerSecondInt) * kCloudUvScaleLayer1);
 }
 
 // ---------------------------------------------------------------------------
@@ -1616,9 +1617,13 @@ Rgb weighted_add(const Rgb &light, const Rgb &base, int weight) {
 
 } // namespace
 
+// The byte weight of the terrain light/sky blend: 0xB5/256 = 0.707 as the
+// witnessed integer arithmetic spells it (not terrain lighting's float literal).
+constexpr int kTerrainLightWeightByte = 0xB5;
+
 Rgb combine_terrain_light(const Rgb &light, const Rgb &sky) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57f0b3] — 0xB5/256 = 0.707.
-	return weighted_add(light, sky, 0xB5);
+	return weighted_add(light, sky, kTerrainLightWeightByte);
 }
 
 Rgb combine_terrain_light_low(const Rgb &light, const Rgb &sky) {

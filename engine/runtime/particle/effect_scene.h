@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <base/io/tick_rate.h>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -103,7 +104,7 @@ struct EffectSceneConfig {
 	std::vector<EffectCatalogDocument> documents;
 	// Initial-age replay uses this fixed step so a catch-up spawn follows the
 	// same emission and physics cadence as ordinary world simulation.
-	float simulation_tick_seconds = 1.0f / 62.5f;
+	float simulation_tick_seconds = 1.0f / static_cast<float>(io::kTickHz);
 	// Zero means unbounded. Non-zero limits reject explicitly rather than
 	// silently dropping an effect or a subset of its emitters.
 	std::size_t max_live_groups = 1024;

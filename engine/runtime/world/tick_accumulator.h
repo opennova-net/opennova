@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <base/io/tick_rate.h>
 
 namespace opennova::world {
 
@@ -8,13 +9,11 @@ namespace opennova::world {
 // banks wall-clock into, advancing the logic tick counter once per quantum
 // [orig: current_tick @ 0x24c1968, incremented per drained 16 ms quantum in
 // Game_MainLoop @ 0x52b630].
-inline constexpr double kTicksPerSecond = 62.5;
-inline constexpr int32_t kTickMs = 16; // one logic tick's wall-clock quantum
 
 // Wall-clock milliseconds -> whole logic ticks (the original's ms/16 quantum
 // count; fractional remainders truncate exactly like the drain).
 constexpr int32_t ticks_from_ms(int64_t ms) {
-    return static_cast<int32_t>(ms / kTickMs);
+    return static_cast<int32_t>(ms / io::kTickMs);
 }
 
 // The fixed-62.5 Hz real-time accumulator [orig: Game_MainLoop @ 0x52b630]:
@@ -27,7 +26,7 @@ constexpr int32_t ticks_from_ms(int64_t ms) {
 class TickAccumulator {
 public:
 	// 16 ms; matches AiEventQueue::kFrameDt.
-	static constexpr double kTickDt = 1.0 / kTicksPerSecond;
+	static constexpr double kTickDt = 1.0 / io::kTickHz;
 	// The spiral-of-death clamp: the 500 ms / 16 ms accumulator cap.
 	static constexpr int kMaxCatchupTicks = 31;
 

@@ -1,4 +1,5 @@
 #include <runtime/audio/ambient_mixer.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -220,7 +221,7 @@ void AmbientMixer::advance_seconds(float dt) {
     if (dt <= 0.0f) {
         return;
     }
-    auto_accum_ += dt * 62.5f;
+    auto_accum_ += dt * static_cast<float>(io::kTickHz);
     const int64_t n = static_cast<int64_t>(auto_accum_);
     if (n > 0) {
         auto_accum_ -= static_cast<float>(n);

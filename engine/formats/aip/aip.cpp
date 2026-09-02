@@ -1,4 +1,5 @@
 #include <formats/aip/aip.h>
+#include <base/io/tick_rate.h>
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -29,7 +30,7 @@ int32_t deg_to_bam(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * 11930464.0); // [orig: dbl_7C6E18]
 }
 int32_t secs_to_ticks(const std::string &s) {
-    return static_cast<int32_t>(std::atof(s.c_str()) * 62.5); // [orig: dbl_7C3B48]
+    return static_cast<int32_t>(std::atof(s.c_str()) * io::kTickHz); // [orig: dbl_7C3B48]
 }
 int32_t units_fixed(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * 65536.0); // [orig: dbl_7C3CC0]
@@ -142,7 +143,7 @@ Profile parse_profile(const uint8_t *text, size_t size) {
             if (key == "combat_climb") { prof.helo_combat_climb = climb_fixed(value); continue; }          // @0x45f757..0x45f78f -> +220
             // turn_rate: atol * 0xB60B60 (11930464 BAM per degree) then the signed
             // /62 (the 0x84210843 magic + sar 5 + sign fix) @0x45f8b0..0x45f8dc -> +224
-            if (key == "turn_rate") { prof.turn_rate_bam_tick = 11930464 * parse_int(value) / 62; continue; }
+            if (key == "turn_rate") { prof.turn_rate_bam_tick = 11930464 * parse_int(value) / io::kTicksPerSecondInt; continue; }
             // accel_time: atol, then (v << 5 - v) * 2 = 62 * v @0x45f902..0x45f91b -> +228
             if (key == "accel_time") { prof.accel_ticks = 62 * parse_int(value); continue; }
             if (key == "use_waypoint_z") { prof.use_waypoint_z = parse_int(value); continue; }             // atol @0x45f941..0x45f952 -> +56

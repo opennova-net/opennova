@@ -3,6 +3,7 @@
 #include "server_config.h"
 
 #include <net_datagram_socket.h>
+#include <base/io/tick_rate.h>
 #include <net_sockets.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
@@ -343,7 +344,7 @@ void NwUdpListener::run_loop() {
 	QueuedJoSocket jo_socket(socket.get());
 	using PumpClock = std::chrono::steady_clock;
 	const auto pump_period =
-			std::chrono::nanoseconds(1000000000LL / opennova::JO_ENGINE_TICK_RATE);
+			std::chrono::nanoseconds(1000000000LL / opennova::io::kTicksPerSecondInt);
 	auto next_pump = PumpClock::now();
 
 	uint8_t rx[4096];

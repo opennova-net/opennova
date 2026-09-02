@@ -438,7 +438,7 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 	if (!std::isfinite(next->config.simulation_tick_seconds) ||
 			next->config.simulation_tick_seconds <=
 					std::numeric_limits<float>::epsilon()) {
-		next->config.simulation_tick_seconds = 1.0f / 62.5f;
+		next->config.simulation_tick_seconds = 1.0f / static_cast<float>(io::kTickHz);
 	}
 	next->load_report.document_count = config.documents.size();
 

@@ -65,7 +65,7 @@ void WeatherRuntime::process_delta(EnvironmentState *env, double delta) {
 	if (world_tick_driven_) {
 		return;
 	}
-	tick_credit_ += std::max(delta, 0.0) * kTicksPerSecond;
+	tick_credit_ += std::max(delta, 0.0) * io::kTickHz;
 	int tick_count = static_cast<int>(std::floor(tick_credit_ + 1.0e-9));
 	if (tick_count > 0) {
 		tick_credit_ = std::max(0.0, tick_credit_ - static_cast<double>(tick_count));

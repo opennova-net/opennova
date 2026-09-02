@@ -18,6 +18,7 @@
 #pragma once
 
 #include <runtime/environment/environment_state.h>
+#include <base/io/tick_rate.h>
 
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather_core.h>
@@ -35,7 +36,6 @@ public:
 	WeatherRuntime &operator=(const WeatherRuntime &) = delete;
 	// The weather runs on the simulation clock — ONE clock, 62.5 Hz
 	// [orig: Game_ProcessMainFrame @ 0x526774 per drained 16 ms quantum].
-	static constexpr double kTicksPerSecond = 62.5;
 	static constexpr int kMaxCatchupTicks = 31;
 	// Retail settles the newly initialized environment through 255 complete
 	// weather ticks before gameplay/network publication
