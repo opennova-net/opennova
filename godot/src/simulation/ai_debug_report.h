@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cstdint>
 #include <runtime/world/entity.h>
 
 // The AI overlay's per-frame payload (Simulation::get_ai_debug): one row per
