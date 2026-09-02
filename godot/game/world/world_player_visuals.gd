@@ -68,9 +68,9 @@ func build_local_player_avatar() -> Node3D:
 			_world.local_player_character_id())
 
 
-func _local_player_visual_spec() -> Dictionary:
+func _local_player_visual_spec() -> PlayerVisualSpec:
 	if _world._placer == null:
-		return {}
+		return null
 	return _world._placer.resolve_player_visual_spec(
 			MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID,
 			_world.local_player_character_id())
@@ -136,16 +136,15 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 	if _world._viewmodel_weapon_cleared:
 		return
 	var def := _world.local_player_viewmodel_def()
-	var spec: Dictionary = Simulation.fp_viewmodel_spec(def != null,
+	var character_spec := _local_player_visual_spec()
+	var spec := Simulation.fp_viewmodel_spec(def != null,
 			def.gfx1 if def != null else "",
-			String(_local_player_visual_spec().get("arms", "")),
+			character_spec.arms if character_spec != null else "",
 			def.animadm if def != null else "", def.flags if def != null else 0)
-	var gun_name := String(spec.get("gun", ""))
-	var arms_name := String(spec.get("arms", ""))
-	if not gun_name.is_empty():
-		_world._placer.object_data_for(gun_name)
-	if bool(spec.get("show_arms", true)) and not arms_name.is_empty():
-		_world._placer.object_data_for(arms_name)
+	if not spec.gun.is_empty():
+		_world._placer.object_data_for(spec.gun)
+	if spec.show_arms and not spec.arms.is_empty():
+		_world._placer.object_data_for(spec.arms)
 
 
 ## Armory apply, presentation side: point the FP viewmodel + action FSM at `weapon_name`.
@@ -280,15 +279,15 @@ func build_local_player_viewmodel() -> Node3D:
 	# fallback and a resolved def with no fpModel intentionally submits no gun.
 	# [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
 	var character_spec := _local_player_visual_spec()
-	var spec: Dictionary = Simulation.fp_viewmodel_spec(def != null,
+	var spec := Simulation.fp_viewmodel_spec(def != null,
 			def.gfx1 if def != null else "",
-			String(character_spec.get("arms", "")),
+			character_spec.arms if character_spec != null else "",
 			def.animadm if def != null else "",
 			def.flags if def != null else 0)
-	var gun_name := String(spec.get("gun", ""))
-	var arms_name := String(spec.get("arms", ""))
-	var adm_name := String(spec.get("adm", ""))
-	var show_arms := bool(spec.get("show_arms", true))
+	var gun_name := spec.gun
+	var arms_name := spec.arms
+	var adm_name := spec.adm
+	var show_arms := spec.show_arms
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
@@ -303,7 +302,8 @@ func build_local_player_viewmodel() -> Node3D:
 		# immediately before each FP arms submit @0x4df008/@0x4df070].
 		arms.set_meta("avatar_part", "arms")
 		arms.set_meta("avatar_graphic", arms_name)
-		arms.set_meta("avatar_camo", character_spec.get("arms_camo", Vector3i()))
+		arms.set_meta("avatar_camo",
+				character_spec.arms_camo if character_spec != null else Vector3i())
 		_world._local_viewmodel_parts.append(arms)
 	if gun != null:
 		_world._local_viewmodel_parts.append(gun)
@@ -332,8 +332,8 @@ func build_local_player_viewmodel() -> Node3D:
 func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
 	var witness := FirstPersonArmsWitness.new()
 	var character_spec := _local_player_visual_spec()
-	var expected_graphic := String(character_spec.get("arms", ""))
-	var expected_camo: Vector3i = character_spec.get("arms_camo", Vector3i())
+	var expected_graphic := character_spec.arms if character_spec != null else ""
+	var expected_camo := character_spec.arms_camo if character_spec != null else Vector3i()
 	for part: ObjectModel in _world._local_viewmodel_parts:
 		if part == null or not is_instance_valid(part) \
 				or String(part.get_meta("avatar_part", "")) != "arms":

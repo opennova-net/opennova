@@ -33,9 +33,9 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 	var spec := placer.resolve_player_visual_spec(0x14B9, character_id)
 
 	assert_eq(character_id, 0x0400, "the chosen combo reaches the visual seam")
-	assert_eq(String(spec.get("head", "")), combo.get_head().graphic)
-	assert_eq(String(spec.get("body", "")), combo.get_body().graphic)
-	assert_false(bool(spec.get("fallback", true)),
+	assert_eq(spec.head, combo.get_head().graphic)
+	assert_eq(spec.body, combo.get_body().graphic)
+	assert_false(spec.fallback,
 			"a valid non-default character must not use Player #1 / US01")
 
 

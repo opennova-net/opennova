@@ -46,6 +46,7 @@ class EntityRow;      // one typed entity-directory row
 class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
+class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -962,7 +963,7 @@ public:
 	static double mission_coord_max() {
 		return opennova::world::kMissionCoordMaxUnits;
 	}
-	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
+	static Ref<FpViewmodelSpec> fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_character_arms, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:
 	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},

@@ -23,8 +23,8 @@ class ViewmodelPlacerStub:
 	extends RefCounted
 	var graphics: Array[String] = []
 	func resolve_player_visual_spec(_runtime_type_id: int,
-			_character_id: int = 0) -> Dictionary:
-		return {"fallback": true}
+			_character_id: int = 0) -> PlayerVisualSpec:
+		return PlayerVisualSpec.new()  # fallback
 	func build_model_from_graphic(graphic: String, _adm_name: String,
 			_parent: Node3D, _clip_key: String, _env_node, _rig_graphic: String):
 		graphics.append(graphic)
@@ -35,12 +35,12 @@ class SelectedAvatarViewmodelPlacerStub:
 	extends RefCounted
 	var graphics: Array[String] = []
 	func resolve_player_visual_spec(_runtime_type_id: int,
-			_character_id: int = 0) -> Dictionary:
-		return {
-			"fallback": false,
-			"arms": "SelectedArms",
-			"arms_camo": Vector3i(17, 34, 51),
-		}
+			_character_id: int = 0) -> PlayerVisualSpec:
+		var spec := PlayerVisualSpec.new()
+		spec.fallback = false
+		spec.arms = "SelectedArms"
+		spec.arms_camo = Vector3i(17, 34, 51)
+		return spec
 	func build_model_from_graphic(graphic: String, _adm_name: String,
 			parent: Node3D, _clip_key: String, _rig_graphic: String):
 		graphics.append(graphic)
@@ -55,8 +55,8 @@ class SelectedAvatarViewmodelPlacerStub:
 class NoCharacterViewmodelPlacerStub:
 	extends SelectedAvatarViewmodelPlacerStub
 	func resolve_player_visual_spec(_runtime_type_id: int,
-			_character_id: int = 0) -> Dictionary:
-		return {"fallback": true}
+			_character_id: int = 0) -> PlayerVisualSpec:
+		return PlayerVisualSpec.new()  # fallback
 
 
 class ViewmodelWorldHarness:
@@ -81,8 +81,11 @@ class ChallengePrewarmPlacerStub:
 	# The joiner's resolved character: its arms are the ONLY first-person arms
 	# source (retail discards weapon.def gfx1a).
 	func resolve_player_visual_spec(_runtime_type_id: int,
-			_character_id: int = 0) -> Dictionary:
-		return {"fallback": false, "arms": "test_arms", "arms_camo": Vector3i()}
+			_character_id: int = 0) -> PlayerVisualSpec:
+		var spec := PlayerVisualSpec.new()
+		spec.fallback = false
+		spec.arms = "test_arms"
+		return spec
 	func resolve_player_visual_item_id(_runtime_type_id: int) -> int:
 		return 101001
 	func graphic_for(_item_id: int) -> String:

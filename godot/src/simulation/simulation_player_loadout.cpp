@@ -2,6 +2,7 @@
 // interactions, the loadout (slot pool / spawn kit / map rules), the weapon
 // profile, and the weapon/ammo table feeds.
 #include "simulation/simulation_internal.h"
+#include "simulation/fp_viewmodel_spec.h"
 
 #include <net/npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
@@ -602,19 +603,15 @@ String Simulation::viewmodel_bringup_fallback_weapon() {
 	return String(opennova::simassets::kBringupFallbackWeapon);
 }
 
-Dictionary Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
+Ref<FpViewmodelSpec> Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 		const String &p_character_arms, const String &p_animadm, int p_flags) {
-	const opennova::simassets::FpViewmodelSpec spec =
-			opennova::simassets::fp_viewmodel_spec(p_has_def,
-					std::string(p_gfx1.utf8().get_data()),
-					std::string(p_character_arms.utf8().get_data()),
-					std::string(p_animadm.utf8().get_data()),
-					static_cast<uint32_t>(p_flags));
-	Dictionary out;
-	out["gun"] = String(spec.gun.c_str());
-	out["arms"] = String(spec.arms.c_str());
-	out["adm"] = String(spec.adm.c_str());
-	out["show_arms"] = spec.show_arms;
+	Ref<FpViewmodelSpec> out;
+	out.instantiate();
+	out->assign(opennova::simassets::fp_viewmodel_spec(p_has_def,
+			std::string(p_gfx1.utf8().get_data()),
+			std::string(p_character_arms.utf8().get_data()),
+			std::string(p_animadm.utf8().get_data()),
+			static_cast<uint32_t>(p_flags)));
 	return out;
 }
 
