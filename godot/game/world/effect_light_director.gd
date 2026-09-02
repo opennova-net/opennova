@@ -670,17 +670,11 @@ func _render_coronas(camera: Camera3D, gain: Vector3, weather: Weather,
 		models: Array[Node3D], owners: PackedInt64Array,
 		env: MissionEnvironment) -> void:
 	_corona_frame = (_corona_frame + 1) & 3
-	var fog: Dictionary = {}
+	var fog: EnvLightValues = null
 	if env != null:
 		var state: EnvLightState = env.get_light_state()
-		if state != null and state.get_values() != null:
-			var values: EnvLightValues = state.get_values()
-			fog = {
-				"enabled": values.get_fog_enabled(),
-				"type": values.get_fog_type(),
-				"start": values.get_fog_start(),
-				"end": values.get_fog_end(),
-			}
+		if state != null:
+			fog = state.get_values()
 	var instance := _ensure_corona_instance()
 	if instance == null:
 		return

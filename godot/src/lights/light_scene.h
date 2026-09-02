@@ -24,10 +24,13 @@
 #include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
+#include "lights/effect_light_report.h" // CoronaRow (the corona inspection seam)
+
 namespace godot {
 
 class EffectLightReport;
 
+class EnvLightValues;
 class MultiMesh;
 class Weather;
 
@@ -136,23 +139,22 @@ public:
 
 	// The corona billboard rows for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads]: one Dictionary per
-	// additive camera-facing quad, keys position (Vector3 Godot world),
-	// half_size (float world units), color (Color, premultiplied additive
-	// including the segment fade and the fog-to-black fold). models/
-	// owner_entities are the SAME parallel arrays the per-model light pass
-	// walks — models carrying an occlusion section-mask verdict gate their
-	// owned coronas on the visible-section bit; fog is
-	// {enabled, type, start, end} (primary device fog, color forced black
-	// [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The
-	// presenter (effect_light_director.gd) feeds the rows into a MultiMesh;
-	// marshalling only.
-	TypedArray<Dictionary> collect_corona_rows(const Vector3 &p_camera_pos,
+	// opennova::renderer::LightScene::collect_corona_quads]: one CoronaRow per
+	// additive camera-facing quad (Godot-world position, half_size in world
+	// units, the premultiplied additive color including the segment fade and
+	// the fog-to-black fold). models/owner_entities are the SAME parallel
+	// arrays the per-model light pass walks — models carrying an occlusion
+	// section-mask verdict gate their owned coronas on the visible-section
+	// bit; fog is the environment's EnvLightValues (null = no fog; the
+	// primary device fog with the color forced black [orig:
+	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The headless
+	// inspection seam of fill_corona_multimesh; marshalling only.
+	TypedArray<CoronaRow> collect_corona_rows(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
-			const Dictionary &p_fog);
+			const Ref<EnvLightValues> &p_fog);
 	// The same corona walk landed as ONE MultiMesh buffer write: the identical
 	// collect_corona_quads rows packed as interleaved TRANSFORM_3D + color
 	// instance floats (scale-only basis = half_size, origin = segment center,
@@ -165,8 +167,8 @@ public:
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
-			const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
-			const Ref<MultiMesh> &p_mesh);
+			const PackedInt64Array &p_owner_entities,
+			const Ref<EnvLightValues> &p_fog, const Ref<MultiMesh> &p_mesh);
 	// Test seam: the interleaved instance floats the last fill packed
 	// (capacity x 16; rows beyond the fill's return are zero). Readable
 	// headless, where the dummy RenderingServer stores no MultiMesh data.
@@ -254,7 +256,8 @@ private:
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
-			const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
+			const PackedInt64Array &p_owner_entities,
+			const Ref<EnvLightValues> &p_fog,
 			std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 			opennova::renderer::LightCoronaFrameInputs &r_inputs) const;
 

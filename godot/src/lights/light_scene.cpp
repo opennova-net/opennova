@@ -790,7 +790,7 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
 		const TypedArray<Node3D> &p_models,
-		const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
 		std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 		opennova::renderer::LightCoronaFrameInputs &r_inputs) const {
 	opennova::renderer::LightCoronaFrameInputs &inputs = r_inputs;
@@ -826,11 +826,10 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	// The fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
 	// @0x5aafb6, see docs/render/render-lighting-re.md]: primary fog params,
 	// color forced black engine-side.
-	inputs.fog_enabled = p_fog.get("enabled", false);
-	inputs.fog_type = static_cast<int32_t>(
-			static_cast<int>(p_fog.get("type", 0)));
-	inputs.fog_start = static_cast<float>(p_fog.get("start", 0.0f));
-	inputs.fog_end = static_cast<float>(p_fog.get("end", 0.0f));
+	inputs.fog_enabled = p_fog.is_valid() && p_fog->fog_enabled;
+	inputs.fog_type = p_fog.is_valid() ? static_cast<int32_t>(p_fog->fog_type) : 0;
+	inputs.fog_start = p_fog.is_valid() ? p_fog->fog_start : 0.0f;
+	inputs.fog_end = p_fog.is_valid() ? p_fog->fog_end : 0.0f;
 	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
@@ -866,11 +865,11 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	}
 }
 
-TypedArray<Dictionary> LightScene::collect_corona_rows(
+TypedArray<CoronaRow> LightScene::collect_corona_rows(
 		const Vector3 &p_camera_pos, const Vector3 &p_camera_forward,
 		const Vector3 &p_ambient_scale, int p_time_ms, int p_frame_index,
 		Weather *p_weather, const TypedArray<Node3D> &p_models,
-		const PackedInt64Array &p_owner_entities, const Dictionary &p_fog) {
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog) {
 	opennova::renderer::LightCoronaFrameInputs inputs;
 	std::vector<opennova::renderer::LightCoronaOwnerMask> owner_masks;
 	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
@@ -878,12 +877,13 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 			p_fog, owner_masks, inputs);
 	std::vector<opennova::renderer::LightCoronaQuad> quads;
 	scene_.collect_corona_quads(inputs, quads);
-	TypedArray<Dictionary> rows;
+	TypedArray<CoronaRow> rows;
 	for (const opennova::renderer::LightCoronaQuad &quad : quads) {
-		Dictionary row;
-		row["position"] = mission_to_godot(quad.center);
-		row["half_size"] = quad.half_size;
-		row["color"] = Color(quad.rgb[0], quad.rgb[1], quad.rgb[2]);
+		Ref<CoronaRow> row;
+		row.instantiate();
+		row->set_position(mission_to_godot(quad.center));
+		row->set_half_size(quad.half_size);
+		row->set_color(Color(quad.rgb[0], quad.rgb[1], quad.rgb[2]));
 		rows.push_back(row);
 	}
 	return rows;
@@ -893,7 +893,7 @@ int LightScene::fill_corona_multimesh(const Vector3 &p_camera_pos,
 		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
 		const TypedArray<Node3D> &p_models,
-		const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
 		const Ref<MultiMesh> &p_mesh) {
 	if (p_mesh.is_null()) {
 		return 0;
