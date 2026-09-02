@@ -37,7 +37,14 @@ struct PlayerInput {
 // The player-body packet that mirrors the raw input deposit at entity+0x12C without
 // pretending it is an NPC route order. This is the seam future MP input sources should feed.
 struct PlayerBodyInput {
-    uint8_t direction_bits = 0;       // F/B/L/R = 1/2/4/8
+    // The packed F/B/L/R word and the 8-way move index it collapses to
+    // [orig: Player_PackInputStateToEntity @0x4df450].
+    enum DirectionBit : uint8_t { kDirForward = 1, kDirBack = 2, kDirLeft = 4, kDirRight = 8 };
+    enum MoveDir : int {
+        kMoveForward = 0, kMoveForwardLeft = 1, kMoveLeft = 2, kMoveBackLeft = 3,
+        kMoveBack = 4, kMoveBackRight = 5, kMoveRight = 6, kMoveForwardRight = 7,
+    };
+    uint8_t direction_bits = 0;       // DirectionBit flags
     bool moving = false;
     int move_dir_index = 0;           // 0 F, 1 F+L, 2 L, 3 B+L, 4 B, 5 B+R, 6 R, 7 F+R
     bool lean_left = false;           // MoveOrder bit 6 [orig: @0x4df71f]

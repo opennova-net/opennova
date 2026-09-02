@@ -115,8 +115,33 @@ struct InitialStateBurst {
 	                                    // [orig: @0x51c134] and ONLY NapiNPServerMsg_HandlePlayerSpawnRequest
 	                                    // @0x513260 (C2S 0x0A) advances 3 -> 4 — the world stream never
 	                                    // races a client that hasn't asked for it (D-NET-150).
-	uint16_t player_sync_subphase = 8;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
-	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
+	// The player-sync tags, one per subphase, and the world-stream phases
+	// (server_initial_state.cpp walks both) [orig: playerSlot+89878/+89882].
+	enum PlayerSyncSubphase : uint16_t {
+		kSyncDone = 0,
+		kSyncMissionMapNames = 8,
+		kSyncSessionConfig = 9,
+		kSyncChatHistoryFirst = 10,
+		kSyncChatHistoryLast = 15,
+		kSyncNoop = 16,
+		kSyncBmsHeader = 17,
+		kSyncWeaponRestrictions = 18,
+		kSyncClassAllowMask = 19,
+		kSyncDisconnectUnlock = 20,
+	};
+	enum WorldStreamPhase : uint8_t {
+		kStreamInit = 0,
+		kStreamPool2Static = 1,
+		kStreamPool1Items = 2,
+		kStreamPool0Organics = 3,
+		kStreamPool3Markers = 4,
+		kStreamTerrainTiles = 5,
+		kStreamMissionText = 6,
+		kStreamWaitForGameStartAck = 7,
+		kStreamGameStartBundle = 8,
+	};
+	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
+	uint8_t  world_stream_phase = kStreamInit;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
