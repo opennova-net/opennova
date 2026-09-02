@@ -1,4 +1,5 @@
 #include "simulation/entity_card.h"
+#include "util/axes.h"
 
 #include "simulation/simulation_internal.h" // mission_to_godot, the ONE axis map
 
@@ -11,10 +12,6 @@ namespace {
 using opennova::world::inspect::AiDetail;
 using opennova::world::inspect::SeatRow;
 using opennova::world::inspect::WorldDetail;
-
-Vector3 godot_from_mission(const opennova::world::Vec3 &p) {
-	return godot::mission_to_godot(p);
-}
 
 Vector3 raw_mission(const opennova::world::Vec3 &p) {
 	return Vector3(p.x, p.y, p.z);
@@ -76,7 +73,7 @@ Dictionary ai_json(const AiDetail &d) {
 	out["net_id"] = d.net_id;
 	out["wire_handle"] = d.wire_handle;
 	out["ai_health"] = d.ai_health;
-	out["position"] = godot_from_mission(d.mission_position);
+	out["position"] = mission_to_godot(d.mission_position);
 	out["yaw_deg"] = d.yaw_deg;
 	out["state"] = d.state;
 	out["state_name"] = String(d.state_name.c_str());
@@ -140,7 +137,7 @@ Dictionary ai_json(const AiDetail &d) {
 	out["magazine"] = d.magazine;
 	out["combat_target_valid"] = d.combat_target_valid;
 	out["muzzle_valid"] = d.muzzle_valid;
-	out["muzzle"] = d.muzzle_valid ? godot_from_mission(d.muzzle) : Vector3();
+	out["muzzle"] = d.muzzle_valid ? mission_to_godot(d.muzzle) : Vector3();
 	out["death_anim_state"] = d.death_anim_state;
 	out["corpse_timer"] = d.corpse_timer;
 	out["deathtime_ticks"] = d.deathtime_ticks;
@@ -179,7 +176,7 @@ Dictionary world_json(const WorldDetail &d) {
 	out["zone_control"] = d.zone_control;
 	out["zone_chain_index"] = d.zone_chain_index;
 	out["mission_position"] = raw_mission(d.mission_position);
-	out["position"] = godot_from_mission(d.mission_position);
+	out["position"] = mission_to_godot(d.mission_position);
 	out["yaw"] = d.yaw;
 	out["pitch"] = d.pitch;
 	out["roll"] = d.roll;
@@ -305,7 +302,7 @@ Vector3 EntityCard::get_mission_position() const {
 }
 
 Vector3 EntityCard::get_position() const {
-	return godot_from_mission(value_.has_ai ? value_.ai.mission_position
+	return mission_to_godot(value_.has_ai ? value_.ai.mission_position
 											: value_.world.mission_position);
 }
 

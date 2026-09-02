@@ -1,4 +1,5 @@
 #include "hud/hud_pos.h"
+#include "util/color_convert.h"
 #include "hud/vehicle_hud_block.h"
 
 #include "resource_index/resource_root.h"
@@ -710,8 +711,7 @@ double HudPos::loading_msg_body_y_frac() {
 
 Color HudPos::loading_msg_label_color() {
 	const uint32_t rgb = opennova::hud::kLoadingMsgLabelRgb;
-	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
-			(rgb & 0xFFu) / 255.0f);
+	return opennova::color_from_rgb24(rgb);
 }
 
 Vector2i HudPos::loading_bar_pos() {
@@ -724,15 +724,12 @@ Vector2i HudPos::loading_bar_size() {
 
 Color HudPos::loading_bar_border_gray() {
 	const uint32_t rgb = opennova::hud::kLoadingBarBorderGray;
-	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
-			(rgb & 0xFFu) / 255.0f);
+	return opennova::color_from_rgb24(rgb);
 }
 
 Color HudPos::loading_bar_fill_color() {
 	const uint32_t argb = opennova::hud::kLoadingBarFillArgb;
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
+	return opennova::color_from_argb(argb);
 }
 
 String HudPos::loading_splash_arrow_image() {
@@ -755,9 +752,7 @@ Color HudPos::loading_splash_continue_color(bool p_phase_on) {
 	const uint32_t argb = opennova::hud::half_bright_argb(p_phase_on
 			? opennova::hud::kSplashContinueColorOn
 			: opennova::hud::kSplashContinueColorOff);
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
+	return opennova::color_from_argb(argb);
 }
 
 // --- first-person view effects (hud/view_effects.h) -------------------------

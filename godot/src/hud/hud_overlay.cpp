@@ -1,4 +1,5 @@
 #include "hud/hud_overlay.h"
+#include "util/color_convert.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/vehicle_hud_block.h"
 
@@ -78,20 +79,6 @@ void fragment() {
 	COLOR = map_color;
 }
 )";
-
-Color argb_to_color(uint32_t argb) {
-	return Color(((argb >> 16) & 0xFFu) / 255.0f, ((argb >> 8) & 0xFFu) / 255.0f,
-			(argb & 0xFFu) / 255.0f, ((argb >> 24) & 0xFFu) / 255.0f);
-}
-
-uint32_t color_to_argb(const Color &c) {
-	const auto channel = [](float v) {
-		const int b = static_cast<int>(v * 255.0f + 0.5f);
-		return static_cast<uint32_t>(std::clamp(b, 0, 255));
-	};
-	return (channel(c.a) << 24) | (channel(c.r) << 16) | (channel(c.g) << 8) |
-			channel(c.b);
-}
 
 HudPosRecord pos_record4(const Vector4i &v) {
 	HudPosRecord r;
@@ -537,7 +524,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		if (!colors.has(key)) {
 			return fallback;
 		}
-		return color_to_argb(colors[key]);
+		return opennova::argb_from_color(colors[key]);
 	};
 	layout_.health_border = color_of("health_border", layout_.health_border);
 	layout_.tag_good = color_of("tagcolor_good", layout_.tag_good);
@@ -1607,7 +1594,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	// elements over the bars/frames the same walk emitted).
 	for (const opennova::hud::HudQuad &quad : p_list.quads) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		const Color color = argb_to_color(quad.color);
+		const Color color = opennova::color_from_argb(quad.color);
 		if (!quad.filled) {
 			draw_rect(rect, color, false, -1.0f);
 			continue;
@@ -1659,12 +1646,12 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		uvs.set(1, Vector2(tri.b.u, tri.b.v));
 		uvs.set(2, Vector2(tri.c.u, tri.c.v));
 		PackedColorArray colors;
-		colors.push_back(argb_to_color(tri.color));
+		colors.push_back(opennova::color_from_argb(tri.color));
 		draw_polygon(points, colors, uvs, tex);
 	}
 	for (const opennova::hud::HudLine &line : p_list.lines) {
 		draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
-				argb_to_color(line.color), line.width);
+				opennova::color_from_argb(line.color), line.width);
 	}
 	// Glyph quads carry explicit corner geometry (the italic pass shears the
 	// top edge), so each renders as a polygon over its page texture, keeping
@@ -1690,12 +1677,12 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		uvs.set(2, Vector2(glyph.u1, glyph.v1));
 		uvs.set(3, Vector2(glyph.u0, glyph.v1));
 		PackedColorArray colors;
-		colors.push_back(argb_to_color(glyph.color));
+		colors.push_back(opennova::color_from_argb(glyph.color));
 		draw_polygon(points, colors, uvs, page);
 	}
 	for (const opennova::hud::GameFontUnderline &underline : p_list.underlines) {
 		draw_line(Vector2(underline.x0, underline.y), Vector2(underline.x1, underline.y),
-				argb_to_color(underline.color), 1.0f);
+				opennova::color_from_argb(underline.color), 1.0f);
 	}
 }
 
@@ -1746,7 +1733,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		uvs.push_back(Vector2(tri.a.u, tri.a.v));
 		uvs.push_back(Vector2(tri.b.u, tri.b.v));
 		uvs.push_back(Vector2(tri.c.u, tri.c.v));
-		const Color color = argb_to_color(tri.color);
+		const Color color = opennova::color_from_argb(tri.color);
 		colors.push_back(color);
 		colors.push_back(color);
 		colors.push_back(color);
@@ -1757,7 +1744,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	const auto push_quad = [&](const Vector2 *corner, const Vector2 *uv,
 			uint32_t argb) {
 		const int base = static_cast<int>(points.size());
-		const Color color = argb_to_color(argb);
+		const Color color = opennova::color_from_argb(argb);
 		for (int i = 0; i < 4; ++i) {
 			points.push_back(corner[i]);
 			uvs.push_back(uv[i]);
@@ -1815,7 +1802,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		for (const opennova::hud::HudMapLine &line : lines) {
 			line_points.set(li * 2, Vector2(line.x0, line.y0));
 			line_points.set(li * 2 + 1, Vector2(line.x1, line.y1));
-			line_colors.set(li, argb_to_color(line.color));
+			line_colors.set(li, opennova::color_from_argb(line.color));
 			++li;
 		}
 		rs->canvas_item_add_multiline(top_item, line_points, line_colors, 1.0f);

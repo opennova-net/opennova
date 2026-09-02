@@ -1,4 +1,5 @@
 #include "env/weather_core.h"
+#include "util/color_convert.h"
 
 #include <formats/env/env_water_render.h> // water_uv_state rides the layer-1 cloud accumulators
 
@@ -9,43 +10,6 @@
 using namespace godot;
 
 namespace {
-
-// Same rounding as ColorSmoother's packer (and the GUT vector hex idiom):
-// byte = int(channel * 255 + 0.5).
-uint32_t color_to_packed(const Color &color) {
-	const auto to_byte = [](float v) -> uint32_t {
-		return static_cast<uint32_t>(std::clamp(static_cast<int>(v * 255.0f + 0.5f), 0, 255));
-	};
-	return to_byte(color.b) | (to_byte(color.g) << 8) | (to_byte(color.r) << 16) | (to_byte(color.a) << 24);
-}
-
-Color packed_to_color(uint32_t packed) {
-	return Color(
-			static_cast<float>((packed >> 16) & 0xFF) / 255.0f,
-			static_cast<float>((packed >> 8) & 0xFF) / 255.0f,
-			static_cast<float>(packed & 0xFF) / 255.0f,
-			static_cast<float>((packed >> 24) & 0xFF) / 255.0f);
-}
-
-opennova::env::Rgb packed_to_rgb01(uint32_t packed) {
-	opennova::env::Rgb c;
-	c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
-	c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
-	c.b = static_cast<float>(packed & 0xFF) / 255.0f;
-	return c;
-}
-
-opennova::env::Rgb color_to_rgb(const Color &color) {
-	opennova::env::Rgb c;
-	c.r = color.r;
-	c.g = color.g;
-	c.b = color.b;
-	return c;
-}
-
-Color rgb_to_color(const opennova::env::Rgb &rgb) {
-	return Color(rgb.r, rgb.g, rgb.b);
-}
 
 } // namespace
 
@@ -95,10 +59,10 @@ void WeatherCore::_bind_methods() {
 }
 
 void WeatherCore::snap_colors(const Color &p_fill, const Color &p_sun, const Color &p_fog, const Color &p_sky) {
-	core_.fill_block.snap(color_to_packed(p_fill));
-	core_.sun_block.snap(color_to_packed(p_sun));
-	core_.fog_block.snap(color_to_packed(p_fog));
-	core_.sky_block.snap(color_to_packed(p_sky));
+	core_.fill_block.snap(opennova::argb_from_color(p_fill));
+	core_.sun_block.snap(opennova::argb_from_color(p_sun));
+	core_.fog_block.snap(opennova::argb_from_color(p_fog));
+	core_.sky_block.snap(opennova::argb_from_color(p_sky));
 }
 
 void WeatherCore::snap_sky_colors(const Color &p_skyfog, const Color &p_ceiling,
@@ -107,16 +71,16 @@ void WeatherCore::snap_sky_colors(const Color &p_skyfog, const Color &p_ceiling,
 		const Color &p_cloudbase, const Color &p_cloudhighlight,
 		const Color &p_cloudedge) {
 	core_.sky_color_blocks.snap({
-			color_to_packed(p_skyfog),
-			color_to_packed(p_ceiling),
-			color_to_packed(p_cloud),
-			color_to_packed(p_floor),
-			color_to_packed(p_skybase),
-			color_to_packed(p_skybright),
-			color_to_packed(p_skyhighlight),
-			color_to_packed(p_cloudbase),
-			color_to_packed(p_cloudhighlight),
-			color_to_packed(p_cloudedge),
+			opennova::argb_from_color(p_skyfog),
+			opennova::argb_from_color(p_ceiling),
+			opennova::argb_from_color(p_cloud),
+			opennova::argb_from_color(p_floor),
+			opennova::argb_from_color(p_skybase),
+			opennova::argb_from_color(p_skybright),
+			opennova::argb_from_color(p_skyhighlight),
+			opennova::argb_from_color(p_cloudbase),
+			opennova::argb_from_color(p_cloudhighlight),
+			opennova::argb_from_color(p_cloudedge),
 	});
 }
 
@@ -126,16 +90,16 @@ void WeatherCore::set_sky_color_targets(const Color &p_skyfog, const Color &p_ce
 		const Color &p_cloudbase, const Color &p_cloudhighlight,
 		const Color &p_cloudedge) {
 	core_.sky_color_blocks.set_targets({
-			color_to_packed(p_skyfog),
-			color_to_packed(p_ceiling),
-			color_to_packed(p_cloud),
-			color_to_packed(p_floor),
-			color_to_packed(p_skybase),
-			color_to_packed(p_skybright),
-			color_to_packed(p_skyhighlight),
-			color_to_packed(p_cloudbase),
-			color_to_packed(p_cloudhighlight),
-			color_to_packed(p_cloudedge),
+			opennova::argb_from_color(p_skyfog),
+			opennova::argb_from_color(p_ceiling),
+			opennova::argb_from_color(p_cloud),
+			opennova::argb_from_color(p_floor),
+			opennova::argb_from_color(p_skybase),
+			opennova::argb_from_color(p_skybright),
+			opennova::argb_from_color(p_skyhighlight),
+			opennova::argb_from_color(p_cloudbase),
+			opennova::argb_from_color(p_cloudhighlight),
+			opennova::argb_from_color(p_cloudedge),
 	});
 }
 
@@ -144,9 +108,9 @@ void WeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target,
 		const Color &p_lightning_color, float p_sky_speed) {
 	// The witnessed tick order is env::WeatherCore::tick's
 	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, see docs/env/env-tod-re.md].
-	core_.tick(color_to_packed(p_fill_target), color_to_packed(p_sun_target),
-			color_to_packed(p_fog_target), color_to_packed(p_sky_target),
-			color_to_packed(p_lightning_color), p_sky_speed);
+	core_.tick(opennova::argb_from_color(p_fill_target), opennova::argb_from_color(p_sun_target),
+			opennova::argb_from_color(p_fog_target), opennova::argb_from_color(p_sky_target),
+			opennova::argb_from_color(p_lightning_color), p_sky_speed);
 }
 
 void WeatherCore::tick_cloud_scroll(float p_sky_speed) {
@@ -173,8 +137,8 @@ void WeatherCore::set_exposure_from_iris_samples(const PackedInt32Array &p_sampl
 		const Vector3 &p_light_dir, const Color &p_ceiling, const Color &p_floor,
 		float p_iris_percent, float p_iris_center) {
 	core_.set_exposure_from_iris_samples(p_samples.ptr(),
-			static_cast<int>(p_samples.size()), color_to_rgb(p_ceiling),
-			color_to_rgb(p_floor), p_light_dir.x, p_light_dir.y, p_light_dir.z,
+			static_cast<int>(p_samples.size()), opennova::env_rgb_from_color(p_ceiling),
+			opennova::env_rgb_from_color(p_floor), p_light_dir.x, p_light_dir.y, p_light_dir.z,
 			p_iris_percent, p_iris_center);
 }
 
@@ -187,8 +151,8 @@ Vector3 WeatherCore::get_color_src_gain() const {
 Color WeatherCore::get_fog() const {
 	// Fog color blocks operate in authored half-intensity bytes; the derived
 	// render color doubles only after smoothing, lightning and modulation.
-	return rgb_to_color(opennova::env::double_saturate(
-			packed_to_rgb01(core_.fog_block.render_color)));
+	return opennova::color_from_env_rgb(opennova::env::double_saturate(
+			opennova::env_rgb_from_argb(core_.fog_block.render_color)));
 }
 
 Color WeatherCore::get_skyfog() const {
@@ -196,47 +160,47 @@ Color WeatherCore::get_skyfog() const {
 	// then applies the same saturating x2 as fog. The reimpl's modulate2x clear
 	// and dome-fog paths consume this final color verbatim.
 	const opennova::env::Rgb blended = opennova::env::horizon_blend_skyfog(
-			packed_to_rgb01(core_.fog_block.render_color),
-			packed_to_rgb01(core_.sky_color_blocks.skyfog.render_color),
+			opennova::env_rgb_from_argb(core_.fog_block.render_color),
+			opennova::env_rgb_from_argb(core_.sky_color_blocks.skyfog.render_color),
 			static_cast<uint32_t>(core_.scalar_channels.fog_dist_fp),
 			1024u << 16);
-	return rgb_to_color(opennova::env::double_saturate(blended));
+	return opennova::color_from_env_rgb(opennova::env::double_saturate(blended));
 }
 
 Color WeatherCore::get_ceiling() const {
-	return packed_to_color(core_.sky_color_blocks.ceiling.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.ceiling.render_color);
 }
 
 Color WeatherCore::get_cloud() const {
-	return packed_to_color(core_.sky_color_blocks.cloud.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.cloud.render_color);
 }
 
 Color WeatherCore::get_floor() const {
-	return packed_to_color(core_.sky_color_blocks.floor.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.floor.render_color);
 }
 
 Color WeatherCore::get_skybase() const {
-	return packed_to_color(core_.sky_color_blocks.skybase.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.skybase.render_color);
 }
 
 Color WeatherCore::get_skybright() const {
-	return packed_to_color(core_.sky_color_blocks.skybright.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.skybright.render_color);
 }
 
 Color WeatherCore::get_skyhighlight() const {
-	return packed_to_color(core_.sky_color_blocks.skyhighlight.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.skyhighlight.render_color);
 }
 
 Color WeatherCore::get_cloudbase() const {
-	return packed_to_color(core_.sky_color_blocks.cloudbase.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.cloudbase.render_color);
 }
 
 Color WeatherCore::get_cloudhighlight() const {
-	return packed_to_color(core_.sky_color_blocks.cloudhighlight.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.cloudhighlight.render_color);
 }
 
 Color WeatherCore::get_cloudedge() const {
-	return packed_to_color(core_.sky_color_blocks.cloudedge.render_color);
+	return opennova::color_from_argb(core_.sky_color_blocks.cloudedge.render_color);
 }
 
 // The sway/lightning formulas live on env::WeatherCore (one home shared with

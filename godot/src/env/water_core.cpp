@@ -1,4 +1,5 @@
 #include "env/water_core.h"
+#include "util/color_convert.h"
 
 #include <cmath>
 #include <base/io/fixed.h>
@@ -119,11 +120,7 @@ PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {
 	Color *write = out.ptrw();
 	for (size_t i = 0; i < packed.size(); ++i) {
 		const uint32_t argb = packed[i];
-		write[i] = Color(
-				static_cast<float>((argb >> 16) & 0xFFu) / 255.0f,
-				static_cast<float>((argb >> 8) & 0xFFu) / 255.0f,
-				static_cast<float>(argb & 0xFFu) / 255.0f,
-				static_cast<float>((argb >> 24) & 0xFFu) / 255.0f);
+		write[i] = opennova::color_from_argb(argb);
 	}
 	return out;
 }
@@ -163,10 +160,11 @@ PackedFloat32Array WaterCore::strip_custom1() const {
 	float *write = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		const uint32_t argb = strip_rows.specular[i];
-		write[i * 4 + 0] = static_cast<float>((argb >> 16) & 0xFFu) / 255.0f;
-		write[i * 4 + 1] = static_cast<float>((argb >> 8) & 0xFFu) / 255.0f;
-		write[i * 4 + 2] = static_cast<float>(argb & 0xFFu) / 255.0f;
-		write[i * 4 + 3] = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
+		const Color c = opennova::color_from_argb(argb);
+		write[i * 4 + 0] = c.r;
+		write[i * 4 + 1] = c.g;
+		write[i * 4 + 2] = c.b;
+		write[i * 4 + 3] = c.a;
 	}
 	return out;
 }

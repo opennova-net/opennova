@@ -7,7 +7,7 @@
 #pragma once
 
 #include "simulation/simulation.h"
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include <base/io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
 #include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)

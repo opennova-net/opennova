@@ -1,4 +1,5 @@
 #include "env/precipitation.h"
+#include "util/color_convert.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -225,11 +226,7 @@ void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera) {
 	const int64_t argb = static_cast<int64_t>(frame.color_argb);
 	// Env_TerrainLightCombined | 0xFF000000: the diffuse the fixed-function
 	// combine modulates (x2) the texture with.
-	const Color diffuse(
-			static_cast<float>((argb >> 16) & 0xFF) / 255.0f,
-			static_cast<float>((argb >> 8) & 0xFF) / 255.0f,
-			static_cast<float>(argb & 0xFF) / 255.0f,
-			static_cast<float>((argb >> 24) & 0xFF) / 255.0f);
+	const Color diffuse = opennova::color_from_argb(static_cast<uint32_t>(argb));
 	material_->set_shader_parameter(param_diffuse_, diffuse);
 	if (!texture_bound_ || bound_texture_snow_ != last_snow_) {
 		Ref<Texture2D> texture = _texture_for(last_snow_);

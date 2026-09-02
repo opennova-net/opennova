@@ -4,7 +4,8 @@
 // inputs (camera, fog distance, the terrain light colour) arrive from the shell
 // per present frame.
 #include "simulation/simulation_internal.h"
-#include "env/env_axes.h"
+#include "util/color_convert.h"
+#include "util/axes.h"
 #include "world/scar_draw_list.h"
 
 #include <runtime/renderer/scar_draw_list.h>
@@ -25,21 +26,6 @@ namespace {
 bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
 	const Simulation *sim = static_cast<const Simulation *>(p_user);
 	return sim->scar_owner_visible(p_owner_packed);
-}
-
-inline uint32_t argb_from_color(const Color &p_color) {
-	auto byte = [](float v) -> uint32_t {
-		const float clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-		return static_cast<uint32_t>(clamped * 255.0f + 0.5f);
-	};
-	return 0xFF000000u | (byte(p_color.r) << 16) | (byte(p_color.g) << 8) | byte(p_color.b);
-}
-
-inline Color color_from_argb(uint32_t p_argb) {
-	return Color(static_cast<float>((p_argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((p_argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(p_argb & 0xFFu) / 255.0f,
-			static_cast<float>((p_argb >> 24) & 0xFFu) / 255.0f);
 }
 
 } // namespace
@@ -94,7 +80,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.cam_x = p_camera_godot.x;
 	ctx.cam_y = -p_camera_godot.z;
 	ctx.fog_distance = p_fog_distance > 0.0f ? p_fog_distance : 0.0f;
-	ctx.terrain_light_argb = argb_from_color(p_terrain_light);
+	ctx.terrain_light_argb = opennova::argb_from_color_opaque(p_terrain_light);
 	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
 	opennova::renderer::ScarDrawList list;
@@ -160,7 +146,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 				? Vector3(-v.x, v.y, v.z)
 				: mission_to_godot(v);
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
-		colors[static_cast<int64_t>(i)] = color_from_argb(v.argb);
+		colors[static_cast<int64_t>(i)] = opennova::color_from_argb(v.argb);
 	}
 	PackedInt32Array batch_owner;
 	PackedInt32Array batch_texture;

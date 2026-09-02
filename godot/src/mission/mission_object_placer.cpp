@@ -1,4 +1,5 @@
 #include "mission/mission_object_placer.h"
+#include "util/axes.h"
 #include "mission/static_population_instance.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
@@ -306,11 +307,7 @@ Vector3 MissionObjectPlacer::godot_to_bms_position(const Vector3 &p) {
 }
 
 Basis MissionObjectPlacer::bms_to_godot_basis(const Vector3 &rot_deg) {
-	const opennova::mission::PlacementBasis b =
-			opennova::mission::bms_to_presentation_basis(
-					float(rot_deg.x), float(rot_deg.y), float(rot_deg.z));
-	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
-			Vector3(b.z.x, b.z.y, b.z.z));
+	return ::godot::bms_to_godot_basis(rot_deg);
 }
 
 Transform3D MissionObjectPlacer::entity_transform(const Vector3 &position,

@@ -2,11 +2,12 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+#include "util/color_convert.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/tracer_ribbon_frame.h" // the compiled tracer strips
 #include "simulation/destruction_events.h"
 #include "simulation/debug_cards.h"
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
 #include "simulation/entity_row.h"  // one typed entity-directory row
@@ -339,10 +340,7 @@ TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
 		if (has_effect && ammo->light_impact_radius > 0.0f) {
 			d->set_has_light(true);
 			d->set_light_radius(ammo->light_impact_radius);
-			d->set_light_color(Color(
-					static_cast<float>((ammo->light_impact_color >> 16) & 0xFF) / 255.0f,
-					static_cast<float>((ammo->light_impact_color >> 8) & 0xFF) / 255.0f,
-					static_cast<float>(ammo->light_impact_color & 0xFF) / 255.0f));
+			d->set_light_color(opennova::color_from_rgb24(ammo->light_impact_color));
 			d->set_light_ticks(ammo->light_impact_ticks);
 		}
 		out.push_back(d);
@@ -676,10 +674,7 @@ TypedArray<RoundGlowRow> Simulation::get_round_glow_rows() const {
 		// see renderer/light_scene.h].
 		d->set_pos(mission_to_godot(r.pos));
 		d->set_radius(ammo->light_move_radius);
-		d->set_color(Color(
-				static_cast<float>((ammo->light_move_color >> 16) & 0xFF) / 255.0f,
-				static_cast<float>((ammo->light_move_color >> 8) & 0xFF) / 255.0f,
-				static_cast<float>(ammo->light_move_color & 0xFF) / 255.0f));
+		d->set_color(opennova::color_from_rgb24(ammo->light_move_color));
 		out.push_back(d);
 	}
 	return out;

@@ -1,6 +1,7 @@
 #include "lights/light_scene.h"
+#include "util/color_convert.h"
 #include "lights/effect_light_report.h"
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include <array>
 #include <base/io/fixed.h>
@@ -1103,24 +1104,18 @@ Ref<Image> LightScene::get_static_light_rows_image() const {
 
 namespace {
 
-Color color_from_rgb(uint32_t rgb) {
-	return Color(static_cast<float>((rgb >> 16) & 0xFF) / 255.0f,
-			static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
-			static_cast<float>(rgb & 0xFF) / 255.0f);
-}
-
 } // namespace
 
 float LightScene::muzzle_glow_radius() {
 	return static_cast<float>(opennova::renderer::LightScene::kMuzzleGlowRadiusFixed) / opennova::io::kFp16One;
 }
 Color LightScene::muzzle_glow_color() {
-	return color_from_rgb(opennova::renderer::LightScene::kMuzzleGlowColorRgb);
+	return opennova::color_from_rgb24(opennova::renderer::LightScene::kMuzzleGlowColorRgb);
 }
 int LightScene::muzzle_glow_fade_mode() { return opennova::renderer::LightScene::kMuzzleGlowFadeMode; }
 int LightScene::muzzle_glow_fade_ticks() { return opennova::renderer::LightScene::kMuzzleGlowFadeTicks; }
 Color LightScene::death_flash_color() {
-	return color_from_rgb(opennova::renderer::LightScene::kDeathFlashColorRgb);
+	return opennova::color_from_rgb24(opennova::renderer::LightScene::kDeathFlashColorRgb);
 }
 int LightScene::death_flash_fade_mode() { return opennova::renderer::LightScene::kDeathFlashFadeMode; }
 int LightScene::death_flash_fade_ticks() { return opennova::renderer::LightScene::kDeathFlashFadeTicks; }

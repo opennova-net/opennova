@@ -1,6 +1,6 @@
 #include "env/sky_dome.h"
 
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -228,7 +228,7 @@ void SkyDome::advance_frame(double p_delta) {
 		}
 		// The dome mesh is the engine layout drawn identity into the Godot
 		// world, so its shader dots GODOT-world sun/light vectors: route the
-		// render-float tuples through the env_axes.h swap (2026-08-20 — the
+		// render-float tuples through the util/axes.h swap (2026-08-20 — the
 		// identity mapping put the sun-proximity highlight 90 degrees off in
 		// yaw, the 03tr-sun-sky dome half).
 		sky_material_->set_shader_parameter("u_sun_dir",

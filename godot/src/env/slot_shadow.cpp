@@ -690,7 +690,7 @@ void SlotShadow::advance_frame() {
 
 	const uint64_t local_id = uint64_t(local_player_id_);
 	// The frame-open slot projection direction: get_light_direction now
-	// serves the Godot-axes vector (the env_axes x/z swap IS the witnessed
+	// serves the Godot-axes vector (the util/axes.h x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
 	// planner law only clamps and negates it
 	// [orig: Environment_GetLightDirectionFloat @0x57d870 into
