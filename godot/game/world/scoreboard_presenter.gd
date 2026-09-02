@@ -45,9 +45,9 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 		return
 	var board: Dictionary = sim.get_scoreboard()
 	_pushed = true
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var strings := {
-		# [orig: GameText_GetStringWithFallback("Overlays",
+		# [orig: GameText_GetStringWithFallback(Strings.SECTION_OVERLAYS,
 		#  "STROVER_KILLLIST", "!Kill List") @0x423a75]
 		"title": "!Kill List",
 		# [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
@@ -58,13 +58,13 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 	}
 	var game_type := int(board.get("game_type", 0))
 	if table != null:
-		if table.has_string_in_section("Overlays", "STROVER_KILLLIST"):
-			strings["title"] = table.get_string_in_section("Overlays", "STROVER_KILLLIST")
+		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST"):
+			strings["title"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST")
 		# The key map is retail's own, engine-owned (npwire game_type.h
 		# overlay_label_key via NetProtocol) — this lane only looks it up.
 		var label_key := NetProtocol.game_type_overlay_label_key(game_type)
-		if label_key != "" and table.has_string_in_section("Overlays", label_key):
-			strings["game_type"] = table.get_string_in_section("Overlays", label_key)
+		if label_key != "" and table.has_string_in_section(Strings.SECTION_OVERLAYS, label_key):
+			strings["game_type"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, label_key)
 		# "<label> <count>": the counts are engine-computed — the players
 		# count is netsim's witnessed rows-minus-spectators header arithmetic
 		# (scoreboard_header); this lane only pairs them with the strings.

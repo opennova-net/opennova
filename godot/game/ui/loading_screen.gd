@@ -543,7 +543,7 @@ func _draw_progress_bar() -> void:
 func _lookup_loading_text(key: String, fallback: String) -> String:
 	if key.is_empty():
 		return fallback
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table == null or not table.has_string_in_section("LoadingText", key):
 		return fallback
 	return table.get_string_in_section("LoadingText", key)

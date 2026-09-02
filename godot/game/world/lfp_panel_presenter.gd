@@ -12,7 +12,7 @@ extends RefCounted
 ## The zone rows never round-trip through script (the overlay pulls them
 ## natively through Simulation.fill_lfp_zones); the shell owns the two status
 ## strings because it owns the string tables, with retail's literal fallbacks
-## [orig: GameText_GetStringWithFallback("Overlays", "STROVER_UNDERATTACK",
+## [orig: GameText_GetStringWithFallback(Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK",
 ##  "!Under\nAttack!!") @0x5a263c / ("STROVER_READYFORTAKEOVER",
 ##  "!Ready for\nTakeover!") @0x5a261d].
 
@@ -37,14 +37,14 @@ func update(hud: HudOverlay, sim: Simulation, frame_counter: int) -> void:
 		"under_attack": "!Under\nAttack!!",
 		"ready": "!Ready for\nTakeover!",
 	}
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table != null:
-		if table.has_string_in_section("Overlays", "STROVER_UNDERATTACK"):
+		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK"):
 			strings["under_attack"] = table.get_string_in_section(
-					"Overlays", "STROVER_UNDERATTACK")
-		if table.has_string_in_section("Overlays", "STROVER_READYFORTAKEOVER"):
+					Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK")
+		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_READYFORTAKEOVER"):
 			strings["ready"] = table.get_string_in_section(
-					"Overlays", "STROVER_READYFORTAKEOVER")
+					Strings.SECTION_OVERLAYS, "STROVER_READYFORTAKEOVER")
 	hud.set_lfp_panel(true, game_type, sim.get_local_player_team(), frame_counter,
 			strings, sim)
 	_pushed = true

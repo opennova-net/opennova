@@ -78,7 +78,7 @@ func _push(hud: HudOverlay, sim: Simulation) -> void:
 
 ## Missing strings resolve empty, as retail's GameText_GetString does.
 func _gametext(section: String, key: String) -> String:
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table != null and table.has_string_in_section(section, key):
 		return table.get_string_in_section(section, key)
 	return ""

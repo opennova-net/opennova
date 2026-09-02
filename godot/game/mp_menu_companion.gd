@@ -281,7 +281,7 @@ func _on_remove_missions() -> void:
 # the parser-only fallback [orig: get_game_type_abbreviation @0x520fd0].
 func _abbreviation_text(code: int) -> String:
 	var key := String(NetProtocol.game_type_host_abbreviation_key(code))
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if t != null and t.has_string_in_section("GateTypeAbbrev", key):
 		return t.get_string_in_section("GateTypeAbbrev", key)
 	return key

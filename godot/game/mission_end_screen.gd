@@ -75,7 +75,7 @@ func setup(outcome: Dictionary, banner: String, root: ResourceRoot) -> void:
 		# MISSION FAILED + the WAC Lose cause [orig: Overlays/STROVER_MISSION_FAILED
 		# at y=120, the g_banner_text line at y=230].
 		_add_line(column,
-				Strings.lookup_display("gametext", "Overlays", "STROVER_MISSION_FAILED"),
+				Strings.lookup_display(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSION_FAILED"),
 				"", 40)
 		if not banner.is_empty():
 			_add_line(column, banner, "", 26)
@@ -86,7 +86,7 @@ func setup(outcome: Dictionary, banner: String, root: ResourceRoot) -> void:
 
 
 func _epilog(key: String) -> String:
-	return Strings.lookup_display("gametext", "Epilog", key)
+	return Strings.lookup_display(Strings.TABLE_GAMETEXT, "Epilog", key)
 
 
 func _add_line(column: VBoxContainer, text: String, value: String, size: int) -> void:
