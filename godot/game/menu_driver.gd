@@ -10,18 +10,18 @@ const MenuTableState := preload("res://game/menu_table_state.gd")
 # everything witnessed (engine/runtime/menu; record: docs/mnu/menu-re.md);
 # this driver is the shell-side orchestration: navigation + the back stack,
 # ACTION dispatch, popup/scroll/table lifecycle, sound edges, the music-var
-# push, and the value-changed relay — its signal surface mirrors the deleted
-# MnuMenu node. Widgets go by stable MnuDocument id, valid across screens;
-# per-id runtime state is replayed at each screen configure.
+# push, and the value-changed relay. Widgets go by stable MnuDocument id,
+# valid across screens; per-id runtime state is replayed at each screen
+# configure.
 
 signal screen_changed(screen_name: String)
-signal music_changed(music_var: int)
 signal menu_requested(file: String, target_screen: String)
 signal quit_requested()
 signal url_requested(url: String)
+# The widget sound edge as resolved from the SOUND table (trigger, bank); the
+# MenuAudio player plays it. Observable without banks, which the seam tests
+# need (a script double never intercepts the typed native call).
 signal sound_requested(file: String, trigger: String)
-signal action_dispatched(type: String, target: String)
-signal shell_action_requested(type: String, action: Dictionary)
 signal widget_value_changed(widget_name: String, kind: String, index: int, value: String)
 # Click-level activation of a widget (button/goto/checkbox/radio...) — the
 # named-control seam the shell and companions wire launch/quit policy to.
@@ -209,7 +209,6 @@ func _on_screen_shown() -> void:
 	var music_var := 0
 	if screen_id >= 0 and _doc.get_screen_has_music_var(screen_id):
 		music_var = _doc.get_screen_music_var(screen_id)
-	music_changed.emit(music_var)
 	if _music_director != null:
 		_music_director.set_var(_music_var_index, music_var)
 
@@ -1043,23 +1042,18 @@ func _trigger_hotkey_target(index: int) -> bool:
 
 # --- Actions --------------------------------------------------------------------
 
-# The shell-owned verbs the dispatcher reports without inventing effects.
-const SHELL_ACTION_TYPES := ["form_post", "glb_load", "glb_loadandping",
-	"glb_filter", "glb_filter_num", "glb_ping", "glb_join", "appmsg",
-	"lan_search", "lan_join", "mnx"]
-
-
 func _dispatch_widget_actions(id: int) -> void:
 	for action in _doc.get_widget_actions(id):
 		dispatch_action_row(action)
 
 
 ## One parsed ACTION row [orig: CUIWidget_HandleScriptedAction @ 0x6497f0].
-## Returns true when the action was handled (or deliberately consumed).
+## Returns true when the action was handled. The service verbs (FORM_POST,
+## GLB_*, APPMSG, LAN_*, MNX; docs/mnu/menu-re.md) are not the driver's: they
+## return false, and the shell wires that behavior by named control.
 func dispatch_action_row(action: Dictionary) -> bool:
 	var type := String(action.get("type", "")).to_lower()
 	var target := String(action.get("target", ""))
-	action_dispatched.emit(type, target)
 	match type:
 		"window":
 			return handle_window_action(target,
@@ -1081,7 +1075,6 @@ func dispatch_action_row(action: Dictionary) -> bool:
 			return true
 		"url":
 			url_requested.emit(target)
-			shell_action_requested.emit(type, action)
 			return true
 		"tab":
 			# TAB selects the named focus target; the compiled path focuses
@@ -1094,10 +1087,6 @@ func dispatch_action_row(action: Dictionary) -> bool:
 			if widget_kind_of(target_id) == MnuDocument.TYPE_EDIT:
 				_focus_edit(target_id)
 			return true
-		_:
-			if SHELL_ACTION_TYPES.has(type):
-				shell_action_requested.emit(type, action)
-				return true
 	return false
 
 
