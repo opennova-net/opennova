@@ -47,6 +47,7 @@
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
+#include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/object_data.h"
@@ -214,6 +215,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionTickOutcome);
 	GDREGISTER_CLASS(MissionFrameOutcome);
 	GDREGISTER_CLASS(WirePresentStats);
+	GDREGISTER_CLASS(ScarDrawList);
 	GDREGISTER_CLASS(ScarPresenterStats);
 	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);

@@ -127,11 +127,11 @@ func present() -> void:
 
 
 ## The pure-data presentation leg (the present_snapshot precedent): production
-## present() feeds the typed sim's draw list; tests feed the same dictionary.
-func present_draw_list(draw: Dictionary) -> void:
-	_stats.slots_live = int(draw.get("slots_live", 0))
-	_stats.slots_culled = int(draw.get("slots_culled", 0))
-	_stats.rings_leased = int(draw.get("rings_leased", 0))
+## present() feeds the sim's draw list; tests author the same record.
+func present_draw_list(draw: ScarDrawList) -> void:
+	_stats.slots_live = draw.slots_live
+	_stats.slots_culled = draw.slots_culled
+	_stats.rings_leased = draw.rings_leased
 	if _presenter == null or not is_instance_valid(_presenter):
 		return
 	var owner_nodes := _resolve_owner_nodes(draw)
@@ -145,15 +145,15 @@ func present_draw_list(draw: Dictionary) -> void:
 
 
 # Every entity-ring owner in the list -> its live node (packed handle -> Node3D).
-func _resolve_owner_nodes(draw: Dictionary) -> Dictionary:
-	var owners: PackedInt32Array = draw.get("batch_owner", PackedInt32Array())
-	var flags: PackedInt32Array = draw.get("batch_flags", PackedInt32Array())
-	var bms_ids: PackedInt32Array = draw.get("batch_bms_id", PackedInt32Array())
-	var origins: PackedInt64Array = draw.get("batch_spawn_origin", PackedInt64Array())
+func _resolve_owner_nodes(draw: ScarDrawList) -> Dictionary:
+	var owners := draw.batch_owner
+	var flags := draw.batch_flags
+	var bms_ids := draw.batch_bms_id
+	var origins := draw.batch_spawn_origin
 	var out := {}
 	_stats.owners_unresolved = 0
 	for i in range(owners.size()):
-		if i >= flags.size() or (flags[i] & 1) == 0:
+		if i >= flags.size() or (flags[i] & ScarDrawList.FLAG_ENTITY_LOCAL) == 0:
 			continue
 		var owner := owners[i]
 		if out.has(owner):

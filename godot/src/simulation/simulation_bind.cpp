@@ -13,6 +13,7 @@
 #include "simulation/player_local_view.h" // the local view-state snapshot record
 #include "simulation/player_weapon_event.h" // one ordered weapon presentation event
 #include "simulation/player_weapon_view.h" // the local weapon FSM view record
+#include "world/scar_draw_list.h" // one frame's impact-scar draw list
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)

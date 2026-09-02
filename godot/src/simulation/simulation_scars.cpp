@@ -5,6 +5,7 @@
 // per present frame.
 #include "simulation/simulation_internal.h"
 #include "env/env_axes.h"
+#include "world/scar_draw_list.h"
 
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
@@ -81,9 +82,10 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 	return !any_hit;
 }
 
-Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
+Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		float p_fog_distance, const Color &p_terrain_light) const {
-	Dictionary out;
+	Ref<ScarDrawList> out;
+	out.instantiate();
 	if (!kernel_) {
 		return out;
 	}
@@ -215,21 +217,21 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		strip_mode_words[strip] =
 				static_cast<int32_t>(opennova::world::scar_texture_strip_mode_word(strip));
 	}
-	out["vertices"] = vertices;
-	out["uvs"] = uvs;
-	out["colors"] = colors;
-	out["batch_owner"] = batch_owner;
-	out["batch_texture"] = batch_texture;
-	out["batch_section"] = batch_section;
-	out["batch_flags"] = batch_flags;
-	out["batch_first"] = batch_first;
-	out["batch_count"] = batch_count;
-	out["batch_bms_id"] = batch_bms_id;
-	out["batch_spawn_origin"] = batch_spawn_origin;
-	out["strip_names"] = strip_names;
-	out["strip_mode_words"] = strip_mode_words;
-	out["slots_live"] = static_cast<int>(list.slots_live);
-	out["slots_culled"] = static_cast<int>(list.slots_culled);
-	out["rings_leased"] = kernel_->world.scars.leased_count();
+	out->set_vertices(vertices);
+	out->set_uvs(uvs);
+	out->set_colors(colors);
+	out->set_batch_owner(batch_owner);
+	out->set_batch_texture(batch_texture);
+	out->set_batch_section(batch_section);
+	out->set_batch_flags(batch_flags);
+	out->set_batch_first(batch_first);
+	out->set_batch_count(batch_count);
+	out->set_batch_bms_id(batch_bms_id);
+	out->set_batch_spawn_origin(batch_spawn_origin);
+	out->set_strip_names(strip_names);
+	out->set_strip_mode_words(strip_mode_words);
+	out->set_slots_live(static_cast<int>(list.slots_live));
+	out->set_slots_culled(static_cast<int>(list.slots_culled));
+	out->set_rings_leased(kernel_->world.scars.leased_count());
 	return out;
 }

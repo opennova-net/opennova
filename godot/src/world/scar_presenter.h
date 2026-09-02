@@ -38,6 +38,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "resource_index/resource_root.h"
+#include "world/scar_draw_list.h"
 
 namespace godot {
 
@@ -51,13 +52,13 @@ public:
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 
-	// Upload one frame's draw list (the Dictionary Simulation::get_scar_draw_list
+	// Upload one frame's draw list (the record Simulation::get_scar_draw_list
 	// returns). `p_owner_nodes` maps an entity-ring owner (the packed handle, int)
 	// to its live model node (ObjectModel preferred — its render-part nodes are
 	// the mounts for the section-local meshes; any Node3D mounts them at its
 	// origin otherwise).
 	// Entity batches whose owner is absent from the map draw nothing this frame.
-	void present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes);
+	void present(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes);
 	// Drop every scar mesh (the Stop -> Play boundary, teardown).
 	void clear();
 	// The typed counter snapshot (ScarPresenterStats: world_surfaces,

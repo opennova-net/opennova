@@ -211,22 +211,24 @@ void ScarPresenter::clear() {
 	stat_vertices_ = 0;
 }
 
-void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes) {
+void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes) {
 	stat_textures_missing_ = 0;
 	stat_strips_unsupported_ = 0;
-	const PackedVector3Array vertices = p_draw_list.get("vertices", PackedVector3Array());
-	const PackedVector2Array uvs = p_draw_list.get("uvs", PackedVector2Array());
-	const PackedColorArray colors = p_draw_list.get("colors", PackedColorArray());
-	const PackedInt32Array owners = p_draw_list.get("batch_owner", PackedInt32Array());
-	const PackedInt32Array textures = p_draw_list.get("batch_texture", PackedInt32Array());
-	const PackedInt32Array sections = p_draw_list.get("batch_section", PackedInt32Array());
-	const PackedInt32Array flags = p_draw_list.get("batch_flags", PackedInt32Array());
-	const PackedInt32Array firsts = p_draw_list.get("batch_first", PackedInt32Array());
-	const PackedInt32Array counts = p_draw_list.get("batch_count", PackedInt32Array());
-	const PackedStringArray strip_names =
-			p_draw_list.get("strip_names", PackedStringArray());
-	const PackedInt32Array strip_mode_words =
-			p_draw_list.get("strip_mode_words", PackedInt32Array());
+	if (p_draw_list.is_null()) {
+		clear();
+		return;
+	}
+	const PackedVector3Array &vertices = p_draw_list->get_vertices();
+	const PackedVector2Array &uvs = p_draw_list->get_uvs();
+	const PackedColorArray &colors = p_draw_list->get_colors();
+	const PackedInt32Array &owners = p_draw_list->get_batch_owner();
+	const PackedInt32Array &textures = p_draw_list->get_batch_texture();
+	const PackedInt32Array &sections = p_draw_list->get_batch_section();
+	const PackedInt32Array &flags = p_draw_list->get_batch_flags();
+	const PackedInt32Array &firsts = p_draw_list->get_batch_first();
+	const PackedInt32Array &counts = p_draw_list->get_batch_count();
+	const PackedStringArray &strip_names = p_draw_list->get_strip_names();
+	const PackedInt32Array &strip_mode_words = p_draw_list->get_strip_mode_words();
 	const int64_t batch_count = owners.size();
 	if (batch_count == 0 || textures.size() != batch_count ||
 			sections.size() != batch_count || flags.size() != batch_count ||
