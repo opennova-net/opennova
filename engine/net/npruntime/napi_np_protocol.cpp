@@ -928,22 +928,6 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
-void configure_session_runtime(NapiNPServerCtx &ctx) {
-	// The reply/runtime config (§5.1 mission/player/spawn) now lives in ctx.config, seeded by
-	// create_session with the host's full GameConfig — so this step no longer copies a config; it only
-	// performs the peer-list reset below.
-	// [orig: HostSessionAccept::configure clears peers_] — peers_ held ONLY remote joiners (the
-	// host's own client lived elsewhere), so the faithful translation drops the server-side (type-1)
-	// remote-joiner nodes and PRESERVES the host's own type-2 loopback client that P1's
-	// create_session registered (else the canonical bring-up create_session(local_client) ->
-	// configure_session_runtime would silently delete it).
-	auto &list = ctx.np_protocol.connection_list;
-	for (auto it = list.begin(); it != list.end();) {
-		if (it->type == NapiNPConnection::kTypeServerSide) it = list.erase(it);
-		else ++it;
-	}
-}
-
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick,
                                     bool defer_in_match_replies) {

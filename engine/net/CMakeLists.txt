@@ -52,9 +52,9 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_login.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_flow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gsb.cpp
-    # netsim — the in-match net seam (ADR 0009/0011): NetSystem + the
-    # World<->wire bridge + the in-process loopback. The single deliberate
-    # bridge between the runtime world and the wire codec.
+    # netsim — the in-match net seam (ADR 0009/0011): connection-fan
+    # primitives, client replica state, the World<->wire bridge, and the
+    # in-process loopback.
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/loopback_channel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/serializing_sink.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/entity_wire_bridge.cpp

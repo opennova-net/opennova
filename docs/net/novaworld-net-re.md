@@ -6534,25 +6534,25 @@ P5. `[orig: NapiNPServer_SendFiltered @0x4C87E0]`
 the host loopback latches `burst.spawned` via its §5.2a burst completion (D-NET-114) like any joiner, so
 it gets its per-frame 0x0A.
 
-**D-NET-123** [reimpl deferral, DOCUMENTED] **`Server_TickUpdate` owns the logic tick.** It calls
-`world.run_logic_tick(true)` itself — the inverse of the legacy seam, where the C2S drain ran INSIDE
-`run_logic_tick` (NetSystem as a World ISystem driven by the host's existing `run_logic_tick` call). A
-P7 binding that migrates to `Server_TickUpdate` but keeps its own `run_logic_tick()` advances the sim
-(and drains the C2S queue) twice per frame. Enforced only by the header guardrail comment today
-(D-NET-125). `[orig: net-before-logic, Game_ProcessMainFrame @0x5263f0]`
+**D-NET-123** [reimpl divergence, **FIXED 2026-09-01**] **`Server_TickUpdate` owns the logic tick.**
+The production role router now makes that ownership exclusive: `Simulation::advance_world_tick`
+returns after `listen_host::frame` for a listen/dedicated host, returns after the client pump for a
+joiner, and reaches `MissionKernel::tick_no_net` only for offline play. The focused listen-host
+regression pins one frame to exactly one world tick and one host-owner tick, so the binding cannot
+fall through into a second `run_logic_tick`. `[orig: net-before-logic, Game_ProcessMainFrame @0x5263f0]`
 
-**D-NET-124** [reimpl deferral, DOCUMENTED] **The drain/emit fan assumes type-1 nodes stay resident.**
-`Server_TickUpdate` walks `np_protocol.connection_list` for both the drain and the emit; a mid-match
-`configure_session_runtime()` erases every type-1 (remote-joiner) node, which would silently drop those
-peers from replication for the rest of the round. No reconfigure path calls it mid-match today; revisit
-when round-restart / re-invoke lands. `[orig: tick_connections connection_list residency]`
+**D-NET-124** [reimpl divergence, **FIXED 2026-09-01**] **The drain/emit fan keeps admitted type-1
+nodes resident.** `create_session` is the sole whole-table reset: at the new-match boundary it clears
+all prior roles, resets `next_connection_id`, then installs the new session's type-2 loopback when
+applicable. The redundant callable post-create mutator was removed, so live config changes have no
+connection-residency side effect. Tests pin both role-set replacement at session creation and an
+admitted remote peer surviving a normal host tick. `[orig: tick_connections connection_list residency]`
 
-**D-NET-125** [reimpl guardrail, DOCUMENTED] **The single-drain / single-tick invariant is comment-only.**
-Nothing in code prevents a binding from both registering a `netsim::NetSystem` ISystem and calling
-`Server_TickUpdate` (`ctx.net` stays a settable `NetSystem*`); whichever runs first drains the C2S queue
-and the other sees nothing, with no compile- or run-time signal. P7 folds the tables onto one transport
-and removes `ctx.net`; until then the guardrail is the header comment on `Server_TickUpdate`. `[orig:
-ADR 0011 single-owner connection table]`
+**D-NET-125** [reimpl guardrail, **FIXED 2026-09-01**] **The single-drain / single-tick invariant is
+structural.** P8 removed the `netsim::NetSystem` class and `ctx.net`; `connection_fan` now exposes only
+the per-connection primitives driven by `Server_TickUpdate`. Together with the mutually exclusive
+production role routing pinned by D-NET-123, there is no second registered world-system owner to drain
+the same queue or advance the authoritative world. `[orig: ADR 0011 single-owner connection table]`
 
 ### 5.44 `Client_ProcessNetworkFrame` — the per-frame client net role (P5, 2026-06-27)
 

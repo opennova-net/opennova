@@ -350,7 +350,6 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x0FE0E112u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33111};
 	opennova::np::JoinerConnection joiner("HoldoffHandshake");
@@ -477,6 +476,54 @@ bool check_create_session_brings_up_host() {
 	return true;
 }
 
+// Connection residency changes only at the true session boundary. Reusing a
+// context must discard every role from the prior session, install exactly the
+// new role set, and restart remote connection ids from the retail joiner base.
+bool check_create_session_replaces_connection_role_set() {
+	opennova::netsim::LoopbackChannel first_local;
+	opennova::netsim::LoopbackChannel replacement_local;
+	NapiNPServerCtx ctx;
+	opennova::np::set_connection_mode(ctx, ConnectionMode::HostClient);
+	opennova::np::set_transport_mode(ctx, SocketMode::Socketless);
+
+	opennova::np::GameConfig settings;
+	settings.max_players = 8;
+	opennova::np::SessionStartup startup;
+	opennova::np::create_session(ctx, settings, startup, &first_local);
+
+	opennova::np::NapiNPConnection remote;
+	remote.type = opennova::np::NapiNPConnection::kTypeServerSide;
+	remote.connection_id = opennova::np::kFirstJoinerDcb + 9;
+	ctx.np_protocol.connection_list.push_back(remote);
+	ctx.np_protocol.next_connection_id = 77;
+
+	opennova::np::create_session(ctx, settings, startup, &replacement_local);
+	if (!expect(ctx.np_protocol.connection_list.size() == 1,
+	            "replacement listen session owns exactly one connection"))
+		return false;
+	const opennova::np::NapiNPConnection &replacement =
+			ctx.np_protocol.connection_list.front();
+	if (!expect(
+				replacement.type ==
+						opennova::np::NapiNPConnection::kTypeClientSide &&
+					replacement.connection_id == opennova::np::kHostPlayerDcb &&
+					replacement.link.transport == &replacement_local &&
+					ctx.np_protocol.next_connection_id ==
+						opennova::np::kFirstJoinerDcb,
+				"replacement session drops stale roles and installs its own loopback"))
+		return false;
+
+	opennova::np::set_connection_mode(ctx, ConnectionMode::HostOnly);
+	opennova::np::set_transport_mode(ctx, SocketMode::Lan);
+	ctx.np_protocol.next_connection_id = 88;
+	opennova::np::create_session(ctx, settings, startup, nullptr);
+	return expect(
+			ctx.np_protocol.connection_list.empty() &&
+					ctx.np_protocol.next_connection_id ==
+						opennova::np::kFirstJoinerDcb,
+			"dedicated replacement clears the prior loopback and resets joiner ids");
+}
+
 // A listen host has no ClientAuth upload. Its resolved PLAYER_INFO fields must
 // therefore reach the type-2 loopback before Server_ProcessPendingPlayerSpawns
 // consumes them [orig: local profile path into Server_PlayerAdd @0x51CBC0].
@@ -566,7 +613,6 @@ bool check_host_pump_batches_one_send_boundary() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33100};
 	opennova::np::PeerLink &peer_link = owner.peers[peer];
@@ -611,6 +657,10 @@ bool check_host_pump_batches_one_send_boundary() {
 	CaptureDatagramSocket socket;
 	socket.incoming.push_back({peer, std::move(inbound)});
 	opennova::np::host_session_pump(owner, socket);
+	if (!expect(owner.ctx.np_protocol.connection_list.size() == 1 &&
+	                    owner.ctx.np_protocol.connection_list.front().peer == peer,
+	            "one host tick preserves the admitted remote peer"))
+		return false;
 	if (!expect(socket.sent.size() == 1,
 	            "host batches mixed-delivery records in one send-boundary datagram"))
 		return false;
@@ -658,7 +708,6 @@ bool check_initial_stream_batches_with_reactive_reply() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
 	world.registry.configure_pool(0, 4);
@@ -1090,7 +1139,6 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
 	world.registry.configure_pool(0, 2);
@@ -1219,7 +1267,6 @@ bool check_host_s2c_holdoff_is_per_connection() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
 	world.registry.configure_pool(0, 4);
@@ -1295,7 +1342,6 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
 	world.registry.configure_pool(0, 4);
@@ -1452,7 +1498,6 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33140};
 	opennova::np::PeerLink &peer_link = owner.peers[peer];
@@ -1602,7 +1647,6 @@ bool check_fragment_group_waits_for_full_node_capacity() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x01020304u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33141};
 	opennova::np::PeerLink &peer_link = owner.peers[peer];
@@ -1690,7 +1734,6 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	opennova::np::SessionStartup startup;
 	startup.host_key = 0x0FE0E112u;
 	opennova::np::create_session(owner.ctx, config, startup, nullptr);
-	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
 	opennova::world::AiSystem ai;
@@ -1826,7 +1869,7 @@ bool check_global_scoreboard_integrity_phase() {
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
 	conn.reply.player_name = "RetailPhase";
-	ctx.np_protocol.connection_list.push_back(std::move(conn));
+	ctx.np_protocol.connection_list.push_back(conn);
 
 	struct Emitted {
 		uint8_t tag = 0;
@@ -1895,8 +1938,9 @@ bool check_global_scoreboard_integrity_phase() {
 	// The global clocks advance even after the session gate closes, but every
 	// maintenance send remains session-only. Keep the peer fully spawned/live so
 	// this exercises the gate itself rather than making the recipient ineligible.
-	// Then a reused mission owner resets only the counter: the process-global
-	// toggle survives. Stale health/alive do not suppress 0x30 while Flags bit
+	// Then a reused mission owner resets the counter and connection table; after
+	// the peer is re-admitted, the process-global toggle survives. Stale
+	// health/alive do not suppress 0x30 while Flags bit
 	// 0x02 is clear.
 	ctx.is_in_session = 0;
 	ctx.scoreboard_broadcast_timer = 0x136u;
@@ -1915,6 +1959,7 @@ bool check_global_scoreboard_integrity_phase() {
 	ctx.scoreboard_broadcast_timer = 77;
 	opennova::np::create_session(
 			ctx, config, opennova::np::SessionStartup{}, nullptr);
+	ctx.np_protocol.connection_list.push_back(conn);
 	if (!expect(ctx.scoreboard_broadcast_timer == 0 &&
 	                    ctx.integrity_entity_family_next,
 	            "mission reuse resets the scoreboard counter but preserves its family toggle"))
@@ -3621,6 +3666,7 @@ int main() {
 	ok = check_retail_rate_defaults() && ok;
 	ok = check_pre_dictation_holdoff_keeps_initial_settings_open() && ok;
 	ok = check_create_session_brings_up_host() && ok;
+	ok = check_create_session_replaces_connection_role_set() && ok;
 	ok = check_listen_host_installs_local_character_profile() && ok;
 	ok = check_dedicated_host_has_no_local_client() && ok;
 	ok = check_production_serve_mode_has_no_phantom_and_mints_startup() && ok;

@@ -33,8 +33,8 @@ struct ListenHostState {
 namespace listen_host {
 
 // The witnessed §5.0 listen-host bring-up: the npruntime ctx over the
-// kernel's world, start_host_session (mode 3 -> create_session over the
-// loopback -> configure_session_runtime -> the auto-spawn of the local player
+// kernel's world, start_host_session (mode 3 -> create_session, which resets
+// the connection table and installs the loopback -> auto-spawn of the local player
 // at the start marker), and the local HostClient replica pipeline folding the
 // loopback into its ClientState. Invoked by the kernel boot's
 // bringup_net_session hook. [orig: SinglePlayer_StartMission @0x561af0]

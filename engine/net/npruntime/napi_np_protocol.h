@@ -99,18 +99,6 @@ struct TickOut {
 	std::vector<HostAcceptEvent> events;
 };
 
-// Construct + configure + start the ctx's SESSION-leg spawn-gate runtime (the old
-// HostSessionAccept(config) ctor + start()), and drop the server-side (type-1) remote-joiner
-// connections — PRESERVING the host's own type-2 loopback (the faithful translation of
-// HostSessionAccept::configure's peers_.clear(), which only held remote joiners).
-//
-// Canonical listen-host bring-up (P0 -> P1 -> P2): set_connection_mode -> set_transport_mode ->
-// create_session(config, local_client) [P1: seeds ctx.config incl. the §5.1 reply slice,
-// host_running=1, registers the loopback] -> configure_session_runtime() [P2: drops the type-1
-// remote-joiner nodes, keeps the loopback]. The live handshake legs reject until host_running == 1,
-// so this bring-up must run before any datagram.
-void configure_session_runtime(NapiNPServerCtx &ctx);
-
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship
 // back + events to react to. [orig: CNapiNPConnection_ParseMessages @0x625BC0 / the accept switch]

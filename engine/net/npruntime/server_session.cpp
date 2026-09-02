@@ -41,6 +41,11 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
 void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                     const SessionStartup &startup, netsim::ISessionTransport *local_client) {
+	// A new session owns a new connection table. Clear both remote server-side
+	// peers and any prior local client before installing this session's role set;
+	// no live-update API is allowed to mutate connection residency mid-match.
+	ctx.np_protocol.connection_list.clear();
+	ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
 	ctx.config = config;
 	// Game_StartMission runs Nbstat_StartupInit once per mission, clearing the
 	// shared scoreboard/integrity counter but deliberately leaving the separate
@@ -108,7 +113,6 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		self.link.transport = local_client;
 		self.link.mode = netsim::TransportMode::Loopback; // socketless mode 1
 		ctx.np_protocol.connection_list.push_back(self);
-		ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
 	}
 }
 

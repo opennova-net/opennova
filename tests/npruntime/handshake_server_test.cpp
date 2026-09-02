@@ -1469,7 +1469,6 @@ bool run_non_jo_peer_is_ignored() {
 // A live handshake against a host that was NOT brought up (host_running == 0) is rejected.
 bool run_handshake_rejected_when_host_down() {
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx); // config only — NO create_session, so host_running stays 0
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
@@ -1482,8 +1481,8 @@ bool run_handshake_rejected_when_host_down() {
 	return true;
 }
 
-// The full P0->P1->P2 listen-host bring-up preserves the host's own type-2 loopback through
-// configure_session_runtime, and a remote joiner is added alongside it (not in place of it).
+// The full listen-host bring-up installs the host's own type-2 loopback, and a remote joiner is added
+// alongside it (not in place of it).
 bool run_listen_host_lifecycle() {
 	netsim::LoopbackChannel loopback;
 	np::NapiNPServerCtx ctx;
@@ -1496,7 +1495,7 @@ bool run_listen_host_lifecycle() {
 	if (!expect(ctx.is_authority == 1 && ctx.is_mp_session_peer == 1, "HostClient = host + client")) return false;
 	if (!expect(ctx.np_protocol.host_running == 1, "listen host is running")) return false;
 	if (!expect(ctx.np_protocol.host_key == kHostKey, "host key seeded")) return false;
-	if (!expect(np::connection_count(ctx) == 1, "loopback preserved through configure_session_runtime")) return false;
+	if (!expect(np::connection_count(ctx) == 1, "listen-host session installs one loopback")) return false;
 	if (!expect(ctx.np_protocol.connection_list[0].type == 2, "preserved node is the type-2 loopback")) return false;
 
 	const PeerAddr peer{0x0100007Fu, 31200};
