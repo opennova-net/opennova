@@ -6,6 +6,7 @@
 //  - Entity_UpdateVehiclePhysics @0x48af00: parked stamp @0x48c002-0x48c02d + the
 //    AI-driver leg @0x48bc12-0x48c034
 //  - the player deploy group stamp @0x519fd0 (commandGroup = 1)
+#include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
@@ -1501,6 +1502,149 @@ void test_ground_waits_for_boarders() {
           bam_heading_from_mission_yaw_deg(static_cast<double>(r.veh().yaw)));
 }
 
+// A helicopter rig for the AI flight legs: a CHel row with a helo profile, an
+// NPC in the control seat, the rotor at full speed (a cold rotor parks every
+// command for the ~18 s spool-up), and a one-node route.
+struct HeloRig {
+    // A flat sea-level field: the hull starts 10 u up, so the ground legs and
+    // the boxless terrain clamp both have a ground to read.
+    std::vector<uint16_t> heightmap = std::vector<uint16_t>(64 * 64, 0);
+    std::vector<int> sector_grid = std::vector<int>(256, 1);
+    opennova::terrain::TerrainHeightField field;
+    Rig r;
+    VehicleTraits t;
+    AiEntity *ve = nullptr;
+    Entity *ctrl = nullptr;
+    explicit HeloRig(bool rotor_full = true) : r(30.0f) {
+        field.heightmap = heightmap.data();
+        field.dim = 64;
+        field.layout.sector_grid = sector_grid.data();
+        field.layout.origin_x = 0;
+        field.layout.origin_y = 0;
+        r.w.terrain = &field;
+        t = truck_traits();
+        t.family = VehicleFamily::Helicopter;
+        t.physics = 0;
+        t.acceleration = 512;
+        t.turn_rate = 0x600000;
+        t.climb_speed = 50 * 293;
+        t.critical_hp = 300;
+        t.critical_drain = 40;
+        t.non_critical_regen = 10;
+        r.w.vehicle_traits.set(r.veh().item_id, t);
+        r.sys.is_authority = true;
+        const int ai_idx = r.sys.attach(r.veh_h);
+        ve = r.sys.at(ai_idx);
+        ve->profile.type = 1; // the helo profile class
+        ve->pos[0] = to_fixed(r.veh().position.x);
+        ve->pos[1] = to_fixed(r.veh().position.y);
+        ve->pos[2] = to_fixed(r.veh().position.z);
+        r.veh().spawn_position = r.veh().position;
+        r.veh().bound_radius = 6.0f;
+        if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin);
+        Entity npc;
+        npc.kind = EntityKind::Organic;
+        npc.item_id = 2072;
+        npc.health = 150;
+        npc.alive = true;
+        npc.team = 1;
+        npc.has_item_def = true;
+        const EntityHandle nh = r.w.registry.spawn(0, npc);
+        CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+        ctrl = resolve_vehicle_controller(r.w, r.veh());
+        CHECK(ctrl != nullptr);
+    }
+    void route_to(int32_t x, int32_t y, int32_t z) {
+        r.sys.nav.channels.resize(3);
+        r.sys.nav.channels[2].count = 1;
+        r.sys.nav.channels[2].entries[0] = 0;
+        r.sys.nav.nodes.resize(1);
+        r.sys.nav.nodes[0] = NavEntry{{2 << 16, x << 16, y << 16, z << 16, 0}};
+        AiBrain &b = ve->brain;
+        b.f[AiBrain::kCurState] = 16;
+        b.f[AiBrain::kPendState] = 16;
+        b.f[AiBrain::kWpType] = 1;
+        b.f[AiBrain::kWpChannel] = 2;
+        b.f[AiBrain::kWpNode] = 0;
+        b.f[AiBrain::kWpResolved] = 0;
+        b.f[AiBrain::kOutSpeed] = 40 * 293;
+    }
+    void tick(int n) {
+        TickContext ctx{};
+        ctx.is_authority = true;
+        for (int i = 0; i < n; ++i) {
+            r.sys.tick(r.w, ctx);
+            ++r.w.logic_tick;
+        }
+    }
+};
+
+// The AI flight block [orig: @0x491672..0x491998]: a crewed, routed helicopter
+// with its rotor up lifts toward the node's altitude and closes on it; with no
+// route it sits on its skids; with a cold rotor every command parks.
+void test_helo_ai_flight() {
+    {
+        HeloRig h;
+        h.route_to(300, 200, 40); // 200 u east, 30 u up
+        const float z0 = h.r.veh().position.z;
+        const float x0 = h.r.veh().position.x;
+        h.tick(400);
+        CHECK(h.r.veh().veh.net_engine_on);
+        CHECK(h.r.veh().position.z > z0 + 5.0f);
+        CHECK(h.r.veh().position.x > x0 + 5.0f);
+        CHECK(h.r.veh().position.x < 300.0f);
+        // Steer chases the node's bearing (+x = mission yaw 90).
+        const int32_t err = h.r.veh().veh.yaw_bam - bam_heading_from_mission_yaw_deg(90.0);
+        CHECK(std::abs(err) < 120000000);
+    }
+    {
+        HeloRig h; // no route: the parked altitude target holds -> it settles
+        h.ve->brain.f[AiBrain::kCurState] = 16;
+        h.ve->brain.f[AiBrain::kPendState] = 16;
+        const float z0 = h.r.veh().position.z;
+        h.tick(200);
+        CHECK(h.r.veh().veh.cmd_speed == 0);
+        CHECK(h.r.veh().position.z <= z0 + 1.0f);
+        CHECK(!h.r.veh().veh.net_engine_on);
+    }
+    {
+        HeloRig h(/*rotor_full=*/false); // cold rotor: the LABEL_328 park
+        h.route_to(300, 200, 40);
+        const float z0 = h.r.veh().position.z;
+        h.tick(200);
+        CHECK(h.r.veh().veh.part_spin.speed < kRotorSpeedMax);
+        CHECK(h.r.veh().veh.cmd_speed == 0);
+        CHECK(!h.r.veh().veh.net_engine_on);
+        CHECK(h.r.veh().position.z <= z0 + 1.0f);
+    }
+}
+
+// The aircraft authority health machine [orig: @0x4903F0..0x490480 regen/burn,
+// @0x492637..0x49266f the crash drain]: above criticalHp the hull regens on the
+// 64-tick cadence; at or below it burns criticalDrain per cadence and, airborne
+// with a target above ground, spins its yaw; past 100 deg of roll it bleeds 200
+// a tick.
+void test_helo_authority_health() {
+    HeloRig h;
+    h.route_to(300, 200, 40);
+    h.r.veh().health = 1000;
+    h.tick(128);
+    CHECK(h.r.veh().health == 1000 + 2 * 10); // two cadence hits of regen
+    // Burning: at critical the drain replaces the regen and the yaw spins.
+    h.r.veh().health = 300;
+    const int32_t yaw0 = h.r.veh().veh.yaw_bam;
+    h.tick(64);
+    CHECK(h.r.veh().health == 300 - 40);
+    CHECK(h.r.veh().veh.yaw_bam != yaw0);
+    // The crash drain: past 100 deg of roll, 200 a tick to zero.
+    h.r.veh().health = 500;
+    h.r.veh().veh.air_roll_bam = 0x50000000; // ~112 deg
+    h.tick(2);
+    CHECK(h.r.veh().health == 100);
+    h.tick(1);
+    CHECK(h.r.veh().health == 0);
+}
+
 // The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
 // commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
 // [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
@@ -2043,6 +2187,8 @@ int main() {
     test_min_ai_crew_clamp();
     test_handbrake_latch();
     test_ground_waits_for_boarders();
+    test_helo_ai_flight();
+    test_helo_authority_health();
     test_redirect_and_speed_commands();
     test_local_player_drive_mirror();
     test_player_spawn_group();

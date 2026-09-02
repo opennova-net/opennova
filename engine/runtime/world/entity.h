@@ -800,6 +800,10 @@ struct Entity {
         int32_t net_recv_lat = 0;          // [orig: brain[178]] air lateral cmd, stale-decays
         int32_t net_alt_target = 0;        // [orig: brain[131]] absolute target Z, never decays
         bool net_engine_on = false;        // replicated Flags 0x80 (air engine/collective)
+        // The AUTHORITY's climb-above-ground register [orig: brain[137] +0x224],
+        // clamped at zero on every write; the engine flag IS `[548] != 0`
+        // (@0x491dfd). The client path folds it into net_alt_target instead.
+        int32_t net_climb = 0;
         // Authority AI flight: chel_ai_drive staged this tick's commands into
         // cmd_speed/cmd_lateral/steer_target/net_alt_target — the mover keeps
         // them instead of adopting net mirrors, then clears the flag. Retail

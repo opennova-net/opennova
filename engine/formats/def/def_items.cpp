@@ -522,6 +522,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
             current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "noncriticalregen", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            current.non_critical_regen = parse_int_n(v, vl); /* i16 raw at +0x184 */
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "radarsig", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
             current.radar_sig = parse_int_n(v, vl) & 0xFFFF; /* u16 at +0x178 */
