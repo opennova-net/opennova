@@ -1,7 +1,7 @@
 extends GutTest
 
 # AiDebugView: the F3 AI window's 3D overlay. Drives it with a crafted
-# get_ai_debug() dictionary (the same shape Simulation emits) through the
+# get_ai_debug() AiDebugReport (the same record Simulation emits) through the
 # public render seam to pin: state labels with alert colors, nav-route lines
 # with the follower's current node, target/aim lines, perception rings, the
 # element gating, the selection-provider ring behavior, and the clear paths.
@@ -9,77 +9,62 @@ extends GutTest
 const ViewScript := preload("res://game/debug/ai_debug_view.gd")
 
 
-func _payload() -> Dictionary:
-	return {
-		"valid": true,
-		"logic_tick": 62,
-		"rows": [
-			{
-				"ai_index": 0,
-				"handle": 0x3001,
-				"name": "ALPHA",
-				"group": 5,
-				"alive": true,
-				"infantry": true,
-				"pos": Vector3(10, 0, 5),
-				"state": 17,
-				"state_name": "GROUND_COMBAT",
-				"alert": 2,
-				"move_mode": 7,
-				"out_speed": 0,
-				"wp_channel": 1,
-				"wp_node": 1,
-				"target_valid": true,
-				"target_handle": 0x3002,
-				"target_pos": Vector3(20, 0, 5),
-				"target_name": "BRAVO",
-				"aim_valid": true,
-				"aim_dir": Vector3(1, 0, 0),
-				"muzzle_valid": true,
-				"muzzle": Vector3(10.4, 1.4, 5.0),
-				"sight_range": 80.0,
-				"attack_range": 50.0,
-				"combat_timer": 40,
-				"fire_delay": 9,
-				"damage_timer": 6,
-				"combat_move_timer": 11,
-			},
-			{
-				"ai_index": 1,
-				"handle": 0x3002,
-				"name": "BRAVO",
-				"group": 5,
-				"alive": false,
-				"infantry": true,
-				"pos": Vector3(20, 0, 5),
-				"state": 23,
-				"state_name": "GROUND_DEAD",
-				"alert": 0,
-				"move_mode": 0,
-				"out_speed": 0,
-				"wp_channel": 0,
-				"wp_node": 0,
-				"target_valid": false,
-				"aim_valid": false,
-				"muzzle_valid": false,
-				"sight_range": 80.0,
-				"attack_range": 50.0,
-			},
-		],
-		"channels": [
-			{
-				"index": 1,
-				"once": false,
-				"followers": 1,
-				"nodes": PackedVector3Array([
-					Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10),
-				]),
-				"radii": PackedFloat32Array([0.5, 0.5, 0.5]),
-			},
-		],
-		"groups": [{ "id": 5, "alert": 2, "initial_count": 2, "live_count": 1 }],
-		"counters": { "brain_count": 2 },
-	}
+func _payload() -> AiDebugReport:
+	var report := AiDebugReport.new()
+	report.valid = true
+	report.logic_tick = 62
+	var alpha := AiDebugRow.new()
+	alpha.ai_index = 0
+	alpha.handle = 0x3001
+	alpha.name = "ALPHA"
+	alpha.group = 5
+	alpha.alive = true
+	alpha.infantry = true
+	alpha.pos = Vector3(10, 0, 5)
+	alpha.state = 17
+	alpha.state_name = "GROUND_COMBAT"
+	alpha.alert = 2
+	alpha.move_mode = 7
+	alpha.wp_channel = 1
+	alpha.wp_node = 1
+	alpha.target_valid = true
+	alpha.target_handle = 0x3002
+	alpha.target_pos = Vector3(20, 0, 5)
+	alpha.target_name = "BRAVO"
+	alpha.aim_valid = true
+	alpha.aim_dir = Vector3(1, 0, 0)
+	alpha.muzzle_valid = true
+	alpha.muzzle = Vector3(10.4, 1.4, 5.0)
+	alpha.sight_range = 80.0
+	alpha.attack_range = 50.0
+	alpha.combat_timer = 40
+	alpha.fire_delay = 9
+	alpha.damage_timer = 6
+	alpha.combat_move_timer = 11
+	report.add_row(alpha)
+	var bravo := AiDebugRow.new()
+	bravo.ai_index = 1
+	bravo.handle = 0x3002
+	bravo.name = "BRAVO"
+	bravo.group = 5
+	bravo.infantry = true
+	bravo.pos = Vector3(20, 0, 5)
+	bravo.state = 23
+	bravo.state_name = "GROUND_DEAD"
+	bravo.sight_range = 80.0
+	bravo.attack_range = 50.0
+	report.add_row(bravo)
+	var route := AiDebugChannel.new()
+	route.index = 1
+	route.followers = 1
+	route.nodes = PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10),
+	])
+	route.radii = PackedFloat32Array([0.5, 0.5, 0.5])
+	report.add_channel(route)
+	report.add_group(AiDebugGroup.make(5, 2, 2, 1))
+	report.brain_count = 2
+	return report
 
 
 func _make_view() -> Node3D:
@@ -140,9 +125,8 @@ func test_selection_provider_rings_an_unengaged_brain() -> void:
 	var view := _make_view()
 	var payload := _payload()
 	# Nobody engaged: no rings without a selection...
-	var rows: Array = payload["rows"]
-	(rows[0] as Dictionary)["target_valid"] = false
-	(rows[1] as Dictionary)["alive"] = true
+	(payload.rows[0] as AiDebugRow).target_valid = false
+	(payload.rows[1] as AiDebugRow).alive = true
 	view.render_report(payload)
 	assert_eq(_mesh(view, "AiDebugRings").get_surface_count(), 0,
 			"no engaged brains and no selection: no rings")
@@ -156,7 +140,7 @@ func test_selection_provider_rings_an_unengaged_brain() -> void:
 func test_invalid_payload_and_missing_sim_clear() -> void:
 	var view := _make_view()
 	view.render_report(_payload())
-	view.render_report({ "valid": false })
+	view.render_report(AiDebugReport.new())
 	assert_eq(view.get_debug_drawable_count(), 0)
 	assert_false((view.get_node("AiDebugLabel0") as Label3D).visible)
 	assert_eq(_mesh(view, "AiDebugRoutes").get_surface_count(), 0)

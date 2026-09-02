@@ -73,6 +73,7 @@
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
+#include "simulation/ai_debug_report.h"
 #include "simulation/destruction_events.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/hud_view_records.h"
@@ -240,6 +241,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HitboxDebugEntity);
 	GDREGISTER_CLASS(HitboxDebugOrganic);
 	GDREGISTER_CLASS(HitboxDebugReport);
+	GDREGISTER_CLASS(AiDebugRow);
+	GDREGISTER_CLASS(AiDebugChannel);
+	GDREGISTER_CLASS(AiDebugGroup);
+	GDREGISTER_CLASS(AiDebugReport);
 	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(WeaponKitEntry);
 	GDREGISTER_CLASS(PlayerInventorySlot);

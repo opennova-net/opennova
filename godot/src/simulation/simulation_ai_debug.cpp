@@ -3,6 +3,7 @@
 // for the Godot AI debug view (godot/game/debug/ai_debug_view.gd). Both read
 // the ONE engine join, world::inspect::ai_debug_report.
 #include "simulation/simulation_internal.h"
+#include "simulation/ai_debug_report.h"
 #include "env/env_axes.h"
 
 #include <runtime/world/angle.h>
@@ -20,13 +21,13 @@ bool Simulation::native_ai_debug(
 	return true;
 }
 
-Dictionary Simulation::get_ai_debug() const {
-	Dictionary out;
-	out["valid"] = false;
+Ref<AiDebugReport> Simulation::get_ai_debug() const {
+	Ref<AiDebugReport> out;
+	out.instantiate();
 	opennova::world::inspect::AiDebugReport report;
 	if (!native_ai_debug(report)) return out;
-	out["valid"] = true;
-	out["logic_tick"] = get_logic_tick();
+	out->set_valid(true);
+	out->set_logic_tick(get_logic_tick());
 
 	// A brain's aim solution as a Godot-space unit direction, so the view does
 	// no BAM math. The mission-frame vector is (cos yaw, sin yaw, sin pitch) —
@@ -35,28 +36,28 @@ Dictionary Simulation::get_ai_debug() const {
 	// mission -> Godot is (x, z, -y).
 	constexpr double rad_per_bam =
 			2.0 * 3.14159265358979323846 / opennova::world::kBamFullTurn;
-	Array rows;
 	for (const opennova::world::inspect::AiOverlayRow &r : report.rows) {
-		Dictionary d;
-		d["ai_index"] = r.ai_index;
-		d["handle"] = static_cast<int>(r.handle);
-		d["name"] = String::utf8(r.name.c_str());
-		d["group"] = r.group_id;
-		d["alive"] = r.alive;
-		d["infantry"] = r.infantry;
-		d["pos"] = godot_from_fixed3(r.pos);
-		d["state"] = r.state;
-		d["state_name"] = String::utf8(r.state_name.c_str());
-		d["alert"] = r.alert;
-		d["move_mode"] = r.move_mode;
-		d["out_speed"] = r.out_speed;
-		d["wp_channel"] = r.wp_channel;
-		d["wp_node"] = r.wp_node;
-		d["target_valid"] = r.target_valid;
-		d["target_handle"] = static_cast<int>(r.target_handle);
-		d["target_pos"] = godot_from_fixed3(r.target_pos);
-		d["target_name"] = String::utf8(r.target_name.c_str());
-		d["aim_valid"] = r.aim_valid;
+		Ref<AiDebugRow> d;
+		d.instantiate();
+		d->set_ai_index(r.ai_index);
+		d->set_handle(static_cast<int>(r.handle));
+		d->set_name(String::utf8(r.name.c_str()));
+		d->set_group(r.group_id);
+		d->set_alive(r.alive);
+		d->set_infantry(r.infantry);
+		d->set_pos(godot_from_fixed3(r.pos));
+		d->set_state(r.state);
+		d->set_state_name(String::utf8(r.state_name.c_str()));
+		d->set_alert(r.alert);
+		d->set_move_mode(r.move_mode);
+		d->set_out_speed(r.out_speed);
+		d->set_wp_channel(r.wp_channel);
+		d->set_wp_node(r.wp_node);
+		d->set_target_valid(r.target_valid);
+		d->set_target_handle(static_cast<int>(r.target_handle));
+		d->set_target_pos(godot_from_fixed3(r.target_pos));
+		d->set_target_name(String::utf8(r.target_name.c_str()));
+		d->set_aim_valid(r.aim_valid);
 		if (r.aim_valid) {
 			const double bearing = static_cast<double>(r.aim_heading) * rad_per_bam;
 			const double pitch = static_cast<double>(r.aim_pitch) * rad_per_bam;
@@ -64,29 +65,26 @@ Dictionary Simulation::get_ai_debug() const {
 			const Vector3 mission(static_cast<float>(std::cos(bearing) * cp),
 					static_cast<float>(std::sin(bearing) * cp),
 					static_cast<float>(std::sin(pitch)));
-			d["aim_dir"] = mission_to_godot(mission);
-		} else {
-			d["aim_dir"] = Vector3();
+			d->set_aim_dir(mission_to_godot(mission));
 		}
-		d["muzzle_valid"] = r.muzzle_valid;
-		d["muzzle"] = godot_from_fixed3(r.muzzle);
-		d["sight_range"] = static_cast<float>(r.sight_range_q16 / kFixed16);
-		d["attack_range"] = static_cast<float>(r.attack_range_q16 / kFixed16);
-		d["combat_timer"] = r.combat_timer;
-		d["fire_delay"] = r.fire_delay;
-		d["damage_timer"] = r.damage_timer;
-		d["combat_move_timer"] = r.combat_move_timer;
-		rows.push_back(d);
+		d->set_muzzle_valid(r.muzzle_valid);
+		d->set_muzzle(godot_from_fixed3(r.muzzle));
+		d->set_sight_range(static_cast<float>(r.sight_range_q16 / kFixed16));
+		d->set_attack_range(static_cast<float>(r.attack_range_q16 / kFixed16));
+		d->set_combat_timer(r.combat_timer);
+		d->set_fire_delay(r.fire_delay);
+		d->set_damage_timer(r.damage_timer);
+		d->set_combat_move_timer(r.combat_move_timer);
+		out->add_row(d);
 	}
-	out["rows"] = rows;
 
-	Array channels;
 	for (const opennova::world::inspect::AiNavChannelRow &ch : report.channels) {
-		Dictionary d;
-		d["index"] = ch.index;
+		Ref<AiDebugChannel> d;
+		d.instantiate();
+		d->set_index(ch.index);
 		// loopflag bit0 set = one-shot (terminate at path end).
-		d["once"] = (ch.loopflag & 1) != 0;
-		d["followers"] = ch.followers;
+		d->set_once((ch.loopflag & 1) != 0);
+		d->set_followers(ch.followers);
 		PackedVector3Array nodes;
 		PackedFloat32Array radii;
 		nodes.resize(static_cast<int64_t>(ch.nodes.size()));
@@ -97,30 +95,20 @@ Dictionary Simulation::get_ai_debug() const {
 			nw[k] = godot_from_fixed3(ch.nodes[k].pos);
 			rw[k] = static_cast<float>(ch.nodes[k].radius_q16 / kFixed16);
 		}
-		d["nodes"] = nodes;
-		d["radii"] = radii;
-		channels.push_back(d);
+		d->set_nodes(nodes);
+		d->set_radii(radii);
+		out->add_channel(d);
 	}
-	out["channels"] = channels;
 
-	Array groups;
 	for (const opennova::world::inspect::AiGroupRow &g : report.groups) {
-		Dictionary d;
-		d["id"] = g.id;
-		d["alert"] = g.alert;
-		d["initial_count"] = g.initial_count;
-		d["live_count"] = g.live_count;
-		groups.push_back(d);
+		out->add_group(AiDebugGroup::make(g.id, g.alert, g.initial_count, g.live_count));
 	}
-	out["groups"] = groups;
 
-	Dictionary counters;
-	counters["brain_count"] = report.counters.brain_count;
-	counters["scheduler_budget"] = report.counters.scheduler_budget;
-	counters["event_count"] = report.counters.event_count;
-	counters["unported_calls"] = report.counters.unported_calls;
-	counters["rel_ops"] = report.counters.rel_ops;
-	counters["find_target_calls"] = report.counters.find_target_calls;
-	out["counters"] = counters;
+	out->set_brain_count(report.counters.brain_count);
+	out->set_scheduler_budget(report.counters.scheduler_budget);
+	out->set_event_count(report.counters.event_count);
+	out->set_unported_calls(report.counters.unported_calls);
+	out->set_rel_ops(report.counters.rel_ops);
+	out->set_find_target_calls(report.counters.find_target_calls);
 	return out;
 }
