@@ -312,15 +312,17 @@ func draw_tracer_rows(rows: PackedFloat32Array) -> void:
 	var cam := _listener_pos()
 	if not cam.is_finite():
 		cam = Vector3.ZERO
-	var frame: Dictionary = Simulation.compile_tracer_ribbons(rows, cam)
-	_stats.tracer_peak = maxi(_stats.tracer_peak, int(frame.get("channels", 0)))
-	_emit_strip(frame.get("additive", {}), _mat_additive)
-	_emit_strip(frame.get("alpha", {}), _mat_alpha)
+	var frame := Simulation.compile_tracer_ribbons(rows, cam)
+	_stats.tracer_peak = maxi(_stats.tracer_peak, frame.channels)
+	_emit_strip(frame.additive, _mat_additive)
+	_emit_strip(frame.alpha, _mat_alpha)
 
 
-func _emit_strip(family: Dictionary, mat: StandardMaterial3D) -> void:
-	var positions: PackedVector3Array = family.get("positions", PackedVector3Array())
-	var colors: PackedColorArray = family.get("colors", PackedColorArray())
+func _emit_strip(family: TracerRibbonStrip, mat: StandardMaterial3D) -> void:
+	if family == null:
+		return
+	var positions := family.positions
+	var colors := family.colors
 	if positions.size() < 4:  # fewer than two pairs draws nothing
 		return
 	_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, mat)

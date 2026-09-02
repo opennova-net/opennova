@@ -56,6 +56,7 @@ class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
+class TracerRibbonFrame;    // the compiled tracer strips (simulation/tracer_ribbon_frame.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 // The small per-frame HUD view records (simulation/hud_view_records.h).
@@ -1151,11 +1152,11 @@ public:
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
 	// the witnessed style tables and the camera-facing build
 	// (engine: runtime/renderer/tracer_frame.cpp)). Static so the present
-	// pass and stub-sim tests share the one native seam:
-	// {additive: {positions, colors}, alpha: {positions, colors}, channels} —
+	// pass and stub-sim tests share the one native seam: a TracerRibbonFrame
+	// (the additive and alpha TracerRibbonStrip runs plus the channel count),
 	// each family one triangle-strip vertex run (channels joined by degenerate
 	// pairs), ready for verbatim ImmediateMesh upload.
-	static Dictionary compile_tracer_ribbons(const PackedFloat32Array &rows,
+	static Ref<TracerRibbonFrame> compile_tracer_ribbons(const PackedFloat32Array &rows,
 			const Vector3 &camera);
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
