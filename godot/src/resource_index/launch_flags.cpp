@@ -1,4 +1,5 @@
 #include "resource_index/launch_flags.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -9,6 +10,9 @@
 #include <vector>
 
 namespace godot {
+
+using opennova::to_gd;
+using opennova::to_std;
 
 std::string LaunchFlags::bundled_probe_override_;
 std::vector<std::string> LaunchFlags::args_override_;
@@ -67,14 +71,6 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::get_bundled_probe_override);
 }
 
-std::string LaunchFlags::to_std(const String &s) {
-	return std::string(s.utf8().get_data());
-}
-
-String LaunchFlags::from_std(const std::string &s) {
-	return String::utf8(s.c_str());
-}
-
 // Every token the game was launched with (engine + user args): Godot commands
 // put custom options behind Godot's `--` separator, and scanning both arrays
 // lets packaged and source launches share the engine's one parser. Tests
@@ -96,10 +92,10 @@ opennova::LaunchFlags LaunchFlags::parse() {
 opennova::BootDirProbe LaunchFlags::probe() {
 	opennova::BootDirProbe p;
 	p.file_exists = [](const std::string &path) {
-		return FileAccess::file_exists(from_std(path));
+		return FileAccess::file_exists(to_gd(path));
 	};
 	p.dir_exists = [](const std::string &path) {
-		return DirAccess::dir_exists_absolute(from_std(path));
+		return DirAccess::dir_exists_absolute(to_gd(path));
 	};
 	return p;
 }
@@ -115,19 +111,19 @@ bool LaunchFlags::loose_override_enabled() {
 }
 
 String LaunchFlags::expansion(const String &fallback) {
-	return from_std(opennova::launch_expansion(parse(), to_std(fallback)));
+	return to_gd(opennova::launch_expansion(parse(), to_std(fallback)));
 }
 
 String LaunchFlags::game(const String &fallback) {
-	return from_std(opennova::launch_game(parse(), to_std(fallback)));
+	return to_gd(opennova::launch_game(parse(), to_std(fallback)));
 }
 
 String LaunchFlags::resource_dir(const String &fallback) {
-	return from_std(opennova::launch_resource_dir(parse(), to_std(fallback)));
+	return to_gd(opennova::launch_resource_dir(parse(), to_std(fallback)));
 }
 
 String LaunchFlags::loose_mission() {
-	return from_std(parse().loose_mission);
+	return to_gd(parse().loose_mission);
 }
 
 bool LaunchFlags::loose_root_allowed() {
@@ -135,15 +131,15 @@ bool LaunchFlags::loose_root_allowed() {
 }
 
 String LaunchFlags::mission() {
-	return from_std(parse().mission);
+	return to_gd(parse().mission);
 }
 
 String LaunchFlags::lan_host() {
-	return from_std(parse().lan_host);
+	return to_gd(parse().lan_host);
 }
 
 String LaunchFlags::lan_join_ip() {
-	return from_std(opennova::launch_lan_join_endpoint(parse(), 0).ip);
+	return to_gd(opennova::launch_lan_join_endpoint(parse(), 0).ip);
 }
 
 int LaunchFlags::lan_join_port(int fallback) {
@@ -171,19 +167,19 @@ bool LaunchFlags::spectator() {
 }
 
 String LaunchFlags::spectator_password() {
-	return from_std(parse().spectator_password);
+	return to_gd(parse().spectator_password);
 }
 
 String LaunchFlags::callsign() {
-	return from_std(parse().callsign);
+	return to_gd(parse().callsign);
 }
 
 String LaunchFlags::integrity_profile() {
-	return from_std(parse().integrity_profile);
+	return to_gd(parse().integrity_profile);
 }
 
 String LaunchFlags::capture_pcap() {
-	return from_std(parse().capture_pcap);
+	return to_gd(parse().capture_pcap);
 }
 
 int LaunchFlags::mcp_port() {
@@ -207,7 +203,7 @@ bool LaunchFlags::has_args_override() {
 }
 
 String LaunchFlags::boot_resource_dir(const String &persisted) {
-	return from_std(opennova::boot_resource_dir(parse(), to_std(persisted), probe_dir(), probe()));
+	return to_gd(opennova::boot_resource_dir(parse(), to_std(persisted), probe_dir(), probe()));
 }
 
 bool LaunchFlags::boot_loose_allowed(const String &dir) {
@@ -215,11 +211,11 @@ bool LaunchFlags::boot_loose_allowed(const String &dir) {
 }
 
 String LaunchFlags::bundled_game_dir(const String &exe_dir) {
-	return from_std(opennova::bundled_game_dir(to_std(exe_dir), probe()));
+	return to_gd(opennova::bundled_game_dir(to_std(exe_dir), probe()));
 }
 
 String LaunchFlags::bundled_assets_dir(const String &exe_dir) {
-	return from_std(opennova::bundled_assets_dir(to_std(exe_dir), probe()));
+	return to_gd(opennova::bundled_assets_dir(to_std(exe_dir), probe()));
 }
 
 void LaunchFlags::set_bundled_probe_override(const String &dir) {
@@ -227,7 +223,7 @@ void LaunchFlags::set_bundled_probe_override(const String &dir) {
 }
 
 String LaunchFlags::get_bundled_probe_override() {
-	return from_std(bundled_probe_override_);
+	return to_gd(bundled_probe_override_);
 }
 
 } // namespace godot

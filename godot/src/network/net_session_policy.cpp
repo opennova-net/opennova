@@ -1,17 +1,12 @@
 #include "network/net_session_policy.h"
+#include "util/string_convert.h"
 
 #include <string>
 #include <vector>
 
 namespace godot {
 
-namespace {
-
-std::string to_std(const String &s) {
-	return std::string(s.utf8().get_data());
-}
-
-} // namespace
+using opennova::to_std;
 
 int NetSessionPolicy::decide_expansion(const String &p_host_expansion,
 		const String &p_mounted_expansion, const PackedStringArray &p_installed) {

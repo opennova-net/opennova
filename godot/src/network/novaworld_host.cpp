@@ -1,4 +1,5 @@
 #include "network/novaworld_host.h"
+#include "util/string_convert.h"
 
 #include "network/novaworld_identity.h"
 
@@ -13,13 +14,7 @@
 
 namespace godot {
 
-namespace {
-
-std::string to_std(const String &s) {
-	return std::string(s.utf8().get_data());
-}
-
-} // namespace
+using opennova::to_std;
 
 NovaWorldHost::NovaWorldHost() :
 		lobby_(make_lobby_hooks()) {}

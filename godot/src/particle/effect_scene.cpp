@@ -1,4 +1,5 @@
 #include "particle/effect_scene.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <cstring>
@@ -15,6 +16,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 using namespace godot;
+using opennova::to_gd;
 
 namespace {
 
@@ -57,10 +59,6 @@ std::uint32_t non_negative_u32(int64_t value) noexcept {
 	return static_cast<std::uint32_t>(std::min<std::uint64_t>(
 			static_cast<std::uint64_t>(value),
 			std::numeric_limits<std::uint32_t>::max()));
-}
-
-String godot_string(const std::string &value) {
-	return String::utf8(value.c_str());
 }
 
 Vec3 native_vector(const Vector3 &value) noexcept {
@@ -244,8 +242,8 @@ Dictionary debug_dictionary(
 		Dictionary value;
 		value["group_id"] = token_to_godot(group.id.value);
 		value["effect_handle"] = static_cast<int64_t>(group.effect.value);
-		value["effect_name"] = godot_string(group.effect_name);
-		value["source"] = godot_string(group.source);
+		value["effect_name"] = to_gd(group.effect_name);
+		value["source"] = to_gd(group.source);
 		value["admission"] = static_cast<int>(group.admission);
 		value["binding"] = static_cast<int>(group.binding);
 		value["render_domain"] = static_cast<int>(group.render_domain);
@@ -269,7 +267,7 @@ Dictionary debug_dictionary(
 			emitter_value["definition_index"] =
 					static_cast<int64_t>(emitter.definition_index);
 			emitter_value["definition_name"] =
-					godot_string(emitter.definition_name);
+					to_gd(emitter.definition_name);
 			emitter_value["definition_flags"] =
 					static_cast<int64_t>(emitter.definition_flags);
 			emitter_value["alive_particle_count"] =
@@ -384,7 +382,7 @@ int64_t EffectScene::intern(const String &p_effect_name) {
 }
 
 String EffectScene::effect_name(int64_t p_effect_handle) const {
-	return godot_string(scene_.effect_name(
+	return to_gd(scene_.effect_name(
 			opennova::particle::EffectHandle{
 				handle_from_godot(p_effect_handle)
 			}));

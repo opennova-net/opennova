@@ -81,8 +81,6 @@ private:
 	static opennova::LaunchFlags parse();
 	static opennova::BootDirProbe probe();
 	static std::string probe_dir();
-	static std::string to_std(const String &s);
-	static String from_std(const std::string &s);
 
 	// A std::string, not a godot::String: a file-scope godot::String would be
 	// constructed at DLL load, before godot-cpp's runtime is bound.

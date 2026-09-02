@@ -1,4 +1,5 @@
 #include "network/novaworld_identity.h"
+#include "util/string_convert.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -30,11 +31,9 @@
 
 namespace godot {
 
-namespace {
+using opennova::to_std;
 
-std::string to_std(const String &value) {
-	return std::string(value.utf8().get_data());
-}
+namespace {
 
 uint32_t fnv1a_32(std::string_view value) {
 	uint32_t hash = 2166136261u;

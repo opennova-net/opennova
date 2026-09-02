@@ -1,4 +1,5 @@
 #include "mnu/menu_frame.h"
+#include "util/string_convert.h"
 
 #include <runtime/menu/options_policy.h>
 
@@ -23,6 +24,7 @@
 #include <string>
 
 using namespace godot;
+using opennova::to_std;
 
 // The EDIT_RESULT_* re-exports track menu/menu_edit.h EditKeyResult; pin the
 // documented GDScript contract (0 none / 1 changed / 2 commit) so an engine
@@ -37,10 +39,6 @@ Color argb_to_color(uint32_t argb) {
 	return Color(((argb >> 16) & 0xFFu) / 255.0f,
 			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
 			((argb >> 24) & 0xFFu) / 255.0f);
-}
-
-std::string to_std(const String &s) {
-	return std::string(s.utf8().get_data());
 }
 
 int positive_mod(int value, int divisor) {
