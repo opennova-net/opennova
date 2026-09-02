@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 
 #include <net/netsim/connection_fan.h>
+#include <runtime/world/occlusion_feed.h>
 #include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
 #include <runtime/world/occlusion_camera.h> // the camera hand-over
@@ -221,18 +222,12 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 }
 
 // [added..., removed...] as [count, ids..., count, ids...] against the applied
-// baseline, which becomes the current set.
+// baseline, which becomes the current set (world/occlusion_feed.h).
 static PackedInt32Array culled_changes_since(const std::vector<int32_t> &p_now,
 		std::vector<int32_t> &r_applied) {
-	std::vector<int32_t> current = p_now;
-	std::sort(current.begin(), current.end());
 	std::vector<int32_t> added;
 	std::vector<int32_t> removed;
-	std::set_difference(current.begin(), current.end(),
-			r_applied.begin(), r_applied.end(), std::back_inserter(added));
-	std::set_difference(r_applied.begin(), r_applied.end(),
-			current.begin(), current.end(), std::back_inserter(removed));
-	r_applied = std::move(current);
+	opennova::world::culled_changes_since(p_now, r_applied, added, removed);
 	PackedInt32Array out;
 	out.push_back(static_cast<int32_t>(added.size()));
 	for (const int32_t id : added) out.push_back(id);

@@ -214,6 +214,9 @@ public:
 	Vector3i get_map_coords() const;
 	// Four visibility bytes for one HUDDECLUT_* row. Empty means absent.
 	PackedByteArray get_declutter_flags(const String &p_name) const;
+	// The retained parse, for the engine folds that take the rows directly
+	// (hud_declutter.h declutter_from_hudpos).
+	const DefHudPosFile &native_file() const { return file_; }
 	// Named HUD colors (Godot Color, RGBA normalized): health_border, hud_textcolor,
 	// stancecolor_good/middle/bad, tagcolor_*, etc.
 	Dictionary get_colors() const;
