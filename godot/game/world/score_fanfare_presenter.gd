@@ -29,12 +29,3 @@ func update(sim: Simulation, world: GameWorld) -> void:
 	var audio: MissionAudio = world.get_mission_audio()
 	if audio != null:
 		audio.ui_soundset(tone)
-
-
-func set_enabled(enabled: bool) -> void:
-	_enabled = enabled
-	ConfigStore.write(CONFIG_PATH, CONFIG_SECTION, CONFIG_KEY, 1 if enabled else 0)
-
-
-func is_enabled() -> bool:
-	return _enabled

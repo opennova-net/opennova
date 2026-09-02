@@ -1005,10 +1005,6 @@ func cycle_showhud() -> void:
 	_apply_fp_gun_visible()
 
 
-func showhud_flags() -> int:
-	return _showhud_flags
-
-
 ## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 ## viewchase F4): first person clears the FP-gun bit, gun view sets it, and
 ## both select first person; chase selects the chase preference. None of them
@@ -1053,7 +1049,8 @@ func _select_third_person(selected: bool) -> void:
 
 func _apply_fp_gun_visible() -> void:
 	if _player_presenter != null:
-		_player_presenter.set_fp_gun_visible((_showhud_flags & 1) != 0)
+		_player_presenter.set_fp_gun_visible(
+				(_showhud_flags & HudOverlay.SHOWHUD_FLAG_GUN) != 0)
 
 
 # The panel's resolved rows: shown win-condition slots with mission-text lines
