@@ -62,6 +62,7 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
     mission/mission_placement_stats.cpp
+    mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
     env/environment_cube_capture.cpp
