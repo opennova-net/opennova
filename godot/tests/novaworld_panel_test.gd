@@ -48,6 +48,18 @@ func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
 	return panel
 
 
+func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
+	var viewport := SubViewport.new()
+	viewport.size = viewport_size
+	add_child_autofree(viewport)
+	var panel := PANEL_SCENE.instantiate() as NovaWorldPanel
+	panel.start_client_on_ready = false
+	panel.target_override = NovaWorldSettings.Target.OPENNOVA
+	panel.resource_root = _real_root(PackedStringArray())
+	viewport.add_child(panel)
+	return panel
+
+
 func test_map_picker_populates_from_root() -> void:
 	# The loose index is flat (memory: ResourceRoot indexes flat filenames);
 	# list_files still returns path-bearing entries, so MissionCatalog's
@@ -79,6 +91,59 @@ func test_authored_scene_is_matchmaking_and_fits_800_by_600() -> void:
 	assert_lte(shell.custom_minimum_size.y, 568.0)
 	assert_eq(backdrop.mouse_filter, Control.MOUSE_FILTER_STOP,
 			"the transparent overlay blocks clicks into the authored menu")
+
+
+func test_populated_browser_controls_stay_inside_the_matchmaking_shell() -> void:
+	var retail_row := {
+		"rid": 1,
+		"name": "! Long Retail Community Server",
+		"msg": "Welcome to community-matchmaking.example.invalid",
+		"mission_name": "AS - Padang River Basin",
+		"game_type": "AAS",
+		"players": 0,
+		"max_players": 64,
+		"mod": "jox01",
+		"ver1": "3",
+		"exp": "jox01",
+		"region": "Jungle",
+		"time_of_day": "Dawn",
+		"time_left": "31",
+		"dedicated": "Y",
+		"player_names": PackedStringArray(),
+	}
+	for viewport_size in [Vector2i(1406, 896), Vector2i(800, 600)]:
+		var panel := _make_panel_in_viewport(viewport_size)
+		panel.client_for_test().emit_signal("connected")
+		panel.client_for_test().emit_signal("login_succeeded", "ljim")
+		panel.set_rows_for_test([retail_row])
+		await wait_process_frames(2)
+
+		var shell := panel.get_node("Center/Shell") as Control
+		var shell_rect := shell.get_global_rect()
+		var status := panel.get_node("Center/Shell/Margin/RootVBox/StatusLabel") as Control
+		var population := panel.get_node(
+				"Center/Shell/Margin/RootVBox/Pages/LobbyView/PopulationLabel") as Control
+		assert_gte(population.get_global_rect().position.y,
+				status.get_global_rect().end.y,
+				"the populated browser starts below the header and status at %s" %
+						viewport_size)
+
+		var bounded_paths := PackedStringArray([
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/Toolbar",
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/QuickFilters",
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/ServerTree",
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel",
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions",
+		])
+		for path in bounded_paths:
+			var control := panel.get_node(path) as Control
+			var rect := control.get_global_rect()
+			assert_gte(rect.position.y, shell_rect.position.y,
+					"%s cannot overflow above the shell at %s" %
+							[path, viewport_size])
+			assert_lte(rect.end.y, shell_rect.end.y,
+					"%s cannot overflow below the shell at %s" %
+							[path, viewport_size])
 
 
 func test_login_failure_uses_novaworld_message_screen() -> void:

@@ -415,27 +415,32 @@ theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 8
 
-[node name="DetailsVBox" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin"]
+[node name="DetailsScroll" type="ScrollContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="DetailsVBox" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 5
 
-[node name="DetailsTitle" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
+[node name="DetailsTitle" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll/DetailsVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "GAME DETAILS"
 
-[node name="DetailsLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
+[node name="DetailsLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll/DetailsVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 text = "Select a game for details."
 autowrap_mode = 2
 vertical_alignment = 0
 
-[node name="RosterTitle" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
+[node name="RosterTitle" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll/DetailsVBox"]
 layout_mode = 2
 text = "PLAYERS"
 
-[node name="RosterList" type="ItemList" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
+[node name="RosterList" type="ItemList" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll/DetailsVBox"]
 custom_minimum_size = Vector2(0, 88)
 layout_mode = 2
 
