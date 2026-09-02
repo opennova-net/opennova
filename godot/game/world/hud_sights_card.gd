@@ -90,22 +90,21 @@ var _card_up := false
 ## Rebuild the card for the equipped weapon's authored SIGHTS rows
 ## ({texture,x1,y1,x2,y2,blend,...} dicts in draw order; an empty array clears
 ## the card). Rows stay hidden until set_card_up(true).
-func set_weapon_sights(sights: Array, root: ResourceRoot) -> void:
+func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot) -> void:
 	for row in _rows:
 		if is_instance_valid(row):
 			row.queue_free()
 	_rows.clear()
-	for entry in sights:
-		var e: Dictionary = entry
-		var tex := _load_texture(root, String(e.get("texture", "")))
+	for e: WeaponSightRow in sights:
+		var tex := _load_texture(root, e.get_texture())
 		if tex == null:
 			continue
 		var row := SightRowControl.new()
 		row.tex = tex
-		var x1 := float(e.get("x1", 0))
-		var y1 := float(e.get("y1", 0))
-		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
-		var material := _material_for_blend(int(e.get("blend", SightBlendMode.BLEND)))
+		var x1 := float(e.get_x1())
+		var y1 := float(e.get_y1())
+		row.rect_v = Rect2(x1, y1, float(e.get_x2()) - x1, float(e.get_y2()) - y1)
+		var material := _material_for_blend(e.get_blend())
 		if material != null:
 			row.material = material
 		row.set_anchors_preset(Control.PRESET_FULL_RECT)

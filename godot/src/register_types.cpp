@@ -54,6 +54,7 @@
 #include "object/object_shader_cache.h"
 #include "object/item_database.h"
 #include "object/weapon_database.h"
+#include "object/weapon_def.h"
 #include "object/avatar_database.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
@@ -163,6 +164,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EntityIndex);
 	GDREGISTER_CLASS(ObjectShaderCache);
 	GDREGISTER_CLASS(ItemDatabase);
+	GDREGISTER_CLASS(WeaponSightRow);
+	GDREGISTER_CLASS(WeaponActionRow);
+	GDREGISTER_CLASS(WeaponDef);
+	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);

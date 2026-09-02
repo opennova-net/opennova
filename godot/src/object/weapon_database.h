@@ -5,8 +5,11 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <formats/def/def.h>
+
+#include "object/weapon_def.h"
 
 #include <vector>
 
@@ -32,7 +35,6 @@ private:
 	String last_error;
 
 	void release_native_weapons();
-	Dictionary weapon_dict(int index) const;
 	const DefWeaponDef *row(int index) const {
 		return (index < 0 || static_cast<size_t>(index) >= weapons_file_.count)
 				? nullptr : &weapons_file_.entries[index];
@@ -99,11 +101,11 @@ public:
 
 	// The weapons that belong in `slot` for the given class + team masks, in table order.
 	// The filter is the engine's world::weapon_slot_indices
-	// (engine: formats/def/def.h). Each entry is a
-	// weapon_dict(); the caller prepends the "NONE" row.
-	Array get_slot_weapons(int slot, int class_mask, int team_mask) const;
-	// All weapons, unfiltered, in table order.
-	Dictionary get_weapon(int index) const;
+	// (engine: formats/def/def.h). Each entry is a WeaponDef record; the
+	// caller prepends the "NONE" row.
+	TypedArray<WeaponDef> get_slot_weapons(int slot, int class_mask, int team_mask) const;
+	// One weapon by table index as a WeaponDef record; null out of range.
+	Ref<WeaponDef> get_weapon(int index) const;
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
 	// case-insensitive like every def lookup), or -1 when absent.
 	int find_weapon(const String &name) const;
@@ -141,11 +143,11 @@ public:
 	// (1 << (class-5) for 5..9, ALL weapons otherwise).
 	static int armory_resolve_selected_class(int p_player_class, int p_class_allow_mask);
 	static int armory_class_filter_mask(int p_selected_class);
-	// The armory PLAYER_CLASS spin catalog, authored order — Array of
-	// { value: int, text_key: String } rows (one table in engine/runtime/world
-	// player_loadout.h kArmoryClassCatalog, which carries the
-	// UI_InitWeaponClassSelection witness — CHARCLASS_MEDIC..ENGINEER, 5..9).
-	static Array armory_class_catalog();
+	// The armory PLAYER_CLASS spin catalog, authored order — ArmoryClassRow
+	// records (one table in engine/runtime/world player_loadout.h
+	// kArmoryClassCatalog, which carries the UI_InitWeaponClassSelection
+	// witness — CHARCLASS_MEDIC..ENGINEER, 5..9).
+	static TypedArray<ArmoryClassRow> armory_class_catalog();
 };
 
 } // namespace godot

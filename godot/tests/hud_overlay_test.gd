@@ -70,13 +70,13 @@ func _make_overlay() -> HudOverlay:
 	return hud
 
 
-func _load_weapon(name: String) -> Dictionary:
+func _load_weapon(name: String) -> WeaponDef:
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK,
 		"weapon.def fixture loads")
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0, "%s exists in the weapon.def fixture" % name)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _set_hud_weapon(hud: HudOverlay, def: PlayerHudWeaponDef, display_name: String) -> void:
@@ -90,23 +90,22 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		pending(RetailData.fixture_pending_text("def/hudpos.def"))
 		return
 	var weapon := _load_weapon("WPN_M4AUTO")
-	assert_false(weapon.is_empty())
-	if weapon.is_empty():
+	assert_not_null(weapon)
+	if weapon == null:
 		return
-	assert_eq(int(weapon.get("flags", 0)) & 0x02000003, 0x2,
+	assert_eq(weapon.flags & 0x02000003, 0x2,
 		"M4AUTO is Sighted and has neither Scoped nor NoCardSwitch")
-	var sights: Array = weapon.get("sights", [])
+	var sights := weapon.get_sights()
 	assert_eq(sights.size(), 3, "M4AUTO retains all three authored SIGHTS rows")
 	var textures := PackedStringArray()
-	for entry in sights:
-		var sight: Dictionary = entry
-		textures.append(String(sight.get("texture", "")))
+	for sight: WeaponSightRow in sights:
+		textures.append(sight.get_texture())
 	assert_eq(textures, PackedStringArray([
 		"car15aim.tga", "car15gls.tga", "reddot1.tga",
 	]), "The final authored row is the committed M4 red-dot analogue")
-	var reticle: Dictionary = sights[2]
-	assert_eq(int(reticle.get("blend", -1)), 1, "The red-dot row keeps additive blend")
-	assert_true(bool(reticle.get("scale", false)), "The red-dot row keeps its scale flag")
+	var reticle: WeaponSightRow = sights[2]
+	assert_eq(reticle.get_blend(), 1, "The red-dot row keeps additive blend")
+	assert_true(reticle.is_scale(), "The red-dot row keeps its scale flag")
 
 	var fixture := _load_temp_layout(PackedStringArray([
 		"ALPHAFADE 30 50 3",
@@ -128,16 +127,16 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		assert_not_null(row, "SIGHTS row %d is a drawable Control" % i)
 		assert_true(row.visible, "SIGHTS row %d is visible while the card is up" % i)
 		RenderingServer.canvas_item_set_custom_rect(row.get_canvas_item(), false)
-		var sight: Dictionary = sights[i]
-		var x1 := float(sight.get("x1", 0))
-		var y1 := float(sight.get("y1", 0))
+		var sight: WeaponSightRow = sights[i]
+		var x1 := float(sight.get_x1())
+		var y1 := float(sight.get_y1())
 		# The card scales through the engine's witnessed per-corner pixel snap
 		# (HudPos.scale_rect [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]),
 		# which replaced the old .gd position*scale approximation.
 		var expected := HudPos.scale_rect(Rect2(
 			Vector2(x1, y1),
-			Vector2(float(sight.get("x2", 0)) - x1,
-				float(sight.get("y2", 0)) - y1)), surface)
+			Vector2(float(sight.get_x2()) - x1,
+				float(sight.get_y2()) - y1)), surface)
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
 			"SIGHTS row %d emits its authored draw rectangle" % i)
 	var reticle_row := card.get_child(2) as Control
@@ -421,17 +420,17 @@ func test_weapon_cluster_artless_safe() -> void:
 	var hp := HudPos.new()
 	assert_eq(hp.load(RetailData.fixture("def/hudpos.def")), OK)
 	hud.configure(hp, null)
-	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_dict({
-		"name": "WPN_AK47",
-		"clipsize": 30,
-		"round_type": "AMMO_762",
-		"error": PackedFloat32Array([0.05, 0.2, 0.25, 0.05, 0.1, 0.15]),
-		"hudclipgfx_texture": "H_clip.tga",
-		"hudclipgfx_offset": Vector2i(0, 0),
-		"hudrndgfx_texture": "H_round.tga",
-		"hudrndgfx_offset": Vector2i(9, 0),
-		"hudrndgfx_layout": Vector3i(18, 0, 1),
-	}), "AK-47")
+	var weapon := WeaponDef.new()
+	weapon.name = "WPN_AK47"
+	weapon.clipsize = 30
+	weapon.round_type = "AMMO_762"
+	weapon.error = PackedFloat32Array([0.05, 0.2, 0.25, 0.05, 0.1, 0.15])
+	weapon.hudclipgfx_texture = "H_clip.tga"
+	weapon.hudclipgfx_offset = Vector2i(0, 0)
+	weapon.hudrndgfx_texture = "H_round.tga"
+	weapon.hudrndgfx_offset = Vector2i(9, 0)
+	weapon.hudrndgfx_layout = Vector3i(18, 0, 1)
+	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_def(weapon), "AK-47")
 	hud.set_weapon_state(true, 12, 90, 0, 0, false, false, false, 0)
 	await get_tree().process_frame
 	# A settled aimed shot hides the crosshair; clearing the weapon clears the cluster.

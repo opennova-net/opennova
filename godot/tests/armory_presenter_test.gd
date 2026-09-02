@@ -138,13 +138,13 @@ func _make_world(sim: Simulation, weapons: WeaponDatabase) -> ArmoryWorldHarness
 	return world
 
 
-func _weapon_display_text(row: Dictionary) -> String:
-	var textid := String(row.get("display_textid", ""))
+func _weapon_display_text(row: WeaponDef) -> String:
+	var textid := row.display_textid
 	var gametext: RtxtStringFile = Strings.get_table("gametext")
 	if gametext != null and not textid.is_empty() \
 			and gametext.has_string_in_section("WepDes", textid):
 		return gametext.get_string_in_section("WepDes", textid)
-	return String(row.get("name", ""))
+	return row.name
 
 
 func _loadout_names(sim: Simulation) -> Array[String]:
@@ -172,10 +172,10 @@ func test_out_of_zone_try_open_is_the_silent_gate() -> void:
 
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var weapons := _make_weapons()
-	var red_rifleman: Array = weapons.get_slot_weapons(
+	var red_rifleman: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(red_rifleman.size(), 0, "fixture has a red rifleman primary")
-	var equipped := String((red_rifleman[0] as Dictionary).get("name", ""))
+	var equipped := red_rifleman[0].name
 
 	var sim := _real_sim(2)
 	assert_true(sim.apply_local_player_loadout([{"name": equipped}], 8),
@@ -240,13 +240,13 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
-	var rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_ACCESSORY, 8, 1)
+	var rows: Array[WeaponDef] = weapons.get_slot_weapons(WeaponDatabase.SLOT_ACCESSORY, 8, 1)
 	assert_gt(rows.size(), 0, "the fixture has an equippable red rifleman accessory")
-	var expected := String((rows[0] as Dictionary).get("name", ""))
+	var expected := rows[0].name
 	assert_eq(expected, "WPN_SATCHEL_CHARGE", "the minimized fixture row is the satchel")
-	var primary_rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 1)
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the fixture has a primary beside the satchel")
-	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
+	var primary := primary_rows[0].name
 	assert_eq(primary, "WPN_AK47AUTO",
 		"the minimized primary expands the non-selectable WPN_AK47 subclass")
 	const PRIMARY_CLIPS := 3
@@ -283,13 +283,13 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	assert_gt(driver.selected_row(accessory), 0,
 		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
 	assert_eq(driver.item_text(accessory, driver.selected_row(accessory)),
-		_weapon_display_text(rows[0] as Dictionary),
+		_weapon_display_text(rows[0] as WeaponDef),
 		"the selected accessory row is exactly the canonical satchel parent")
 	var primary_combo := driver.widget_id("PRIMARY")
 	assert_gt(driver.selected_row(primary_combo), 0,
 		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
 	assert_eq(driver.item_text(primary_combo, driver.selected_row(primary_combo)),
-		_weapon_display_text(primary_rows[0] as Dictionary),
+		_weapon_display_text(primary_rows[0] as WeaponDef),
 		"the selected primary row is exactly WPN_AK47AUTO")
 	var primary_ammo := driver.widget_id("PRIMARY_AMMO1")
 	var accessory_ammo := driver.widget_id("ACCESSORY_AMMO1")
@@ -312,18 +312,18 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
-	var grenade_rows: Array = weapons.get_slot_weapons(
+	var grenade_rows: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, 8, 1)
 	assert_eq(grenade_rows.size(), 3,
 		"the real weapon.def fixture has three selectable red rifleman grenades")
-	var primary_rows: Array = weapons.get_slot_weapons(
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the canonical kit has a normal equipped primary")
-	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
+	var primary := primary_rows[0].name
 	var kit: Array[Dictionary] = [{"name": primary}]
 	for i in grenade_rows.size():
 		kit.append({
-			"name": String((grenade_rows[i] as Dictionary).get("name", "")),
+			"name": grenade_rows[i].name,
 			"ammo_primary": i + 1,
 		})
 	assert_true(simulation.apply_local_player_loadout(kit, 8),
@@ -344,7 +344,7 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 		var grenade_combo := driver.widget_id(combo_name)
 		assert_gte(grenade_combo, 0, "weapon.mnu authors %s" % combo_name)
 		assert_eq(driver.item_count(grenade_combo),
-			int((grenade_rows[i] as Dictionary).get("maxclips", 0)) + 1,
+			grenade_rows[i].maxclips + 1,
 			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
 		assert_eq(driver.selected_row(grenade_combo), i + 1,
 			"%s preselects the authoritative canonical grenade count" % combo_name)
@@ -360,7 +360,7 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	for value in simulation.get_local_player_inventory().get("slots", []):
 		inventory_names.append(String((value as Dictionary).get("name", "")))
 	for i in grenade_rows.size():
-		var grenade_name := String((grenade_rows[i] as Dictionary).get("name", ""))
+		var grenade_name := grenade_rows[i].name
 		assert_eq(int(accepted_by_name.get(grenade_name, -1)), i + 1,
 			"untouched ACCEPT preserves %s and its selected count" % grenade_name)
 		assert_has(inventory_names, grenade_name,

@@ -5,6 +5,7 @@
 // event queue, snapshots the per-frame state dictionary, and routes the two
 // wire request records (net-re §5.62).
 #include "simulation/simulation_internal.h"
+#include "object/weapon_def.h" // the typed weapon.def row the GUT install seams hand over
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
@@ -145,54 +146,19 @@ bool Simulation::local_held_weapon_visible(
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
 
-void Simulation::set_local_player_weapon(const Dictionary &p_def,
+void Simulation::set_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(
 			p_def, p_clip_seconds, p_preserve_slot_state, false);
 }
 
-opennova::world::WeaponInstallData Simulation::install_data_from_dict(
-		const Dictionary &p_def, const Dictionary &p_clip_seconds) {
-	using opennova::world::WeaponFsmActionRow;
-	opennova::world::WeaponInstallData data;
-	data.name = String(p_def.get("name", String())).utf8().get_data();
-	data.animadm = String(p_def.get("animadm", String())).utf8().get_data();
-	data.flags = int(p_def.get("flags", 0));
-	data.flags2 = int(p_def.get("flags2", 0));
-	data.heat_per_shot = int(int64_t(p_def.get("heat_per_shot", 0)));
-	data.heat_decay_per_tick = int(int64_t(p_def.get("heat_decay_per_tick", 0)));
-	data.heat_glow_threshold = int(int64_t(p_def.get("heat_glow_threshold", 0)));
-	data.scope_max_mag = float(double(p_def.get("scope_max_mag", 0.0)));
-	data.attack_anim = int(int64_t(p_def.get("attack_anim", 0)));
-	data.run_anim = int(int64_t(p_def.get("run_anim", 0)));
-	data.clipsize = int(p_def.get("clipsize", 0));
-	data.startrounds = int(p_def.get("startrounds", 0));
-	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
-	const Array actions = p_def.get("actions", Array());
-	data.rows.reserve(static_cast<size_t>(actions.size()));
-	for (int i = 0; i < actions.size(); ++i) {
-		const Dictionary a = actions[i];
-		WeaponFsmActionRow row;
-		const CharString name = String(a.get("name", "")).utf8();
-		const CharString anim = String(a.get("anim", "")).utf8();
-		const CharString function = String(a.get("function", "")).utf8();
-		snprintf(row.name, sizeof(row.name), "%s", name.get_data());
-		snprintf(row.anim, sizeof(row.anim), "%s", anim.get_data());
-		snprintf(row.function, sizeof(row.function), "%s", function.get_data());
-		row.delaystart = static_cast<int32_t>(int64_t(a.get("delaystart", -1)));
-		row.delayend = static_cast<int32_t>(int64_t(a.get("delayend", -1)));
-		// The audio/effect legs ride the bake into the pool entries
-		// [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows].
-		const CharString soundset = String(a.get("soundset", "")).utf8();
-		const CharString soundsetend = String(a.get("soundsetend", "")).utf8();
-		const CharString particle = String(a.get("particle", "")).utf8();
-		const CharString userpoint = String(a.get("particleuserpoint", "")).utf8();
-		snprintf(row.soundset, sizeof(row.soundset), "%s", soundset.get_data());
-		snprintf(row.soundsetend, sizeof(row.soundsetend), "%s", soundsetend.get_data());
-		snprintf(row.particle, sizeof(row.particle), "%s", particle.get_data());
-		snprintf(row.particleuserpoint, sizeof(row.particleuserpoint), "%s", userpoint.get_data());
-		data.rows.push_back(row);
-	}
+opennova::world::WeaponInstallData Simulation::install_data_from_def(
+		const DefWeaponDef &p_def, const Dictionary &p_clip_seconds) {
+	// The row half is the engine's (the same builder the kernel's by-name
+	// mount runs); only the clip-variant rings arrive from the shell's .adm
+	// read, keyed by clip name.
+	opennova::world::WeaponInstallData data =
+			opennova::world::weapon_install_data_from_def(p_def);
 	const Array keys = p_clip_seconds.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		std::vector<float> lengths;
@@ -224,18 +190,18 @@ bool Simulation::install_local_player_weapon_by_name(
 			std::string(p_weapon_name.utf8().get_data()), p_preserve_slot_state);
 }
 
-void Simulation::rebake_local_player_weapon(const Dictionary &p_def,
+void Simulation::rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(
 			p_def, p_clip_seconds, p_preserve_slot_state, true);
 }
 
-void Simulation::install_local_player_weapon(const Dictionary &p_def,
+void Simulation::install_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
 		bool p_allow_same_weapon_rebake) {
-	if (!kernel_) return;
+	if (!kernel_ || p_def.is_null()) return;
 	opennova::world::local_weapon_install(kernel_->world, kernel_->weapon,
-			install_data_from_dict(p_def, p_clip_seconds),
+			install_data_from_def(p_def->value(), p_clip_seconds),
 			p_preserve_slot_state, p_allow_same_weapon_rebake,
 			kernel_->inventory_valid ? &kernel_->inventory : nullptr, kernel_->view);
 }

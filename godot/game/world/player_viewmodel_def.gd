@@ -1,9 +1,8 @@
 class_name PlayerViewmodelDef
 extends RefCounted
 
-## The weapon.def slice driving the first-person viewmodel — the typed record behind
-## `WeaponDatabase.get_weapon()`'s transport Dictionary (ADR 0017: the record is
-## the contract, the dict is its C++-binding encoding). Model names resolve the gun
+## The weapon.def slice driving the first-person viewmodel, decoded from the
+## WeaponDef record `WeaponDatabase.get_weapon()` returns. Model names resolve the gun
 ## and the shared animation set (the first-person ARMS are the local player's
 ## character arms, never a weapon.def field: retail parses-and-discards gfx1a/gfx1b
 ## [orig: WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 -> loc_545098]);
@@ -40,25 +39,23 @@ var scope_max_mag := 0.0
 var clipsize := 0
 
 
-## Decode one WeaponDatabase weapon dict; null when the dict is empty (weapon.def
-## or the weapon name unresolved — callers keep their built-in fallbacks).
-static func from_weapon_dict(d: Dictionary) -> PlayerViewmodelDef:
-	if d.is_empty():
+## Decode one WeaponDef; null for no weapon (weapon.def or the weapon name
+## unresolved — callers keep their built-in fallbacks).
+static func from_weapon_def(def: WeaponDef) -> PlayerViewmodelDef:
+	if def == null:
 		return null
 	var out := PlayerViewmodelDef.new()
-	out.weapon_name = String(d.get("name", ""))
-	out.gfx1 = String(d.get("gfx1", ""))
-	out.gfx3 = String(d.get("gfx3", ""))
-	out.animadm = String(d.get("animadm", ""))
-	var pos: PackedFloat32Array = d.get("pos", PackedFloat32Array())
-	if pos.size() >= 6:
-		out.pos_units = Vector3(pos[0], pos[1], pos[2])
-		out.rot_bias_deg = Vector3(pos[3], pos[4], pos[5])
-	var tpos: PackedFloat32Array = d.get("tpos", PackedFloat32Array())
-	if tpos.size() >= 3:
-		out.tpos_units = Vector3(tpos[0], tpos[1], tpos[2])
-	out.renderfov_h_deg = float(d.get("renderfov", Simulation.DEFAULT_PLAYER_FOV_H_DEG))
-	out.flags = int(d.get("flags", 0))
-	out.scope_max_mag = float(d.get("scope_max_mag", 0.0))
-	out.clipsize = int(d.get("clipsize", 0))
+	out.weapon_name = def.name
+	out.gfx1 = def.gfx1
+	out.gfx3 = def.gfx3
+	out.animadm = def.animadm
+	var pos := def.pos
+	out.pos_units = Vector3(pos[0], pos[1], pos[2])
+	out.rot_bias_deg = Vector3(pos[3], pos[4], pos[5])
+	var tpos := def.tpos
+	out.tpos_units = Vector3(tpos[0], tpos[1], tpos[2])
+	out.renderfov_h_deg = def.renderfov
+	out.flags = def.flags
+	out.scope_max_mag = def.scope_max_mag
+	out.clipsize = def.clipsize
 	return out

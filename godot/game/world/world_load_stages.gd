@@ -307,7 +307,7 @@ func unload() -> void:
 	_world._mission_audio = null
 	_world._placer = null
 	_world._weapon_db = null  # re-resolves against the next load's mounted root
-	_world._local_weapon_dict = {}
+	_world._local_weapon = null
 	# The decoded view record is keyed on the resolved name; the next mission
 	# re-decodes from ITS weapon.def even when the name repeats, or the memo
 	# would short-circuit with the dict above left empty.

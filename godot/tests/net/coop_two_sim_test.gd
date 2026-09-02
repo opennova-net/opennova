@@ -286,44 +286,44 @@ func _install_combat_tables(sim: Simulation) -> void:
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 
 
-func _retail_m4() -> Dictionary:
+func _retail_m4() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_m9() -> Dictionary:
+func _retail_m9() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M9Beretta")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_smoke_grenade() -> Dictionary:
+func _retail_smoke_grenade() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_GRENADESM")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_emplaced_50() -> Dictionary:
+func _retail_emplaced_50() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_EMPLCD50NA")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _throwable_visual_count(sim: Simulation, item_id: int) -> int:
@@ -1007,9 +1007,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: Dictionary = weapons.get_weapon(
+	var mounted: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50NA"))
 	host.set_local_player_weapon(personal, {})
 	host.drain_local_player_weapon_events()
