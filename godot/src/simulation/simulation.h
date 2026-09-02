@@ -69,6 +69,7 @@ class DestructionDrain;  // the destruction drain record (simulation/destruction
 class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
 class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
 class CollisionDebugReport; // the F3 collision overlay payload (simulation/collision_debug_report.h)
+class DebugPickCard;     // the F3 entity picker's card (simulation/debug_pick_card.h)
 class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
 class RayDebugReport;    // the F3 rays view channel (simulation/ray_debug_report.h)
 class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlusion_portal_report.h)
@@ -1575,10 +1576,11 @@ public:
 
 	// The F3 entity picker: one plain geometric trace_projectile segment
 	// (terrain / water / static + dynamic CFAC / person bone spheres, nearest
-	// wins) along a camera or crosshair ray. Read-only. Stable-shape
-	// Dictionary; hit=false with blocked = "terrain"/"water"/"proxy" naming
-	// why the ray stopped without a pickable entity (proxies = wire geometry).
-	Dictionary debug_pick_entity(const Vector3 &p_from_godot,
+	// wins) along a camera or crosshair ray. Read-only. A DebugPickCard
+	// (simulation/debug_pick_card.h) with every field at its typed default;
+	// hit=false with blocked = "terrain"/"water"/"proxy" naming why the ray
+	// stopped without a pickable entity (proxies = wire geometry).
+	Ref<DebugPickCard> debug_pick_entity(const Vector3 &p_from_godot,
 			const Vector3 &p_dir_godot, float p_max_range_units);
 	// Diagnostic round injector: spawns one live round through the REAL
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the

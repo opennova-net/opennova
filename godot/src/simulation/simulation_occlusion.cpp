@@ -3,6 +3,7 @@
 // dictionaries + debug round spawn).
 #include "simulation/simulation_internal.h"
 #include "simulation/collision_debug_report.h"
+#include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/occlusion_portal_report.h"
 #include "simulation/ray_debug_report.h"
@@ -995,37 +996,14 @@ int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_
 	return kernel_->world.round_sim.spawn(kernel_->world, params);
 }
 
-Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
+Ref<DebugPickCard> Simulation::debug_pick_entity(const Vector3 &p_from_godot,
                                              const Vector3 &p_dir_godot,
                                              float p_max_range_units) {
-	Dictionary out;
-	// Typed defaults on every key so the shape is stable for every outcome
-	// (the stable-card-shape convention).
-	out["hit"] = false;
-	out["blocked"] = String();
-	out["hit_class"] = String();
-	out["entity_handle"] = -1;
-	out["pool"] = -1;
-	out["kind"] = -1;
-	out["index"] = -1;
-	out["bms_id"] = 0;
-	out["net_id"] = 0;
-	out["item_id"] = 0;
-	out["name"] = String();
-	out["position_godot"] = Vector3();
-	out["bound_radius"] = 0.0f;
-	out["hit_position_godot"] = Vector3();
-	out["hit_normal_godot"] = Vector3();
-	out["distance_units"] = 0.0f;
-	out["section"] = -1;
-	out["face"] = -1;
-	out["bone"] = -1;
-	out["hit_zone"] = -1;
-	out["surface_type"] = -1;
-	out["material_flags"] = 0;
-	out["tick"] = 0;
+	// Every field carries its typed default (the stable-card convention).
+	Ref<DebugPickCard> out;
+	out.instantiate();
 	if (!kernel_) return out;
-	out["tick"] = static_cast<int64_t>(kernel_->world.logic_tick);
+	out->set_tick(static_cast<int64_t>(kernel_->world.logic_tick));
 
 	// Godot world (x, up, z) -> mission (x, -z, up) — the debug_spawn_round
 	// conversion; the direction is normalized in doubles.
@@ -1067,23 +1045,22 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 
 	const int32_t hp[3] = {hit.position_q16.x, hit.position_q16.y, hit.position_q16.z};
 	const int32_t hn[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
-	out["hit_position_godot"] = godot_from_fixed3(hp);
-	out["hit_normal_godot"] = godot_from_fixed3(hn);
-	out["distance_units"] =
-	    static_cast<float>(range * (static_cast<double>(hit.t_q16) / 65536.0));
-	out["section"] = hit.section_index;
-	out["face"] = hit.face_index;
-	out["bone"] = hit.bone_index;
-	out["hit_zone"] = hit.hit_zone;
-	out["surface_type"] = hit.surface_type;
-	out["material_flags"] = static_cast<int64_t>(hit.material_flags);
+	out->set_hit_position_godot(godot_from_fixed3(hp));
+	out->set_hit_normal_godot(godot_from_fixed3(hn));
+	out->set_distance_units(static_cast<float>(range * (static_cast<double>(hit.t_q16) / 65536.0)));
+	out->set_section(hit.section_index);
+	out->set_face(hit.face_index);
+	out->set_bone(hit.bone_index);
+	out->set_hit_zone(hit.hit_zone);
+	out->set_surface_type(hit.surface_type);
+	out->set_material_flags(static_cast<int64_t>(hit.material_flags));
 
 	switch (hit.hit_class) {
 		case opennova::world::ProjectileHitClass::Terrain:
-			out["blocked"] = "terrain";
+			out->set_blocked("terrain");
 			return out;
 		case opennova::world::ProjectileHitClass::Water:
-			out["blocked"] = "water";
+			out->set_blocked("water");
 			return out;
 		default:
 			break;
@@ -1092,32 +1069,32 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	if (ent == nullptr) {
 		// A decoded wire proxy or an already-freed slot: the geometry hit but
 		// carries no pickable identity (joined visual-only clients).
-		out["blocked"] = "proxy";
+		out->set_blocked("proxy");
 		return out;
 	}
-	out["hit"] = true;
+	out->set_hit(true);
 	switch (hit.hit_class) {
 		case opennova::world::ProjectileHitClass::StaticEntity:
-			out["hit_class"] = "static";
+			out->set_hit_class("static");
 			break;
 		case opennova::world::ProjectileHitClass::DynamicEntity:
-			out["hit_class"] = "dynamic";
+			out->set_hit_class("dynamic");
 			break;
 		default:
-			out["hit_class"] = "person";
+			out->set_hit_class("person");
 			break;
 	}
-	out["entity_handle"] = static_cast<int>(hit.geometry_entity.packed);
-	out["pool"] = hit.geometry_entity.pool();
-	out["kind"] = opennova::world::spawn_origin_kind(ent->spawn_origin);
-	out["index"] = static_cast<int>(
-			opennova::world::spawn_origin_index(ent->spawn_origin));
-	out["bms_id"] = ent->bms_id;
-	out["net_id"] = static_cast<int>(ent->net_id);
-	out["item_id"] = ent->item_id;
-	out["name"] = String(ent->name.c_str());
-	out["position_godot"] = mission_to_godot(ent->position);
-	out["bound_radius"] = ent->bound_radius;
+	out->set_entity_handle(static_cast<int>(hit.geometry_entity.packed));
+	out->set_pool(hit.geometry_entity.pool());
+	out->set_kind(opennova::world::spawn_origin_kind(ent->spawn_origin));
+	out->set_index(static_cast<int>(
+			opennova::world::spawn_origin_index(ent->spawn_origin)));
+	out->set_bms_id(ent->bms_id);
+	out->set_net_id(static_cast<int>(ent->net_id));
+	out->set_item_id(ent->item_id);
+	out->set_name(String(ent->name.c_str()));
+	out->set_position_godot(mission_to_godot(ent->position));
+	out->set_bound_radius(ent->bound_radius);
 	return out;
 }
 

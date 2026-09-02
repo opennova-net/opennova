@@ -8,20 +8,29 @@ extends GutTest
 const ViewScript := preload("res://game/debug/pick/pick_debug_view.gd")
 
 
-func _static_pick() -> Dictionary:
-	return {
-		"hit": true, "entity_handle": 5, "kind": 2, "index": 14, "bms_id": 1484,
-		"net_id": 0, "name": "RckS07", "position_godot": Vector3(1, 0, 1),
-		"bound_radius": 3.0, "hit_position_godot": Vector3(1, 1, 1),
-	}
+func _card(entity_handle: int, kind: int, index: int, bms_id: int, net_id: int,
+		name: String, position: Vector3, bound_radius: float,
+		hit_position: Vector3) -> DebugPickCard:
+	var card := DebugPickCard.new()
+	card.hit = true
+	card.entity_handle = entity_handle
+	card.kind = kind
+	card.index = index
+	card.bms_id = bms_id
+	card.net_id = net_id
+	card.name = name
+	card.position_godot = position
+	card.bound_radius = bound_radius
+	card.hit_position_godot = hit_position
+	return card
 
 
-func _mover_pick() -> Dictionary:
-	return {
-		"hit": true, "entity_handle": 4130, "kind": 1, "index": 34, "bms_id": 212,
-		"net_id": 212, "name": "hmv_2", "position_godot": Vector3(5, 0, 5),
-		"bound_radius": 5.0, "hit_position_godot": Vector3(5, 1, 5),
-	}
+func _static_pick() -> DebugPickCard:
+	return _card(5, 2, 14, 1484, 0, "RckS07", Vector3(1, 0, 1), 3.0, Vector3(1, 1, 1))
+
+
+func _mover_pick() -> DebugPickCard:
+	return _card(4130, 1, 34, 212, 212, "hmv_2", Vector3(5, 0, 5), 5.0, Vector3(5, 1, 5))
 
 
 func _make_view(picks: DebugPickList) -> PickDebugView:

@@ -116,9 +116,10 @@ func test_picker_stamps_provenance_and_replayable_ray() -> void:
 	camera.current = true
 	var pick := DebugEntityPicker.pick_with_camera(
 			sim, camera, Vector2(10, 10), "mouse_click")
-	assert_false(pick.is_empty(), "the sim always answers the stable card")
-	assert_eq(String(pick.get("source", "")), "mouse_click",
+	assert_not_null(pick, "the sim always answers the stable card")
+	assert_eq(pick.source, "mouse_click",
 			"the card records its input provenance")
-	assert_true(pick.has("ray_origin_godot"), "the card records the replayable ray")
-	assert_true(pick.has("ray_dir_godot"))
-	assert_false(bool(pick.get("hit", true)), "worldless picks are honest misses")
+	assert_eq(pick.ray_origin_godot, camera.project_ray_origin(Vector2(10, 10)),
+			"the card records the replayable ray")
+	assert_eq(pick.ray_dir_godot, camera.project_ray_normal(Vector2(10, 10)))
+	assert_false(pick.hit, "worldless picks are honest misses")
