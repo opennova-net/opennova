@@ -11,6 +11,7 @@
 #include <formats/env/env.h>
 
 #include "env/env_keyframe.h"
+#include "env/env_records.h"
 #include "resource_index/resource_root.h"
 
 namespace godot {
@@ -167,9 +168,9 @@ public:
 	static float fog_end_above_water(float p_fog_distance, float p_overcast);
 	float get_fog_end_underwater() const;
 
-	// Hardcoded sunrise/sunset windows; {"is_night": bool, "blend": float}
+	// Hardcoded sunrise/sunset windows as an EnvDayPhase record
 	// (engine: formats/env/env_render.cpp).
-	Dictionary get_day_phase(float p_time) const;
+	Ref<EnvDayPhase> get_day_phase(float p_time) const;
 
 	// Derived render colors [orig: Environment_UpdateWeatherTick tail, see docs/env/env-tod-re.md].
 	static Color double_saturate_color(const Color &p_color);
@@ -183,9 +184,9 @@ public:
 			float p_fog_distance, float p_fog_distance_reference);
 
 	// Sun glare intensity from view-sun alignment and occlusion brightness
-	// (engine: formats/env/env_celestial.h); returns
-	// {"glare": 0..255, "fog_whiten": 0..40}.
-	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
+	// (engine: formats/env/env_celestial.h) as an EnvSunGlare record
+	// (glare 0..255, fog_whiten 0..40).
+	static Ref<EnvSunGlare> compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
 	// The mission time-of-day clock (env/tod_clock.h): the BMS Q8.8 start hour
 	// widened into the day-wrapped 8.24 accumulator (engine: formats/env/env.h), the

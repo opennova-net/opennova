@@ -16,6 +16,7 @@
 #include <net/novaworld/lobby_vars.h>
 
 #include "network/novaworld_server_row.h"
+#include "network/novaworld_server_totals.h"
 #include "network/nwu_lobby_session.h"
 #include "network/ping_sweep_worker.h"
 
@@ -97,10 +98,10 @@ public:
 	// the usual `server_list_updated` signal.
 	void refresh_servers();
 
-	// The GSB response's list-wide totals (`total_servers` / `total_players`
-	// ints; the service-wide population line the retail browser shows). Zeros
-	// until the first list lands.
-	Dictionary get_server_totals() const;
+	// The GSB response's list-wide totals (network/novaworld_server_totals.h;
+	// the service-wide population line the retail browser shows). Zeros until
+	// the first list lands.
+	Ref<NovaWorldServerTotals> get_server_totals() const;
 
 	// The ping sweep's per-row results so far: rid (int) -> ping. A
 	// non-negative value is the echo round-trip in ms; -2 = failed/timed out,
