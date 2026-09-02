@@ -236,7 +236,10 @@ func setup(mission: MissionData, container: Node,
 	_index = EntityIndex.new()
 	var registry_placer: MissionObjectPlacer = options.placer
 	_registry_placer = registry_placer
-	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
+	var placed_models: Array[ObjectModel] = []
+	if registry_placer != null:
+		placed_models = registry_placer.placed_models
+	_index.build(placed_models,
 			mission.get_area_triggers() if mission != null else [])
 	# The registry present drives whichever authored mission nodes actually exist. A
 	# production joiner owns only the 616-byte wire header, so its index is empty: the
@@ -386,22 +389,21 @@ func has_current_present_effect_snapshot() -> bool:
 ## Resolve one presented entity by its stable value identity. Placed nodes use
 ## bms_id first and (kind,index) as the zero-id fallback; wire-spawned nodes use
 ## their wire handle. Returns null when the entity is absent this tick.
-func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
-	if not has_current_present_effect_snapshot():
+func presented_entity_effect_transform(entity_ref: EntityRef) -> Variant:
+	if entity_ref == null or not has_current_present_effect_snapshot():
 		return null
-	var has_wire_handle := entity_ref.has("wire_handle")
-	var wire_handle := int(entity_ref.get("wire_handle", -1))
+	var wire_handle := entity_ref.wire_handle
 	var state := PackedVector3Array()
-	if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
+	if wire_handle >= 0 and wire_handle <= 0xffff:
 		state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
 	else:
-		var native_bms_id := int(entity_ref.get("bms_id", 0))
+		var native_bms_id := entity_ref.bms_id
 		if native_bms_id > 0:
 			state = _sim.get_present_effect_state_for_bms_id(native_bms_id)
 		else:
-			var native_kind := int(entity_ref.get(
-					"kind", entity_ref.get("origin_kind", -1)))
-			var native_index := int(entity_ref.get("index", -1))
+			var native_kind := entity_ref.kind if entity_ref.kind >= 0 \
+					else entity_ref.origin_kind
+			var native_index := entity_ref.index
 			if native_kind >= 0 and native_index >= 0:
 				state = _sim.get_present_effect_state_for_origin(
 						native_kind, native_index)
@@ -573,7 +575,7 @@ func rebind_placed_entities(placer: MissionObjectPlacer) -> void:
 	if _index == null or placer == null:
 		return
 	_registry_placer = placer
-	_index.build(placer.placed_entity_records, [])
+	_index.build(placer.placed_models, [])
 
 
 ## A joiner's stamped slot vanished or was re-typed: its placed representation

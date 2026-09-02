@@ -188,14 +188,13 @@ func _muzzle_model() -> ObjectModel:
 
 
 func _index_of(by_bms_id: Dictionary) -> EntityIndex:
-	var entries: Array = []
+	var models: Array[ObjectModel] = []
 	for bms_id in by_bms_id.keys():
-		entries.append({ "model": by_bms_id[bms_id], "ref": {
-			"kind": 1, "index": int(bms_id), "bms_id": int(bms_id),
-			"group": -1, "team": -1, "position": Vector3.ZERO,
-		} })
+		var model: ObjectModel = by_bms_id[bms_id]
+		model.entity_ref = EntityRef.make(1, int(bms_id), int(bms_id))
+		models.append(model)
 	var index := EntityIndex.new()
-	index.build(entries, [])
+	index.build(models, [])
 	return index
 
 
@@ -246,10 +245,8 @@ func test_active_channel_poses_to_phase() -> void:
 func test_transform_presentation_advances_the_static_shadow_registry_once() -> void:
 	var model := _model()
 	var index := EntityIndex.new()
-	index.build([{ "model": model, "ref": {
-		"kind": MissionData.KIND_BUILDING, "index": 7, "bms_id": 501,
-		"group": -1, "team": -1, "position": Vector3.ZERO,
-	} }], [])
+	model.entity_ref = EntityRef.make(MissionData.KIND_BUILDING, 7, 501)
+	index.build([model], [])
 	var placer := MissionObjectPlacer.new()
 	placer.register_static_instance(501, "Caster", 7,
 			Transform3D(Basis.IDENTITY, Vector3(-9, -9, -9)), true)
@@ -791,10 +788,8 @@ func test_resolves_by_kind_index_fallback() -> void:
 	# must fall back to (kind,index) through the real index.
 	var model := _model()
 	var index := EntityIndex.new()
-	index.build([{ "model": model, "ref": {
-		"kind": 3, "index": 2, "bms_id": 0, "group": -1, "team": -1,
-		"position": Vector3.ZERO,
-	} }], [])
+	model.entity_ref = EntityRef.make(3, 2, 0)
+	index.build([model], [])
 	var p := _make_pass(index)
 	var snap := Snapshot.new()
 	snap.entities = [{ "bms_id": 0, "kind": 3, "index": 2,
@@ -1044,10 +1039,8 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 			"freeing any cached model invalidates the typed row plan immediately")
 	assert_false(visibility_intent.has(21),
 			"a freed cached node releases its visibility intent immediately")
-	index.build([{ "model": replacement, "ref": {
-		"kind": 1, "index": 21, "bms_id": 21, "group": -1, "team": -1,
-		"position": Vector3.ZERO,
-	} }], [])
+	replacement.entity_ref = EntityRef.make(1, 21, 21)
+	index.build([replacement], [])
 	_present(p, snap)
 	assert_almost_eq(replacement.position.x, 30.0, 0.001,
 			"the replacement receives the current row after the rebind")

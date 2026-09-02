@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <runtime/mission/placement_traits.h>
 
@@ -197,9 +198,12 @@ public:
 			bool p_retain_authored_lods = false);
 
 	// --- read-back seams --------------------------------------------------
-	Array get_placed_entity_records() const { return placed_entity_records_; }
-	void set_placed_entity_records(const Array &p_records) {
-		placed_entity_records_ = p_records;
+	// The animated models place() registered, each carrying its EntityRef:
+	// EntityIndex builds from this list (construction-time registration,
+	// never a child scan). Shared by reference so a harness appends its own.
+	TypedArray<ObjectModel> get_placed_models() const { return placed_models_; }
+	void set_placed_models(const TypedArray<ObjectModel> &p_models) {
+		placed_models_ = p_models;
 	}
 	Array get_static_user_point_sources();
 	Array get_static_item_effect_sources();
@@ -411,7 +415,7 @@ private:
 	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
 
-	Array placed_entity_records_;
+	TypedArray<ObjectModel> placed_models_;
 	Array static_user_point_sources_;
 	Array static_item_effect_sources_;
 	Array static_light_draw_sources_;

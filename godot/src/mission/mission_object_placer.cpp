@@ -137,12 +137,13 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::build_model_from_graphic, DEFVAL(String()),
 			DEFVAL(String()), DEFVAL(false));
 
-	ClassDB::bind_method(D_METHOD("get_placed_entity_records"),
-			&MissionObjectPlacer::get_placed_entity_records);
-	ClassDB::bind_method(D_METHOD("set_placed_entity_records", "records"),
-			&MissionObjectPlacer::set_placed_entity_records);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_entity_records"),
-			"set_placed_entity_records", "get_placed_entity_records");
+	ClassDB::bind_method(D_METHOD("get_placed_models"),
+			&MissionObjectPlacer::get_placed_models);
+	ClassDB::bind_method(D_METHOD("set_placed_models", "models"),
+			&MissionObjectPlacer::set_placed_models);
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_models", PROPERTY_HINT_ARRAY_TYPE,
+						 "ObjectModel"),
+			"set_placed_models", "get_placed_models");
 	ClassDB::bind_method(D_METHOD("get_static_user_point_sources"),
 			&MissionObjectPlacer::get_static_user_point_sources);
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
@@ -403,7 +404,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 	static_terrain_shadow_source_rows_.clear();
 	static_terrain_shadow_rows_by_bms_.clear();
 	_bump_static_terrain_shadow_source_revision();
-	placed_entity_records_ = Array();
+	placed_models_ = TypedArray<ObjectModel>();
 	if (p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
 	}
@@ -1038,21 +1039,19 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 		// Tag identity on the node in BOTH runtime + editor so EntityIndex
 		// can resolve SSN/group/zone event-action targets back to this live
 		// model.
-		Dictionary ref;
-		ref["kind"] = kind;
-		ref["index"] = int(a.get("index", -1));
-		ref["bms_id"] = int(a.get("bms_id", 0));
-		ref["group"] = int(a.get("group", -1));
-		ref["team"] = int(a.get("team", -1));
-		ref["position"] = a.get("position", Vector3());
-		ref["item_id"] = item_id;
-		ref["graphic"] = graphic;
-		ref["attrib2"] = int64_t(item_db_->get_attrib2(item_id));
-		model->set_meta("entity_ref", ref);
-		Dictionary record;
-		record["model"] = model;
-		record["ref"] = ref;
-		placed_entity_records_.push_back(record);
+		Ref<EntityRef> ref;
+		ref.instantiate();
+		ref->set_kind(kind);
+		ref->set_index(int(a.get("index", -1)));
+		ref->set_bms_id(int(a.get("bms_id", 0)));
+		ref->set_group(int(a.get("group", -1)));
+		ref->set_team(int(a.get("team", -1)));
+		ref->set_position(a.get("position", Vector3()));
+		ref->set_item_id(item_id);
+		ref->set_graphic(graphic);
+		ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
+		model->set_entity_ref(ref);
+		placed_models_.push_back(model);
 		_record_static_terrain_shadow_source(kind,
 				int(a.get("index", -1)), int(a.get("bms_id", 0)),
 				int(a.get("team", 0)),

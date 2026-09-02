@@ -250,7 +250,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 	var node := ObjectModel.new()
 	container.add_child(node)
 	node.set_object_data(_fixture_object_data("shed.3di"))
-	node.set_meta("entity_ref", {"wire_handle": 7, "kind": MissionData.KIND_ITEM})
+	node.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 7)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
@@ -666,11 +666,7 @@ func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
 	var first := ObjectModel.new()
 	add_child_autofree(first)
 	first.set_object_data(_fixture_object_data("shed.3di"))
-	first.set_meta("entity_ref", {
-		"wire_handle": 41,
-		"kind": MissionData.KIND_ITEM,
-		"item_type": ItemDatabase.TYPE_POWERUP,
-	})
+	first.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 41)
 	director.on_wire_node_spawned(first, MissionData.KIND_ITEM, 0)
 	director.on_wire_node_spawned(first, MissionData.KIND_ITEM, 0)
 	assert_eq(director.get_report().live, 1,
@@ -683,11 +679,7 @@ func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
 	var respawn := ObjectModel.new()
 	add_child_autofree(respawn)
 	respawn.set_object_data(_fixture_object_data("shed.3di"))
-	respawn.set_meta("entity_ref", {
-		"wire_handle": 41,
-		"kind": MissionData.KIND_ITEM,
-		"item_type": ItemDatabase.TYPE_POWERUP,
-	})
+	respawn.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 41)
 	director.on_wire_node_spawned(respawn, MissionData.KIND_ITEM, 0)
 	assert_eq(director.get_report().live, 1,
 			"the replacement node takes the retail powerup_respawn LGHT path")
@@ -733,7 +725,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	var attached_position := node.get_model_light_world_position(0)
 	assert_false(attached_position.is_equal_approx(spawn_position),
 			"the control ROBJ transform differs from the entity placement matrix")
-	node.set_meta("entity_ref", {"wire_handle": 33})
+	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 33)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
 	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, 0)
@@ -784,7 +776,7 @@ func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> v
 	var node := ObjectModel.new()
 	container.add_child(node)
 	node.set_object_data(_fixture_object_data("shed.3di"))
-	node.set_meta("entity_ref", {"wire_handle": 91})
+	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 91)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
 	director.reattach()

@@ -27,12 +27,10 @@ func _add_caster(
 	var model := ObjectModel.new()
 	model.name = "Caster%d" % bms_id
 	model.position = position
-	model.set_meta("entity_ref", {
-		"bms_id": bms_id,
-		"item_id": item_id,
-		"graphic": graphic,
-		"attrib2": attrib2,
-	})
+	var ref := EntityRef.make(-1, -1, bms_id, item_id)
+	ref.graphic = graphic
+	ref.attrib2 = attrib2
+	model.entity_ref = ref
 	world.add_child(model)
 	model.set_shadow_caster_enabled(dynamic_enabled)
 	model.set_static_shadow_caster_enabled(static_enabled)
@@ -228,7 +226,7 @@ func test_inventory_resolves_graphic_and_attrib2_through_the_public_item_db() ->
 	var viewport := SubViewport.new()
 	world.add_child(viewport)
 	var model := ObjectModel.new()
-	model.set_meta("entity_ref", {"bms_id": 291, "item_id": 101291})
+	model.entity_ref = EntityRef.make(-1, -1, 291, 101291)
 	world.add_child(model)
 	model.set_shadow_caster_enabled(true)
 

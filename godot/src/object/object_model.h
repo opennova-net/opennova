@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "object/entity_ref.h"
 #include "object/object_data.h"
 #include "object/post_multiply_draw.h"
 #include "object/skeletal_anim.h"
@@ -387,6 +388,7 @@ private:
 	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
 	Vector3i avatar_camo_; // the arms' raw camo triplet for the per-submit FP writer
 	String graphic_name_; // the object graphic the placer built this model from
+	Ref<EntityRef> entity_ref_;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
@@ -652,6 +654,10 @@ public:
 	Vector3i get_avatar_camo() const { return avatar_camo_; }
 	void set_graphic_name(const String &p_name) { graphic_name_ = p_name; }
 	String get_graphic_name() const { return graphic_name_; }
+	// The entity identity this model presents; null for models that are no
+	// placed or wire-spawned entity (viewmodels, husk grafts, helpers).
+	void set_entity_ref(const Ref<EntityRef> &p_ref) { entity_ref_ = p_ref; }
+	Ref<EntityRef> get_entity_ref() const { return entity_ref_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;

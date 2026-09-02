@@ -98,6 +98,7 @@ add_library(${TARGET_NAME} SHARED
     render/q3_source_registry.cpp
     render/slot_capture_adapter.cpp
     object/entity_index.cpp
+    object/entity_ref.cpp
     object/object_model.cpp
     object/object_model_anim.cpp
     object/object_model_materials.cpp

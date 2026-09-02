@@ -56,6 +56,7 @@
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
+#include "object/entity_ref.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
 #include "object/post_multiply_draw.h"
@@ -204,6 +205,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);
+	GDREGISTER_CLASS(EntityRef);
 	GDREGISTER_CLASS(PostMultiplyDraw);
 	GDREGISTER_CLASS(ObjectModel);
 	GDREGISTER_CLASS(EntityIndex);

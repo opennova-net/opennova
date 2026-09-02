@@ -209,8 +209,9 @@ class CatchupEffectWorld:
 # Build a one-organic mission + a real placer registering one real ObjectModel for it by
 # (kind,index) — the in-memory mission has bms_id 0, so the present index resolves by the fallback
 # key. The runtime builds its EntityIndex from options.placer's construction-time
-# placed_entity_records ({model, ref} — the channel MissionObjectPlacer.place() records; never a
-# container scan), so the harness registers through that same channel and every setup below passes
+# placed_models (each model carrying its EntityRef — the channel MissionObjectPlacer.place()
+# registers; never a container scan), so the harness registers through that same channel and
+# every setup below passes
 # _options_with_placer(w.placer). The tests assert only Node3D position/visible on the model.
 func _make_world(authored: Transform3D) -> Dictionary:
 	var md := MissionData.new()
@@ -223,10 +224,9 @@ func _make_world(authored: Transform3D) -> Dictionary:
 	container.add_child(model)
 	model.set_process(false)
 	model.transform = authored
-	var ref := { "kind": 3, "index": 0, "bms_id": 0, "group": -1, "team": -1, "position": Vector3.ZERO }
-	model.set_meta("entity_ref", ref)
+	model.entity_ref = EntityRef.make(3, 0, 0)
 	var placer := MissionObjectPlacer.new()
-	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	placer.placed_models.append(model)
 	return { "mission": md, "container": container, "model": model, "placer": placer }
 
 
@@ -257,7 +257,9 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	container.add_child(model)
 	model.set_process(false)
 	var placer := MissionObjectPlacer.new()
-	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	model.entity_ref = EntityRef.make(MissionData.KIND_BUILDING,
+			int(ref.get("index", -1)), bms_id, 102001)
+	placer.placed_models.append(model)
 	placer.register_static_instance(bms_id, "Caster", 0,
 			Transform3D(Basis.IDENTITY, Vector3(-20, -20, -20)), true)
 	var revision := placer.get_static_terrain_shadow_source_revision()
@@ -601,7 +603,7 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
-	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
+	var entity_ref := EntityRef.make(3, 0, 0)
 	var observed: Array = []
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
 		observed.append({

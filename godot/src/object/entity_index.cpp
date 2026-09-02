@@ -6,7 +6,7 @@
 namespace godot {
 
 void EntityIndex::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("build", "entries", "area_triggers"), &EntityIndex::build);
+	ClassDB::bind_method(D_METHOD("build", "models", "area_triggers"), &EntityIndex::build);
 	ClassDB::bind_method(D_METHOD("clear"), &EntityIndex::clear);
 	ClassDB::bind_method(D_METHOD("get_generation"), &EntityIndex::get_generation);
 	ClassDB::bind_method(D_METHOD("resolve", "bms_id", "kind", "index"),
@@ -21,35 +21,38 @@ void EntityIndex::_bind_methods() {
 			&EntityIndex::get_animatable_nodes);
 }
 
-void EntityIndex::build(const Array &p_entries, const Array &p_area_triggers) {
+void EntityIndex::build(const TypedArray<ObjectModel> &p_models,
+		const Array &p_area_triggers) {
 	clear();
 	area_triggers_ = p_area_triggers;
-	for (int64_t i = 0; i < p_entries.size(); ++i) {
-		const Dictionary entry = p_entries[i];
+	for (int64_t i = 0; i < p_models.size(); ++i) {
 		ObjectModel *model =
-				Object::cast_to<ObjectModel>(Object::cast_to<Object>(entry["model"]));
+				Object::cast_to<ObjectModel>(Object::cast_to<Object>(p_models[i]));
 		if (model == nullptr) {
 			continue;
 		}
-		const Dictionary ref = entry["ref"];
+		const Ref<EntityRef> ref = model->get_entity_ref();
+		if (ref.is_null()) {
+			continue;
+		}
 		const ObjectID id = ObjectID(model->get_instance_id());
-		const int64_t bms_id = int64_t(ref.get("bms_id", 0));
+		const int64_t bms_id = ref->get_bms_id();
 		if (bms_id != 0) {
 			by_bms_id_[bms_id] = id;
 		}
-		const int64_t kind = int64_t(ref.get("kind", -1));
-		const int64_t index = int64_t(ref.get("index", -1));
+		const int64_t kind = ref->get_kind();
+		const int64_t index = ref->get_index();
 		if (kind >= 0 && index >= 0) {
 			by_kind_index_[origin_key(kind, index)] = id;
 		}
-		const int64_t group = int64_t(ref.get("group", -1));
+		const int64_t group = ref->get_group();
 		if (group >= 0) {
 			by_group_[group].push_back(id);
 		}
 		EntityRecord record;
 		record.model_id = id;
-		record.position = ref.get("position", Vector3());
-		record.team = int(ref.get("team", -1));
+		record.position = ref->get_position();
+		record.team = ref->get_team();
 		records_.push_back(record);
 	}
 }

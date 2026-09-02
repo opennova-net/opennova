@@ -143,7 +143,7 @@ func reattach() -> void:
 	if container != null:
 		for child in container.get_children():
 			var node := child as ObjectModel
-			if node == null or not node.has_meta("entity_ref"):
+			if node == null or node.entity_ref == null:
 				continue
 			on_wire_node_spawned(node, -1, 0)
 	_static_sources_snapshot = _static_sources.call() \
@@ -187,8 +187,8 @@ func reattach() -> void:
 ## spawns and per-draw contexts must agree on this or owner gating never
 ## matches.
 static func owner_id_for_node(node: ObjectModel) -> int:
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var wire := int(ref.get("wire_handle", -1))
+	var ref: EntityRef = node.entity_ref
+	var wire := ref.wire_handle if ref != null else -1
 	return owner_id_for_wire(wire) if wire >= 0 else node.get_instance_id()
 
 
@@ -213,8 +213,8 @@ func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
 	# outright for a BUILDING — a building's own unattached records stay world
 	# lights even though its blink volumes contain them (the query has no
 	# self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec].
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var is_building := int(ref.get("kind", -1)) == MissionData.KIND_BUILDING
+	var ref: EntityRef = node.entity_ref
+	var is_building := ref != null and ref.kind == MissionData.KIND_BUILDING
 	var blink_owner: Array = []
 	if not is_building:
 		blink_owner = _blink_owner_at(node.global_position)
@@ -639,12 +639,12 @@ func _rebuild_model_registry(container: Node) -> void:
 		var model := child as ObjectModel
 		if model == null:
 			continue
-		var ref: Dictionary = model.get_meta("entity_ref", {})
+		var ref: EntityRef = model.entity_ref
 		_reg_models.append(model)
 		_reg_owners.append(owner_id_for_node(model))
-		_reg_robj_scoped.append(1 if int(ref.get("kind", -1)) == \
-				MissionData.KIND_BUILDING else 0)
-		_reg_bms_ids.append(int(ref.get("bms_id", 0)))
+		_reg_robj_scoped.append(1 if ref != null \
+				and ref.kind == MissionData.KIND_BUILDING else 0)
+		_reg_bms_ids.append(ref.bms_id if ref != null else 0)
 	_reg_dirty = false
 
 
