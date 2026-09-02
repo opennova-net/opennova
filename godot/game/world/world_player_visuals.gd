@@ -385,25 +385,22 @@ func local_player_hud_weapon_def() -> PlayerHudWeaponDef:
 	return PlayerHudWeaponDef.from_weapon_def(_world._local_weapon)
 
 
-## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
-## weapon FSM is installed.
+## The equipped-weapon FSM view; null when no weapon FSM is installed.
 func local_player_weapon_view() -> PlayerWeaponView:
 	var sim := _world.get_sim()
 	if sim == null:
 		return null
-	return PlayerWeaponView.from_state_dict(sim.get_local_player_weapon_state())
+	var view := sim.get_local_player_weapon_state()
+	return view if view.active else null
 
 
 ## Destructively drain the equipped FSM's ordered presentation batch, decoding the
 ## C++ transport Dictionaries at this one adapter edge (ADR 0017).
 func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
-	var out: Array[PlayerWeaponEvent] = []
 	var sim := _world.get_sim()
 	if sim == null:
-		return out
-	for row in sim.drain_local_player_weapon_events():
-		out.append(PlayerWeaponEvent.from_event_dict(row as Dictionary))
-	return out
+		return []
+	return sim.drain_local_player_weapon_events()
 
 
 ## Register the GameWorld presenter for fixed-tick weapon events. The game

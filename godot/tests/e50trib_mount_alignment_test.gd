@@ -95,9 +95,9 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.set_local_player_mouse(511, false)
 	sim.add_local_player_look(300.0, 0.0)
 	sim.step()
-	var weapon_state: Dictionary = sim.get_local_player_weapon_state()
-	var yaw_control := int(weapon_state.get("emplaced_gun_yaw", 0))
-	var pitch_control := int(weapon_state.get("emplaced_gun_pitch", 0))
+	var weapon_state := sim.get_local_player_weapon_state()
+	var yaw_control := weapon_state.emplaced_gun_yaw
+	var pitch_control := weapon_state.emplaced_gun_pitch
 	assert_ne(yaw_control, 0, "look input drives E50triB's EWEAP_GUNYAW")
 
 	var rest_parts: Dictionary = data.evaluate_panm(0, 0, {})

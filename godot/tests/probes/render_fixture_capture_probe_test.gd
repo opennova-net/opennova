@@ -73,12 +73,12 @@ class ComparisonSim:
 	func get_local_player_weapon_name() -> String:
 		return equipped_name
 
-	func get_local_player_weapon_state() -> Dictionary:
-		return {
-			"active": true,
-			"clip": weapon_clip,
-			"reserve": weapon_reserve,
-		}
+	func get_local_player_weapon_state() -> PlayerWeaponView:
+		var view := PlayerWeaponView.new()
+		view.active = true
+		view.clip = weapon_clip
+		view.reserve = weapon_reserve
+		return view
 
 	func debug_teleport_local_player(
 			position_bms: Vector3, yaw_deg: float, pitch_deg: float) -> Error:

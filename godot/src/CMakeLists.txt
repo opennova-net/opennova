@@ -113,6 +113,8 @@ add_library(${TARGET_NAME} SHARED
     simulation/fp_viewmodel_spec.cpp
     simulation/player_aim_overlay.cpp
     simulation/player_local_view.cpp
+    simulation/player_weapon_event.cpp
+    simulation/player_weapon_view.cpp
     object/skeletal_anim.cpp
     hud/hud_overlay.cpp
     hud/feed_row.cpp

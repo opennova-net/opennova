@@ -63,6 +63,8 @@
 #include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
+#include "simulation/player_weapon_event.h"
+#include "simulation/player_weapon_view.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
 #include "hud/hud_overlay.h"
@@ -192,6 +194,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FpViewmodelSpec);
 	GDREGISTER_CLASS(PlayerLocalView);
 	GDREGISTER_CLASS(PlayerAimOverlay);
+	GDREGISTER_CLASS(PlayerWeaponView);
+	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);

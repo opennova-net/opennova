@@ -790,12 +790,12 @@ static func verify_comparison_spawn(
 				% [presented_weapon, expected_weapon]}
 	var weapon_state_value: Variant = sim_object.call(
 			"get_local_player_weapon_state")
-	if not (weapon_state_value is Dictionary):
+	if not (weapon_state_value is PlayerWeaponView):
 		return {"error": "comparison spawn produced no weapon-state witness"}
-	var weapon_state := weapon_state_value as Dictionary
-	var weapon_clip := int(weapon_state.get("clip", -1))
-	var weapon_reserve := int(weapon_state.get("reserve", -1))
-	if not bool(weapon_state.get("active", false)) \
+	var weapon_state := weapon_state_value as PlayerWeaponView
+	var weapon_clip := weapon_state.clip
+	var weapon_reserve := weapon_state.reserve
+	if not weapon_state.active \
 			or weapon_clip != COMPARISON_WEAPON_CLIP \
 			or weapon_reserve != COMPARISON_WEAPON_RESERVE:
 		return {"error": (
