@@ -1952,6 +1952,13 @@ target_link_libraries(gsb_retail_semantics_test PRIVATE opennova_net)
 target_include_directories(gsb_retail_semantics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_retail_semantics COMMAND gsb_retail_semantics_test)
 
+# The server browser's table model: cells, ping states, quick filters and
+# search, the sort orders (unmeasured pings last either way), details and hover text.
+add_executable(server_browser_test novaworld/server_browser_test.cpp)
+target_link_libraries(server_browser_test PRIVATE opennova_net)
+target_include_directories(server_browser_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME server_browser COMMAND server_browser_test)
+
 # Byte-level oracle: decode the genuine .204 server-browser blob
 # (fixtures/novaworld/nw204_jop_2.gsb) through our retail-faithful parser.
 add_executable(gsb_real204_decode_test novaworld/gsb_real204_decode_test.cpp)

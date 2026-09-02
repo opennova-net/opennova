@@ -33,8 +33,9 @@ signal join_in_match_requested(target: JoinTarget)
 # the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host).
 signal host_requested(config: HostSessionConfig)
 
-# The table's column order. PLAYERS and PING sort numerically; the rest by text.
-enum Column { NAME, MISSION, TYPE, PLAYERS, PING, ACCESS }
+# The table's column titles, in NovaWorldServerBrowser.Column order (the
+# engine's server_browser.h owns the columns, the filters, the sort and the
+# cell text; this panel only renders them).
 const COLUMN_TITLES: PackedStringArray = [
 	"Server", "Mission", "Mode", "Players", "Ping", "Access"]
 
@@ -59,10 +60,12 @@ var _hide_locked_check: CheckBox
 var _details_label: Label
 var _roster_list: ItemList
 var _target: int = NovaWorldSettings.Target.OPENNOVA
-var _rows: Array = []          # the full GSB row set (Array of Dictionary)
-var _view: Array = []          # the filtered + sorted rows the table shows
-var _pings: Dictionary = {}    # rid -> ping ms / -2 failed / -3 never (absent = in flight)
-var _sort_column: int = Column.NAME
+var _rows: Array[NovaWorldServerRow] = []   # the full GSB row set
+var _view: Array[NovaWorldServerRow] = []   # the filtered + sorted rows the table shows
+# rid -> ping: a round-trip in ms, or NovaWorldServerBrowser.PING_FAILED /
+# PING_NEVER_ATTEMPTED (the sweep's codes); absent = in flight.
+var _pings: Dictionary = {}
+var _sort_column := NovaWorldServerBrowser.COLUMN_NAME
 var _sort_ascending := true
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
@@ -170,11 +173,12 @@ func _bind_scene_ui() -> void:
 	_server_tree.columns = COLUMN_TITLES.size()
 	_server_tree.column_titles_visible = true
 	for column in COLUMN_TITLES.size():
-		_server_tree.set_column_expand(column, column == Column.NAME or column == Column.MISSION)
-	_server_tree.set_column_custom_minimum_width(Column.TYPE, 90)
-	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 76)
-	_server_tree.set_column_custom_minimum_width(Column.PING, 62)
-	_server_tree.set_column_custom_minimum_width(Column.ACCESS, 86)
+		_server_tree.set_column_expand(column, column == NovaWorldServerBrowser.COLUMN_NAME
+				or column == NovaWorldServerBrowser.COLUMN_MISSION)
+	_server_tree.set_column_custom_minimum_width(NovaWorldServerBrowser.COLUMN_TYPE, 90)
+	_server_tree.set_column_custom_minimum_width(NovaWorldServerBrowser.COLUMN_PLAYERS, 76)
+	_server_tree.set_column_custom_minimum_width(NovaWorldServerBrowser.COLUMN_PING, 62)
+	_server_tree.set_column_custom_minimum_width(NovaWorldServerBrowser.COLUMN_ACCESS, 86)
 	_server_tree.column_title_clicked.connect(_on_column_title_clicked)
 	_server_tree.item_selected.connect(_on_server_selected)
 	_server_tree.item_activated.connect(_on_join_pressed)
@@ -382,8 +386,7 @@ func _refresh_servers() -> void:
 	_pings = {}
 	_exp_warning_armed = false
 	if _client != null:
-		for row in _client.get_server_rows():
-			_rows.append(row)
+		_rows = _client.get_server_rows()
 		_pings = _client.get_server_pings()
 	_rebuild_type_filter()
 	_rebuild_view()
@@ -415,7 +418,7 @@ func _rebuild_type_filter() -> void:
 	_type_filter.add_item("All modes")
 	var seen := {}
 	for row in _rows:
-		var t := String((row as Dictionary).get("game_type", "")).strip_edges()
+		var t := row.game_type.strip_edges()
 		if t.is_empty() or seen.has(t.to_lower()):
 			continue
 		seen[t.to_lower()] = true
@@ -424,18 +427,17 @@ func _rebuild_type_filter() -> void:
 			_type_filter.select(_type_filter.item_count - 1)
 
 
-# The filter bar's current state as the filter_rows() dictionary.
-func _filter_state() -> Dictionary:
+# The filter bar's current state, applied through the engine's filter.
+func _filtered_rows() -> Array[NovaWorldServerRow]:
 	var type_text := ""
 	if _type_filter != null and _type_filter.selected > 0:
 		type_text = _type_filter.get_item_text(_type_filter.selected)
-	return {
-		"text": _filter_edit.text if _filter_edit != null else "",
-		"game_type": type_text,
-		"hide_full": _hide_full_check != null and _hide_full_check.button_pressed,
-		"hide_empty": _hide_empty_check != null and _hide_empty_check.button_pressed,
-		"hide_locked": _hide_locked_check != null and _hide_locked_check.button_pressed,
-	}
+	return NovaWorldServerBrowser.filter_rows(_rows,
+			_filter_edit.text if _filter_edit != null else "",
+			type_text,
+			_hide_full_check != null and _hide_full_check.button_pressed,
+			_hide_empty_check != null and _hide_empty_check.button_pressed,
+			_hide_locked_check != null and _hide_locked_check.button_pressed)
 
 
 # Re-derive the visible table from the full row set: filter, sort, repopulate,
@@ -445,25 +447,26 @@ func _rebuild_view() -> void:
 		return
 	var selected_rid := -1
 	var selected_row := _selected_row()
-	if not selected_row.is_empty():
-		selected_rid = int(selected_row.get("rid", -1))
-	_view = sort_rows(filter_rows(_rows, _filter_state()),
+	if selected_row != null:
+		selected_rid = selected_row.rid
+	_view = NovaWorldServerBrowser.sort_rows(_filtered_rows(),
 			_sort_column, _sort_ascending, _pings)
 	_server_tree.clear()
 	var root := _server_tree.create_item()
 	var reselected := false
 	var first_item: TreeItem
-	for row in _view:
+	for row: NovaWorldServerRow in _view:
 		var item := _server_tree.create_item(root)
 		if first_item == null:
 			first_item = item
-		var cells := row_cells(row, _ping_for(row))
+		var cells := NovaWorldServerBrowser.row_cells(row, _ping_for(row))
 		for c in cells.size():
 			item.set_text(c, cells[c])
-		item.set_tooltip_text(Column.NAME, server_row_tooltip(row))
+		item.set_tooltip_text(NovaWorldServerBrowser.COLUMN_NAME,
+				NovaWorldServerBrowser.row_tooltip(row))
 		item.set_metadata(0, row)
-		if int((row as Dictionary).get("rid", -2)) == selected_rid:
-			item.select(Column.NAME)
+		if row.rid == selected_rid:
+			item.select(NovaWorldServerBrowser.COLUMN_NAME)
 			reselected = true
 	if _empty_label != null:
 		_empty_label.visible = _view.is_empty()
@@ -472,24 +475,25 @@ func _rebuild_view() -> void:
 				else "No games match these filters.")
 	_server_tree.visible = not _view.is_empty()
 	if not reselected and first_item != null:
-		first_item.select(Column.NAME)
+		first_item.select(NovaWorldServerBrowser.COLUMN_NAME)
 		_join_button.disabled = false
 		_show_details(first_item.get_metadata(0))
 	elif not reselected:
 		_join_button.disabled = true
-		_show_details({})
+		_show_details(null)
 	_update_column_titles()
 
 
-func _ping_for(row: Dictionary) -> Variant:
-	return _pings.get(int(row.get("rid", -1)))
+## The row's ping so far: the sweep's result, else PING_PENDING while in flight.
+func _ping_for(row: NovaWorldServerRow) -> int:
+	return int(_pings.get(row.rid, NovaWorldServerBrowser.PING_PENDING))
 
 
 func _on_column_title_clicked(column: int, _mouse_button_index: int) -> void:
 	if column == _sort_column:
 		_sort_ascending = not _sort_ascending
 	else:
-		_sort_column = column
+		_sort_column = column as NovaWorldServerBrowser.Column
 		_sort_ascending = true
 	_rebuild_view()
 
@@ -509,172 +513,18 @@ func _on_server_pings_updated() -> void:
 	if _client == null:
 		return
 	_pings = _client.get_server_pings()
-	if _sort_column == Column.PING:
+	if _sort_column == NovaWorldServerBrowser.COLUMN_PING:
 		_rebuild_view()
 		return
 	if _server_tree == null or _server_tree.get_root() == null:
 		return
 	var item := _server_tree.get_root().get_first_child()
 	while item != null:
-		var row: Variant = item.get_metadata(0)
-		if row is Dictionary:
-			item.set_text(Column.PING, ping_text(_ping_for(row)))
+		var row := item.get_metadata(0) as NovaWorldServerRow
+		if row != null:
+			item.set_text(NovaWorldServerBrowser.COLUMN_PING,
+					NovaWorldServerBrowser.ping_text(_ping_for(row)))
 		item = item.get_next()
-
-
-# --- The pure row helpers (tests drive these on literal dictionaries) --------
-
-## True when the row advertises a password or a lock.
-static func row_is_locked(row: Dictionary) -> bool:
-	return String(row.get("password", "N")) == "Y" \
-			or String(row.get("locked", "N")) == "Y"
-
-
-## The ping cell's text: in flight (null) shows "...", the sweep's failed (-2)
-## and never-attempted (-3) codes show "N/A", a round-trip shows milliseconds.
-static func ping_text(ping) -> String:
-	if ping == null:
-		return "..."
-	var value := int(ping)
-	if value < 0:
-		return "N/A"
-	return str(value)
-
-
-## One table row's cells, in Column order.
-static func row_cells(row: Dictionary, ping) -> PackedStringArray:
-	return PackedStringArray([
-		String(row.get("name", "server")),
-		String(row.get("mission_name", "")),
-		String(row.get("game_type", "")),
-		"%d/%d" % [int(row.get("players", 0)), int(row.get("max_players", 0))],
-		ping_text(ping),
-		"Password" if row_is_locked(row) else "Open",
-	])
-
-
-## The filter pass. `filters` keys (all optional): `text` — case-insensitive
-## substring over name/map/mod; `game_type` — exact type ("" = all);
-## `hide_full` / `hide_empty` / `hide_locked` — the quick filters.
-static func filter_rows(rows: Array, filters: Dictionary) -> Array:
-	var text := String(filters.get("text", "")).strip_edges().to_lower()
-	var game_type := String(filters.get("game_type", "")).strip_edges()
-	var hide_full := bool(filters.get("hide_full", false))
-	var hide_empty := bool(filters.get("hide_empty", false))
-	var hide_locked := bool(filters.get("hide_locked", false))
-	var out: Array = []
-	for entry in rows:
-		var row := entry as Dictionary
-		if not text.is_empty():
-			var haystack := "%s\n%s\n%s" % [String(row.get("name", "")),
-					String(row.get("mission_name", "")), String(row.get("mod", ""))]
-			if not haystack.to_lower().contains(text):
-				continue
-		if not game_type.is_empty() \
-				and String(row.get("game_type", "")).nocasecmp_to(game_type) != 0:
-			continue
-		var players := int(row.get("players", 0))
-		if hide_full and players >= int(row.get("max_players", 0)):
-			continue
-		if hide_empty and players <= 0:
-			continue
-		if hide_locked and row_is_locked(row):
-			continue
-		out.append(row)
-	return out
-
-
-## The sort pass: PLAYERS and PING compare numerically (an unmeasured/failed
-## ping always sorts last, either direction), everything else compares
-## case-insensitively with the server name as the tiebreak.
-static func sort_rows(rows: Array, column: int, ascending: bool,
-		pings: Dictionary) -> Array:
-	var out := rows.duplicate()
-	var direction := 1 if ascending else -1
-	out.sort_custom(func(a, b) -> bool:
-		var ra := a as Dictionary
-		var rb := b as Dictionary
-		var cmp := 0
-		match column:
-			Column.PLAYERS:
-				cmp = signi(int(ra.get("players", 0)) - int(rb.get("players", 0)))
-			Column.PING:
-				var pa: Variant = pings.get(int(ra.get("rid", -1)))
-				var pb: Variant = pings.get(int(rb.get("rid", -1)))
-				var va := int(pa) if pa != null and int(pa) >= 0 else 0x7FFFFFFF
-				var vb := int(pb) if pb != null and int(pb) >= 0 else 0x7FFFFFFF
-				if va == 0x7FFFFFFF and vb == 0x7FFFFFFF:
-					cmp = 0
-				elif va == 0x7FFFFFFF or vb == 0x7FFFFFFF:
-					# Unmeasured sorts last regardless of direction.
-					return vb == 0x7FFFFFFF
-				else:
-					cmp = signi(va - vb)
-			Column.ACCESS:
-				cmp = signi(int(row_is_locked(ra)) - int(row_is_locked(rb)))
-			_:
-				var key := "name"
-				match column:
-					Column.MISSION: key = "mission_name"
-					Column.TYPE: key = "game_type"
-				cmp = String(ra.get(key, "")).nocasecmp_to(String(rb.get(key, "")))
-		if cmp == 0:
-			cmp = String(ra.get("name", "")).nocasecmp_to(String(rb.get("name", "")))
-		return cmp * direction < 0)
-	return out
-
-
-## The details pane's labeled lines for one row (empty fields are skipped).
-static func server_details_lines(row: Dictionary) -> PackedStringArray:
-	# A plain Array so the lambda appends through the captured reference
-	# (PackedStringArray is a value type and would capture as a copy).
-	var lines: Array = []
-	var push := func(label: String, value: String) -> void:
-		if not value.strip_edges().is_empty():
-			lines.append("%s: %s" % [label, value])
-	push.call("Server", String(row.get("name", "")))
-	push.call("Message", String(row.get("msg", "")))
-	push.call("Map", String(row.get("mission_name", "")))
-	push.call("Type", String(row.get("game_type", "")))
-	lines.append("Players: %d/%d" % [
-		int(row.get("players", 0)), int(row.get("max_players", 0))])
-	push.call("Mod", String(row.get("mod", "")))
-	push.call("Version", String(row.get("ver1", "")))
-	push.call("Expansion", String(row.get("exp", "")))
-	push.call("Region", String(row.get("region", "")))
-	push.call("Country", String(row.get("country", "")))
-	push.call("Time of day", String(row.get("time_of_day", "")))
-	push.call("Time left", String(row.get("time_left", "")))
-	push.call("Level range", String(row.get("level_range", "")))
-	if String(row.get("dedicated", "N")) == "Y":
-		lines.append("Dedicated server")
-	if String(row.get("pb_server", "")) == "Y":
-		lines.append("PunkBuster on")
-	if row_is_locked(row):
-		lines.append("Password protected")
-	return PackedStringArray(lines)
-
-
-# Hover details for a browser row: the locale/address fields that don't fit
-# the table cells.
-func server_row_tooltip(row: Dictionary) -> String:
-	var parts := PackedStringArray()
-	var mission := String(row.get("mission_name", ""))
-	if not mission.is_empty():
-		parts.append("Mission: %s" % mission)
-	var region := String(row.get("region", ""))
-	if not region.is_empty():
-		parts.append("Region: %s" % region)
-	var country := String(row.get("country", ""))
-	if not country.is_empty():
-		parts.append("Country: %s" % country)
-	var exp := String(row.get("exp", ""))
-	if not exp.is_empty():
-		parts.append("Expansion: %s" % exp)
-	var ip := String(row.get("ip", ""))
-	if not ip.is_empty() and ip != "0.0.0.0":
-		parts.append("Address: %s" % ip)
-	return "\n".join(parts)
 
 
 func _on_server_list_updated(_updated: Array) -> void:
@@ -694,34 +544,33 @@ func _on_server_list_failed(reason: String) -> void:
 	_show_message(reason, "Retry", Callable(self, "_retry_server_list"), Screen.LOBBY)
 
 
-# The table's selected row's backing dictionary, or {} when none is selected.
-func _selected_row() -> Dictionary:
+# The table's selected row, or null when none is selected.
+func _selected_row() -> NovaWorldServerRow:
 	if _server_tree == null:
-		return {}
+		return null
 	var item := _server_tree.get_selected()
 	if item == null:
-		return {}
-	var row: Variant = item.get_metadata(0)
-	return row if row is Dictionary else {}
+		return null
+	return item.get_metadata(0) as NovaWorldServerRow
 
 
 func _on_server_selected() -> void:
 	var row := _selected_row()
-	_join_button.disabled = row.is_empty()
+	_join_button.disabled = row == null
 	_show_details(row)
 
 
 # The details pane: the labeled facts plus the live player roster.
-func _show_details(row: Dictionary) -> void:
+func _show_details(row: NovaWorldServerRow) -> void:
 	if _details_label == null:
 		return
-	if row.is_empty():
+	if row == null:
 		_details_label.text = "Select a server for details."
 		_roster_list.clear()
 		return
-	_details_label.text = "\n".join(server_details_lines(row))
+	_details_label.text = "\n".join(NovaWorldServerBrowser.details_lines(row))
 	_roster_list.clear()
-	var roster: PackedStringArray = row.get("player_names", PackedStringArray())
+	var roster := row.player_names
 	for player in roster:
 		_roster_list.add_item(player)
 	if roster.is_empty():
@@ -794,11 +643,11 @@ func _on_join_pressed() -> void:
 	if not _logged_in:
 		return
 	var row := _selected_row()
-	if row.is_empty():
+	if row == null:
 		_show_message("Select a game before joining.", "Back to Games",
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
-	var rid := int(row.get("rid", 0))
+	var rid := row.rid
 	# Browse-time expansion advisory: warn BEFORE the join when the row's
 	# advertised expansion cannot be honored locally, instead of letting the
 	# in-match 0x7B reconcile abort the load minutes later (D-NET-178 stays the
@@ -807,11 +656,11 @@ func _on_join_pressed() -> void:
 	if expansion_advisory_blocks_first_press(row, rid):
 		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
-	_pending_mission = String(row.get("mission_name", ""))
+	_pending_mission = row.mission_name
 	# The NW handle when signed in (retail: your account name is your callsign
 	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
 	_pending_player = join_callsign()
-	_set_status("Joining %s..." % String(row.get("name", "server")))
+	_set_status("Joining %s..." % row.name)
 	_join_button.disabled = true
 	if _client != null:
 		_client.join(rid)
@@ -820,15 +669,15 @@ func _on_join_pressed() -> void:
 func _on_join_failed(reason: String) -> void:
 	if not _logged_in or _suppress_client_messages:
 		return
-	_join_button.disabled = _selected_row().is_empty()
+	_join_button.disabled = _selected_row() == null
 	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 
 
 # True only on the FIRST Join press for a row whose advertised expansion the
 # local install cannot supply (the policy's FAIL decision); sets the warning
 # status and arms the second-press override.
-func expansion_advisory_blocks_first_press(row: Dictionary, rid: int) -> bool:
-	var host_exp := String(row.get("exp", "")).strip_edges()
+func expansion_advisory_blocks_first_press(row: NovaWorldServerRow, rid: int) -> bool:
+	var host_exp := row.exp.strip_edges()
 	if host_exp.is_empty() or resource_root == null:
 		return false
 	if _exp_warning_armed and _exp_warning_armed_rid == rid:
@@ -914,7 +763,7 @@ func client_for_test() -> NovaWorldClient:
 
 ## Install a literal row set (no client) and derive the view — the browser-table
 ## test seam.
-func set_rows_for_test(rows: Array) -> void:
+func set_rows_for_test(rows: Array[NovaWorldServerRow]) -> void:
 	_rows = rows
 	_rebuild_type_filter()
 	_rebuild_view()
@@ -927,15 +776,15 @@ func set_pings_for_test(pings: Dictionary) -> void:
 
 
 ## The visible (filtered + sorted) rows, in table order.
-func visible_rows() -> Array:
+func visible_rows() -> Array[NovaWorldServerRow]:
 	return _view
 
 
 ## One visible table cell's text.
-func visible_cell(row: int, column: int) -> String:
+func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	if row < 0 or row >= _view.size():
 		return ""
-	return row_cells(_view[row], _ping_for(_view[row]))[column]
+	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
 
 
 ## Drive the filter bar (the controls, so the real signal path rebuilds).
@@ -949,7 +798,7 @@ func apply_filter_for_test(text: String, hide_full: bool, hide_empty: bool,
 
 
 ## Drive a column-header click (sort toggle).
-func click_column_for_test(column: int) -> void:
+func click_column_for_test(column: NovaWorldServerBrowser.Column) -> void:
 	_on_column_title_clicked(column, MOUSE_BUTTON_LEFT)
 
 

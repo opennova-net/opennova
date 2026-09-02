@@ -160,7 +160,7 @@ void NovaWorldClient::start() {
 		return;
 	}
 	server_info_.clear();
-	server_rows_.clear();
+	server_entries_.clear();
 	server_pings_ = Dictionary();
 	total_servers_ = 0;
 	total_players_ = 0;
@@ -222,7 +222,7 @@ void NovaWorldClient::stop() {
 	}
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
-	server_rows_.clear();
+	server_entries_.clear();
 	server_pings_ = Dictionary();
 	total_servers_ = 0;
 	total_players_ = 0;
@@ -441,8 +441,15 @@ void NovaWorldClient::sync_session_state() {
 
 // ---- Server browser (GSB over HTTP) — ADR 0010 Phase 2 ------------------
 
-Array NovaWorldClient::get_server_rows() const {
-	return server_rows_;
+TypedArray<NovaWorldServerRow> NovaWorldClient::get_server_rows() const {
+	TypedArray<NovaWorldServerRow> out;
+	for (const opennova::GsbServerEntry &entry : server_entries_) {
+		Ref<NovaWorldServerRow> row;
+		row.instantiate();
+		row->assign(entry);
+		out.push_back(row);
+	}
+	return out;
 }
 
 // ---- Lobby HTTP pump (over engine/net/novaworld LobbyHttpFlow) ----------------
@@ -536,57 +543,11 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		return;
 	}
 
-	Array rows;
-	for (const auto &s : parsed.servers) {
-		Dictionary row;
-		row["rid"] = static_cast<int64_t>(s.rid);
-		// GSB text fields are the host's cp1252 bytes, not UTF-8 (a copyright
-		// sign in a server name is one 0xA9 byte).
-		row["name"] = opennova::cp1252_to_gd(s.server_name);
-		row["game_type"] = opennova::cp1252_to_gd(s.game_type);
-		row["mission_name"] = opennova::cp1252_to_gd(s.mission_name);
-		row["players"] = s.players;
-		row["max_players"] = s.max_players;
-		row["dedicated"] = String(s.dedicated.c_str());
-		row["password"] = String(s.password.c_str());
-		row["country"] = String(s.country.c_str());
-		row["region"] = String(s.region.c_str());
-		row["time_left"] = String(s.time_left.c_str());
-		row["msg"] = opennova::cp1252_to_gd(s.msg);
-		row["age"] = String(s.age.c_str());
-		row["time_of_day"] = String(s.time_of_day.c_str());
-		row["stat"] = String(s.stat.c_str());
-		row["level_range"] = String(s.level_range.c_str());
-		row["locked"] = String(s.locked.c_str());
-		row["tracers"] = String(s.tracers.c_str());
-		row["skins"] = String(s.skins.c_str());
-		row["bb_mode"] = String(s.bb_mode.c_str());
-		row["mod"] = opennova::cp1252_to_gd(s.mod);
-		row["pix"] = String(s.pix.c_str());
-		row["pb_server"] = String(s.pb_server.c_str());
-		row["ver1"] = String(s.ver1.c_str());
-		// The host's expansion tag ("" = base game). The authoritative check
-		// stays the in-match 0x7B reconcile (D-NET-178); this is the browse-time
-		// advisory the panel warns from before a join is attempted.
-		row["exp"] = String(s.exp.c_str());
-		row["exp_bits"] = String(s.exp_bits.c_str());
-		row["joicon2"] = String(s.joicon2.c_str());
-		PackedStringArray roster;
-		for (const std::string &player : s.player_names) {
-			roster.push_back(opennova::cp1252_to_gd(player));
-		}
-		row["player_names"] = roster;
-		// Row dword1 is the host's IPv4 — retail's browser pings it on the XXXX
-		// finalize [orig: NapiGameList_StartPingSweep @ 0x63BCF0, see docs/net/novaworld-net-re.md]. The connect
-		// address is still resolved on join via the NK token (/NWJoin.dll?rid=).
-		row["ip"] = String(s.ip.c_str());
-		rows.push_back(row);
-	}
-	server_rows_ = rows;
+	server_entries_ = parsed.servers;
 	total_servers_ = parsed.total_servers;
 	total_players_ = parsed.total_players;
-	trace(String("server browser: ") + String::num_int64(rows.size()) + " server(s)");
-	emit_signal("server_list_updated", server_rows_);
+	trace(String("server browser: ") + String::num_int64(static_cast<int64_t>(server_entries_.size())) + " server(s)");
+	emit_signal("server_list_updated", get_server_rows());
 	// Retail pings every accumulated row's IPv4 on the list finalize
 	// (docs/net/novaworld-net-re.md; the semantics live in
 	// engine/net/novaworld/ping_sweep.h).
@@ -614,11 +575,8 @@ void NovaWorldClient::start_ping_sweep() {
 	// Every row goes to the sweep; the engine decides which it can drive (an
 	// unreported 0.0.0.0 host address folds to never-attempted there).
 	std::vector<std::pair<int64_t, std::string>> targets;
-	for (int i = 0; i < server_rows_.size(); ++i) {
-		const Dictionary row = server_rows_[i];
-		const String ip = row.get("ip", "");
-		targets.emplace_back(static_cast<int64_t>(int64_t(row.get("rid", 0))),
-		                     std::string(ip.utf8().get_data()));
+	for (const opennova::GsbServerEntry &entry : server_entries_) {
+		targets.emplace_back(static_cast<int64_t>(entry.rid), entry.ip);
 	}
 	if (targets.empty()) {
 		emit_signal("server_pings_updated");
