@@ -68,6 +68,9 @@ class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
 class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
+class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
+class RayDebugReport;    // the F3 rays view channel (simulation/ray_debug_report.h)
+class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlusion_portal_report.h)
 }
 
 #include "wac/wac_program.h"
@@ -1518,11 +1521,11 @@ public:
 	//   shooter_handle, ammo_index, husk, t, p0, p1, hit (Godot-space Vector3),
 	//   entity_name } ] } — oldest first, capped at RoundSim::kDebugTrailCap;
 	// every resolved outcome, face-miss fly-ons included.
-	Dictionary get_round_debug() const;
+	Ref<RoundDebugReport> get_round_debug() const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
 	// draw filter) behind the F3 "Show rays" view and Rays window; counts ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
-	Dictionary get_ray_debug() const;
+	Ref<RayDebugReport> get_ray_debug() const;
 	void set_ray_debug_recording(bool p_enabled);
 	bool is_ray_debug_recording() const;
 	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
@@ -1594,7 +1597,7 @@ public:
 	// through the SAME render_matrix_from_pose path the engine's frame runs, then
 	// mapped to Godot space. p_anchor (Godot) + p_range_units bound the sweep
 	// per horizontal axis (range <= 0 = everything), capped at 128 buildings.
-	Dictionary get_occlusion_portal_debug(const Vector3 &p_anchor, double p_range_units) const;
+	Ref<OcclusionPortalReport> get_occlusion_portal_debug(const Vector3 &p_anchor, double p_range_units) const;
 
 	// Local-player blink state (engine: runtime/world/collision.h). The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;

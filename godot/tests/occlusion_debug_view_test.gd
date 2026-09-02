@@ -21,22 +21,27 @@ static func _quad_segments(origin: Vector3) -> PackedVector3Array:
 	])
 
 
-func _payload(visible := true, origin := Vector3.ZERO) -> Dictionary:
-	return {
-		"buildings": [{
-			"bms_id": 42,
-			"pos": Vector3.ZERO,
-			"visible": visible,
-			"records": [
-				{ "type": 2, "section_a": 3, "section_b": 0,
-					"pos": origin + Vector3(0.5, 0.5, 0.0), "radius": 0.7, "glow": 0.0,
-					"segments": _quad_segments(origin) },
-				{ "type": 0, "section_a": 0, "section_b": 0,
-					"pos": origin + Vector3(2.5, 0.5, 0.0), "radius": 0.7, "glow": 0.0,
-					"segments": _quad_segments(origin + Vector3(2.0, 0.0, 0.0)) },
-			],
-		}],
-	}
+func _record(type: int, section_a: int, pos: Vector3,
+		segments: PackedVector3Array) -> OcclusionPortalRecord:
+	var record := OcclusionPortalRecord.new()
+	record.type = type
+	record.section_a = section_a
+	record.pos = pos
+	record.radius = 0.7
+	record.segments = segments
+	return record
+
+
+func _payload(visible := true, origin := Vector3.ZERO) -> OcclusionPortalReport:
+	var building := OcclusionPortalBuilding.new()
+	building.bms_id = 42
+	building.visible = visible
+	building.add_record(_record(2, 3, origin + Vector3(0.5, 0.5, 0.0), _quad_segments(origin)))
+	building.add_record(_record(0, 0, origin + Vector3(2.5, 0.5, 0.0),
+			_quad_segments(origin + Vector3(2.0, 0.0, 0.0))))
+	var report := OcclusionPortalReport.new()
+	report.add_building(building)
+	return report
 
 
 func _make_view() -> Node3D:

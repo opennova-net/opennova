@@ -2066,19 +2066,16 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			"a local-owned round starts through the rendered mounted head")
 	for _tick in range(2):
 		sim.step()
-	var events: Array = sim.get_round_debug().get("events", [])
-	var hit_event: Dictionary = {}
-	for value in events:
-		var event: Dictionary = value
-		if int(event.get("entity_handle", -1)) == enemy_handle \
-				and String(event.get("kind_name", "")) == "organic":
+	var hit_event: RoundDebugEvent = null
+	for event: RoundDebugEvent in sim.get_round_debug().events:
+		if event.entity_handle == enemy_handle and event.kind_name == "organic":
 			hit_event = event
-	assert_false(hit_event.is_empty(),
+	assert_not_null(hit_event,
 			"the authoritative shot resolves against the rendered mounted target")
-	if not hit_event.is_empty():
-		assert_eq(int(hit_event.get("section", -1)), 14,
+	if hit_event != null:
+		assert_eq(hit_event.section, 14,
 				"the primary posed-hit section remains authoritative")
-		assert_false(bool(hit_event.get("fallback", true)))
+		assert_false(hit_event.fallback)
 	var impacts := sim.drain_round_impacts()
 	assert_eq(impacts.size(), 1)
 	if impacts.size() == 1:

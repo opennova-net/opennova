@@ -56,8 +56,8 @@ func _refresh_from_sim(sim: Simulation) -> void:
 ## Render one round snapshot (Simulation.get_round_debug's shape). Split from
 ## the sim fetch so tests and probes can drive the view with report data
 ## directly.
-func render_report(debug: Dictionary) -> void:
-	_update(debug.get("events", []))
+func render_report(debug: RoundDebugReport) -> void:
+	_update(debug.events if debug != null else [])
 
 
 func _clear_all() -> void:
@@ -79,9 +79,9 @@ func _update(events: Array) -> void:
 	# change signature.
 	var sig_parts := [events.size()]
 	if not events.is_empty():
-		var newest: Dictionary = events[events.size() - 1]
-		sig_parts.append(newest.get("tick", 0))
-		sig_parts.append(newest.get("hit", Vector3.ZERO))
+		var newest: RoundDebugEvent = events[events.size() - 1]
+		sig_parts.append(newest.tick)
+		sig_parts.append(newest.hit)
 	var sig := hash(sig_parts)
 	if sig == _signature:
 		return
@@ -95,12 +95,12 @@ func _update(events: Array) -> void:
 
 	var segments: Array = []
 	for i in range(events.size()):
-		var ev: Dictionary = events[i]
-		var kind := int(ev.get("kind", 4))
+		var ev: RoundDebugEvent = events[i]
+		var kind := ev.kind
 		var color := kind_color(kind)
-		var p0: Vector3 = ev.get("p0", Vector3.ZERO)
-		var p1: Vector3 = ev.get("p1", Vector3.ZERO)
-		var hit: Vector3 = ev.get("hit", Vector3.ZERO)
+		var p0: Vector3 = ev.p0
+		var p1: Vector3 = ev.p1
+		var hit: Vector3 = ev.hit
 		var seg_color := Color(color, SEGMENT_DIM)
 		# The tick's flight segment, then the resolved stop (or graze point for
 		# a face miss -- where the sphere said "maybe" and the faces said no).
@@ -115,48 +115,48 @@ func _update(events: Array) -> void:
 	var label_i := 0
 	var i2 := events.size() - 1
 	while i2 >= 0 and label_i < _labels.size():
-		var ev2: Dictionary = events[i2]
+		var ev2: RoundDebugEvent = events[i2]
 		var lb := _labels[label_i]
 		lb.visible = true
-		lb.position = (ev2.get("hit", Vector3.ZERO) as Vector3) + Vector3(0.0, 0.4, 0.0)
-		lb.modulate = kind_color(int(ev2.get("kind", 4)))
+		lb.position = ev2.hit + Vector3(0.0, 0.4, 0.0)
+		lb.modulate = kind_color(ev2.kind)
 		lb.text = describe_event(ev2)
 		label_i += 1
 		i2 -= 1
 
 
-static func describe_event(ev: Dictionary) -> String:
-	var kind := int(ev.get("kind", 4))
-	var line := String(ev.get("kind_name", "?"))
+static func describe_event(ev: RoundDebugEvent) -> String:
+	var kind := ev.kind
+	var line := ev.kind_name
 	# The "no local record" sentinel (world/entity.h EntityHandle::kInvalid).
-	var ent := int(ev.get("entity_handle", Simulation.INVALID_WIRE_HANDLE))
+	var ent := ev.entity_handle
 	if ent != Simulation.INVALID_WIRE_HANDLE:
-		var name := String(ev.get("entity_name", ""))
+		var name := ev.entity_name
 		line += "  ent %s%s" % [WireHandle.label(ent),
 				("  " + name) if not name.is_empty() else ""]
-	if bool(ev.get("husk", false)):
+	if ev.husk:
 		line += "  HUSK"
 	match kind:
 		0:
-			var primary := int(ev.get("section", -1))
-			var secondary := int(ev.get("secondary_section", -1))
-			if bool(ev.get("fallback", false)):
+			var primary := ev.section
+			var secondary := ev.secondary_section
+			if ev.fallback:
 				line += "\nneutral fallback sphere  reaction stand-in %d  mat %d -> %s" % [
-						primary, int(ev.get("material", 0)),
-						String(ev.get("effect_tag_name", ""))]
+						primary, ev.material,
+						ev.effect_tag_name]
 			else:
 				var secondary_text := "-" if secondary < 0 else str(secondary)
 				line += "\nreaction bone %d  damage zone %s  mat %d -> %s" % [
-						primary, secondary_text, int(ev.get("material", 0)),
-						String(ev.get("effect_tag_name", ""))]
+						primary, secondary_text, ev.material,
+						ev.effect_tag_name]
 		1:
-			line += "\nsec %d face %d  mat %d -> %s" % [int(ev.get("section", -1)),
-					int(ev.get("face", -1)), int(ev.get("material", 0)),
-					String(ev.get("effect_tag_name", ""))]
+			line += "\nsec %d face %d  mat %d -> %s" % [ev.section,
+					ev.face, ev.material,
+					ev.effect_tag_name]
 		2:
-			line += "\nsphere stand-in -> %s" % String(ev.get("effect_tag_name", ""))
+			line += "\nsphere stand-in -> %s" % ev.effect_tag_name
 		5:
-			line += "\ngraze t %.3f -- no face crossed" % float(ev.get("t", 0.0))
+			line += "\ngraze t %.3f -- no face crossed" % ev.t
 		_:
 			pass
 	return line

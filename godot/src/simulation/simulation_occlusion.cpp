@@ -3,6 +3,9 @@
 // dictionaries + debug round spawn).
 #include "simulation/simulation_internal.h"
 #include "simulation/hitbox_debug_report.h"
+#include "simulation/occlusion_portal_report.h"
+#include "simulation/ray_debug_report.h"
+#include "simulation/round_debug_report.h"
 
 #include <net/netsim/connection_fan.h>
 #include <runtime/world/occlusion_feed.h>
@@ -1121,10 +1124,9 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	return out;
 }
 
-Dictionary Simulation::get_round_debug() const {
-	Dictionary out;
-	Array events;
-	out["events"] = events;
+Ref<RoundDebugReport> Simulation::get_round_debug() const {
+	Ref<RoundDebugReport> out;
+	out.instantiate();
 	if (!kernel_) return out;
 	const opennova::world::RoundSim &rs = kernel_->world.round_sim;
 	static const char *const kKindNames[] = {"organic", "item face", "item sphere",
@@ -1136,28 +1138,29 @@ Dictionary Simulation::get_round_debug() const {
 	for (int i = 0; i < count; ++i, idx = (idx + 1) % opennova::world::RoundSim::kDebugTrailCap) {
 		const opennova::world::RoundDebugEvent &ev =
 		    rs.debug_trail[static_cast<size_t>(idx)];
-		Dictionary d;
-		d["tick"] = static_cast<int64_t>(ev.tick);
-		d["kind"] = static_cast<int>(ev.kind);
-		d["kind_name"] = String(ev.kind <= 5 ? kKindNames[ev.kind] : "?");
-		d["material"] = static_cast<int>(ev.material);
-		d["section"] = static_cast<int>(ev.section);
-		d["secondary_section"] = static_cast<int>(ev.secondary_section);
-		d["fallback"] = ev.organic_fallback;
-		d["face"] = static_cast<int>(ev.face);
-		d["effect_tag"] = ev.effect_tag;
-		d["effect_tag_name"] =
+		Ref<RoundDebugEvent> d;
+		d.instantiate();
+		d->set_tick(static_cast<int64_t>(ev.tick));
+		d->set_kind(static_cast<int>(ev.kind));
+		d->set_kind_name(String(ev.kind <= 5 ? kKindNames[ev.kind] : "?"));
+		d->set_material(static_cast<int>(ev.material));
+		d->set_section(static_cast<int>(ev.section));
+		d->set_secondary_section(static_cast<int>(ev.secondary_section));
+		d->set_fallback(ev.organic_fallback);
+		d->set_face(static_cast<int>(ev.face));
+		d->set_effect_tag(ev.effect_tag);
+		d->set_effect_tag_name(
 		    (ev.effect_tag >= 0 && ev.effect_tag < opennova::world::kImpactEffectTagCount)
 		        ? String(opennova::world::kImpactEffectTagNames[ev.effect_tag])
-		        : String("");
-		d["entity_handle"] = static_cast<int>(ev.entity);
-		d["shooter_handle"] = static_cast<int>(ev.shooter);
-		d["ammo_index"] = ev.ammo_index;
-		d["husk"] = ev.husk;
-		d["t"] = ev.t;
-		d["p0"] = mission_to_godot(ev.p0);
-		d["p1"] = mission_to_godot(ev.p1);
-		d["hit"] = mission_to_godot(ev.hit);
+		        : String(""));
+		d->set_entity_handle(static_cast<int>(ev.entity));
+		d->set_shooter_handle(static_cast<int>(ev.shooter));
+		d->set_ammo_index(ev.ammo_index);
+		d->set_husk(ev.husk);
+		d->set_t(ev.t);
+		d->set_p0(mission_to_godot(ev.p0));
+		d->set_p1(mission_to_godot(ev.p1));
+		d->set_hit(mission_to_godot(ev.hit));
 		// The struck entity's item name when it still resolves (wrecks keep
 		// their slot until cleanup) — display sugar for the F3 list.
 		String label;
@@ -1165,10 +1168,10 @@ Dictionary Simulation::get_round_debug() const {
 		    kernel_->world.registry.get(opennova::world::EntityHandle{ev.entity});
 		if (te != nullptr && !te->name.empty())
 			label = String(te->name.c_str());
-		d["entity_name"] = label;
-		events.push_back(d);
+		d->set_entity_name(label);
+		out->add_event(d);
 	}
-	out["tick"] = static_cast<int64_t>(kernel_->world.logic_tick);
+	out->set_tick(static_cast<int64_t>(kernel_->world.logic_tick));
 	return out;
 }
 
@@ -1179,37 +1182,29 @@ Dictionary Simulation::get_round_debug() const {
 // engine-held category mask and TTL, oldest first per category; counts:
 // [ { name, held, total } ] (all categories, unfiltered); mask, ttl,
 // recording }. Empty-but-shaped without a world.
-Dictionary Simulation::get_ray_debug() const {
+Ref<RayDebugReport> Simulation::get_ray_debug() const {
 	using CW = opennova::world::CollisionWorld;
-	Dictionary out;
-	out["stride"] = 12;
-	out["events"] = PackedFloat32Array();
-	out["counts"] = Array();
-	out["mask"] = static_cast<int64_t>(CW::kRayDebugMaskAll);
-	out["ttl"] = 93;
-	out["recording"] = false;
-	out["tick"] = 0;
+	static_assert(RayDebugReport::kStride == 12, "the rays view reads stride-12 events");
+	Ref<RayDebugReport> out;
+	out.instantiate();
+	out->set_mask(static_cast<int64_t>(CW::kRayDebugMaskAll));
 	if (!kernel_) return out;
 	const CW &collision = kernel_->collision;
 	const uint32_t now = kernel_->world.logic_tick;
 	const uint32_t mask = collision.ray_debug_mask();
 	const int32_t ttl = collision.ray_debug_ttl_ticks();
-	out["tick"] = static_cast<int64_t>(now);
-	out["mask"] = static_cast<int64_t>(mask);
-	out["ttl"] = static_cast<int64_t>(ttl);
-	out["recording"] = collision.ray_debug_enabled();
+	out->set_tick(static_cast<int64_t>(now));
+	out->set_mask(static_cast<int64_t>(mask));
+	out->set_ttl(static_cast<int64_t>(ttl));
+	out->set_recording(collision.ray_debug_enabled());
 
-	Array counts;
 	PackedFloat32Array events;
 	const auto &rings = collision.ray_debug_rings();
 	for (size_t c = 0; c < rings.size(); ++c) {
 		const CW::RayDebugRing &ring = rings[c];
-		Dictionary count;
-		count["name"] = String(CW::ray_debug_category_name(
-				static_cast<CW::RayDebugCategory>(c)));
-		count["held"] = static_cast<int64_t>(ring.count);
-		count["total"] = static_cast<int64_t>(ring.total);
-		counts.push_back(count);
+		out->add_count(RayDebugCount::make(
+				String(CW::ray_debug_category_name(static_cast<CW::RayDebugCategory>(c))),
+				static_cast<int64_t>(ring.count), static_cast<int64_t>(ring.total)));
 		if ((mask & (1u << c)) == 0) continue;
 		if (ring.count <= 0) continue;
 		// Oldest -> newest so the view draws newest-last (brightest).
@@ -1240,8 +1235,7 @@ Dictionary Simulation::get_ray_debug() const {
 			events.push_back(hg.z);
 		}
 	}
-	out["events"] = events;
-	out["counts"] = counts;
+	out->set_events(events);
 	return out;
 }
 
@@ -1354,11 +1348,10 @@ bool Simulation::native_physics_snapshot(opennova::devtools::PhysicsSnapshot &ou
 	return true;
 }
 
-Dictionary Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
-                                                      double p_range_units) const {
-	Dictionary out;
-	Array buildings;
-	out["buildings"] = buildings;
+Ref<OcclusionPortalReport> Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
+                                                                      double p_range_units) const {
+	Ref<OcclusionPortalReport> out;
+	out.instantiate();
 	if (!kernel_) return out;
 	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
 	const int64_t anchor_x = opennova::world::to_fixed(p_anchor.x);
@@ -1367,7 +1360,7 @@ Dictionary Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
 	    p_range_units > 0.0 ? static_cast<int64_t>(p_range_units * kFixed16) : -1;
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building) return;
-		if (buildings.size() >= 128) return;
+		if (out->get_buildings().size() >= 128) return;
 		const opennova::world::OcclusionModel *m =
 		    kernel_->occlusion.model(kernel_->occlusion.instance_model_id(e.handle));
 		if (m == nullptr) return;
@@ -1380,21 +1373,22 @@ Dictionary Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
 		// The same full authored building-pose path the engine's frame uses.
 		const opennova::world::RenderMatrix mat =
 		    opennova::world::render_matrix_from_entity_pose(e);
-		Dictionary b;
-		b["bms_id"] = e.bms_id;
-		b["pos"] = godot_from_fixed3(pos_fixed);
-		b["visible"] = kernel_->occlusion.building_visible(e.handle);
-		Array records;
+		Ref<OcclusionPortalBuilding> b;
+		b.instantiate();
+		b->set_bms_id(e.bms_id);
+		b->set_pos(godot_from_fixed3(pos_fixed));
+		b->set_visible(kernel_->occlusion.building_visible(e.handle));
 		for (const opennova::world::OcclusionPortalFace &rec : m->records) {
-			Dictionary rd;
-			rd["type"] = static_cast<int>(rec.type);
-			rd["section_a"] = static_cast<int>(rec.section_a);
-			rd["section_b"] = static_cast<int>(rec.section_b);
+			Ref<OcclusionPortalRecord> rd;
+			rd.instantiate();
+			rd->set_type(static_cast<int>(rec.type));
+			rd->set_section_a(static_cast<int>(rec.section_a));
+			rd->set_section_b(static_cast<int>(rec.section_b));
 			float wp[3];
 			mat.transform_point(rec.pos, wp);
-			rd["pos"] = godot_from_render_float3(wp);
-			rd["radius"] = rec.radius;
-			rd["glow"] = rec.glow_scale;
+			rd->set_pos(godot_from_render_float3(wp));
+			rd->set_radius(rec.radius);
+			rd->set_glow(rec.glow_scale);
 			// The record's boundary outline: OFAC edge words whose low-15-bit
 			// identity appears once (shared interior edges pair up and drop —
 			// the same cancellation identity the occluder pass uses).
@@ -1430,11 +1424,10 @@ Dictionary Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,
 				segments.push_back(godot_from_render_float3(aw));
 				segments.push_back(godot_from_render_float3(bw));
 			}
-			rd["segments"] = segments;
-			records.push_back(rd);
+			rd->set_segments(segments);
+			b->add_record(rd);
 		}
-		b["records"] = records;
-		buildings.push_back(b);
+		out->add_building(b);
 	});
 	return out;
 }

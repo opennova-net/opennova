@@ -57,12 +57,14 @@ func _refresh_from_sim(sim: Simulation) -> void:
 
 ## Render one ray snapshot (Simulation.get_ray_debug's shape). Split from the
 ## sim fetch so tests and probes can drive the view with report data directly.
-func render_report(report: Dictionary) -> void:
-	var events: PackedFloat32Array = report.get("events", PackedFloat32Array())
-	var ttl := maxi(1, int(report.get("ttl", 93)))
+func render_report(report: RayDebugReport) -> void:
+	if report == null:
+		report = RayDebugReport.new()
+	var events := report.events
+	var ttl := maxi(1, report.ttl)
 	# Ages shift every tick while recording, so the tick + payload size is the
 	# change signature (a paused world stops rebuilding).
-	var sig := hash([int(report.get("tick", 0)), events.size()])
+	var sig := hash([report.tick, events.size()])
 	if sig == _signature:
 		return
 	_signature = sig
