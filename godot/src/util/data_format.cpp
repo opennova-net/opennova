@@ -9,6 +9,16 @@
 
 using namespace godot;
 
+PackedByteArray godot::to_packed_bytes(const uint8_t *p_data, size_t p_size) {
+	PackedByteArray out;
+	if (p_data == nullptr || p_size == 0) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(p_size));
+	std::memcpy(out.ptrw(), p_data, p_size);
+	return out;
+}
+
 bool godot::decode_nova_payload_bytes(PackedByteArray &p_bytes) {
 	std::vector<uint8_t> bytes(static_cast<size_t>(p_bytes.size()));
 	if (!bytes.empty()) {
@@ -17,10 +27,7 @@ bool godot::decode_nova_payload_bytes(PackedByteArray &p_bytes) {
 	if (!opennova::vfs_decode_payload(bytes)) {
 		return false;
 	}
-	p_bytes.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(p_bytes.ptrw(), bytes.data(), bytes.size());
-	}
+	p_bytes = to_packed_bytes(bytes);
 	return true;
 }
 

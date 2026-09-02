@@ -179,12 +179,7 @@ Error TerrainTileInfo::save_to_path(const String &p_path) const {
 	if (file.is_null()) {
 		return ERR_FILE_CANT_WRITE;
 	}
-	PackedByteArray packed;
-	packed.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
-	}
-	file->store_buffer(packed);
+	file->store_buffer(to_packed_bytes(bytes));
 	file->close();
 	return OK;
 }

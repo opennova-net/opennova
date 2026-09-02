@@ -1,4 +1,5 @@
 #include "mnu/mns_stylesheet.h"
+#include "util/data_format.h"
 
 #include "util/string_convert.h"
 
@@ -255,12 +256,7 @@ Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
 
 PackedByteArray MnsStyleSheet::to_byte_array() const {
 	const std::vector<uint8_t> bytes = doc_.serialize();
-	PackedByteArray out;
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error MnsStyleSheet::load_from_path(const String &p_path) {

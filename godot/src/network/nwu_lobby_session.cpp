@@ -1,4 +1,5 @@
 #include "network/nwu_lobby_session.h"
+#include "util/data_format.h"
 
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_probe.h>
@@ -10,15 +11,6 @@
 namespace godot {
 
 namespace {
-
-PackedByteArray to_pba(const std::vector<uint8_t> &v) {
-	PackedByteArray out;
-	out.resize(static_cast<int>(v.size()));
-	if (!v.empty()) {
-		std::memcpy(out.ptrw(), v.data(), v.size());
-	}
-	return out;
-}
 
 std::vector<uint8_t> from_pba(const PackedByteArray &pba) {
 	std::vector<uint8_t> out(pba.size());
@@ -80,7 +72,7 @@ void NwuLobbySession::probe(const String &gate_host, int gate_port) {
 	}
 	packet.resize(out_size);
 	gate_socket_->set_dest_address(gate_host_, gate_port_);
-	gate_socket_->put_packet(to_pba(packet));
+	gate_socket_->put_packet(to_packed_bytes(packet));
 }
 
 void NwuLobbySession::close() {
@@ -211,7 +203,7 @@ void NwuLobbySession::begin_session() {
 void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 	if (!nw_socket_.is_valid() || dg.empty()) return;
 	nw_socket_->set_dest_address(nw_udp_host_, nw_udp_port_);
-	nw_socket_->put_packet(to_pba(dg));
+	nw_socket_->put_packet(to_packed_bytes(dg));
 	if (hooks_.on_sent) hooks_.on_sent(dg);
 }
 

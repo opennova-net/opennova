@@ -1,4 +1,5 @@
 #include "mnu/mnu_document.h"
+#include "util/data_format.h"
 
 #include "util/string_convert.h"
 
@@ -693,12 +694,7 @@ PackedByteArray MnuDocument::to_byte_array() const {
 		UtilityFunctions::push_warning(String("MnuDocument::to_byte_array: ") + to_gd(error));
 		return PackedByteArray();
 	}
-	PackedByteArray out;
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error MnuDocument::load_from_path(const String &p_path) {

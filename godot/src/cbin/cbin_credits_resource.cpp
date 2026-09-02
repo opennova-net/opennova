@@ -1015,12 +1015,7 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 		UtilityFunctions::push_warning("CbinCreditsResource: cannot open for writing: ", p_path);
 		return ERR_CANT_OPEN;
 	}
-	PackedByteArray byte_array;
-	byte_array.resize(static_cast<int64_t>(data.size()));
-	if (!data.empty()) {
-		std::memcpy(byte_array.ptrw(), data.data(), data.size());
-	}
-	file->store_buffer(byte_array);
+	file->store_buffer(to_packed_bytes(data));
 	file->close();
 	return OK;
 }

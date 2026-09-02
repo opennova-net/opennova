@@ -54,6 +54,8 @@ bool is_valid_utf8(const std::string &s) {
 	return true;
 }
 
+// NOT util/string_convert.h's to_gd/to_std: these two are cp1252-aware (the
+// retail text falls back to the single-byte codepage), a different contract.
 String std_to_gd(const std::string &s) {
 	if (is_valid_utf8(s)) {
 		return String::utf8(s.c_str(), static_cast<int>(s.length()));
@@ -269,11 +271,7 @@ PackedByteArray RtxtStringFile::to_byte_array() const {
 		UtilityFunctions::push_warning("RtxtStringFile: serialize failed: ", error.c_str());
 		return out;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error RtxtStringFile::load_from_byte_array(const PackedByteArray &p_bytes) {
@@ -335,9 +333,7 @@ Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &
 	opennova::mission::resolve_mission_text(files,
 			std::string(mission_file_basename.utf8().get_data()), bytes);
 	if (bytes.empty()) return Ref<RtxtStringFile>();
-	PackedByteArray packed;
-	packed.resize(static_cast<int64_t>(bytes.size()));
-	std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
+	const PackedByteArray packed = to_packed_bytes(bytes);
 	Ref<RtxtStringFile> table;
 	table.instantiate();
 	if (table->load_from_byte_array(packed) != OK) return Ref<RtxtStringFile>();

@@ -1,4 +1,5 @@
 #include "pff/pff_document.h"
+#include "util/data_format.h"
 
 #include <base/vfs/pack_policy.h>
 
@@ -342,11 +343,7 @@ PackedByteArray PffDocument::read_entry(const String &name, bool decode) const {
 		last_error_ = "Failed to read or decode: " + name;
 		return out;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error PffDocument::extract_to(const String &name, const String &out_path, bool decode) const {

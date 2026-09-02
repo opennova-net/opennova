@@ -1,4 +1,5 @@
 #include "resource_index/resource_root.h"
+#include "util/data_format.h"
 
 #include "cbin/cbin_asset_lookup.h"
 #include "fnt/fnt_resource.h"
@@ -444,11 +445,7 @@ PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy)
 	if (!found) {
 		return out;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy policy) const {
