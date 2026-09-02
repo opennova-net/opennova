@@ -36,7 +36,7 @@ func _refresh_from_sim(sim: Simulation) -> void:
 	var live_positions := {}
 	if _pick_list != null:
 		for pick_v in _pick_list.get_picks():
-			var net_id := int((pick_v as Dictionary).get("net_id", 0))
+			var net_id := (pick_v as DebugPickCard).net_id
 			if net_id <= 0 or live_positions.has(net_id):
 				continue
 			# Movers re-resolve so the highlight follows the live entity.
@@ -60,16 +60,16 @@ func render_picks(live_positions: Dictionary) -> void:
 		return
 	var segments: Array = []
 	for i in range(mini(picks.size(), _labels.size())):
-		var pick: Dictionary = picks[i]
+		var pick: DebugPickCard = picks[i]
 		var color := Color.from_hsv(IndexHue.hue_for_index(i), 0.75, 1.0)
-		var origin: Vector3 = pick.get("position_godot", Vector3.ZERO)
-		var net_id := int(pick.get("net_id", 0))
+		var origin: Vector3 = pick.position_godot
+		var net_id := pick.net_id
 		if net_id > 0 and live_positions.has(net_id):
 			origin = live_positions[net_id]
-		var radius := maxf(float(pick.get("bound_radius", 0.0)), 0.75)
+		var radius := maxf(pick.bound_radius, 0.75)
 		_diamond(segments, origin, radius, color)
 		_cross(segments, origin, 0.3, color)
-		_cross(segments, pick.get("hit_position_godot", Vector3.ZERO), 0.18,
+		_cross(segments, pick.hit_position_godot, 0.18,
 				Color(color, 0.7))
 		var lb := _labels[i]
 		lb.visible = true
@@ -86,11 +86,11 @@ func _clear_all() -> void:
 		lb.visible = false
 
 
-static func describe_pick(pick: Dictionary) -> String:
-	var name := String(pick.get("name", ""))
-	var line := name if not name.is_empty() else String(pick.get("hit_class", "entity"))
-	var bms_id := int(pick.get("bms_id", 0))
+static func describe_pick(pick: DebugPickCard) -> String:
+	var name := pick.name
+	var line := name if not name.is_empty() else pick.hit_class
+	var bms_id := pick.bms_id
 	if bms_id != 0:
 		line += "  #%d" % bms_id
-	line += "  (%d:%d)" % [int(pick.get("kind", -1)), int(pick.get("index", -1))]
+	line += "  (%d:%d)" % [pick.kind, pick.index]
 	return line

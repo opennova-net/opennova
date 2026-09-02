@@ -46,7 +46,7 @@ func handle_click(event: InputEvent) -> void:
 	last_pick_position = button.position
 	var pick := DebugEntityPicker.pick_with_camera(
 			_world.get_sim(), camera, button.position, "mouse_click")
-	if pick.is_empty():
+	if pick == null:
 		return
 	_pick_list.add(pick)
 	viewport.set_input_as_handled()

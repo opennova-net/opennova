@@ -917,10 +917,10 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 			"dev tools open: world clicks ray-pick")
 	var pick_sim = runtime.get_sim()
 	var player_pos: Vector3 = pick_sim.get_local_player_position()
-	var down: Dictionary = pick_sim.debug_pick_entity(
+	var down: DebugPickCard = pick_sim.debug_pick_entity(
 			player_pos + Vector3(0, 20, 0), Vector3.DOWN, 100.0)
-	assert_false(bool(down.get("hit", true)))
-	assert_eq(String(down.get("blocked", "")), "terrain",
+	assert_false(down.hit)
+	assert_eq(down.blocked, "terrain",
 			"terrain blocks the pick exactly like a bullet")
 	_shell.pick_at_crosshair()
 	assert_not_null(_shell.find_child("PickToast", true, false),
