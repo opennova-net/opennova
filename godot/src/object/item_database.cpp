@@ -564,35 +564,24 @@ PackedInt32Array ItemDatabase::get_item_ids() const {
 	return out;
 }
 
-Dictionary ItemDatabase::extract_seat_specs_for_item(
+Ref<ItemSeatCard> ItemDatabase::extract_seat_specs_for_item(
 		const Ref<ResourceRoot> &p_root, int p_item_id) {
-	Dictionary out;
-	out["item_id"] = p_item_id;
-	out["type_id"] =
+	Ref<ItemSeatCard> out;
+	out.instantiate();
+	const int32_t type_id =
 			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
-	out["display_name"] = String();
-	out["graphic"] = String();
-	out["model"] = String();
-	out["seats"] = Array();
-	out["armory_points"] = Array();
-	out["emplacement_attachments"] = Array();
-	out["primary_weapon"] = String();
-	out["mount_config_valid"] = false;
-	out["mount_config"] = 0;
-	out["error"] = String();
+	out->set_identity(p_item_id, type_id);
 	if (p_root.is_null()) {
-		out["error"] = "missing_resource_root_or_item_db";
+		out->set_error("missing_resource_root_or_item_db");
 		return out;
 	}
 	if (!has_item(p_item_id)) {
-		out["error"] = "item_not_found";
+		out->set_error("item_not_found");
 		return out;
 	}
 	const String graphic = get_graphic(p_item_id);
-	out["display_name"] = get_display_name(p_item_id);
-	out["graphic"] = graphic;
-	if (!graphic.is_empty())
-		out["model"] = graphic.get_file().get_basename() + ".3di";
+	out->set_model(get_display_name(p_item_id), graphic,
+			graphic.is_empty() ? String() : graphic.get_file().get_basename() + ".3di");
 
 	opennova::simassets::SimModelCache models;
 	models.set_index(&p_root->native_index());
@@ -601,57 +590,9 @@ Dictionary ItemDatabase::extract_seat_specs_for_item(
 			native_items(),
 			[&models](const std::string &key) { return models.model_for(key); },
 			{p_item_id}, native);
-	const int32_t type_id =
-			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
-	const opennova::mission::ItemSeatSpec *spec = nullptr;
-	for (const opennova::mission::ItemSeatSpec &candidate : native.specs) {
-		if (candidate.type_id == type_id) {
-			spec = &candidate;
-			break;
-		}
-	}
-	if (spec == nullptr) return out; // no runtime metadata — an empty card
-
-	static const char *kSeatTypeLabels[] = {
-			"none", "passenger", "controller", "gunner", "armory", "driver"};
-	Array seats;
-	for (const opennova::world::Seat &seat : spec->seats) {
-		Dictionary row;
-		const int seat_type = static_cast<int>(seat.type);
-		row["type"] = seat_type;
-		constexpr int kSeatTypeLabelCount =
-				static_cast<int>(sizeof(kSeatTypeLabels) / sizeof(kSeatTypeLabels[0]));
-		row["type_label"] = seat_type >= 0 && seat_type < kSeatTypeLabelCount
-				? String(kSeatTypeLabels[seat_type])
-				: String("none");
-		row["retail_slot"] = seat.retail_slot;
-		row["bone_index"] = seat.bone_index;
-		row["pose_index"] = seat.pose_index;
-		row["yaw_offset"] = seat.yaw_offset;
-		row["local"] = Vector3(seat.seat_local.x, seat.seat_local.y,
-				seat.seat_local.z);
-		row["source_name"] = String(seat.source_name.c_str());
-		row["occupied"] = false;
-		seats.push_back(row);
-	}
-	out["seats"] = seats;
-	Array armory;
-	for (const opennova::world::Vec3 &p : spec->armory_points)
-		armory.push_back(Vector3(p.x, p.y, p.z));
-	out["armory_points"] = armory;
-	Array attachments;
-	for (const opennova::mission::ItemEmplacementAttachmentSpec &attachment :
-			spec->emplacement_attachments) {
-		Dictionary row;
-		row["child_type_id"] = attachment.child_type_id;
-		row["item_id"] = attachment.child_type_id +
-				static_cast<int>(opennova::mission::kItemIdOffset);
-		row["anchor_found"] = attachment.anchor_found;
-		attachments.push_back(row);
-	}
-	out["emplacement_attachments"] = attachments;
-	out["primary_weapon"] = String(spec->primary_weapon.c_str());
-	out["mount_config_valid"] = spec->mount_config_valid;
-	out["mount_config"] = spec->mount_config;
+	const opennova::mission::ItemSeatSpec *spec =
+			opennova::simassets::item_seat_spec_for_type(native.specs,
+					static_cast<uint16_t>(type_id));
+	if (spec != nullptr) out->assign_spec(*spec); // else: no runtime metadata — an empty card
 	return out;
 }

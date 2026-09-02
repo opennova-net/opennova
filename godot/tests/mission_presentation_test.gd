@@ -85,20 +85,22 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth"))
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(String(spec.get("error", "")), "")
-	var seats: Array = spec.get("seats", []) as Array
+	assert_eq(spec.error, "")
+	var seats := spec.get_seats()
 	assert_eq(seats.size(), 1,
 			"the witnessed mount target contributes exactly its Usegun seat")
 	if seats.size() == 1:
-		assert_eq(String((seats[0] as Dictionary).get("source_name", "")), "Usegun")
-		assert_eq(int((seats[0] as Dictionary).get("bone_index", 0)), 6,
+		var seat: EntityCardSeat = seats[0]
+		assert_eq(seat.get_source_name(), "Usegun")
+		assert_eq(seat.get_bone_index(), 6,
 				"the wire byte is the 1-based USRP table row, not a seat ordinal")
-		assert_eq(int((seats[0] as Dictionary).get("type", 0)), 3)
-		assert_eq(int((seats[0] as Dictionary).get("retail_slot", -1)), 9,
+		assert_eq(seat.get_type(), 3)
+		assert_eq(seat.get_retail_slot(), 9,
 				"UseGun occupies fixed retail mountHandles slot 9")
-	assert_true(bool(spec.get("mount_config_valid", false)),
+		assert_false(seat.is_occupied(), "a def-level seat row is static data")
+	assert_true(spec.is_mount_config_valid(),
 			"authored phrase_set marks target config valid")
-	assert_eq(int(spec.get("mount_config", -1)), 4,
+	assert_eq(spec.mount_config, 4,
 			"target itemDef+0x86c phrase_set reaches the production seat spec")
 
 
@@ -123,13 +125,13 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	# The metadata the install extracted, via the tooling card over the same
 	# native extractor (ItemDatabase.extract_seat_specs_for_item).
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq(int(spec.get("item_id", 0)), 101419,
+	assert_eq(spec.item_id, 101419,
 			"the wire type maps back into the items.def id space")
-	assert_eq(int(spec.get("type_id", 0)), 1419)
-	assert_eq((spec.get("seats", []) as Array).size(), 1,
+	assert_eq(spec.type_id, 1419)
+	assert_eq(spec.get_seats().size(), 1,
 			"the late join path resolves the model's UseGun seat")
-	assert_true(bool(spec.get("mount_config_valid", false)))
-	assert_eq(int(spec.get("mount_config", -1)), 4)
+	assert_true(spec.is_mount_config_valid())
+	assert_eq(spec.mount_config, 4)
 
 
 class FireAudioStub:

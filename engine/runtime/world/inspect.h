@@ -39,6 +39,10 @@ struct SeatRow {
 	bool occupied = false;
 };
 
+// One seat as a row: `index` is its slot in the owning table (-1 for a
+// def-level seat spec that has no live table yet).
+SeatRow seat_row(const Seat &seat, int32_t index);
+
 // The registry/world half of a card — the field set the old
 // get_world_entity_debug Dictionary carried, engine-space.
 struct WorldDetail {

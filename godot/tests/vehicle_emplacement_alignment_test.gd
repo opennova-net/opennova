@@ -178,9 +178,8 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 						* Vector3.BACK).normalized(),
 			})
 
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, CARRIER_ITEM_ID)
-	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 2)
+	var carrier_card := item_db.extract_seat_specs_for_item(root, CARRIER_ITEM_ID)
+	assert_eq(carrier_card.get_emplacement_attachments().size(), 2)
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
 	var sim := Simulation.new()
@@ -234,9 +233,8 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, MRK5_ITEM_ID)
-	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 4,
+	var carrier_card := item_db.extract_seat_specs_for_item(root, MRK5_ITEM_ID)
+	assert_eq(carrier_card.get_emplacement_attachments().size(), 4,
 			"the shipped MRK5 has four attachment anchors")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, MRK5_GRAPHIC + ".3di")
@@ -437,9 +435,8 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, DBUGGY_ITEM_ID)
-	assert_gt((carrier_card.get("emplacement_attachments", []) as Array).size(), 0,
+	var carrier_card := item_db.extract_seat_specs_for_item(root, DBUGGY_ITEM_ID)
+	assert_gt(carrier_card.get_emplacement_attachments().size(), 0,
 			"the shipped DBuggy authors at least one child emplacement")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, DBUGGY_GRAPHIC + ".3di")
@@ -447,8 +444,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if open_err != OK:
 		return
 	var attachments := _authored_attachment_anchors(item_db, DBUGGY_ITEM_ID, data)
-	assert_eq(attachments.size(),
-			(carrier_card.get("emplacement_attachments", []) as Array).size(),
+	assert_eq(attachments.size(), carrier_card.get_emplacement_attachments().size(),
 			"the native extraction carries every authored DBuggy attachment")
 	var child_types := {}
 	var attachment_by_type := {}
