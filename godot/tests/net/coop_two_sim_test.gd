@@ -452,13 +452,13 @@ func _moving_eweap_userpoint(data: ObjectData) -> Dictionary:
 		"EWEAP_GUNPITCH": 0,
 	})
 	for index in range(data.get_user_point_count()):
-		var info: Dictionary = data.get_user_point_info(index)
-		var part := int(info.get("subobject", -1))
+		var info := data.get_user_point_info(index)
+		var part := info.subobject
 		if not neutral.has(part) or not turned.has(part):
 			continue
 		var rest: Transform3D = neutral[part]
 		var live: Transform3D = turned[part]
-		var authored: Vector3 = info.get("position", Vector3.ZERO)
+		var authored: Vector3 = info.position
 		var point_in_part := rest.affine_inverse() * authored
 		if (live * point_in_part).distance_to(authored) > 0.25:
 			return {"index": index, "info": info}
@@ -973,8 +973,8 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"mount exposes a userpoint carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
-	var anchor: Dictionary = moving_anchor["info"]
-	var anchor_name := String(anchor.get("name", ""))
+	var anchor: ModelUserPoint = moving_anchor["info"]
+	var anchor_name := anchor.name
 	# This attachment-specific fixture deliberately keeps the parent and its
 	# synthetic child on distinct wire types (the following UDP/presentation
 	# test uses the real B50 item/type end to end). The authored addeweap row
@@ -1102,8 +1102,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 			"mount exposes a real ROBJ carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
-	var yaw_part := int((moving_anchor["info"] as Dictionary).get(
-			"subobject", -1))
+	var yaw_part := (moving_anchor["info"] as ModelUserPoint).subobject
 	# The real B50 item end to end: items.def row 101419 (graphic mount,
 	# primary WPN_EMPLCD50NA) plus the model's authored Usegun userpoint,
 	# through the ONE native extractor on both peers.

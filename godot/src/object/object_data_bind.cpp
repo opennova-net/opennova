@@ -1,6 +1,8 @@
 // ObjectData's runtime GDScript surface: immutable .3di loading, inspection,
 // and evaluation plus the whole-content replacement signal.
 #include "object/object_data_internal.h"
+#include "object/model_light.h"
+#include "object/model_user_point.h"
 
 using namespace novaobj;
 

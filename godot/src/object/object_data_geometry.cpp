@@ -1,6 +1,8 @@
 // ObjectData — geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
 #include "object/object_data_internal.h"
+#include "object/model_light.h"
+#include "object/model_user_point.h"
 
 #include <runtime/simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
@@ -42,27 +44,28 @@ int ObjectData::get_light_count() const {
 	return has_source_model ? static_cast<int>(source_model.light_count) : 0;
 }
 
-Dictionary ObjectData::get_light_info(int p_index) const {
-	Dictionary info;
+Ref<ModelLight> ObjectData::get_light_info(int p_index) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.light_count) {
-		return info;
+		return Ref<ModelLight>();
 	}
 	const ThreediLight &light = source_model.lights[p_index];
-	info["name"] = vformat("Light %d", p_index);
-	info["position"] = godot_vec3(light.offset);
-	info["atten_start"] = light.atten_start;
-	info["atten_end"] = light.atten_end;
-	info["color_start"] = Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f, 1.0f);
-	info["color_end"] = Color(light.color_end[2] / 255.0f, light.color_end[1] / 255.0f, light.color_end[0] / 255.0f, 1.0f);
-	info["falloff_deg"] = static_cast<int>(light.falloff_byte);
-	info["subobject"] = static_cast<int>(light.subobj_index);
-	info["disable_corona"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_CORONA) != 0;
-	info["disable_lightterrain"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_TERRAIN) != 0;
-	info["disable_lightobjects"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0;
-	info["colorgen_style"] = static_cast<int>(light.style);
-	info["colorgen_phase"] = static_cast<int>(light.phase);
-	info["colorgen_rate"] = static_cast<int>(light.rate);
-	info["light_type"] = (light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0;
+	Ref<ModelLight> info;
+	info.instantiate();
+	info->set_name(vformat("Light %d", p_index));
+	info->set_position(godot_vec3(light.offset));
+	info->set_atten_start(light.atten_start);
+	info->set_atten_end(light.atten_end);
+	info->set_color_start(Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f, 1.0f));
+	info->set_color_end(Color(light.color_end[2] / 255.0f, light.color_end[1] / 255.0f, light.color_end[0] / 255.0f, 1.0f));
+	info->set_falloff_deg(static_cast<int>(light.falloff_byte));
+	info->set_subobject(static_cast<int>(light.subobj_index));
+	info->set_disable_corona((light.flags & THREEDI_LIGHT_FLAG_DISABLE_CORONA) != 0);
+	info->set_disable_lightterrain((light.flags & THREEDI_LIGHT_FLAG_DISABLE_TERRAIN) != 0);
+	info->set_disable_lightobjects((light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0);
+	info->set_colorgen_style(static_cast<int>(light.style));
+	info->set_colorgen_phase(static_cast<int>(light.phase));
+	info->set_colorgen_rate(static_cast<int>(light.rate));
+	info->set_light_type((light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0);
 	return info;
 }
 
@@ -70,21 +73,19 @@ int ObjectData::get_user_point_count() const {
 	return has_source_model ? static_cast<int>(source_model.user_point_count) : 0;
 }
 
-Dictionary ObjectData::get_user_point_info(int p_index) const {
-	Dictionary info;
+Ref<ModelUserPoint> ObjectData::get_user_point_info(int p_index) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.user_point_count) {
-		return info;
+		return Ref<ModelUserPoint>();
 	}
 	const ThreediUserPoint &point = source_model.user_points[p_index];
 	float position[3];
 	float direction[3];
 	threedi_user_point_position(&point, position);
 	threedi_user_point_direction(&point, direction);
-	info["name"] = from_native(point.name);
-	info["position"] = godot_vec3(position);
-	info["rotation"] = godot_vec3(direction);
-	info["subobject"] = point.subobject_index;
-	info["point_type"] = point.userpoint_type;
+	Ref<ModelUserPoint> info;
+	info.instantiate();
+	info->assign(from_native(point.name), godot_vec3(position), godot_vec3(direction),
+			point.subobject_index, point.userpoint_type);
 	return info;
 }
 

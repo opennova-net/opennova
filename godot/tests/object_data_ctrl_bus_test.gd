@@ -171,10 +171,10 @@ func test_wave_styles_receive_the_loader_resolved_phase_ordinal() -> void:
 
 func test_light_controls_share_the_case_insensitive_global_bus() -> void:
 	var data := _open(SYN_ARMRY_LGHT0_COLORGEN113)
-	var light: Dictionary = data.get_light_info(0)
-	assert_eq(int(light.get("colorgen_style", -1)), 113,
+	var light := data.get_light_info(0)
+	assert_eq(light.colorgen_style, 113,
 			"the fixture authors LGHT 0 as a register-driven color generator")
-	assert_false(bool(light.get("disable_lightobjects", true)))
+	assert_false(light.disable_lightobjects)
 	var upper: Color = (data.evaluate_lights(
 			0, {"FLICKER": 0x8000})[0] as Dictionary).get("color")
 	var mixed: Color = (data.evaluate_lights(

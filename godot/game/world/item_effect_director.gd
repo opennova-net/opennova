@@ -471,12 +471,12 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 		for i in range(ITEM_EFFECT_USER_POINT_SCAN_LIMIT):
 			if (mask & (1 << i)) == 0:
 				continue
-			var info: Dictionary = data.get_user_point_info(i)
+			var info := data.get_user_point_info(i)
 			var key := "itemfx:%d:%d" % [node_id, i]
 			var receipt: Dictionary = effect_world.spawn_effect_attached_request(
 					key, effect, node.global_transform,
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
+					info.position,
+					info.rotation)
 			if bool(receipt.get("spawned", false)):
 				_item_fx_nodes[key] = node
 				_item_fx_owner_refs[key] = entity_ref
@@ -550,12 +550,12 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 		for i in range(ITEM_EFFECT_USER_POINT_SCAN_LIMIT):
 			if (mask & (1 << i)) == 0:
 				continue
-			var info: Dictionary = data.get_user_point_info(i)
+			var info := data.get_user_point_info(i)
 			# The same local pose EffectWorld.spawn_effect_attached uses; static
 			# sources compose it once with their placement transform.
 			var local_pose := EffectWorld.forward_pose(
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
+					info.position,
+					info.rotation)
 			if _spawn_static_item_effect(effect, entity_transform * local_pose):
 				attached += 1
 			matched += 1

@@ -321,10 +321,10 @@ func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
 # frame, then back through its current global pose — the ported equivalent of the
 # original action-bone transform.
 # [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
-func _action_particle_model_to_world(part: ObjectModel, info: Dictionary) -> Transform3D:
+func _action_particle_model_to_world(part: ObjectModel, info: ModelUserPoint) -> Transform3D:
 	if part != null:
 		var skeleton: Skeleton3D = part.get_skeleton()
-		var subobject := int(info.get("subobject", -1))
+		var subobject := info.subobject
 		if skeleton != null and subobject >= 0 and subobject < skeleton.get_bone_count():
 			return (skeleton.global_transform
 					* skeleton.get_bone_global_pose(subobject)
@@ -361,12 +361,12 @@ func _third_person_action_particle(userpoint: String) -> Dictionary:
 		return {}
 	var xform: Transform3D = held_weapon.global_transform
 	for i in range(int(data.get_user_point_count())):
-		var info: Dictionary = data.get_user_point_info(i)
-		if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+		var info := data.get_user_point_info(i)
+		if info.name.nocasecmp_to(userpoint) != 0:
 			continue
-		var direction: Vector3 = xform.basis * Vector3(info.get("rotation", Vector3(0, 0, 1)))
+		var direction: Vector3 = xform.basis * info.rotation
 		return {
-			"pos": xform * Vector3(info.get("position", Vector3.ZERO)),
+			"pos": xform * info.position,
 			"dir": direction.normalized() if direction.length_squared() > 0.000001
 					else -xform.basis.z.normalized(),
 		}
@@ -389,10 +389,10 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 		if data == null:
 			continue
 		for i in range(data.get_user_point_count()):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
+			var info := data.get_user_point_info(i)
+			if info.name.nocasecmp_to(userpoint) == 0:
 				var model_to_world := _action_particle_model_to_world(part, info)
-				return model_to_world * Vector3(info.get("position", Vector3.ZERO))
+				return model_to_world * info.position
 	if fallback != Vector3.INF:
 		return fallback
 	# Retail's deepest fallback is the ENTITY ORIGIN [orig: Entity_ComputeActionTransform @0x401310, fallback site @0x401867..0x401887
@@ -413,10 +413,10 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 		if data == null:
 			continue
 		for i in range(data.get_user_point_count()):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+			var info := data.get_user_point_info(i)
+			if info.name.nocasecmp_to(userpoint) != 0:
 				continue
-			var direction := Vector3(info.get("rotation", Vector3(0, 0, 1)))
+			var direction := info.rotation
 			var model_to_world := _action_particle_model_to_world(part, info)
 			var world_direction: Vector3 = model_to_world.basis * direction
 			if world_direction.length_squared() > 0.000001:

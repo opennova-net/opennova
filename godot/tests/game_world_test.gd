@@ -257,7 +257,7 @@ func _fx_anchor_index() -> int:
 	return -1
 
 
-func _fx_anchor_info() -> Dictionary:
+func _fx_anchor_info() -> ModelUserPoint:
 	return _fx_anchor_data().get_user_point_info(_fx_anchor_index())
 
 
@@ -2734,9 +2734,9 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 			"only normal pool-1 plus allowed pool-2/3 entities attach")
 	var anchor_info := _fx_anchor_info()
 	assert_eq(effects.attached_spawns[0].local_pos,
-			Vector3(anchor_info.get("position", Vector3.ZERO)))
+			anchor_info.position)
 	assert_eq(effects.attached_spawns[0].local_dir,
-			Vector3(anchor_info.get("rotation", Vector3.ZERO)))
+			anchor_info.rotation)
 	assert_eq(world.present_item_fx(nodes[1], MissionData.KIND_ITEM, 2), 0,
 			"a replayed wire-node callback cannot duplicate an existing attach")
 	assert_eq(effects.attached_spawns.size(), 3)
@@ -2814,10 +2814,10 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	assert_eq(String(effects.attached_spawns[0].effect), "Effect_whiteExhaust")
 	var anchor_info := _fx_anchor_info()
 	assert_eq(Vector3(effects.attached_spawns[0].local_pos),
-			Vector3(anchor_info.get("position", Vector3.ZERO)),
+			anchor_info.position,
 			"the effect anchors at the real model's MFlash01 point")
 	assert_eq(Vector3(effects.attached_spawns[0].local_dir),
-			Vector3(anchor_info.get("rotation", Vector3.ZERO)))
+			anchor_info.rotation)
 
 	# Replayed starts are idempotent; a single transition stop detaches the
 	# exact native group id returned by the receipt-bearing facade.
@@ -3032,8 +3032,8 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var anchor_info := _fx_anchor_info()
 	var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
 	assert_true(first_transform.origin.is_equal_approx(
-			entity_transform * Vector3(anchor_info.get("position", Vector3.ZERO))))
-	var anchor_dir := Vector3(anchor_info.get("rotation", Vector3.ZERO))
+			entity_transform * anchor_info.position))
+	var anchor_dir := anchor_info.rotation
 	if anchor_dir.length_squared() > 0.000001:
 		assert_true(first_transform.basis.z.normalized().is_equal_approx(
 				(entity_transform.basis * anchor_dir).normalized()),

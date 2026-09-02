@@ -51,15 +51,15 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	# seat-spec/provider path below is only the system under test, never the oracle.
 	var userpoint_index := -1
 	for index in range(data.get_user_point_count()):
-		var candidate: Dictionary = data.get_user_point_info(index)
-		if String(candidate.get("name", "")).nocasecmp_to("Usegun") == 0:
+		var candidate := data.get_user_point_info(index)
+		if candidate.name.nocasecmp_to("Usegun") == 0:
 			userpoint_index = index
 			break
 	assert_gte(userpoint_index, 0, "E50triB carries its retail Usegun USRP row")
 	if userpoint_index < 0:
 		return
-	var userpoint: Dictionary = data.get_user_point_info(userpoint_index)
-	var part_index := int(userpoint.get("subobject", -1))
+	var userpoint := data.get_user_point_info(userpoint_index)
+	var part_index := userpoint.subobject
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
 	var card := item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
@@ -107,7 +107,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	})
 	assert_true(rest_parts.has(part_index))
 	assert_true(live_parts.has(part_index))
-	var authored_model_position: Vector3 = userpoint.get("position", Vector3.ZERO)
+	var authored_model_position: Vector3 = userpoint.position
 	var point_in_part := (rest_parts[part_index] as Transform3D).affine_inverse() \
 			* authored_model_position
 	var live_usegun_model := (live_parts[part_index] as Transform3D) * point_in_part

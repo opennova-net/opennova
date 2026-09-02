@@ -295,7 +295,7 @@ func _spawn_node_lights(node: ObjectModel, owner_id: int,
 	return cached_handle
 
 
-## One authored light record (the get_light_info dictionary shape) becomes one
+## One authored light record (ObjectData.get_light_info's ModelLight) becomes one
 ## pool instance. Public: the GUT seam test feeds records directly. The owner
 ## attach is decided by the portable policy the config feeds
 ## (renderer::resolve_model_light_owner): a record attached to a subobject is
@@ -308,37 +308,36 @@ func _spawn_node_lights(node: ObjectModel, owner_id: int,
 ## id — so an owned light passes the per-draw select only for the draws retail
 ## admits (per_model_light_isolation_test pins both directions). `blink_owner`
 ## is the [owner id, section] pair _blink_owner_at resolved, empty outdoors.
-func spawn_light_record(info: Dictionary, world_transform: Transform3D,
+func spawn_light_record(info: ModelLight, world_transform: Transform3D,
 		owner_id: int = 0, blink_owner: Array = [],
 		spawner_is_building: bool = false) -> int:
-	if info.is_empty():
+	if info == null:
 		return 0
-	var world_pos: Vector3 = world_transform * Vector3(
-			info.get("position", Vector3.ZERO))
+	var world_pos: Vector3 = world_transform * info.position
 	return _spawn_light_at(info, world_pos, owner_id, blink_owner,
 			spawner_is_building)
 
 
-func _spawn_light_at(info: Dictionary, world_pos: Vector3,
+func _spawn_light_at(info: ModelLight, world_pos: Vector3,
 		owner_id: int = 0, blink_owner: Array = [],
 		spawner_is_building: bool = false) -> int:
 	var has_blink := blink_owner.size() >= 2
 	return int(_scene.spawn_model_light({
 		"position": world_pos,
-		"atten_end": float(info.get("atten_end", 0.0)),
-		"style": int(info.get("colorgen_style", 0)),
-		"phase": int(info.get("colorgen_phase", 0)),
-		"rate": int(info.get("colorgen_rate", 0)),
-		"color_start": info.get("color_start", Color.WHITE),
-		"color_end": info.get("color_end", Color.WHITE),
-		"attach_bone": int(info.get("subobject", 0)),
+		"atten_end": info.atten_end,
+		"style": info.colorgen_style,
+		"phase": info.colorgen_phase,
+		"rate": info.colorgen_rate,
+		"color_start": info.color_start,
+		"color_end": info.color_end,
+		"attach_bone": info.subobject,
 		"spawning_entity": owner_id,
 		"spawner_is_building": spawner_is_building,
 		"blink_owner_entity": int(blink_owner[0]) if has_blink else 0,
 		"blink_section": int(blink_owner[1]) if has_blink else 0,
-		"disable_corona": bool(info.get("disable_corona", false)),
-		"disable_terrain": bool(info.get("disable_lightterrain", false)),
-		"disable_objects": bool(info.get("disable_lightobjects", false)),
+		"disable_corona": info.disable_corona,
+		"disable_terrain": info.disable_lightterrain,
+		"disable_objects": info.disable_lightobjects,
 	}))
 
 

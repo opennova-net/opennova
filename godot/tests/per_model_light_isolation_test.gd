@@ -94,10 +94,10 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	director.setup(world, Callable(), Callable())
 	# One world light between the models (an unowned authored record), one
 	# light owned by entity 77 (the muzzle-glow shape).
-	var world_light := director.spawn_light_record({
-		"position": Vector3(2.0, 1.0, 0.0),
-		"atten_end": 8.0,
-	}, Transform3D.IDENTITY)
+	var world_record := ModelLight.new()
+	world_record.position = Vector3(2.0, 1.0, 0.0)
+	world_record.atten_end = 8.0
+	var world_light := director.spawn_light_record(world_record, Transform3D.IDENTITY)
 	assert_gt(world_light, 0)
 	director.on_muzzle_fire(77, Vector3(0.0, 1.0, 0.0))
 	var camera := Camera3D.new()
@@ -219,7 +219,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	var lit := ObjectData.new()
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SYN_SHED_LGHT0_SUB2)), OK)
 	assert_eq(lit.get_light_count(), 1)
-	assert_eq(int(lit.get_light_info(0).get("subobject", -1)), 2,
+	assert_eq(lit.get_light_info(0).subobject, 2,
 			"the fixture attaches the record to subobject 2")
 	var director := EffectLightDirector.new()
 	director.setup(world, func() -> Array:
@@ -250,7 +250,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	# reload the pristine shed (subobject 0, atten 0..3) into the ObjectData the
 	# source closure holds.
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SHED_3DI)), OK)
-	assert_eq(int(lit.get_light_info(0).get("subobject", -1)), 0)
+	assert_eq(lit.get_light_info(0).subobject, 0)
 	director.reattach()
 	director.render_frame(camera)
 	assert_eq(float(surface_a.get_instance_shader_parameter(

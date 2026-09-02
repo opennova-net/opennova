@@ -6,6 +6,7 @@
 // script-double eval fallbacks are gone.
 
 #include "object/object_model.h"
+#include "object/model_user_point.h"
 
 #include <godot_cpp/core/math.hpp>
 
@@ -78,8 +79,8 @@ void ObjectModel::resolve_muzzle_userpoint() {
 	const int count = object_data_->get_user_point_count();
 	int best = -1;
 	for (int i = 0; i < count; ++i) {
-		const Dictionary info = object_data_->get_user_point_info(i);
-		if (String(info.get("name", "")).to_lower() == wanted) {
+		const Ref<ModelUserPoint> info = object_data_->get_user_point_info(i);
+		if (info.is_valid() && info->get_name().to_lower() == wanted) {
 			best = i;
 			break;
 		}
@@ -87,13 +88,13 @@ void ObjectModel::resolve_muzzle_userpoint() {
 	if (best < 0) {
 		return;
 	}
-	const Dictionary info2 = object_data_->get_user_point_info(best);
-	const int bone = int(info2.get("subobject", -1));
+	const Ref<ModelUserPoint> info2 = object_data_->get_user_point_info(best);
+	const int bone = info2->get_subobject();
 	if (bone < 0 || bone >= skeleton_->get_bone_count()) {
 		return;
 	}
 	muzzle_bone_ = bone;
-	muzzle_model_pos_ = info2.get("position", Vector3());
+	muzzle_model_pos_ = info2->get_position();
 }
 
 // Play a main-body clip by ADM key. Missing semantic keys use this ADM's
