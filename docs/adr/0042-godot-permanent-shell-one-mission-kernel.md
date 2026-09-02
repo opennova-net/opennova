@@ -99,7 +99,11 @@ and rejected on evidence, not on precedent.
    all of `godot/src`; `gd_orig_cites`, now including `godot/probes`) are non-increasing. The marker rewrite that
    let 117 citations leave the pushdown gauge is no longer an exit: only code that moves banks a
    counter. `godot/game/mcp` carries a zero-cite floor (a converter that needs a witness cite is
-   re-deriving).
+   re-deriving). One ratified exception (2026-09-01, the simplification campaign): a cite in a
+   binding's DOC COMMENT whose every address the engine already carries is a duplicate, not a
+   witness, and may become an `(engine: <group/lib/file>)` pointer; the commit that does so says
+   the counter moved by deduplication, and a doc cite the engine does NOT carry stays where it is
+   (it is either a device fact or the ladder's next relocation).
 
 8. **Named options, not slices** (a later maintainer may take them without re-arguing): retiring
    `apps/nw_server` once a headless `--lan-host` serve mode is proven; lifting netsim+npruntime

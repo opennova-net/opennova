@@ -48,8 +48,7 @@ private:
 		int id = 0;
 		int type = 0;
 		// The items.def `sid` token — the key hudpos.def's VEHICLE_HUD blocks
-		// commit against [orig: HUD_ParseHudposToken @0x59F370 VEHICLE_END
-		// walks the item table by sid; see docs/interface/hud-re.md].
+		// commit against (engine: formats/def/def.h).
 		String sid;
 		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
 		uint32_t attrib2 = 0; // items.def ItemDefAttrib2 (+0x58); bit 6 = portal-weldable
@@ -65,9 +64,7 @@ private:
 		String render_function;
 		String disk_function;
 		// items.def default_aip (itemDef+0x8B8): the vehicle AI init's profile
-		// name when the placed record's ai_textfile is empty [orig:
-		// Entity_InitVehicleAIFromDef @0x4686C0, the def+0x8B8 arm @0x4687c1;
-		// see docs/world/world-wac-ai-re.md §23].
+		// name when the placed record's ai_textfile is empty (engine: runtime/mission/promote.cpp).
 		String default_aip;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
 		// Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
@@ -82,7 +79,7 @@ private:
 		float damage_reduc_pp = 0.0f;
 		float damage_reduc_max = 0.0f;
 		// Vehicle physics-property block, PRE-SCALED by the engine/formats/def parser exactly like
-		// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Consumed by
+		// the original loader (engine: formats/def/def.h). Consumed by
 		// the sim's item-traits sweep (world::VehicleTraits). All 0 when absent.
 		int physics = 0;      // +0x8DC selector — non-zero = ground-vehicle motor
 		int acceleration = 0; // +0x8E0
@@ -104,8 +101,8 @@ private:
 	int flip = 0;  // +0x910 raw (air pitch-rate cap token)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
-		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
-		int unit_type = 0;    // minimap icon class [orig: Entity_ClassifyForMinimap @0x50FA70]
+		int torque = 0;       // +0x91C raw — collision speed-decay shift (engine: formats/def/def.h)
+		int unit_type = 0;    // minimap icon class (engine: formats/def/def.h)
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
@@ -113,9 +110,7 @@ private:
 		// items.def per-item particle-effect keys, verbatim authored names. Anchored
 		// slots carry {effect, userpoint[, secondary]}; the death/fire/other family is
 		// effect-name-only (their anchors are the fixed husk userpoint names Dead/Fire/
-		// Other, resolved at runtime). [orig: ItemDef_ParseProperty @ 0x49eb00
-		// particlefx family @ 0x4a13ad..0x4a179d; mission-start resolve + slot-A attach
-		// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
+		// Other, resolved at runtime). (engine: formats/def/def.h)
 		struct ParticleFx {
 			String effect;
 			String userpoint;
@@ -133,18 +128,16 @@ private:
 		// Person-item anim-fire weapon family (world-wac-ai-re §17.4): the
 		// ammo_closeattack round NAME (JO riflemen author all four ammo_* slots =
 		// the rifle round) + clipsize (the magazine reseed). Consumed by the sim's
-		// AI weapon seed (D-AI-5). [orig: ItemDef_ParseProperty @ 0x4a1823 ->
-		// def+0x56B / @ 0x49fa1c -> def+0x894]
+		// AI weapon seed (D-AI-5). (engine: formats/def/def.h)
 		String ammo_closeattack;
 		// The def-AUTHORED closeattack launch userpoint NAME (the AI muzzle on
 		// the entity's model; JO NPC riflemen author mflash01). Empty when the
-		// item never AI-fires. [orig: ItemDef_ParseProperty launchups_* ->
-		// def+0x5EB/+0x5FB; resolve modelgpm_FindUserpointByName @ 0x5b2170]
+		// item never AI-fires. (engine: formats/def/def.h)
 		String launchups_closeattack;
 		int clipsize = 0;
 		// items.def deathtime in TICKS ((62*seconds or 496) + 62, scaled at parse);
 		// 0 = none authored. The corpse timer's seed (entity+0x148 at the infantry
-		// death edge). [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890]
+		// death edge). (engine: formats/def/def.h)
 		int deathtime_ticks = 0;
 		// items.def primary_weapon — the weapon.def entry an ewep emplacement mounts
 		// (the attach label's text source); empty if none authored.
@@ -217,7 +210,7 @@ public:
 	// mirroring DefItemType in engine/formats/def/def.h (static_asserts in the
 	// .cpp pin the mirror). Non-injective by engine design: DECORATION==FOLIAGE
 	// and POWERUP==OBJECT share values; 7 is unused, 0 = unset/unknown.
-	// [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]
+	// (engine: formats/def/def.h)
 	enum {
 		TYPE_UNKNOWN = 0,
 		TYPE_VEHICLE = 1,
@@ -273,8 +266,7 @@ public:
 	int get_item_type(int id) const;
 	// Effective authored model scale source, signed Q16.16. Zero is retail's
 	// unscaled sentinel (a visual/collision scale of 1.0).
-	// [orig: ItemDef+0x1B8; Entity_InitFromModel @0x40dc30, see
-	// engine/runtime/simassets/model_builders.cpp]
+	// (engine: formats/def/def.h)
 	int32_t get_model_scale_q16(int id) const;
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
@@ -288,8 +280,7 @@ public:
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;
 	// The raw items.def ItemDefAttrib2 dword (itemDef+0x58); 0 for unknown ids. The
-	// render-occlusion weld pass reads bit 6 ("weldable") [orig: the +88 >> 6 read in
-	// Terrain_RegisterExteriorPortalFaces @ 0x5c5cce].
+	// render-occlusion weld pass reads bit 6 ("weldable") (engine: runtime/simassets/collision_resolve.cpp).
 	uint32_t get_attrib2(int id) const;
 	// The authored items.def `shadow` blob decal (C++ seam for the placer):
 	// false when the item authors none; dims = (width, length, offset_x,
@@ -297,8 +288,7 @@ public:
 	bool get_shadow_decal(int id, String &r_texture, Vector4 &r_dims) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
 	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
-	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty
-	// @0x49d870; consumer Entity_UpdateVehiclePhysics @0x48af00]
+	// world::VehicleTraits table (resolve_item_traits). (engine: formats/def/def.h)
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
 	// S16 tooling: the native seat-spec extraction for ONE item, shaped like
@@ -317,12 +307,11 @@ public:
 	Dictionary get_emplacement_attachment_markers(int id) const;
 	// {valid: bool, value: int} for the target definition's phrase_set +0x86C.
 	// Always returns both fields so absent and authored zero stay distinct.
-	// [orig: parse @ 0x49F9DB..0x49FA0A; mounted consumer @ 0x4B1884]
+	// (engine: formats/def/def.h)
 	Dictionary get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
-	// [orig: itemDef+0x70/+0x80 -> huskModel/huskFinalModel (+0xF4/+0xF8);
-	// render pick @ 0x413086, pieces prefer huskfinal @ 0x4934af]
+	// (engine: runtime/simassets/collision_resolve.cpp)
 	String get_husk(int id) const;
 	String get_huskfinal(int id) const;
 	// The destruction traits as one bundle: {unit_type, kz, armor_impact,

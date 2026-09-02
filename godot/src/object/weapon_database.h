@@ -17,8 +17,7 @@ class ResourceRoot;
 // Thin GDExtension wrapper over engine/formats/def weapon.def parsing (def_parse_weapons), surfacing
 // the PLAYER_INFO loadout slice: per-slot weapon lists filtered by the selected class + team,
 // with the fields the loadout combos + weight readout consume.
-// [orig: WeaponDef_LoadAll @ 0x54dd10 / WeaponDef_ParseProperty @ 0x54d730; consumer
-//  populate_weapon_slot_lists @ 0x560430] (docs/playerinfo/avatars-re.md D-PLAYERINFO-11).
+// (engine: base/gameprofile/required_resources.c) (docs/playerinfo/avatars-re.md D-PLAYERINFO-11).
 class WeaponDatabase : public RefCounted {
 	GDCLASS(WeaponDatabase, RefCounted)
 
@@ -43,7 +42,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// weapon_class slot values [orig: WeaponDef_ParseProperty @ 0x54d730 +108].
+	// weapon_class slot values (engine: formats/def/def.h).
 	enum {
 		SLOT_ACCESSORY = 0,
 		SLOT_PRIMARY = 1,
@@ -59,14 +58,13 @@ public:
 
 	// flags2 bit: the weapon authors no ammo-type choice — the PLAYER_INFO
 	// *_AMMO1_TYPE combo is locked non-interactive and the saved type resets to 0
-	// [orig: populate_ammo_combo_boxes @ 0x55def0 gates on +188 & 0x40].
+	// (engine: formats/def/def.cpp).
 	enum {
 		FLAG2_NOAMMOTYPES = 0x40,
 	};
 
 	// Encumbrance bands for loadout weight — mirrors DefEncumbrance
-	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480:
-	//  >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT].
+	// (engine: formats/def/def.cpp).
 	enum {
 		ENCUMBRANCE_LIGHT = 0,
 		ENCUMBRANCE_NORMAL = 1,
@@ -75,7 +73,7 @@ public:
 
 	// The untouched-ammo sentinel: retail serializes -1 until the user picks a
 	// clip row, and every default-select/weight leg keys on it
-	// [orig: @0x565cd0/0x566166; the -1 arms in @0x55def0/@0x55f1f0].
+	// (engine: net/npruntime/loadout_submit.cpp).
 	enum {
 		CLIP_COUNT_DEF_DEFAULT = -1,
 	};
@@ -101,7 +99,7 @@ public:
 
 	// The weapons that belong in `slot` for the given class + team masks, in table order.
 	// The filter is the engine's world::weapon_slot_indices
-	// [orig: populate_weapon_slot_lists @ 0x560430]. Each entry is a
+	// (engine: formats/def/def.h). Each entry is a
 	// weapon_dict(); the caller prepends the "NONE" row.
 	Array get_slot_weapons(int slot, int class_mask, int team_mask) const;
 	// All weapons, unfiltered, in table order.
@@ -112,26 +110,25 @@ public:
 
 	// Total loadout weight over the indexed weapons: per entry weaponweight +
 	// (count <= 0 ? maxclips : count) * clipweight — the engine/formats/def port of the
-	// parent-slot terms [orig: calculate_loadout_weight @ 0x55f1f0]. Invalid
+	// parent-slot terms (engine: formats/def/def.cpp). Invalid
 	// indices contribute nothing; a short counts array reads as -1 (default).
 	double loadout_weight(const PackedInt32Array &weapon_indices,
 			const PackedInt32Array &ammo_counts) const;
 	// One extra-ammo (category-3) term for the indexed weapon: count *
 	// clipweight only, CLIP_COUNT_DEF_DEFAULT -> the maxclips default, a
 	// chosen zero row weighs nothing (engine/formats/def def_extra_ammo_weight
-	// [orig: @ 0x5655c9..0x56561c; the @ 0x55f1f0 family terms]).
+	// (engine: formats/def/def.cpp)).
 	double extra_ammo_weight(int p_index, int p_count) const;
 	// The sub-weapon behind a parent slot's *_AMMO2: the absolute index of the
 	// first differing-round_type entry in the parent's loadout_subclasses
 	// window, or -1 (engine/formats/def def_subclass_weapon_index
-	// [orig: @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
+	// (engine: formats/def/def.cpp)).
 	int subclass_weapon_index(int p_parent_index) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
-	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480].
+	// (engine: formats/def/def.cpp).
 	int encumbrance_class(double weight) const;
 	// The PLAYER_INFO screen policies (one impl in engine/runtime/world
-	// player_loadout.h [orig: PlayerInfo_SetTeamAndClassMask @0x55de60;
-	// populate_ammo_combo_boxes @0x55def0]): the team mask (team 0 -> 2, else
+	// player_loadout.h (engine: runtime/world/player_loadout.cpp)): the team mask (team 0 -> 2, else
 	// 1), the class mask (5..9 -> its bit, else nothing), and the ammo combo's
 	// default-select clip count (saved > 0 clamped into 1..maxclips, the
 	// CLIP_COUNT_DEF_DEFAULT sentinel -> the full maxclips row).
@@ -139,8 +136,7 @@ public:
 	static int player_info_class_mask(int p_playerclass_value);
 	static int default_clip_row(int p_saved, int p_maxclips);
 	// The armory screen's open-time class policy (one impl in
-	// engine/runtime/world player_loadout.h [orig: Armory_ResolveSelectedClass
-	// @0x5642f0]): the current class when the S2C 0x76 allow mask permits it,
+	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
 	// else scan up through 9, else gunner (7); and the class filter bit
 	// (1 << (class-5) for 5..9, ALL weapons otherwise).
 	static int armory_resolve_selected_class(int p_player_class, int p_class_allow_mask);

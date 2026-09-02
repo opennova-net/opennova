@@ -209,7 +209,7 @@ private:
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
 	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
 	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
-	// start_host_session's gating [orig: the §5.0 listen-host bring-up, SinglePlayer_StartMission @0x561af0].
+	// start_host_session's gating (engine: net/inmatch/listen_host.cpp).
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell (which owns the resource
@@ -228,16 +228,14 @@ private:
 	std::unordered_map<int32_t, std::string> mission_location_texts_;
 	// Numeric suffix -> [PeopleNames] STRNAME%03i value; promote resolves an
 	// entity's authored display name (D-HUD-20) from its BMS name_index here
-	// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; the witnessed
-	// resolve lives engine-side in promote.cpp].
+	// (engine: runtime/mission/promote.cpp).
 	std::unordered_map<int32_t, std::string> mission_people_names_;
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()):
 	// the joiner's view of the host's stream.
 	PackedFloat32Array present_snapshot_from_client_replicas() const;
 	// Build the PF_* present buffer from the host's own pools: retail's listen
 	// host/SP local client reads process memory and its loopback 0x0A carries no
-	// entity records [orig: serialize_entity_states_to_packet @0x50f07e;
-	// collect_visible_entities_for_terrain @0x5c8c60; D-NET-140 closed].
+	// entity records (engine: net/netsim/connection_fan.cpp).
 	PackedFloat32Array present_snapshot_from_world() const;
 	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
 	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
@@ -252,7 +250,7 @@ private:
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
 	// the boot's role hook; runtime_ is in the P7 block below). joiner_pump drives the connect legs +
 	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
-	// runs run_logic_tick(false), remotes render wire-direct. [orig: NapiNPClientMsg_0x00C @0x42E730]
+	// runs run_logic_tick(false), remotes render wire-direct. (engine: net/npruntime/joiner_connection.h)
 	bool joiner_ = false;
 	// The F3 Weapon window's held-trigger latch (OR'd into per-tick weapon input).
 	bool debug_weapon_fire_held_ = false;
@@ -317,7 +315,7 @@ private:
 	// latch lives on the world-typed loadout aggregate
 	// (kernel_->loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
-	// spawn performs. [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
+	// spawn performs. (engine: net/npruntime/host_session.h)
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 
@@ -326,7 +324,7 @@ private:
 	// request_stance / look_settings); this binding only converts device
 	// input and routes the joiner's wire edges.
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
-	// iff the soldier may fire it. [orig: Entity_CanFireWeapon @ 0x4dcb10]
+	// iff the soldier may fire it. (engine: net/npruntime/client_replica_present.h)
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
 	// The M-cycle map mode + the two radar zooms — the engine-side state
 	// machine carries the retail lifecycle (cycle, zoom routing, spawn
@@ -336,9 +334,7 @@ private:
 
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
-	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
-	// this member owns the LOCAL player's slot. World::run_logic_tick separately pumps
-	// occupied UseGun parent slots for NPC gunners in that same global phase]. The host
+	// world advances (engine: runtime/mission/mission_kernel.cpp). The host
 	// feeds the baked def via set_local_player_weapon and per-frame trigger state via
 	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
 	// per-tick records because several logic ticks can run per render frame; the
@@ -392,11 +388,9 @@ private:
 	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
 	// side blocks (blue/red), each carrying the class byte that selects both the wire
 	// class and one of five 2048-byte kit pages, plus the single-player page.
-	// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 reads five 0x1080C records;
-	//  Game_StartMission @0x525767..@0x525836 selects the block and the page]
+	// (engine: base/gameprofile/required_resources.c)
 	// Seeded from the shipped defaults so it is NEVER empty even when weapon.sav is
-	// absent [orig: PlayerProfile_InitDefaults @0x54bb40 — class 8 both sides,
-	// WPN_M4AUTO/WPN_AK47AUTO pages].
+	// absent (engine: formats/playersav/weapon_sav.cpp).
 	opennova::playersav::Record weapon_profile_ =
 			opennova::playersav::make_defaults().slots[0];
 	bool weapon_profile_loaded_ = false;
@@ -418,17 +412,16 @@ private:
 				kernel_->world, kernel_->weapon,
 				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
 	}
-	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
+	// Player_InitPlayer's weapon leg (engine: net/npruntime/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData [orig: Game_StartMission
-	// @0x525813; re-run per side by NapiNPClientMsg_TeamAssign @0x431a9a]. False when
+	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: net/npruntime/loadout_submit.h). False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
-	// a later S2C 0x50 reassignment [orig: byte_A85B48 @0x425499 / @0x4319db].
+	// a later S2C 0x50 reassignment (engine: net/npruntime/joiner_connection.cpp).
 	bool reseed_session_kit_on_side_change();
 	// Which side the resident kit buffer was last copied from (-1 = never seeded).
 	int weapon_profile_seeded_side_ = -1;
@@ -450,7 +443,7 @@ private:
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
-	// load [orig: Entity_BuildSpawnZoneList @0x43EAE0].
+	// load (engine: runtime/hud/hud_lfp_panel.h).
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
 	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
 	bool deploy_zone_registry_built_ = false;
@@ -515,9 +508,7 @@ private:
 	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
 	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
 	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump [orig: AnimMap_IsSlotActive @0x4125e0 reads the one
-	// g_CharAttr table CharAttr_LoadFromDef @0x412140 fills and the 0x41 arm
-	// AnimMap_SetSlotProperty @0x412890 clears; see docs/interface/hud-re.md].
+	// after each net pump (engine: net/npruntime/charattr_challenge.cpp).
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
