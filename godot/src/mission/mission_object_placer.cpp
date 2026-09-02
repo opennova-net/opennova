@@ -1,4 +1,5 @@
 #include "mission/mission_object_placer.h"
+#include "mission/static_population_instance.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 
@@ -728,12 +729,12 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			global_slots.write[i] = i;
 		}
 
-		const auto tag_static_shadow_source = [&](MultiMeshInstance3D *p_source,
+		const auto tag_static_shadow_source = [&](StaticPopulationInstance *p_source,
 				const Vector<int> &p_slots) {
-			Array shadow_bms_ids;
-			Array shadow_item_ids;
-			Array shadow_attrib2;
-			Array shadow_slots;
+			PackedInt32Array shadow_bms_ids;
+			PackedInt32Array shadow_item_ids;
+			PackedInt64Array shadow_attrib2;
+			PackedByteArray shadow_slots;
 			for (const int slot : p_slots) {
 				shadow_bms_ids.push_back(
 						slot < group.bms_ids.size() ? group.bms_ids[slot] : 0);
@@ -742,15 +743,17 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 				shadow_attrib2.push_back(slot < group.attrib2_values.size()
 								? int64_t(group.attrib2_values[slot])
 								: int64_t(0));
-				shadow_slots.push_back(slot < group.shadow_slots.size() &&
-						group.shadow_slots[slot]);
+				shadow_slots.push_back(
+						slot < group.shadow_slots.size() && group.shadow_slots[slot]
+								? 1
+								: 0);
 			}
-			p_source->set_meta("static_shadow_bms_ids", shadow_bms_ids);
-			p_source->set_meta("static_shadow_item_ids", shadow_item_ids);
-			p_source->set_meta("static_shadow_attrib2", shadow_attrib2);
-			p_source->set_meta("static_shadow_slots", shadow_slots);
-			p_source->set_meta("static_shadow_graphic", graphic);
-			p_source->set_meta("static_shadow_batch_key", group_key);
+			p_source->set_shadow_tagged(true);
+			p_source->set_slot_bms_ids(shadow_bms_ids);
+			p_source->set_slot_item_ids(shadow_item_ids);
+			p_source->set_slot_attrib2(shadow_attrib2);
+			p_source->set_slot_casts_shadow(shadow_slots);
+			p_source->set_graphic(graphic);
 		};
 		// One population over a slot list: capacity = the slot count, one
 		// binding per slot joining its retained instance (so a level switch
@@ -801,15 +804,14 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 		// Retail draws every selected entity; hidden here means the population
 		// has no live row this frame and the cull can skip it outright.
 		const auto attach_population = [&](int p_population,
-				MultiMeshInstance3D *p_mmi, bool p_shadow_tagged) {
+				StaticPopulationInstance *p_mmi, bool p_shadow_tagged) {
 			StaticPopulation &population = static_populations_.write[p_population];
 			population.instance_node = p_mmi->get_instance_id();
 			population.shadow_tagged = p_shadow_tagged;
 			static_population_by_node_[population.instance_node] = p_population;
 			p_mmi->set_visible(population.live > 0);
 			if (p_shadow_tagged) {
-				p_mmi->set_meta("static_shadow_rows",
-						_static_population_row_slots(population));
+				p_mmi->set_row_slots(_static_population_row_slots(population));
 			}
 		};
 
@@ -851,7 +853,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			const int population_index =
 					build_population(mm, p_slots, p_batch, false);
 
-			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+			StaticPopulationInstance *mmi = memnew(StaticPopulationInstance);
 			mmi->set_multimesh(mm);
 			if (has_population_bounds) {
 				mmi->set_custom_aabb(population_bounds);
@@ -869,12 +871,13 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			if (p_batch.material.is_valid()) {
 				mmi->set_material_override(p_batch.material);
 			}
-			mmi->set_meta("static_batch_population",
-					p_global ? String("global") : String("bin"));
-			mmi->set_meta("static_batch_lod", p_batch.lod_index);
+			mmi->set_population_kind(p_global
+							? StaticPopulationInstance::POPULATION_GLOBAL
+							: StaticPopulationInstance::POPULATION_BIN);
+			mmi->set_lod_index(p_batch.lod_index);
 			if (!p_global) {
-				mmi->set_meta("static_batch_bin_x", p_bin_x);
-				mmi->set_meta("static_batch_bin_z", p_bin_z);
+				mmi->set_bin_x(p_bin_x);
+				mmi->set_bin_z(p_bin_z);
 			}
 			const bool legacy_name = p_global || bins.size() == 1;
 			mmi->set_name(legacy_name ? vformat("Batch_%s%s_%d", graphic,
@@ -928,7 +931,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			}
 			const int shadow_population =
 					build_population(shadow_mm, p_slots, p_batch, true);
-			MultiMeshInstance3D *shadow_mmi = memnew(MultiMeshInstance3D);
+			StaticPopulationInstance *shadow_mmi = memnew(StaticPopulationInstance);
 			shadow_mmi->set_multimesh(shadow_mm);
 			if (has_shadow_bounds) {
 				shadow_mmi->set_custom_aabb(shadow_bounds);
@@ -939,12 +942,13 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			if (p_batch.material.is_valid()) {
 				shadow_mmi->set_material_override(p_batch.material);
 			}
-			shadow_mmi->set_meta("static_batch_population",
-					p_global ? String("global") : String("bin"));
-			shadow_mmi->set_meta("static_batch_lod", p_batch.lod_index);
+			shadow_mmi->set_population_kind(p_global
+							? StaticPopulationInstance::POPULATION_GLOBAL
+							: StaticPopulationInstance::POPULATION_BIN);
+			shadow_mmi->set_lod_index(p_batch.lod_index);
 			if (!p_global) {
-				shadow_mmi->set_meta("static_batch_bin_x", p_bin_x);
-				shadow_mmi->set_meta("static_batch_bin_z", p_bin_z);
+				shadow_mmi->set_bin_x(p_bin_x);
+				shadow_mmi->set_bin_z(p_bin_z);
 			}
 			shadow_mmi->set_name(legacy_name
 							? vformat("StaticShadow_%s%s_%d", graphic,
@@ -1888,15 +1892,14 @@ void MissionObjectPlacer::_flush_static_population_changes(
 			continue;
 		}
 		const StaticPopulation &population = static_populations_[population_index];
-		MultiMeshInstance3D *node = Object::cast_to<MultiMeshInstance3D>(
+		StaticPopulationInstance *node = Object::cast_to<StaticPopulationInstance>(
 				ObjectDB::get_instance(population.instance_node));
 		if (node == nullptr) {
 			continue;
 		}
 		node->set_visible(population.live > 0);
 		if (population.shadow_tagged) {
-			node->set_meta("static_shadow_rows",
-					_static_population_row_slots(population));
+			node->set_row_slots(_static_population_row_slots(population));
 		}
 		if (!population.shadow_only) {
 			FrameFx::invalidate_q3_instances(node);

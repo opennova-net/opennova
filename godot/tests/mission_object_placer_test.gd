@@ -255,27 +255,27 @@ func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> 
 	assert_not_null(container)
 	if container == null:
 		return
-	var binned: Array[MultiMeshInstance3D] = []
-	var global: MultiMeshInstance3D = null
+	var binned: Array[StaticPopulationInstance] = []
+	var global: StaticPopulationInstance = null
 	for child in _populations(container):
-		var mmi := child as MultiMeshInstance3D
+		var mmi := child as StaticPopulationInstance
 		if mmi == null:
 			continue
-		if String(mmi.get_meta("static_batch_population", "")) == "bin":
+		if mmi.population_kind == StaticPopulationInstance.POPULATION_BIN:
 			binned.append(mmi)
-		elif String(mmi.get_meta("static_batch_population", "")) == "global":
+		else:
 			global = mmi
 	assert_eq(binned.size(), 2)
 	assert_not_null(global)
 	if global != null:
 		assert_eq(global.multimesh.instance_count, 2,
 				"the global blended population retains both placements")
-		assert_false(global.has_meta("static_batch_bin_x"))
+		assert_eq(global.population_kind, StaticPopulationInstance.POPULATION_GLOBAL)
 	var bin_xs: Array[int] = []
 	for mmi in binned:
-		var bin_x := int(mmi.get_meta("static_batch_bin_x", -99))
+		var bin_x := mmi.bin_x
 		bin_xs.append(bin_x)
-		assert_eq(int(mmi.get_meta("static_batch_bin_z", -99)), 0)
+		assert_eq(mmi.bin_z, 0)
 		assert_eq(mmi.multimesh.instance_count, 1)
 		var authored_position := Vector3(10, -10, 0) \
 				if bin_x == 0 else Vector3(530, -10, 0)
@@ -411,7 +411,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	assert_eq(stats.batched, 2)
 	var container := parent.get_node_or_null("MissionObjects")
 	var visible_batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
-			as MultiMeshInstance3D
+			as StaticPopulationInstance
 	assert_not_null(visible_batch)
 	if visible_batch != null:
 		assert_eq(visible_batch.layers,
@@ -427,10 +427,10 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 		for index in range(2):
 			expected_bms_ids.append(int(mission.get_entity(
 					MissionData.KIND_BUILDING, index).get("bms_id", 0)))
-		assert_eq(visible_batch.get_meta("static_shadow_bms_ids"),
+		assert_eq(Array(visible_batch.slot_bms_ids),
 				expected_bms_ids,
 				"scratch attribution retains exact slot identity without changing geometry")
-		assert_eq(visible_batch.get_meta("static_shadow_slots"), [true, true])
+		assert_eq(Array(visible_batch.slot_casts_shadow), [1, 1])
 	assert_null(container.get_node_or_null("StaticPopulations/StaticShadow_StaticCrate1_0"),
 			"an all-eligible batch needs no shadow-only duplicate")
 	var shadow_sources := placer.get_static_terrain_shadow_source_diagnostics()
@@ -473,7 +473,7 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 
 	var container := parent.get_node_or_null("MissionObjects")
 	var visible_batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
-			as MultiMeshInstance3D
+			as StaticPopulationInstance
 	var shadow_batch := container.get_node_or_null(
 			"StaticPopulations/StaticShadow_StaticCrate1_0") as MultiMeshInstance3D
 	assert_not_null(visible_batch)
@@ -1097,9 +1097,9 @@ func _populations(container: Node) -> Array[Node]:
 	return holder.get_children() if holder != null else []
 
 
-func _lod_population(container: Node, population_name: String) -> MultiMeshInstance3D:
+func _lod_population(container: Node, population_name: String) -> StaticPopulationInstance:
 	var mmi := container.get_node_or_null("StaticPopulations/" + population_name) \
-			as MultiMeshInstance3D
+			as StaticPopulationInstance
 	assert_not_null(mmi, "population %s is emitted" % population_name)
 	return mmi
 
@@ -1163,8 +1163,8 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
 	if level0 == null or level1 == null:
 		return
-	assert_eq(int(level0.get_meta("static_batch_lod", -1)), 0)
-	assert_eq(int(level1.get_meta("static_batch_lod", -1)), 1)
+	assert_eq(level0.lod_index, 0)
+	assert_eq(level1.lod_index, 1)
 	assert_eq(level0.multimesh.instance_count, 2,
 			"every population of the bin holds the same slot list")
 	assert_eq(level1.multimesh.instance_count, 2)
@@ -1265,9 +1265,9 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 		return
 	var levels := {}
 	for child in _populations(container):
-		var mmi := child as MultiMeshInstance3D
-		if mmi != null and mmi.has_meta("static_batch_lod"):
-			levels[int(mmi.get_meta("static_batch_lod"))] = true
+		var mmi := child as StaticPopulationInstance
+		if mmi != null:
+			levels[mmi.lod_index] = true
 	assert_true(levels.has(0), "level 0 populations are emitted")
 	if lod_count > 1:
 		assert_true(levels.has(1), "the coarser authored level is emitted too")
@@ -1479,11 +1479,11 @@ func test_dense_shadow_twin_and_shadow_row_map_follow_the_compaction() -> void:
 			"the shadow twin carries rows only for the slots that cast")
 	assert_eq(_live_bms(placer, shadow1), [])
 	assert_false(shadow1.visible)
-	assert_eq(Array(level0.get_meta("static_shadow_rows")), [0, 1, 2],
+	assert_eq(Array(level0.row_slots), [0, 1, 2],
 			"the row -> slot map starts in slot order")
-	assert_eq(Array(shadow0.get_meta("static_shadow_rows")), [0, 2],
+	assert_eq(Array(shadow0.row_slots), [0, 2],
 			"the twin's rows name the casting slots")
-	assert_eq(level0.get_meta("static_shadow_bms_ids"), [bms[0], bms[1], bms[2]],
+	assert_eq(Array(level0.slot_bms_ids), [bms[0], bms[1], bms[2]],
 			"the slot identity arrays stay slot-ordered")
 	assert_eq(fixture.stats.static_live_populations, 2)
 
@@ -1495,10 +1495,10 @@ func test_dense_shadow_twin_and_shadow_row_map_follow_the_compaction() -> void:
 	assert_eq(_live_bms(placer, shadow1), [bms[0]],
 			"the NoShadow entity never enters a twin")
 	assert_true(shadow1.visible)
-	assert_eq(Array(level0.get_meta("static_shadow_rows")), [2])
-	assert_eq(Array(level1.get_meta("static_shadow_rows")), [0, 1])
-	assert_eq(Array(shadow0.get_meta("static_shadow_rows")), [2])
-	assert_eq(Array(shadow1.get_meta("static_shadow_rows")), [0])
+	assert_eq(Array(level0.row_slots), [2])
+	assert_eq(Array(level1.row_slots), [0, 1])
+	assert_eq(Array(shadow0.row_slots), [2])
+	assert_eq(Array(shadow1.row_slots), [0])
 	assert_eq(_live_populations(placer, bms[0]), ["Batch_StaticCrate1_1"],
 			"the live-population read-back names visible populations only")
 

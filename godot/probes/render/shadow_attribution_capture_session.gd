@@ -297,13 +297,14 @@ static func _model_ref(model: ObjectModel) -> Dictionary:
 
 ## The population-local slot each live MultiMesh row draws. The placer packs a
 ## population's rows dense [0, visible_instance_count) in swap-remove order and
-## publishes the row -> slot map as `static_shadow_rows`; a source without that
-## map is slot-ordered (row == slot) over its instance count.
+## publishes the row -> slot map on its StaticPopulationInstance; any other
+## source is slot-ordered (row == slot) over its instance count.
 static func _static_source_row_slots(source: MultiMeshInstance3D,
 		slot_count: int) -> PackedInt32Array:
 	var rows := PackedInt32Array()
-	if source.has_meta("static_shadow_rows"):
-		for slot in PackedInt32Array(source.get_meta("static_shadow_rows")):
+	var population := source as StaticPopulationInstance
+	if population != null and population.shadow_tagged:
+		for slot in population.row_slots:
 			if slot >= 0 and slot < slot_count:
 				rows.append(slot)
 		return rows
@@ -319,11 +320,18 @@ static func _static_source_row_slots(source: MultiMeshInstance3D,
 static func _static_source_identities(source: MultiMeshInstance3D) -> Array:
 	var count := source.multimesh.instance_count \
 			if source.multimesh != null else 0
-	var bms_ids := Array(source.get_meta("static_shadow_bms_ids", []))
-	var item_ids := Array(source.get_meta("static_shadow_item_ids", []))
-	var attrib2_values := Array(source.get_meta("static_shadow_attrib2", []))
-	var slots := Array(source.get_meta("static_shadow_slots", []))
-	var graphic := String(source.get_meta("static_shadow_graphic", ""))
+	var bms_ids: Array = []
+	var item_ids: Array = []
+	var attrib2_values: Array = []
+	var slots: Array = []
+	var graphic := ""
+	var population := source as StaticPopulationInstance
+	if population != null and population.shadow_tagged:
+		bms_ids = Array(population.slot_bms_ids)
+		item_ids = Array(population.slot_item_ids)
+		attrib2_values = Array(population.slot_attrib2)
+		slots = Array(population.slot_casts_shadow)
+		graphic = population.graphic
 	if bms_ids.is_empty():
 		var parent := source.get_parent()
 		while parent != null and not (parent is ObjectModel):

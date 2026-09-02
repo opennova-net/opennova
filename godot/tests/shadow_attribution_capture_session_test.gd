@@ -130,19 +130,19 @@ func test_static_batch_inventory_and_suppression_leave_visible_geometry_intact()
 	multimesh.instance_count = 2
 	multimesh.set_instance_transform(0, Transform3D(Basis(), Vector3(5, 2, 7)))
 	multimesh.set_instance_transform(1, Transform3D(Basis(), Vector3(-3, 2, 9)))
-	var batch := MultiMeshInstance3D.new()
+	var batch := StaticPopulationInstance.new()
 	batch.name = "Batch_DTruck1_0"
 	batch.multimesh = multimesh
 	batch.layers = Water.VISUAL_LAYER_WORLD_NO_MIRROR \
 			| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	batch.set_meta("static_shadow_bms_ids", PackedInt32Array([58, 77]))
-	batch.set_meta("static_shadow_item_ids", PackedInt32Array([101294, 101111]))
-	batch.set_meta("static_shadow_attrib2", PackedInt32Array([0x20, 0x20]))
-	# The native mission placer stores eligibility as bool Variants in an Array.
-	# Keep this fixture faithful so inventory exercises the runtime value shape.
-	batch.set_meta("static_shadow_slots", [true, true])
-	batch.set_meta("static_shadow_graphic", "DTruck1")
+	batch.shadow_tagged = true
+	batch.slot_bms_ids = PackedInt32Array([58, 77])
+	batch.slot_item_ids = PackedInt32Array([101294, 101111])
+	batch.slot_attrib2 = PackedInt64Array([0x20, 0x20])
+	batch.slot_casts_shadow = PackedByteArray([1, 1])
+	batch.graphic = "DTruck1"
+	batch.row_slots = PackedInt32Array([0, 1])
 	world.add_child(batch)
 
 	var original_layers := batch.layers
