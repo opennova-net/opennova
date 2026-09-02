@@ -68,6 +68,7 @@ class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
 class AiDebugReport;     // the F3 AI overlay payload (simulation/ai_debug_report.h)
+class CollisionDebugReport; // the F3 collision overlay payload (simulation/collision_debug_report.h)
 class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
 class RayDebugReport;    // the F3 rays view channel (simulation/ray_debug_report.h)
 class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlusion_portal_report.h)
@@ -1502,7 +1503,7 @@ public:
 	// (first 128 with no player spawned). While the contact capture is armed
 	// the report adds "hits" (stride-6 [target, age, kind, x, y, z], mask+TTL
 	// filtered) + "hit_stride"/"hit_ttl"/"tick" — the overlay's flash channel.
-	Dictionary get_collision_debug() const;
+	Ref<CollisionDebugReport> get_collision_debug() const;
 
 	// The AI overlay's per-frame payload as an AiDebugReport
 	// (simulation/ai_debug_report.h): per-brain rows, nav channels, groups and
