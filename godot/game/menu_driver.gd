@@ -32,8 +32,6 @@ signal list_activated(id: int, row: int)
 signal widget_hover_changed(id: int, hovered: bool)
 
 # Double-click window for list/table activation, matching Godot's default.
-const DOUBLE_CLICK_MS := 400
-
 var _frame: MenuFrame
 var _audio: MenuAudio
 var _doc: MnuDocument
@@ -75,21 +73,14 @@ var _text_rsrc_cache: Dictionary = {}
 # owns the mounts + the hidden-tab visibility gate).
 var _credits := MenuCreditsOverlays.new()
 
-var _focus_id := -1        # keyboard/edit focus [orig: g_ui_focus_wnd @ 0x31C16D4]
-var _open_combo_id := -1   # single open dropdown [orig: g_ui_active_combo_wnd @ 0x31C16D0]
-var _last_claim := -1
-var _last_mouse := Vector2.ZERO
-var _mouse_down := false
-var _last_click_id := -1
-var _last_click_row := -1
-var _last_click_ms := 0
 
 
 func attach(frame: MenuFrame, audio: MenuAudio) -> void:
 	_frame = frame
 	_audio = audio
-	if not _frame.widget_clicked.is_connected(_on_frame_widget_clicked):
-		_frame.widget_clicked.connect(_on_frame_widget_clicked)
+	input.setup(self)
+	if not _frame.widget_clicked.is_connected(input.on_frame_widget_clicked):
+		_frame.widget_clicked.connect(input.on_frame_widget_clicked)
 	if not _frame.scroll_value_changed.is_connected(_on_frame_scroll_value):
 		_frame.scroll_value_changed.connect(_on_frame_scroll_value)
 
@@ -133,9 +124,7 @@ func open_document(doc: MnuDocument, root: ResourceRoot, style: MnsStyleSheet,
 	_screen_order = []
 	_text_rsrc_cache.clear()
 	_nav_stack = []
-	_focus_id = -1
-	_open_combo_id = -1
-	_last_claim = -1
+	input.reset()
 	if _doc == null:
 		return false
 	for screen_id in _doc.get_screen_ids():
@@ -204,7 +193,7 @@ func pop_screen() -> bool:
 
 func _set_current_screen_internal(name: String) -> void:
 	_current_screen = name
-	_focus_id = -1
+	input.reset_focus()
 	_configure_frame()
 
 
@@ -233,7 +222,7 @@ func _configure_frame() -> void:
 			_screen_text_lookup())
 	MenuFrameStateReplay.apply(_frame, _index_of_id, _id_state)
 	_seed_marquee_widgets()
-	_apply_cursor(null)
+	input.reset_cursor()
 
 
 # Marquee DATASOURCE routing: a marquee_wnd DATASOURCE is either a
@@ -262,11 +251,11 @@ func _seed_marquee_widgets() -> void:
 			_credits.mount(_frame, int(id), widget_frame_rect(int(id)), credits, true)
 			continue
 		var text := bytes.get_string_from_ascii()
-		var index := _frame_index(int(id))
+		var index := frame_index(int(id))
 		if index >= 0 and not text.is_empty():
 			_frame.set_widget_marquee_lines(index,
 					text.replace("\r\n", "\n").split("\n"))
-	_credits.sync(_frame, _frame_index)
+	_credits.sync(_frame, frame_index)
 
 
 # The current screen's id<->pre-order-index maps: the frame's index space is
@@ -355,7 +344,7 @@ func has_widget(name: String) -> bool:
 	return widget_id(name) >= 0
 
 
-func _frame_index(id: int) -> int:
+func frame_index(id: int) -> int:
 	# Frameless (headless seam tests): every frame-dependent path takes its
 	# state-store fallback.
 	if _frame == null:
@@ -382,15 +371,15 @@ func _saved_state(id: int) -> MenuWidgetState:
 ## rect scaled by the frame's current size) — icon/preview mounts position by
 ## it. Zero rect when the widget is not on the configured screen.
 func widget_frame_rect(id: int) -> Rect2:
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index < 0 or _frame == null:
 		return Rect2()
 	var design := _frame.widget_rect(index)
-	var scale := _design_scale()
+	var scale := design_scale()
 	return Rect2(design.position * scale, design.size * scale)
 
 
-func _design_scale() -> Vector2:
+func design_scale() -> Vector2:
 	# The fixed authoring design space (the witness lives at the engine home,
 	# engine/runtime/menu menu_frame.h kMenuDesignWidth/Height).
 	var size := _frame.get_size()
@@ -404,10 +393,10 @@ func set_widget_shown(id: int, shown: bool) -> void:
 	var state := _state_of(id)
 	state.shown = shown
 	state.has_shown = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_shown_override(index, shown)
-	_credits.sync(_frame, _frame_index)
+	_credits.sync(_frame, frame_index)
 
 
 func is_widget_shown(id: int) -> bool:
@@ -421,7 +410,7 @@ func set_widget_disabled(id: int, disabled: bool) -> void:
 	var state := _state_of(id)
 	state.disabled = disabled
 	state.has_disabled = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_disabled(index, disabled)
 
@@ -437,7 +426,7 @@ func set_widget_checked(id: int, checked: bool) -> void:
 	var state := _state_of(id)
 	state.checked = checked
 	state.has_checked = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_checked(index, checked)
 
@@ -453,13 +442,13 @@ func set_widget_text(id: int, text: String) -> void:
 	var state := _state_of(id)
 	state.text = text
 	state.has_text = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_text(index, text)
 
 
 func get_widget_text(id: int) -> String:
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		return _frame.get_widget_text(index)
 	var state := _saved_state(id)
@@ -478,7 +467,7 @@ func set_widget_items(id: int, items: PackedStringArray) -> void:
 	state.has_selected_item = true
 	state.scroll_row = 0
 	state.has_scroll_row = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_items(index, items)
 		_frame.set_widget_selection(index, state.selected_item, -1, 0)
@@ -498,7 +487,7 @@ func item_count(id: int) -> int:
 	var state := _saved_state(id)
 	if state != null and state.has_items:
 		return state.items.size()
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		return _frame.item_count(index)
 	return _doc.get_item_count(id)
@@ -537,7 +526,7 @@ func select_row(id: int, row: int, emit := true) -> void:
 	var state := _state_of(id)
 	state.selected_item = row
 	state.has_selected_item = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_selection(index, row, -1, state.scroll_row)
 	if emit:
@@ -566,7 +555,7 @@ func set_scroll_row(id: int, row: int) -> void:
 	var state := _state_of(id)
 	state.scroll_row = maxi(row, 0)
 	state.has_scroll_row = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_selection(index,
 				state.selected_item if state.has_selected_item else -1, -1,
@@ -577,7 +566,7 @@ func set_scroll_row(id: int, row: int) -> void:
 # applied to the frame): mirror it into the saved-state store and relay the
 # value change.
 func _on_frame_scroll_value(index: int, value: int) -> void:
-	var id := _id_at_index(index)
+	var id := id_at_index(index)
 	if id < 0:
 		return
 	if widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
@@ -602,7 +591,7 @@ func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 	value = clampi(value, minimum, maximum)
 	var scroll := MenuScrollRange.new(minimum, maximum, page, value)
 	_state_of(id).scroll_range = scroll
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
 				scroll.page, scroll.value)
@@ -618,7 +607,7 @@ func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
 	var state := _state_of(id)
 	state.marquee_lines = lines
 	state.has_marquee_lines = true
-	var index := _frame_index(id)
+	var index := frame_index(id)
 	if index >= 0:
 		_frame.set_widget_marquee_lines(index, lines)
 
@@ -655,124 +644,30 @@ func table_selected_rows(id: int) -> PackedInt32Array:
 
 func table_select_row(id: int, row: int, additive := false) -> void:
 	MenuTableState.select_row(_state_of(id), row, additive)
-	MenuTableState.push_selection(_frame, _frame_index(id), _saved_state(id))
+	MenuTableState.push_selection(_frame, frame_index(id), _saved_state(id))
 
 
 func _push_table_rows(id: int) -> void:
-	MenuTableState.push_rows(_frame, _frame_index(id), _saved_state(id))
+	MenuTableState.push_rows(_frame, frame_index(id), _saved_state(id))
 
 
-# --- Input: mouse ---------------------------------------------------------------
+# --- Input dispatch seams ---------------------------------------------------------
+# The mouse / key / popup / edit-focus half lives in MenuInputDispatch
+# (menu_input_dispatch.gd); these are the typed seams it drives and the
+# shell-facing forwarders the _gui_input owners call.
 
-## One raw-mouse sample in frame-local coordinates. The shell's _gui_input
-## forwards motion and left-button edges here.
-func process_mouse(position: Vector2, button_down: bool) -> void:
-	if _frame == null or not _frame.is_configured():
-		return
-	_last_mouse = position
-	var down_edge := button_down and not _mouse_down
-	_mouse_down = button_down
-
-	# An open dropdown owns the mouse exclusively [orig: dispatch_mouse_event
-	# @ 0x63ab00 g_ui_open_popup_wnd gate; combobox_handle_event @ 0x65c190,
-	# outside check @ 0x65c290 — D-MNU-11/12]: a press picks a popup row or
-	# dismisses (the dismissing click is consumed either way; a press on the
-	# input-dead closed cell does nothing).
-	if _open_combo_id >= 0:
-		var combo_index := _frame_index(_open_combo_id)
-		if combo_index < 0:
-			_open_combo_id = -1
-		else:
-			_frame.set_cursor_state(false, position)
-			# The popup's scrollbar child sees the sample ahead of row picking
-			# [orig: CListWnd child walk @ 0x643f30 — the scrollbar child
-			# claims first; parts = CScrollWnd_HandleEvent @ 0x64d050]. Its
-			# scroll_row changes arrive on scroll_value_changed like the
-			# main pump's.
-			if _frame.process_popup_mouse(combo_index, position, button_down):
-				_frame.set_widget_hover_item(combo_index, -1)
-				return
-			# The popup-exclusive pump hovers the row under the mouse (style 2)
-			# [orig: the per-frame pump runs ONLY on the popup while open —
-			# scene_end_frame @ 0x63e600 gate @ 0x63e691; the row mouseover
-			# style = CListWnd_DrawItems @ 0x643f30].
-			_frame.set_widget_hover_item(combo_index,
-					_frame.combo_popup_row_at(combo_index, position))
-			if down_edge:
-				var row := _frame.combo_popup_row_at(combo_index, position)
-				if row >= 0:
-					_combo_select(_open_combo_id, row)
-					close_active_combo_popup()
-				elif not _frame.combo_popup_contains(combo_index, position) \
-						and not _frame.widget_rect(combo_index).has_point(
-								position / _design_scale()):
-					close_active_combo_popup()
-			return
-
-	# The CScrollWnd interaction (arrows/track/shuttle drag) lives in the
-	# engine pump; its value changes arrive on scroll_value_changed.
-	var claim := _frame.process_mouse(position, button_down)
-	_frame.set_cursor_state(false, position)
-	if claim != _last_claim:
-		_on_claim_changed(_last_claim, claim)
-		_last_claim = claim
-	_apply_cursor(_frame.get_cursor_texture())
+var input := MenuInputDispatch.new()
 
 
-## One wheel tick (steps: +1 rows-down, -1 rows-up) in frame-local
-## coordinates. Deliberate divergence D-MNU-18 — retail ships no functioning
-## menu wheel scroll (the witness lives at the engine pump); the open popup
-## consumes the tick exclusively, else the front-most row owner under the
-## point. Returns true when a scrollable target claimed it.
-func process_wheel(position: Vector2, steps: int) -> bool:
-	if _frame == null or not _frame.is_configured():
-		return false
-	if not _frame.process_mouse_wheel(position, steps):
-		return false
-	if _open_combo_id >= 0:
-		var combo_index := _frame_index(_open_combo_id)
-		if combo_index >= 0:
-			# Keep the popup row hover matching the rows that just moved
-			# under the still cursor.
-			_frame.set_widget_hover_item(combo_index,
-					_frame.combo_popup_row_at(combo_index, position))
-	return true
+func document() -> MnuDocument:
+	return _doc
 
 
-func _on_claim_changed(previous: int, current: int) -> void:
-	# The hover sound edges ride the visual-state transitions
-	# [orig: widget_process_mouse_event @ 0x647a00 — MOUSEIN on entering
-	# state 2/3, MOUSEOUT on leaving the widget].
-	if previous >= 0:
-		var prev_id := _id_at_index(previous)
-		if prev_id >= 0:
-			_play_widget_sound_state(prev_id, "MOUSEOUT")
-			widget_hover_changed.emit(prev_id, false)
-	if current >= 0 and not _frame.is_widget_disabled(current):
-		var id := _id_at_index(current)
-		if id >= 0:
-			_play_widget_sound_state(id, "MOUSEIN")
-			widget_hover_changed.emit(id, true)
-
-
-func _id_at_index(index: int) -> int:
+## The doc id at a frame index, or -1.
+func id_at_index(index: int) -> int:
 	if index < 0 or index >= _id_of_index.size():
 		return -1
 	return int(_id_of_index[index])
-
-
-func _apply_cursor(texture: Texture2D) -> void:
-	# The retail cursor rides the claim as the OS custom cursor — the ONE
-	# live cursor (both drawn showed the compiled one trailing by a pump
-	# frame; emit_cursor stays for surfaces without an OS cursor).
-	Input.set_custom_mouse_cursor(texture, Input.CURSOR_ARROW)
-
-
-func _on_frame_widget_clicked(index: int) -> void:
-	var id := _id_at_index(index)
-	if id < 0 or _frame.is_widget_disabled(index):
-		return
-	_activate_widget(id, index, _last_mouse)
 
 
 # widget_activated fires BEFORE the scripted ACTION list. Retail runs ACTIONs
@@ -782,104 +677,15 @@ func _on_frame_widget_clicked(index: int) -> void:
 # still-live controls first, and the dispatch is skipped when an observer
 # swapped the document under the emit (game.mnu CONFIRM_YES -> main.mnu;
 # menu-re.md).
-func _emit_activated_then_dispatch(id: int) -> void:
+func activate(id: int) -> void:
 	var doc_at_emit := _doc
 	widget_activated.emit(id, widget_name_of(id))
 	if _doc == doc_at_emit:
 		_dispatch_widget_actions(id)
 
 
-func _activate_widget(id: int, index: int, position: Vector2) -> void:
-	var kind := widget_kind_of(id)
-	match kind:
-		MnuDocument.TYPE_BUTTON, MnuDocument.TYPE_GOTO, MnuDocument.TYPE_STATIC, \
-		MnuDocument.TYPE_LABEL:
-			_play_widget_sound_state(id, "SELECTED")
-			_emit_activated_then_dispatch(id)
-		MnuDocument.TYPE_CHECKBOX:
-			var next := not is_widget_checked(id)
-			set_widget_checked(id, next)
-			_play_widget_sound_state(id, "SELECTED")
-			_emit_activated_then_dispatch(id)
-		MnuDocument.TYPE_RADIO:
-			_select_radio(id)
-			_play_widget_sound_state(id, "SELECTED")
-			_emit_activated_then_dispatch(id)
-		MnuDocument.TYPE_COMBO:
-			_play_widget_sound_state(id, "SELECTED")
-			if _open_combo_id == id:
-				close_active_combo_popup()
-			else:
-				_open_combo_popup(id)
-		MnuDocument.TYPE_LIST, MnuDocument.TYPE_MULTI, MnuDocument.TYPE_LAN_LIST:
-			var row := _frame.list_row_at(index, position) if index >= 0 else -1
-			if row >= 0:
-				_list_click(id, kind, row)
-		MnuDocument.TYPE_SPINLIST:
-			var arrow := _frame.spin_arrow_at(index, position)
-			if arrow == 1:
-				spin_cycle(id, 1)
-			elif arrow == 2:
-				spin_cycle(id, -1)
-		MnuDocument.TYPE_EDIT:
-			_focus_edit(id)
-		MnuDocument.TYPE_TABLE:
-			var row := _frame.table_row_at(index, position)
-			if row >= 0:
-				_table_click(id, row)
-		_:
-			# Generic containers: actions still dispatch (authored WINDOW
-			# widgets carry SCREEN jumps in shipped menus).
-			if _doc.get_widget_actions(id).size() > 0:
-				_play_widget_sound_state(id, "SELECTED")
-				_emit_activated_then_dispatch(id)
-
-
-func _list_click(id: int, kind: int, row: int) -> void:
-	var now := Time.get_ticks_msec()
-	var double := id == _last_click_id and row == _last_click_row \
-			and now - _last_click_ms <= DOUBLE_CLICK_MS
-	_last_click_id = id
-	_last_click_row = row
-	_last_click_ms = 0 if double else now
-	if kind == MnuDocument.TYPE_MULTI:
-		var additive := Input.is_key_pressed(KEY_CTRL)
-		var state := _state_of(id)
-		var selected := state.selected_set if additive else PackedInt32Array()
-		if selected.has(row):
-			var kept := PackedInt32Array()
-			for r in selected:
-				if r != row:
-					kept.append(r)
-			selected = kept
-		else:
-			selected.append(row)
-		state.selected_set = selected
-		state.has_selected_set = true
-		var index := _frame_index(id)
-		if index >= 0:
-			_frame.set_widget_selected_set(index, selected)
-	select_row(id, row)  # emits the "list"/"multi" value change
-	_play_widget_sound_state(id, "SELECTED")
-	if double:
-		list_activated.emit(id, row)
-
-
-func _table_click(id: int, row: int) -> void:
-	var now := Time.get_ticks_msec()
-	var double := id == _last_click_id and row == _last_click_row \
-			and now - _last_click_ms <= DOUBLE_CLICK_MS
-	_last_click_id = id
-	_last_click_row = row
-	_last_click_ms = 0 if double else now
-	var multiselect := _doc.is_widget_multiselect(id)
-	table_select_row(id, row, multiselect and Input.is_key_pressed(KEY_CTRL))
-	_play_widget_sound_state(id, "SELECTED")
-	if double:
-		list_activated.emit(id, row)
-
-
-func _select_radio(id: int) -> void:
+## Check one radio and uncheck its GROUP siblings on the same screen.
+func select_radio(id: int) -> void:
 	set_widget_checked(id, true)
 	var group := _doc.get_widget_group(id)
 	# Group exclusivity within the widget's screen (the authored GROUP id).
@@ -897,38 +703,60 @@ func _select_radio(id: int) -> void:
 		set_widget_checked(int(other_id), false)
 
 
-# --- Combo popups ---------------------------------------------------------------
+func emit_edit_changed(id: int) -> void:
+	var kind := "multiline" if widget_kind_of(id) == MnuDocument.TYPE_MULTILINE_EDIT \
+			else "edit"
+	widget_value_changed.emit(widget_name_of(id), kind, -1, get_widget_text(id))
 
-func _open_combo_popup(id: int) -> void:
-	# One dropdown per menu: opening one closes the previous
-	# [orig: g_ui_active_combo_wnd @ 0x31C16D0, single-open toggle @ 0x65c210].
-	close_active_combo_popup()
-	_open_combo_id = id
-	var index := _frame_index(id)
+
+
+## The MULTI list's stored selection set (empty until a CTRL-select wrote one).
+func selected_set(id: int) -> PackedInt32Array:
+	return _state_of(id).selected_set
+
+
+## Store a MULTI list's selection set and push it to the frame.
+func set_selected_set(id: int, rows: PackedInt32Array) -> void:
+	var state := _state_of(id)
+	state.selected_set = rows
+	state.has_selected_set = true
+	var index := frame_index(id)
 	if index >= 0:
-		_frame.set_widget_popup_open(index, true)
+		_frame.set_widget_selected_set(index, rows)
+
+
+## Persist an edit widget's text for cross-screen reads.
+func remember_widget_text(id: int, text: String) -> void:
+	var state := _state_of(id)
+	state.text = text
+	state.has_text = true
+
+
+func process_mouse(position: Vector2, button_down: bool) -> void:
+	input.process_mouse(position, button_down)
+
+
+func process_wheel(position: Vector2, steps: int) -> bool:
+	return input.process_wheel(position, steps)
+
+
+func handle_key_input(event: InputEventKey) -> bool:
+	return input.handle_key_input(event)
 
 
 func close_active_combo_popup() -> void:
-	if _open_combo_id < 0:
-		return
-	var index := _frame_index(_open_combo_id)
-	if index >= 0:
-		_frame.set_widget_popup_open(index, false)
-		_frame.set_widget_hover_item(index, -1)
-	_open_combo_id = -1
+	input.close_active_combo_popup()
 
 
 func is_combo_popup_open(id: int) -> bool:
-	return _open_combo_id == id
+	return input.is_combo_popup_open(id)
 
 
-func _combo_select(id: int, row: int) -> void:
-	select_row(id, row)
-	_play_widget_sound_state(id, "SELECTED")
+func get_focused_widget() -> int:
+	return input.get_focused_widget()
 
 
-# --- Spin lists -----------------------------------------------------------------
+# --- Spin lists ---------------------------------------------------------------------
 
 ## Wrap-around cycle (the spin arrows' step); emits the value change.
 func spin_cycle(id: int, delta: int) -> void:
@@ -937,7 +765,7 @@ func spin_cycle(id: int, delta: int) -> void:
 		return
 	var row := ((selected_row(id) + delta) % count + count) % count
 	select_row(id, row)
-	_play_widget_sound_state(id, "SELECTED")
+	play_widget_state_sound(id, "SELECTED")
 
 
 ## The selected item's `value=` attribute (authored rows only; runtime rows
@@ -945,136 +773,6 @@ func spin_cycle(id: int, delta: int) -> void:
 func spin_value_attr(id: int) -> String:
 	return item_value(id, selected_row(id))
 
-
-# --- Edit focus + keyboard ------------------------------------------------------
-
-func _focus_edit(id: int) -> void:
-	# Click focuses unless read-only [orig: edit_widget_handle_input_event
-	# @ 0x661510 — g_ui_focus_wnd = this unless widget[194]].
-	if (_doc.get_widget_flags(id) & MnuDocument.FLAG_READONLY) != 0:
-		return
-	if _focus_id == id:
-		return
-	_clear_edit_focus()
-	_focus_id = id
-	var index := _frame_index(id)
-	if index >= 0:
-		_frame.set_widget_focused(index, true)
-		if _frame.get_widget_caret(index) < 0:
-			_frame.set_widget_caret(index, get_widget_text(id).length())
-
-
-func _clear_edit_focus() -> void:
-	if _focus_id < 0:
-		return
-	var id := _focus_id
-	_focus_id = -1
-	var index := _frame_index(id)
-	if index >= 0:
-		_frame.set_widget_focused(index, false)
-		# Persist the edited text for cross-screen reads.
-		var state := _state_of(id)
-		state.text = _frame.get_widget_text(index)
-		state.has_text = true
-	_emit_edit_changed(id)
-
-
-func get_focused_widget() -> int:
-	return _focus_id
-
-
-func _emit_edit_changed(id: int) -> void:
-	var kind := "multiline" if widget_kind_of(id) == MnuDocument.TYPE_MULTILINE_EDIT \
-			else "edit"
-	widget_value_changed.emit(widget_name_of(id), kind, -1, get_widget_text(id))
-
-
-## Route one key event. Returns true when consumed (the shell then marks the
-## input handled). Order matches the Control tree: focused edit first, then
-## the virtual-key hotkey scan, then the character scan.
-func handle_key_input(event: InputEventKey) -> bool:
-	if event.is_echo() or not event.is_pressed():
-		return false
-	if _frame == null or not _frame.is_configured():
-		return false
-	if _focus_id >= 0:
-		if _route_edit_key(event):
-			return true
-	var vk := ""
-	match event.get_keycode():
-		KEY_ESCAPE:
-			vk = "VK_ESCAPE"
-		KEY_ENTER, KEY_KP_ENTER:
-			vk = "VK_RETURN"
-	if not vk.is_empty():
-		var target := _frame.hotkey_widget(vk, true)
-		if target >= 0 and _trigger_hotkey_target(target):
-			return true
-	var unicode := event.get_unicode()
-	if unicode == 0:
-		var keycode := int(event.get_keycode())
-		if keycode >= 0x20 and keycode <= 0x7E:
-			unicode = keycode
-	if unicode > 0:
-		var target := _frame.hotkey_widget(String.chr(unicode), false)
-		if target >= 0 and _trigger_hotkey_target(target):
-			return true
-	return false
-
-
-func _route_edit_key(event: InputEventKey) -> bool:
-	var index := _frame_index(_focus_id)
-	if index < 0:
-		_focus_id = -1
-		return false
-	var id := _focus_id
-	# Godot key -> the engine's edit VK codes (the witness lives at the engine
-	# home, engine/runtime/menu menu_edit.h kEditKey*).
-	var vk := 0
-	match event.get_keycode():
-		KEY_BACKSPACE: vk = MenuFrame.EDIT_KEY_BACKSPACE
-		KEY_ENTER, KEY_KP_ENTER: vk = MenuFrame.EDIT_KEY_ENTER
-		KEY_END: vk = MenuFrame.EDIT_KEY_END
-		KEY_HOME: vk = MenuFrame.EDIT_KEY_HOME
-		KEY_LEFT: vk = MenuFrame.EDIT_KEY_LEFT
-		KEY_RIGHT: vk = MenuFrame.EDIT_KEY_RIGHT
-		KEY_DELETE: vk = MenuFrame.EDIT_KEY_DELETE
-	if vk != 0:
-		var result := _frame.edit_key(index, vk, event.is_shift_pressed())
-		if result == MenuFrame.EDIT_RESULT_COMMIT:
-			# Enter commits: the value fires and focus releases (the witness
-			# lives at the engine home, engine/runtime/menu menu_edit.h
-			# EditKeyResult::kCommit — clears g_ui_focus_wnd and fires the
-			# commit event 0x7000002).
-			_clear_edit_focus()
-			_play_widget_sound_state(id, "SELECTED")
-		elif result == MenuFrame.EDIT_RESULT_CHANGED:
-			_emit_edit_changed(id)
-		return true
-	var unicode := event.get_unicode()
-	if unicode > 0:
-		if _frame.edit_char(index, unicode):
-			_emit_edit_changed(id)
-		return true
-	return false
-
-
-func _trigger_hotkey_target(index: int) -> bool:
-	# A disabled target consumes the key without firing (prevents a later
-	# same-key widget firing through a disabled modal); an actionless match
-	# is still consumed — actionless named controls are the retail Command
-	# seam the shell wires by name.
-	if _frame.is_widget_disabled(index):
-		return true
-	var id := _id_at_index(index)
-	if id < 0:
-		return true
-	if widget_kind_of(id) == MnuDocument.TYPE_EDIT:
-		_focus_edit(id)
-		return true
-	var rect := _frame.widget_rect(index)
-	_activate_widget(id, index, (rect.position + rect.size * 0.5) * _design_scale())
-	return true
 
 
 # --- Actions --------------------------------------------------------------------
@@ -1120,7 +818,7 @@ func dispatch_action_row(action: MnuActionRow) -> bool:
 			if not is_widget_shown(target_id) or is_widget_disabled(target_id):
 				return false
 			if widget_kind_of(target_id) == MnuDocument.TYPE_EDIT:
-				_focus_edit(target_id)
+				input.focus_edit(target_id)
 			return true
 	return false
 
@@ -1157,7 +855,7 @@ func handle_window_action(target: String, state: String, toggle := false) -> boo
 
 # --- Sounds / value relay -------------------------------------------------------
 
-func _play_widget_sound_state(id: int, state_token: String) -> void:
+func play_widget_state_sound(id: int, state_token: String) -> void:
 	for sound: MnuSoundRow in _doc.get_widget_sounds(id):
 		if sound.state.nocasecmp_to(state_token) != 0:
 			continue
