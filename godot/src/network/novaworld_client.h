@@ -9,11 +9,13 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 
+#include "network/novaworld_server_row.h"
 #include "network/nwu_lobby_session.h"
 #include "network/ping_sweep_worker.h"
 
@@ -88,7 +90,7 @@ public:
 	// Server browser (ADR 0010 Phase 2). The list is fetched over HTTP from
 	// the GSB endpoint once the session is verified; rows arrive asynchronously
 	// (watch the `server_list_updated` signal, then read get_server_rows()).
-	Array get_server_rows() const;
+	TypedArray<NovaWorldServerRow> get_server_rows() const;
 
 	// Re-fetch the server list on demand (the browser's Refresh button). A
 	// no-op before the session/base URL exists; the fresh rows arrive through
@@ -196,7 +198,7 @@ private:
 
 	// Server browser.
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
-	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
+	std::vector<opennova::GsbServerEntry> server_entries_; // the cached GSB list
 	bool gsb_request_in_flight_ = false;    // transport bookkeeping (cancel before re-issue)
 	int total_servers_ = 0;                 // GSB TS — list-wide server count
 	int total_players_ = 0;                 // GSB TP — service-wide player count

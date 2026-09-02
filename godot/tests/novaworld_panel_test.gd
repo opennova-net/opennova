@@ -48,6 +48,14 @@ func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
 	return panel
 
 
+## A browser row authored from its wire field names (the record's properties).
+func _row(fields: Dictionary) -> NovaWorldServerRow:
+	var row := NovaWorldServerRow.new()
+	for key in fields:
+		row.set(key, fields[key])
+	return row
+
+
 func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
 	var viewport := SubViewport.new()
 	viewport.size = viewport_size
@@ -94,7 +102,7 @@ func test_authored_scene_is_matchmaking_and_fits_800_by_600() -> void:
 
 
 func test_populated_browser_controls_stay_inside_the_matchmaking_shell() -> void:
-	var retail_row := {
+	var retail_row := _row({
 		"rid": 1,
 		"name": "! Long Retail Community Server",
 		"msg": "Welcome to community-matchmaking.example.invalid",
@@ -110,12 +118,13 @@ func test_populated_browser_controls_stay_inside_the_matchmaking_shell() -> void
 		"time_left": "31",
 		"dedicated": "Y",
 		"player_names": PackedStringArray(),
-	}
+	})
+	var retail_rows: Array[NovaWorldServerRow] = [retail_row]
 	for viewport_size in [Vector2i(1406, 896), Vector2i(800, 600)]:
 		var panel := _make_panel_in_viewport(viewport_size)
 		panel.client_for_test().emit_signal("connected")
 		panel.client_for_test().emit_signal("login_succeeded", "ljim")
-		panel.set_rows_for_test([retail_row])
+		panel.set_rows_for_test(retail_rows)
 		await wait_process_frames(2)
 
 		var shell := panel.get_node("Center/Shell") as Control
@@ -218,97 +227,85 @@ func test_host_pressed_reports_when_no_missions() -> void:
 	assert_string_contains(panel.status_text(), "No missions", "the empty case is reported, not hung")
 
 
-# The browser table's row cells (Server, Mission, Mode, Players, Ping, Access).
+# The browser table model is the engine's (net/novaworld/server_browser.h,
+# pinned by ctest server_browser); these cases prove the binding plumbing over
+# NovaWorldServerRow: cells, ping states, filter, sort, details.
 func test_row_cells_cover_the_table_columns() -> void:
-	var row := {"name": "Alpha", "mission_name": "ASH_G11A", "players": 3,
+	var row := _row({"name": "Alpha", "mission_name": "ASH_G11A", "players": 3,
 			"max_players": 16, "game_type": "COOP", "exp": "jox01",
-			"password": "N", "locked": "N"}
-	var cells := NovaWorldPanel.row_cells(row, 42)
-	assert_eq(cells[NovaWorldPanel.Column.NAME], "Alpha")
-	assert_eq(cells[NovaWorldPanel.Column.MISSION], "ASH_G11A")
-	assert_eq(cells[NovaWorldPanel.Column.TYPE], "COOP")
-	assert_eq(cells[NovaWorldPanel.Column.PLAYERS], "3/16")
-	assert_eq(cells[NovaWorldPanel.Column.PING], "42")
-	assert_eq(cells[NovaWorldPanel.Column.ACCESS], "Open")
-	row["password"] = "Y"
-	assert_eq(NovaWorldPanel.row_cells(row, null)[NovaWorldPanel.Column.ACCESS], "Password",
+			"password": "N", "locked": "N"})
+	var cells := NovaWorldServerBrowser.row_cells(row, 42)
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_NAME], "Alpha")
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_MISSION], "ASH_G11A")
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_TYPE], "COOP")
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_PLAYERS], "3/16")
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_PING], "42")
+	assert_eq(cells[NovaWorldServerBrowser.COLUMN_ACCESS], "Open")
+	row.password = "Y"
+	assert_eq(NovaWorldServerBrowser.row_cells(row, NovaWorldServerBrowser.PING_PENDING)[
+			NovaWorldServerBrowser.COLUMN_ACCESS], "Password",
 			"a passworded server is labeled plainly")
 
 
-# The ping cell's three states (engine/net/novaworld/ping_sweep.h's fold):
-# absent = in flight, negative codes = unreachable, else milliseconds.
+# The ping cell's three states: pending, the sweep's negative codes, milliseconds.
 func test_ping_text_states() -> void:
-	assert_eq(NovaWorldPanel.ping_text(null), "...", "in flight shows pending")
-	assert_eq(NovaWorldPanel.ping_text(-2), "N/A", "the sweep's failed code")
-	assert_eq(NovaWorldPanel.ping_text(-3), "N/A", "the never-attempted code")
-	assert_eq(NovaWorldPanel.ping_text(87), "87", "a round-trip shows milliseconds")
+	assert_eq(NovaWorldServerBrowser.ping_text(NovaWorldServerBrowser.PING_PENDING), "...",
+			"in flight shows pending")
+	assert_eq(NovaWorldServerBrowser.ping_text(NovaWorldServerBrowser.PING_FAILED), "N/A",
+			"the sweep's failed code")
+	assert_eq(NovaWorldServerBrowser.ping_text(NovaWorldServerBrowser.PING_NEVER_ATTEMPTED), "N/A",
+			"the never-attempted code")
+	assert_eq(NovaWorldServerBrowser.ping_text(87), "87", "a round-trip shows milliseconds")
 
 
-func _browser_rows() -> Array:
+func _browser_rows() -> Array[NovaWorldServerRow]:
 	return [
-		{"rid": 1, "name": "Bravo", "mission_name": "G11", "players": 16,
-				"max_players": 16, "game_type": "COOP", "password": "N", "locked": "N"},
-		{"rid": 2, "name": "alpha", "mission_name": "Ash", "players": 0,
-				"max_players": 32, "game_type": "TDM", "password": "Y", "locked": "N"},
-		{"rid": 3, "name": "Charlie", "mission_name": "Delta", "players": 4,
+		_row({"rid": 1, "name": "Bravo", "mission_name": "G11", "players": 16,
+				"max_players": 16, "game_type": "COOP", "password": "N", "locked": "N"}),
+		_row({"rid": 2, "name": "alpha", "mission_name": "Ash", "players": 0,
+				"max_players": 32, "game_type": "TDM", "password": "Y", "locked": "N"}),
+		_row({"rid": 3, "name": "Charlie", "mission_name": "Delta", "players": 4,
 				"max_players": 24, "game_type": "COOP", "password": "N", "locked": "N",
-				"mod": "escalation"},
+				"mod": "escalation"}),
 	]
 
 
 func test_filter_rows_quick_filters_and_search() -> void:
 	var rows := _browser_rows()
-	assert_eq(NovaWorldPanel.filter_rows(rows, {}).size(), 3, "no filters keeps every row")
-	var not_full := NovaWorldPanel.filter_rows(rows, {"hide_full": true})
-	assert_eq(not_full.size(), 2, "a 16/16 server hides behind Not full")
-	var has_players := NovaWorldPanel.filter_rows(rows, {"hide_empty": true})
-	assert_eq(has_players.size(), 2, "an empty server hides behind Has players")
-	var unlocked := NovaWorldPanel.filter_rows(rows, {"hide_locked": true})
-	assert_eq(unlocked.size(), 2, "a passworded server hides behind No password")
-	var by_type := NovaWorldPanel.filter_rows(rows, {"game_type": "coop"})
-	assert_eq(by_type.size(), 2, "the type filter matches case-insensitively")
-	var by_text := NovaWorldPanel.filter_rows(rows, {"text": "escal"})
+	assert_eq(NovaWorldServerBrowser.filter_rows(rows, "", "", false, false, false).size(), 3,
+			"no filters keeps every row")
+	assert_eq(NovaWorldServerBrowser.filter_rows(rows, "", "", true, false, false).size(), 2,
+			"a 16/16 server hides behind Not full")
+	assert_eq(NovaWorldServerBrowser.filter_rows(rows, "", "coop", true, false, false).size(), 1,
+			"the type filter and Not full compose (case-insensitive type)")
+	var by_text := NovaWorldServerBrowser.filter_rows(rows, "escal", "", false, false, false)
 	assert_eq(by_text.size(), 1, "the search matches the mod field too")
-	assert_eq(String((by_text[0] as Dictionary).get("name", "")), "Charlie")
+	assert_eq(by_text[0].name, "Charlie")
 
 
 func test_sort_rows_text_numeric_and_ping() -> void:
 	var rows := _browser_rows()
-	var by_name := NovaWorldPanel.sort_rows(rows, NovaWorldPanel.Column.NAME, true, {})
-	assert_eq(String((by_name[0] as Dictionary).get("name", "")), "alpha",
-			"name sorts case-insensitively ascending")
-	var by_players := NovaWorldPanel.sort_rows(
-			rows, NovaWorldPanel.Column.PLAYERS, false, {})
-	assert_eq(int((by_players[0] as Dictionary).get("players", -1)), 16,
-			"players sorts numerically descending")
+	var by_name := NovaWorldServerBrowser.sort_rows(rows, NovaWorldServerBrowser.COLUMN_NAME, true, {})
+	assert_eq(by_name[0].name, "alpha", "name sorts case-insensitively ascending")
 	# Ping: rid 3 fastest, rid 1 slower, rid 2 unmeasured -> always last.
 	var pings := {3: 20, 1: 95}
-	var by_ping := NovaWorldPanel.sort_rows(rows, NovaWorldPanel.Column.PING, true, pings)
-	assert_eq(int((by_ping[0] as Dictionary).get("rid", 0)), 3)
-	assert_eq(int((by_ping[2] as Dictionary).get("rid", 0)), 2,
-			"an unmeasured ping sorts last ascending")
-	var by_ping_desc := NovaWorldPanel.sort_rows(
-			rows, NovaWorldPanel.Column.PING, false, pings)
-	assert_eq(int((by_ping_desc[0] as Dictionary).get("rid", 0)), 1,
-			"descending flips the measured order")
-	assert_eq(int((by_ping_desc[2] as Dictionary).get("rid", 0)), 2,
-			"an unmeasured ping sorts last descending too")
+	var by_ping := NovaWorldServerBrowser.sort_rows(rows, NovaWorldServerBrowser.COLUMN_PING, false, pings)
+	assert_eq(by_ping[0].rid, 1, "descending puts the slowest measured ping first")
+	assert_eq(by_ping[2].rid, 2, "an unmeasured ping sorts last descending too")
 
 
 func test_details_lines_and_roster_seams() -> void:
-	var row := {"name": "Bravo", "msg": "Friday night co-op", "mission_name": "G11",
+	var row := _row({"name": "Bravo", "msg": "Friday night co-op", "mission_name": "G11",
 			"game_type": "COOP", "players": 4, "max_players": 24, "mod": "escalation",
 			"ver1": "1.7.5.7", "dedicated": "Y", "password": "Y",
-			"player_names": PackedStringArray(["ljim", "walker"])}
-	var lines := NovaWorldPanel.server_details_lines(row)
-	var text := "\n".join(lines)
+			"player_names": PackedStringArray(["ljim", "walker"])})
+	var text := "\n".join(NovaWorldServerBrowser.details_lines(row))
 	assert_string_contains(text, "Message: Friday night co-op")
 	assert_string_contains(text, "Players: 4/24")
-	assert_string_contains(text, "Mod: escalation")
-	assert_string_contains(text, "Version: 1.7.5.7")
-	assert_string_contains(text, "Dedicated server")
 	assert_string_contains(text, "Password protected")
 	assert_false(text.contains("Region:"), "empty fields are skipped")
+	assert_eq(row.player_names, PackedStringArray(["ljim", "walker"]),
+			"the roster rides the record")
 
 
 # The table view seams end to end: rows in, filter + sort + ping through the
@@ -317,35 +314,34 @@ func test_browser_view_filters_sorts_and_pings() -> void:
 	var panel := _make_panel(PackedStringArray())
 	panel.set_rows_for_test(_browser_rows())
 	assert_eq(panel.visible_rows().size(), 3, "every row shows unfiltered")
-	assert_eq(panel.visible_cell(0, NovaWorldPanel.Column.NAME), "alpha",
+	assert_eq(panel.visible_cell(0, NovaWorldServerBrowser.COLUMN_NAME), "alpha",
 			"the default sort is name ascending")
-	panel.click_column_for_test(NovaWorldPanel.Column.NAME)
-	assert_eq(panel.visible_cell(0, NovaWorldPanel.Column.NAME), "Charlie",
+	panel.click_column_for_test(NovaWorldServerBrowser.COLUMN_NAME)
+	assert_eq(panel.visible_cell(0, NovaWorldServerBrowser.COLUMN_NAME), "Charlie",
 			"clicking the sorted column flips the direction")
 	panel.apply_filter_for_test("", true, false, false)
 	assert_eq(panel.visible_rows().size(), 2, "Not full hides the 16/16 row")
 	panel.apply_filter_for_test("", false, false, false)
 	panel.set_pings_for_test({1: 33})
 	assert_eq(panel.visible_cell(panel.visible_rows().size() - 1,
-			NovaWorldPanel.Column.PING), "...",
+			NovaWorldServerBrowser.COLUMN_PING), "...",
 			"rows without a result still read as in flight")
 	var bravo_row := -1
 	for i in panel.visible_rows().size():
-		if panel.visible_cell(i, NovaWorldPanel.Column.NAME) == "Bravo":
+		if panel.visible_cell(i, NovaWorldServerBrowser.COLUMN_NAME) == "Bravo":
 			bravo_row = i
-	assert_eq(panel.visible_cell(bravo_row, NovaWorldPanel.Column.PING), "33",
+	assert_eq(panel.visible_cell(bravo_row, NovaWorldServerBrowser.COLUMN_PING), "33",
 			"the installed ping lands in the row's cell")
 
 
 func test_server_row_tooltip_lists_details() -> void:
-	var panel := _make_panel(PackedStringArray())
-	var row := {"mission_name": "ASH_G11A", "region": "Jungle", "country": "US",
-			"ip": "203.0.113.7"}
-	assert_eq(panel.server_row_tooltip(row),
+	var row := _row({"mission_name": "ASH_G11A", "region": "Jungle", "country": "US",
+			"ip": "203.0.113.7"})
+	assert_eq(NovaWorldServerBrowser.row_tooltip(row),
 			"Mission: ASH_G11A\nRegion: Jungle\nCountry: US\nAddress: 203.0.113.7",
 			"the tooltip lists mission, locale, and address")
-	row["exp"] = "JOE"
-	assert_string_contains(panel.server_row_tooltip(row), "Expansion: JOE",
+	row.exp = "JOE"
+	assert_string_contains(NovaWorldServerBrowser.row_tooltip(row), "Expansion: JOE",
 			"an advertised expansion shows in the row details")
 
 
@@ -355,7 +351,7 @@ func test_expansion_advisory_warns_once_then_defers_to_the_join() -> void:
 	# joining, the SECOND proceeds (the in-match 0x7B reconcile stays the
 	# authoritative gate, D-NET-178).
 	var panel := _make_panel(PackedStringArray())
-	var row := {"name": "EscalationHost", "exp": "JOE", "rid": 42}
+	var row := _row({"name": "EscalationHost", "exp": "JOE", "rid": 42})
 	assert_true(panel.expansion_advisory_blocks_first_press(row, 42),
 			"the first press on a not-installed expansion row is blocked")
 	assert_string_contains(panel.status_text(), "expansion 'JOE'",
@@ -389,10 +385,10 @@ func test_nw_join_callsign_is_the_signed_in_handle() -> void:
 func test_expansion_advisory_ignores_rows_without_an_expansion() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_false(panel.expansion_advisory_blocks_first_press(
-			{"name": "BaseGameHost", "exp": "", "rid": 7}, 7),
+			_row({"name": "BaseGameHost", "exp": "", "rid": 7}), 7),
 			"a base-game row (empty exp) never warns")
 	assert_false(panel.expansion_advisory_blocks_first_press(
-			{"name": "NoExpField", "rid": 8}, 8),
+			_row({"name": "NoExpField", "rid": 8}), 8),
 			"a row with no exp field never warns (stale/absent GSB data)")
 
 

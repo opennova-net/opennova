@@ -50,6 +50,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gate_response.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/registration_url.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_login.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/server_browser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_flow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gsb.cpp
     # netsim — the in-match net seam (ADR 0009/0011): connection-fan
