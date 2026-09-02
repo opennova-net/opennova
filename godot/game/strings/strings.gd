@@ -30,6 +30,7 @@ const SECTION_OVERLAYS := "Overlays"
 const SECTION_WEPDES := "WepDes"
 const SECTION_WPNAMES := "WPNames"
 const SECTION_CANNED_MSG := "Canned Msg"
+const SECTION_CLIENT := "Client"
 
 var _table: RtxtStringFile
 var _tables: Dictionary = {}

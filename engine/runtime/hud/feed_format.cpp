@@ -2,8 +2,118 @@
 
 #include <cctype>
 #include <cstdio>
+#include <utility>
 
 namespace opennova::hud {
+
+// event_type classification — the 0x426270 switch. The cases that resolve
+// attacker+victim (HUD_FormatKillEventMessage with both) are kills; the
+// flag/zone/camp/base cases are objectives; killer-less deaths are SelfDeath
+// (their victim/aux slots are literal zero on the wire) and the two medic
+// lines carry their own color. Corrected 2026-08-19: 38/39/45 were misfiled
+// as kills and 1/2/3 + 22/23/25/26 as Other by the earlier structural read.
+GameEventKind game_event_kind(uint8_t t) {
+	switch (t) {
+	case 4: case 5: case 6: case 7: case 8: case 9:
+	case 10: case 11: case 12: case 13: case 14: case 15:
+	case 24: case 32: case 33: case 34: case 49:
+		return GameEventKind::Kill;
+	// Deaths with no killer — the handler leaves victim/aux zero
+	// [orig: GameEvent_PlayerDeath @0x516DD0].
+	case 1: case 2: case 3: case 22: case 23: case 25: case 26:
+		return GameEventKind::SelfDeath;
+	// The medic trio, previously misfiled as kills by this structural read.
+	// 39 has no emitter in the image but the handler files it with 38/45 —
+	// all three share the one 0xFF008CEE post [orig: cases 38 @0x42640F /
+	// 39 @0x426456 / 45 @0x426442 fall into the shared sink call].
+	case 38: case 39: case 45:
+		return GameEventKind::Medic;
+	case 19: case 20: case 21:
+	case 41: case 42: case 43: case 44:
+	case 50: case 51: case 52: case 53:
+	case 54: case 55: case 56: case 57: case 58: case 59: case 60:
+		return GameEventKind::Objective;
+	default:
+		return GameEventKind::Other;
+	}
+}
+
+// The witnessed "Canned Msg" string key for an event_type, where the handler
+// uses a single deterministic key. Types that pick the string by team/gametype
+// at runtime (19/20/21/50-53/58) return nullptr. [orig: 0x426270 switch]
+const char *game_event_strcnd_key(uint8_t t) {
+	switch (t) {
+	case 1: return "STRCND01"; case 2: return "STRCND02"; case 3: return "STRCND03";
+	case 4: return "STRCND04"; case 5: return "STRCND05"; case 6: return "STRCND06";
+	case 7: case 8: case 9: return "STRCND07";
+	case 10: case 11: case 12: return "STRCND08";
+	case 13: return "STRCND09"; case 14: return "STRCND10"; case 15: return "STRCND11";
+	case 16: case 17: case 18: return "STRCND12";
+	case 22: case 23: return "STRCND19";
+	case 24: return "STRCND22"; case 25: return "STRCND28"; case 26: return "STRCND29";
+	case 27: return "STRCND33"; case 28: return "STRCND34"; case 29: return "STRCND31";
+	case 30: return "STRCND32"; case 31: return "STRCND35";
+	case 32: return "STRCND36"; case 33: return "STRCND37"; case 34: return "STRCND38";
+	case 35: return "STRCND39"; case 36: return "STRCND40"; case 37: return "STRCND41";
+	case 38: return "STRCND42"; case 39: return "STRCND43"; case 40: return "STRCND44";
+	case 41: return "STRCND_PSP_BLUEWARNING"; case 42: return "STRCND_PSP_REDWARNING";
+	case 43: return "STRCND_PSP_BLUETAKEN";   case 44: return "STRCND_PSP_REDTAKEN";
+	case 45: return "STRCND45"; case 48: return "STRCND46"; case 49: return "STRCND47";
+	case 54: return "STRCND_LFP_BLUEWARNING"; case 55: return "STRCND_LFP_REDWARNING";
+	case 56: return "STRCND_LFP_BLUETAKEN";   case 57: return "STRCND_LFP_REDTAKEN";
+	case 59: return "STRCND_FULLYCAMPED";     case 60: return "STRCND_LOSTCAMP";
+	default: return nullptr;
+	}
+}
+
+void feed_event_rows(const FeedEventInput *events, std::size_t count,
+                     uint16_t self_handle, bool mp_verbose,
+                     const FeedNameLookup &name_of, std::vector<FeedRow> &out) {
+	const auto name = [&name_of](uint8_t index) -> std::string {
+		return index == 0xFF ? std::string() : name_of(index);
+	};
+	for (std::size_t i = 0; i < count; ++i) {
+		const FeedEventInput &ev = events[i];
+		if (feed_event_suppressed(ev.event_type)) continue;
+		// Camp events reuse the slots: attacker is the LEVEL index and victim
+		// is the TEAM byte, and their key gets a client-side team suffix
+		// [orig: case 59 @0x4272D7 / case 60 @0x4273DC].
+		const bool camp = feed_event_is_camp(ev.event_type);
+		const bool own = !camp && self_handle != 0xFFFF &&
+				(static_cast<uint16_t>(ev.attacker_index) == self_handle ||
+				 static_cast<uint16_t>(ev.victim_index) == self_handle);
+		if (!own && !mp_verbose && feed_event_verbose_only(ev.event_type)) continue;
+		const std::string camp_key =
+				camp ? feed_camp_key(ev.event_type, ev.victim_index) : std::string();
+		if (camp && camp_key.empty()) continue;   // team outside 1/2 draws nothing
+		const char *key = camp ? camp_key.c_str() : game_event_strcnd_key(ev.event_type);
+		if (key == nullptr) continue;   // team/gametype-keyed at runtime — not ported
+		FeedRow row;
+		row.event_type = ev.event_type;
+		row.kind = ev.kind;
+		row.camp = camp;
+		row.own = own;
+		row.key = key;
+		if (camp) {
+			// The camp template's %s takes the WPNames string of the level
+			// slot — index PLUS ONE [orig: sprintf @0x4272EC/@0x4273F1].
+			row.wpname_key = feed_camp_wpname_key(ev.attacker_index);
+		} else {
+			row.attacker = name(ev.attacker_index);
+			row.victim = name(ev.victim_index);
+			// The aux slot carries the bonus-credited player; only when that is
+			// the LOCAL player does retail re-compose the line through STRCND48
+			// "%s - Bonus for %s" with their name [orig: the 4th
+			// HUD_FormatKillEventMessage arg @0x422F5F -> the sprintf @0x422CA2].
+			if (self_handle != 0xFFFF && ev.aux_index != 0xFF &&
+					static_cast<uint16_t>(ev.aux_index) == self_handle) {
+				row.extra = name(ev.aux_index);
+			}
+		}
+		row.color = feed_event_color(ev.event_type, own, camp ? ev.victim_index : 0);
+		out.push_back(std::move(row));
+	}
+}
 
 bool feed_event_suppressed(uint8_t event_type) {
 	switch (event_type) {

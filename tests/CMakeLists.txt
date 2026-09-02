@@ -1326,7 +1326,7 @@ add_test(NAME guided_missile_flight COMMAND guided_missile_flight_test)
 # The message-feed line policy (0x1E -> canned sentence + color) and the
 # witnessed game-event classification corrections.
 add_executable(feed_format_test hud/feed_format_test.cpp)
-target_link_libraries(feed_format_test PRIVATE opennova_runtime opennova_net)
+target_link_libraries(feed_format_test PRIVATE opennova_runtime)
 target_include_directories(feed_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(feed_format_test PRIVATE cxx_std_17)
 add_test(NAME feed_format COMMAND feed_format_test)

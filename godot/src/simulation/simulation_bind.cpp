@@ -5,6 +5,7 @@
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
+#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 

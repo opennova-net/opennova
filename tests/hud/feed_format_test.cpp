@@ -2,12 +2,12 @@
 // HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60]:
 // the suppression set, the verbose gate, the per-case color table, the
 // $A/$B substitution with the STRCND48 bonus re-compose, and the camp keys.
-// Also pins the witnessed 0x1E classification corrections in npwire.
+// Also pins the witnessed 0x1E classification corrections and the
+// event -> feed-row fold (feed_event_rows).
 #include <cstdio>
 #include <string>
 
 #include <runtime/hud/feed_format.h>
-#include <net/npwire/ingame_decode.h>
 
 using namespace opennova;
 using namespace opennova::hud;
@@ -159,6 +159,71 @@ void test_game_event_classification() {
     CHECK(game_event_strcnd_key(19) == nullptr);   // team/gametype-keyed at runtime
 }
 
+// The event -> row fold [orig: NetPacket_HandleGameEvent @0x426270]: the
+// own/verbose gate, the suppression set, the camp slot reuse and team suffix,
+// the runtime-keyed drop, and the STRCND48 bonus name.
+void test_feed_event_rows() {
+    const auto roster = [](uint8_t index) -> std::string {
+        switch (index) {
+            case 0: return "Carol";
+            case 3: return "Alice";
+            case 7: return "Bob";
+            default: return std::string();
+        }
+    };
+    const auto fold = [&](std::vector<FeedEventInput> events, uint16_t self, bool verbose) {
+        std::vector<FeedRow> rows;
+        feed_event_rows(events.data(), events.size(), self, verbose, roster, rows);
+        return rows;
+    };
+
+    // A kill the local player (index 3) made: own, white, both names resolved.
+    {
+        auto rows = fold({ { 4, 3, 7, 0xFF, 1 } }, 3, true);
+        CHECK(rows.size() == 1);
+        CHECK(rows[0].own && !rows[0].camp);
+        CHECK(rows[0].key == "STRCND04");
+        CHECK(rows[0].attacker == "Alice" && rows[0].victim == "Bob");
+        CHECK(rows[0].extra.empty() && rows[0].wpname_key.empty());
+        CHECK(rows[0].color == kFeedColorWhite);
+        CHECK(rows[0].event_type == 4 && rows[0].kind == 1);
+    }
+    // The same kill seen by an uninvolved viewer: grey while verbose, dropped
+    // when the verbose toggle is off; an unknown index resolves to "".
+    {
+        auto rows = fold({ { 4, 3, 9, 0xFF, 1 } }, 0, true);
+        CHECK(rows.size() == 1 && !rows[0].own && rows[0].color == kFeedColorGrey);
+        CHECK(rows[0].victim.empty());
+        CHECK(fold({ { 4, 3, 9, 0xFF, 1 } }, 0, false).empty());
+        // No local player at all: never own, still posted while verbose.
+        CHECK(fold({ { 4, 3, 7, 0xFF, 1 } }, 0xFFFF, true).size() == 1);
+    }
+    // Suppressed (the LFP result set) and runtime-keyed (19) types draw nothing.
+    CHECK(fold({ { 50, 3, 7, 0xFF, 2 }, { 58, 3, 7, 0xFF, 2 }, { 19, 3, 7, 0xFF, 2 } }, 3, true).empty());
+    // Camp: attacker byte = level, victim byte = team; key suffix, the
+    // PLUS-ONE WPNames key, the team color, no actor names, never own.
+    {
+        auto rows = fold({ { 59, 3, 2, 0xFF, 2 }, { 60, 0, 1, 0xFF, 2 }, { 59, 1, 3, 0xFF, 2 } }, 3, true);
+        CHECK(rows.size() == 2);
+        CHECK(rows[0].camp && !rows[0].own);
+        CHECK(rows[0].key == "STRCND_FULLYCAMPED_RED");
+        CHECK(rows[0].wpname_key == "STRWPNAME004");
+        CHECK(rows[0].attacker.empty() && rows[0].victim.empty());
+        CHECK(rows[0].color == kFeedColorRed);
+        CHECK(rows[1].key == "STRCND_LOSTCAMP_BLUE");
+        CHECK(rows[1].wpname_key == "STRWPNAME001");
+        CHECK(rows[1].color == kFeedColorBlue);
+    }
+    // The bonus name rides `extra` only when the aux actor IS the local player.
+    {
+        auto mine = fold({ { 32, 7, 0, 3, 1 } }, 3, true);
+        CHECK(mine.size() == 1 && mine[0].extra == "Alice" && !mine[0].own);
+        auto theirs = fold({ { 32, 7, 0, 3, 1 } }, 7, true);
+        CHECK(theirs.size() == 1 && theirs[0].extra.empty() && theirs[0].own);
+        CHECK(theirs[0].color == kFeedColorBonusKill);
+    }
+}
+
 // The inline-markup stripper [orig: Chat_StripHtmlTags @0x4983f0]: every
 // '<'..'>' span dropped, an unterminated '<' tail dropped with it.
 void test_strip_inline_tags() {
@@ -182,6 +247,7 @@ int main() {
     test_bonus_recompose();
     test_camp_keys_and_line();
     test_game_event_classification();
+    test_feed_event_rows();
     if (failures == 0) std::printf("feed_format_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

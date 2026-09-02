@@ -1111,7 +1111,7 @@ func _flush_feed_events() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	var rows: Array = sim.drain_feed_events()
+	var rows: Array[FeedRow] = sim.drain_feed_events()
 	if rows.is_empty():
 		return
 	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
@@ -1120,43 +1120,37 @@ func _flush_feed_events() -> void:
 	# A missing actor formats as the Client fallback string
 	# [orig: HUD_FormatKillEventMessage null-entity paths @0x422DDA/@0x422E91
 	#  -> GameText_GetString("Client", "STRCLI01") = "Unknown"].
-	var unknown := ""
-	if table.has_string_in_section("Client", "STRCLI01"):
-		unknown = table.get_string_in_section("Client", "STRCLI01")
-	for row in rows:
-		var key := String(row.get("key", ""))
-		if key.is_empty() or not table.has_string_in_section(Strings.SECTION_CANNED_MSG, key):
-			continue
-		var tmpl := table.get_string_in_section(Strings.SECTION_CANNED_MSG, key)
+	var unknown := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CLIENT, "STRCLI01", "")
+	for row: FeedRow in rows:
+		var tmpl := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG, row.get_key(), "")
 		if tmpl.is_empty():
 			continue
 		var line := ""
 		# The compose form is the engine's decision (the camp discriminant
-		# rides the row), not an inference from which keys are present.
-		if bool(row.get("camp", false)):
+		# rides the row), not an inference from which fields are filled.
+		if row.is_camp():
 			# Camp line: the template's %s takes the level's WPNames string
 			# [orig: sprintf @0x427327/@0x42736B].
-			var wpname_key := String(row.get("wpname_key", ""))
-			var wpname := ""
-			if table.has_string_in_section(Strings.SECTION_WPNAMES, wpname_key):
-				wpname = table.get_string_in_section(Strings.SECTION_WPNAMES, wpname_key)
-			line = String(sim.format_feed_camp_line(tmpl, wpname))
+			var wpname := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
+					row.get_wpname_key(), "")
+			line = sim.format_feed_camp_line(tmpl, wpname)
 		else:
-			var attacker := String(row.get("attacker", ""))
-			var victim := String(row.get("victim", ""))
+			var attacker := row.get_attacker()
+			var victim := row.get_victim()
 			# The bonus re-compose rides STRCND48 ("%s - Bonus for %s") when
 			# the aux actor is the local player [orig: the sprintf @0x422CA2].
-			var extra := String(row.get("extra", ""))
+			var extra := row.get_extra()
 			var bonus_tmpl := ""
-			if not extra.is_empty() and table.has_string_in_section(Strings.SECTION_CANNED_MSG, "STRCND48"):
-				bonus_tmpl = table.get_string_in_section(Strings.SECTION_CANNED_MSG, "STRCND48")
-			line = String(sim.format_feed_line(tmpl,
+			if not extra.is_empty():
+				bonus_tmpl = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG,
+						"STRCND48", "")
+			line = sim.format_feed_line(tmpl,
 					attacker if not attacker.is_empty() else unknown,
 					victim if not victim.is_empty() else unknown,
-					extra, bonus_tmpl))
+					extra, bonus_tmpl)
 		if line.is_empty():
 			continue
-		_game_hud.push_feed_line(line, int(row.get("color", -1)))
+		_game_hud.push_feed_line(line, row.get_color())
 
 
 func _flush_pending_hud_messages() -> void:

@@ -42,6 +42,7 @@ class Weather;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
+class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -802,13 +803,14 @@ public:
 	// Destructively drain permanent terrain-cache scorch insertions. Bounds are
 	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
 	Array drain_terrain_scorches();
-	// Drain this frame's folded S2C 0x1E game events as feed rows — one per
-	// line the original would post to its message feed (engine: net/netsim/client_replica_feed.cpp). Each row carries the actor NAMES (resolved here, where the
-	// decoded roster lives), the canned-message key (plus the camp rows'
-	// WPNames level key), and the witnessed line color; the embedder resolves
-	// the keys against gametext and calls the format helpers below.
-	// Suppressed types (the LFP result set + the tip-only 58) never appear.
-	Array drain_feed_events();
+	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
+	// per line the original posts to its message feed. The fold (suppression,
+	// the own/verbose gate, the camp keys, the bonus recompose, the color) is
+	// the engine's (runtime/hud/feed_format.h feed_event_rows); the actor
+	// names resolve here, where the decoded roster lives. The embedder
+	// resolves each row's keys against gametext and calls the format helpers
+	// below.
+	TypedArray<FeedRow> drain_feed_events();
 	// The folded Tab board's HEADER (netsim ClientScoreboard counts + the
 	// session strings): known/team_mode/timed, the witnessed players count
 	// (accepted rows minus the spectator trailer, netsim::scoreboard_header),

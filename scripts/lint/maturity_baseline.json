@@ -16,7 +16,7 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 441,
+    "adapter_cpp_orig_cites": 436,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 0,
@@ -44,6 +44,7 @@
     "game_render_diagnostics.gd|func to_json_value()",
     "effect_light_report.gd|func to_json_value()",
     "debug_controls.gd|static func normalize_value(",
+    "debug_arg_spec.gd|func to_json_value()",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
     "game_packer.gd|static func pack(",
     "game_packer.gd|static func stage_loose(",

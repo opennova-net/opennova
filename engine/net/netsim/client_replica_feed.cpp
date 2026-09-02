@@ -20,6 +20,8 @@
 
 #include <net/netsim/client_replica_pipeline.h>
 
+#include <runtime/hud/feed_format.h>
+
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 
@@ -44,12 +46,12 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 	ev.aux_index = rec.aux_index;
 	ev.pos_x = rec.pos_x;
 	ev.pos_y = rec.pos_y;
-	const GameEventKind kind = game_event_kind(rec.event_type);
+	const hud::GameEventKind kind = hud::game_event_kind(rec.event_type);
 	ev.kind = static_cast<uint8_t>(kind);
 
 	// A killer-less death carries zeroed victim/aux slots — normalize them to
 	// "none" so no consumer can mistake slot 0 for a real actor.
-	if (kind == GameEventKind::SelfDeath) {
+	if (kind == hud::GameEventKind::SelfDeath) {
 		ev.victim_index = 0xFF;
 		ev.aux_index = 0xFF;
 	}
