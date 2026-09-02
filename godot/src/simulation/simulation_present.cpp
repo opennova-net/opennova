@@ -3,6 +3,7 @@
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/destruction_events.h"
 #include "env/env_axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
@@ -503,62 +504,37 @@ Array Simulation::drain_fire_sounds() {
 // The destruction presentation drain (world/destruction.h; §24): one call per
 // present, converting the sim's events into godot-space dictionaries. Mission
 // (x, y, z-up) -> Godot (x, z, -y), the drain_fire_presentation_events rule.
-Dictionary Simulation::drain_destruction_events() {
-	Dictionary out;
-	if (!world_installed_) return out;
+Ref<DestructionDrain> Simulation::drain_destruction_events() {
+	if (!world_installed_) return Ref<DestructionDrain>();
 	opennova::world::DestructionEvents &ev = kernel_->world.destruction;
-	auto to_godot = [](const opennova::world::Vec3 &v) {
-		return mission_to_godot(v);
-	};
-	Array effects;
+	Ref<DestructionDrain> out;
+	out.instantiate();
 	for (const opennova::world::DestructionEffectEvent &e : ev.effects) {
-		Dictionary d;
-		d["effect"] = String(e.effect.c_str());
-		d["pos"] = to_godot(e.pos);
-		d["dir"] = to_godot(e.dir);
-		d["attach_net_id"] = static_cast<int>(e.attach_net_id);
-		d["attach_bms_id"] = e.attach_bms_id;
-		d["attach_wire_handle"] = static_cast<int>(e.attach_wire_handle);
-		d["attach_spawn_origin"] =
-				static_cast<int64_t>(e.attach_spawn_origin);
-		d["family"] = static_cast<int>(e.family);
-		effects.push_back(d);
+		out->add_effect(DestructionEffectEvent::make(String(e.effect.c_str()),
+				mission_to_godot(e.pos), static_cast<int>(e.family), mission_to_godot(e.dir),
+				static_cast<int>(e.attach_net_id), e.attach_bms_id,
+				static_cast<int>(e.attach_wire_handle),
+				static_cast<int64_t>(e.attach_spawn_origin)));
 	}
-	Array sounds;
 	for (const opennova::world::DestructionSoundEvent &s : ev.sounds) {
-		Dictionary d;
-		d["sound"] = String(s.sound.c_str());
-		d["pos"] = to_godot(s.pos);
-		sounds.push_back(d);
+		out->add_sound(DestructionSoundEvent::make(String(s.sound.c_str()), mission_to_godot(s.pos)));
 	}
-	Array husks;
 	for (const opennova::world::HuskSwapEvent &h : ev.husk_swaps) {
-		Dictionary d;
-		d["net_id"] = static_cast<int>(h.net_id);
-		d["wire_handle"] = static_cast<int>(h.wire_handle);
-		d["bms_id"] = h.bms_id;
-		d["spawn_origin"] = static_cast<int64_t>(h.spawn_origin);
-		d["item_id"] = h.item_id;
-		d["spawned_piece_mask"] = static_cast<int64_t>(h.spawned_piece_mask);
-		d["pos"] = to_godot(h.pos);
-		husks.push_back(d);
+		Ref<HuskSwapEvent> row = HuskSwapEvent::make(h.bms_id, h.item_id,
+				static_cast<int64_t>(h.spawn_origin), static_cast<int>(h.wire_handle));
+		row->set_net_id(static_cast<int>(h.net_id));
+		row->set_spawned_piece_mask(static_cast<int64_t>(h.spawned_piece_mask));
+		row->set_pos(mission_to_godot(h.pos));
+		out->add_husk_swap(row);
 	}
-	Array death_lights;
 	for (const opennova::world::DeathLightEvent &l : ev.death_lights) {
-		Dictionary d;
-		d["pos"] = to_godot(l.pos);
-		d["radius"] = l.radius;
-		death_lights.push_back(d);
+		out->add_death_light(DeathLightEvent::make(mission_to_godot(l.pos), l.radius));
 	}
-	out["effects"] = effects;
-	out["sounds"] = sounds;
-	out["husk_swaps"] = husks;
-	out["death_lights"] = death_lights;
-	out["explosions_processed"] = ev.explosions_processed;
-	out["items_destroyed"] = ev.items_destroyed;
-	out["crackles"] = ev.crackles; // wreck-fire crackle rolls fired (S12b)
-	out["debris_triangles"] = ev.debris_triangles;
-	out["glass_points"] = ev.glass_points;
+	out->set_explosions_processed(ev.explosions_processed);
+	out->set_items_destroyed(ev.items_destroyed);
+	out->set_crackles(ev.crackles); // wreck-fire crackle rolls fired (S12b)
+	out->set_debris_triangles(ev.debris_triangles);
+	out->set_glass_points(ev.glass_points);
 	ev.clear();
 	return out;
 }

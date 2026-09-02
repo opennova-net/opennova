@@ -4,6 +4,7 @@
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
+#include "simulation/destruction_events.h" // the destruction drain record
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)

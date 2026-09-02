@@ -167,12 +167,12 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var anchors := CaptureAnchors.new()
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:7'
-	presenter.present_drained({}, [_piece(7, 11, 1, Vector3(1, 2, 3))])
+	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
 	assert_eq(fx.owned_spawns.size(), 1)
-	presenter.present_drained({}, [_piece(7, 11, 1, Vector3(4, 5, 6))])
+	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
 	assert_eq(fx.owned_spawns.size(), 1)
 	assert_eq(anchors.anchor_position(key), Vector3(4, 5, 6))
-	presenter.present_drained({}, [_piece(7, 12, 2, Vector3(8, 9, 10))])
+	presenter.present_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
 	assert_eq(fx.owned_spawns.size(), 2)
 	if fx.owned_spawns.size() == 2:
 		assert_eq(String(fx.owned_spawns[1]['effect']), 'Effect_VexpS')
@@ -186,10 +186,10 @@ func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
 	var anchors := CaptureAnchors.new()
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:3'
-	presenter.present_drained({}, [_piece(3, 30, 1, Vector3(2, 3, 4))])
+	presenter.present_drained(null, [_piece(3, 30, 1, Vector3(2, 3, 4))])
 	assert_eq(fx.owned_spawns.size(), 1)
 	assert_true(anchors.anchors.has(key))
-	presenter.present_drained({}, [_piece(3, 31, 0, Vector3(8, 8, 8))])
+	presenter.present_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
 	assert_eq(fx.owned_spawns.size(), 1)
 	assert_eq(anchors.unregistrations.count(key), 1)
 	assert_false(anchors.anchors.has(key))
@@ -201,12 +201,12 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var anchors := CaptureAnchors.new()
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:13'
-	presenter.present_drained({}, [_piece(13, 20, 1, Vector3(1, 4, 2))])
+	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
 	assert_eq(fx.owned_spawns.size(), 1)
-	presenter.present_drained({}, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
+	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
 	assert_eq(fx.owned_spawns.size(), 1)
 	assert_eq(anchors.anchor_position(key), Vector3(1, 0, 2))
-	presenter.present_drained({}, [_piece(13, 21, 2, Vector3(9, 3, 5))])
+	presenter.present_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
 	assert_eq(fx.owned_spawns.size(), 2)
 	if fx.owned_spawns.size() == 2:
 		assert_eq(String(fx.owned_spawns[1]['effect']), 'Effect_VexpS')
@@ -231,19 +231,9 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	intact.add_child(originally_hidden)
 	intact.add_child(static_caster)
 	var index := _index_of([_entry(intact, 41)])
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 41,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-		'effects': [{
-			'effect': 'Effect_VehExplode',
-			'family': 2,
-			'attach_net_id': 91,
-			'attach_bms_id': 41,
-			'pos': Vector3(3, 4, 5),
-		}],
-	}
+	var events := DestructionDrain.make(
+			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)],
+			[DestructionEffectEvent.make('Effect_VehExplode', Vector3(3, 4, 5), 2, Vector3.ZERO, 91, 41)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors, Callable(),
 			func(): return fx)
@@ -289,12 +279,7 @@ func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
 	intact.mirror_reflected = true
 	container.add_child(intact)
 	var index := _index_of([_entry(intact, 41)])
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 41,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -346,9 +331,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	presenter.setup(null, container, _index_of([_entry(intact, 41)]),
 			_husk_placer(), _item_db, CaptureAnchors.new(), Callable(), Callable(),
 			null, Callable())
-	presenter.present_drained({
-		"husk_swaps": [{"bms_id": 41, "item_id": BUGGY_ITEM_ID}],
-	}, [])
+	presenter.present_drained(DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
 	assert_eq(_husk_models(world).size(), 1,
 			"the production destruction pass built the authored husk graft")
 	assert_eq(director.get_report().live, 1,
@@ -373,12 +356,7 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	add_child_autofree(container)
 	var placed := Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
 	placer.register_static_instance(77, 'StaticProp', 0, placed, true, true)
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 77,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, _index_of([]), placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -414,12 +392,7 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 	var visual := Node3D.new()
 	intact.add_child(visual)
 	var index := _index_of([_entry(intact, 41)])
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 41,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -441,12 +414,7 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 			Transform3D(Basis.IDENTITY, Vector3(9, 8, 7)), false)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 77,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, _index_of([]), placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -477,17 +445,10 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 	var index := _index_of([_entry(first, 0, 3, 5), _entry(second, 0, 4, 6)])
 	var first_origin := (3 << 24) | 5
 	var second_origin := (4 << 24) | 6
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 0,
-			'spawn_origin': first_origin,
-			'item_id': BUGGY_ITEM_ID,
-		}, {
-			'bms_id': 0,
-			'spawn_origin': second_origin,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make(
+			[
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, first_origin),
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, second_origin)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -526,19 +487,10 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	# Pre-fix fallback: both synthetic children collapse to this same authored
 	# identity because they have no BMS id and share the non-BMS origin sentinel.
 	var index := _index_of([_entry(first, 0, 255, 16777215)])
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 0,
-			'spawn_origin': SpawnOrigin.NONE,
-			'wire_handle': 0x1004,
-			'item_id': BUGGY_ITEM_ID,
-		}, {
-			'bms_id': 0,
-			'spawn_origin': SpawnOrigin.NONE,
-			'wire_handle': 0x1005,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make(
+			[
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1004),
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1005)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors,
 			Callable(), func(): return fx, resolver)
@@ -567,14 +519,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	var authored_zero := ObjectModel.new()
 	add_child_autofree(authored_zero)
 	var index := _index_of([_entry(authored_zero, 0, 255, 16777215)])
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 0,
-			'spawn_origin': SpawnOrigin.NONE,
-			'wire_handle': 0x1004,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-	}
+	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1004)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db,
 			CaptureAnchors.new(), Callable(), Callable(), resolver)
@@ -603,31 +548,19 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	var effects: Array = []
 	for wire_handle in [0x1004, 0x1005]:
 		for family in [1, 2, 3]:
-			effects.append({
-				'effect': 'Effect_Family%d' % family,
-				'family': family,
-				'attach_net_id': 0,
-				'attach_bms_id': 0,
-				'attach_wire_handle': wire_handle,
-				'attach_spawn_origin': SpawnOrigin.NONE,
-				'pos': Vector3(100, 100, 100),
-			})
+			effects.append(DestructionEffectEvent.make(
+					'Effect_Family%d' % family, Vector3(100, 100, 100),
+					family, Vector3.ZERO, 0, 0, wire_handle, SpawnOrigin.NONE))
 	# Even when a payload happens to carry a valid dynamic identity, family zero
 	# remains the one-shot transient path.
-	effects.append({
-		'effect': 'Effect_Transient',
-		'family': 0,
-		'attach_net_id': 0,
-		'attach_bms_id': 0,
-		'attach_wire_handle': 0x1004,
-		'attach_spawn_origin': SpawnOrigin.NONE,
-		'pos': Vector3(20, 30, 40),
-	})
+	effects.append(DestructionEffectEvent.make(
+			'Effect_Transient', Vector3(20, 30, 40),
+			0, Vector3.ZERO, 0, 0, 0x1004, SpawnOrigin.NONE))
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, _index_of([]), _husk_placer(),
 			_item_db, anchors, Callable(), func(): return fx, resolver)
 
-	presenter.present_drained({'effects': effects}, [])
+	presenter.present_drained(DestructionDrain.make([], effects), [])
 
 	assert_eq(fx.owned_spawns.size(), 6,
 			'all attached death/fire/other banks stay owned for zero-net children')
@@ -695,21 +628,11 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	placer.register_static_instance(0, 'StaticProp', 0, authored, false)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var events := {
-		'husk_swaps': [{
-			'bms_id': 0,
-			'spawn_origin': spawn_origin,
-			'item_id': BUGGY_ITEM_ID,
-		}],
-		'effects': [{
-			'effect': 'Effect_VehExplode',
-			'family': 2,
-			'attach_net_id': 91,
-			'attach_bms_id': 0,
-			'attach_spawn_origin': spawn_origin,
-			'pos': Vector3(100, 100, 100),
-		}],
-	}
+	var events := DestructionDrain.make(
+			[HuskSwapEvent.make(0, BUGGY_ITEM_ID, spawn_origin)],
+			[DestructionEffectEvent.make(
+					'Effect_VehExplode', Vector3(100, 100, 100),
+					2, Vector3.ZERO, 91, 0, WireHandle.INVALID, spawn_origin)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(sim, container, _index_of([]), placer, _item_db, anchors,
 			Callable(), func(): return fx)
@@ -738,19 +661,15 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 	var anchors := CaptureAnchors.new()
 	var presenter := _make_pass(fx, anchors)
 
-	presenter.present_drained({
-		'effects': [{
-			'effect': 'Effect_TreeFoliageExp',
-			'pos': Vector3.ZERO,
-			'dir': Vector3.RIGHT,
-		}, {
-			'effect': 'Effect_BldGlassExp',
-			'pos': Vector3(1, 2, 3),
-			'dir': Vector3.UP,
-		}],
-		'debris_triangles': 1,
-		'glass_points': 1,
-	}, [])
+	presenter.present_drained(DestructionDrain.make(
+			[],
+			[
+					DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO, 0, Vector3.RIGHT),
+					DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP)],
+			[],
+			[],
+			1,
+			1), [])
 
 	assert_eq(presenter.get_stats().debris_triangles, 1)
 	assert_eq(presenter.get_stats().glass_points, 1)

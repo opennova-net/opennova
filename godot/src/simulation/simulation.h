@@ -65,6 +65,7 @@ class ScoreboardHeader;
 class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
+class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 }
 
 #include "wac/wac_program.h"
@@ -1147,10 +1148,10 @@ public:
 			const Vector3 &camera);
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
-	// §24): {effects[], sounds[], husk_swaps[], debris_triangles, glass_points,
-	// explosions_processed, items_destroyed}, godot-space positions, cleared on
-	// read. Once per present, beside the fire drain.
-	Dictionary drain_destruction_events();
+	// §24) as one DestructionDrain record (simulation/destruction_events.h):
+	// the effect/sound/husk-swap/death-light rows since the last drain plus the
+	// diagnostic counters. Null until a world is installed.
+	Ref<DestructionDrain> drain_destruction_events();
 	// The live death-piece pool as dictionaries {slot, generation, item_id,
 	// section, type_index, scale, pos, heading, pitch, settled} — each piece renders as its single
 	// husk-model section. (engine: runtime/world/destruction.cpp)
