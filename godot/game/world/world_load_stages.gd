@@ -155,7 +155,6 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_set_water_world_rendering_enabled(true)
 	build_minimap_water_mask()
 	_world.load_progress.emit(MissionData.LOAD_PROGRESS_COMPLETE)
-	_world._debug_views.on_loaded()
 	_world.world_loaded.emit()
 	return OK
 
@@ -274,9 +273,6 @@ func unload() -> void:
 	# Per-item attached-effect owner keys reference nodes in that container —
 	# never let a reload's provider resolve against freed instances.
 	_world._item_fx.reset()
-	# Debug-view teardown: the retain/free split (user-point re-arm vs freed
-	# overlays vs the deliberately surviving particle/pick stack) lives in the set.
-	_world._debug_views.on_unload()
 	if _world._mission_audio != null:
 		_world._mission_audio.teardown()
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].

@@ -333,8 +333,7 @@ class ItemFxGameWorldHarness:
 	var fx: ItemFxDirectorProbe
 	func _init() -> void:
 		# GameWorld._init first: defining _init here otherwise SKIPS the
-		# world's internal child construction (_net_drive / _debug_views /
-		# _occlusion / the real director), which the mission load path needs.
+		# world's internal child construction (_net_drive / # _occlusion / the real director), which the mission load path needs.
 		super()
 		fx = ItemFxDirectorProbe.new()
 		fx.setup(self,
@@ -382,7 +381,7 @@ class ItemFxGameWorldHarness:
 # mission-loadable). Only the two presentation SINKS swap for recording
 # SUBCLASSES of their real classes, through implicit-self privates. No _init
 # here: defining one would shadow GameWorld._init and skip the internal
-# child construction (_net_drive / _debug_views / _occlusion / _item_fx).
+# child construction (_net_drive / _occlusion / _item_fx).
 class ImpactGameWorldHarness:
 	extends GameWorld
 	func install_probes(effects: EffectWorld, audio: MissionAudio) -> void:
@@ -2453,123 +2452,6 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 			"tearing down a successfully wire-loaded world leaves no suspended owner method")
 
 
-func test_skeleton_debug_builds_and_frees_the_view() -> void:
-	# The F3 overlay's "Show skeletons" toggle routes here: enabling builds a child
-	# SkeletonDebugView under the world, disabling frees it (mirrors set_pick_debug).
-	var world := _make_world()
-	add_child_autofree(world)
-	await get_tree().process_frame
-	assert_false(world.debug_views().is_skeleton_debug(), "off by default")
-	assert_null(world.get_node_or_null("SkeletonDebug"), "...with no view node")
-
-	world.debug_views().set_skeleton_debug(true)
-	assert_true(world.debug_views().is_skeleton_debug())
-	assert_not_null(world.get_node_or_null("SkeletonDebug"), "enabling builds the 3D view")
-
-	world.debug_views().set_skeleton_debug(false)
-	assert_false(world.debug_views().is_skeleton_debug())
-	await get_tree().process_frame  # queue_free lands at frame end
-	assert_null(world.get_node_or_null("SkeletonDebug"), "disabling frees it")
-
-
-func test_user_point_debug_builds_frees_and_cleans_up_on_unload() -> void:
-	var world := _make_world()
-	add_child_autofree(world)
-	await get_tree().process_frame
-	assert_false(world.debug_views().is_user_point_debug(), "off by default")
-	assert_null(world.get_node_or_null("UserPointDebug"), "...with no view node")
-
-	world.debug_views().set_user_point_debug(true)
-	assert_true(world.debug_views().is_user_point_debug())
-	assert_not_null(world.get_node_or_null("UserPointDebug"),
-			"enabling builds the world-wide user-point view")
-
-	world.unload()
-	assert_true(world.debug_views().is_user_point_debug(),
-			"the checked toggle survives teardown so the next load can re-arm it")
-	assert_null(world.get_node_or_null("UserPointDebug"),
-			"teardown detaches the view immediately, before deferred destruction")
-
-	world.debug_views().set_user_point_debug(false)
-	assert_false(world.debug_views().is_user_point_debug())
-
-
-func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
-	var root_dir := _stage_minimal_fixture("debug_view_reload")
-	var world := _make_world()
-	add_child_autofree(world)
-	await get_tree().process_frame
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(root_dir), OK)
-	world.set_resource_root(root)
-	assert_eq(world.load_mission("mnml.bms"), OK)
-
-	world.debug_views().set_skeleton_debug(true)
-	world.debug_views().set_user_point_debug(true)
-	world.debug_views().set_collision_debug(true)
-	world.debug_views().set_occlusion_debug(true)
-	world.debug_views().set_round_debug(true)
-	world.debug_views().set_hitbox_debug(true)
-	var debug_names := [
-		"SkeletonDebug",
-		"UserPointDebug",
-		"CollisionDebug",
-		"OcclusionDebug",
-		"RoundDebug",
-		"HitboxDebug",
-	]
-	for debug_name in debug_names:
-		assert_not_null(world.get_node_or_null(NodePath(debug_name)),
-				"%s exists before reload" % debug_name)
-
-	world.unload()
-	assert_true(world.debug_views().is_skeleton_debug())
-	assert_true(world.debug_views().is_user_point_debug())
-	assert_true(world.debug_views().is_collision_debug())
-	assert_true(world.debug_views().is_occlusion_debug())
-	assert_true(world.debug_views().is_round_debug())
-	assert_true(world.debug_views().is_hitbox_debug())
-	for debug_name in debug_names:
-		assert_null(world.get_node_or_null(NodePath(debug_name)),
-				"%s detaches immediately during unload" % debug_name)
-
-	assert_eq(world.load_mission("mnml.bms"), OK)
-	for debug_name in debug_names:
-		assert_not_null(world.get_node_or_null(NodePath(debug_name)),
-				"%s is rebuilt for the replacement mission" % debug_name)
-	world.unload()
-
-
-func test_pick_helpers_keep_stable_names_on_same_frame_replacement() -> void:
-	var world := _make_world()
-	add_child_autofree(world)
-	await get_tree().process_frame
-	var first_picks := DebugPickList.new()
-	var replacement_picks := DebugPickList.new()
-
-	world.debug_views().set_pick_debug(first_picks)
-	var first_view := world.get_node_or_null("PickDebug")
-	assert_not_null(first_view)
-	world.debug_views().set_pick_debug(replacement_picks)
-	var replacement_view := world.get_node_or_null("PickDebug")
-	assert_not_null(replacement_view)
-	assert_ne(replacement_view, first_view)
-	assert_null(first_view.get_parent(),
-			"the old view detaches before its deferred destruction")
-	assert_eq(replacement_view.name, &"PickDebug")
-
-	world.debug_views().set_pick_click_enabled(true)
-	var first_catcher := world.get_node_or_null("PickClickCatcher")
-	assert_not_null(first_catcher)
-	world.debug_views().set_pick_click_enabled(true)
-	var replacement_catcher := world.get_node_or_null("PickClickCatcher")
-	assert_not_null(replacement_catcher)
-	assert_ne(replacement_catcher, first_catcher)
-	assert_null(first_catcher.get_parent(),
-			"the old click catcher also detaches before replacement")
-	assert_eq(replacement_catcher.name, &"PickClickCatcher")
-
-
 func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
 	# dispatcher node (whose ArrayMesh batches render the scattered vegetation).
@@ -3207,45 +3089,6 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			"leaving the skip re-emits the claim from the sim's delta baseline")
 	assert_gt(int((world.get("_perf_probe_spans") as Dictionary).get("occl_frame", -1)), -1,
 			"leaving the skip resumes the render-occlusion frame span")
-
-
-# (test_occlusion_steady_frames_touch_no_nodes was deleted with the sim
-# doubles: counting section-mask dispatches needed the recording node stub. The
-# churn contract it pinned — steady verdicts emit no deltas, so steady frames
-# walk nothing — is the native delta contract, pinned on the real sim by
-# simulation_test.gd's test_occlusion_delta_calls_emit_changes_only.)
-
-
-func test_occlusion_debug_view_builds_and_frees() -> void:
-	# The F3 overlay's "Show portal faces" toggle: GameWorld builds/frees the
-	# OcclusionDebugView child (the collision-view contract). Without a sim the
-	# built view clears instead of erroring.
-	var world := _make_world()
-	add_child_autofree(world)
-	world.debug_views().set_occlusion_debug(true)
-	var view := world.get_node_or_null(NodePath("OcclusionDebug"))
-	assert_not_null(view, "enabling builds the occlusion debug child")
-	assert_true(world.debug_views().is_occlusion_debug())
-	view.refresh_now()  # no sim resolved: clears, no error
-	world.debug_views().set_occlusion_debug(false)
-	assert_false(world.debug_views().is_occlusion_debug())
-	assert_true(view.is_queued_for_deletion(), "disabling frees the view")
-
-
-# (test_tick_emits_session_lost_once_for_an_in_match_loss and
-# test_tick_holds_split_grant_join_until_the_deploy_policy_is_complete were
-# deleted with the joiner sim doubles: staging an in-match loss edge or a
-# split-grant zoned admission on the REAL stack needs either the 120 s silence
-# reap [orig: cs_dir0.timeout_ms @ 0x4ca4a0] or a live zoned host — neither
-# fits a unit frame. The latch/edge machine those tests exercised — loss wins
-# and emits ONCE per session, the deploy pick holds until the policy/grant
-# boundary completes, the ready edge is once per join — is the native
-# NetSessionPolicy, pinned on the real policy by
-# tests/npruntime/join_session_policy_test.cpp (test_session_loss_latch,
-# test_admission_deploy_edge_and_ready). GameWorld's forwarding of the real
-# sim predicates into that policy is covered by the live joiner tests above
-# (test_joiner_accepts_novaworld_advertised_mission_basename,
-# test_escape_aborts_the_joiner_admission_wait) and the non-joiner leg below.)
 
 
 func test_tick_never_emits_session_lost_for_a_non_joiner() -> void:

@@ -5,7 +5,7 @@ extends RefCounted
 # the mission-lifetime owner of the entity-attached / static / controller-gated
 # item emitters, the owner-registered effect-anchor resolvers, and the retail
 # master particle switch. Plain RefCounted on the internal-member pattern
-# (DebugViewSet/NetSessionDrive, minus tree presence: it owns no Nodes and runs
+# (NetSessionDrive, minus tree presence: it owns no Nodes and runs
 # no coroutines — the item-FX emitters attach to game nodes through the effect
 # world). Owned by GameWorld as _item_fx, constructed in the world's _init and
 # wired once through setup(). GameWorld keeps one-line public delegates
@@ -15,7 +15,7 @@ extends RefCounted
 # Shared state is reached through the world's PUBLIC surface —
 # get_effect_world() / get_runtime() / get_node_or_null — with TWO lent
 # private seams arriving as setup() Callables, null-guarded by the world (the
-# DebugViewSet two-Callable precedent): the placer's static item-effect
+# NetSessionDrive Callable precedent): the placer's static item-effect
 # sources, and the placer's ItemDatabase (typed at the resolve boundary,
 # ADR 0034 — harnesses hand real fixture databases).
 
