@@ -138,6 +138,7 @@ class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlus
 #include "simulation/inmatch_session_values.h"
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
 #include "simulation/hud_view_records.h" // the per-frame HUD view records (typed-array returns)
+#include "simulation/present_event_records.h" // the per-tick present drain records (typed-array returns)
 #include "devtools/frame_stats.h"
 
 namespace opennova::hud {
@@ -210,8 +211,8 @@ public:
 	const opennova::renderer::PrecipitationDrawFrame &compile_precipitation_frame(
 			const Vector3 &p_camera, const Vector3 &p_camera_right,
 			const Vector3 &p_camera_up, int p_terrain_light_rgb);
-	// Thunder one-shots since the last drain: [{distance, bearing}] (weather_state.h carries the cites).
-	Array drain_weather_sounds();
+	// Thunder one-shots since the last drain (weather_state.h carries the cites).
+	TypedArray<WeatherSoundRow> drain_weather_sounds();
 	// The probe/test view of the weather home in native units
 	// (simulation/weather_home_state.h); null without a weather home.
 	Ref<WeatherHomeState> get_weather_state() const;
@@ -842,12 +843,12 @@ public:
 	// previous render frame. Each Dictionary encodes one PlayerWeaponEvent.
 	TypedArray<PlayerWeaponEvent> drain_local_player_weapon_events();
 	// Destructively drain the flight sim's resolved round impacts, each row already
-	// mapped through the ammo effects_table to {position, direction, effect, sound}
+	// mapped through the ammo effects_table to its effect and sound legs
 	// (engine: runtime/world/ammo_table.h).
-	Array drain_round_impacts();
+	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions. Bounds are
 	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
-	Array drain_terrain_scorches();
+	TypedArray<TerrainScorchRow> drain_terrain_scorches();
 	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
 	// per line the original posts to its message feed. The fold (suppression,
 	// the own/verbose gate, the camp keys, the bonus recompose, the color) is
@@ -891,9 +892,9 @@ public:
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	// The S2C 0x14 player-chat lines since the last drain, each routed by the
-	// witnessed channel table: [{text, argb, sink, channel}] where sink 0 =
-	// the SYSTEM ring, 1 = the CHAT ring, 2 = the message queue, 3 = channel 3.
-	Array drain_chat_lines();
+	// witnessed channel table (ChatLineRow.sink: 0 = the SYSTEM ring, 1 = the
+	// CHAT ring, 2 = the message queue, 3 = channel 3).
+	TypedArray<ChatLineRow> drain_chat_lines();
 	// Substitute actor names into a canned template (engine: net/netsim/client_replica_feed.cpp): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so
 	// the string lookup can live with the string table while the substitution
@@ -1069,25 +1070,23 @@ public:
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;
 
-	// Drain the World EffectLog as an Array of Dictionaries {kind, a, b, c, d, str} and clear
-	// it. Presentation-only (text/dialog/win/subgoal/show_waypoints/set_light); state mutation
-	// is applied in-engine, never here.
-	Array drain_effects();
+	// Drain the World EffectLog as MissionEffect records and clear it.
+	// Presentation-only (text/dialog/win/subgoal/show_waypoints/set_light);
+	// state mutation is applied in-engine, never here.
+	TypedArray<MissionEffect> drain_effects();
 
-	// The shell fire-presentation drain: one Dictionary per round spawned since the
-	// last call — {origin: Vector3 (godot), forward: Vector3 (godot, unit),
-	// shooter_handle, is_local_player, ammo_index, sound_set, effect, mf_light} with
-	// the ammo-def 'ai_launch'/'ai_launcheffect' names resolved. The fire present
-	// pass plays/spawns per event, skipping the local player (whose action-slot
-	// presentation is already ported). (engine: runtime/world/ai.h)
-	Array drain_fire_presentation_events();
+	// The shell fire-presentation drain: one FirePresentationEvent per round
+	// spawned since the last call, with the ammo-def 'ai_launch'/'ai_launcheffect'
+	// names resolved. The fire present pass spawns per event, skipping the local
+	// player (whose action-slot presentation is already ported).
+	// (engine: runtime/world/ai.h)
+	TypedArray<FirePresentationEvent> drain_fire_presentation_events();
 
 	// The fire-sound legs on the logic clock (world/fire_sound.h): the shell
 	// stamps the camera listener each frame before the tick batch, and drains
-	// the ready one-shots ({set, pos, source_bms_id} rows) each present.
-	// (engine: runtime/world/collision.h)
+	// the ready one-shots each present. (engine: runtime/world/collision.h)
 	void set_sound_listener(const Vector3 &p_listener_godot);
-	Array drain_fire_sounds();
+	TypedArray<FireSoundRow> drain_fire_sounds();
 
 	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,
 	// Y=left, Z=up) from raw weapon.def pos/tpos units — the /256 blend +
@@ -1109,11 +1108,10 @@ public:
 	// The mission water plane (godot Y units) the footstep water pick and the
 	// landing legs compare feet against (engine: net/netsim/client_replica_pipeline.h).
 	void set_water_z(double p_water_y);
-	// Drain the per-tick slot-sound emissions (footsteps/foley/landing/screams):
-	// one Dictionary per event — {set: String, pos: Vector3 (godot), handle,
-	// slot} — played by the fire present pass at full volume
+	// Drain the per-tick slot-sound emissions (footsteps/foley/landing/screams),
+	// played by the fire present pass at full volume
 	// (engine: net/npwire/ingame_decode.h).
-	Array drain_slot_sounds();
+	TypedArray<SlotSoundRow> drain_slot_sounds();
 
 	// Queue this frame's REMOTE-body footsteps and foley for one wire row.
 	// Runs only for wire-RENDERED bodies (a joiner's remote rows, a listen
@@ -1128,12 +1126,10 @@ public:
 			int p_wire_handle, int p_carrier_handle, int p_anim_state,
 			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
 	// Drain persistent entity-attached emitter registrations. Producers refresh
-	// a keyed (source_spawn_id, lane) intent; the audio layer expands `set` into
-	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
-	// Rows are {source_spawn_id, handle, source_bms_id, pos, lane, slot,
-	// lifetime, emitted_tick, pitch_q16, volume_q8_8, source_only, set}.
+	// a keyed (source_spawn_id, lane) intent; the audio layer expands the set
+	// into LWF layers and owns keep-alive, spatial ranking, and physical voices.
 	// (engine: runtime/world/sound_emitter_mailbox.h)
-	Array drain_sound_emitters();
+	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
 	// framed per channel as [style_id, age, count, then count x (x, y, z, w)] in
@@ -1550,10 +1546,9 @@ public:
 	void clear_contact_debug();
 	bool native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
-	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id,
-	// pos (godot), rotation_deg (pitch, yaw, roll — placer convention)}; the
-	// enemy-team item swap follows the viewer team (engine: runtime/world/round_sim.h).
-	Array get_throwable_visuals() const;
+	// rounds with a TrcrID model plus placed devices; the enemy-team item swap
+	// follows the viewer team (engine: runtime/world/round_sim.h).
+	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's

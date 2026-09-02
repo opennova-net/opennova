@@ -164,12 +164,11 @@ func _sim_arm(mission: MissionData, sim_ticks: int, data: Dictionary) -> Vector3
 		for t in range(sim_ticks):
 			sim.step()
 			for e in sim.drain_effects():
-				var effect: Dictionary = e
-				var k := String(effect.get("kind", ""))
+				var effect: MissionEffect = e
+				var k := effect.kind
 				kinds[k] = int(kinds.get(k, 0)) + 1
 				if k == "dialog" or k == "dialog_wav":
-					dialog_ticks.append("%s@t%d a=%d str=%s" % [k, t, int(effect.get("a", 0)),
-							String(effect.get("str", ""))])
+					dialog_ticks.append("%s@t%d a=%d str=%s" % [k, t, effect.a, effect.text])
 		_ctx.log("sim %d ticks, effect kinds: %s" % [sim_ticks, str(kinds)])
 		for d in dialog_ticks.slice(0, DIALOG_TICK_LOG_CAP):
 			_ctx.log("  %s" % d)

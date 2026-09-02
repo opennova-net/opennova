@@ -310,19 +310,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 			["amb", "amb", "amb", "amb"],
 			{"amb": [_layer(2000)]}))
 	audio.set_markers(markers)
-	var idle := {
-		"source_spawn_id": 77,
-		"handle": 0x10001,
-		"source_bms_id": 42,
-		"lane": 0,
-		"lifetime": 30,
-		"pitch_q16": 0x10000,
-		"volume_q8_8": 0xFFFF,
-		"slot": 0,
-		"set": "V_TRUCK_ILP",
-		"pos": vehicle_pos,
-	}
-	audio.apply_sound_emitters([idle])
+	audio.apply_sound_emitters([_emitter_row(77, vehicle_pos, 0x10000, 0xFFFF)])
 	audio.tick(vehicle_pos, 0.2)
 
 	assert_eq(_players(container).size(), MissionAudio.MIX_CHANNELS,
@@ -343,12 +331,8 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 
 	# A per-tick refresh of the same (source lifetime, lane) updates its live
 	# controls and pose without rebinding/restarting its stream.
-	var refreshed := idle.duplicate()
 	var refreshed_pos := vehicle_pos + Vector3(1, 0, 0)
-	refreshed["pos"] = refreshed_pos
-	refreshed["pitch_q16"] = 0xC000
-	refreshed["volume_q8_8"] = 0x8000
-	audio.apply_sound_emitters([refreshed])
+	audio.apply_sound_emitters([_emitter_row(77, refreshed_pos, 0xC000, 0x8000)])
 	audio.tick(refreshed_pos, 0.2)
 	assert_eq(_player_at_position(container, refreshed_pos), voice)
 	assert_eq(voice.stream, first_stream,
@@ -356,10 +340,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	assert_almost_eq(voice.pitch_scale, 0.75, 0.0001)
 	assert_almost_eq(voice.volume_db, linear_to_db(125.0 / 255.0), 0.001)
 
-	var clear := refreshed.duplicate()
-	clear["pitch_q16"] = 0
-	clear["volume_q8_8"] = 0
-	audio.apply_sound_emitters([clear])
+	audio.apply_sound_emitters([_emitter_row(77, refreshed_pos, 0, 0)])
 	audio.tick(refreshed_pos, 0.2)
 	assert_null(_player_at_position(container, refreshed_pos),
 		"the zeroed source/lane update removes the vehicle emitter immediately")
@@ -392,18 +373,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	var audio = MissionAudio.new(root, null)
 	audio.setup(mission, "vehicle_catchup.bms", container)
 
-	var idle := {
-		"source_spawn_id": 77,
-		"source_bms_id": 42,
-		"emitted_tick": 1,
-		"lane": 0,
-		"lifetime": 30,
-		"pitch_q16": 0x10000,
-		"volume_q8_8": 0xFFFF,
-		"set": "V_TRUCK_ILP",
-		"pos": Vector3(40, 0, 0),
-	}
-	audio.apply_sound_emitters([idle])
+	audio.apply_sound_emitters([_emitter_row(77, Vector3(40, 0, 0), 0x10000, 0xFFFF, 1)])
 	# One render frame catches up 32 world ticks. The registration must retain
 	# tick 1 as its refresh time rather than being reborn at the final tick.
 	audio.advance_ticks(32)
@@ -418,11 +388,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	audio.tick(Vector3.ZERO)
 	assert_null(audio.ambient_player_for_candidate(first_id))
 
-	var replacement := idle.duplicate()
-	replacement["source_spawn_id"] = 88
-	replacement["emitted_tick"] = 33
-	replacement["pos"] = Vector3(80, 0, 0)
-	audio.apply_sound_emitters([replacement])
+	audio.apply_sound_emitters([_emitter_row(88, Vector3(80, 0, 0), 0x10000, 0xFFFF, 33)])
 	audio.advance_ticks(33)
 	audio.tick(Vector3.ZERO)
 	assert_not_null(audio.ambient_player_for_candidate(first_id),
@@ -669,3 +635,21 @@ func _reverb_count(bus_idx: int) -> int:
 		if AudioServer.get_bus_effect(bus_idx, i) is AudioEffectReverb:
 			count += 1
 	return count
+
+
+# One persistent emitter registration shaped like Simulation.drain_sound_emitters
+# emits: the fixture truck's idle lane at `pos` with the given pitch/volume words.
+func _emitter_row(source_spawn_id: int, pos: Vector3, pitch_q16: int, volume_q8_8: int,
+		emitted_tick: int = 0) -> SoundEmitterRow:
+	var row := SoundEmitterRow.new()
+	row.source_spawn_id = source_spawn_id
+	row.handle = 0x10001
+	row.source_bms_id = 42
+	row.lane = 0
+	row.lifetime = 30
+	row.pitch_q16 = pitch_q16
+	row.volume_q8_8 = volume_q8_8
+	row.soundset = "V_TRUCK_ILP"
+	row.pos = pos
+	row.emitted_tick = emitted_tick
+	return row

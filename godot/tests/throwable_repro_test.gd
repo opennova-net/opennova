@@ -106,15 +106,15 @@ func _step_and_pump(ticks: int) -> Array[String]:
 func _visual_ids() -> Array[int]:
 	var out: Array[int] = []
 	for v in _sim.get_throwable_visuals():
-		out.append(int((v as Dictionary).get("item_id", 0)))
+		out.append((v as ThrowableVisualRow).item_id)
 	return out
 
 
 func _visual_move_effect(item_id: int) -> String:
 	for value in _sim.get_throwable_visuals():
-		var visual := value as Dictionary
-		if int(visual.get("item_id", 0)) == item_id:
-			return String(visual.get("move_effect", ""))
+		var visual := value as ThrowableVisualRow
+		if visual.item_id == item_id:
+			return visual.move_effect
 	return ""
 
 
@@ -280,10 +280,10 @@ func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
 	assert_eq(bounces.size(), 5,
 			"retail presents only the first five grenade contacts")
 	for value in bounces:
-		var bounce: Dictionary = value
-		assert_eq(String(bounce.get("effect", "")), "",
+		var bounce: RoundImpactRow = value
+		assert_eq(bounce.effect, "",
 				"a terrain bounce never submits Effect_FragGrndDirt")
-		assert_eq(String(bounce.get("sound", "")), "IMP_GREN_DIRT",
+		assert_eq(bounce.sound, "IMP_GREN_DIRT",
 				"the retained bounce leg is the authored ground-impact sound")
 	assert_true(_visual_ids().has(1883),
 			"the grenade remains in flight until its fuse after bouncing")
@@ -384,22 +384,22 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
 			"the production effects_table move row is live from spawn")
 
-	var arm_events: Array[Dictionary] = []
+	var arm_events: Array[RoundImpactRow] = []
 	var move_effect_survived_arm := true
 	for _tick in 312:
 		_sim.step()
 		move_effect_survived_arm = move_effect_survived_arm \
 				and _visual_move_effect(1875) == "Effect_SmokeToss"
 		for value in _sim.drain_round_impacts():
-			var event := value as Dictionary
-			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+			var event := value as RoundImpactRow
+			if event.sound == "EXPLO_SMOK_GREN":
 				arm_events.append(event)
 
 	assert_eq(arm_events.size(), 1, "the five-second arm boundary emits one presentation event")
 	if arm_events.size() == 1:
-		assert_eq(String(arm_events[0].get("effect", "")), "",
+		assert_eq(arm_events[0].effect, "",
 				"the authored smoke obj row has no particle leg")
-		assert_eq(String(arm_events[0].get("sound", "")), "EXPLO_SMOK_GREN",
+		assert_eq(arm_events[0].sound, "EXPLO_SMOK_GREN",
 				"the arm boundary presents the authored smoke-pour sound")
 	assert_true(_visual_ids().has(1875),
 			"the smoke grenade remains alive after its five-second arm event")
@@ -415,8 +415,8 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	for tick in 2300:
 		_sim.step()
 		for value in _sim.drain_round_impacts():
-			var event := value as Dictionary
-			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+			var event := value as RoundImpactRow
+			if event.sound == "EXPLO_SMOK_GREN":
 				fuse_sounds += 1
 		if fuse_tick < 0 and not _visual_ids().has(1875):
 			fuse_tick = tick + 312

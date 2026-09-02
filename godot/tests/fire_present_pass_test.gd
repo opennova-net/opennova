@@ -37,12 +37,28 @@ class CaptureAudio:
 		sound_emitter_calls.append(events.duplicate(true))
 
 
-func _event(pos: Vector3, source_bms_id: int) -> Dictionary:
-	return {
-		"origin": pos,
-		"source_bms_id": source_bms_id,
-		"is_local_player": false,
-	}
+func _event(pos: Vector3, source_bms_id: int) -> FirePresentationEvent:
+	var event := FirePresentationEvent.new()
+	event.origin = pos
+	event.source_bms_id = source_bms_id
+	return event
+
+
+func _fire_sound(soundset: String, pos: Vector3, source_bms_id: int) -> FireSoundRow:
+	var row := FireSoundRow.new()
+	row.soundset = soundset
+	row.pos = pos
+	row.source_bms_id = source_bms_id
+	return row
+
+
+func _slot_sound(soundset: String, pos: Vector3, handle: int, slot: int) -> SlotSoundRow:
+	var row := SlotSoundRow.new()
+	row.soundset = soundset
+	row.pos = pos
+	row.handle = handle
+	row.slot = slot
+	return row
 
 
 func _make_pass(audio: CaptureAudio) -> FirePresentPass:
@@ -64,8 +80,8 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 	var presenter := _make_pass(audio)
 
 	presenter.present_fire_sounds([
-		{"set": "AI_FIRE", "pos": Vector3(10, 0, 0), "source_bms_id": 77},
-		{"set": "GS_END", "pos": Vector3(4, 1, 2), "source_bms_id": 0},
+		_fire_sound("AI_FIRE", Vector3(10, 0, 0), 77),
+		_fire_sound("GS_END", Vector3(4, 1, 2), 0),
 	])
 
 	assert_eq(audio.calls.size(), 2)
@@ -87,11 +103,11 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	var audio := CaptureAudio.new(null, null)
 	var presenter := _make_pass(audio)
 	var local := _event(Vector3(1, 0, 0), 11)
-	local["is_local_player"] = true
+	local.is_local_player = true
 	var remote := _event(Vector3(2, 0, 0), 22)
 
 	for _frame in range(128):
-		presenter.present_fires([local.duplicate(), remote.duplicate()])
+		presenter.present_fires([local, remote])
 
 	assert_eq(presenter.get_stats().fires, 128,
 			"only the decoded remote shot reaches the presentation legs")
@@ -166,9 +182,9 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	var presenter := _make_pass(audio)
 
 	presenter.present_slot_sounds([
-		{"set": "FSP_DIRT_L", "pos": Vector3(400, 0, 0), "handle": 3, "slot": 17},
-		{"set": "FREEFALL", "pos": Vector3(1, 0, 0), "handle": 3, "slot": 44},
-		{"set": "", "pos": Vector3.ZERO, "handle": 3, "slot": 18},
+		_slot_sound("FSP_DIRT_L", Vector3(400, 0, 0), 3, 17),
+		_slot_sound("FREEFALL", Vector3(1, 0, 0), 3, 44),
+		_slot_sound("", Vector3.ZERO, 3, 18),
 	])
 
 	assert_eq(audio.slot_calls.size(), 2, "empty set name is the id-0 no-op")
@@ -183,20 +199,17 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	var audio := CaptureAudio.new(null, null)
 	var presenter := _make_pass(audio)
-	var idle := {
-		"source_spawn_id": 77,
-		"handle": 0x10001,
-		"source_bms_id": 42,
-		"emitted_tick": 12,
-		"lane": 0,
-		"lifetime": 30,
-		"pitch_q16": 0x10000,
-		"volume_q8_8": 0xFFFF,
-		"source_only": false,
-		"slot": 0,
-		"set": "V_TRUCK_ILP",
-		"pos": Vector3(10, 0, 0),
-	}
+	var idle := SoundEmitterRow.new()
+	idle.source_spawn_id = 77
+	idle.handle = 0x10001
+	idle.source_bms_id = 42
+	idle.emitted_tick = 12
+	idle.lane = 0
+	idle.lifetime = 30
+	idle.pitch_q16 = 0x10000
+	idle.volume_q8_8 = 0xFFFF
+	idle.soundset = "V_TRUCK_ILP"
+	idle.pos = Vector3(10, 0, 0)
 
 	presenter.present_sound_emitters([idle])
 

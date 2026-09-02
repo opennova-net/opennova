@@ -362,6 +362,12 @@ class ItemFxGameWorldHarness:
 		return fx.active_identity_count()
 	func consume_runtime_effects(effects: Array) -> void:
 		_on_runtime_effects(effects)
+	# One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it.
+	static func control_effect(kind: String, a: int, b: int, c: int,
+			wire_handle: int = -1) -> MissionEffect:
+		var effect := MissionEffect.make(kind, a, b, c)
+		effect.wire_handle = wire_handle
+		return effect
 	func configure_item_owner(key: String, node: Node3D,
 			entity_ref: EntityRef) -> void:
 		# The runtime the resolve consults is the REAL MissionPresentation the world
@@ -908,7 +914,7 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	world.add_child(effects)
 	world.install_probes(effects, null)
 
-	world.route_mission_effects([{"kind": "fx2ssn", "b": ssn, "str": "Dust"}])
+	world.route_mission_effects([MissionEffect.make("fx2ssn", 0, ssn, 0, "Dust")])
 	assert_eq(effects.spawns.size(), 1)
 	if effects.spawns.is_empty():
 		return
@@ -947,9 +953,9 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 	add_child_autofree(world)
 	watch_signals(world)
 	var rows := [
-		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
-		{"kind": "win", "a": 1},
-		{"kind": "round_end", "a": 2},
+		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
+		MissionEffect.make("win", 1),
+		MissionEffect.make("round_end", 2),
 	]
 	world.consume_runtime_effects(rows)
 	assert_signal_emitted_with_parameters(world, "mission_effects", [rows])
@@ -2776,18 +2782,8 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	watch_signals(world)
 
 	var spawn_origin := (MissionData.KIND_ITEM << 24) | 3
-	var started := {
-		"kind": "vehicle_control_started",
-		"a": 71,
-		"b": 9001,
-		"c": spawn_origin,
-	}
-	var stopped := {
-		"kind": "vehicle_control_stopped",
-		"a": 71,
-		"b": 9001,
-		"c": spawn_origin,
-	}
+	var started := ItemFxGameWorldHarness.control_effect("vehicle_control_started", 71, 9001, spawn_origin)
+	var stopped := ItemFxGameWorldHarness.control_effect("vehicle_control_stopped", 71, 9001, spawn_origin)
 
 	# The simulation event can precede the present pass's wire/model callback.
 	world.consume_runtime_effects([started])
@@ -2819,7 +2815,7 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	# exposes only the public effect after consuming the lifecycle row.
 	world.consume_runtime_effects([started])
 	assert_eq(effects.attached_spawns.size(), 2)
-	var public_effect := {"kind": "text", "str": "still public"}
+	var public_effect := MissionEffect.make("text", 0, 0, 0, "still public")
 	world.consume_runtime_effects([stopped, public_effect])
 	assert_eq(effects.stopped_groups, [1, 2])
 	assert_signal_emitted_with_parameters(
@@ -2844,19 +2840,9 @@ func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0,
 			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
 	var spawn_origin := (MissionData.KIND_ITEM << 24) | 8
-	world.consume_runtime_effects([{
-		"kind": "vehicle_control_started",
-		"a": 81,
-		"b": 9010,
-		"c": spawn_origin,
-	}])
+	world.consume_runtime_effects([ItemFxGameWorldHarness.control_effect("vehicle_control_started", 81, 9010, spawn_origin)])
 	assert_eq(world.pending_item_fx_count(), 1)
-	world.consume_runtime_effects([{
-		"kind": "vehicle_control_stopped",
-		"a": 81,
-		"b": 9010,
-		"c": spawn_origin,
-	}])
+	world.consume_runtime_effects([ItemFxGameWorldHarness.control_effect("vehicle_control_stopped", 81, 9010, spawn_origin)])
 	assert_eq(world.pending_item_fx_count(), 0,
 			"stop cancels a hidden activation before particles are re-enabled")
 	world.set_particles_hidden(false)
@@ -2876,12 +2862,7 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
 
-	world.consume_runtime_effects([{
-		"kind": "vehicle_control_started",
-		"a": 77,
-		"b": 0,
-		"c": 0,
-	}])
+	world.consume_runtime_effects([ItemFxGameWorldHarness.control_effect("vehicle_control_started", 77, 0, 0)])
 	var model := _fx_model(world)
 	model.entity_ref = EntityRef.make(MissionData.KIND_ITEM, 12, 0, DBUGGY_ITEM, 77)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0)
@@ -2912,31 +2893,13 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 		assert_eq(world.present_item_fx(
 				model, MissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
 
-	world.consume_runtime_effects([{
-		"kind": "vehicle_control_started",
-		"a": 0,
-		"b": 0,
-		"c": -1,
-		"wire_handle": 0x1004,
-	}])
+	world.consume_runtime_effects([ItemFxGameWorldHarness.control_effect("vehicle_control_started", 0, 0, -1, 0x1004)])
 	assert_eq(effects.attached_spawns.size(), 1,
 			"mounting one synthetic emplacement starts only that sibling's effect")
 	assert_eq(String(effects.attached_spawns[0].owner),
 			"itemfx:%d:%d" % [siblings[0].get_instance_id(), _fx_anchor_index()])
 
-	world.consume_runtime_effects([{
-		"kind": "vehicle_control_stopped",
-		"a": 0,
-		"b": 0,
-		"c": -1,
-		"wire_handle": 0x1004,
-	}, {
-		"kind": "vehicle_control_started",
-		"a": 0,
-		"b": 0,
-		"c": -1,
-		"wire_handle": 0x1005,
-	}])
+	world.consume_runtime_effects([ItemFxGameWorldHarness.control_effect("vehicle_control_stopped", 0, 0, -1, 0x1004), ItemFxGameWorldHarness.control_effect("vehicle_control_started", 0, 0, -1, 0x1005)])
 	assert_eq(effects.stopped_groups, [1])
 	assert_eq(effects.attached_spawns.size(), 2)
 	assert_eq(String(effects.attached_spawns[1].owner),

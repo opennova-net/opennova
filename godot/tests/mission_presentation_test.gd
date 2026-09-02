@@ -503,7 +503,7 @@ func test_effects_drained_signal_fires() -> void:
 	for _i in range(16):
 		rt.step_once()
 	assert_eq(drained.size(), 1, "one effect drained through the signal")
-	assert_eq(String((drained[0] as Dictionary)["kind"]), "text", "OutputText -> text effect")
+	assert_eq((drained[0] as MissionEffect).kind, "text", "OutputText -> text effect")
 
 
 # --- Fixed-timestep accumulator (session_frame): the sim runs at a constant 62.5 Hz independent of
@@ -689,7 +689,7 @@ func test_session_frame_drains_effects_per_tick() -> void:
 	# 20.5 quanta of wall-clock in ONE frame -> 20 ticks; crosses the 16th-tick quarter-pass boundary.
 	assert_eq(_advance_ticks(rt, 0.328), 20, "20+ quanta of wall-clock run 20 logic ticks in one frame")
 	assert_eq(drained.size(), 1, "the per-tick one-shot effect surfaced from inside the batch")
-	assert_eq(String((drained[0] as Dictionary)["kind"]), "text")
+	assert_eq((drained[0] as MissionEffect).kind, "text")
 
 
 func test_distance_per_real_second_is_frame_rate_independent() -> void:

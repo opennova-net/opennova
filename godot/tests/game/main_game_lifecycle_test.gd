@@ -1293,8 +1293,8 @@ func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu(
 
 	var banner_key := "STRMISC_KILLEDGREEN"
 	world.mission_effects.emit([
-		{"kind": "lose", "a": 0, "str": banner_key},
-		{"kind": "round_end", "a": 2},
+		MissionEffect.make("lose", 0, 0, 0, banner_key),
+		MissionEffect.make("round_end", 2),
 	])
 	assert_false(_shell.is_gameplay_input_active(),
 			"the round-end latch stops gameplay input while the world keeps ticking")

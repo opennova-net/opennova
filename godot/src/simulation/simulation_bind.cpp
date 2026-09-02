@@ -7,6 +7,7 @@
 #include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
 #include "simulation/tracer_ribbon_frame.h" // the compiled tracer strips
 #include "simulation/weather_home_state.h" // the weather home's probe view
+#include "simulation/present_event_records.h" // the per-tick present drain records
 #include "simulation/destruction_events.h" // the destruction drain record
 #include "simulation/ai_debug_report.h" // the F3 AI overlay payload
 #include "simulation/collision_debug_report.h" // the F3 collision overlay payload

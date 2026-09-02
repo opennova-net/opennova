@@ -32,16 +32,16 @@ func setup(world: GameWorld) -> void:
 # consumers (HUD, etc.).
 func route_mission_effects(effects: Array) -> void:
 	for e in effects:
-		var eff: Dictionary = e
-		var kind := String(eff.get("kind", ""))
+		var eff: MissionEffect = e
+		var kind := eff.kind
 		if kind == "dialog":
 			# BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
 			if _world._mission_audio != null:
-				_world._mission_audio.play_dialog(int(eff.get("a", 0)))
+				_world._mission_audio.play_dialog(eff.a)
 		elif kind == "dialog_wav":
 			# WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if _world._mission_audio != null:
-				_world._mission_audio.play_wac_wave(String(eff.get("str", "")))
+				_world._mission_audio.play_wac_wave(eff.text)
 		elif kind == "fx2ssn":
 			# WAC fx2ssn: spawn the named effect at the SSN entity's position with
 			# the emitter handle owned per entity — a scripted re-trigger detaches
@@ -54,14 +54,14 @@ func route_mission_effects(effects: Array) -> void:
 			# [orig: WacScript_SpawnEffectAtSsnEntity @0x4f23a0 reads
 			# outMillis/off_849934 after resolving the entity grid cell.]
 			if _world._effect_world != null and _world._runtime != null:
-				var ssn := int(eff.get("b", 0))
+				var ssn := eff.b
 				var pos: Variant = _world._runtime.entity_position_for_ssn(ssn)
 				if pos != null:
 					var orientation := Vector3.UP
 					if _world._terrain_data != null:
 						orientation = _world._terrain_data.get_surface_normal_world(pos)
 					_world._effect_world.spawn_effect_owned(
-							ssn, String(eff.get("str", "")), pos, orientation)
+							ssn, eff.text, pos, orientation)
 		# fx2tgt (spawn at a placed type-6088 target marker
 		# [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
 		# family]) stays unrouted: which .bms record field carries the 1..99
@@ -78,27 +78,21 @@ func _route_round_impacts() -> void:
 	if sim == null:
 		return
 	for row_v in sim.drain_round_impacts():
-		var row: Dictionary = row_v
-		var pos := Vector3(row.get("position", Vector3.ZERO))
-		var effect := String(row.get("effect", ""))
-		if _world._effect_world != null and not effect.is_empty():
-			_world._effect_world.spawn_effect_transient(effect, pos,
-					Vector3(row.get("direction", Vector3.ZERO)),
-					maxi(int(row.get("age_ticks", 0)), 0),
+		var row: RoundImpactRow = row_v
+		var pos := row.position
+		if _world._effect_world != null and not row.effect.is_empty():
+			_world._effect_world.spawn_effect_transient(row.effect, pos,
+					row.direction, maxi(row.age_ticks, 0),
 					EffectScene.RENDER_DOMAIN_WORLD,
-					int(row.get("source_tick", 0)),
-					int(row.get("source_order", 0)))
-		var sound := String(row.get("sound", ""))
-		if _world._mission_audio != null and not sound.is_empty():
-			_world._mission_audio.fire_soundset(sound, pos)
+					row.source_tick, row.source_order)
+		if _world._mission_audio != null and not row.sound.is_empty():
+			_world._mission_audio.fire_soundset(row.sound, pos)
 		# The light_impact flash rides the effect leg's own gate (the row only
 		# carries light fields when the ammo authors it and the effect presents)
 		# [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3].
-		if _world._light_director != null and row.has("light_radius"):
+		if _world._light_director != null and row.has_light:
 			_world._light_director.on_impact_light(pos,
-					float(row.get("light_radius", 0.0)),
-					row.get("light_color", Color.WHITE),
-					int(row.get("light_ticks", 10)))
+					row.light_radius, row.light_color, row.light_ticks)
 
 
 # Install simulation-resolved permanent scorch records into the terrain page
@@ -109,13 +103,10 @@ func _route_terrain_scorches() -> void:
 	if sim == null or _world._terrain == null:
 		return
 	for row_v in sim.drain_terrain_scorches():
-		var row: Dictionary = row_v
-		_world._terrain.append_terrain_scorch(
-				int(row.get("texture_index", -1)),
-				int(row.get("minimum_x_q16", 0)),
-				int(row.get("minimum_z_q16", 0)),
-				int(row.get("maximum_x_q16", 0)),
-				int(row.get("maximum_z_q16", 0)))
+		var row: TerrainScorchRow = row_v
+		_world._terrain.append_terrain_scorch(row.texture_index,
+				row.minimum_x_q16, row.minimum_z_q16,
+				row.maximum_x_q16, row.maximum_z_q16)
 
 
 # Consume render-internal lifecycle effects first, route "dialog" actions to
@@ -124,10 +115,9 @@ func _route_terrain_scorches() -> void:
 func _on_runtime_effects(effects: Array) -> void:
 	var routed: Array = []
 	for effect_v in effects:
-		if effect_v is Dictionary:
-			var effect: Dictionary = effect_v
-			if _world._item_fx.consume_control_effect(effect):
-				continue
+		var effect := effect_v as MissionEffect
+		if effect != null and _world._item_fx.consume_control_effect(effect):
+			continue
 		routed.append(effect_v)
 	if routed.is_empty():
 		return

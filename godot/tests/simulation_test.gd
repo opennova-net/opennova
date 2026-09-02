@@ -1689,12 +1689,12 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 		# so only the SOUND distinguishes them.
 		# [orig: Projectile_HandleTerrainImpact_0 @ 0x4e98f0 — local-player compare
 		#  @0x4e9a55, push 2 @0x4e9aa1, push 17h @0x4e9ad7]
-		assert_eq(String((impacts[0] as Dictionary).get("effect", "")), "Effect_AmHitBody")
-		assert_eq(String((impacts[0] as Dictionary).get("sound", "")), "IMP_BULLET_FLESH")
+		assert_eq((impacts[0] as RoundImpactRow).effect, "Effect_AmHitBody")
+		assert_eq((impacts[0] as RoundImpactRow).sound, "IMP_BULLET_FLESH")
 		# The drained position is Godot-space (x, z_up, -y): the +y_m flight lands
 		# near (0, ~eye, -8). Pins the local fire bearing = the engine heading
 		# frame (D-WPN-18; RoundSim's wire-validated (cos, sin) mapping).
-		var impact_pos: Vector3 = (impacts[0] as Dictionary).get("position", Vector3.ZERO)
+		var impact_pos := (impacts[0] as RoundImpactRow).position
 		assert_almost_eq(impact_pos.x, 0.0, 0.75,
 				"the shot flies the aim bearing, not its 90-deg mirror")
 		assert_between(-impact_pos.z, 6.0, 8.5,
@@ -2079,9 +2079,8 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	var impacts := sim.drain_round_impacts()
 	assert_eq(impacts.size(), 1)
 	if impacts.size() == 1:
-		var impact: Dictionary = impacts[0]
-		assert_lt((impact.get("direction", Vector3.ZERO) as Vector3).distance_to(
-				incoming), 0.001,
+		var impact: RoundImpactRow = impacts[0]
+		assert_lt(impact.direction.distance_to(incoming), 0.001,
 				"the incoming shot direction remains authoritative for reactions")
 	assert_lt(sim.entity_card_by_ai_index(enemy_idx).get_health(),
 			health_before, "the posed head shot damages the mounted enemy")
@@ -2579,13 +2578,13 @@ end
 	# Co-located with the carrier, the first think boards.
 	for _board_tick in range(48):
 		sim.step()
-	var started: Dictionary = {}
+	var started: MissionEffect = null
 	for effect_v in sim.drain_effects():
-		var effect: Dictionary = effect_v
-		if String(effect.get("kind", "")) == "vehicle_control_started":
+		var effect: MissionEffect = effect_v
+		if effect.kind == "vehicle_control_started":
 			started = effect
 			break
-	assert_false(started.is_empty(),
+	assert_not_null(started,
 			"command-125 controller mount emits the occupied-item lifecycle edge")
 	var expected_vehicle_handle := -1
 	var snapshot := sim.get_present_snapshot()
@@ -2596,33 +2595,35 @@ end
 					snapshot[base + Simulation.PF_WIRE_HANDLE])
 			break
 	assert_gte(expected_vehicle_handle, 0)
-	var idle: Dictionary = {}
+	var idle: SoundEmitterRow = null
 	for emitter_v in sim.drain_sound_emitters():
-		var emitter: Dictionary = emitter_v
-		if int(emitter.get("lane", -1)) == 0 \
-				and String(emitter.get("set", "")) == "V_TRUCK_ILP":
+		var emitter: SoundEmitterRow = emitter_v
+		if emitter.lane == 0 and emitter.soundset == "V_TRUCK_ILP":
 			idle = emitter
 			break
-	assert_false(idle.is_empty(),
+	assert_not_null(idle,
 			"an NPC control-seat occupant keeps the truck idle emitter alive without a local player")
-	assert_gt(int(idle.get("source_spawn_id", 0)), 0,
+	if idle == null:
+		sim.free()
+		return
+	assert_gt(idle.source_spawn_id, 0,
 			"the emitter key carries the registry-lifetime identity")
-	assert_eq(int(idle.get("handle", -1)), expected_vehicle_handle)
-	assert_eq(int(idle.get("source_bms_id", -1)), int(vehicle["bms_id"]))
-	assert_eq(int(idle.get("lane", -1)), 0)
-	assert_eq(int(idle.get("lifetime", -1)), 30)
-	assert_eq(int(idle.get("emitted_tick", -1)), int(sim.get_logic_tick()),
+	assert_eq(idle.handle, expected_vehicle_handle)
+	assert_eq(idle.source_bms_id, int(vehicle["bms_id"]))
+	assert_eq(idle.lane, 0)
+	assert_eq(idle.lifetime, 30)
+	assert_eq(idle.emitted_tick, int(sim.get_logic_tick()),
 			"catch-up transport retains the producing world tick")
-	assert_eq(int(idle.get("pitch_q16", -1)), 0x10000)
-	assert_eq(int(idle.get("volume_q8_8", -1)), 0xFFFF)
-	assert_false(bool(idle.get("source_only", true)))
-	assert_eq(int(idle.get("slot", -1)), 0)
-	assert_eq(String(idle.get("set", "")), "V_TRUCK_ILP")
-	assert_lt(Vector3(idle.get("pos", Vector3.INF)).distance_to(Vector3(10, 0, 0)), 0.001,
+	assert_eq(idle.pitch_q16, 0x10000)
+	assert_eq(idle.volume_q8_8, 0xFFFF)
+	assert_false(idle.source_only)
+	assert_eq(idle.slot, 0)
+	assert_eq(idle.soundset, "V_TRUCK_ILP")
+	assert_lt(idle.pos.distance_to(Vector3(10, 0, 0)), 0.001,
 			"the emitter tracks the carrier across the boarding ticks")
-	assert_eq(int(started.get("wire_handle", -1)), expected_vehicle_handle,
+	assert_eq(started.wire_handle, expected_vehicle_handle,
 			"binding names the packed identity used by dynamic presentation")
-	assert_eq(int(started.get("d", -1)), expected_vehicle_handle,
+	assert_eq(started.d, expected_vehicle_handle,
 			"the generic effect payload retains the same packed identity")
 	# Both command-125 boarders walk in and claim their seat on the staggered
 	# infantry think, so which of the two reaches the controller seat first is
@@ -3868,8 +3869,8 @@ func test_bms_event_fires_through_binding() -> void:
 		sim.step()
 	var effects := sim.drain_effects()
 	assert_eq(effects.size(), 1, "one presentation effect drained")
-	assert_eq(String((effects[0] as Dictionary)["kind"]), "text", "OutputText -> text effect")
-	assert_eq(int((effects[0] as Dictionary)["a"]), 77, "carries the string id")
+	assert_eq((effects[0] as MissionEffect).kind, "text", "OutputText -> text effect")
+	assert_eq((effects[0] as MissionEffect).a, 77, "carries the string id")
 	assert_true(sim.has_event_fired(0), "the event is marked fired")
 	assert_true(sim.drain_effects().is_empty(), "drain cleared the log")
 	sim.free()

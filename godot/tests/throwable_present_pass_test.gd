@@ -95,6 +95,19 @@ func _make_fx() -> CaptureFx:
 	return fx
 
 
+# One visual row shaped like Simulation::get_throwable_visuals emits.
+func _row(key: int, item_id: int, pos: Vector3, rotation_deg: Vector3,
+		move_effect: String = "", move_effect_live: bool = true) -> ThrowableVisualRow:
+	var row := ThrowableVisualRow.new()
+	row.key = key
+	row.item_id = item_id
+	row.pos = pos
+	row.rotation_deg = rotation_deg
+	row.move_effect = move_effect
+	row.move_effect_live = move_effect_live
+	return row
+
+
 func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -104,12 +117,7 @@ func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 
 	var position := Vector3(12.5, -4.0, 33.25)
 	for rotation in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(20, 35, -15)]:
-		presenter.present_visuals([{
-			"key": 7,
-			"item_id": 1883,
-			"pos": position,
-			"rotation_deg": rotation,
-		}])
+		presenter.present_visuals([_row(7, 1883, position, rotation)])
 		assert_eq(_thrown_models(container).size(), 1, "the same live round reuses its model")
 		var model: ObjectModel = _thrown_models(container)[0]
 		assert_eq(model.position, position, "Godot-space position is applied verbatim")
@@ -134,13 +142,7 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 			func() -> Variant: return fx, anchors)
 	var first_pos := Vector3(2, 3, 4)
 	var first_rot := Vector3(15, 35, -12)
-	var row := {
-		"key": 7,
-		"item_id": 1883,
-		"pos": first_pos,
-		"rotation_deg": first_rot,
-		"move_effect": "Effect_SmokeToss",
-	}
+	var row := _row(7, 1883, first_pos, first_rot, "Effect_SmokeToss")
 
 	presenter.present_visuals([row])
 	assert_eq(fx.spawns.size(), 1, "the live round spawns one move group")
@@ -155,8 +157,8 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 
 	var next_pos := Vector3(-8, 6, 12)
 	var next_rot := Vector3(-20, 110, 32)
-	row["pos"] = next_pos
-	row["rotation_deg"] = next_rot
+	row.pos = next_pos
+	row.rotation_deg = next_rot
 	presenter.present_visuals([row])
 	assert_eq(fx.spawns.size(), 1, "pose updates never respawn the move group")
 	var next_transform: Transform3D = (anchors.anchors[owner_key] as Callable).call()
@@ -186,20 +188,13 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	var presenter := ThrowablePresentPass.new()
 	presenter.setup(null, container, _round_placer(), _item_db,
 			func() -> Variant: return fx, anchors)
-	var row := {
-		"key": 3075,
-		"item_id": 1883,
-		"pos": Vector3(3, 1, 2),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-		"move_effect_live": true,
-	}
+	var row := _row(3075, 1883, Vector3(3, 1, 2), Vector3.ZERO, "Effect_SmokeToss")
 	presenter.present_visuals([row])
 	assert_eq(fx.spawns.size(), 1, "a live emitter spawns its group")
 	var owner_key := "throwable-move:3075"
 
-	row["move_effect_live"] = false
-	row["pos"] = Vector3(3, -1, 2)
+	row.move_effect_live = false
+	row.pos = Vector3(3, -1, 2)
 	presenter.present_visuals([row])
 	assert_eq(fx.stopped, [91],
 			"the released emitter stops its group while the round stays live")
@@ -210,8 +205,8 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	assert_eq(presenter.get_stats().move_effect_transforms, 0,
 			"a released round keeps no stale transform")
 
-	row["move_effect_live"] = true
-	row["pos"] = Vector3(3, 1.5, 2)
+	row.move_effect_live = true
+	row.pos = Vector3(3, 1.5, 2)
 	presenter.present_visuals([row])
 	assert_eq(fx.spawns.size(), 2,
 			"surfacing acquires a FRESH group for the same round")
@@ -235,21 +230,9 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 			func() -> Variant: return fx, anchors)
 	var pos_a := Vector3(1, 2, 3)
 	var pos_b := Vector3(10, 20, 30)
-	var rows := [
-		{
-			"key": 1027,
-			"item_id": 1883,
-			"pos": pos_a,
-			"rotation_deg": Vector3(5, 15, 25),
-			"move_effect": "Effect_SmokeToss",
-		},
-		{
-			"key": 2059,
-			"item_id": 1883,
-			"pos": pos_b,
-			"rotation_deg": Vector3(-5, 70, -25),
-			"move_effect": "Effect_SmokeToss",
-		},
+	var rows: Array[ThrowableVisualRow] = [
+		_row(1027, 1883, pos_a, Vector3(5, 15, 25), "Effect_SmokeToss"),
+		_row(2059, 1883, pos_b, Vector3(-5, 70, -25), "Effect_SmokeToss"),
 	]
 	presenter.present_visuals(rows)
 
@@ -265,8 +248,8 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 
 	var next_a := Vector3(-3, 8, 14)
 	var next_b := Vector3(42, -2, 6)
-	rows[0]["pos"] = next_a
-	rows[1]["pos"] = next_b
+	rows[0].pos = next_a
+	rows[1].pos = next_b
 	presenter.present_visuals(rows)
 	transform_a = (anchors.anchors[owner_a] as Callable).call()
 	transform_b = (anchors.anchors[owner_b] as Callable).call()
@@ -301,20 +284,11 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	var presenter := ThrowablePresentPass.new()
 	presenter.setup(null, container, _round_placer(), _item_db,
 			func() -> Variant: return fx, anchors)
-	presenter.present_visuals([{
-		"key": 1024, # generation 1, slot 0
-		"item_id": 1883,
-		"pos": Vector3(1, 0, 0),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}])
-	presenter.present_visuals([{
-		"key": 2048, # generation 2, the same slot 0
-		"item_id": 1883,
-		"pos": Vector3(20, 0, 0),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}])
+	# key 1024 = generation 1, slot 0; key 2048 = generation 2, the same slot 0
+	presenter.present_visuals([
+		_row(1024, 1883, Vector3(1, 0, 0), Vector3.ZERO, "Effect_SmokeToss")])
+	presenter.present_visuals([
+		_row(2048, 1883, Vector3(20, 0, 0), Vector3.ZERO, "Effect_SmokeToss")])
 
 	assert_eq(fx.spawns.size(), 2,
 			"same-slot replacement starts a fresh effect lifetime")
@@ -335,13 +309,7 @@ func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> vo
 	add_child_autofree(container)
 	var anchors := CaptureAnchors.new()
 	var presenter := ThrowablePresentPass.new()
-	var row := {
-		"key": 1024,
-		"item_id": 1883,
-		"pos": Vector3(9, 8, 7),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}
+	var row := _row(1024, 1883, Vector3(9, 8, 7), Vector3.ZERO, "Effect_SmokeToss")
 
 	# A missing provider is a normal startup/teardown ordering case. It must not
 	# leave an unowned transform that retirement can never discover.
@@ -379,12 +347,7 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 	var presenter := ThrowablePresentPass.new()
 	presenter.setup(null, container, placer, _item_db)
 
-	presenter.present_visuals([{
-		"key": 19,
-		"item_id": 1883,
-		"pos": Vector3(4, 5, 6),
-		"rotation_deg": Vector3.ZERO,
-	}])
+	presenter.present_visuals([_row(19, 1883, Vector3(4, 5, 6), Vector3.ZERO)])
 	assert_eq(_thrown_models(container).size(), 1,
 			"the remote flying-round snapshot materializes its TrcrID item")
 	var live_stats := presenter.get_stats()

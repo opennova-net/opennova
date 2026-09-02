@@ -174,7 +174,7 @@ var _candidate_lookup: Dictionary = {}  # candidate_id -> CandidateBinding
 # registrations first, then the newest per-tick refresh lands at the current
 # clock [orig: SoundEmitter_Register @0x529270 before the render-frame
 # SoundEmitter_UpdateAndMixTop8 @0x5284a0].
-var _queued_sound_emitters: Array = []
+var _queued_sound_emitters: Array[SoundEmitterRow] = []
 # "source_spawn_id:lane" -> DynamicEmitter. Candidate IDs remain stable across
 # per-tick refreshes so an incumbent physical channel does not restart; a set
 # change or explicit clear retires the old IDs.
@@ -434,9 +434,9 @@ func apply_sound_emitters(events: Array) -> void:
 	if _mixer == null or _bank == null:
 		return
 	for event_value in events:
-		if event_value is Dictionary:
-			_queued_sound_emitters.append(
-				(event_value as Dictionary).duplicate())
+		var event := event_value as SoundEmitterRow
+		if event != null:
+			_queued_sound_emitters.append(event)
 
 
 ## The weather tick's thunder: the THUNDER trigger set played at a distance
@@ -450,11 +450,11 @@ func play_weather_sounds(events: Array, camera_xform: Transform3D) -> void:
 		return
 	var forward := -camera_xform.basis.z
 	for event_value in events:
-		if not (event_value is Dictionary):
+		var event := event_value as WeatherSoundRow
+		if event == null:
 			continue
-		var event: Dictionary = event_value
-		var distance := float(event.get("distance", 1.0))
-		var bearing := int(event.get("bearing", 0))
+		var distance := event.distance
+		var bearing := event.bearing
 		var dir := forward.rotated(Vector3.UP, float(bearing) * TAU / BEARING_BAM8_TURN)
 		var pos := camera_xform.origin + dir * distance
 		_bank.play_oneshot_3d(_audio_root, pos, "THUNDER", SFX_BUS, camera_xform.origin)
@@ -935,24 +935,22 @@ func _flush_sound_emitters(final_tick: int) -> void:
 	var pending := _queued_sound_emitters
 	_queued_sound_emitters = []
 	pending.sort_custom(_sound_emitter_event_before)
-	for event_value in pending:
-		var event: Dictionary = event_value
-		var event_tick := int(event.get(
-				"emitted_tick", int(_mixer.clock_tick())))
+	for event in pending:
+		var event_tick := int(event.emitted_tick)
 		if _world_driven_ticks:
 			event_tick += _world_driven_tick_offset
 		event_tick = mini(event_tick, final_tick)
 		if event_tick > int(_mixer.clock_tick()):
 			_mixer.advance_to_tick(event_tick)
-		var source_spawn_id := int(event.get("source_spawn_id", 0))
-		var lane := int(event.get("lane", 0))
+		var source_spawn_id := event.source_spawn_id
+		var lane := event.lane
 		var key := "%d:%d" % [source_spawn_id, lane]
-		var pos: Vector3 = event.get("pos", Vector3.ZERO)
-		var source_bms_id := int(event.get("source_bms_id", 0))
-		var lifetime := maxi(1, int(event.get("lifetime", 30)))
-		var pitch_q16 := int(event.get("pitch_q16", 0))
-		var volume_q8_8 := int(event.get("volume_q8_8", 0))
-		if bool(event.get("source_only", false)):
+		var pos := event.pos
+		var source_bms_id := event.source_bms_id
+		var lifetime := maxi(1, event.lifetime)
+		var pitch_q16 := event.pitch_q16
+		var volume_q8_8 := event.volume_q8_8
+		if event.source_only:
 			_mixer.update_emitter_source(source_spawn_id, pos, source_bms_id)
 			continue
 		if pitch_q16 == 0 or volume_q8_8 == 0:
@@ -961,7 +959,7 @@ func _flush_sound_emitters(final_tick: int) -> void:
 			_forget_dynamic_emitter(key)
 			continue
 
-		var set_name := String(event.get("set", ""))
+		var set_name := event.soundset
 		if set_name.is_empty():
 			continue
 		var described: Array = _bank.describe_ambient(set_name)
@@ -1053,11 +1051,8 @@ func _release_retired_candidate_ids() -> void:
 	_retired_candidate_ids = still_retired
 
 
-static func _sound_emitter_event_before(a: Variant, b: Variant) -> bool:
-	var event_a: Dictionary = a
-	var event_b: Dictionary = b
-	return int(event_a.get("emitted_tick", 0)) < int(
-			event_b.get("emitted_tick", 0))
+static func _sound_emitter_event_before(a: SoundEmitterRow, b: SoundEmitterRow) -> bool:
+	return a.emitted_tick < b.emitted_tick
 
 
 ## The player's pitch: the layer's authored base pitch times the emitter's
