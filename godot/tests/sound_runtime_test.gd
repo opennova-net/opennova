@@ -286,54 +286,6 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 		parent, Vector3(100, 0, 0), "OCCLUDED_CULL", StringName(), Vector3.ZERO))
 	assert_eq(provider.calls, 1, "raw-in-range fire reaches the occlusion query")
 	assert_eq(parent.get_child_count(), 0, "inflation beyond set range spawns no voice")
-
-
-func test_crossfade_volume_byte_rounding() -> void:
-	var A := preload("res://game/world/mission_audio.gd")
-	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
-	# the mixer reads its high byte [orig: Entity_UpdateEnvSoundEmitter
-	# @ 0x4a81c6]. Full blend (the 0xFFFF sentinel) -> 255; half -> 128 (the
-	# +0x8000 round add: a floor form gives 127); zero -> 0.
-	assert_eq(A.crossfade_volume_byte(1.0), 255)
-	assert_eq(A.crossfade_volume_byte(0.5), 128)
-	assert_eq(A.crossfade_volume_byte(0.0), 0)
-
-
-func test_time_of_day_regions_and_blend() -> void:
-	var A := preload("res://game/world/mission_audio.gd")
-	# Region cuts [orig: Entity_CalcTimeOfDayRegion @ 0x408110]:
-	# [4,10) morning, [10,17) day, [17,21) evening, else night.
-	assert_eq(int(A.time_of_day_region(6.0).region), 0)
-	assert_eq(int(A.time_of_day_region(12.0).region), 1)
-	assert_eq(int(A.time_of_day_region(18.0).region), 2)
-	assert_eq(int(A.time_of_day_region(23.0).region), 3)
-	assert_eq(int(A.time_of_day_region(0.5).region), 3, "night wraps past midnight")
-	assert_eq(int(A.time_of_day_region(3.99).region), 3)
-	# The regions are OPEN at the low cut: the exact cut instant classifies as
-	# night at full blend (the original's unsigned range-check idiom starts
-	# each interval one tick past the cut) [orig: @ 0x408175].
-	assert_eq(int(A.time_of_day_region(4.0).region), 3, "exact cut instant falls through to night")
-	assert_eq(float(A.time_of_day_region(4.0).blend), 1.0)
-	# Mid-region: full blend.
-	assert_eq(float(A.time_of_day_region(12.0).blend), 1.0)
-	# Just after a cut: fading in, adjacent = the previous region.
-	var fade_in = A.time_of_day_region(10.02)
-	assert_eq(int(fade_in.region), 1)
-	assert_eq(int(fade_in.adjacent), 0)
-	assert_between(float(fade_in.blend), 0.1, 0.5)
-	# Just before a cut: fading out, adjacent = the next region.
-	var fade_out = A.time_of_day_region(9.98)
-	assert_eq(int(fade_out.region), 0)
-	assert_eq(int(fade_out.adjacent), 1)
-	assert_between(float(fade_out.blend), 0.1, 0.5)
-	# Night holds full volume up to the 4h cut (the wrapped region's far edge
-	# never blends [orig: @ 0x40820f]).
-	assert_eq(float(A.time_of_day_region(3.98).blend), 1.0)
-	# The exact cut instant reads full volume — the original's zero-blend-distance
-	# guard [orig: @ 0x408251].
-	assert_eq(float(A.time_of_day_region(10.0).blend), 1.0)
-
-
 func test_wav_loader_decodes_pcm8_unsigned() -> void:
 	# Minimal 8-bit unsigned mono 22050 Hz PCM WAV with 4 samples.
 	var samples := PackedByteArray([0x80, 0x00, 0xFF, 0x80])  # center, min, max, center

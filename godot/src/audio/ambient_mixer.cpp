@@ -1,6 +1,8 @@
 #include "audio/ambient_mixer.h"
 
 #include <godot_cpp/core/object.hpp>
+
+#include <base/io/fixed.h> // kFp16One
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/audio/bank_chain.h>
@@ -52,12 +54,8 @@ void AmbientMixer::_bind_methods() {
 			D_METHOD("oneshot_layer_volume", "dist_q16", "min_q16",
 					"falloff_q16", "member_vol", "clamp_vol"),
 			&AmbientMixer::oneshot_layer_volume);
-	ClassDB::bind_static_method("AmbientMixer",
-			D_METHOD("crossfade_volume_byte", "blend"),
-			&AmbientMixer::crossfade_volume_byte);
-	ClassDB::bind_static_method("AmbientMixer",
-			D_METHOD("time_of_day_region", "hours"),
-			&AmbientMixer::time_of_day_region);
+	ClassDB::bind_static_method("AmbientMixer", D_METHOD("q16_to_float", "q16"),
+			&AmbientMixer::q16_to_float);
 	ClassDB::bind_static_method("AmbientMixer",
 			D_METHOD("global_bank_chain", "expansion_name"),
 			&AmbientMixer::global_bank_chain);
@@ -228,16 +226,6 @@ int AmbientMixer::oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
 			member_vol, clamp_vol);
 }
 
-int AmbientMixer::crossfade_volume_byte(float blend) {
-	return opennova::audio::crossfade_volume_byte(blend);
-}
-
-Dictionary AmbientMixer::time_of_day_region(float hours) {
-	const opennova::audio::TimeOfDayRegion tod =
-			opennova::audio::time_of_day_region(hours);
-	Dictionary d;
-	d["region"] = tod.region;
-	d["adjacent"] = tod.adjacent;
-	d["blend"] = tod.blend;
-	return d;
+float AmbientMixer::q16_to_float(int q16) {
+	return static_cast<float>(q16) / opennova::io::kFp16One;
 }

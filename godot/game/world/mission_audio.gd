@@ -24,15 +24,82 @@ extends RefCounted
 
 
 
-class TimeOfDayRegion extends RefCounted:
-	var region: int
-	var adjacent: int
-	var blend: float
+## One placed ambient marker ("snd:" item): data, not a scene node. The four
+## time-of-day slot set names ("" = silent in that region) and, per distinct
+## set, the LWF layer descriptors (SoundBank.describe_ambient's Dictionary, the
+## documented layer transport edge), each carrying a stable `candidate_id` for
+## the mission's lifetime so an incumbent keeps its channel across ranking ticks.
+class Marker extends RefCounted:
+	var pos: Vector3
+	var source_bms_id: int
+	var slot_sets: PackedStringArray
+	## The marker's pool-slot nibble: the native mixer derives the walk cohort
+	## AND the (slot << 11) Q16-hours clock stagger from it
+	## [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158].
+	var stagger_slot: int
+	var layers_by_set: Dictionary  # set name -> Array of layer descriptors
 
-	func _init(p_region: int, p_adjacent: int, p_blend: float) -> void:
-		region = p_region
-		adjacent = p_adjacent
-		blend = p_blend
+	func _init(p_pos: Vector3, p_source_bms_id: int, p_slot_sets: PackedStringArray,
+			p_stagger_slot: int, p_layers_by_set: Dictionary) -> void:
+		pos = p_pos
+		source_bms_id = p_source_bms_id
+		slot_sets = p_slot_sets
+		stagger_slot = p_stagger_slot
+		layers_by_set = p_layers_by_set
+
+
+## One of the MIX_CHANNELS physical channels: a reusable player and the
+## candidate bound to it (-1 = free).
+class Channel extends RefCounted:
+	var player: AudioStreamPlayer3D
+	var candidate_id := -1
+
+	func _init(p_player: AudioStreamPlayer3D) -> void:
+		player = p_player
+
+
+## A live candidate's descriptor and bus, by candidate id: marker layers ride
+## the Ambient bus, dynamic emitter layers the SFX bus.
+class CandidateBinding extends RefCounted:
+	var descriptor: Dictionary
+	var bus: StringName
+
+	func _init(p_descriptor: Dictionary, p_bus: StringName) -> void:
+		descriptor = p_descriptor
+		bus = p_bus
+
+
+## One ranked mix row the native mixer returned this frame, joined to its
+## binding; `resolved_stream` is filled for an entrant that reaches the top eight.
+class Candidate extends RefCounted:
+	var candidate_id: int
+	var descriptor: Dictionary
+	var bus: StringName
+	var pos: Vector3
+	var vol: int
+	var pitch_q16: int
+	var resolved_stream: AudioStreamWAV = null
+
+	func _init(p_candidate_id: int, p_binding: CandidateBinding, p_pos: Vector3, p_vol: int,
+			p_pitch_q16: int) -> void:
+		candidate_id = p_candidate_id
+		descriptor = p_binding.descriptor
+		bus = p_binding.bus
+		pos = p_pos
+		vol = p_vol
+		pitch_q16 = p_pitch_q16
+
+
+## One dynamic emitter lane's live registration ((source lifetime, lane) key):
+## the set it plays, its stable candidate ids, and the tick it expires.
+class DynamicEmitter extends RefCounted:
+	var set_name: String
+	var candidate_ids: PackedInt32Array
+	var expires_tick := 0
+
+	func _init(p_set_name: String, p_candidate_ids: PackedInt32Array) -> void:
+		set_name = p_set_name
+		candidate_ids = p_candidate_ids
 
 
 ## The setup statistics: a typed record like the sibling present passes' Stats
@@ -66,13 +133,16 @@ class Stats extends RefCounted:
 const AMBIENT_BUS := &"Ambient"
 const SFX_BUS := &"SFX"
 const VOICE_BUS := &"Voice"
-# Marker -> sound set resolution strategy. The faithful default is the marker
-# item's items.def soundloop_1..7 set names (e.g. id 106178 "snd: Lp Flourescent
-# Light" -> soundloop_1 LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4];
-# the engine is name-keyed (docs/audio/lwf-dbf-sound-re.md). The others stay as seams.
-const STRATEGY_ITEM_SOUNDLOOP := 0
-const STRATEGY_MARKER_NAME := 1
-const STRATEGY_TARGET_ID := 2
+# Marker -> sound set resolution is the marker item's items.def soundloop_1..7
+# set names (e.g. id 106178 "snd: Lp Flourescent Light" -> soundloop_1
+# LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4]; the engine is
+# name-keyed (docs/audio/lwf-dbf-sound-re.md) and resolves it natively
+# (audio/envs_markers.h via ItemDatabase.resolve_envs_markers).
+
+# The thunder bearing is an 8-bit binary angle (one byte = a full turn;
+# world/weather_state.h WeatherSound.bearing).
+const BEARING_BAM8_TURN := 256.0
+const MINUTES_PER_HOUR := 60.0
 
 # The ambient emitter mix budget: the engine sorts every in-range emitter voice
 # by computed volume each frame and keeps the loudest 8 on real channels
@@ -92,43 +162,38 @@ var _occlusion_override: Callable = Callable()
 var _bank: SoundBank
 var _dbf  # DbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
-# Placed ambient markers ("snd:" items) are data, not scene nodes. Each carries
-# the four time-of-day slot set names and lightweight layer descriptors for each
-# distinct set. A candidate_id identifies one marker/set/layer for the lifetime
-# of the mission, allowing incumbents to retain playback across ranking ticks.
-# [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_slot:int,
-#    layers_by_set:{set_name: Array[Dictionary]} }]
-var _markers: Array = []
+var _markers: Array[Marker] = []
 # The native emitter system (engine/runtime/audio AmbientMixer): staggered tick&7 marker
 # eval/registration on the logic-tick clock + the per-frame live-slot ranking
 # (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). This node keeps the
 # per-candidate descriptors for stream resolution and the voice binding below.
 var _mixer: AmbientMixer = null
-var _candidate_lookup: Dictionary = {}  # candidate_id -> {descriptor[, bus]}
+var _candidate_lookup: Dictionary = {}  # candidate_id -> CandidateBinding
 # Portable systems emit short-lived registrations before the GameWorld audio
 # pass advances the mixer clock. Queue them so catch-up ticks age the previous
 # registrations first, then the newest per-tick refresh lands at the current
 # clock [orig: SoundEmitter_Register @0x529270 before the render-frame
 # SoundEmitter_UpdateAndMixTop8 @0x5284a0].
 var _queued_sound_emitters: Array = []
-# (source registry lifetime, lane) -> {set_name, candidate_ids}. Candidate IDs
-# remain stable across per-tick refreshes so an incumbent physical channel does
-# not restart; a set change or explicit clear retires the old IDs.
+# "source_spawn_id:lane" -> DynamicEmitter. Candidate IDs remain stable across
+# per-tick refreshes so an incumbent physical channel does not restart; a set
+# change or explicit clear retires the old IDs.
 var _dynamic_emitter_states: Dictionary = {}
 # Latched once a world-driven logic tick arrives (advance_ticks): the world tick owns
 # the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
 # (editor-idle owners — the weather world-driven/autonomous split).
 var _world_driven_ticks := false
 var _world_driven_tick_offset := 0
-# At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].
-var _channels: Array = []
+var _channels: Array[Channel] = []  # at most MIX_CHANNELS
 var _next_candidate_id := 1
 var _free_candidate_ids: Array[int] = []
 var _retired_candidate_ids: Array[int] = []
 var _failed_candidate_ids: Dictionary = {}
 var _validated_candidate_ids: Dictionary = {}
 var _warned_ambient_decode_failure := false
-var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
+# The "ambience disabled" arm (the dialog-vs-ambient probe): banks and the
+# .DBF still load, no marker resolves.
+var _ambient_markers_enabled := true
 var _stats: Stats = null
 var _time_of_day_hhmm: float = 1200.0  # HHMM like MissionEnvironment.time_of_day; noon default
 var _last_camera_pos := Vector3.INF  # listener at the last tick; INF until first tick
@@ -208,25 +273,13 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 	container.add_child(_audio_root)
 
 	var marker_rows: Array = []
-	if _strategy == STRATEGY_ITEM_SOUNDLOOP:
-		# S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
-		# names resolve natively over the retained items.def and the mission's
-		# bms document (audio/envs_markers.h). The bank-presence filter below
-		# stays a shell stream-resolution concern (the original has no such
-		# gate — a missing set is simply silent).
-		if _item_db != null:
-			marker_rows = _item_db.resolve_envs_markers(mission)
-	else:
-		# The two explicit reimpl-only fallback strategies keep the marker pool.
-		for e in mission.get_all_entities():
-			var entity: Dictionary = e
-			if int(entity.get("kind", -1)) != MissionData.KIND_MARKER:
-				continue
-			marker_rows.append({
-				"position": entity.get("position", Vector3.ZERO),
-				"bms_id": int(entity.get("bms_id", 0)),
-				"slot_sets": _resolve_slot_sets(entity),
-			})
+	# S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
+	# names resolve natively over the retained items.def and the mission's
+	# bms document (audio/envs_markers.h). The bank-presence filter below
+	# stays a shell stream-resolution concern (the original has no such
+	# gate — a missing set is simply silent).
+	if _ambient_markers_enabled and _item_db != null:
+		marker_rows = _item_db.resolve_envs_markers(mission)
 	for row_value in marker_rows:
 		var row: Dictionary = row_value
 		_stats.markers_total += 1
@@ -265,16 +318,8 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 			candidate_count += layers.size()
 		if layers_by_set.is_empty():
 			continue
-		_markers.append({
-			"pos": pos,
-			"source_bms_id": int(row.get("bms_id", 0)),
-			"slot_sets": slot_sets,
-			# The marker's pool-slot nibble: the native mixer derives the walk
-			# cohort AND the (slot << 11) Q16-hours clock stagger from it
-			# [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158].
-			"stagger_slot": _markers.size() & 0xF,
-			"layers_by_set": layers_by_set,
-		})
+		_markers.append(Marker.new(pos, int(row.get("bms_id", 0)), slot_sets,
+				_markers.size() & 0xF, layers_by_set))
 		_stats.markers_resolved += 1
 		_stats.ambient_candidates += candidate_count
 
@@ -299,12 +344,12 @@ func get_stats() -> Stats:
 
 
 ## Read/drive seams (ADR 0018): tests and diagnostics go through these, never
-## the private fields. set_markers injects fully-described marker entries (the
-## shape _markers documents above) so the mix tick can be driven without a
-## mission. `container` supplies a SceneTree home for the physical test channels.
+## the private fields. set_markers injects fully-described Marker records so the
+## mix tick can be driven without a mission. `container` supplies a SceneTree
+## home for the physical test channels.
 func set_markers(markers: Array, container: Node3D = null) -> void:
 	_stop_all_ambient_channels()
-	_markers = markers
+	_markers.assign(markers)
 	_failed_candidate_ids.clear()
 	_validated_candidate_ids.clear()
 	_warned_ambient_decode_failure = false
@@ -317,11 +362,9 @@ func set_markers(markers: Array, container: Node3D = null) -> void:
 		_audio_root = Node3D.new()
 		_audio_root.name = "MissionAudio"
 		container.add_child(_audio_root)
-	for marker_value in _markers:
-		var marker: Dictionary = marker_value
-		var layers_by_set: Dictionary = marker.get("layers_by_set", {})
-		for set_name in layers_by_set:
-			var layers: Array = layers_by_set[set_name]
+	for marker in _markers:
+		for set_name in marker.layers_by_set:
+			var layers: Array = marker.layers_by_set[set_name]
 			for layer_value in layers:
 				var layer: Dictionary = layer_value
 				if not layer.has("candidate_id"):
@@ -331,8 +374,10 @@ func set_markers(markers: Array, container: Node3D = null) -> void:
 	_feed_mixer()
 
 
-func set_resolution_strategy(strategy: int) -> void:
-	_strategy = strategy
+## The "ambience disabled" arm: banks and the mission .DBF still load, no
+## ambient marker resolves (the dialog-vs-ambient probe's silent control).
+func set_ambient_markers_enabled(enabled: bool) -> void:
+	_ambient_markers_enabled = enabled
 
 
 func dialog_voice() -> AudioStreamPlayer:
@@ -341,9 +386,8 @@ func dialog_voice() -> AudioStreamPlayer:
 
 func get_perf_counters() -> Dictionary:
 	var active_channels := 0
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		if int(state.get("candidate_id", -1)) >= 0:
+	for channel in _channels:
+		if channel.candidate_id >= 0:
 			active_channels += 1
 	return {
 		"tick_us": _perf_tick_us,
@@ -390,7 +434,7 @@ func play_weather_sounds(events: Array, camera_xform: Transform3D) -> void:
 		var event: Dictionary = event_value
 		var distance := float(event.get("distance", 1.0))
 		var bearing := int(event.get("bearing", 0))
-		var dir := forward.rotated(Vector3.UP, float(bearing) * TAU / 256.0)
+		var dir := forward.rotated(Vector3.UP, float(bearing) * TAU / BEARING_BAM8_TURN)
 		var pos := camera_xform.origin + dir * distance
 		_bank.play_oneshot_3d(_audio_root, pos, "THUNDER", SFX_BUS, camera_xform.origin)
 
@@ -626,100 +670,82 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	# Ranked loudest-first (candidate-id tie-break) by the native mixer; a
 	# physical incumbent is never rebound merely because its rank within the
 	# selected eight changed.
-	var candidates: Array = []  # [{candidate_id, descriptor, pos, vol, pitch_q16, bus}]
+	var candidates: Array[Candidate] = []
 	for base in range(0, rows.size(), row_stride):
 		var row_id := int(rows[base])
-		var entry: Dictionary = _candidate_lookup.get(row_id, {})
-		if entry.is_empty():
+		var binding: CandidateBinding = _candidate_lookup.get(row_id)
+		if binding == null:
 			continue
-		var pitch_q16 := int(rows[base + 2])
 		var pos_base := base + 3
-		candidates.append({
-			"candidate_id": row_id,
-			"descriptor": entry.descriptor,
-			"pos": Vector3(
-				rows[pos_base], rows[pos_base + 1], rows[pos_base + 2]),
-			"vol": int(rows[base + 1]),
-			"pitch_q16": pitch_q16,
-			"bus": entry.get("bus", AMBIENT_BUS),
-		})
-	var incumbent_by_id: Dictionary = {}
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		var incumbent_id := int(state.get("candidate_id", -1))
-		if incumbent_id >= 0:
-			incumbent_by_id[incumbent_id] = state
+		candidates.append(Candidate.new(row_id, binding,
+				Vector3(rows[pos_base], rows[pos_base + 1], rows[pos_base + 2]),
+				int(rows[base + 1]), int(rows[base + 2])))
+	var incumbent_by_id: Dictionary = {}  # candidate_id -> Channel
+	for channel in _channels:
+		if channel.candidate_id >= 0:
+			incumbent_by_id[channel.candidate_id] = channel
 
 	# Resolve streams only for new candidates that would enter the top eight.
 	# Failed/corrupt descriptors are cached out and the next-ranked candidate
 	# gets the channel, matching the old eager path's "unresolvable = absent".
-	var selected: Array = []
-	for candidate_value in candidates:
+	var selected: Array[Candidate] = []
+	for candidate in candidates:
 		if selected.size() >= MIX_CHANNELS:
 			break
-		var candidate: Dictionary = candidate_value
-		var candidate_id := int(candidate.candidate_id)
-		if _failed_candidate_ids.has(candidate_id):
+		if _failed_candidate_ids.has(candidate.candidate_id):
 			continue
-		if not incumbent_by_id.has(candidate_id):
+		if not incumbent_by_id.has(candidate.candidate_id):
 			var stream := _validate_candidate_stream(
-				candidate_id, candidate.descriptor)
+				candidate.candidate_id, candidate.descriptor)
 			if stream == null:
-				_failed_candidate_ids[candidate_id] = true
+				_failed_candidate_ids[candidate.candidate_id] = true
 				continue
-			candidate["resolved_stream"] = stream
+			candidate.resolved_stream = stream
 		selected.append(candidate)
 
 	var selected_ids: Dictionary = {}
-	for candidate_value in selected:
-		var candidate: Dictionary = candidate_value
-		selected_ids[int(candidate.candidate_id)] = true
+	for candidate in selected:
+		selected_ids[candidate.candidate_id] = true
 
 	# Dropouts release their physical slot. If the same virtual candidate later
 	# re-enters it is rebound and play() starts it from the beginning, like the
 	# original transient channel registration.
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		var candidate_id := int(state.get("candidate_id", -1))
-		if candidate_id < 0 or selected_ids.has(candidate_id):
+	for channel in _channels:
+		if channel.candidate_id < 0 or selected_ids.has(channel.candidate_id):
 			continue
-		var player: AudioStreamPlayer3D = state.player
+		var player := channel.player
 		player.stop()
 		player.stream = null
 		player.volume_db = SILENT_DB
 		player.process_mode = Node.PROCESS_MODE_DISABLED
 		player.remove_meta("ambient_candidate_id")
-		state["candidate_id"] = -1
+		channel.candidate_id = -1
 		writes += 1
 
-	for candidate_value in selected:
-		var candidate: Dictionary = candidate_value
-		var candidate_id := int(candidate.candidate_id)
-		var state: Dictionary = incumbent_by_id.get(candidate_id, {})
-		if state.is_empty():
-			state = _free_or_new_channel()
-			if state.is_empty():
+	for candidate in selected:
+		var channel: Channel = incumbent_by_id.get(candidate.candidate_id)
+		if channel == null:
+			channel = _free_or_new_channel()
+			if channel == null:
 				continue
-			var player: AudioStreamPlayer3D = state.player
-			var stream: AudioStreamWAV = candidate.get("resolved_stream")
+			var player := channel.player
 			SoundBank.configure_ambient_player(
-				player, stream, candidate.descriptor,
-				StringName(candidate.get("bus", AMBIENT_BUS)))
+				player, candidate.resolved_stream, candidate.descriptor, candidate.bus)
 			player.position = candidate.pos
-			player.volume_db = SoundBank.volume_db_from_255(int(candidate.vol))
+			player.volume_db = SoundBank.volume_db_from_255(candidate.vol)
 			player.pitch_scale = _candidate_pitch_scale(candidate)
 			player.process_mode = Node.PROCESS_MODE_INHERIT
-			player.set_meta("ambient_candidate_id", candidate_id)
-			state["candidate_id"] = candidate_id
+			player.set_meta("ambient_candidate_id", candidate.candidate_id)
+			channel.candidate_id = candidate.candidate_id
 			player.play()
 			writes += 1
 			continue
-		var incumbent: AudioStreamPlayer3D = state.player
+		var incumbent := channel.player
 		var changed := false
 		if incumbent.position != candidate.pos:
 			incumbent.position = candidate.pos
 			changed = true
-		var db := SoundBank.volume_db_from_255(int(candidate.vol))
+		var db := SoundBank.volume_db_from_255(candidate.vol)
 		if not is_equal_approx(incumbent.volume_db, db):
 			incumbent.volume_db = db
 			changed = true
@@ -767,34 +793,33 @@ func _validate_candidate_stream(
 	return null
 
 
-func _free_or_new_channel() -> Dictionary:
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		if int(state.get("candidate_id", -1)) < 0:
-			return state
+## A free channel, a new one under the MIX_CHANNELS budget, else null.
+func _free_or_new_channel() -> Channel:
+	for channel in _channels:
+		if channel.candidate_id < 0:
+			return channel
 	if _channels.size() >= MIX_CHANNELS or _audio_root == null:
-		return {}
+		return null
 	var player := AudioStreamPlayer3D.new()
 	player.name = "AmbientChannel%d" % _channels.size()
 	player.volume_db = SILENT_DB
 	player.process_mode = Node.PROCESS_MODE_DISABLED
 	_audio_root.add_child(player)
-	var state := {"player": player, "candidate_id": -1}
-	_channels.append(state)
-	return state
+	var channel := Channel.new(player)
+	_channels.append(channel)
+	return channel
 
 
 func _stop_all_ambient_channels() -> void:
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		var player: AudioStreamPlayer3D = state.player
+	for channel in _channels:
+		var player := channel.player
 		if player != null and is_instance_valid(player):
 			player.stop()
 			player.stream = null
 			player.volume_db = SILENT_DB
 			player.process_mode = Node.PROCESS_MODE_DISABLED
 			player.remove_meta("ambient_candidate_id")
-		state["candidate_id"] = -1
+		channel.candidate_id = -1
 
 
 func _reset_mission_playback_state() -> void:
@@ -854,19 +879,15 @@ func _feed_mixer() -> void:
 	_dynamic_emitter_states.clear()
 	_world_driven_ticks = false
 	_world_driven_tick_offset = 0
-	for mi in _markers.size():
-		var marker: Dictionary = _markers[mi]
-		var pos: Vector3 = marker.get("pos", Vector3.ZERO)
-		var layers_by_set: Dictionary = marker.get("layers_by_set", {})
-		var slot_sets: PackedStringArray = marker.get("slot_sets", PackedStringArray())
+	for marker in _markers:
 		var set_names: Array = []
 		var sets: Array = []
-		for set_name in layers_by_set:
+		for set_name in marker.layers_by_set:
 			var packed := PackedInt32Array()
-			for layer_value in layers_by_set[set_name]:
+			for layer_value in marker.layers_by_set[set_name]:
 				var layer: Dictionary = layer_value
 				var cid := int(layer.get("candidate_id", 0))
-				_candidate_lookup[cid] = {"descriptor": layer, "pos": pos}
+				_candidate_lookup[cid] = CandidateBinding.new(layer, AMBIENT_BUS)
 				packed.append_array(PackedInt32Array([
 					cid,
 					int(layer.get("falloff_radius", 0)),
@@ -880,10 +901,10 @@ func _feed_mixer() -> void:
 			sets.append(packed)
 		var slot_keys := PackedInt32Array([-1, -1, -1, -1])
 		for r in range(4):
-			if r < slot_sets.size():
-				slot_keys[r] = set_names.find(String(slot_sets[r]))
-		_mixer.add_marker(pos, int(marker.get("source_bms_id", 0)),
-				int(marker.get("stagger_slot", 0)), 0, slot_keys, sets)
+			if r < marker.slot_sets.size():
+				slot_keys[r] = set_names.find(String(marker.slot_sets[r]))
+		_mixer.add_marker(marker.pos, marker.source_bms_id, marker.stagger_slot, 0,
+				slot_keys, sets)
 
 
 # Resolve queued name-keyed registrations into LWF layer descriptors at their
@@ -928,38 +949,28 @@ func _flush_sound_emitters(final_tick: int) -> void:
 		var described: Array = _bank.describe_ambient(set_name)
 		if described.is_empty():
 			continue
-		var state: Dictionary = _dynamic_emitter_states.get(key, {})
-		var candidate_ids: PackedInt32Array = state.get(
-				"candidate_ids", PackedInt32Array())
-		if String(state.get("set_name", "")) != set_name \
-				or candidate_ids.size() != described.size():
-			if not state.is_empty():
+		var emitter: DynamicEmitter = _dynamic_emitter_states.get(key)
+		if emitter == null or emitter.set_name != set_name \
+				or emitter.candidate_ids.size() != described.size():
+			if emitter != null:
 				_mixer.register_emitter(source_spawn_id, lane, pos,
 						source_bms_id, lifetime, 0, 0, PackedInt32Array())
 				_forget_dynamic_emitter(key)
-			candidate_ids = PackedInt32Array()
+			var candidate_ids := PackedInt32Array()
 			candidate_ids.resize(described.size())
 			for i in described.size():
 				candidate_ids[i] = _allocate_dynamic_candidate_id()
-			_dynamic_emitter_states[key] = {
-				"set_name": set_name,
-				"candidate_ids": candidate_ids,
-			}
-		var state_tick := int(_mixer.clock_tick())
-		var live_state: Dictionary = _dynamic_emitter_states[key]
-		live_state["expires_tick"] = state_tick + lifetime
-		_dynamic_emitter_states[key] = live_state
+			emitter = DynamicEmitter.new(set_name, candidate_ids)
+			_dynamic_emitter_states[key] = emitter
+		emitter.expires_tick = int(_mixer.clock_tick()) + lifetime
 
 		var layers := PackedInt32Array()
 		for i in described.size():
 			var descriptor: Dictionary = (
 					described[i] as Dictionary).duplicate()
-			var candidate_id := int(candidate_ids[i])
+			var candidate_id := int(emitter.candidate_ids[i])
 			descriptor["candidate_id"] = candidate_id
-			_candidate_lookup[candidate_id] = {
-				"descriptor": descriptor,
-				"bus": SFX_BUS,
-			}
+			_candidate_lookup[candidate_id] = CandidateBinding.new(descriptor, SFX_BUS)
 			layers.append_array(PackedInt32Array([
 				candidate_id,
 				int(descriptor.get("falloff_radius", 0)),
@@ -974,10 +985,10 @@ func _flush_sound_emitters(final_tick: int) -> void:
 
 
 func _forget_dynamic_emitter(key: String) -> void:
-	var state: Dictionary = _dynamic_emitter_states.get(key, {})
-	var ids: PackedInt32Array = state.get(
-			"candidate_ids", PackedInt32Array())
-	for candidate_id in ids:
+	var emitter: DynamicEmitter = _dynamic_emitter_states.get(key)
+	if emitter == null:
+		return
+	for candidate_id in emitter.candidate_ids:
 		var id := int(candidate_id)
 		_candidate_lookup.erase(id)
 		_failed_candidate_ids.erase(id)
@@ -1001,8 +1012,8 @@ func _prune_dynamic_emitter_states() -> void:
 	var expired_keys: Array[String] = []
 	for key_value in _dynamic_emitter_states:
 		var key := String(key_value)
-		var state: Dictionary = _dynamic_emitter_states[key]
-		if now_tick > int(state.get("expires_tick", now_tick)):
+		var emitter: DynamicEmitter = _dynamic_emitter_states[key]
+		if now_tick > emitter.expires_tick:
 			expired_keys.append(key)
 	for key in expired_keys:
 		_forget_dynamic_emitter(key)
@@ -1012,11 +1023,9 @@ func _release_retired_candidate_ids() -> void:
 	if _retired_candidate_ids.is_empty():
 		return
 	var bound_ids: Dictionary = {}
-	for state_value in _channels:
-		var state: Dictionary = state_value
-		var candidate_id := int(state.get("candidate_id", -1))
-		if candidate_id >= 0:
-			bound_ids[candidate_id] = true
+	for channel in _channels:
+		if channel.candidate_id >= 0:
+			bound_ids[channel.candidate_id] = true
 	var still_retired: Array[int] = []
 	for candidate_id in _retired_candidate_ids:
 		if bound_ids.has(candidate_id):
@@ -1033,20 +1042,17 @@ static func _sound_emitter_event_before(a: Variant, b: Variant) -> bool:
 			event_b.get("emitted_tick", 0))
 
 
-static func _candidate_pitch_scale(candidate: Dictionary) -> float:
-	var descriptor: Dictionary = candidate.get("descriptor", {})
-	var base_pitch := float(descriptor.get("base_pitch", 1.0))
-	if base_pitch <= 0.01:
-		base_pitch = 1.0
-	return base_pitch * maxf(
-			float(candidate.get("pitch_q16", 0x10000)) / 65536.0, 0.0001)
+## The player's pitch: the layer's authored base pitch times the emitter's
+## 16.16 pitch word (the native mix row's pitch_q16).
+static func _candidate_pitch_scale(candidate: Candidate) -> float:
+	return SoundBank.effective_base_pitch(candidate.descriptor) \
+			* maxf(AmbientMixer.q16_to_float(candidate.pitch_q16), 0.0001)
 
 
+## HHMM (MissionEnvironment.time_of_day) -> hours, through the engine's
+## conversion (environment_state.h hhmm_to_minute_of_day).
 static func _hhmm_to_hours(hhmm: float) -> float:
-	var wrapped := fposmod(hhmm, MissionEnvironment.HHMM_DAY)
-	var hour := floorf(wrapped / 100.0)
-	var minute := clampf(fmod(wrapped, 100.0), 0.0, 59.999999)
-	return hour + minute / 60.0
+	return MissionEnvironment.hhmm_to_minute_of_day(hhmm) / MINUTES_PER_HOUR
 
 
 func _load_bank(lwf_name: String) -> void:
@@ -1056,51 +1062,6 @@ func _load_bank(lwf_name: String) -> void:
 	if lwf.open_from_resource_root(_resource_root, lwf_name) == OK:
 		_bank.add_bank(lwf)
 		_stats.banks_loaded += 1
-
-
-# The four time-of-day slot set names for a marker: soundloop_1..4 select by
-# region morning/day/evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080
-# indexes itemDef.soundLoopId[region]]. Unresolvable/empty slots stay "" — a
-# marker whose current region has no set is SILENT, like the original's null
-# soundLoopId (the original has NO fallback; a sound_profile fallback we once
-# carried was unwitnessed and never fires with JO data — zero envs-class items
-# ship a sound_profile key).
-func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
-	# Reimpl-only fallback strategies. The faithful STRATEGY_ITEM_SOUNDLOOP
-	# path resolves natively (audio/envs_markers.h) in setup(); the shared
-	# bank-presence filter applies at consumption there for every strategy.
-	var slots: PackedStringArray = ["", "", "", ""]
-	match _strategy:
-		STRATEGY_MARKER_NAME:
-			var n := String(entity.get("name", ""))
-			if not n.is_empty():
-				for i in range(4):
-					slots[i] = n
-		_:
-			pass
-	return slots
-
-
-## Time-of-day region + crossfade for env sound markers [orig:
-## Entity_CalcTimeOfDayRegion @ 0x408110]. The typed result carries region
-## 0..3, its adjacent region, and blend 0..1; each region fades IN over the first
-## ~5 game-minutes after its low cut and fades OUT over the last ~5 before the
-## next cut; `adjacent` is the neighbouring region at that edge (same-set
-## neighbours suppress the dip [orig: @ 0x4a819d]).
-static func time_of_day_region(hours: float) -> TimeOfDayRegion:
-	# The open-low cuts, edge blends, and night-wrap forms live in engine/runtime/audio
-	# (ambient_mixer.cpp time_of_day_region) beside the eval that consumes them.
-	var d: Dictionary = AmbientMixer.time_of_day_region(hours)
-	return TimeOfDayRegion.new(int(d.region), int(d.adjacent), float(d.blend))
-
-
-## The emitter volume byte for a region crossfade blend. The original registers
-## the volume word (0xFFFF * blend_q16 + 0x8000) >> 16 — ROUNDED, with 0xFFFF as
-## the full-blend sentinel — and the mixer reads its HIGH byte as the emitter
-## volume [orig: Entity_UpdateEnvSoundEmitter @ 0x4a81c6 (blendAlpha); the mix
-## reads slot byte +25 @ 0x52865e]. Net: byte = (0xFFFF * blend_q16 + 0x8000) >> 24.
-static func crossfade_volume_byte(blend: float) -> int:
-	return AmbientMixer.crossfade_volume_byte(blend)
 
 
 # Reverb id -> an AudioEffectReverb preset on the Ambient bus. NOT a port: retail's
