@@ -174,6 +174,55 @@ private:
 	END_ROUND_STATISTICS_FIELDS(HUD_VIEW_MEMBER)
 };
 
+// One RESULTLIST column (Simulation::get_end_round_columns): the header text
+// resolved through the gametext Overlays table plus the engine column's key,
+// fallback, literal, width and field id (np::StatScreenColumn).
+#define END_ROUND_COLUMN_FIELDS(X) \
+	X(String, header)              \
+	X(String, header_key)          \
+	X(String, header_fallback)     \
+	X(String, literal)             \
+	X(int, width)                  \
+	X(int, field_id)
+
+class EndRoundColumn : public RefCounted {
+	GDCLASS(EndRoundColumn, RefCounted)
+
+public:
+	END_ROUND_COLUMN_FIELDS(HUD_VIEW_ACCESSORS)
+
+protected:
+	static void _bind_methods();
+
+private:
+	END_ROUND_COLUMN_FIELDS(HUD_VIEW_MEMBER)
+};
+
+// One RESULTLIST row (Simulation::get_end_round_rows): the roster slot and
+// team, name and squad, the stat cells in column order, the row colour
+// (ARGB) and the local-player selection (np::StatScreenRow).
+#define END_ROUND_ROW_FIELDS(X)  \
+	X(int, slot)                 \
+	X(int, team)                 \
+	X(String, name)              \
+	X(String, squad)             \
+	X(PackedStringArray, cells)  \
+	X(int64_t, color)            \
+	X(bool, selected)
+
+class EndRoundRow : public RefCounted {
+	GDCLASS(EndRoundRow, RefCounted)
+
+public:
+	END_ROUND_ROW_FIELDS(HUD_VIEW_ACCESSORS)
+
+protected:
+	static void _bind_methods();
+
+private:
+	END_ROUND_ROW_FIELDS(HUD_VIEW_MEMBER)
+};
+
 // The DEATH screen's STATIC facts (Simulation::get_deploy_status): the
 // sub-block-0 timers, the queued status line (world::DeployStatusLine), the
 // psp/medic show gates and the medic-call cooldown.

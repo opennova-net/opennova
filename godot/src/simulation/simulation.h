@@ -134,6 +134,7 @@ class OcclusionPortalReport; // the F3 occlusion view payload (simulation/occlus
 
 #include "simulation/inmatch_session_values.h"
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
+#include "simulation/hud_view_records.h" // the per-frame HUD view records (typed-array returns)
 #include "devtools/frame_stats.h"
 
 namespace opennova::hud {
@@ -565,11 +566,11 @@ public:
 	Ref<EndRoundOverlay> get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const;
 	// The RESULTLIST columns with their header text resolved through the
 	// gametext Overlays table (null gametext = the "!..." fallbacks).
-	TypedArray<Dictionary> get_end_round_columns(int p_table_width,
+	TypedArray<EndRoundColumn> get_end_round_columns(int p_table_width,
 			const Ref<RtxtStringFile> &p_gametext) const;
 	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
 	// engine's stat_screen_row_visible).
-	TypedArray<Dictionary> get_end_round_rows(int p_tab) const;
+	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
 	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
 	static int end_round_stat_screen_delay_msec();
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.

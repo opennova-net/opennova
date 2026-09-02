@@ -157,32 +157,33 @@ String Simulation::strip_inline_tags(const String &p_text) {
 	return String::utf8(opennova::hud::strip_inline_tags(p_text.utf8().get_data()).c_str());
 }
 
-TypedArray<Dictionary> Simulation::get_end_round_columns(int p_table_width,
+TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 		const Ref<RtxtStringFile> &p_gametext) const {
-	TypedArray<Dictionary> out;
+	TypedArray<EndRoundColumn> out;
 	if (!runtime_) return out;
 	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
 	if (!er.known) return out;
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
 	for (const opennova::np::StatScreenColumn &c :
 			opennova::np::stat_screen_columns(er.board, false, p_table_width)) {
-		Dictionary d;
-		d["header"] = resolve_column_header(lookup, c);
-		d["header_key"] = String::utf8(c.header_key.c_str());
-		d["header_fallback"] = String::utf8(c.header_fallback.c_str());
-		d["literal"] = String::utf8(c.literal.c_str());
-		d["width"] = c.width;
-		d["field_id"] = c.field_id;
-		out.push_back(d);
+		Ref<EndRoundColumn> column;
+		column.instantiate();
+		column->set_header(resolve_column_header(lookup, c));
+		column->set_header_key(String::utf8(c.header_key.c_str()));
+		column->set_header_fallback(String::utf8(c.header_fallback.c_str()));
+		column->set_literal(String::utf8(c.literal.c_str()));
+		column->set_width(c.width);
+		column->set_field_id(c.field_id);
+		out.push_back(column);
 	}
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_end_round_rows(int p_tab) const {
+TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
 	// The PLAYER SLOT table retail walks is the roster every role's view
 	// folds from 0x46 (name / clan / team). The local row comes from the 0x1D
 	// header's board index, resolved to a connection slot below.
-	TypedArray<Dictionary> out;
+	TypedArray<EndRoundRow> out;
 	if (!runtime_) return out;
 	const opennova::netsim::ClientState &cs = runtime_->state();
 	if (!cs.end_round.known) return out;
@@ -216,17 +217,18 @@ TypedArray<Dictionary> Simulation::get_end_round_rows(int p_tab) const {
 		// The tab filter (the engine's stat_screen_row_visible; its witness is
 		// stat_screen_feed.h's).
 		if (!opennova::np::stat_screen_row_visible(p_tab, r.team)) continue;
-		Dictionary d;
-		d["slot"] = static_cast<int>(r.slot);
-		d["team"] = static_cast<int>(r.team);
-		d["name"] = String::utf8(r.name.c_str());
-		d["squad"] = String::utf8(r.squad.c_str());
+		Ref<EndRoundRow> row;
+		row.instantiate();
+		row->set_slot(static_cast<int>(r.slot));
+		row->set_team(static_cast<int>(r.team));
+		row->set_name(String::utf8(r.name.c_str()));
+		row->set_squad(String::utf8(r.squad.c_str()));
 		PackedStringArray cells;
 		for (const std::string &c : r.cells) cells.push_back(String::utf8(c.c_str()));
-		d["cells"] = cells;
-		d["color"] = static_cast<int64_t>(r.color_argb);
-		d["selected"] = r.selected;
-		out.push_back(d);
+		row->set_cells(cells);
+		row->set_color(static_cast<int64_t>(r.color_argb));
+		row->set_selected(r.selected);
+		out.push_back(row);
 	}
 	return out;
 }

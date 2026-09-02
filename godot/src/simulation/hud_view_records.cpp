@@ -13,6 +13,8 @@ constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
 template <>
 constexpr Variant::Type variant_type_of<int64_t>() { return Variant::INT; }
 template <>
+constexpr Variant::Type variant_type_of<float>() { return Variant::FLOAT; }
+template <>
 constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
 template <>
 constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
@@ -40,6 +42,8 @@ HUD_VIEW_RECORD_BIND(ScoreFeedback, SCORE_FEEDBACK_FIELDS)
 HUD_VIEW_RECORD_BIND(ScoreboardHeader, SCOREBOARD_HEADER_FIELDS)
 HUD_VIEW_RECORD_BIND(EndRoundOverlay, END_ROUND_OVERLAY_FIELDS)
 HUD_VIEW_RECORD_BIND(EndRoundStatistics, END_ROUND_STATISTICS_FIELDS)
+HUD_VIEW_RECORD_BIND(EndRoundColumn, END_ROUND_COLUMN_FIELDS)
+HUD_VIEW_RECORD_BIND(EndRoundRow, END_ROUND_ROW_FIELDS)
 HUD_VIEW_RECORD_BIND(DeployStatus, DEPLOY_STATUS_FIELDS)
 
 #undef HUD_VIEW_BIND_FIELD
