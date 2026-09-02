@@ -522,15 +522,11 @@ static func _build_fingerprint(world: GameWorld, runtime: MissionPresentation, b
 		model_count += 1
 		if not (node as Node3D).is_visible_in_tree():
 			hidden_count += 1
-		if node.has_meta("entity_ref"):
+		var ref: EntityRef = (node as ObjectModel).entity_ref
+		if ref != null:
 			identified_count += 1
-			var ref: Dictionary = node.get_meta("entity_ref")
 			signatures.append("%s|%d|%d|%d|%d" % [
-					node.name,
-					int(ref.get("bms_id", 0)),
-					int(ref.get("kind", -1)),
-					int(ref.get("index", -1)),
-					int(ref.get("item_id", 0))])
+					node.name, ref.bms_id, ref.kind, ref.index, ref.item_id])
 		else:
 			signatures.append("%s|unidentified" % node.get_path())
 	signatures.sort()

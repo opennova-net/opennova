@@ -1721,6 +1721,11 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_graphic_name"), &ObjectModel::get_graphic_name);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic_name"), "set_graphic_name",
 			"get_graphic_name");
+	ClassDB::bind_method(D_METHOD("set_entity_ref", "ref"), &ObjectModel::set_entity_ref);
+	ClassDB::bind_method(D_METHOD("get_entity_ref"), &ObjectModel::get_entity_ref);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "entity_ref", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT, "EntityRef"),
+			"set_entity_ref", "get_entity_ref");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),

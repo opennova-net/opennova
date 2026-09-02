@@ -334,9 +334,8 @@ func test_authored_owners_resolve_through_the_entity_index() -> void:
 	if model == null:
 		return
 	var index := EntityIndex.new()
-	index.build([{'model': model, 'ref': {
-		'bms_id': 41, 'kind': -1, 'index': -1,
-		'group': -1, 'team': -1, 'position': Vector3.ZERO}}], [])
+	model.entity_ref = EntityRef.make(-1, -1, 41)
+	index.build([model], [])
 	var presenter := _presenter()
 	var scar_pass := ScarPresentPass.new()
 	scar_pass.setup(null, null, index, null, null, Callable(), Callable(), presenter)

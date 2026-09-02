@@ -81,7 +81,7 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 		world.add_child(container)
 	assert_not_null(container)
 	var owner_model := _placed_model(container, Vector3(0.0, 0.0, 0.0))
-	owner_model.set_meta("entity_ref", {"wire_handle": 77})
+	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 77)
 	var bystander := _placed_model(container, Vector3(4.0, 0.0, 0.0))
 	assert_eq(EffectLightDirector.owner_id_for_node(owner_model),
 			EffectLightDirector.owner_id_for_wire(77),
@@ -169,7 +169,7 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 		container.name = "MissionObjects"
 		world.add_child(container)
 	var owner_model := _placed_model(container, Vector3.ZERO)
-	owner_model.set_meta("entity_ref", {"wire_handle": 0})
+	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 0)
 	var bystander := _placed_model(container, Vector3(3.0, 0.0, 0.0))
 	var tagged_zero := EffectLightDirector.owner_id_for_node(owner_model)
 	assert_ne(tagged_zero, 0,
@@ -533,10 +533,7 @@ func test_building_owned_lights_are_selected_per_robj() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var building := _multi_part_model(container)
-	building.set_meta("entity_ref", {
-		"kind": MissionData.KIND_BUILDING,
-		"wire_handle": 0x1002,
-	})
+	building.entity_ref = EntityRef.make(MissionData.KIND_BUILDING, -1, 0, 0, 0x1002)
 	assert_eq(building.get_render_part_nodes().size(), 5)
 	var owner := EffectLightDirector.owner_id_for_node(building)
 	var scene := LightScene.new()

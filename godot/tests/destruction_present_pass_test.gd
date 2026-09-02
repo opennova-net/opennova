@@ -126,10 +126,9 @@ func _index_of(entries: Array) -> EntityIndex:
 
 
 func _entry(model: ObjectModel, bms_id: int, kind: int = -1,
-		index: int = -1) -> Dictionary:
-	return {'model': model, 'ref': {
-		'bms_id': bms_id, 'kind': kind, 'index': index,
-		'group': -1, 'team': -1, 'position': Vector3.ZERO}}
+		index: int = -1) -> ObjectModel:
+	model.entity_ref = EntityRef.make(kind, index, bms_id)
+	return model
 
 
 func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
@@ -316,11 +315,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 			"res://../fixtures/threedi/synth/shed.3di")), OK)
 	assert_eq(intact_data.get_light_count(), 1)
 	intact.set_object_data(intact_data)
-	intact.set_meta("entity_ref", {
-		"bms_id": 41,
-		"wire_handle": 73,
-		"kind": MissionData.KIND_ITEM,
-	})
+	intact.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 41, 0, 73)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
 	director.on_wire_node_spawned(intact, MissionData.KIND_ITEM, BUGGY_ITEM_ID)

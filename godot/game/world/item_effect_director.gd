@@ -162,9 +162,9 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 		# before any is_instance_valid guard could run.
 		var node: Variant = _item_fx_nodes.get(owner_key)
 		if node is Node3D and is_instance_valid(node) and node.is_inside_tree():
-			var entity_ref: Dictionary = _item_fx_owner_refs.get(owner_key, {})
+			var entity_ref: EntityRef = _item_fx_owner_refs.get(owner_key)
 			var pose_runtime: MissionPresentation = _world.get_runtime()
-			if not entity_ref.is_empty() and pose_runtime != null \
+			if entity_ref != null and pose_runtime != null \
 					and pose_runtime.has_current_present_effect_snapshot():
 				# Null here means the identity left THIS tick's replica set. Do
 				# not fall back to the one-frame-old Node or the group would emit
@@ -221,11 +221,10 @@ func reattach() -> void:
 			# Boundary filter: only placed ObjectModels carry the per-item
 			# effect contract (husk grafts and helper nodes skip here).
 			var node := child as ObjectModel
-			if node == null or not node.has_meta("entity_ref"):
+			var ref: EntityRef = node.entity_ref if node != null else null
+			if ref == null:
 				continue
-			var ref: Dictionary = node.get_meta("entity_ref")
-			attached += _attach_item_effect_to_node(node, int(ref.get("kind", -1)),
-					int(ref.get("item_id", 0)), item_db)
+			attached += _attach_item_effect_to_node(node, ref.kind, ref.item_id, item_db)
 	var static_sources: Array = _static_sources.call()
 	for source_index in range(static_sources.size()):
 		attached += _attach_item_effect_to_static(
@@ -286,18 +285,17 @@ func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
 
 
 func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
-	if node == null:
+	var model := node as ObjectModel
+	var ref: EntityRef = model.entity_ref if model != null else null
+	if ref == null:
 		return []
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var net_id := int(ref.get("net_id", 0)) if ref.has("net_id") else 0
-	var bms_id := int(ref.get("bms_id", 0))
-	var origin_kind := int(ref.get("origin_kind", ref.get("kind", -1)))
-	var index := int(ref.get("index", -1))
+	# A wire row's origin is the header identity it carries (which may be
+	# none); a placed model's origin is its own record.
+	var origin_kind := ref.origin_kind if ref.wire_handle >= 0 else ref.kind
 	var spawn_origin := 0
-	if origin_kind >= 0 and index >= 0:
-		spawn_origin = SpawnOrigin.pack(origin_kind, index)
-	return _item_fx_identity_aliases(
-			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
+	if origin_kind >= 0 and ref.index >= 0:
+		spawn_origin = SpawnOrigin.pack(origin_kind, ref.index)
+	return _item_fx_identity_aliases(0, ref.bms_id, spawn_origin, ref.wire_handle)
 
 
 func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:
@@ -462,7 +460,7 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 		return 0
 	var attached := 0
 	var matched := 0
-	var entity_ref: Dictionary = node.get_meta("entity_ref", {}).duplicate()
+	var entity_ref: EntityRef = node.entity_ref
 	if not userpoint.is_empty():
 		# The first-16 case-insensitive scan is native — ONE impl in
 		# engine/formats/threedi (S12c) [orig: ItemDef_GetBoneMaskByName

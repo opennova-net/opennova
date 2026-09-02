@@ -309,9 +309,9 @@ class ItemFxDirectorProbe:
 		return _item_fx_control_nodes.size()
 	func active_identity_count() -> int:
 		return _item_fx_control_active.size()
-	func seed_owner(key: String, node: Node3D, entity_ref: Dictionary) -> void:
+	func seed_owner(key: String, node: Node3D, entity_ref: EntityRef) -> void:
 		_item_fx_nodes[key] = node
-		_item_fx_owner_refs[key] = entity_ref.duplicate()
+		_item_fx_owner_refs[key] = entity_ref
 	func resolve_owner(key: String) -> Variant:
 		return _effect_owner_transform(key)
 
@@ -354,7 +354,7 @@ class ItemFxGameWorldHarness:
 	func consume_runtime_effects(effects: Array) -> void:
 		_on_runtime_effects(effects)
 	func configure_item_owner(key: String, node: Node3D,
-			entity_ref: Dictionary) -> void:
+			entity_ref: EntityRef) -> void:
 		# The runtime the resolve consults is the REAL MissionPresentation the world
 		# built in _start_runtime — the typed seam admits nothing else.
 		fx.seed_owner(key, node, entity_ref)
@@ -2786,12 +2786,7 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	assert_signal_not_emitted(world, "mission_effects",
 			"render-internal lifecycle events never leak to HUD consumers")
 	var model := _fx_model(world)
-	model.set_meta("entity_ref", {
-		"kind": MissionData.KIND_ITEM,
-		"index": 3,
-		"bms_id": 9001,
-		"item_id": DBUGGY_ITEM,
-	})
+	model.entity_ref = EntityRef.make(MissionData.KIND_ITEM, 3, 9001, DBUGGY_ITEM)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 1)
 	assert_eq(world.deferred_control_item_fx_count(), 1)
 	assert_eq(effects.attached_spawns.size(), 1)
@@ -2836,12 +2831,7 @@ func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
 	world.set_particles_hidden(true)
 
 	var model := _fx_model(world)
-	model.set_meta("entity_ref", {
-		"kind": MissionData.KIND_ITEM,
-		"index": 8,
-		"bms_id": 9010,
-		"item_id": DBUGGY_ITEM,
-	})
+	model.entity_ref = EntityRef.make(MissionData.KIND_ITEM, 8, 9010, DBUGGY_ITEM)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0,
 			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
 	var spawn_origin := (MissionData.KIND_ITEM << 24) | 8
@@ -2884,13 +2874,7 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 		"c": 0,
 	}])
 	var model := _fx_model(world)
-	model.set_meta("entity_ref", {
-		"kind": MissionData.KIND_ITEM,
-		"index": 12,
-		"bms_id": 0,
-		"wire_handle": 77,
-		"item_id": DBUGGY_ITEM,
-	})
+	model.entity_ref = EntityRef.make(MissionData.KIND_ITEM, 12, 0, DBUGGY_ITEM, 77)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0)
 	assert_eq(effects.attached_spawns.size(), 0,
 			"event a is a simulation net id, not the presentation wire handle")
@@ -2911,14 +2895,10 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	var siblings: Array[ObjectModel] = []
 	for wire_handle in [0x1004, 0x1005]:
 		var model := _fx_model(world)
-		model.set_meta("entity_ref", {
-			"kind": MissionData.KIND_ITEM,
-			"origin_kind": 0xff,
-			"index": 0xffffff,
-			"bms_id": 0,
-			"wire_handle": wire_handle,
-			"item_id": PLAYER_CONTROL_ITEM,
-		})
+		var ref := EntityRef.make(MissionData.KIND_ITEM, 0xffffff, 0,
+				PLAYER_CONTROL_ITEM, wire_handle)
+		ref.origin_kind = 0xff
+		model.entity_ref = ref
 		siblings.append(model)
 		assert_eq(world.present_item_fx(
 				model, MissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
@@ -3054,7 +3034,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	node.transform = Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
 	var key := "itemfx:%d:0" % bms_id
 	world.configure_item_owner(key, node,
-			{"kind": MissionData.KIND_BUILDING, "index": 0, "bms_id": bms_id})
+			EntityRef.make(MissionData.KIND_BUILDING, 0, bms_id))
 
 	var resolved: Variant = world.resolve_item_owner(key)
 	assert_true(resolved is Transform3D)
@@ -3073,7 +3053,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 
 	var absent_key := "itemfx:999999:0"
 	world.configure_item_owner(absent_key, node,
-			{"kind": MissionData.KIND_BUILDING, "index": 999, "bms_id": 999999})
+			EntityRef.make(MissionData.KIND_BUILDING, 999, 999999))
 	assert_null(world.resolve_item_owner(absent_key),
 			"an owner absent from this tick detaches instead of emitting once from stale presentation")
 

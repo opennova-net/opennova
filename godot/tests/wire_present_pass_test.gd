@@ -284,10 +284,8 @@ func _index_with_placed(bms_id: int) -> Dictionary:
 	add_child_autofree(placed)
 	placed.set_process(false)
 	var index := EntityIndex.new()
-	index.build([{ "model": placed, "ref": {
-		"kind": 1, "index": 0, "bms_id": bms_id, "group": -1, "team": -1,
-		"position": Vector3.ZERO,
-	} }], [])
+	placed.entity_ref = EntityRef.make(1, 0, bms_id)
+	index.build([placed], [])
 	return { "index": index, "placed": placed }
 
 
@@ -325,11 +323,11 @@ func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void
 			"ordinary SP rows stay with MissionPresentPass; synthetic children materialize")
 	var model: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_not_null(model)
-	var ref: Dictionary = model.get_meta("entity_ref", {})
-	assert_eq(int(ref.get("item_id", 0)), 106102,
+	var ref: EntityRef = model.entity_ref
+	assert_eq(ref.item_id, 106102,
 			"the wire type resolves through the ITEM_ID_OFFSET visual mapping")
-	assert_eq(int(ref.get("runtime_type_id", 0)), TYPE_RIFLEMAN)
-	assert_eq(int(ref.get("origin_kind", 0)), 255)
+	assert_eq(ref.runtime_type_id, TYPE_RIFLEMAN)
+	assert_eq(ref.origin_kind, 255)
 
 
 func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
@@ -464,7 +462,7 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 	_present(p, snap, 2)
 	var second: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_ne(second, first, "recycled handle cannot keep the prior type model")
-	assert_eq(int(second.get_meta("entity_ref", {}).get("runtime_type_id", 0)),
+	assert_eq(second.entity_ref.runtime_type_id,
 			TYPE_ARMORY)
 
 
@@ -480,7 +478,7 @@ func test_live_player_character_id_change_rebuilds_the_visual() -> void:
 	_present(p, snap)
 	var first: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_not_null(first)
-	assert_eq(int(first.get_meta("entity_ref", {}).get("character_id", 0)),
+	assert_eq(first.entity_ref.character_id,
 			0x0400)
 
 	snap.entities[0]["character_id"] = 0x0600
@@ -488,7 +486,7 @@ func test_live_player_character_id_change_rebuilds_the_visual() -> void:
 	var second: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_ne(second, first,
 			"a reused player slot cannot retain the prior selected character")
-	assert_eq(int(second.get_meta("entity_ref", {}).get("character_id", 0)),
+	assert_eq(second.entity_ref.character_id,
 			0x0600, "the packed 0x0C identity keys remote presentation")
 
 
@@ -557,9 +555,9 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 	var avatar: ObjectModel = p.resolve_wire_handle(2)
 	assert_not_null(avatar, "the admitted player's avatar node exists on the host")
 	assert_almost_eq(avatar.position.x, 7.0, 0.001)
-	var ref: Dictionary = avatar.get_meta("entity_ref", {})
-	assert_eq(int(ref.get("runtime_type_id", 0)), TYPE_RIFLEMAN)
-	assert_eq(int(ref.get("item_id", 0)), 106102,
+	var ref: EntityRef = avatar.entity_ref
+	assert_eq(ref.runtime_type_id, TYPE_RIFLEMAN)
+	assert_eq(ref.item_id, 106102,
 			"the runtime type resolves through the placer's visual mapping")
 
 
@@ -849,9 +847,9 @@ func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() ->
 	assert_eq(call.position, Vector3(4, 5, 6),
 			"registration runs after the production transform is applied")
 	var node := call.node as Node3D
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	assert_eq(int(ref.get("wire_handle", 0)), 0x1004)
-	assert_eq(int(ref.get("origin_kind", 0)), -1)
+	var ref: EntityRef = (node as ObjectModel).entity_ref
+	assert_eq(ref.wire_handle, 0x1004)
+	assert_eq(ref.origin_kind, -1)
 
 	_present(p, snap)
 	assert_eq(observer.calls.size(), 1, "steady presentation never re-registers the model")

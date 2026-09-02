@@ -187,9 +187,9 @@ void WirePresentPass::set_node_spawned_callback(const Callable &p_callback) {
 		if (node == nullptr) {
 			continue;
 		}
-		Dictionary ref = node->get_meta("entity_ref", Dictionary());
-		node_spawned_callback_.call(node, int(ref.get("kind", -1)),
-				int(ref.get("item_id", 0)));
+		const Ref<EntityRef> ref = node->get_entity_ref();
+		node_spawned_callback_.call(node, ref.is_valid() ? ref->get_kind() : -1,
+				ref.is_valid() ? ref->get_item_id() : 0);
 	}
 }
 
@@ -328,16 +328,17 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 				continue;
 			}
 			node->set_name(vformat("Wire_%04x", handle));
-			Dictionary ref;
-			ref["kind"] = runtime_kind;
-			ref["origin_kind"] = int(snap[base + PF_KIND]);
-			ref["index"] = int(snap[base + PF_INDEX]);
-			ref["bms_id"] = int(snap[base + PF_BMS_ID]);
-			ref["wire_handle"] = handle;
-			ref["item_id"] = visual_item_id;
-			ref["runtime_type_id"] = type_id;
-			ref["character_id"] = character_id;
-			node->set_meta("entity_ref", ref);
+			Ref<EntityRef> ref;
+			ref.instantiate();
+			ref->set_kind(runtime_kind);
+			ref->set_origin_kind(int(snap[base + PF_KIND]));
+			ref->set_index(int(snap[base + PF_INDEX]));
+			ref->set_bms_id(int(snap[base + PF_BMS_ID]));
+			ref->set_wire_handle(handle);
+			ref->set_item_id(visual_item_id);
+			ref->set_runtime_type_id(type_id);
+			ref->set_character_id(character_id);
+			node->set_entity_ref(ref);
 			nodes_[handle] = node->get_instance_id();
 			apply_lighting_context(handle);
 			++stat_spawned_;
@@ -438,13 +439,16 @@ int WirePresentPass::consume_present_logic_tick_delta() {
 bool WirePresentPass::wire_node_matches_row(ObjectModel *p_node,
 		const PackedFloat32Array &p_snap, int p_base, int p_type_id) const {
 	const float *snap = p_snap.ptr();
-	Dictionary ref = p_node->get_meta("entity_ref", Dictionary());
-	return int(ref.get("runtime_type_id", 0)) == p_type_id &&
-			int(ref.get("character_id", 0)) ==
+	const Ref<EntityRef> ref = p_node->get_entity_ref();
+	if (ref.is_null()) {
+		return false;
+	}
+	return ref->get_runtime_type_id() == p_type_id &&
+			ref->get_character_id() ==
 					(int(snap[p_base + PF_CHARACTER_ID]) & 0xffff) &&
-			int(ref.get("origin_kind", -1)) == int(snap[p_base + PF_KIND]) &&
-			int(ref.get("index", -1)) == int(snap[p_base + PF_INDEX]) &&
-			int(ref.get("bms_id", 0)) == int(snap[p_base + PF_BMS_ID]);
+			ref->get_origin_kind() == int(snap[p_base + PF_KIND]) &&
+			ref->get_index() == int(snap[p_base + PF_INDEX]) &&
+			ref->get_bms_id() == int(snap[p_base + PF_BMS_ID]);
 }
 
 Vector3 WirePresentPass::muzzle_world_for(int p_handle,
