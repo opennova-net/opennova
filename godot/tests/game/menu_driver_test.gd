@@ -194,13 +194,13 @@ func _key(keycode: Key, unicode := 0, pressed := true, echo := false) -> InputEv
 func test_screen_action_same_file_navigates_and_pushes_stack() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	# Empty file = same file.
-	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": ""}),
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("screen", "SUB", "", false, "")),
 			"empty-file screen action handled")
 	assert_eq(driver.get_current_screen(), "SUB", "navigated to SUB")
 	assert_true(driver.pop_screen(), "pop returns")
 	assert_eq(driver.get_current_screen(), "MAIN", "pop returned to MAIN")
 	# Shipped same-file jumps spell their own filename, case-insensitively.
-	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": "MENU.MNU"}),
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("screen", "SUB", "", false, "MENU.MNU")),
 			"own-filename screen action handled")
 	assert_eq(driver.get_current_screen(), "SUB", "case-insensitive same-file jump navigated")
 
@@ -216,8 +216,7 @@ func test_pop_past_root_emits_quit_requested() -> void:
 func test_cross_file_screen_action_emits_menu_requested() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
-	assert_true(driver.dispatch_action_row(
-			{"type": "screen", "target": "LOBBY", "file": "other.mnu"}),
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("screen", "LOBBY", "", false, "other.mnu")),
 			"cross-file action consumed")
 	assert_signal_emitted_with_parameters(driver, "menu_requested", ["other.mnu", "LOBBY"])
 	assert_eq(driver.get_current_screen(), "MAIN", "cross-file jump does not navigate in-file")
@@ -226,9 +225,9 @@ func test_cross_file_screen_action_emits_menu_requested() -> void:
 func test_quit_and_url_actions() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
-	assert_true(driver.dispatch_action_row({"type": "quit"}), "quit consumed")
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("quit", "", "", false, "")), "quit consumed")
 	assert_signal_emitted(driver, "quit_requested")
-	assert_true(driver.dispatch_action_row({"type": "url", "target": "www.novalogic.com"}),
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("url", "www.novalogic.com", "", false, "")),
 			"url consumed")
 	assert_signal_emitted_with_parameters(driver, "url_requested", ["www.novalogic.com"])
 
@@ -237,47 +236,41 @@ func test_window_actions_show_hide_enable_disable_toggle() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	var panel := driver.widget_id("PANEL")
 	assert_true(driver.is_widget_shown(panel), "panel starts shown")
-	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "hide"}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "hide", false, "")))
 	assert_false(driver.is_widget_shown(panel), "hide hides")
-	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "show"}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "show", false, "")))
 	assert_true(driver.is_widget_shown(panel), "show shows")
-	assert_true(driver.dispatch_action_row(
-			{"type": "window", "target": "PANEL", "state": "hide", "toggle": true}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "hide", true, "")))
 	assert_false(driver.is_widget_shown(panel), "hide+TOGGLE flips shown -> hidden")
-	assert_true(driver.dispatch_action_row(
-			{"type": "window", "target": "PANEL", "state": "show", "toggle": true}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "show", true, "")))
 	assert_true(driver.is_widget_shown(panel), "show+TOGGLE flips hidden -> shown")
-	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "toggle"}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "toggle", false, "")))
 	assert_false(driver.is_widget_shown(panel), "the toggle state verb flips")
 
 	assert_false(driver.is_widget_disabled(panel), "panel starts enabled")
-	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "disable"}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "disable", false, "")))
 	assert_true(driver.is_widget_disabled(panel), "disable disables")
-	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "enable"}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "enable", false, "")))
 	assert_false(driver.is_widget_disabled(panel), "enable enables")
-	assert_true(driver.dispatch_action_row(
-			{"type": "window", "target": "PANEL", "state": "disable", "toggle": true}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "disable", true, "")))
 	assert_true(driver.is_widget_disabled(panel), "disable+TOGGLE flips enabled -> disabled")
-	assert_true(driver.dispatch_action_row(
-			{"type": "window", "target": "PANEL", "state": "enable", "toggle": true}))
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "enable", true, "")))
 	assert_false(driver.is_widget_disabled(panel), "enable+TOGGLE flips disabled -> enabled")
 
 
 func test_window_action_rejects_off_screen_target() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	assert_eq(driver.get_current_screen(), "MAIN")
-	assert_false(driver.dispatch_action_row(
-			{"type": "window", "target": "SUB_PANEL", "state": "hide"}),
+	assert_false(driver.dispatch_action_row(MnuActionRow.make("window", "SUB_PANEL", "hide", false, "")),
 			"a WINDOW action only reaches the current screen's widgets")
-	assert_false(driver.dispatch_action_row(
-			{"type": "window", "target": "NO_SUCH", "state": "hide"}),
+	assert_false(driver.dispatch_action_row(MnuActionRow.make("window", "NO_SUCH", "hide", false, "")),
 			"an unknown target is rejected")
 
 
 func test_service_verbs_are_not_driver_actions() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
-	var action := {"type": "lan_search", "target": "SERVER_ROWS", "source": "lan"}
+	var action := MnuActionRow.make("lan_search", "SERVER_ROWS", "", false, "")
 	assert_false(driver.dispatch_action_row(action),
 			"a service verb (menu-re.md: LAN_SEARCH) is not handled by the driver")
 	assert_eq(driver.get_current_screen(), "MAIN", "the driver invents no LAN effects")

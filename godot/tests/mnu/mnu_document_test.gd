@@ -284,8 +284,11 @@ func test_item_accessors_read_list() -> void:
 	var doc := _load_all_widgets()
 	var list := _find_widget(doc, "MissionList")
 	assert_eq(doc.get_item_count(list), 2, "MissionList has 2 items")
-	assert_eq(doc.get_item(list, 0), {"type": "id", "value": "0", "text": "MM_Alpha"}, "first row")
-	assert_eq(doc.get_item(list, 1), {"type": "id", "value": "1", "text": "MM_Bravo"}, "second row")
+	assert_eq(doc.get_item_text(list, 0), "MM_Alpha", "first row text")
+	assert_eq(doc.get_item_value(list, 0), "0", "first row value")
+	assert_eq(doc.get_item_text(list, 1), "MM_Bravo", "second row text")
+	assert_eq(doc.get_item_value(list, 1), "1", "second row value")
+	assert_eq(doc.get_item_text(list, 2), "", "past the end reads empty")
 
 
 func test_item_accessors_non_list_widget() -> void:
@@ -299,7 +302,7 @@ func test_item_combo_uses_list_box_and_round_trips() -> void:
 	var combo := _find_widget(doc, "ServerList")
 	assert_eq(doc.get_widget_type(combo), MnuDocument.TYPE_COMBO, "ServerList is a combo")
 	assert_eq(doc.get_item_count(combo), 3, "combo reads its LIST_BOX rows")
-	assert_eq(doc.get_item(combo, 2)["text"], "LAN Server", "third LIST_BOX row")
+	assert_eq(doc.get_item_text(combo, 2), "LAN Server", "third LIST_BOX row")
 
 
 func test_item_combo_top_level_items_with_empty_list_box() -> void:
@@ -321,7 +324,7 @@ func test_item_combo_top_level_items_with_empty_list_box() -> void:
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK, "inline combo parses")
 	var combo := _find_widget(doc, "ModeBox")
 	assert_eq(doc.get_item_count(combo), 2, "reads the top-level ITEMS, not the empty LIST_BOX")
-	assert_eq(doc.get_item(combo, 1)["text"], "Team", "second top-level row")
+	assert_eq(doc.get_item_text(combo, 1), "Team", "second top-level row")
 
 
 func test_widget_sounds_read_edit_roundtrip() -> void:
@@ -330,12 +333,11 @@ func test_widget_sounds_read_edit_roundtrip() -> void:
 	var start := _find_widget(doc, "StartBtn")
 	var sounds := doc.get_widget_sounds(start)
 	assert_eq(sounds.size(), 1, "StartBtn has one authored sound")
-	assert_eq(String(sounds[0]["trigger"]), "MOUSE_OVER", "hover trigger read")
-	assert_eq(String(sounds[0]["file"]), "menu.lwf", "sound file read")
-	assert_eq(String(sounds[0]["state"]), "mousein", "sound state read")
+	var sound: MnuSoundRow = sounds[0]
+	assert_eq(sound.trigger, "MOUSE_OVER", "hover trigger read")
+	assert_eq(sound.file, "menu.lwf", "sound file read")
+	assert_eq(sound.state, "mousein", "sound state read")
 
-	# Append a click sound and replace the whole list.
-	sounds.append({"state": "selected", "trigger": "CLICK_SELECT", "file": "menu.lwf"})
 
 
 func test_widget_actions_read_edit_roundtrip() -> void:
@@ -344,14 +346,14 @@ func test_widget_actions_read_edit_roundtrip() -> void:
 	# editable as structured data and round-trip through the MNU serializer.
 	var doc := _load_doc()
 	var start := _find_widget(doc, "StartBtn")
-	var actions: Array = doc.get_widget_actions(start)
+	var actions := doc.get_widget_actions(start)
 	assert_eq(actions.size(), 1, "StartBtn has one authored action")
-	assert_eq(String(actions[0]["type"]), "screen", "screen verb read")
-	assert_eq(String(actions[0]["target"]), "OPTIONS", "screen target read")
-	assert_eq(String(actions[0]["file"]), "", "same-file action has no file")
-	assert_eq(String(actions[0]["state"]), "", "screen action has no window state")
+	var action: MnuActionRow = actions[0]
+	assert_eq(action.type, "screen", "screen verb read")
+	assert_eq(action.target, "OPTIONS", "screen target read")
+	assert_eq(action.file, "", "same-file action has no file")
+	assert_eq(action.state, "", "screen action has no window state")
 
-	actions.append({"type": "window", "target": "SoundChk", "state": "HIDE", "file": ""})
 
 
 func test_authoring_state_apply_preserves_presence_and_nested_data() -> void:

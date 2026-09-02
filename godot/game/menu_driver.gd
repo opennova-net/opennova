@@ -490,7 +490,7 @@ func get_widget_items(id: int) -> PackedStringArray:
 		return state.items
 	var out := PackedStringArray()
 	for i in range(_doc.get_item_count(id)):
-		out.append(String(_doc.get_item(id, i).get("text", "")))
+		out.append(_doc.get_item_text(id, i))
 	return out
 
 
@@ -509,18 +509,18 @@ func item_text(id: int, row: int) -> String:
 	if state != null and state.has_items:
 		var items := state.items
 		return items[row] if row >= 0 and row < items.size() else ""
-	return String(_doc.get_item(id, row).get("text", ""))
+	return _doc.get_item_text(id, row)
 
 
 ## The authored item `value=` attribute of a row (the semantic value the
 ## original reads — SERVERTYPE 0/1; distinct from the display text).
 func item_value(id: int, row: int) -> String:
-	return String(_doc.get_item(id, row).get("value", ""))
+	return _doc.get_item_value(id, row)
 
 
-## A widget's authored ACTION rows, as the document parsed them (each a
-## Dictionary dispatch_action_row accepts).
-func widget_actions(id: int) -> Array:
+## A widget's authored ACTION rows, as the document parsed them (each a row
+## dispatch_action_row accepts).
+func widget_actions(id: int) -> Array[MnuActionRow]:
 	return _doc.get_widget_actions(id)
 
 
@@ -1080,7 +1080,7 @@ func _trigger_hotkey_target(index: int) -> bool:
 # --- Actions --------------------------------------------------------------------
 
 func _dispatch_widget_actions(id: int) -> void:
-	for action in _doc.get_widget_actions(id):
+	for action: MnuActionRow in _doc.get_widget_actions(id):
 		dispatch_action_row(action)
 
 
@@ -1088,18 +1088,16 @@ func _dispatch_widget_actions(id: int) -> void:
 ## Returns true when the action was handled. The service verbs (FORM_POST,
 ## GLB_*, APPMSG, LAN_*, MNX; docs/mnu/menu-re.md) are not the driver's: they
 ## return false, and the shell wires that behavior by named control.
-func dispatch_action_row(action: Dictionary) -> bool:
-	var type := String(action.get("type", "")).to_lower()
-	var target := String(action.get("target", ""))
+func dispatch_action_row(action: MnuActionRow) -> bool:
+	var type := action.type.to_lower()
+	var target := action.target
 	match type:
 		"window":
-			return handle_window_action(target,
-					String(action.get("state", "")).to_lower(),
-					bool(action.get("toggle", false)))
+			return handle_window_action(target, action.state.to_lower(), action.toggle)
 		"screen":
 			# Same-file detection: shipped menus spell same-file jumps with
 			# their own filename; empty file = same file.
-			var file := String(action.get("file", ""))
+			var file := action.file
 			if file.is_empty() or file.nocasecmp_to(_menu_file) == 0:
 				return navigate_to_screen(target)
 			menu_requested.emit(file, target)
@@ -1160,12 +1158,10 @@ func handle_window_action(target: String, state: String, toggle := false) -> boo
 # --- Sounds / value relay -------------------------------------------------------
 
 func _play_widget_sound_state(id: int, state_token: String) -> void:
-	for sound in _doc.get_widget_sounds(id):
-		if String(sound.get("state", "")).nocasecmp_to(state_token) != 0:
+	for sound: MnuSoundRow in _doc.get_widget_sounds(id):
+		if sound.state.nocasecmp_to(state_token) != 0:
 			continue
-		var trigger := String(sound.get("trigger", ""))
-		var file := String(sound.get("file", ""))
-		play_widget_sound(trigger, file)
+		play_widget_sound(sound.trigger, sound.file)
 		return
 
 
