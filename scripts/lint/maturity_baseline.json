@@ -56,7 +56,6 @@
     "probe_verdict.gd|func to_json_value()",
     "probe_schema_result.gd|var values",
     "probe_context.gd|var args",
-    "probe_context.gd|func capture_bundle(",
     "probe_context.gd|func progress_value()",
     "probe_run.gd|var progress",
     "probe_run.gd|func to_status(",

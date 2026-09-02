@@ -9,7 +9,6 @@ extends RefCounted
 ## and the log/progress channel game_probe op=status reads back.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 240_000
-const MS_PER_SECOND := 1000.0
 
 var run_id := ""
 var name := ""
@@ -110,22 +109,6 @@ func wait_frames(count: int) -> void:
 func wait_ms(duration_ms: int) -> void:
 	var deadline := Time.get_ticks_msec() + duration_ms
 	while Time.get_ticks_msec() < deadline and not cancelled and tree != null:
-		await tree.process_frame
-
-
-## Wait for the loaded simulation to advance `seconds` of mission time (the
-## engine's fixed logic-tick cadence, Simulation.tick_dt()); falls back to
-## wall time without a sim.
-func wait_mission_seconds(seconds: float) -> void:
-	var live_sim := sim()
-	if live_sim == null:
-		await wait_ms(int(seconds * MS_PER_SECOND))
-		return
-	var target := int(live_sim.get_logic_tick()) + int(ceil(seconds / Simulation.tick_dt()))
-	while not cancelled and tree != null:
-		var current := sim()
-		if current == null or int(current.get_logic_tick()) >= target:
-			return
 		await tree.process_frame
 
 
@@ -238,35 +221,6 @@ func set_time_scale(scale: float) -> void:
 	Engine.time_scale = scale
 
 
-## Stop the shell and the world from processing (a still frame to capture).
-func freeze_shell() -> void:
-	var shell := game()
-	if shell == null:
-		return
-	var previous := shell.process_mode
-	defer_restore(func() -> void:
-		if is_instance_valid(shell):
-			shell.process_mode = previous)
-	shell.process_mode = Node.PROCESS_MODE_DISABLED
-
-
-func unfreeze_shell() -> void:
-	var shell := game()
-	if shell != null:
-		shell.process_mode = Node.PROCESS_MODE_INHERIT
-
-
-func set_menu_visible(visible: bool) -> void:
-	var shell := menu_shell()
-	if shell == null:
-		return
-	var previous := shell.visible
-	defer_restore(func() -> void:
-		if is_instance_valid(shell):
-			shell.visible = previous)
-	shell.visible = visible
-
-
 ## The shell window at an exact size (a capture's resolution); windowed for
 ## the run, the previous mode and size back at finish. False without a window.
 func set_window_size(size: Vector2i) -> bool:
@@ -315,28 +269,6 @@ func capture_png(label: String, target: Viewport = null) -> String:
 		return ""
 	artifact(label, path, "png")
 	return path
-
-
-## A lossless render bundle through the adapter's capture (the game_capture_bundle
-## path); the PNG/JSON it wrote are recorded as artifacts. Returns the bundle
-## metadata or {"error": ...}.
-func capture_bundle(capture_args: Dictionary = {}) -> Dictionary:
-	var live_adapter := adapter()
-	if live_adapter == null:
-		return { "error": "no game adapter" }
-	var request := capture_args.duplicate(true)
-	request["include_image"] = false
-	var value: Variant = await live_adapter.capture_mcp_render_bundle(
-			request, func() -> bool: return cancelled)
-	if not (value is Dictionary):
-		return { "error": "the render capture returned nothing" }
-	var bundle: Dictionary = value
-	bundle.erase("image_bytes")
-	for key in ["image_path", "diagnostics_path"]:
-		if bundle.has(key):
-			artifact(String(bundle.get("label", "render")) + "." + key.get_slice("_", 0),
-					String(bundle[key]), String(bundle[key]).get_extension())
-	return bundle
 
 
 ## Record a file the probe produced (under artifact_dir or elsewhere).

@@ -10,11 +10,7 @@ extends RefCounted
 # and the wire present pass keep the WireHandle.* spelling instead of
 # re-deriving the shifts.
 
-const POOL_SHIFT := NetProtocol.WIRE_HANDLE_POOL_SHIFT
-const POOL_MASK := NetProtocol.WIRE_HANDLE_POOL_MASK
-const SLOT_MASK := NetProtocol.WIRE_HANDLE_SLOT_MASK
 const INVALID := NetProtocol.WIRE_HANDLE_INVALID       # "not found" / no-entity sentinel
-const POOL_COUNT := NetProtocol.WIRE_HANDLE_POOL_COUNT # live pools 0..4 (pool 4 = effects)
 
 
 static func pool(handle: int) -> int:

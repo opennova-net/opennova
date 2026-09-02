@@ -15,10 +15,6 @@ func _init(shell: MainGame) -> void:
 	_shell = shell
 
 
-func is_picker_open() -> bool:
-	return _shell._picker != null
-
-
 # Returns false when the directory would not mount (the picker is raised and
 # the shell holds no root) so boot continuations can gate on it.
 func enter_menu(dir: String) -> bool:

@@ -13,7 +13,6 @@ const CONTROL_TABLE := "CONTROL_MAPPING"
 const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
 const KEYBOARD_CONTROL := "KEYBOARD"
 const MOUSE_CONTROL := "MOUSE"
-const JOYSTICK_CONTROL := "JOYSTICK"
 
 var _driver: MenuDriver
 var _options: PlayerOptions

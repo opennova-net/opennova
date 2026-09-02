@@ -816,12 +816,6 @@ func endround_banner_line() -> String:
 	return _endround_banner
 
 
-## The waypoint label's current entry (null = label hidden) — the ADR 0018
-## public read seam for probes and diagnostics, as the ADR 0017 typed record.
-func waypoint_hud_entry() -> WaypointHudEntry:
-	return _build_waypoint_entry()
-
-
 ## The objectives-panel toggle, flipped by the shell's objectives key.
 ## [orig: the co-op action toggle @0x49b68b]
 func toggle_objectives() -> void:
