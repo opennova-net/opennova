@@ -156,10 +156,6 @@ bool GameDevTools::needs_weapon_records() const {
 	return pass_.is_open() && weapon_window_->open;
 }
 
-uint64_t GameDevTools::weapon_definition_serial() const {
-	return weapon_window_->definition_serial();
-}
-
 bool GameDevTools::take_weapon_request(WeaponRequest &request) {
 	return weapon_window_->take_request(request);
 }

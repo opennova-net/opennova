@@ -28,11 +28,6 @@ struct Area {
     int32_t zone_id = -1;
 };
 
-struct Route {
-    std::string name;
-    std::vector<Vec3> markers;
-};
-
 // Stable identity for one allocation lifetime of a packed pool/slot handle.
 // Handles are intentionally reused; the registry spawn serial prevents an old
 // owner from reading or despawning a later entity that occupies the same slot.
@@ -76,8 +71,6 @@ public:
     EntityHandle find_by_net_id(uint16_t net_id) const;
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
-    void by_team(uint8_t team, std::vector<EntityHandle> &out) const;
-    EntityHandle find_by_name(std::string_view name) const;
     void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
@@ -88,12 +81,7 @@ public:
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;
-    int find_area(std::string_view name) const;              // -1 if absent
     const Area *area(int id) const;
-
-    int register_route(std::string name, std::vector<Vec3> markers); // returns route id
-    int find_route(std::string_view name) const;
-    const Route *route(int id) const;
 
     int intern_group(std::string_view name); // stable id for a named group
 
@@ -141,7 +129,6 @@ private:
     std::array<Pool, kPoolCount> pools_{};
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
-    std::vector<Route> routes_;
     std::vector<std::string> group_names_;
 };
 

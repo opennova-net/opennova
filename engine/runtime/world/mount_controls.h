@@ -62,15 +62,6 @@ struct EmplacedWeaponControls {
 	uint16_t gun_pitch = 0;
 };
 
-inline uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam) {
-	// Retail stores the high word of the wrapped parent-minus-occupant angle:
-	// occupant Yaw/Pitch = parent Yaw/Pitch - turret control.
-	// [orig: Entity_UpdateTransformAndTurret @0x441251..0x441263,
-	//  @0x441298..0x4412b3]
-	const int32_t delta = opennova::io::bam_sub(parent_bam, occupant_bam);
-	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
-}
-
 // Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
 // (the "360" gun family) — no effective window; 0 tells callers to skip.
 inline int32_t turret_limit_bam(int16_t degrees) {

@@ -116,12 +116,6 @@ void remove_host_by_rid(opennova::db::Database &db, uint32_t rid) {
 	db.exec("DELETE FROM active_hosts WHERE rid=?;", {i64(rid)});
 }
 
-void remove_host_by_peer(opennova::db::Database &db,
-                         const std::string &peer_ip, int peer_port) {
-	db.exec("DELETE FROM active_hosts WHERE peer_ip=? AND peer_port=?;",
-	        {str(peer_ip), i64(peer_port)});
-}
-
 int prune_stale_hosts(opennova::db::Database &db, int64_t window_seconds) {
 	// policy: a backstop for rows the normal teardown (GOODBYE /
 	// ClientStopHosting / heartbeat-timeout -> erase_lobby_state) somehow

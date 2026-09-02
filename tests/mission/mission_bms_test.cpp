@@ -530,7 +530,7 @@ int main() {
 	}
 
 	// --- Regression (review): the terrain slot is a fixed 16-byte field (first of the three
-	// 16-byte slots in header.terrain[48]: terrain / cnv_file / tt_file). copy_cstr used to force a
+	// 16-byte slots in header.terrain[48]: terrain / cnv_file / tt_file). The old copy used to force a
 	// NUL into byte 15 and truncate a full 16-char terrain name on every edit; copy_fixed_field
 	// keeps all 16, and the info()/get_terrain reads are bounded to 16 so a full slot does not bleed
 	// into cnv_file. Editing terrain must also leave cnv_file / tt_file untouched. ---
@@ -640,7 +640,7 @@ int main() {
 		TEST_EXPECT(rec2.name1 == "rifle");
 		TEST_EXPECT(rec2.name2 == "patrol");
 		TEST_EXPECT(rec2.max_simultaneous == rec.max_simultaneous); // no_more_than preserved
-		// An exactly-8-char name keeps all 8 bytes: copy_cstr used to force a NUL into byte 7 and
+		// An exactly-8-char name keeps all 8 bytes: the old copy used to force a NUL into byte 7 and
 		// drop the 8th char, silently corrupting an unedited AI class name on every property edit.
 		props.name1 = "rifleman"; // 8 chars
 		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));

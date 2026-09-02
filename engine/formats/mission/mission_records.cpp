@@ -317,7 +317,7 @@ void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
 	entity.no_less_than = static_cast<uint8_t>(std::clamp(properties.no_less_than, 0, 255));
 	entity.map_symbol = static_cast<uint8_t>(std::clamp(properties.map_symbol, 0, 255));
 	// name1/name2 are fixed 8-byte slots a mission can fill completely; copy_fixed_field keeps all
-	// 8 bytes (copy_cstr would force a NUL into byte 7 and truncate an 8-char name on every edit).
+	// 8 bytes (a NUL-forcing copy would truncate an 8-char name at byte 7 on every edit).
 	copy_fixed_field(entity.name1, sizeof(entity.name1), properties.name1);
 	copy_fixed_field(entity.name2, sizeof(entity.name2), properties.name2);
 }

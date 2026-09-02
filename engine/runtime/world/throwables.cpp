@@ -943,19 +943,6 @@ void ThrowableSim::detonate_satchels_by_owner(World &world, EntityHandle owner) 
     }
 }
 
-void ThrowableSim::remove_devices_by_owner(World &world, EntityHandle owner) {
-    // [orig: Server_ProcessPlayerDeath -> Entity_RemovePlacedDevicesByOwner
-    // @ 0x546e00 -> Server_RemoveEntityAndNotify @ 0x50a270 — silent removal.]
-    const Entity *live_owner = world.registry.get(owner);
-    if (live_owner == nullptr) return;
-    for (PlacedDevice &d : devices) {
-        if (!d.active || d.owner.packed != owner.packed ||
-            d.owner_spawn_id != live_owner->registry_spawn_id)
-            continue;
-        remove_device(world, d);
-    }
-}
-
 void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
     if (!device.active) return;
     if (entity_for_lifetime(world, device.entity, device.entity_spawn_id) == nullptr) {

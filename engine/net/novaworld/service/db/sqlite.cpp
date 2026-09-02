@@ -91,12 +91,6 @@ std::optional<int64_t> Row::as_int(std::size_t i) const {
 	return std::nullopt;
 }
 
-std::optional<double> Row::as_real(std::size_t i) const {
-	if (i >= values.size()) return std::nullopt;
-	if (auto *v = std::get_if<double>(&values[i])) return *v;
-	return std::nullopt;
-}
-
 std::optional<std::string> Row::as_text(std::size_t i) const {
 	if (i >= values.size()) return std::nullopt;
 	if (auto *v = std::get_if<std::string>(&values[i])) return *v;

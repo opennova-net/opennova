@@ -225,11 +225,6 @@ public:
     // device owned by `owner` gets Health = -1; the next think detonates it.
     void detonate_satchels_by_owner(World &world, EntityHandle owner);
 
-    // Owner death/leave cleanup [orig: Server_ProcessPlayerDeath @ 0x5178d8 ->
-    // Entity_RemovePlacedDevicesByOwner @ 0x546e00 -> Server_RemoveEntityAndNotify
-    // @ 0x50a270]: devices are REMOVED silently, never detonated.
-    void remove_devices_by_owner(World &world, EntityHandle owner);
-
     void reset() noexcept {
         devices.clear();
         events.clear();
