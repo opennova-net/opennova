@@ -461,7 +461,7 @@ def count_godot_src_dictionary_returns() -> int:
     return count
 
 
-NODE_META_CALL = re.compile(r"\b(?:set_meta|get_meta|has_meta|remove_meta)\s*\(")
+NODE_META_CALL = re.compile(r"\b(?:set_meta|get_meta|has_meta|remove_meta|get_meta_list)\s*\(")
 
 
 def count_godot_node_meta_sites() -> int:

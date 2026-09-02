@@ -527,12 +527,6 @@ func get_throwable_present_stats() -> RefCounted:
 	return _throwable_present.get_stats() if _throwable_present != null else null
 
 
-func get_destruction_present_stats() -> RefCounted:
-	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
-	# loaded mission runs with the pass.
-	return _destruction_present.get_stats() if _destruction_present != null else null
-
-
 func get_scar_present_stats() -> RefCounted:
 	# ScarPresentPass.Stats (typed counters, ADR 0017); null until the
 	# presentation pass exists.

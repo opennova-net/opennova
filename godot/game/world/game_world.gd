@@ -848,12 +848,6 @@ func get_fire_present_stats() -> RefCounted:
 	return _runtime.get_fire_present_stats() if _runtime != null else null
 
 
-# Destruction-presentation counters (DestructionPresentPass.Stats, typed per
-# ADR 0017; null until a loaded mission runs with the pass).
-func get_destruction_present_stats() -> RefCounted:
-	return _runtime.get_destruction_present_stats() if _runtime != null else null
-
-
 # Scar-presentation counters (ScarPresentPass.Stats, typed per ADR 0017).
 func get_scar_present_stats() -> RefCounted:
 	return _runtime.get_scar_present_stats() if _runtime != null else null
