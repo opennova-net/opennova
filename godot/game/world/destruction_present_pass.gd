@@ -199,7 +199,7 @@ func present_drained(events: DestructionDrain, pieces: Array) -> void:
 # runtime entities instead use their packed wire handle because siblings share
 # both zero BMS id and the non-BMS origin sentinel.
 func _spawn_origin_parts(spawn_origin: int) -> Vector2i:
-	return Vector2i(SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
+	return Vector2i(Simulation.spawn_origin_kind(spawn_origin), Simulation.spawn_origin_index(spawn_origin))
 
 
 func _uses_dynamic_husk_identity(bms_id: int, spawn_origin: int,
@@ -208,7 +208,7 @@ func _uses_dynamic_husk_identity(bms_id: int, spawn_origin: int,
 		return false
 	# A real authored origin remains canonical even when its BMS id is zero.
 	# Runtime-only entities carry either no origin or the promotion sentinel.
-	return spawn_origin == SpawnOrigin.NONE
+	return spawn_origin == Simulation.SPAWN_ORIGIN_NONE
 
 
 func _husk_identity_key(bms_id: int, spawn_origin: int,
@@ -219,7 +219,7 @@ func _husk_identity_key(bms_id: int, spawn_origin: int,
 	return '%d:%d:%d' % [bms_id, origin.x, origin.y]
 
 
-func _resolve_entity_node(bms_id: int, spawn_origin: int = SpawnOrigin.NONE,
+func _resolve_entity_node(bms_id: int, spawn_origin: int = Simulation.SPAWN_ORIGIN_NONE,
 		wire_handle: int = -1) -> Node3D:
 	var dynamic_identity := _uses_dynamic_husk_identity(
 			bms_id, spawn_origin, wire_handle)
@@ -378,15 +378,15 @@ func _set_husk_static_shadow(model: ObjectModel, enabled: bool) -> void:
 # Node-less wrecks still move while death physics settles them. Resolve the
 # same compact present pose consumed by the other shell presentation paths.
 func _present_transform_for_identity(bms_id: int,
-		spawn_origin: int = SpawnOrigin.NONE) -> Variant:
+		spawn_origin: int = Simulation.SPAWN_ORIGIN_NONE) -> Variant:
 	if _sim == null:
 		return null
 	var state := PackedVector3Array()
 	if bms_id > 0:
 		state = _sim.get_present_effect_state_for_bms_id(bms_id)
-	if state.size() != Simulation.EFFECT_STATE_COUNT and spawn_origin != SpawnOrigin.NONE:
+	if state.size() != Simulation.EFFECT_STATE_COUNT and spawn_origin != Simulation.SPAWN_ORIGIN_NONE:
 		state = _sim.get_present_effect_state_for_origin(
-				SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
+				Simulation.spawn_origin_kind(spawn_origin), Simulation.spawn_origin_index(spawn_origin))
 	if state.size() != Simulation.EFFECT_STATE_COUNT:
 		return null
 	var rotation_deg := state[Simulation.EFFECT_STATE_ROTATION_DEG]
@@ -418,7 +418,7 @@ func _sync_static_husks() -> void:
 			continue
 		var live_v: Variant = _present_transform_for_identity(
 				int(restore.get('bms_id', 0)),
-				int(restore.get('spawn_origin', SpawnOrigin.NONE)))
+				int(restore.get('spawn_origin', Simulation.SPAWN_ORIGIN_NONE)))
 		if live_v is Transform3D:
 			var graft := graft_v as Node3D
 			var live := live_v as Transform3D

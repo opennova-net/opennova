@@ -130,7 +130,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	var challenge_sim: Simulation = _world._runtime.get_sim()
 	if challenge_sim != null and not wire_header_join:
 		if challenge_sim.is_joiner():
-			_world._prewarm_loaded_model_challenge_definitions()
+			_world._player_visuals.prewarm_loaded_model_challenge_definitions()
 		challenge_sim.finalize_loaded_model_challenge_snapshot()
 	_world.load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_AUDIO))
 	timeline.span("audio")
@@ -533,7 +533,7 @@ func settle_join_wire_assets() -> bool:
 		_world._join_wire_assets_failed = true
 		return false
 	_place_streamed_mission_objects(sim)
-	_world._prewarm_loaded_model_challenge_definitions()
+	_world._player_visuals.prewarm_loaded_model_challenge_definitions()
 	sim.finalize_loaded_model_challenge_snapshot()
 	_world._join_wire_assets_pending = false
 	return true
@@ -674,7 +674,7 @@ func _configure_foliage() -> void:
 # placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick(); its drained side effects route through
-# _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
+# the router's on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	var container := _world.get_node_or_null(NodePath("MissionObjects"))
 	_world._runtime = MissionPresentation.new()
@@ -776,9 +776,9 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 		# Water may have been built before the runtime existed — re-push the
 		# sim-side plane the footstep/landing legs compare feet against.
 		_world._runtime.get_sim().set_water_z(float(_world._water.water_height))
-	_world._runtime.effects_drained.connect(_world._on_runtime_effects)
-	_world._runtime.fixed_tick_completed.connect(_world._on_runtime_fixed_tick)
-	_world._runtime.simulation_restarted.connect(_world._on_runtime_simulation_restarted)
+	_world._runtime.effects_drained.connect(_world._effect_router.on_runtime_effects)
+	_world._runtime.fixed_tick_completed.connect(_world._effect_router.on_runtime_fixed_tick)
+	_world._runtime.simulation_restarted.connect(_world._effect_router.on_runtime_simulation_restarted)
 	# A browsable listen host: register it with the NovaWorld gate (F1), if one was
 	# configured. No-op for single-player, joiners, and pure-LAN play.
 	_world._net_drive.on_runtime_started(opts, bms_name)

@@ -307,7 +307,7 @@ func _item_fx_identity_aliases(net_id: int, bms_id: int,
 	# authored BMS/net identity. Their packed runtime handle is therefore the only
 	# alias that distinguishes siblings on the same carrier.
 	if has_wire_identity and bms_id == 0 and (
-			spawn_origin == -1 or spawn_origin == SpawnOrigin.NONE):
+			spawn_origin == -1 or spawn_origin == Simulation.SPAWN_ORIGIN_NONE):
 		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
@@ -332,7 +332,7 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var origin_kind := ref.origin_kind if ref.wire_handle >= 0 else ref.kind
 	var spawn_origin := 0
 	if origin_kind >= 0 and ref.index >= 0:
-		spawn_origin = SpawnOrigin.pack(origin_kind, ref.index)
+		spawn_origin = Simulation.spawn_origin_pack(origin_kind, ref.index)
 	return _item_fx_identity_aliases(0, ref.bms_id, spawn_origin, ref.wire_handle)
 
 
@@ -417,7 +417,7 @@ func _deactivate_item_fx_control_nodes(event_aliases: Array) -> void:
 
 
 ## Consume a vehicle-control lifecycle effect from the runtime's drained batch
-## (called by the world's _on_runtime_effects router). Returns true when the
+## (called by the world's effect router, on_runtime_effects). Returns true when the
 ## effect was a control event and was handled here.
 func consume_control_effect(effect: MissionEffect) -> bool:
 	var kind := effect.kind

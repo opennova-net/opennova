@@ -104,7 +104,7 @@ class ChallengePrewarmWorldHarness:
 	func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		return requested_def
 	func prewarm_challenge_models() -> void:
-		_prewarm_loaded_model_challenge_definitions()
+		_player_visuals.prewarm_loaded_model_challenge_definitions()
 
 
 class ImpactAudioStub:
@@ -360,7 +360,7 @@ class ItemFxGameWorldHarness:
 	func active_control_identity_count() -> int:
 		return fx.active_identity_count()
 	func consume_runtime_effects(effects: Array) -> void:
-		_on_runtime_effects(effects)
+		_effect_router.on_runtime_effects(effects)
 	# One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it.
 	static func control_effect(kind: String, a: int, b: int, c: int,
 			wire_handle: int = -1) -> MissionEffect:

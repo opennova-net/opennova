@@ -159,7 +159,7 @@ func _resolve_owner_nodes(draw: ScarDrawList) -> Dictionary:
 		if out.has(owner):
 			continue
 		var bms_id := bms_ids[i] if i < bms_ids.size() else 0
-		var origin := int(origins[i]) if i < origins.size() else SpawnOrigin.NONE
+		var origin := int(origins[i]) if i < origins.size() else Simulation.SPAWN_ORIGIN_NONE
 		var node := _resolve_owner(bms_id, origin, owner)
 		if node != null:
 			out[owner] = node
@@ -173,10 +173,10 @@ func _resolve_owner_nodes(draw: ScarDrawList) -> Dictionary:
 # the shared index by (bms_id, kind, index). The wire node is the fallback for
 # an authored row the index does not carry (a joiner's wire-header world).
 func _resolve_owner(bms_id: int, spawn_origin: int, wire_handle: int) -> Node3D:
-	var dynamic_identity := bms_id == 0 and spawn_origin == SpawnOrigin.NONE
+	var dynamic_identity := bms_id == 0 and spawn_origin == Simulation.SPAWN_ORIGIN_NONE
 	if not dynamic_identity and _index != null:
-		var node: Node3D = _index.resolve(bms_id, SpawnOrigin.kind(spawn_origin),
-				SpawnOrigin.index(spawn_origin))
+		var node: Node3D = _index.resolve(bms_id, Simulation.spawn_origin_kind(spawn_origin),
+				Simulation.spawn_origin_index(spawn_origin))
 		if node != null and is_instance_valid(node):
 			return node
 	if _wire != null and is_instance_valid(_wire):

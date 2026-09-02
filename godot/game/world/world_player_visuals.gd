@@ -82,7 +82,7 @@ func _local_player_visual_spec() -> PlayerVisualSpec:
 # the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
 # the same boundary without constructing hidden scene nodes. Later builders hit
 # the placer's cache, so they cannot introduce a definition just after freeze.
-func _prewarm_loaded_model_challenge_definitions() -> void:
+func prewarm_loaded_model_challenge_definitions() -> void:
 	if _world._placer == null:
 		return
 	# By the deployment/admission boundary the complete initial world stream has

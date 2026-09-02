@@ -81,7 +81,7 @@ func setup(world: GameWorld, ui_parent: Node) -> void:
 	_world = world
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
-	_connect_layout_source()
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func is_open() -> bool:
@@ -422,7 +422,7 @@ func _ensure_menu() -> bool:
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	var style := _load_style(root)
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 	var menu_text: RtxtStringFile = Strings.get_table(Strings.TABLE_MENUTXT)
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("DeployScreenPresenter: %s has no screens" % MENU_FILE)
@@ -459,14 +459,6 @@ func _game_text(section: String, key: String, fallback: String) -> String:
 	if t != null and not key.is_empty() and t.has_string_in_section(section, key):
 		return t.get_string_in_section(section, key)
 	return fallback
-
-
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-
-
-func _connect_layout_source() -> void:
-	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func _recompute_fit() -> void:

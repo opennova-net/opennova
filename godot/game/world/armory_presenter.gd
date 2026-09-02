@@ -67,7 +67,7 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter,
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
-	_connect_layout_source()
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func set_player_team(team: int) -> void:
@@ -288,7 +288,7 @@ func _ensure_menu() -> bool:
 	_driver.attach(_frame, _audio)
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
-	var style := _load_style(root)
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("ArmoryPresenter: %s has no screens" % MENU_FILE)
@@ -397,14 +397,6 @@ func _register_text_tables(root: ResourceRoot) -> void:
 
 
 # The canonical menu stylesheet name the original engine looks for.
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-
-
-func _connect_layout_source() -> void:
-	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
-
-
 func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
