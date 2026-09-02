@@ -872,8 +872,7 @@ func _table_click(id: int, row: int) -> void:
 	_last_click_id = id
 	_last_click_row = row
 	_last_click_ms = 0 if double else now
-	var multiselect := bool(_doc.get_widget_authoring_state(id).get("items", {})
-			.get("multiselect", false))
+	var multiselect := _doc.is_widget_multiselect(id)
 	table_select_row(id, row, multiselect and Input.is_key_pressed(KEY_CTRL))
 	_play_widget_sound_state(id, "SELECTED")
 	if double:
