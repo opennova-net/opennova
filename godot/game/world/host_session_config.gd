@@ -6,8 +6,8 @@ extends RefCounted
 ## runtime. Every host producer builds one — the mp.mnu host screen (MpMenuCompanion), the
 ## NovaWorld panel, and the --lan-host launch flag. A HostSessionConfig always requests a
 ## SOCKETED LAN listen server; single-player passes none and keeps the in-process
-## (socketless) listen server. At the FFI boundary the runtime encodes it back to a
-## Dictionary via to_session_options() for Simulation.configure_host_session.
+## (socketless) listen server. The runtime projects it to the sim's HostSessionOptions
+## record via to_session_options() for Simulation.configure_host_session.
 
 ## The g_GameType code words, re-exported from the NetProtocol binding so host
 ## producers keep the HostSessionConfig.* spelling. The canonical home (and every
@@ -127,41 +127,42 @@ static func game_type_for_mission_mode(mode: int) -> int:
 	return NetProtocol.game_type_for_mission_mode(mode)
 
 
-## Encode the session slice for Simulation.configure_host_session — the FFI boundary
-## keeps a Dictionary (ADR 0017). The mission runtime stamps the mission-derived identity
-## (mission_name / mission_file / spawn_names) on top before handing it to the sim.
-func to_session_options() -> Dictionary:
-	return {
-		"server_name": server_name,
-		"player_name": player_name,
-		"custom_text": custom_text,
-		"expansion": expansion,
-		"integrity_profile": integrity_profile,
-		"gametype": game_type,
-		"class_allow_mask": class_allow_mask,
-		"channel": channel,
-		"lan_mode": lan_mode,
-		"bind_port": bind_port,
-		"max_players": max_players,
-		"spectator_slots": spectator_slots,
-		"spectator_password": spectator_password,
-		"serve_and_play": not dedicated,
-		"respawn_time": respawn_time,
-		"time_limit_minutes": time_limit_minutes,
-		"replay_enabled": replay_enabled,
-		"max_team_lives": max_team_lives,
-		"score_limit": score_limit,
-		"max_score": max_score,
-		"koth_delta": koth_delta,
-		"flag_return_ticks": flag_return_ticks,
-		"capture_duration_seconds": capture_duration_seconds,
-		"capture_speed_setting": capture_speed_setting,
-		"spawn_wave_time_base": spawn_wave_time_base,
-		"spawn_wave_time_zone": spawn_wave_time_zone,
-		"default_spawn_requires_no_team_zone": default_spawn_requires_no_team_zone,
-		"num_teams": num_teams,
-		"respawn_timeout": respawn_timeout,
-		"start_delay": start_delay,
-		"destroy_buildings": destroy_buildings,
-		"death_messages": death_messages,
-	}
+## The session slice for Simulation.configure_host_session as the typed record
+## the sim takes. The mission runtime stamps the mission-derived identity
+## (mission_name / mission_file / spawn_names / game_root) on top before handing
+## it to the sim.
+func to_session_options() -> HostSessionOptions:
+	var options := HostSessionOptions.new()
+	options.server_name = server_name
+	options.player_name = player_name
+	options.custom_text = custom_text
+	options.expansion = expansion
+	options.integrity_profile = integrity_profile
+	options.game_type = game_type
+	options.class_allow_mask = class_allow_mask
+	options.channel = channel
+	options.lan_mode = lan_mode
+	options.bind_port = bind_port
+	options.max_players = max_players
+	options.spectator_slots = spectator_slots
+	options.spectator_password = spectator_password
+	options.serve_and_play = not dedicated
+	options.respawn_time = respawn_time
+	options.time_limit_minutes = time_limit_minutes
+	options.replay_enabled = replay_enabled
+	options.max_team_lives = max_team_lives
+	options.score_limit = score_limit
+	options.max_score = max_score
+	options.koth_delta = koth_delta
+	options.flag_return_ticks = flag_return_ticks
+	options.capture_duration_seconds = capture_duration_seconds
+	options.capture_speed_setting = capture_speed_setting
+	options.spawn_wave_time_base = spawn_wave_time_base
+	options.spawn_wave_time_zone = spawn_wave_time_zone
+	options.default_spawn_requires_no_team_zone = default_spawn_requires_no_team_zone
+	options.num_teams = num_teams
+	options.respawn_timeout = respawn_timeout
+	options.start_delay = start_delay
+	options.destroy_buildings = destroy_buildings
+	options.death_messages = death_messages
+	return options

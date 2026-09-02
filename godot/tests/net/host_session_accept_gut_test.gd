@@ -44,27 +44,26 @@ func test_enable_host_listen_binds_and_keeps_sp_present() -> void:
 
 func test_host_session_config_survives_native_accept_start() -> void:
 	var sim := Simulation.new()
-	sim.configure_host_session({
-		"server_name": "Configured Host",
-		"mission_name": "Custom Island Test",
-		"mission_file": "CUSTOM_A1.BMS",
-		"player_name": "HostPlayer",
-		"spawn_names": ["Custom Island Test"],
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Configured Host"
+	host_options.mission_name = "Custom Island Test"
+	host_options.mission_file = "CUSTOM_A1.BMS"
+	host_options.player_name = "HostPlayer"
+	host_options.spawn_names = PackedStringArray(["Custom Island Test"])
+	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "host bound an OS-assigned UDP port")
-	var config: Dictionary = sim.get_host_session_config()
-	assert_eq(String(config.get("server_name", "")), "Configured Host")
-	assert_eq(String(config.get("mission_name", "")), "Custom Island Test")
-	assert_eq(String(config.get("mission_file", "")), "CUSTOM_A1.BMS")
-	assert_eq(String(config.get("player_name", "")), "HostPlayer")
-	assert_eq(Array(config.get("spawn_names", [])).size(), 1)
+	var config := sim.get_host_session_config()
+	assert_eq(config.server_name, "Configured Host")
+	assert_eq(config.mission_name, "Custom Island Test")
+	assert_eq(config.mission_file, "CUSTOM_A1.BMS")
+	assert_eq(config.player_name, "HostPlayer")
+	assert_eq(config.spawn_names.size(), 1)
 	sim.free()
 
 
 func test_loaded_host_session_installs_bms_header() -> void:
 	var sim := _host_sim(_two_organics())
-	var config: Dictionary = sim.get_host_session_config()
-	assert_eq(int(config.get("mission_header_size", 0)), 616,
+	assert_eq(sim.get_mission_header_size(), 616,
 		"loaded host session has the BMS header sent by tag=0x0B")
 	sim.free()
 

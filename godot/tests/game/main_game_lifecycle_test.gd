@@ -673,18 +673,18 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_gt(host_body_records, 0,
 			"the host fixture includes authored pools that must reach the wire-only join")
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Loading Hold Host",
-		"mission_name": "Minimal",
-		"mission_file": advertised_file,
-		"gametype": 0x30020,
-		"max_players": 4,
-		# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
-		# leaves the host advertising whatever expansion this machine last persisted, and the
-		# joiner's preload then correctly refuses a data set this install cannot mount
-		# (D-NET-178) — a failure about machine state, not about the loading-screen hold.
-		"expansion": "",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Loading Hold Host"
+	host_options.mission_name = "Minimal"
+	host_options.mission_file = advertised_file
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
+	# leaves the host advertising whatever expansion this machine last persisted, and the
+	# joiner's preload then correctly refuses a data set this install cannot mount
+	# (D-NET-178) — a failure about machine state, not about the loading-screen hold.
+	host_options.expansion = ""
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	var streamed_til := TilFixture.bytes_for_cell(4)
 	host.set_terrain_til_data(streamed_til)
@@ -749,14 +749,14 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 			FIXTURE_DIR.path_join("mnml.bms"))), OK)
 	var advertised_file := "wire_truncated_til.bms"
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Truncated TIL Host",
-		"mission_name": "Minimal",
-		"mission_file": advertised_file,
-		"gametype": 0x30020,
-		"max_players": 4,
-		"expansion": "",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Truncated TIL Host"
+	host_options.mission_name = "Minimal"
+	host_options.mission_file = advertised_file
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.expansion = ""
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	# Advertise two records but provide one. The host emits the canonical first
 	# page [0,1), then has no second page; admission must see Receiving, never

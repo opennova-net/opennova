@@ -207,7 +207,9 @@ func _join_pair_with_pending_pick() -> Dictionary:
 
 	var host := Simulation.new()
 	autofree(host)
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1))

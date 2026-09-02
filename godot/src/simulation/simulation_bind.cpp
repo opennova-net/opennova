@@ -7,6 +7,7 @@
 #include "simulation/entity_row.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h"
+#include "network/host_session_options.h" // the hosted-session request record
 #include "simulation/fp_viewmodel_spec.h" // the first-person submit spec record
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
@@ -114,6 +115,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_host_peer_count"), &Simulation::get_host_peer_count);
 	ClassDB::bind_method(D_METHOD("configure_host_session", "options"), &Simulation::configure_host_session);
 	ClassDB::bind_method(D_METHOD("get_host_session_config"), &Simulation::get_host_session_config);
+	ClassDB::bind_method(D_METHOD("get_mission_header_size"), &Simulation::get_mission_header_size);
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &Simulation::admit_test_remote_peer);
 	ClassDB::bind_method(
 			D_METHOD("enable_join", "host_ip", "port", "player_name",

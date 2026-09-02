@@ -1803,8 +1803,8 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	assert_not_null(sim)
 	if sim != null:
 		var config := sim.get_host_session_config()
-		assert_eq(int(config.get("gametype", 0)), 0x30020)
-		assert_eq(String(config.get("expansion", "missing")), "",
+		assert_eq(config.game_type, 0x30020)
+		assert_eq(config.expansion, "",
 			"base JO stays empty instead of falling back to captured jox01")
 	world.unload()
 
@@ -1965,14 +1965,14 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Abort Admission Host",
-		"mission_name": mission.get_mission_name(),
-		"mission_file": "mnml.bms",
-		"expansion": "",
-		"gametype": 0x30020,
-		"max_players": 4,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Abort Admission Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	var failures: Array[String] = []
@@ -2419,14 +2419,14 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Basename Host",
-		"mission_name": mission.get_mission_name(),
-		"mission_file": "mnml",
-		"expansion": "",
-		"gametype": 0x30020,
-		"max_players": 4,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Basename Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 

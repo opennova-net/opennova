@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
+#include "network/host_session_options.h" // the hosted-session request record
 
 #include <cmath>
 #include <cstring>
@@ -709,35 +710,34 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::configure_host_session(Dictionary p_options) {
+void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {
+	if (p_options.is_null()) return;
+	const opennova::np::GameConfig &in = p_options->config();
+	// Start from the live config so the sim-owned fields (mission header blob,
+	// score tables, PCID) survive; every user-facing field lands from the record.
 	opennova::np::GameConfig config = host_session_config_;
-	host_bind_port_ = dictionary_u16(p_options, "bind_port", host_bind_port_);
-	apply_dictionary_string(p_options, "server_name", config.server_name);
-	apply_dictionary_string(p_options, "mission_name", config.mission_name);
-	apply_dictionary_string(p_options, "mission_file", config.mission_file);
-	apply_dictionary_string(p_options, "custom_text", config.custom_text);
-	apply_dictionary_string(p_options, "player_name", config.player_name);
-	apply_dictionary_string(p_options, "expansion", config.expansion);
-	apply_dictionary_string(
-			p_options, "spectator_password", config.spectator_password);
-	if (p_options.has("spectator_slots")) {
-		config.spectator_slots = dictionary_i32(
-				p_options, "spectator_slots", config.spectator_slots);
-		if (config.spectator_slots < -1) config.spectator_slots = -1;
-	}
+	host_bind_port_ = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
+	config.server_name = in.server_name;
+	config.mission_name = in.mission_name;
+	config.mission_file = in.mission_file;
+	config.custom_text = in.custom_text;
+	config.player_name = in.player_name;
+	config.expansion = in.expansion;
+	config.spectator_password = in.spectator_password;
+	config.spectator_slots = std::max(in.spectator_slots, -1);
 	// D-NET-166: the host's g_expansion_checksum analog. When the caller names
 	// its install root, compute the CRC of the loose
 	// expansion/<name>/version.txt so the join gate can run retail's compare
 	// (the witnessed producer/gate live in vfs_expansion_version_checksum and
 	// validates_join_request).
-	if (p_options.has("game_root")) {
-		const String root = p_options["game_root"];
+	if (!p_options->get_game_root().is_empty()) {
 		config.expansion_version_checksum =
 				opennova::vfs_expansion_version_checksum(
-						std::string(root.utf8().get_data()), config.expansion);
+						std::string(p_options->get_game_root().utf8().get_data()),
+						config.expansion);
 	}
-	if (p_options.has("integrity_profile")) {
-		const String requested = String(p_options["integrity_profile"]).strip_edges();
+	{
+		const String requested = p_options->get_integrity_profile().strip_edges();
 		const std::string id(requested.utf8().get_data());
 		if (id.empty() ||
 				opennova::np::find_integrity_challenge_profile(id) != nullptr) {
@@ -748,106 +748,49 @@ void Simulation::configure_host_session(Dictionary p_options) {
 			config.integrity_profile.clear();
 		}
 	}
-	if (p_options.has("gametype")) {
-		config.game_type = dictionary_u32(p_options, "gametype", config.game_type);
-	} else if (p_options.has("game_type")) {
-		config.game_type = dictionary_u32(p_options, "game_type", config.game_type);
-	}
-	config.mp_attributes = dictionary_u32(p_options, "mpattrib", config.mp_attributes);
-	config.class_allow_mask = static_cast<uint16_t>(dictionary_u32(
-			p_options, "class_allow_mask", config.class_allow_mask) & 0xFFFFu);
-	config.respawn_time = dictionary_u32(p_options, "respawn_time", config.respawn_time);
-	config.time_limit_minutes = dictionary_u32(
-			p_options, "time_limit_minutes", config.time_limit_minutes);
-	config.replay_enabled = dictionary_u32(
-			p_options, "replay_enabled", config.replay_enabled);
-	config.max_team_lives = dictionary_u32(
-			p_options, "max_team_lives", config.max_team_lives);
-	config.score_limit = dictionary_u32(p_options, "score_limit", config.score_limit);
-	config.max_score = dictionary_u32(p_options, "max_score", config.max_score);
-	config.koth_delta = dictionary_u32(p_options, "koth_delta", config.koth_delta);
-	config.flag_return_ticks = dictionary_u32(
-			p_options, "flag_return_ticks", config.flag_return_ticks);
-	config.capture_duration_seconds = dictionary_i32(
-			p_options, "capture_duration_seconds", config.capture_duration_seconds);
-	config.capture_speed_setting = dictionary_i32(
-			p_options, "capture_speed_setting", config.capture_speed_setting);
-	config.spawn_wave_time_base = dictionary_i32(
-			p_options, "spawn_wave_time_base", config.spawn_wave_time_base);
-	config.spawn_wave_time_zone = dictionary_i32(
-			p_options, "spawn_wave_time_zone", config.spawn_wave_time_zone);
-	config.default_spawn_requires_no_team_zone = dictionary_u32(
-			p_options, "default_spawn_requires_no_team_zone",
-			config.default_spawn_requires_no_team_zone);
-	config.num_teams = static_cast<uint8_t>(dictionary_u32(
-			p_options, "num_teams", config.num_teams) & 0xFFu);
-	config.respawn_timeout = dictionary_u32(
-			p_options, "respawn_timeout", config.respawn_timeout);
-	config.start_delay = dictionary_u32(p_options, "start_delay", config.start_delay);
-	config.destroy_buildings = dictionary_u32(
-			p_options, "destroy_buildings", config.destroy_buildings);
-	config.death_messages = dictionary_u32(
-			p_options, "death_messages", config.death_messages);
+	config.game_type = in.game_type;
+	config.mp_attributes = in.mp_attributes;
+	config.class_allow_mask = in.class_allow_mask;
+	config.respawn_time = in.respawn_time;
+	config.time_limit_minutes = in.time_limit_minutes;
+	config.replay_enabled = in.replay_enabled;
+	config.max_team_lives = in.max_team_lives;
+	config.score_limit = in.score_limit;
+	config.max_score = in.max_score;
+	config.koth_delta = in.koth_delta;
+	config.flag_return_ticks = in.flag_return_ticks;
+	config.capture_duration_seconds = in.capture_duration_seconds;
+	config.capture_speed_setting = in.capture_speed_setting;
+	config.spawn_wave_time_base = in.spawn_wave_time_base;
+	config.spawn_wave_time_zone = in.spawn_wave_time_zone;
+	config.default_spawn_requires_no_team_zone = in.default_spawn_requires_no_team_zone;
+	config.num_teams = in.num_teams;
+	config.respawn_timeout = in.respawn_timeout;
+	config.start_delay = in.start_delay;
+	config.destroy_buildings = in.destroy_buildings;
+	config.death_messages = in.death_messages;
 	// The witnessed BANDWIDTH server command (100-1600, clamped at apply):
 	// lowers the per-frame 0x0A byte cap so entity records rotate across frames
 	// [orig: g_entity_send_budget @0xC8FC50].
-	config.entity_send_budget =
-			dictionary_u32(p_options, "bandwidth", config.entity_send_budget);
+	config.entity_send_budget = in.entity_send_budget;
 	// Retail selects its default send divider from the session family, then
 	// from g_LanMode for an authority LAN host. Explicit test/tool overrides
 	// remain available through send_holdoff_ticks.
 	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0]
-	if (p_options.has("channel")) {
-		const String channel = String(p_options["channel"]);
-		config.session_channel = channel.nocasecmp_to("NovaWorld") == 0
-				? opennova::np::GameSessionChannel::NovaWorld
-				: opennova::np::GameSessionChannel::Lan;
-	}
-	config.lan_mode = dictionary_u32(p_options, "lan_mode", config.lan_mode);
-	if (p_options.has("send_holdoff_ticks")) {
-		const Variant holdoff = p_options["send_holdoff_ticks"];
-		if (holdoff.get_type() == Variant::NIL)
-			config.send_holdoff_ticks.reset();
-		else
-			config.send_holdoff_ticks =
-					dictionary_u32(p_options, "send_holdoff_ticks", 1);
-	}
-	if (p_options.has("fat_bullets"))
-		config.fat_bullets = static_cast<bool>(p_options["fat_bullets"]);
-	if (p_options.has("one_shot_kill"))
-		config.one_shot_kill = static_cast<bool>(p_options["one_shot_kill"]);
-	if (p_options.has("spawn_x") || p_options.has("spawn_y") || p_options.has("spawn_z")) {
-		config.spawn_x = dictionary_u32(p_options, "spawn_x", config.spawn_x);
-		config.spawn_y = dictionary_u32(p_options, "spawn_y", config.spawn_y);
-		config.spawn_z = dictionary_u32(p_options, "spawn_z", config.spawn_z);
-	}
-	if (p_options.has("spawn_names")) {
-		config.spawn_names.clear();
-		const Variant names_v = p_options.get("spawn_names", Array());
-		if (names_v.get_type() == Variant::ARRAY) {
-			const Array names = names_v;
-			for (int64_t i = 0; i < names.size(); ++i) {
-				const String name = names[i];
-				if (!name.is_empty()) {
-					config.spawn_names.emplace_back(name.utf8().get_data());
-				}
-			}
-		}
-	}
+	config.session_channel = in.session_channel;
+	config.lan_mode = in.lan_mode;
+	config.send_holdoff_ticks = in.send_holdoff_ticks;
+	config.fat_bullets = in.fat_bullets;
+	config.one_shot_kill = in.one_shot_kill;
+	config.spawn_x = in.spawn_x;
+	config.spawn_y = in.spawn_y;
+	config.spawn_z = in.spawn_z;
+	config.spawn_names = in.spawn_names;
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the lobby-advertised cap, clamped to the witnessed 1..65.
-	if (p_options.has("serve_and_play")) {
-		host_serve_and_play_ = static_cast<bool>(p_options["serve_and_play"]);
-	}
-	if (p_options.has("max_players")) {
-		uint32_t mp = dictionary_u32(p_options, "max_players", host_max_players_);
-		if (mp < 1u) {
-			mp = 1u;
-		} else if (mp > opennova::np::kMaxPlayersCap) {
-			mp = opennova::np::kMaxPlayersCap;
-		}
-		host_max_players_ = mp;
-	}
+	host_serve_and_play_ = p_options->get_serve_and_play();
+	host_max_players_ = static_cast<uint32_t>(std::clamp(p_options->get_max_players(), 1,
+			static_cast<int>(opennova::np::kMaxPlayersCap)));
 	host_session_config_ = std::move(config);
 	if (kernel_ && host_listen_) {
 		kernel_->world.fat_bullets = host_session_config_.fat_bullets;
@@ -855,60 +798,18 @@ void Simulation::configure_host_session(Dictionary p_options) {
 	}
 }
 
-Dictionary Simulation::get_host_session_config() const {
-	const opennova::np::GameConfig &session = host_session_config_;
-	Dictionary out;
-	out["bind_port"] = static_cast<int>(host_bind_port_);
-	out["server_name"] = String(session.server_name.c_str());
-	out["mission_name"] = String(session.mission_name.c_str());
-	out["mission_file"] = String(session.mission_file.c_str());
-	out["player_name"] = String(session.player_name.c_str());
-	out["expansion"] = String(session.expansion.c_str());
-	out["integrity_profile"] = String(session.integrity_profile.c_str());
-	out["spectator_slots"] = static_cast<int64_t>(session.spectator_slots);
-	out["spectator_password"] = String(session.spectator_password.c_str());
-	out["gametype"] = static_cast<int64_t>(session.game_type);
-	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
-	out["class_allow_mask"] = static_cast<int64_t>(session.class_allow_mask);
-	out["respawn_time"] = static_cast<int64_t>(session.respawn_time);
-	out["time_limit_minutes"] = static_cast<int64_t>(session.time_limit_minutes);
-	out["replay_enabled"] = static_cast<int64_t>(session.replay_enabled);
-	out["max_team_lives"] = static_cast<int64_t>(session.max_team_lives);
-	out["score_limit"] = static_cast<int64_t>(session.score_limit);
-	out["max_score"] = static_cast<int64_t>(session.max_score);
-	out["koth_delta"] = static_cast<int64_t>(session.koth_delta);
-	out["flag_return_ticks"] = static_cast<int64_t>(session.flag_return_ticks);
-	out["capture_duration_seconds"] =
-			static_cast<int64_t>(session.capture_duration_seconds);
-	out["capture_speed_setting"] =
-			static_cast<int64_t>(session.capture_speed_setting);
-	out["spawn_wave_time_base"] =
-			static_cast<int64_t>(session.spawn_wave_time_base);
-	out["spawn_wave_time_zone"] =
-			static_cast<int64_t>(session.spawn_wave_time_zone);
-	out["default_spawn_requires_no_team_zone"] =
-			static_cast<int64_t>(session.default_spawn_requires_no_team_zone);
-	out["num_teams"] = static_cast<int64_t>(session.num_teams);
-	out["respawn_timeout"] = static_cast<int64_t>(session.respawn_timeout);
-	out["start_delay"] = static_cast<int64_t>(session.start_delay);
-	out["destroy_buildings"] = static_cast<int64_t>(session.destroy_buildings);
-	out["death_messages"] = static_cast<int64_t>(session.death_messages);
-	// UI host-config values held on the sim (not in GameConfig): the lobby player
-	// cap and the serve-and-play/dedicated selector, for the F3 Net tab.
-	out["max_players"] = static_cast<int64_t>(host_max_players_);
-	out["serve_and_play"] = host_serve_and_play_;
-	out["fat_bullets"] = session.fat_bullets;
-	out["one_shot_kill"] = session.one_shot_kill;
-	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);
-	out["spawn_y"] = static_cast<int64_t>(session.spawn_y);
-	out["spawn_z"] = static_cast<int64_t>(session.spawn_z);
-	out["mission_header_size"] = static_cast<int64_t>(session.mission_header_blob.size());
-	Array spawn_names;
-	for (const std::string &name : session.spawn_names) {
-		spawn_names.push_back(String(name.c_str()));
-	}
-	out["spawn_names"] = spawn_names;
+Ref<HostSessionOptions> Simulation::get_host_session_config() const {
+	Ref<HostSessionOptions> out;
+	out.instantiate();
+	out->assign_config(host_session_config_);
+	out->set_bind_port(host_bind_port_);
+	out->set_max_players(static_cast<int>(host_max_players_));
+	out->set_serve_and_play(host_serve_and_play_);
 	return out;
+}
+
+int Simulation::get_mission_header_size() const {
+	return static_cast<int>(host_session_config_.mission_header_blob.size());
 }
 
 void Simulation::set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile) {

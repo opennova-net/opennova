@@ -221,14 +221,14 @@ func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 func _join_against_host(host_expansion: String, dir: String,
 		world = null, failures: Array = []) -> String:
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Expansion Host",
-		"mission_name": "Expansion Probe",
-		"mission_file": HOST_MAP,
-		"expansion": host_expansion,
-		"gametype": 0x30020,
-		"max_players": 4,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Expansion Host"
+	host_options.mission_name = "Expansion Probe"
+	host_options.mission_file = HOST_MAP
+	host_options.expansion = host_expansion
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0), "the in-process listen host bound a loopback port")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)

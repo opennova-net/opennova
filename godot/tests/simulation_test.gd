@@ -323,10 +323,13 @@ end
 
 func test_host_projectile_options_roundtrip() -> void:
 	var sim := Simulation.new()
-	sim.configure_host_session({"fat_bullets": true, "one_shot_kill": true})
-	var options: Dictionary = sim.get_host_session_config()
-	assert_true(bool(options.get("fat_bullets", false)))
-	assert_true(bool(options.get("one_shot_kill", false)))
+	var host_options := HostSessionOptions.new()
+	host_options.fat_bullets = true
+	host_options.one_shot_kill = true
+	sim.configure_host_session(host_options)
+	var options := sim.get_host_session_config()
+	assert_true(options.fat_bullets)
+	assert_true(options.one_shot_kill)
 	sim.free()
 
 
@@ -334,14 +337,14 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var sim := Simulation.new()
-	sim.configure_host_session({
-		"max_players": 4,
-		"spectator_slots": -1,
-		"spectator_password": "watch",
-	})
-	var options: Dictionary = sim.get_host_session_config()
-	assert_eq(int(options.get("spectator_slots", 0)), -1)
-	assert_eq(String(options.get("spectator_password", "")), "watch")
+	var host_options := HostSessionOptions.new()
+	host_options.max_players = 4
+	host_options.spectator_slots = -1
+	host_options.spectator_password = "watch"
+	sim.configure_host_session(host_options)
+	var options := sim.get_host_session_config()
+	assert_eq(options.spectator_slots, -1)
+	assert_eq(options.spectator_password, "watch")
 	assert_true(sim.enable_host_listen(0))
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.has_local_player(),
@@ -370,9 +373,11 @@ func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_class_allow_mask(), 0x03FF,
 			"a fresh host exposes retail's all-ten-classes default")
-	sim.configure_host_session({"class_allow_mask": 0x0155})
-	var options: Dictionary = sim.get_host_session_config()
-	assert_eq(int(options.get("class_allow_mask", -1)), 0x0155,
+	var host_options := HostSessionOptions.new()
+	host_options.class_allow_mask = 0x0155
+	sim.configure_host_session(host_options)
+	var options := sim.get_host_session_config()
+	assert_eq(options.class_allow_mask, 0x0155,
 			"the configured writer source survives the Godot session adapter")
 	assert_eq(sim.get_class_allow_mask(), 0x0155,
 			"the armory-facing seam exposes the same configured host mask")
@@ -381,40 +386,40 @@ func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 
 func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 	var sim := Simulation.new()
-	sim.configure_host_session({
-		"gametype": NetProtocol.GAME_TYPE_FLAGBALL,
-		"max_score": 9,
-		"koth_delta": 7,
-		"flag_return_ticks": 333,
-		"capture_duration_seconds": 27,
-		"capture_speed_setting": 2,
-		"spawn_wave_time_base": 4,
-		"spawn_wave_time_zone": 12,
-		"default_spawn_requires_no_team_zone": 1,
-		"num_teams": 4,
-	})
-	var options: Dictionary = sim.get_host_session_config()
-	assert_eq(int(options.get("gametype", -1)), NetProtocol.GAME_TYPE_FLAGBALL)
-	assert_eq(int(options.get("max_score", -1)), 9)
-	assert_eq(int(options.get("koth_delta", -1)), 7)
-	assert_eq(int(options.get("flag_return_ticks", -1)), 333)
-	assert_eq(int(options.get("capture_duration_seconds", -1)), 27)
-	assert_eq(int(options.get("capture_speed_setting", -1)), 2)
-	assert_eq(int(options.get("spawn_wave_time_base", -1)), 4)
-	assert_eq(int(options.get("spawn_wave_time_zone", -1)), 12)
-	assert_eq(int(options.get("default_spawn_requires_no_team_zone", -1)), 1)
-	assert_eq(int(options.get("num_teams", -1)), 4)
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = NetProtocol.GAME_TYPE_FLAGBALL
+	host_options.max_score = 9
+	host_options.koth_delta = 7
+	host_options.flag_return_ticks = 333
+	host_options.capture_duration_seconds = 27
+	host_options.capture_speed_setting = 2
+	host_options.spawn_wave_time_base = 4
+	host_options.spawn_wave_time_zone = 12
+	host_options.default_spawn_requires_no_team_zone = 1
+	host_options.num_teams = 4
+	sim.configure_host_session(host_options)
+	var options := sim.get_host_session_config()
+	assert_eq(options.game_type, NetProtocol.GAME_TYPE_FLAGBALL)
+	assert_eq(options.max_score, 9)
+	assert_eq(options.koth_delta, 7)
+	assert_eq(options.flag_return_ticks, 333)
+	assert_eq(options.capture_duration_seconds, 27)
+	assert_eq(options.capture_speed_setting, 2)
+	assert_eq(options.spawn_wave_time_base, 4)
+	assert_eq(options.spawn_wave_time_zone, 12)
+	assert_eq(options.default_spawn_requires_no_team_zone, 1)
+	assert_eq(options.num_teams, 4)
 	sim.free()
 
 
 func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 	var sim := Simulation.new()
-	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "x")), "",
+	assert_eq(sim.get_host_session_config().integrity_profile, "",
 			"a host never infers integrity bytes from its expansion name")
-	sim.configure_host_session({
-		"integrity_profile": " retail-revx02-024f56f2-2d087374 ",
-	})
-	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "")),
+	var host_options := HostSessionOptions.new()
+	host_options.integrity_profile = " retail-revx02-024f56f2-2d087374 "
+	sim.configure_host_session(host_options)
+	assert_eq(sim.get_host_session_config().integrity_profile,
 			"retail-revx02-024f56f2-2d087374",
 			"the independently witnessed corpus is an explicit host-session input")
 	sim.free()

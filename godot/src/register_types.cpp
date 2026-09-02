@@ -91,6 +91,7 @@
 #include "rtxt/rtxt_string_file.h"
 #include "network/novaworld_client.h"
 #include "network/novaworld_server_browser.h"
+#include "network/host_session_options.h"
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_host.h"
 #include "network/udp_pump.h"
@@ -254,6 +255,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	GDREGISTER_CLASS(ControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
+	GDREGISTER_CLASS(HostSessionOptions);
 	GDREGISTER_CLASS(NovaWorldServerRow);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);
 	GDREGISTER_CLASS(NovaWorldHost);

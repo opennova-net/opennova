@@ -214,7 +214,7 @@ func test_host_pressed_emits_selected_mission() -> void:
 	assert_eq(config.mission, "bravo.bms", "the picked map rides the host request")
 	assert_eq(config.channel, HostSessionConfig.CHANNEL_NOVAWORLD,
 		"panel hosts on the NovaWorld channel")
-	assert_eq(String(config.to_session_options().get("channel", "")),
+	assert_eq(config.to_session_options().channel,
 		HostSessionConfig.CHANNEL_NOVAWORLD,
 		"the FFI options retain the NovaWorld period-12 selector")
 

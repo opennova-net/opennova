@@ -150,8 +150,8 @@ func setup(mission: MissionData, container: Node,
 		if needs_join_connection and options.resource_root != null:
 			_sim.set_join_expansion_version_root(options.resource_root.get_root_dir())
 	elif host_session != null:
-		# Co-op LAN HOST: encode the typed session request at the FFI boundary (ADR 0017)
-		# and stamp the mission-derived identity the session advertises on top. bind_port
+		# Co-op LAN HOST: project the typed session request to the sim's record and
+		# stamp the mission-derived identity the session advertises on top. bind_port
 		# defaults to the witnessed retail LAN host port (HostSessionConfig.DEFAULT_LAN_PORT);
 		# serve-and-play vs DEDICATED and the lobby player cap ride to_session_options()
 		# (net-re §5.2b, host_session_pump step 5).
@@ -160,26 +160,26 @@ func setup(mission: MissionData, container: Node,
 			var mission_mode := 0
 			if mission != null:
 				mission_mode = int(mission.get_game_mode())
-			session_options["gametype"] = HostSessionConfig.game_type_for_mission_mode(mission_mode)
+			session_options.game_type = HostSessionConfig.game_type_for_mission_mode(mission_mode)
 		var mission_name := options.mission_name.strip_edges()
 		if mission_name.is_empty() and mission != null:
 			mission_name = String(mission.get_mission_name()).strip_edges()
 		if mission_name.is_empty() and not options.mission_file.is_empty():
 			mission_name = options.mission_file.get_basename()
 		if not options.mission_file.is_empty():
-			session_options["mission_file"] = options.mission_file
+			session_options.mission_file = options.mission_file
 		if not options.spawn_names.is_empty():
-			session_options["spawn_names"] = Array(options.spawn_names)
+			session_options.spawn_names = options.spawn_names
 		if not mission_name.is_empty():
-			session_options["mission_name"] = mission_name
-			if Array(session_options.get("spawn_names", [])).is_empty():
-				session_options["spawn_names"] = [mission_name]
+			session_options.mission_name = mission_name
+			if session_options.spawn_names.is_empty():
+				session_options.spawn_names = PackedStringArray([mission_name])
 		# The host's expansion version checksum (retail's g_expansion_checksum) is
 		# CRC'd from the loose expansion/<name>/version.txt under the install root;
 		# the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		# expansion is active (D-NET-166).
 		if options.resource_root != null:
-			session_options["game_root"] = options.resource_root.get_root_dir()
+			session_options.game_root = options.resource_root.get_root_dir()
 		_sim.configure_host_session(session_options)
 		# Retail builds the active game-type score table, then overlays the loose
 		# VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This

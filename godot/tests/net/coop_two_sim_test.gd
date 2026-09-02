@@ -470,15 +470,15 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_true(mission.set_header_string("mission_name", "Preload Island"))
 
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Preload Host",
-		"mission_name": "Preload Island",
-		"mission_file": "PRELOAD_A1.BMS",
-		"expansion": "jox01",
-		"gametype": 0x30020,
-		"max_players": 4,
-		"class_allow_mask": 0x0155,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Preload Host"
+	host_options.mission_name = "Preload Island"
+	host_options.mission_file = "PRELOAD_A1.BMS"
+	host_options.expansion = "jox01"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.class_allow_mask = 0x0155
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 
@@ -536,7 +536,9 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	# WAC-equivalent commands on the host's weather home, deliberately unlike
@@ -574,7 +576,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host := Simulation.new()
 	# Captured retail Co-op g_GameType: bit 0x20000 makes every phase-3
 	# 0x0A carry a 16-byte objective block before the local-health tail.
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	assert_true(host.load_from_mission_data(mission), "host promoted with the net seam")
 	# A co-op host is playable — it spawns its own pool-0 player (0x14B9), which the joiner must
@@ -1119,10 +1123,10 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_gt(mounted_bms_id, 0)
 
 	var host := Simulation.new()
-	host.configure_host_session({
-		"serve_and_play": false,
-		"gametype": 0x30020,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.serve_and_play = false
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
@@ -1326,7 +1330,9 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1462,7 +1468,9 @@ func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
 func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1519,7 +1527,9 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1584,7 +1594,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# zero-offset ctrlx userpoint, the exact shape the old hand table carried.
 	var root := _native_asset_root()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
@@ -1743,7 +1755,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> void:
 	var mission := _peer_duel_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1900,7 +1914,9 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2026,7 +2042,9 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2112,7 +2130,9 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2227,10 +2247,10 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	var host := Simulation.new()
 	# This regression isolates receive-before-actions ordering, so deliver the
 	# authority echo on the next test tick instead of waiting on retail cadence.
-	host.configure_host_session({
-		"gametype": 0x30020,
-		"send_holdoff_ticks": 1,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.send_holdoff_ticks = 1
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2320,7 +2340,9 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> void:
 	var mission := _peer_duel_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2408,7 +2430,9 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(host_mission))
 	_install_combat_tables(host)
@@ -2471,7 +2495,9 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2540,7 +2566,9 @@ func test_joiner_off_by_default() -> void:
 func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2646,7 +2674,10 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	# per-class chase - never hold-then-teleport at the wire cadence.
 	var mission := _subrate_walk_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020, "bandwidth": 100})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.entity_send_budget = 100
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
