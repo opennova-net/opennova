@@ -63,10 +63,39 @@ static void test_mirror_admission() {
     CHECK(!placement_is_mirror_reflected(0x00400000u, kItemTypeBuilding));
 }
 
+static void test_individual_node_admission() {
+    // Persons, dynamic casters, animated items and occluders leave the batch;
+    // a plain static item rides the population.
+    CHECK(needs_individual_node(kItemTypePerson, 0, false, false));
+    CHECK(needs_individual_node(kItemTypeVehicle, kItemAttrib2DynamicShadow, false, false));
+    CHECK(needs_individual_node(kItemTypeBuilding, 0, true, false));
+    CHECK(needs_individual_node(kItemTypeBuilding, 0, false, true));
+    CHECK(!needs_individual_node(kItemTypeBuilding, 0, false, false));
+    CHECK(!needs_individual_node(kItemTypeBuilding, kItemAttrib2StaticShadow, false, false));
+}
+
+static void test_visual_item_resolution() {
+    // The catalog carries the authored visual item and two authored ids.
+    const auto catalog = [](int id) {
+        return id == kPlayerVisualItemId || id == 100166 || id == 100200;
+    };
+    CHECK(resolve_visual_item_id(kPlayerRuntimeTypeId, catalog) == kPlayerVisualItemId);
+    CHECK(resolve_visual_item_id(100166, catalog) == 100166);
+    CHECK(resolve_visual_item_id(166, catalog) == 100166);
+    CHECK(resolve_visual_item_id(200, catalog) == 100200);
+    CHECK(resolve_visual_item_id(300, catalog) == 300);
+    CHECK(resolve_visual_item_id(0, catalog) == 0);
+    // Without the visual item in the catalog the player type falls through.
+    const auto bare = [](int) { return false; };
+    CHECK(resolve_visual_item_id(kPlayerRuntimeTypeId, bare) == kPlayerRuntimeTypeId);
+}
+
 int main() {
     test_dynamic_shadow_admission();
     test_static_shadow_admission();
     test_mirror_admission();
+    test_individual_node_admission();
+    test_visual_item_resolution();
     if (failures == 0) {
         std::printf("placement_traits_test: all checks passed\n");
     }

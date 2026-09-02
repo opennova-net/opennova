@@ -346,18 +346,14 @@ func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 
 
 func test_dynamic_shadow_caster_policy_matches_retail_entity_slot_admission() -> void:
-	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
-			ItemDatabase.TYPE_PERSON, 0, 0),
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(ItemDatabase.TYPE_PERSON, 0),
 			"people always receive a retail shadow render slot")
-	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
-			ItemDatabase.TYPE_VEHICLE, 0, 0x10),
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(ItemDatabase.TYPE_VEHICLE, 0x10),
 			"DynamicShadow admits a non-person model")
-	assert_false(MissionObjectPlacer.item_casts_dynamic_shadow(
-			ItemDatabase.TYPE_BUILDING, 0, 0),
+	assert_false(MissionObjectPlacer.item_casts_dynamic_shadow(ItemDatabase.TYPE_BUILDING, 0),
 			"portal/static buildings never become silhouette casters")
-	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
-			ItemDatabase.TYPE_PERSON, 0x04000000, 0x10),
-			"the witnessed dynamic-slot allocator does not consult ItemDef NoShadow")
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(ItemDatabase.TYPE_PERSON, 0x10),
+			"the witnessed dynamic-slot allocator reads only attrib2 (never ItemDef NoShadow)")
 
 
 func test_static_shadow_caster_policy_matches_retail_terrain_tile_admission() -> void:

@@ -94,8 +94,7 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("entity_transform", "position", "rotation_deg"),
 			&MissionObjectPlacer::entity_transform);
 	ClassDB::bind_static_method("MissionObjectPlacer",
-			D_METHOD("item_casts_dynamic_shadow", "item_type", "attrib",
-					"attrib2"),
+			D_METHOD("item_casts_dynamic_shadow", "item_type", "attrib2"),
 			&MissionObjectPlacer::item_casts_dynamic_shadow);
 	ClassDB::bind_static_method("MissionObjectPlacer",
 			D_METHOD("item_casts_static_terrain_shadow", "kind",
@@ -341,9 +340,7 @@ void MissionObjectPlacer::_configure_item_scale(ObjectModel *p_model,
 
 // --- witnessed eligibility ---------------------------------------------------
 
-bool MissionObjectPlacer::item_casts_dynamic_shadow(int item_type,
-		uint32_t p_attrib, uint32_t attrib2) {
-	(void)p_attrib;
+bool MissionObjectPlacer::item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 	return opennova::mission::item_casts_dynamic_shadow(item_type, attrib2);
 }
 
@@ -1108,24 +1105,15 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 
 int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 	_ensure_item_db();
-	if (p_runtime_type_id == PLAYER_RUNTIME_TYPE_ID && item_db_.is_valid() &&
-			item_db_->has_item(PLAYER_VISUAL_ITEM_ID)) {
-		return PLAYER_VISUAL_ITEM_ID;
+	if (item_db_.is_null()) {
+		return p_runtime_type_id;
 	}
-	if (item_db_.is_valid()) {
-		if (item_db_->has_item(p_runtime_type_id)) {
-			return p_runtime_type_id;
-		}
-		if (p_runtime_type_id > 0 &&
-				p_runtime_type_id < MissionData::ITEM_ID_OFFSET) {
-			const int authored_item_id =
-					p_runtime_type_id + MissionData::ITEM_ID_OFFSET;
-			if (item_db_->has_item(authored_item_id)) {
-				return authored_item_id;
-			}
-		}
-	}
-	return p_runtime_type_id;
+	static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
+	static_assert(PLAYER_RUNTIME_TYPE_ID == opennova::mission::kPlayerRuntimeTypeId);
+	static_assert(PLAYER_VISUAL_ITEM_ID == opennova::mission::kPlayerVisualItemId);
+	const ItemDatabase *db = item_db_.ptr();
+	return opennova::mission::resolve_visual_item_id(p_runtime_type_id,
+			[db](int p_id) { return db->has_item(p_id); });
 }
 
 // The player's visual = the combo its packed character id resolves to: head +
@@ -1356,19 +1344,14 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (item_db_.is_null()) {
 		return false;
 	}
+	// The rule is the engine's (placement_traits.h); the occlusion-record probe
+	// is an asset-cache leg, so it runs only when the cheaper tests said no.
 	const int item_type = item_db_->get_item_type(p_item_id);
-	if (item_type == ItemDatabase::TYPE_PERSON) {
+	const bool has_anim_def = !item_db_->get_anim_def(p_item_id).is_empty();
+	if (opennova::mission::needs_individual_node(item_type, item_db_->get_attrib2(p_item_id),
+				has_anim_def, false)) {
 		return true;
 	}
-	if (item_casts_dynamic_shadow(item_type, item_db_->get_attrib(p_item_id),
-				item_db_->get_attrib2(p_item_id))) {
-		return true;
-	}
-	if (!item_db_->get_anim_def(p_item_id).is_empty()) {
-		return true;
-	}
-	// Multiple authored RLODs are no reason to leave the batch: the retained
-	// populations select the level per instance (update_static_lods).
 	return _has_occlusion_records(p_item_id);
 }
 
@@ -1416,7 +1399,7 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	}
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
-			item_db_->get_attrib(p_item_id), item_db_->get_attrib2(p_item_id)));
+			item_db_->get_attrib2(p_item_id)));
 	// The render-slot ground-shadow profile: person-type casters steepen the
 	// drape's depth-clip plane 4x (the shadowztex stage, not the silhouette
 	// projection), and vehicles may author an items.def `shadow` blob decal —
