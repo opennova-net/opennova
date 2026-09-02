@@ -53,6 +53,12 @@ const ENTITY_HEALTH_MAX := Simulation.ENTITY_HEALTH_MAX
 const MISSION_VAR_COUNT := Simulation.MISSION_VAR_COUNT
 const AUDIO_BUS_VOLUME_MIN_DB := -60.0
 const AUDIO_BUS_VOLUME_MAX_DB := 6.0
+## The teleport action's look domain: one full turn of yaw, the pitch clamp.
+const TELEPORT_YAW_LIMIT_DEG := 360.0
+const TELEPORT_PITCH_LIMIT_DEG := 90.0
+## A mission variable is a signed 32-bit word.
+const MISSION_VAR_VALUE_MIN := -2147483648
+const MISSION_VAR_VALUE_MAX := 2147483647
 
 const REASON_HOST_ONLY := "Only the session host can change authoritative game state."
 const REASON_CONFIRM := "This control changes authoritative state; pass confirm_authority=true on an authority-owning session."
@@ -776,8 +782,10 @@ func _register_edit_actions() -> void:
 			"Move the local player to a mission-space position.",
 			TARGET_SIM, OWNER_ENGINE, [
 				_mission_position_arg("position"),
-				DebugArgSpec.number("yaw_deg").between(-360.0, 360.0).optional(0.0),
-				DebugArgSpec.number("pitch_deg").between(-90.0, 90.0).optional(0.0),
+				DebugArgSpec.number("yaw_deg").between(
+						-TELEPORT_YAW_LIMIT_DEG, TELEPORT_YAW_LIMIT_DEG).optional(0.0),
+				DebugArgSpec.number("pitch_deg").between(
+						-TELEPORT_PITCH_LIMIT_DEG, TELEPORT_PITCH_LIMIT_DEG).optional(0.0),
 			])
 	_authoritative(teleport)
 	teleport.invoke = func(args: Array) -> Dictionary:
@@ -918,7 +926,7 @@ func _register_runtime_rows() -> void:
 			"Set one live V0..V511 mission-script variable.",
 			TARGET_SIM, OWNER_ENGINE, [
 				DebugArgSpec.integer("index").between(0, MISSION_VAR_COUNT - 1),
-				DebugArgSpec.integer("value").between(-2147483648, 2147483647),
+				DebugArgSpec.integer("value").between(MISSION_VAR_VALUE_MIN, MISSION_VAR_VALUE_MAX),
 			])
 	_authoritative(mission_variable)
 	mission_variable.invoke = func(args: Array) -> Dictionary:
