@@ -194,6 +194,7 @@ void NovaWorldClient::start() {
 	if (browser_http_ == nullptr) {
 		browser_http_ = memnew(HTTPRequest);
 		add_child(browser_http_);
+		browser_http_->set_timeout(10.0);
 		browser_http_->connect("request_completed",
 		                       Callable(this, "on_gsb_request_completed"));
 	}
@@ -439,7 +440,10 @@ void NovaWorldClient::sync_session_state() {
 		}
 		break;
 	case S::Verified:
-		if (state_ != STATE_CONNECTED) {
+		// A verified lobby remains active while the separate HTTP join runs.
+		// Keep transactional public states from being overwritten by keepalives.
+		if (state_ != STATE_CONNECTED && state_ != STATE_JOINING &&
+		    state_ != STATE_IN_GAME_HELLO) {
 			enter_state(STATE_CONNECTED);
 			tick_accum_ = 0.0;
 		}
@@ -497,17 +501,17 @@ Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestS
 
 void NovaWorldClient::trigger_gsb() {
 	if (!authenticated_) {
-		emit_signal("server_list_failed", String("Sign in to NovaWorld before loading games."));
+		emit_signal("server_list_failed", String("Sign in before loading games."));
 		return;
 	}
 	if (browser_http_ == nullptr) {
-		emit_signal("server_list_failed", String("The NovaWorld game browser is unavailable."));
+		emit_signal("server_list_failed", String("The game browser is unavailable."));
 		return;
 	}
 	sync_flow_context();
 	const opennova::HttpRequestSpec spec = flow_.gsb_request();
 	if (!spec.valid) {
-		emit_signal("server_list_failed", String("NovaWorld did not provide a game-list address."));
+		emit_signal("server_list_failed", String("The matchmaking service did not provide a game-list address."));
 		return;
 	}
 	if (gsb_request_in_flight_) {
@@ -517,7 +521,7 @@ void NovaWorldClient::trigger_gsb() {
 		gsb_request_in_flight_ = false;
 		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB request did not start: ")
 			+ String(spec.url.c_str()));
-		emit_signal("server_list_failed", String("Could not request the NovaWorld game list."));
+		emit_signal("server_list_failed", String("Could not request the game list."));
 		return;
 	}
 	gsb_request_in_flight_ = true;
@@ -539,12 +543,12 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB fetch failed result=")
 			+ String::num_int64(result) + " code=" + String::num_int64(response_code));
 		if (result != HTTPRequest::RESULT_SUCCESS) {
-			emit_signal("server_list_failed", String("Could not reach the NovaWorld game list."));
+			emit_signal("server_list_failed", String("Could not reach the game browser."));
 		} else if (response_code != 200) {
-			emit_signal("server_list_failed", String("NovaWorld could not load the game list (HTTP ")
+			emit_signal("server_list_failed", String("The matchmaking service could not load the game list (HTTP ")
 				+ String::num_int64(response_code) + String(")."));
 		} else {
-			emit_signal("server_list_failed", String("NovaWorld returned an unreadable game list."));
+			emit_signal("server_list_failed", String("The matchmaking service returned an unreadable game list."));
 		}
 		return;
 	}
@@ -665,11 +669,11 @@ void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t gene
 void NovaWorldClient::login(const String &username, const String &password) {
 	authenticated_ = false;
 	if (state_ != STATE_CONNECTED) {
-		emit_signal("login_failed", String("NovaWorld is still connecting."));
+		emit_signal("login_failed", String("The matchmaking service is still connecting."));
 		return;
 	}
 	if (login_http_ == nullptr) {
-		emit_signal("login_failed", String("client not started"));
+		emit_signal("login_failed", String("The matchmaking client is unavailable."));
 		return;
 	}
 	if (flow_.login_active()) {
@@ -683,7 +687,7 @@ void NovaWorldClient::login(const String &username, const String &password) {
 		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).
 		if (ship_spec(login_http_, r.request) != OK) {
 			flow_.on_login_response(false, 0, {}, {});  // drive the machine back to Idle
-			emit_signal("login_failed", String("prepare request failed"));
+			emit_signal("login_failed", String("Could not start sign-in."));
 		}
 		break;
 	case opennova::LoginResult::Kind::Failed:
@@ -698,8 +702,8 @@ void NovaWorldClient::login(const String &username, const String &password) {
 void NovaWorldClient::on_login_request_completed(int result, int response_code,
                                                  const PackedStringArray &headers,
                                                  const PackedByteArray &body) {
-	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
-		return; // cancelled by stop/reconnect
+	if (state_ != STATE_CONNECTED || !flow_.login_active()) {
+		return; // cancelled by stop/reconnect, or superseded by another lifecycle
 	}
 	const opennova::LoginResult r = flow_.on_login_response(
 		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
@@ -708,7 +712,7 @@ void NovaWorldClient::on_login_request_completed(int result, int response_code,
 		// Re-ship on login_http_ (PREPARE -> NWSTART -> POST -> POLL, all in the flow).
 		if (ship_spec(login_http_, r.request) != OK) {
 			flow_.on_login_response(false, 0, {}, {});
-			emit_signal("login_failed", String("login request failed to start"));
+			emit_signal("login_failed", String("Could not continue sign-in."));
 		}
 		break;
 	case opennova::LoginResult::Kind::Succeeded:
@@ -729,11 +733,11 @@ void NovaWorldClient::on_login_request_completed(int result, int response_code,
 
 void NovaWorldClient::join(int rid) {
 	if (!authenticated_) {
-		emit_signal("join_failed", String("Sign in to NovaWorld before joining a game."));
+		emit_signal("join_failed", String("Sign in before joining a game."));
 		return;
 	}
 	if (join_http_ == nullptr) {
-		emit_signal("join_failed", String("The NovaWorld join service is unavailable."));
+		emit_signal("join_failed", String("The matchmaking join service is unavailable."));
 		return;
 	}
 	if (flow_.join_active()) {
@@ -748,7 +752,7 @@ void NovaWorldClient::join(int rid) {
 		if (ship_spec(join_http_, r.request) != OK) {
 			flow_.on_join_response(false, 0, {}, {});  // drive the machine back to Idle
 			enter_state(STATE_CONNECTED);
-			emit_signal("join_failed", String("Could not start the NovaWorld join request."));
+			emit_signal("join_failed", String("Could not start the join request."));
 		}
 		break;
 	case opennova::JoinResult::Kind::Failed:
@@ -763,6 +767,9 @@ void NovaWorldClient::join(int rid) {
 void NovaWorldClient::on_join_request_completed(int result, int response_code,
                                                 const PackedStringArray &headers,
                                                 const PackedByteArray &body) {
+	if (!authenticated_ || !flow_.join_active()) {
+		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+	}
 	const opennova::JoinResult r = flow_.on_join_response(
 		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
 	switch (r.kind) {
@@ -771,7 +778,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		if (ship_spec(join_http_, r.request) != OK) {
 			flow_.on_join_response(false, 0, {}, {});
 			enter_state(STATE_CONNECTED);
-			emit_signal("join_failed", String("Could not resolve the selected NovaWorld game."));
+			emit_signal("join_failed", String("Could not resolve the selected game."));
 		}
 		break;
 	case opennova::JoinResult::Kind::Resolved: {

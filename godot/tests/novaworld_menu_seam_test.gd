@@ -7,6 +7,7 @@ extends GutTest
 # two-client smoke recorded in plan/status.md; this pins the wiring.
 
 const MenuShell := preload("res://game/menu_shell.gd")
+const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func test_novaworld_control_names_default() -> void:
@@ -33,10 +34,40 @@ func test_pressing_a_novaworld_control_emits_request() -> void:
 		"pressing the NovaWorld control asks the host to open NovaWorld")
 
 
+func test_panel_keeps_authored_menu_visible_and_restores_its_keyboard_input() -> void:
+	var menu := MenuShell.new()
+	add_child_autofree(menu)
+	menu.show_menu()
+	menu.set_process_unhandled_key_input(true)
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := NetSessionController.new()
+	add_child_autofree(controller)
+	controller.setup(null, null, menu, layer)
+
+	controller.open_novaworld_panel()
+
+	assert_true(menu.visible,
+			"the current authored menu remains visible behind Matchmaking")
+	assert_false(menu.is_processing_unhandled_key_input(),
+			"the covered menu cannot consume Enter/Escape behind the overlay")
+	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+	assert_not_null(panel)
+	if panel == null:
+		return
+
+	panel.closed.emit()
+
+	assert_true(menu.visible, "closing Matchmaking restores the prior menu")
+	assert_true(menu.is_processing_unhandled_key_input(),
+			"closing Matchmaking restores the menu keyboard path")
+
+
 func test_panel_class_is_available() -> void:
 	# The panel the host opens exists and instantiates headless without a
 	# server (it shows an artist-facing status, never crashes).
-	var panel := NovaWorldPanel.new()
+	var panel := PANEL_SCENE.instantiate() as NovaWorldPanel
+	panel.start_client_on_ready = false
 	add_child_autofree(panel)
 	await wait_frames(2)
 	assert_not_null(panel, "NovaWorldPanel instantiates")

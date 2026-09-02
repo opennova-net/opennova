@@ -15,6 +15,9 @@ var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
+var _menu_visible_before_novaworld := false
+var _menu_key_input_before_novaworld := false
+var _novaworld_menu_state_captured := false
 var _join_role_prompt: Control
 var _join_role_password: LineEdit
 var _join_role_target: JoinTarget
@@ -375,17 +378,20 @@ func resolve_player_callsign() -> String:
 
 # --- NovaWorld (online multiplayer) ---------------------------------------------
 
-# The menu's NovaWorld control: open the panel over the hidden menu.
+# The menu's NovaWorld control: open the panel over the authored multiplayer
+# screen. The full-rect panel blocks pointer input; suspend the MenuShell's
+# unhandled-key path as well so Enter/Escape cannot activate controls behind
+# the compact overlay.
 func open_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		return
+	_capture_menu_behind_novaworld()
 	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel
 	# Dev default: localhost. A prod build sets the server host from the
 	# resolved server IP before showing the panel.
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
 	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
-	_menu_shell.hide_menu()
 	_panel_layer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
@@ -397,13 +403,36 @@ func open_novaworld_panel() -> void:
 
 func _on_novaworld_closed() -> void:
 	_dismiss_novaworld_panel()
-	_menu_shell.show_menu()
 
 
 func _dismiss_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		_novaworld_panel.queue_free()
 		_novaworld_panel = null
+	_restore_menu_after_novaworld()
+
+
+func _capture_menu_behind_novaworld() -> void:
+	if _menu_shell == null:
+		return
+	_menu_visible_before_novaworld = _menu_shell.visible
+	_menu_key_input_before_novaworld = _menu_shell.is_processing_unhandled_key_input()
+	_novaworld_menu_state_captured = true
+	# show_menu only changes presentation/process state; it keeps the current
+	# .mnu document, screen, and back stack intact behind the overlay.
+	_menu_shell.show_menu()
+	_menu_shell.set_process_unhandled_key_input(false)
+
+
+func _restore_menu_after_novaworld() -> void:
+	if not _novaworld_menu_state_captured or _menu_shell == null:
+		return
+	_menu_shell.set_process_unhandled_key_input(_menu_key_input_before_novaworld)
+	if _menu_visible_before_novaworld:
+		_menu_shell.show_menu()
+	else:
+		_menu_shell.hide_menu()
+	_novaworld_menu_state_captured = false
 
 
 # The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
