@@ -760,20 +760,20 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
-	var wp: Dictionary = sim.get_waypoint_hud_view()
-	assert_true(bool(wp.get("show", false)), "waypoints visible by default")
-	assert_eq(int(wp.get("count", 0)), 3, "the blue route's three markers")
-	assert_eq(int(wp.get("current", 0)), -1, "no selection before a player tick")
+	var wp := sim.get_waypoint_hud_view()
+	assert_true(wp.show, "waypoints visible by default")
+	assert_eq(wp.count, 3, "the blue route's three markers")
+	assert_eq(wp.current, -1, "no selection before a player tick")
 
 	# Spawn the local player far from marker 0 (demo marker 0 = mission (100,0,0)
 	# = Godot (100, 0, 0); radius 25). The first tick latches entry 0.
 	assert_true(sim.spawn_local_player(Vector3(0, 0, 0), 0.0, 1))
 	sim.step()
 	wp = sim.get_waypoint_hud_view()
-	assert_eq(int(wp.get("current", -1)), 0, "first tick latches waypoint 0")
-	assert_eq(int(wp.get("number", 0)), 1, "1-based display number")
-	assert_eq(int(wp.get("name_id", -1)), 1, "marker 0's authored name id")
-	var pos: Vector3 = wp.get("position", Vector3.ZERO)
+	assert_eq(wp.current, 0, "first tick latches waypoint 0")
+	assert_eq(wp.number, 1, "1-based display number")
+	assert_eq(wp.name_id, 1, "marker 0's authored name id")
+	var pos := wp.position
 	assert_almost_eq(pos.x, 100.0, 0.01, "marker 0 world X")
 
 	# Teleport inside the 25 u radius (mission space; the player is AI index 2,
@@ -781,7 +781,7 @@ func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 	sim.debug_set_entity_position(2, Vector3(95, 0, 0))
 	sim.step()
 	wp = sim.get_waypoint_hud_view()
-	assert_eq(int(wp.get("current", -1)), 1, "proximity advance onto waypoint 1")
+	assert_eq(wp.current, 1, "proximity advance onto waypoint 1")
 	sim.free()
 
 const ANIM_FIXTURES := "res://../fixtures/anim"

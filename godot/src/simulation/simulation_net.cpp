@@ -2,6 +2,7 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
@@ -1465,23 +1466,24 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 // fill_scoreboard_rows, and the counts here come from the same netsim
 // projection (netsim::scoreboard_header — the accepted-rows-minus-spectators
 // players count is the witnessed header arithmetic, retail @0x4231dd).
-Dictionary Simulation::get_scoreboard() const {
-	Dictionary out;
+Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
+	Ref<ScoreboardHeader> out;
+	out.instantiate();
 	if (!runtime_) return out;
 	const opennova::netsim::ClientScoreboardHeader header =
 			opennova::netsim::scoreboard_header(runtime_->state());
-	out["known"] = header.known;
-	out["team_mode"] = header.team_mode;
-	out["timed"] = header.timed;
-	out["players"] = header.players;
-	out["in_game"] = header.in_game;
-	out["spectators"] = header.spectators;
+	out->set_known(header.known);
+	out->set_team_mode(header.team_mode);
+	out->set_timed(header.timed);
+	out->set_players(static_cast<int>(header.players));
+	out->set_in_game(static_cast<int>(header.in_game));
+	out->set_spectators(static_cast<int>(header.spectators));
 	// The drawer branches on the session game type (retail reads g_GameType
 	// @0x423acb); the header's session strings ride along — joiner-decoded,
 	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
-	out["game_type"] = static_cast<int64_t>(runtime_->game_type());
-	out["server"] = String::utf8(runtime_->server_name().c_str());
-	out["mission"] = String::utf8(runtime_->mission_name().c_str());
+	out->set_game_type(static_cast<int64_t>(runtime_->game_type()));
+	out->set_server(String::utf8(runtime_->server_name().c_str()));
+	out->set_mission(String::utf8(runtime_->mission_name().c_str()));
 	return out;
 }
 

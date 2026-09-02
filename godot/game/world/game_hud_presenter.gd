@@ -278,9 +278,9 @@ func _ensure_game_hud() -> void:
 	_map_footprints_next_query_ticks = 0
 	_map_grid_origin_next_query_ticks = 0
 	if sim_for_origin != null:
-		var origin: Dictionary = sim_for_origin.get_hud_map_grid_origin()
-		var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
-		_map_grid_origin_present = bool(origin.get("present", false))
+		var origin := sim_for_origin.get_hud_map_grid_origin()
+		var origin_pos := origin.position
+		_map_grid_origin_present = origin.present
 		_game_hud.set_minimap_grid_origin(
 				Vector2(origin_pos.x, -origin_pos.z), _map_grid_origin_present)
 	else:
@@ -452,9 +452,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 		if origin_ticks >= _map_grid_origin_next_query_ticks:
 			_map_grid_origin_next_query_ticks = \
 					origin_ticks + MAP_FOOTPRINT_QUERY_INTERVAL_TICKS
-			var origin: Dictionary = sim.get_hud_map_grid_origin()
-			if bool(origin.get("present", false)):
-				var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
+			var origin := sim.get_hud_map_grid_origin()
+			if origin.present:
+				var origin_pos := origin.position
 				_map_grid_origin_present = true
 				_game_hud.set_minimap_grid_origin(
 						Vector2(origin_pos.x, -origin_pos.z), true)
@@ -589,13 +589,13 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	var sim := _world.get_sim()
 	if sim == null:
 		return null
-	var wp: Dictionary = sim.get_waypoint_hud_view()
-	if not bool(wp.get("show", false)) or int(wp.get("current", -1)) < 0:
+	var wp := sim.get_waypoint_hud_view()
+	if not wp.show or wp.current < 0:
 		return null
-	var pos: Vector3 = wp.get("position", Vector3.ZERO)
+	var pos := wp.position
 	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
-	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
+	entry.text_name = _resolve_waypoint_name(wp.name_id)
 	entry.mission_position = Vector2(pos.x, -pos.z)
 	entry.altitude_wu = pos.y
 	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated

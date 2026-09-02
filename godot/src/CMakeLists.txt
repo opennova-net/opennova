@@ -118,6 +118,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_aim_overlay.cpp
     simulation/player_local_view.cpp
     simulation/player_weapon_event.cpp
+    simulation/hud_view_records.cpp
     simulation/player_weapon_view.cpp
     simulation/player_inventory.cpp
     simulation/weapon_kit_entry.cpp

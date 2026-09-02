@@ -1486,7 +1486,7 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 	assert_false(joiner.request_local_player_medic(),
 			"an alive player cannot call a medic")
 	# The 0x81 hit-confirm edge is consume-once: nothing landed, nothing plays.
-	assert_true(joiner.take_score_feedback().is_empty(),
+	assert_null(joiner.take_score_feedback(),
 			"no score delta landed on the fresh joiner")
 	assert_eq(joiner.local_medic_request_serial(), 0)
 

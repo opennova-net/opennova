@@ -178,10 +178,8 @@ func _apply_overlay(sim: Simulation) -> void:
 	var hud := _hud()
 	if hud == null:
 		return
-	var overlay: Dictionary = sim.get_end_round_overlay(_gametext())
-	hud.set_end_round_overlay(true, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
-			PackedStringArray(overlay.get("texts", PackedStringArray())),
-			PackedInt32Array(overlay.get("ys", PackedInt32Array())))
+	var overlay := sim.get_end_round_overlay(_gametext())
+	hud.set_end_round_overlay(true, overlay.top, overlay.bottom, overlay.texts, overlay.ys)
 	_overlay_shown = true
 
 
@@ -189,8 +187,9 @@ func _hide_overlay() -> void:
 	var hud := _hud()
 	if hud != null and _overlay_shown:
 		var sim: Simulation = _world.get_sim() if _world != null else null
-		var overlay: Dictionary = sim.get_end_round_overlay(null) if sim != null else {}
-		hud.set_end_round_overlay(false, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
+		var overlay: EndRoundOverlay = (
+				sim.get_end_round_overlay(null) if sim != null else EndRoundOverlay.new())
+		hud.set_end_round_overlay(false, overlay.top, overlay.bottom,
 				PackedStringArray(), PackedInt32Array())
 	_overlay_shown = false
 

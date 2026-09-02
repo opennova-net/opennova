@@ -64,16 +64,14 @@ func update(hud: HudOverlay, sim: Simulation, down: bool, chorded: bool,
 func _push(hud: HudOverlay, sim: Simulation) -> void:
 	if sim == null:
 		return
-	var stats: Dictionary = sim.get_end_round_statistics()
-	if stats.is_empty():
+	var stats := sim.get_end_round_statistics()
+	if stats == null:
 		return
 	var labels := PackedStringArray()
-	var values := PackedStringArray()
-	for row in stats.get("rows", []):
-		labels.push_back(_gametext("Epilog", String(row.get("label_key", ""))))
-		values.push_back(String(row.get("value", "")))
-	hud.set_end_round_statistics(true, bool(stats.get("raised", false)),
-			_gametext("Score", "SCORE_TITLE"), labels, values)
+	for label_key in stats.label_keys:
+		labels.push_back(_gametext("Epilog", label_key))
+	hud.set_end_round_statistics(true, stats.raised,
+			_gametext("Score", "SCORE_TITLE"), labels, stats.values)
 
 
 ## Missing strings resolve empty, as retail's GameText_GetString does.

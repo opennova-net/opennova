@@ -2,6 +2,7 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 #include "env/env_axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
@@ -137,33 +138,35 @@ Array Simulation::get_throwable_visuals() const {
 	return out;
 }
 
-Dictionary Simulation::get_waypoint_hud_view() const {
+Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// The current-waypoint slice of the per-frame HUD info rebuild, plus the
 	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
 	// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
-	Dictionary out;
+	Ref<WaypointHudView> out;
+	out.instantiate();
 	const opennova::world::WaypointTrack *track = kernel_ ? &kernel_->world.waypoints : nullptr;
-	out["show"] = track != nullptr && track->show;
-	out["count"] = track ? static_cast<int>(track->entries.size()) : 0;
+	out->set_show(track != nullptr && track->show);
+	out->set_count(track ? static_cast<int>(track->entries.size()) : 0);
 	const opennova::world::WaypointEntry *cur = track ? track->current_entry() : nullptr;
-	out["current"] = cur ? track->current : -1;
-	out["number"] = cur ? track->current + 1 : 0;
-	out["name_id"] = cur ? cur->name_id : 0;
+	out->set_current(cur ? static_cast<int>(track->current) : -1);
+	out->set_number(cur ? static_cast<int>(track->current) + 1 : 0);
+	out->set_name_id(cur ? static_cast<int>(cur->name_id) : 0);
 	// Fixed 16.16 mission (x,y,z) -> Godot (x, z, -y), like every entity read.
-	out["position"] = cur ? Vector3(cur->x / 65536.0f, cur->z / 65536.0f, -(cur->y / 65536.0f))
-						  : Vector3();
-	out["done"] = cur != nullptr && cur->done;
+	out->set_position(cur ? Vector3(cur->x / 65536.0f, cur->z / 65536.0f, -(cur->y / 65536.0f))
+						  : Vector3());
+	out->set_done(cur != nullptr && cur->done);
 	return out;
 }
 
-Dictionary Simulation::get_hud_map_grid_origin() const {
+Ref<HudMapGridOrigin> Simulation::get_hud_map_grid_origin() const {
 	// The map grid-label origin: the mission's first type-2043 marker. The
 	// host stashes it at promotion from the mission doc; a JOINER promotes a
 	// marker-less wire-header BMS (D-NET-194), so its origin resolves from
 	// the replicated pool-3 entity in the decoded view instead — the same
 	// client-side pool scan retail's HUD init runs (witness at
 	// World::map_grid_origin_x / HudMinimapInput::grid_origin_x).
-	Dictionary out;
+	Ref<HudMapGridOrigin> out;
+	out.instantiate();
 	bool present = kernel_ != nullptr && kernel_->world.map_grid_origin_present;
 	int32_t x_q16 = present ? kernel_->world.map_grid_origin_x : 0;
 	int32_t y_q16 = present ? kernel_->world.map_grid_origin_y : 0;
@@ -171,10 +174,10 @@ Dictionary Simulation::get_hud_map_grid_origin() const {
 		present = opennova::netsim::client_minimap_grid_origin(
 				runtime_->state(), x_q16, y_q16);
 	}
-	out["present"] = present;
-	out["position"] = present
+	out->set_present(present);
+	out->set_position(present
 			? Vector3(x_q16 / 65536.0f, 0.0f, -(y_q16 / 65536.0f))
-			: Vector3();
+			: Vector3());
 	return out;
 }
 

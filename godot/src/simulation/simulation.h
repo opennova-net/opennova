@@ -56,6 +56,15 @@ class ScarDrawList;         // one frame's impact-scar draw list (world/scar_dra
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
+// The small per-frame HUD view records (simulation/hud_view_records.h).
+class WaypointHudView;
+class HudMapGridOrigin;
+class VehiclePanelView;
+class ScoreFeedback;
+class ScoreboardHeader;
+class EndRoundOverlay;
+class EndRoundStatistics;
+class DeployStatus;
 }
 
 #include "wac/wac_program.h"
@@ -448,7 +457,7 @@ public:
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
 	// 2D interface sound behind the enable_slotmachine setting
 	// (engine: net/netsim/client_state.h).
-	Dictionary take_score_feedback();
+	Ref<ScoreFeedback> take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
 	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
@@ -511,7 +520,7 @@ public:
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
-	Dictionary get_deploy_status();
+	Ref<DeployStatus> get_deploy_status();
 	// The STATIC_RESPAWN_MSG1 text of the current status line, resolved
 	// through the gametext table (the engine's deploy_status_text); "" when the static is hidden.
 	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
@@ -538,8 +547,8 @@ public:
 	opennova::hud::EndRoundOverlayInput end_round_overlay_input() const;
 	// The overlay ladder resolved through the gametext Overlays table (the
 	// folds + printf forms are the engine's end_round_overlay_resolve):
-	// {texts, ys, top, bottom} ready for HudOverlay::set_end_round_overlay.
-	Dictionary get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const;
+	// texts/ys/top/bottom ready for HudOverlay::set_end_round_overlay.
+	Ref<EndRoundOverlay> get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const;
 	// The RESULTLIST columns with their header text resolved through the
 	// gametext Overlays table (null gametext = the "!..." fallbacks).
 	TypedArray<Dictionary> get_end_round_columns(int p_table_width,
@@ -552,8 +561,8 @@ public:
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):
-	// the 0xC846xx block the toggled panel draws. Empty when no host world.
-	Dictionary get_end_round_statistics() const;
+	// the 0xC846xx block the toggled panel draws. Null when no host world.
+	Ref<EndRoundStatistics> get_end_round_statistics() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an
@@ -776,7 +785,7 @@ public:
 	// selection; number is the 1-based display index [orig: hudInfo+373 =
 	// list index + 1 @ 0x4b88e8]. Read-only; the track advances in the world
 	// tick. (docs/interface/hud-re.md §Waypoint HUD)
-	Dictionary get_waypoint_hud_view() const;
+	Ref<WaypointHudView> get_waypoint_hud_view() const;
 	// Header {version, stride, row_count}, followed by rows {bank, handle, x,
 	// y, z, heading_bam, icon, argb, flags, source, remaining_ticks,
 	// entity_known, policy_flags, half_x_q16, half_y_q16, floor_px}.
@@ -804,8 +813,8 @@ private:
 	mutable bool minimap_snapshot_valid_ = false;
 
 public:
-	// { present: bool, position: Vector3 } — the type-2043 grid-origin marker.
-	Dictionary get_hud_map_grid_origin() const;
+	// The type-2043 grid-origin marker: present + Godot-space position.
+	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
 	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
 	// header slots 1..8, terminated at the first 0/255 win-condition id —
 	// exactly the panel's row walk (engine: runtime/mission/promote.cpp).
@@ -837,7 +846,7 @@ public:
 	// (accepted rows minus the spectator trailer, netsim::scoreboard_header),
 	// in_game/spectators, game_type, server and mission names. The rows no
 	// longer round-trip through script — HudOverlay pulls them natively via fill_scoreboard_rows.
-	Dictionary get_scoreboard() const;
+	Ref<ScoreboardHeader> get_scoreboard() const;
 	// The native Tab-board row handoff: fills the drawer's entries via the
 	// netsim projection (netsim::project_scoreboard — wire order, the server
 	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
@@ -852,7 +861,7 @@ public:
 	// {shown, item_id} — the panel's root vehicle (the attached gun child
 	// re-roots to its parent), whose items.def sid the shell joins to its
 	// VEHICLE_HUD block. Read-only.
-	Dictionary get_vehicle_panel_view() const;
+	Ref<VehiclePanelView> get_vehicle_panel_view() const;
 	// The native panel handoff (NOT ClassDB-bound; HudOverlay::set_vehicle_panel
 	// calls it): the hull's health band + one row per authored seat pair
 	// (occupancy, rider health, the seat-select digit, the own seat). Returns
