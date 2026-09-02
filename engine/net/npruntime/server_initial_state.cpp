@@ -331,7 +331,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	bool is_world_batch = false;
 	bool world_pool_done = true; // false when a world-stream pool was paused mid-pool (budget hit)
 
-	if (b.sync_state == 2 && b.player_sync_subphase == 16) {
+	if (b.sync_state == 2 && b.player_sync_subphase == InitialStateBurst::kSyncNoop) {
 		// Retail treats subphase 16 as one atomic player-sync tail, even though
 		// it contains five semantic records. The 00TRg oracle carries exactly
 		// [0x1C,0x0B,0x66,0x76,0x11] in one 0x83 boundary after the sixth 0x2A.
@@ -354,19 +354,21 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				s2c::CLASS_ALLOW_MASK, serialize_class_allow_mask(ctx.config.class_allow_mask)});
 		step.messages.push_back(
 				InitialStateMessage{s2c::DISCONNECT_UNLOCK, {}});
-		b.player_sync_subphase = 20;
+		b.player_sync_subphase = InitialStateBurst::kSyncDisconnectUnlock;
 	} else if (b.sync_state == 2) {
 		// Player-sync track: one tag per subphase (8..20), then -> world-stream.
 		switch (b.player_sync_subphase) {
-		case 8:  tag = s2c::MISSION_MAP_NAMES; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
-		case 9:  tag = s2c::SESSION_CONFIG; action = Action::EmitBody; break;  // ServerConfig_SerializeToPacket @0x505bd0
-		case 10: case 11: case 12: case 13: case 14: case 15:
+		case InitialStateBurst::kSyncMissionMapNames: tag = s2c::MISSION_MAP_NAMES; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
+		case InitialStateBurst::kSyncSessionConfig: tag = s2c::SESSION_CONFIG; action = Action::EmitBody; break;  // ServerConfig_SerializeToPacket @0x505bd0
+		case InitialStateBurst::kSyncChatHistoryFirst: case InitialStateBurst::kSyncChatHistoryFirst + 1:
+		case InitialStateBurst::kSyncChatHistoryFirst + 2: case InitialStateBurst::kSyncChatHistoryFirst + 3:
+		case InitialStateBurst::kSyncChatHistoryFirst + 4: case InitialStateBurst::kSyncChatHistoryLast:
 		         tag = s2c::CHAT_HISTORY; action = Action::EmitBody; break;  // NetPacket_CopyTenBytes @0x503900 (×6, table @0x82F1D8)
-		case 16: tag = s2c::NOOP; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x1C empty payload]
-		case 17: tag = s2c::BMS_HEADER; action = Action::EmitBody; break;  // exact loaded BMS header (§5.4, 616 B)
-		case 18: tag = s2c::WEAPON_RESTRICTIONS; action = Action::EmitBody; break;  // NetPacket_SerializeWeaponRestrictionTable @0x5102c0
-		case 19: tag = s2c::CLASS_ALLOW_MASK; action = Action::EmitBody; break;  // NetPacket_WriteClassAllowMask @0x510350
-		case 20: tag = s2c::DISCONNECT_UNLOCK; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
+		case InitialStateBurst::kSyncNoop: tag = s2c::NOOP; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x1C empty payload]
+		case InitialStateBurst::kSyncBmsHeader: tag = s2c::BMS_HEADER; action = Action::EmitBody; break;  // exact loaded BMS header (§5.4, 616 B)
+		case InitialStateBurst::kSyncWeaponRestrictions: tag = s2c::WEAPON_RESTRICTIONS; action = Action::EmitBody; break;  // NetPacket_SerializeWeaponRestrictionTable @0x5102c0
+		case InitialStateBurst::kSyncClassAllowMask: tag = s2c::CLASS_ALLOW_MASK; action = Action::EmitBody; break;  // NetPacket_WriteClassAllowMask @0x510350
+		case InitialStateBurst::kSyncDisconnectUnlock: tag = s2c::DISCONNECT_UNLOCK; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
 		default: break;
 		}
 	} else if (b.sync_state == 4) {
@@ -378,12 +380,12 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// 0x10 -> 0x0D -> 0x0C -> 0x20]. The paged emits push directly; the action switch is a no-op here.
 		action = Action::SkipSilent;
 		switch (b.world_stream_phase) {
-		case 0: // phase-0 init [orig: @0x51bc1a case 0]: zero the page cursor, advance to phase 1
+		case InitialStateBurst::kStreamInit: // phase-0 init [orig: @0x51bc1a case 0]: zero the page cursor, advance to phase 1
 		        // (one no-emit tick). The C2S 0x0A handler re-enters here on every spawn-menu
 		        // request (it writes world_stream_phase = 0 [orig: @0x5132f6]).
 			b.phase_loop_counter = 0;
 			break;
-		case 1: { // 0x10 pool-2 static structures [orig: serialize_pool2_static_to_buffer @0x5042f0]
+		case InitialStateBurst::kStreamPool2Static: { // 0x10 pool-2 static structures [orig: serialize_pool2_static_to_buffer @0x5042f0]
 			const opennova::StaticEntityBatch full = opennova::netsim::build_pool2_static_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x10, full.records.size(),
 			                                initial_state_page_limits::pool2_static(),
@@ -397,7 +399,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 2: { // 0x0D pool-1 destructibles / items / vehicles [orig: serialize_entity_pool_to_packet_0 @0x503940]
+		case InitialStateBurst::kStreamPool1Items: { // 0x0D pool-1 destructibles / items / vehicles [orig: serialize_entity_pool_to_packet_0 @0x503940]
 			const opennova::PoolSpawnBatch full = opennova::netsim::build_pool1_spawn_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x0D, full.records.size(),
 			                                initial_state_page_limits::pool1_entities(),
@@ -410,7 +412,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 3: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner name-match) [orig: serialize_entity_states_to_buffer @0x5030a0]
+		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner name-match) [orig: serialize_entity_states_to_buffer @0x5030a0]
 			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
 			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
 			const opennova::OrganicSpawnBatch full =
@@ -426,7 +428,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 4: { // 0x20 pool-3 markers / waypoints / nav nodes (FULL, not just spawn markers) [orig: serialize_entity_pool_to_packet @0x503460]
+		case InitialStateBurst::kStreamPool3Markers: { // 0x20 pool-3 markers / waypoints / nav nodes (FULL, not just spawn markers) [orig: serialize_entity_pool_to_packet @0x503460]
 			const opennova::Pool3SyncBatch full = opennova::netsim::build_pool3_marker_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x20, full.records.size(),
 			                                initial_state_page_limits::pool3_markers(),
@@ -440,7 +442,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 5: { // 0x45 terrain-tile (.til) load [orig: serialize_terrain_tiles @0x6080F0, §5.37/D-NET-83]
+		case InitialStateBurst::kStreamTerrainTiles: { // 0x45 terrain-tile (.til) load [orig: serialize_terrain_tiles @0x6080F0, §5.37/D-NET-83]
 			// Stream the mission's terrain-tile array so the joiner's g_loading_progress climbs 5 -> 6 and
 			// its terrain finishes loading. The raw .til header maps 1:1 onto the 0x45 header
 			// (`[u32 'til0'][u32 count][u32 res0][u32 res1]` then count × 12-B entries). EMPTY .til =>
@@ -491,7 +493,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 6:
+		case InitialStateBurst::kStreamMissionText:
 			// The original phase is conditional on a loaded MissionText resource. A
 			// valid table may contain empty strings, so use the explicit loaded bit
 			// rather than treating an empty value as absence.
@@ -500,8 +502,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				action = Action::EmitBody;
 			}
 			break;
-		case 7: tag = s2c::WAIT_FOR_GAME_START_ACK; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
-		case 8: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
+		case InitialStateBurst::kStreamWaitForGameStartAck: tag = s2c::WAIT_FOR_GAME_START_ACK; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
+		case InitialStateBurst::kStreamGameStartBundle: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
 			// Without it a retail joiner world-loads but stays undeployed (floods C2S 0x0f, "stuck at 7%").
 			// 0x42 input-flags, 0x0F world-state-load (clears the client's dword_81474C load-gate + queues
 			// its deploy burst), 0x4D player-index, 0x61 session-key/seed, 0x3E terminator. The per-frame
@@ -583,7 +585,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 
 	// Advance the cursor and handle track transitions / the terminator.
 	if (b.sync_state == 2) {
-		if (b.player_sync_subphase >= 20) {
+		if (b.player_sync_subphase >= InitialStateBurst::kSyncDisconnectUnlock) {
 			// Player-sync tail [orig: 0x51c113..0x51c13c]: game state 9, sync state -> 3, subphase
 			// reset. State 3 PARKS the burst — the world stream starts only when the client's C2S
 			// 0x0A spawn-menu request advances 3 -> 4 (NapiNPServerMsg_HandlePlayerSpawnRequest
@@ -592,7 +594,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// mission build and mis-bound its own CharacterEntity (D-NET-150).
 			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) @0x51c11c]
 			b.sync_state = 3;          // [orig: @0x51c134]
-			b.player_sync_subphase = 0; // [orig: @0x51c13c]
+			b.player_sync_subphase = InitialStateBurst::kSyncDone; // [orig: @0x51c13c]
 		} else {
 			++b.player_sync_subphase;
 		}
@@ -601,7 +603,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// stay on this phase and resume from b.phase_loop_counter next tick (the pacing resume point).
 		if (!world_pool_done) {
 			// remain on the same world_stream_phase; cursor saved in b.phase_loop_counter
-		} else if (b.world_stream_phase >= 8) { // phase 8 = the game-start bundle (deploy unsticker)
+		} else if (b.world_stream_phase >= InitialStateBurst::kStreamGameStartBundle) { // phase 8 = the game-start bundle (deploy unsticker)
 			b.sync_state = 5;          // done
 			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) — in-game]
 			b.spawned = true;          // the PeerSpawned source
@@ -632,7 +634,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	InitialStateBurst &b = conn.burst;
 	if (b.sync_state == 0) {                            // start the player-sync track
 		b.sync_state = 2;
-		b.player_sync_subphase = 8;
+		b.player_sync_subphase = InitialStateBurst::kSyncMissionMapNames;
 		b.game_state = 8;                              // [orig: CNetPlayer_SetGameState(.., 8)]
 	}
 
@@ -678,9 +680,9 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			if (is_remote) break;
 			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
 			b.sync_state = 4;         // [orig: @0x5132b1]
-			b.world_stream_phase = 0; // [orig: @0x5132f6]
+			b.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 		}
-		if (is_remote && b.sync_state == 4 && b.world_stream_phase == 8 && !b.loadout_received) {
+		if (is_remote && b.sync_state == 4 && b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !b.loadout_received) {
 			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start
 			// bundle AND the per-frame 0x0A stream — with NO timeout. The golden retail host
 			// emits NOTHING in-match until the joiner's 0x2F: its first S2C 0x0A directly follows

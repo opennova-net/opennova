@@ -1657,7 +1657,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.burst.game_state = 9;              // [orig: @0x513295]
 					if (conn.burst.sync_state != 4)
 						conn.burst.sync_state = 4;          // [orig: @0x5132a0/@0x5132b1]
-					conn.burst.world_stream_phase = 0;      // [orig: @0x5132f6]
+					conn.burst.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
 				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets

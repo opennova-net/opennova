@@ -257,6 +257,36 @@ public:
     // target's AI component, reached through World::ai. p2/p3/p4 are the sub-type's slots
     // (e.g. PLAYPARTANIM: p2=channel, p3=play_type, p4=time). No-op (returns false / 0)
     // when there is no AI system or no brain for the target.
+    // The ChangeAI action's sub-type ids, the dfx2med token names
+    // [orig: Entity_ApplyCommand @0x43ab60's switch]. Subs the port does not
+    // carry (31/37/39/40/44) are named so the coverage counter reads.
+    enum ChangeAiSub : int {
+        kGuardBit = 2,
+        kRedAlert = 5,
+        kGreenAlert = 6,
+        kAccuracy100 = 8,
+        kBlindBit = 15,
+        kBerserkBit = 16,
+        kClimberBit = 17,
+        kCowardBit = 21,
+        kYellowAlert = 22,
+        kClimbChase = 23,
+        kDriveSkill = 26,
+        kAimSkill = 27,
+        kAiSetState = 28,
+        kCombatSpeed = 29,
+        kPatrolSpeed = 30,
+        kFindAndUse = 31,
+        kHudItem = 37,
+        kTmateStatus = 39,
+        kAiNodePath = 40,
+        kAttackDistanceValue = 41,
+        kEngageDistance = 42,
+        kIndestructableBit = 43,
+        kTargetSsn = 44,
+        kAiStartFiring = 45,
+        kAiFiringAngle = 46,
+    };
     bool apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
     int apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4);
     int apply_area_ai_command(int zone_area_id, int team, int sub_type,

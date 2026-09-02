@@ -1318,33 +1318,33 @@ void set_slot_mask(int32_t &word, uint32_t mask, bool enabled) {
 void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
                                  int32_t p2, int32_t p3) {
     switch (sub_type) {
-        case 2: // GUARD_BIT [orig: case 2 @0x43ab9a — Flags 0x40 @0x43abae/0x43abb8]
+        case EntityCommands::kGuardBit: // [orig: case 2 @0x43ab9a — Flags 0x40 @0x43abae/0x43abb8]
             // Retail writes the one Flags dword; 0x40 is legacy-mirrored,
             // so both views stay coherent (the vehicle_attach precedent).
             set_mask(entity.flags, kEntityFlagMounted, p2 != 0);
             set_mask(entity.engine_flags, kEntityFlagMounted, p2 != 0);
             break;
-        case 5: // RED_ALERT [orig: case 5 @0x43ac24 — ai+136 = 2 @0x43ac2d]
+        case EntityCommands::kRedAlert: // [orig: case 5 @0x43ac24 — ai+136 = 2 @0x43ac2d]
             ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
-        case 6: // GREEN_ALERT [orig: case 6 @0x43acf4 — ai+136 = 0 @0x43acfd]
+        case EntityCommands::kGreenAlert: // [orig: case 6 @0x43acf4 — ai+136 = 0 @0x43acfd]
             ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
-        case 8:
+        case EntityCommands::kAccuracy100:
             // ACCURACY_100: p2 == 0 is a no-op, the store clamps at zero
             // [orig: case 8 @0x43ad94 — gate @0x43ada4, 100-p2 @0x43adb1,
             //  clamp @0x43adbb].
             if (p2 != 0)
                 ae.slot.f[AiSlot::kAimErrorPrimary] = std::max(0, 100 - p2);
             break;
-        case 15: // BLIND_BIT [orig: case 0xF @0x43aecd — bit 0x1 @0x43aede/0x43aee8]
+        case EntityCommands::kBlindBit: // [orig: case 0xF @0x43aecd — bit 0x1 @0x43aede/0x43aee8]
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x1u, p2 != 0);
             break;
-        case 16: // BERSERK_BIT [orig: case 0x10 @0x43aef6 — bit 0x200 @0x43af07/0x43af14]
+        case EntityCommands::kBerserkBit: // [orig: case 0x10 @0x43aef6 — bit 0x200 @0x43af07/0x43af14]
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200u, p2 != 0);
             break;
-        case 17: // CLIMBER_BIT [orig: case 0x11 @0x43af25 — bit 0x400 @0x43af36/0x43af43]
+        case EntityCommands::kClimberBit: // [orig: case 0x11 @0x43af25 — bit 0x400 @0x43af36/0x43af43]
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], AiSlot::kClimber, p2 != 0);
             break;
-        case 21:
+        case EntityCommands::kCowardBit:
             // COWARD_BIT: 0x20000 always clears first
             // [orig: case 0x15 @0x43b06d — clear @0x43b078, bit 0x8
             //  @0x43b088/0x43b092].
@@ -1354,20 +1354,20 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
                             ~0x20000u);
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x8u, p2 != 0);
             break;
-        case 22: // YELLOW_ALERT [orig: case 0x16 @0x43ac80 — ai+136 = 1 @0x43ac8d]
+        case EntityCommands::kYellowAlert: // [orig: case 0x16 @0x43ac80 — ai+136 = 1 @0x43ac8d]
             ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
-        case 23:
+        case EntityCommands::kClimbChase:
             // The org1 climb-chase mode flag (entity.h kEntityFlagAiClimb;
             // no dfx2med token — runtime-only sub). Legacy-mirrored like 0x40.
             // [orig: case 0x17 @0x43afae — Flags 0x80 @0x43afc2/0x43afcf]
             set_mask(entity.flags, kEntityFlagAiClimb, p2 != 0);
             set_mask(entity.engine_flags, kEntityFlagAiClimb, p2 != 0);
             break;
-        case 41: // ATTACKDISTANCE_VALUE [orig: case 0x29 @0x43b263 — ai+60 = p2<<16]
+        case EntityCommands::kAttackDistanceValue: // [orig: case 0x29 @0x43b263 — ai+60 = p2<<16]
             ae.slot.f[AiSlot::kAttackRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p2) << 16);
             break;
-        case 42:
+        case EntityCommands::kEngageDistance:
             // ENGAGEDISTANCE MIN/MAX [orig: case 0x2A — ai+64 = p2<<16
             //  @0x43b27c, ai+68 = p3<<16 @0x43b289].
             ae.slot.f[AiSlot::kEngageMin] =
@@ -1387,8 +1387,8 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
 // engine_flags — the retail Flags dword home. Returns true when the sub was
 // this arm (the brain halves have nothing to do).
 bool apply_brainless_ai_command(Entity &entity, int sub_type, int32_t p2) {
-    if (sub_type != 43) return false;
-    set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0); // INDESTRUCTABLE_BIT
+    if (sub_type != EntityCommands::kIndestructableBit) return false;
+    set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0);
     return true;
 }
 
@@ -1398,7 +1398,13 @@ bool apply_brainless_ai_command(Entity &entity, int sub_type, int32_t p2) {
 // event_runtime's unported_action marker does for action types.
 void note_unported_ai_sub(AiSystem &sys, int sub_type) {
     switch (sub_type) {
-        case 31: case 37: case 39: case 40: case 44: ++sys.unported_calls; break;
+        case EntityCommands::kFindAndUse:
+        case EntityCommands::kHudItem:
+        case EntityCommands::kTmateStatus:
+        case EntityCommands::kAiNodePath:
+        case EntityCommands::kTargetSsn:
+            ++sys.unported_calls;
+            break;
         default: break;
     }
 }
@@ -1412,16 +1418,16 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
     int event_type = -1;
     int32_t argument = p2;
     switch (sub_type) {
-        case 5: event_type = 6; argument = 2; break;  // [orig: @0x43ac59..0x43ac77]
-        case 6: event_type = 6; argument = 0; break;  // [orig: @0x43ad34..0x43ad4e]
-        case 22: event_type = 6; argument = 1; break; // [orig: @0x43acc4..0x43ace2]
-        case 26: event_type = 9; break;  // DRIVESKILL   [orig: case 0x1A @0x43b0ad]
-        case 27: event_type = 8; break;  // AIMSKILL     [orig: case 0x1B @0x43b0cb]
-        case 28: event_type = 7; break;  // AISETSTATE   [orig: case 0x1C @0x43b0e9]
-        case 29: event_type = 10; break; // COMBATSPEED  [orig: case 0x1D @0x43b107]
-        case 30: event_type = 11; break; // PATROLSPEED  [orig: case 0x1E @0x43b125]
-        case 45: event_type = 21; break; // AISTARTFIRING [orig: case 0x2D @0x43b2cd]
-        case 46: event_type = 22; break; // AIFIRINGANGLE [orig: case 0x2E @0x43b2e4]
+        case EntityCommands::kRedAlert: event_type = 6; argument = 2; break;  // [orig: @0x43ac59..0x43ac77]
+        case EntityCommands::kGreenAlert: event_type = 6; argument = 0; break;  // [orig: @0x43ad34..0x43ad4e]
+        case EntityCommands::kYellowAlert: event_type = 6; argument = 1; break; // [orig: @0x43acc4..0x43ace2]
+        case EntityCommands::kDriveSkill: event_type = 9; break;  // [orig: case 0x1A @0x43b0ad]
+        case EntityCommands::kAimSkill: event_type = 8; break;  // [orig: case 0x1B @0x43b0cb]
+        case EntityCommands::kAiSetState: event_type = 7; break;  // [orig: case 0x1C @0x43b0e9]
+        case EntityCommands::kCombatSpeed: event_type = 10; break; // [orig: case 0x1D @0x43b107]
+        case EntityCommands::kPatrolSpeed: event_type = 11; break; // [orig: case 0x1E @0x43b125]
+        case EntityCommands::kAiStartFiring: event_type = 21; break; // [orig: case 0x2D @0x43b2cd]
+        case EntityCommands::kAiFiringAngle: event_type = 22; break; // [orig: case 0x2E @0x43b2e4]
         default: return;
     }
     AiEventEntry ev{};
