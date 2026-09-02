@@ -269,15 +269,16 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	_world.register_effect_anchor(slot_key,
 			_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
 	_registered_effect_anchor_keys[slot_key] = true
-	fx.spawn_effect_request(event.action_particle, anchor_transform, {
-		"admission": EffectScene.ADMISSION_SUPPRESS_WHILE_OWNED,
-		"binding": EffectScene.BINDING_FOLLOW_OWNER,
-		"render_domain": WEAPON_EFFECT_RENDER_DOMAIN,
-		"slot_key": slot_key,
-		"owner_key": slot_key,
-		"owner_transform": anchor_transform,
-		"initial_age_ticks": maxi(event.age_ticks, 0),
-	})
+	var options := EffectSpawnOptions.new()
+	options.admission = EffectScene.ADMISSION_SUPPRESS_WHILE_OWNED
+	options.binding = EffectScene.BINDING_FOLLOW_OWNER
+	options.render_domain = WEAPON_EFFECT_RENDER_DOMAIN
+	options.slot_key = slot_key
+	options.owner_key = slot_key
+	options.owner_transform = anchor_transform
+	options.has_owner_transform = true
+	options.initial_age_ticks = maxi(event.age_ticks, 0)
+	fx.spawn_effect_request(event.action_particle, anchor_transform, options)
 
 
 # The recoil-row DIRECT effect leg is entirely data-defined. Retail submits

@@ -294,25 +294,25 @@ func _disabled_receipt() -> EffectSpawnReceipt:
 
 
 ## Deep spawn seam. Admission, binding, and render domain are explicit values;
-## arbitrary slot_key/owner_key Variants are interned to stable native tokens.
+## the options' slot_key/owner_key Variants are interned to stable native tokens.
 func spawn_effect_request(name: String, transform: Transform3D,
-		options: Dictionary = {}) -> EffectSpawnReceipt:
+		options: EffectSpawnOptions = null) -> EffectSpawnReceipt:
 	if _particles_disabled:
 		return _disabled_receipt()
+	if options == null:
+		options = EffectSpawnOptions.new()
 	var handle := intern_effect(name)
-	var admission := int(options.get("admission", ADMISSION_ALWAYS))
-	var binding := int(options.get("binding", BINDING_WORLD))
-	var slot_token := int(options.get("slot_token", 0))
-	var owner_token := int(options.get("owner_token", 0))
-	var has_slot_key := options.has("slot_key")
-	if has_slot_key:
-		slot_token = _slot_token_for(options["slot_key"])
-	if options.has("owner_key"):
-		owner_token = _owner_token_for(options["owner_key"])
+	var admission := options.admission
+	var slot_token := 0
+	var owner_token := 0
+	if options.slot_key != null:
+		slot_token = _slot_token_for(options.slot_key)
+	if options.owner_key != null:
+		owner_token = _owner_token_for(options.owner_key)
 	var owner_transform := Transform3D.IDENTITY
 	var seed_owner_after_spawn := false
-	if owner_token > 0 and options.has("owner_transform"):
-		owner_transform = options["owner_transform"]
+	if owner_token > 0 and options.has_owner_transform:
+		owner_transform = options.owner_transform
 		# ReplaceOwned must detach its predecessor at that predecessor's last
 		# pose. Seeding the new pose first would move both groups before the
 		# portable scene gets a chance to detach the old one.
@@ -321,20 +321,16 @@ func spawn_effect_request(name: String, transform: Transform3D,
 			_seed_owner_pose(owner_token, owner_transform)
 	var request := EffectSpawnRequest.make(handle, transform)
 	request.admission = admission
-	request.binding = binding
-	request.render_domain = int(options.get("render_domain", RENDER_DOMAIN_WORLD))
+	request.binding = options.binding
+	request.render_domain = options.render_domain
 	request.slot_token = slot_token
 	request.owner_token = owner_token
-	request.owner_relative_transform = options.get(
-			"owner_relative_transform", Transform3D.IDENTITY)
-	request.initial_age_ticks = int(options.get("initial_age_ticks", 0))
-	request.source_tick = int(options.get("source_tick", 0))
-	request.source_order = int(options.get("source_order", 0))
-	request.color_tint = options.get("color_tint", Vector3.ONE)
-	request.spring_const = float(options.get("spring_const", 0.0))
-	request.lod_divisor = int(options.get("lod_divisor", 1))
-	request.kill_plane = int(options.get("kill_plane", KILL_PLANE_DISABLED))
-	request.kill_plane_y = float(options.get("kill_plane_y", _water_height))
+	request.owner_relative_transform = options.owner_relative_transform
+	request.initial_age_ticks = options.initial_age_ticks
+	request.source_tick = options.source_tick
+	request.source_order = options.source_order
+	request.kill_plane = KILL_PLANE_DISABLED
+	request.kill_plane_y = _water_height
 	var receipt := _scene.spawn(request)
 	if seed_owner_after_spawn and receipt.spawned:
 		_seed_owner_pose(owner_token, owner_transform)
@@ -400,12 +396,12 @@ func spawn_effect_transient(name: String, position: Vector3,
 		orientation: Vector3 = Vector3.ZERO, initial_age_ticks: int = 0,
 		render_domain: int = RENDER_DOMAIN_WORLD, source_tick: int = 0,
 		source_order: int = 0) -> int:
-	var receipt := spawn_effect_request(name, forward_pose(position, orientation), {
-		"initial_age_ticks": initial_age_ticks,
-		"render_domain": render_domain,
-		"source_tick": source_tick,
-		"source_order": source_order,
-	})
+	var options := EffectSpawnOptions.new()
+	options.initial_age_ticks = initial_age_ticks
+	options.render_domain = render_domain
+	options.source_tick = source_tick
+	options.source_order = source_order
+	var receipt := spawn_effect_request(name, forward_pose(position, orientation), options)
 	return receipt.effect_handle
 
 
@@ -419,14 +415,14 @@ func spawn_effect_owned_request(owner_key: Variant, name: String, position: Vect
 	if _particles_disabled:
 		return _disabled_receipt()
 	var initial_transform := forward_pose(position, orientation)
-	return spawn_effect_request(name, initial_transform, {
-		"admission": ADMISSION_REPLACE_OWNED,
-		"binding": BINDING_FOLLOW_OWNER,
-		"slot_key": owner_key,
-		"owner_key": owner_key,
-		"owner_transform": initial_transform,
-		"owner_relative_transform": Transform3D.IDENTITY,
-	})
+	var options := EffectSpawnOptions.new()
+	options.admission = ADMISSION_REPLACE_OWNED
+	options.binding = BINDING_FOLLOW_OWNER
+	options.slot_key = owner_key
+	options.owner_key = owner_key
+	options.owner_transform = initial_transform
+	options.has_owner_transform = true
+	return spawn_effect_request(name, initial_transform, options)
 
 
 func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
@@ -441,13 +437,13 @@ func spawn_effect_attached_request(owner_key: Variant, name: String,
 	if _particles_disabled:
 		return _disabled_receipt()
 	var local_transform := forward_pose(local_pos, local_dir)
-	return spawn_effect_request(name,
-			initial_transform * local_transform, {
-		"binding": BINDING_FOLLOW_OWNER,
-		"owner_key": owner_key,
-		"owner_transform": initial_transform,
-		"owner_relative_transform": local_transform,
-	})
+	var options := EffectSpawnOptions.new()
+	options.binding = BINDING_FOLLOW_OWNER
+	options.owner_key = owner_key
+	options.owner_transform = initial_transform
+	options.has_owner_transform = true
+	options.owner_relative_transform = local_transform
+	return spawn_effect_request(name, initial_transform * local_transform, options)
 
 
 func spawn_effect_attached(owner_key: Variant, name: String,
@@ -464,10 +460,10 @@ func spawn_effect_unless_alive(owner_key: Variant, name: String,
 		position: Vector3, orientation: Vector3 = Vector3.ZERO) -> int:
 	if _particles_disabled:
 		return 0
-	var receipt := spawn_effect_request(name, forward_pose(position, orientation), {
-		"admission": ADMISSION_SUPPRESS_WHILE_OWNED,
-		"slot_key": owner_key,
-	})
+	var options := EffectSpawnOptions.new()
+	options.admission = ADMISSION_SUPPRESS_WHILE_OWNED
+	options.slot_key = owner_key
+	var receipt := spawn_effect_request(name, forward_pose(position, orientation), options)
 	return receipt.effect_handle
 
 
