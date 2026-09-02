@@ -17,7 +17,7 @@ String EntityRow::get_state_name() const {
 }
 
 Vector3 EntityRow::get_world_position() const {
-	return sim_internal::mission_to_godot(value_.mission_position);
+	return godot::mission_to_godot(value_.mission_position);
 }
 
 Vector3 EntityRow::get_mission_position() const {

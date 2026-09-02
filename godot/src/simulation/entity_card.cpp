@@ -13,7 +13,7 @@ using opennova::world::inspect::SeatRow;
 using opennova::world::inspect::WorldDetail;
 
 Vector3 godot_from_mission(const opennova::world::Vec3 &p) {
-	return sim_internal::mission_to_godot(p);
+	return godot::mission_to_godot(p);
 }
 
 Vector3 raw_mission(const opennova::world::Vec3 &p) {
