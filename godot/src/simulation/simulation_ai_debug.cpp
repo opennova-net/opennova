@@ -3,6 +3,7 @@
 // for the Godot AI debug view (godot/game/debug/ai_debug_view.gd). Both read
 // the ONE engine join, world::inspect::ai_debug_report.
 #include "simulation/simulation_internal.h"
+#include "env/env_axes.h"
 
 #include <runtime/world/angle.h>
 
@@ -63,7 +64,7 @@ Dictionary Simulation::get_ai_debug() const {
 			const Vector3 mission(static_cast<float>(std::cos(bearing) * cp),
 					static_cast<float>(std::sin(bearing) * cp),
 					static_cast<float>(std::sin(pitch)));
-			d["aim_dir"] = Vector3(mission.x, mission.z, -mission.y);
+			d["aim_dir"] = mission_to_godot(mission);
 		} else {
 			d["aim_dir"] = Vector3();
 		}

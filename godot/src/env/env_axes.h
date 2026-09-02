@@ -4,6 +4,8 @@
 
 #include <formats/env/env.h>
 
+#include <array>
+
 namespace godot {
 
 // The render-float (D3D world) <-> Godot world axis map for celestial/sky
@@ -35,10 +37,21 @@ inline opennova::env::Vec3 godot_to_render_float(const Vector3 &v) {
 }
 
 // Mission fixed axes (x east, y north, z up) <-> Godot world (x east, y up,
-// z south): (x, y, z)_mission -> (x, z, -y)_godot. The engine/formats/env
-// glint and veil laws take mission-axis tuples.
-inline Vector3 mission_to_godot(const opennova::env::Vec3 &v) {
+// z south): (x, y, z)_mission -> (x, z, -y)_godot. The ONE mission ->
+// presentation map (world/presentation_frame.h) for every float tuple the
+// engine hands the bindings: world::Vec3, env::Vec3, the wire/presenter
+// {x,y,z} structs, and the float[3] / std::array<float, 3> forms.
+template <typename V>
+inline Vector3 mission_to_godot(const V &v) {
 	return Vector3(v.x, v.z, -v.y);
+}
+
+inline Vector3 mission_to_godot(const float (&v)[3]) {
+	return Vector3(v[0], v[2], -v[1]);
+}
+
+inline Vector3 mission_to_godot(const std::array<float, 3> &v) {
+	return Vector3(v[0], v[2], -v[1]);
 }
 
 inline opennova::env::Vec3 godot_to_mission(const Vector3 &v) {

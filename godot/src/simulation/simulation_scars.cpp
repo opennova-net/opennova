@@ -4,6 +4,7 @@
 // inputs (camera, fog distance, the terrain light colour) arrive from the shell
 // per present frame.
 #include "simulation/simulation_internal.h"
+#include "env/env_axes.h"
 
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
@@ -155,7 +156,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		const opennova::renderer::ScarVertex &v = list.vertices[source_index(i)];
 		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
 				? Vector3(-v.x, v.y, v.z)
-				: Vector3(v.x, v.z, -v.y);
+				: mission_to_godot(v);
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
 		colors[static_cast<int64_t>(i)] = color_from_argb(v.argb);
 	}

@@ -2,6 +2,7 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+#include "env/env_axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
 #include "simulation/entity_row.h"  // one typed entity-directory row
@@ -65,7 +66,7 @@ Array Simulation::get_throwable_visuals() const {
 		Dictionary d;
 		d["key"] = key;
 		d["item_id"] = item_id;
-		d["pos"] = Vector3(pos.x, pos.z, -pos.y);
+		d["pos"] = mission_to_godot(pos);
 		// the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
 		d["rotation_deg"] = Vector3(
 				static_cast<float>(double(pitch_bam) * kDegPerBam),
@@ -313,8 +314,8 @@ Array Simulation::drain_round_impacts() {
 		if (!has_effect && !has_sound) continue;
 		Dictionary d;
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
-		d["position"] = Vector3(imp.position.x, imp.position.z, -imp.position.y);
-		d["direction"] = Vector3(imp.direction.x, imp.direction.z, -imp.direction.y);
+		d["position"] = mission_to_godot(imp.position);
+		d["direction"] = mission_to_godot(imp.direction);
 		d["effect"] = has_effect ? String::utf8(row.effect.c_str()) : String();
 		d["sound"] = has_sound ? String::utf8(row.sound.c_str()) : String();
 		// A lifecycle rewind must never turn a future/stale source tick into an
@@ -395,7 +396,7 @@ Array Simulation::drain_fire_presentation_events() {
 	const bool have_local = kernel_->world.cached.local_player.valid();
 	for (const opennova::world::FireEvent &fe : kernel_->world.round_sim.fired) {
 		Dictionary d;
-		d["origin"] = Vector3(fe.origin.x, fe.origin.z, -fe.origin.y);
+		d["origin"] = mission_to_godot(fe.origin);
 		// Retail's two receive arms are mutually exclusive and present differently.
 		// Bit 0 is tested first; only when it is CLEAR and bit 1 is set does the
 		// adm-indexed arm run, and that arm spawns no ammo-def sound or effect.
@@ -489,7 +490,7 @@ Array Simulation::drain_fire_sounds() {
 			kernel_->world.fire_sounds.drain()) {
 		Dictionary d;
 		d["set"] = String(sound.set_name.c_str());
-		d["pos"] = Vector3(sound.pos.x, sound.pos.z, -sound.pos.y);
+		d["pos"] = mission_to_godot(sound.pos);
 		d["source_bms_id"] = sound.source_bms_id;
 		out.push_back(d);
 	}
@@ -504,7 +505,7 @@ Dictionary Simulation::drain_destruction_events() {
 	if (!world_installed_) return out;
 	opennova::world::DestructionEvents &ev = kernel_->world.destruction;
 	auto to_godot = [](const opennova::world::Vec3 &v) {
-		return Vector3(v.x, v.z, -v.y);
+		return mission_to_godot(v);
 	};
 	Array effects;
 	for (const opennova::world::DestructionEffectEvent &e : ev.effects) {
@@ -578,7 +579,7 @@ Array Simulation::get_death_pieces() const {
 		d["trail"] = String(
 				opennova::world::death_piece_trail_effect(p.type_index));
 		d["scale"] = p.render_scale;
-		d["pos"] = Vector3(p.pos.x, p.pos.z, -p.pos.y);
+		d["pos"] = mission_to_godot(p.pos);
 		d["heading"] = p.heading;
 		d["pitch"] = p.pitch;
 		d["settled"] = p.settled;
@@ -644,7 +645,7 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 		out["glass_point_positions"] = glass_positions;
 		out["glass_point_directions"] = glass_directions;
 	}
-	out["pos"] = Vector3(found->position.x, found->position.z, -found->position.y);
+	out["pos"] = mission_to_godot(found->position);
 	return out;
 }
 
@@ -689,7 +690,7 @@ Array Simulation::get_round_glow_rows() const {
 		// The spawn rides radius/2 above the round and the per-tick follow
 		// re-centers at the round position [orig: @0x4ec8d6 / @0x4eaa9f,
 		// see renderer/light_scene.h].
-		d["pos"] = Vector3(r.pos.x, r.pos.z, -r.pos.y);
+		d["pos"] = mission_to_godot(r.pos);
 		d["radius"] = ammo->light_move_radius;
 		d["color"] = Color(
 				static_cast<float>((ammo->light_move_color >> 16) & 0xFF) / 255.0f,

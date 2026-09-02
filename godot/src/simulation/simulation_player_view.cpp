@@ -3,6 +3,7 @@
 // inputs the arbiter reads, and the Dictionary read. The orchestration and
 // every witnessed gate live in <runtime/world/local_player_view.h>.
 #include "simulation/simulation_internal.h"
+#include "env/env_axes.h"
 
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <runtime/world/local_player_view.h>
@@ -152,7 +153,7 @@ Dictionary Simulation::get_local_player_view() const {
 	out["scope_card_active"] = f.scope_card_active;
 	out["fov_h_deg"] = f.fov_h_deg;
 	// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position map.
-	out["tp_anchor"] = Vector3(f.tp_anchor[0], f.tp_anchor[2], -f.tp_anchor[1]);
+	out["tp_anchor"] = mission_to_godot(f.tp_anchor);
 	out["tp_anchor_valid"] = f.tp_anchor_valid;
 	if (f.fp_terms_valid) {
 		out["fp_pitch_recoil_deg"] = f.fp_pitch_recoil_deg;
@@ -160,7 +161,7 @@ Dictionary Simulation::get_local_player_view() const {
 	}
 	if (f.camera_pose_valid) {
 		out["camera_pose_valid"] = true;
-		out["camera_eye"] = Vector3(f.camera.eye[0], f.camera.eye[2], -f.camera.eye[1]);
+		out["camera_eye"] = mission_to_godot(f.camera.eye);
 		out["camera_yaw_deg"] = f.camera.yaw_deg;
 		out["camera_pitch_deg"] = f.camera.pitch_deg;
 		out["camera_roll_deg"] = f.camera.roll_deg;
