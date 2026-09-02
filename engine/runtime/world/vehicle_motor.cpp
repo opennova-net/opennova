@@ -144,14 +144,23 @@ Entity *resolve_vehicle_controller(World &world, Entity &veh) {
 static void stage_player_vehicle_input(Entity &veh, Entity &occ,
                                        const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
-    // The above-water gate at the player leg head remains with D-NET-161.
-    const uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
-                                (static_cast<uint32_t>(occ.net_stance_bits) << 8);
+    uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
+                          (static_cast<uint32_t>(occ.net_stance_bits) << 8);
     int dir = static_cast<int>(move_order & 7u);
     bool moving = ((move_order >> 3) & 1u) != 0;
     const int32_t analog_sum = static_cast<int32_t>(occ.net_analog_x) +
                                static_cast<int32_t>(occ.net_analog_y) +
                                static_cast<int32_t>(occ.net_analog_z);
+    // The MoveOrder bit-0x10 merge: any analog deflection, or the move bit with
+    // a nonzero 8-way direction, latches the free-look/steer-mode bit on the
+    // OCCUPANT's own MoveOrder word — the host echoes that byte in the
+    // player's 0x0A record, so the latch is wire-visible until the next uplink
+    // rewrites it [orig: ground @0x48b847..0x48b897 (`or eax, 10h` /
+    // `or [ecx+12Ch], 10h`); boat @0x48DE04..0x48DE7B].
+    if (analog_sum != 0 || (moving && dir != 0)) {
+        move_order |= Entity::kMoveOrderFreeLook;
+        occ.net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
+    }
     const int32_t driver_yaw_bam =
             bam_heading_from_mission_yaw_deg(static_cast<double>(occ.yaw));
 
@@ -377,8 +386,22 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             m.steer_ramp_bam = 0;
         }
         // A live NON-player controller with no drive command holds the previous
-        // steer/speed targets (the deferral tail of D-NET-161: boarding-wait, the
-        // handbrake byte-973 latch and the aim-lock stop are unmodeled).
+        // steer/speed targets.
+        // Occupied: the driverless stuck count rests [orig: `moveTimer = 0` at
+        // the occupied entry split, the boat twin @0x48DFA8..0x48DFCD].
+        if (occ != nullptr) m.stuck_ticks = 0;
+        // The handbrake stop latch and the crashed stop [orig: @0x48c03a..0x48c095
+        // — `occupant && Flags & 8 && itemDef->handBrake` sets byte +0x3CD, else
+        // clears it (@0x48c066); while set, [136] = 0 (@0x48c07a); the crashed
+        // byte +0x2EC zeroes [136] too (@0x48c086..0x48c08f)]. Flags bit 3 is
+        // the player leg's lean-right mirror above, so the handbrake IS the
+        // lean-right key while driving.
+        if (occ != nullptr && (veh.flags & 0x8u) != 0 && traits.hand_brake != 0)
+            m.handbrake_latched = 1;
+        else
+            m.handbrake_latched = 0;
+        if (m.handbrake_latched != 0) m.cmd_speed = 0;
+        if (m.crashed != 0) m.cmd_speed = 0;
     }
 
     // ------------------------------------------------------------- steering chase
@@ -1820,28 +1843,30 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
                 occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
         if (occ == nullptr) {
             // Parked/no controller: hold heading, zero command and ramp, lights
-            // off. The state-22 stamp lives with the brain in watercraft_ai_drive;
-            // AI_CheckVehicleStuckState stays a D-NET-161 deferral.
-            // [orig: @0x48E7EE..0x48E81E]
+            // off. The state-22 stamp and the stuck escalation live with the
+            // brain in watercraft_ai_drive. [orig: @0x48E7EE..0x48E81E]
             m.steer_target_bam = m.yaw_bam;
             m.cmd_speed = 0;
             m.steer_ramp_bam = 0;
             veh.flags &= ~0x80u;
-        } else if (player_occupant) {
+        } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
             // The human-driver leg: 8-way keys + analog through waterSpeed, the
             // boat bit6/bit7 overrides, the 45-deg ramp cap, walk/creep halving,
-            // lights [orig: @0x48DFE5..0x48E20F].
+            // lights [orig: @0x48DFE5..0x48E20F]. A player whose head is under
+            // the water plane routes to the AI leg instead [orig: the
+            // submerged-driver cut @0x48DFD3..0x48DFDF].
+            m.stuck_ticks = 0; // [orig: `moveTimer = 0` at the entry split @0x48DFA8..0x48DFCD]
             stage_player_vehicle_input(veh, *occ, traits);
         } else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
             // The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
             // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
+            m.stuck_ticks = 0;
             m.steer_target_bam = ai_cmd->steer_target_bam;
             m.cmd_speed = ai_cmd->cmd_speed;
             m.steer_ramp_bam = 0;
         }
         // A live non-player controller with no drive command holds the previous
-        // targets (the boarding-wait stop @0x48E75B..0x48E7EC rides D-NET-161
-        // with the boarding think).
+        // targets.
     }
 
     watercraft_motor_core(world, veh, traits);

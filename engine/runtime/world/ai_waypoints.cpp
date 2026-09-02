@@ -286,6 +286,118 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
     return cmd_speed;
 }
 
+// See ai.h. [orig: Entity_IsBoneInProximity @0x434F90 — parent @0x434f98
+// (dead parent -> 0 @0x434fa6; Entity_TransformLocalToWorld @0x434fc3), the
+// halved Z @0x43501e, the x87 length and the 0x80000 compare @0x435051]. Our
+// rows carry no spawn parent (a hull authored on a deck is the D-NET-196
+// deck-carried vehicle residual), so the anchor is spawn_position verbatim.
+bool vehicle_at_spawn_anchor(const Entity &veh) {
+    const int32_t dx = to_fixed(veh.spawn_position.x) - to_fixed(veh.position.x);
+    const int32_t dy = to_fixed(veh.spawn_position.y) - to_fixed(veh.position.y);
+    const int32_t dz = (to_fixed(veh.spawn_position.z) - to_fixed(veh.position.z)) >> 1;
+    const double d = std::sqrt(static_cast<double>(dx) * dx +
+                               static_cast<double>(dy) * dy +
+                               static_cast<double>(dz) * dz);
+    const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+    return di <= 0x80000;
+}
+
+// See ai.h. [orig: Entity_CountMountedEntities @0x435970 — the pool-0 walk
+// @0x4359a0: `entity[8] != 0` (an ItemDef) @0x4359a9, `!(Flags & 2)`
+// @0x4359b2, `+0x28 == target || (+0x28 && +0x28->groundEntity == target)`
+// @0x4359c2]. A seated rider's ground link is its vehicle, so the mount
+// relation counts alongside a free-standing ground link.
+int count_mounted_entities(const World &world, const Entity &veh) {
+    int count = 0;
+    world.registry.for_each_in_pool(0, [&](const Entity &e) {
+        if (!e.has_item_def) return;
+        if ((e.flags & kEntityFlagDead) != 0) return;
+        const EntityHandle ground = e.mounted ? e.mount_target : e.ground_target;
+        if (!ground.valid()) return;
+        if (ground == veh.handle) { ++count; return; }
+        const Entity *g = world.registry.get(ground);
+        if (g != nullptr && g->ground_target == veh.handle) ++count;
+    });
+    return count;
+}
+
+// See ai.h. [orig: @0x48DFD3..0x48DFDF — `occupant->Position.z +
+// CameraOffset.z <= Env_WaterHeightFixed`]. Retail's CameraOffset.z is always
+// live (the body updater writes it every tick); our eye offset is derived by
+// the infantry body legs, so a body that never derived one (0) has no head
+// height to test and keeps the wheel — a seated eye sits above the deck, never
+// at it.
+bool watercraft_driver_submerged(const World &world, const Entity &occ) {
+    if (world.env.water_z == 0 || occ.eye_offset_z == 0) return false;
+    return to_fixed(occ.position.z) + occ.eye_offset_z <= world.env.water_z;
+}
+
+// See ai.h. [orig: AI_CheckVehicleStuckState @0x465290]
+void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
+    // [orig: `entity[74] != 1` @0x4652a3 — the think cooldown at +0x128]
+    if (const AiEntity *ve = for_handle(veh.handle);
+        ve != nullptr && ve->inf.wait_cooldown == 1)
+        return;
+    Entity::VehicleMotorState &m = veh.veh;
+    const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652b6]
+    if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652bc/@0x4652c4]
+    const int32_t px = to_fixed(veh.position.x);
+    const int32_t py = to_fixed(veh.position.y);
+    const int32_t pz = to_fixed(veh.position.z);
+    const int32_t self_r = to_fixed(veh.bound_radius); // [orig: entity+0]
+    if (n > 32) {
+        // Anyone alive nearby keeps the hull from being written off: a live,
+        // unhidden pool-0 body inside the (both radii + 12 u) box and sphere
+        // resets the count [orig: the pool-0 walk @0x4652e6..0x46538c].
+        world.registry.for_each_in_pool(0, [&](const Entity &e) {
+            if (m.stuck_ticks == 0) return;
+            if (!e.has_item_def) return;               // [orig: entity[7] @0x465308]
+            if ((e.flags & 3u) != 0) return;           // [orig: (Flags & 3) == 0 @0x465312]
+            const int32_t r = to_fixed(e.bound_radius) + self_r + 0xC0000;
+            const int32_t dx = px - to_fixed(e.position.x);
+            if (iabs32(dx) > r) return;
+            const int32_t dy = py - to_fixed(e.position.y);
+            if (iabs32(dy) > r) return;
+            const int32_t dz = pz - to_fixed(e.position.z);
+            if (iabs32(dz) > r) return;
+            const double d = std::sqrt(static_cast<double>(dx) * dx +
+                                       static_cast<double>(dy) * dy +
+                                       static_cast<double>(dz) * dz);
+            const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+            if (di <= r) m.stuck_ticks = 0;            // [orig: @0x46538c]
+        });
+    }
+    if (m.stuck_ticks <= 3410) return;                 // [orig: @0x4653a6]
+    // The spawn anchor [orig: +0x24C, lifted through a live spawn parent
+    // @0x4653d4 — a DEAD parent returns @0x4653be; no parent model here].
+    const int32_t sx = px - to_fixed(veh.spawn_position.x);
+    const int32_t sy = py - to_fixed(veh.spawn_position.y);
+    const int32_t sz = pz - to_fixed(veh.spawn_position.z);
+    const double d = std::sqrt(static_cast<double>(sx) * sx +
+                               static_cast<double>(sy) * sy +
+                               static_cast<double>(sz) * sz);
+    const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+    if (di <= 0xC0000) return;                          // [orig: @0x465470]
+    if (m.stuck_ticks <= 3720) {
+        m.slide_z += 1024;                              // [orig: @0x465492 slideDecay += 0x400]
+    } else {
+        // Written off: zero health, no attacker credit [orig: @0x46547e/@0x465485].
+        veh.health = 0;
+    }
+}
+
+// See ai.h. [orig: ground @0x48bc4e..0x48bc94 — `minAI > 1` @0x48bc51,
+// Entity_IsBoneInProximity @0x48bc5d, Entity_CountMountedEntities < minAI
+// @0x48bc75, `Health > criticalHp -> Health = criticalHp` @0x48bc84..0x48bc8d]
+void AiSystem::apply_min_ai_crew_clamp(World &world, Entity &veh,
+                                       const VehicleTraits &traits) {
+    if (traits.min_ai <= 1) return;
+    if (vehicle_at_spawn_anchor(veh)) return;
+    if (count_mounted_entities(world, veh) >= traits.min_ai) return;
+    if (veh.health > traits.critical_hp)
+        veh.health = static_cast<int32_t>(static_cast<int16_t>(traits.critical_hp));
+}
+
 // See ai.h — the vehicle-physics AI/parked input staging. [orig: Entity_UpdateVehiclePhysics
 // @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
 void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
@@ -297,13 +409,15 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     const bool wrecked = veh.health <= 0 || !veh.alive;
     if (controller == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
         // Parked/no driver: the motor's no-controller branch holds heading + zeroes the
-        // command; the brain drops into the player-mode/parked state. The stuck-state
-        // check is unported (D-NET-161). [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
-        // [136] = 0, [137] = 0, AI_CheckVehicleStuckState, Flags &= ~0x80, state = 22]
+        // command; the brain drops into the player-mode/parked state and the
+        // stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
+        // [136] = 0, [137] = 0, AI_CheckVehicleStuckState @0x48c01e, Flags &= ~0x80,
+        // state = 22]
         // The pend mirror is ours: the original has ONE state field; without it the
         // SM's transition pass reverts the stamp to the pending 16 next tick.
         b.f[AiBrain::kCurState] = 22;
         b.f[AiBrain::kPendState] = 22;
+        check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
 
@@ -322,8 +436,8 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     //  the aiComp[135] <- brain[127] target mirror is an unmodeled slot].
     int32_t cmd_speed = b.f[AiBrain::kOutSpeed];
     if (cmd_speed > traits.player_speed) cmd_speed = traits.player_speed;
-    // The minAI crew health clamp [orig: @0x48bc4e-0x48bc94] rides D-NET-161 (def
-    // minai/criticalHp unparsed).
+    // The minAI crew health clamp [orig: @0x48bc4e-0x48bc94].
+    apply_min_ai_crew_clamp(world, veh, traits);
 
     // Per-leg turn budget: recomputed whenever the mover's node advance cleared it.
     // [orig: @0x48bc9a-0x48bccf — budget = 32 * |Yaw - bearing| / ((storedKeyTime >> 15) + 32)]
@@ -360,11 +474,17 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     out.steer_target_bam = heading + delta + (delta >> 3); // [orig: @0x48bd7f]
-    // The wait-for-boarders stop @0x48bf6f-0x48bff9 (a full stop while any live
-    // unmounted pool-0 entity runs the boarding think toward THIS vehicle —
-    // brain mode 125 + the vehicle id; moot until the AI boarding think lands),
-    // the handbrake byte-973 latch @0x48c03a and the aim-lock stop @0x48c086
-    // stay tracked deferrals (D-NET-161).
+    // The wait-for-boarders stop: a full stop while any live unmounted pool-0
+    // body runs the boarding think toward THIS vehicle [orig: @0x48bf6f-0x48bff9
+    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80; the motor zeroes
+    // the ramp for every AI command].
+    if (vehicle_waits_for_boarders(world, veh)) {
+        out.steer_target_bam = heading;
+        out.cmd_speed = 0;
+        veh.flags &= ~0x80u;
+    }
+    // The handbrake byte-973 latch @0x48c03a and the crashed stop @0x48c086 sit
+    // past the AI leg in the motor itself (tick_vehicle_motor).
 }
 
 // See ai.h — the cbot AI-driver/parked staging (witnessed 2026-08-06).
@@ -386,11 +506,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     if (controller == nullptr ||
         ((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
         // Parked/no driver [orig: @0x48E7EE..0x48E81E — aiComp[132] = Yaw,
-        // [136] = 0, [137] = 0, AI_CheckVehicleStuckState (deferred, D-NET-161),
+        // [136] = 0, [137] = 0, AI_CheckVehicleStuckState @0x48e808,
         // Flags &= ~0x80, state = 22]. The pend mirror is ours — one state field
         // in the original (see vehicle_ai_drive).
         b.f[AiBrain::kCurState] = 22;
         b.f[AiBrain::kPendState] = 22;
+        check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
 
@@ -406,11 +527,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 
     // cmd = the SM mover's out-speed capped at def waterSpeed [orig:
     // @0x48E260..0x48E279 — aiComp[136] = min(brain[128], waterSpeed)]. The
-    // aiComp[135] <- brain[127] target mirror (@0x48E254) is an unmodeled slot;
-    // the minAI crew health clamp @0x48E27F..0x48E2C7 (def minai + criticalHp:
-    // undercrewed AI hulls bleed to critical) rides D-NET-161.
+    // aiComp[135] <- brain[127] target mirror (@0x48E254) is an unmodeled slot.
     int32_t cmd_speed = b.f[AiBrain::kOutSpeed];
     if (cmd_speed > traits.water_speed) cmd_speed = traits.water_speed;
+    // The minAI crew health clamp [orig: @0x48E27F..0x48E2C7 — the boat twin
+    // of the ground block; undercrewed AI hulls bleed to critical].
+    apply_min_ai_crew_clamp(world, veh, traits);
 
     // Per-leg turn budget, boat form: truncate-divide THEN << 4 [orig:
     // @0x48E2D5..0x48E31C — refresh when brain[32] is spent and the waypoint
@@ -484,9 +606,14 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     out.ai_drive = true;
     out.cmd_speed = cmd_speed;
     out.steer_target_bam = steer;
-    // The wait-for-boarders stop @0x48E75B..0x48E7EC (hold at cmd 0 while any
-    // live unmounted pool-0 AI runs boarding mode 125 toward THIS hull's id —
-    // moot until the boarding think lands) stays a tracked deferral (D-NET-161).
+    // The wait-for-boarders stop: hold at cmd 0 while any live unmounted pool-0
+    // AI runs boarding mode 125 toward THIS hull's id [orig: @0x48E75B..0x48E7EC
+    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80].
+    if (vehicle_waits_for_boarders(world, veh)) {
+        out.steer_target_bam = heading;
+        out.cmd_speed = 0;
+        veh.flags &= ~0x80u;
+    }
 }
 
 // The CHel AI flight drive — see the ai.h declaration. Retail computes this
@@ -549,9 +676,10 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     const bool crewed =
             controller != nullptr && controller->alive && controller->health > 0;
     if (!crewed || wrecked) {
-        // Parked. [orig: the state-14 block — thrust slots zeroed, altitude
-        // pinned below ground (collective off), engine flag cleared; our
-        // shared parked stamp is 22 like the ground movers' player/parked leg]
+        // Parked. [orig: the no-pilot/dead block — thrust slots zeroed, altitude
+        // pinned below ground (collective off), AI_CheckVehicleStuckState
+        // @0x491c5e, state 14, engine flag cleared; our shared parked stamp is
+        // 22 like the ground movers' player/parked leg]
         b.f[AiBrain::kCurState] = 22;
         b.f[AiBrain::kPendState] = 22;
         m.cmd_speed = 0;
@@ -559,15 +687,22 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.steer_target_bam = m.yaw_bam;
         m.net_alt_target = ground - 0x4000;
         m.net_engine_on = false;
+        check_vehicle_stuck(world, veh);
         return;
     }
 
-    // Crewed: parked -> FOLLOWWP. [orig: `if (brain[16] == 14) brain[16] = 7`]
+    // Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`],
+    // parked -> FOLLOWWP [orig: `if (brain[16] == 14) brain[16] = 7`].
+    m.stuck_ticks = 0;
     if (b.f[AiBrain::kCurState] == 22) {
         b.f[AiBrain::kCurState] = 16;
         b.f[AiBrain::kPendState] = 16;
     }
     m.net_engine_on = true;
+    // The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
+    // `itemDef+0x8D8 > 1`, Entity_IsBoneInProximity @0x4915c2,
+    // Entity_CountMountedEntities @0x4915d2, criticalHp @0x4915e2].
+    apply_min_ai_crew_clamp(world, veh, traits);
 
     // The patrol height stand-in until the HELO .aip profile rows are plumbed
     // to vehicle brains (stage-1 parse landed; patrol_altitude authored ~40u).

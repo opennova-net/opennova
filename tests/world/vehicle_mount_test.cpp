@@ -1259,6 +1259,248 @@ void test_ai_drive_avoid_brake() {
     CHECK(cmd2.cmd_speed == cmd0.cmd_speed);
 }
 
+// A driverless hull's stuck escalation [orig: AI_CheckVehicleStuckState
+// @0x465290]: the count climbs once per parked tick; on the authority every
+// 16th count past 32 a live pool-0 body within (radii + 12 u) resets it; past
+// 3410 a hull more than 12 u from its spawn anchor is nudged up (slideDecay
+// += 1024 per check) until 3720, then killed.
+void test_stuck_check() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.sys.is_authority = true;
+    r.sys.attach(r.veh_h);
+    r.veh().spawn_position = Vec3{0.0f, 0.0f, 10.0f}; // 100+ u from the hull
+    r.veh().bound_radius = 3.0f;
+    // The rig's player stands 30 u away: outside (3 + 0 + 12) u, no reset.
+    for (int i = 0; i < 3410; ++i) {
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
+        CHECK(!cmd.ai_drive);
+    }
+    CHECK(r.veh().veh.stuck_ticks == 3410);
+    CHECK(r.veh().veh.slide_z == 0);
+    CHECK(r.veh().health == 2000);
+    // 3411..3720: every 16th count nudges the hull upward.
+    int32_t nudges = 0;
+    for (int i = 3411; i <= 3720; ++i) {
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
+        if ((i & 0xF) == 0) ++nudges;
+        CHECK(r.veh().veh.slide_z == nudges * 1024);
+    }
+    CHECK(r.veh().health == 2000);
+    // The first checked count past 3720 writes the hull off.
+    for (int i = 3721; i <= 3728; ++i) {
+        VehicleDriveCmd cmd;
+        r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
+    }
+    CHECK(r.veh().veh.stuck_ticks == 3728);
+    CHECK(r.veh().health == 0);
+
+    // A hull still AT its spawn anchor is never written off, and a live body
+    // nearby resets the count entirely.
+    Rig r2(2.0f); // the player 2 u away: inside the reset reach
+    r2.w.vehicle_traits.set(r2.veh().item_id, t);
+    r2.sys.is_authority = true;
+    r2.sys.attach(r2.veh_h);
+    r2.player().has_item_def = true; // [orig: the walk's entity[7] gate]
+    r2.veh().spawn_position = r2.veh().position;
+    r2.veh().bound_radius = 3.0f;
+    for (int i = 0; i < 48; ++i) {
+        VehicleDriveCmd cmd;
+        r2.sys.vehicle_ai_drive(r2.w, r2.veh(), nullptr, t, cmd);
+    }
+    // Counts 33..48: the check at 48 (> 32, & 0xF == 0) saw the body and reset.
+    CHECK(r2.veh().veh.stuck_ticks == 0);
+    // Move the body away and let the count run past the kill line: at the
+    // anchor, distance <= 12 u -> neither nudge nor kill.
+    r2.player().position = Vec3{200.0f, 200.0f, 10.0f};
+    for (int i = 0; i < 3800; ++i) {
+        VehicleDriveCmd cmd;
+        r2.sys.vehicle_ai_drive(r2.w, r2.veh(), nullptr, t, cmd);
+    }
+    CHECK(r2.veh().veh.stuck_ticks == 3800);
+    CHECK(r2.veh().veh.slide_z == 0);
+    CHECK(r2.veh().health == 2000);
+    // An occupant rests the count.
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    const EntityHandle nh = r2.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r2.w, nh, r2.veh_h, 1));
+    VehicleDriveCmd cmd;
+    tick_vehicle_motor(r2.w, r2.veh(), t, &cmd);
+    CHECK(r2.veh().veh.stuck_ticks == 0);
+    // A joiner never runs the escalation (the count still climbs).
+    r2.sys.is_authority = false;
+    r2.w.registry.get(nh)->health = 0;
+    r2.w.registry.get(nh)->alive = false;
+    for (int i = 0; i < 3800; ++i) {
+        VehicleDriveCmd c2;
+        r2.sys.vehicle_ai_drive(r2.w, r2.veh(), nullptr, t, c2);
+    }
+    CHECK(r2.veh().veh.stuck_ticks == 3800);
+    CHECK(r2.veh().health == 2000);
+}
+
+// The minAI crew clamp [orig: @0x48bc4e-0x48bc94]: an AI-driven hull that has
+// left its spawn anchor with fewer than minAI riders bleeds to criticalHp.
+void test_min_ai_crew_clamp() {
+    Rig r(30.0f);
+    VehicleTraits t = truck_traits();
+    t.min_ai = 2;
+    t.critical_hp = 300;
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.sys.attach(r.veh_h);
+    r.veh().spawn_position = r.veh().position;
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    npc.has_item_def = true;
+    const EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(ctrl != nullptr);
+    CHECK(count_mounted_entities(r.w, r.veh()) == 1);
+
+    // At the anchor: no clamp.
+    CHECK(vehicle_at_spawn_anchor(r.veh()));
+    VehicleDriveCmd cmd;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+    CHECK(r.veh().health == 2000);
+    // 8 u planar is still the anchor (<= 0x80000); 9 u is not.
+    r.veh().position = Vec3{108.0f, 200.0f, 10.0f};
+    CHECK(vehicle_at_spawn_anchor(r.veh()));
+    r.veh().position = Vec3{109.0f, 200.0f, 10.0f};
+    CHECK(!vehicle_at_spawn_anchor(r.veh()));
+    // The Z delta is HALVED: 15 u straight up still counts as the anchor.
+    r.veh().position = Vec3{100.0f, 200.0f, 25.0f};
+    CHECK(vehicle_at_spawn_anchor(r.veh()));
+    r.veh().position = Vec3{100.0f, 200.0f, 27.0f};
+    CHECK(!vehicle_at_spawn_anchor(r.veh()));
+    // Off the anchor, one rider of the required two: clamped to critical.
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+    CHECK(r.veh().health == 300);
+    // Health below critical is left alone.
+    r.veh().health = 120;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+    CHECK(r.veh().health == 120);
+    // A second rider (a free-standing body grounded on the deck) fills the crew.
+    r.veh().health = 2000;
+    Entity rider;
+    rider.kind = EntityKind::Organic;
+    rider.item_id = 2072;
+    rider.health = 150;
+    rider.alive = true;
+    rider.has_item_def = true;
+    rider.ground_target = r.veh_h;
+    const EntityHandle rh = r.w.registry.spawn(0, rider);
+    CHECK(count_mounted_entities(r.w, r.veh()) == 2);
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+    CHECK(r.veh().health == 2000);
+    // A dead rider does not count.
+    r.w.registry.get(rh)->flags |= kEntityFlagDead;
+    CHECK(count_mounted_entities(r.w, r.veh()) == 1);
+    // minAI 1 never clamps.
+    t.min_ai = 1;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
+    CHECK(r.veh().health == 2000);
+}
+
+// The handbrake latch [orig: @0x48c03a..0x48c095]: the driver's lean-right key
+// (vehicle Flags bit 3) with the def's handBrake set forces the command word to
+// zero while held; the crashed byte does the same.
+void test_handbrake_latch() {
+    Rig r(2.0f);
+    VehicleTraits t = truck_traits();
+    t.hand_brake = 1;
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
+    Entity &drv = r.player();
+    drv.net_move_input = 0x08; // moving forward
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK(r.veh().veh.cmd_speed == t.player_speed);
+    CHECK(r.veh().veh.handbrake_latched == 0);
+    drv.net_move_input = 0x08 | 0x80; // + lean right = handbrake
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK((r.veh().flags & 0x8u) != 0);
+    CHECK(r.veh().veh.handbrake_latched == 1);
+    CHECK(r.veh().veh.cmd_speed == 0);
+    drv.net_move_input = 0x08;
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK(r.veh().veh.handbrake_latched == 0);
+    CHECK(r.veh().veh.cmd_speed == t.player_speed);
+    // A def without handBrake ignores the key.
+    t.hand_brake = 0;
+    drv.net_move_input = 0x08 | 0x80;
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK(r.veh().veh.handbrake_latched == 0);
+    CHECK(r.veh().veh.cmd_speed == t.player_speed);
+    // The crashed byte stops the command regardless.
+    r.veh().veh.crashed = 1;
+    drv.net_move_input = 0x08;
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK(r.veh().veh.cmd_speed == 0);
+    r.veh().veh.crashed = 0;
+    // The MoveOrder merge: a nonzero direction with the move bit latches the
+    // free-look bit on the occupant's own word [orig: @0x48b847..0x48b897].
+    drv.net_move_input = 0x08 | 0x01;
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK((drv.net_move_input & 0x10u) != 0);
+    drv.net_move_input = 0x08; // straight: no latch
+    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    CHECK((drv.net_move_input & 0x10u) == 0);
+}
+
+// The ground twin of the boarders hold [orig: @0x48bf6f-0x48bff9]: an AI
+// driver holds at cmd 0 while a body walks over to a free seat.
+void test_ground_waits_for_boarders() {
+    Rig r(30.0f);
+    const VehicleTraits t = truck_traits();
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.sys.attach(r.veh_h);
+    AiEntity &ve = *r.sys.for_handle(r.veh_h);
+    ve.brain.f[AiBrain::kOutSpeed] = 40 * 293;
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.item_id = 2072;
+    npc.health = 150;
+    npc.alive = true;
+    npc.team = 1;
+    const EntityHandle nh = r.w.registry.spawn(0, npc);
+    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(ctrl != nullptr);
+    VehicleDriveCmd cmd0;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd0);
+    CHECK(cmd0.ai_drive);
+    CHECK(cmd0.cmd_speed > 0);
+    // A walker running the board order at this truck: full stop.
+    Entity walker;
+    walker.kind = EntityKind::Organic;
+    walker.item_id = 2072;
+    walker.health = 150;
+    walker.alive = true;
+    walker.has_item_def = true;
+    const EntityHandle wh = r.w.registry.spawn(0, walker);
+    AiEntity &wb = *r.sys.at(r.sys.attach(wh));
+    wb.brain.f[37] = 125;
+    wb.brain.f[38] = static_cast<int32_t>(r.veh().net_id);
+    VehicleDriveCmd cmd1;
+    r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd1);
+    CHECK(cmd1.ai_drive);
+    CHECK(cmd1.cmd_speed == 0);
+    CHECK(cmd1.steer_target_bam ==
+          bam_heading_from_mission_yaw_deg(static_cast<double>(r.veh().yaw)));
+}
+
 // The redirect order reaches the BRAIN (mode/list/node + budget) and the BMS speed
 // commands write kSpeedA/kSpeedB at the witnessed x65536/225 scale.
 // [orig: Entity_SetWaypointByTeam @0x43cdb4; Entity_ApplyCommand @0x43ab60 0x1D/0x1E ->
@@ -1797,6 +2039,10 @@ int main() {
     test_prepare_vehicle_weapon_slot_after_armory_load();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();
+    test_stuck_check();
+    test_min_ai_crew_clamp();
+    test_handbrake_latch();
+    test_ground_waits_for_boarders();
     test_redirect_and_speed_commands();
     test_local_player_drive_mirror();
     test_player_spawn_group();

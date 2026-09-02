@@ -261,6 +261,8 @@ static int test_weathervane_minai_default_aip(void) {
         "  move_function chel\n"
         "    weathervane 30\n"
         "    minai\t\t1\n"
+        "    hand_brake 0\n"
+        "    tire_slip 7\n"
         "  default_aip H_BHawk\n"
         "  sound_profile SP_Blackhawk1\n"
         "end\n"
@@ -282,6 +284,19 @@ static int test_weathervane_minai_default_aip(void) {
     }
     if (items.entries[0].min_ai != 1) {
         fprintf(stderr, "FAIL: min_ai %d != 1\n", items.entries[0].min_ai);
+        ++fails;
+    }
+    /* hand_brake / tire_slip: authored values land raw; an entry that lists
+       neither runs on the allocator's 1 / 5 [orig: ItemDef_AllocateWithDefaults
+       @0x49E3B0; keys @0x7c7d60 / @0x7c7d6c]. */
+    if (items.entries[0].hand_brake != 0 || items.entries[0].tire_slip != 7) {
+        fprintf(stderr, "FAIL: hand_brake %d / tire_slip %d != 0 / 7\n",
+                items.entries[0].hand_brake, items.entries[0].tire_slip);
+        ++fails;
+    }
+    if (items.entries[1].hand_brake != 1 || items.entries[1].tire_slip != 5) {
+        fprintf(stderr, "FAIL: hand_brake/tire_slip defaults %d / %d != 1 / 5\n",
+                items.entries[1].hand_brake, items.entries[1].tire_slip);
         ++fails;
     }
     fails += expect_str("default_aip", items.entries[0].default_aip, "H_BHawk");

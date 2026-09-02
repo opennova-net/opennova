@@ -238,6 +238,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.pitch_lift_vel = def->pitch_velocity;
                 vt.bob = def->bob;
                 vt.flip = def->flip;
+                vt.hand_brake = def->hand_brake;
+                vt.min_ai = def->min_ai;
+                vt.critical_hp = def->critical_hp;
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;

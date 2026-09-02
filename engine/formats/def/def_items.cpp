@@ -71,8 +71,7 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
    but the key that writes unk591 is an unresolved indirect string in the
    decompilation (`off_7C7D78`), so its identity with our `bob`
    field is NOT witnessed for defaulting purposes and `bob` is deliberately
-   left at 0. Retail's tireSlip = 5 and handBrake = 1 have no field in our
-   record at all. Both are named divergences, not oversights. */
+   left at 0. */
 static void apply_item_def_defaults(DefItemDef *d) {
     d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
     d->torque = 3;         /* [orig: torque] */
@@ -86,6 +85,8 @@ static void apply_item_def_defaults(DefItemDef *d) {
     d->pitch = 1;          /* [orig: pitch] */
     d->pitch_velocity = 5; /* [orig: pitchVelocity] */
     d->flip = 45;          /* [orig: flip] */
+    d->hand_brake = 1;     /* [orig: handBrake] */
+    d->tire_slip = 5;      /* [orig: tireSlip] */
 }
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
@@ -446,6 +447,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "flip", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
             current.flip = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "hand_brake", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.hand_brake = parse_int_n(v, vl); /* raw +0x944 [orig: key @0x7c7d60] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "tire_slip", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.tire_slip = parse_int_n(v, vl); /* raw +0x940 [orig: key @0x7c7d6c] */
             parsed = 1;
         /* The suspension spring block — raw atol [orig: spring_comp @0x49dbd4,
            spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98 — the last is
