@@ -210,13 +210,11 @@ public:
 	int get_user_point_bone_mask(const String &p_name) const;
 	// PLAYPARTANIM's engine math (one impl in engine/runtime/world ai.h): the
 	// witnessed rate from ANIMTIME seconds
-	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9] and one 16 ms sweep step
-	// (returns {"phase": int, "finished": bool})
-	// [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]. The
-	// authoritative AI path integrates in AiSystem and presents through
-	// set_part_phase; local runtime controllers use the same helpers.
+	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. The sweep step is
+	// world::part_anim_step, which the model's part-anim channels call
+	// directly; the authoritative AI path integrates in AiSystem and presents
+	// through set_part_phase.
 	static int part_anim_rate_for_seconds(double p_seconds);
-	static Dictionary part_anim_step(int p_phase, int p_dir, int p_rate);
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked

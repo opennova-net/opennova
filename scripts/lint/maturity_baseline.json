@@ -16,14 +16,14 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 420,
+    "adapter_cpp_orig_cites": 419,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
     "gd_dict_key_sites": 963,
     "gd_orig_cites": 699,
     "gd_prints_outside_debug": 0,
-    "godot_src_dictionary_returns": 145,
+    "godot_src_dictionary_returns": 141,
     "has_method_guards": 22,
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,

@@ -174,12 +174,13 @@ public:
 	// currents snap to targets, clamps install, 255 full ticks settle (retail
 	// Environment_MissionStartInit @ 0x57f1e0). False for a joiner / no world.
 	bool settle_weather_mission_start();
-	// The precipitation drop pool's per-render update + compile for a camera:
-	// {positions (three per drop), drops, color (ARGB int), snow}
-	// (renderer/precipitation_frame.h carries the cites).
-	Dictionary compile_precipitation_frame(const Vector3 &p_camera,
-			const Vector3 &p_camera_right, const Vector3 &p_camera_up,
-			int p_terrain_light_rgb);
+	// The precipitation drop pool's per-render update + compile for a camera
+	// (renderer/precipitation_frame.h carries the cites): the compiled frame the
+	// Precipitation node streams (drops, five floats per vertex, color, snow);
+	// an empty frame without a world. C++-only, the node is its one consumer.
+	const opennova::renderer::PrecipitationDrawFrame &compile_precipitation_frame(
+			const Vector3 &p_camera, const Vector3 &p_camera_right,
+			const Vector3 &p_camera_up, int p_terrain_light_rgb);
 	// Thunder one-shots since the last drain: [{distance, bearing}] (weather_state.h carries the cites).
 	Array drain_weather_sounds();
 	// The probe/test view of the weather home in native units.

@@ -788,9 +788,10 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 		Vector<String> finished;
 		for (KeyValue<String, PartAnimChannel> &kv : part_anims_) {
 			const int64_t previous = kv.value.value;
-			const Dictionary step = ObjectData::part_anim_step(
-					static_cast<int>(previous), kv.value.dir, kv.value.rate);
-			const int64_t next_value = int64_t(step["phase"]);
+			int32_t phase = static_cast<int32_t>(previous);
+			const bool step_finished = opennova::world::part_anim_step(phase,
+					static_cast<int32_t>(kv.value.dir), static_cast<int32_t>(kv.value.rate));
+			const int64_t next_value = phase;
 			kv.value.value = next_value;
 			// A register entering the table is a change even when its first
 			// step lands on the phase it started from.
@@ -798,7 +799,7 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 			ctrl_values_[kv.key] = next_value;
 			ctrl_value_owners_.erase(kv.key);
 			changed = changed || inserted || next_value != previous;
-			if (bool(step["finished"])) {
+			if (step_finished) {
 				finished.push_back(kv.key);
 			}
 		}
