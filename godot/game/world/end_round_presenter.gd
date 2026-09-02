@@ -232,17 +232,16 @@ func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.table_clear_rows(list_id)
 	var headers := PackedStringArray()
-	for value in sim.get_end_round_columns(table_width, _gametext()):
-		headers.append(String((value as Dictionary).get("header", "")))
+	for column: EndRoundColumn in sim.get_end_round_columns(table_width, _gametext()):
+		headers.append(column.header)
 	_driver.table_add_row(list_id, headers)
 	var row_index := 1
 	var selected_row := -1
-	for value in sim.get_end_round_rows(tab):
-		var row := value as Dictionary
-		var cells := PackedStringArray([String(row.get("name", "")), String(row.get("squad", "-"))])
-		cells.append_array(PackedStringArray(row.get("cells", PackedStringArray())))
+	for row: EndRoundRow in sim.get_end_round_rows(tab):
+		var cells := PackedStringArray([row.name, row.squad])
+		cells.append_array(row.cells)
 		_driver.table_add_row(list_id, cells)
-		if bool(row.get("selected", false)):
+		if row.selected:
 			selected_row = row_index
 		row_index += 1
 	if selected_row >= 0:
