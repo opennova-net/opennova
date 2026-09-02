@@ -353,6 +353,10 @@ func _frame_index(id: int) -> int:
 
 
 func _state_of(id: int) -> Dictionary:
+	# An absent widget (-1, the retail null CUIWidget_FindByName) has no
+	# state: its writes land in a throwaway so the store never grows a -1 row.
+	if id < 0:
+		return {}
 	if not _id_state.has(id):
 		_id_state[id] = {}
 	return _id_state[id]
