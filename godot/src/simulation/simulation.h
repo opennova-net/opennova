@@ -57,6 +57,7 @@ class ScarDrawList;         // one frame's impact-scar draw list (world/scar_dra
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
 class TracerRibbonFrame;    // the compiled tracer strips (simulation/tracer_ribbon_frame.h)
+class WeatherHomeState;     // the weather home's probe view (simulation/weather_home_state.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 // The small per-frame HUD view records (simulation/hud_view_records.h).
@@ -211,8 +212,9 @@ public:
 			const Vector3 &p_camera_up, int p_terrain_light_rgb);
 	// Thunder one-shots since the last drain: [{distance, bearing}] (weather_state.h carries the cites).
 	Array drain_weather_sounds();
-	// The probe/test view of the weather home in native units.
-	Dictionary get_weather_state() const;
+	// The probe/test view of the weather home in native units
+	// (simulation/weather_home_state.h); null without a weather home.
+	Ref<WeatherHomeState> get_weather_state() const;
 	// The F3 Environment window's record (ADR 0042 d6): the ENGINE join over
 	// the weather home; false without a world.
 	bool native_environment_snapshot(opennova::devtools::EnvironmentSnapshot &out) const;

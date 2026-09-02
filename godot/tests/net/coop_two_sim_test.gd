@@ -552,20 +552,23 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "EnvironmentJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
-	var received := {}
+	var received: WeatherHomeState = null
 	for _i in range(1200):
 		host.step()
 		joiner.step()
 		received = joiner.get_weather_state()
-		if int(received.get("fog_target_q16", 0)) == 291 << 16:
+		if received != null and received.fog_target_q16 == 291 << 16:
 			break
 		OS.delay_msec(2)
 
-	assert_eq(int(received.get("fog_target_q16", -1)), 291 << 16,
+	assert_not_null(received, "the joiner exposes its weather home")
+	if received == null:
+		return
+	assert_eq(received.fog_target_q16, 291 << 16,
 			"the OpenNova joiner folds the host's scheduled phase-2 sample into its weather home")
-	assert_eq(int(received.get("cloud_scroll_rate_target", -1)), 170 << 10)
-	assert_eq(int(received.get("precipitation_kind", -1)), 1)
-	assert_gt(int(received.get("quake_ticks", -1)), 0,
+	assert_eq(received.cloud_scroll_rate_target, 170 << 10)
+	assert_eq(received.precipitation_kind, 1)
+	assert_gt(received.quake_ticks, 0,
 			"the host's quake countdown reaches the joiner")
 	joiner.free()
 	host.free()

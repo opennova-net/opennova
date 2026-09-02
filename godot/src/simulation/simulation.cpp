@@ -4,6 +4,7 @@
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
 #include "simulation/debug_cards.h"
+#include "simulation/weather_home_state.h" // the weather home's probe/test view
 #include "env/env_axes.h"
 
 #include "env/weather.h"
@@ -277,36 +278,37 @@ Array Simulation::drain_weather_sounds() {
 	return out;
 }
 
-Dictionary Simulation::get_weather_state() const {
-	Dictionary out;
+Ref<WeatherHomeState> Simulation::get_weather_state() const {
 	const opennova::world::WeatherState *w = weather_state();
-	if (w == nullptr) return out;
-	out["valid"] = w->valid;
-	out["generation"] = static_cast<int64_t>(w->generation);
-	out["command_generation"] = static_cast<int64_t>(w->command_generation);
-	out["fog_target_q16"] = static_cast<int64_t>(w->fog_target_q16());
-	out["fog_current_q16"] = static_cast<int64_t>(w->fog_current_q16());
-	out["fog_accel_clamp"] = static_cast<int64_t>(w->fog_accel_clamp());
-	out["fog_type"] = w->fog_type;
-	out["tod_fixed24"] = static_cast<int64_t>(w->tod_fixed24);
-	out["tod_advance_per_tick"] = static_cast<int64_t>(w->tod_advance_per_tick);
-	out["quake_ticks"] = static_cast<int64_t>(w->quake_ticks);
-	out["cloud_scroll_rate_target"] = static_cast<int64_t>(w->cloud_scroll_rate_target);
-	out["cloud_scroll_rate"] = static_cast<int64_t>(w->cloud_scroll_rate());
-	out["rain_pct_current_q16"] = static_cast<int64_t>(w->rain_pct_current_q16());
-	out["rain_pct_target_q16"] = static_cast<int64_t>(w->rain_pct_target_q16());
-	out["overcast_blend_q16"] = static_cast<int64_t>(w->overcast_blend_q16());
-	out["overcast_target_q16"] = static_cast<int64_t>(w->overcast_target_q16());
-	out["sun_dim_pct_q16"] = static_cast<int64_t>(w->sun_dim_pct_q16());
-	out["sky_height_q16"] = static_cast<int64_t>(w->sky_height_q16());
-	out["precipitation_kind"] = static_cast<int64_t>(w->precipitation_kind);
-	out["lightning_color"] = static_cast<int64_t>(w->lightning_color);
-	out["color_fade_ticks"] = static_cast<int64_t>(w->color_fade_ticks);
-	out["wind_scale"] = static_cast<int64_t>(w->wind_scale());
-	out["lightning_timer_a"] = w->core.lightning.timer_a;
-	out["lightning_timer_b"] = w->core.lightning.timer_b;
-	out["lightning_level"] = w->core.lightning.level;
-	out["night"] = w->is_night_phase();
+	if (w == nullptr) return Ref<WeatherHomeState>();
+	Ref<WeatherHomeState> out;
+	out.instantiate();
+	out->set_valid(w->valid);
+	out->set_generation(static_cast<int64_t>(w->generation));
+	out->set_command_generation(static_cast<int64_t>(w->command_generation));
+	out->set_fog_target_q16(static_cast<int64_t>(w->fog_target_q16()));
+	out->set_fog_current_q16(static_cast<int64_t>(w->fog_current_q16()));
+	out->set_fog_accel_clamp(static_cast<int64_t>(w->fog_accel_clamp()));
+	out->set_fog_type(w->fog_type);
+	out->set_tod_fixed24(static_cast<int64_t>(w->tod_fixed24));
+	out->set_tod_advance_per_tick(static_cast<int64_t>(w->tod_advance_per_tick));
+	out->set_quake_ticks(static_cast<int64_t>(w->quake_ticks));
+	out->set_cloud_scroll_rate_target(static_cast<int64_t>(w->cloud_scroll_rate_target));
+	out->set_cloud_scroll_rate(static_cast<int64_t>(w->cloud_scroll_rate()));
+	out->set_rain_pct_current_q16(static_cast<int64_t>(w->rain_pct_current_q16()));
+	out->set_rain_pct_target_q16(static_cast<int64_t>(w->rain_pct_target_q16()));
+	out->set_overcast_blend_q16(static_cast<int64_t>(w->overcast_blend_q16()));
+	out->set_overcast_target_q16(static_cast<int64_t>(w->overcast_target_q16()));
+	out->set_sun_dim_pct_q16(static_cast<int64_t>(w->sun_dim_pct_q16()));
+	out->set_sky_height_q16(static_cast<int64_t>(w->sky_height_q16()));
+	out->set_precipitation_kind(static_cast<int64_t>(w->precipitation_kind));
+	out->set_lightning_color(static_cast<int64_t>(w->lightning_color));
+	out->set_color_fade_ticks(static_cast<int64_t>(w->color_fade_ticks));
+	out->set_wind_scale(static_cast<int64_t>(w->wind_scale()));
+	out->set_lightning_timer_a(w->core.lightning.timer_a);
+	out->set_lightning_timer_b(w->core.lightning.timer_b);
+	out->set_lightning_level(w->core.lightning.level);
+	out->set_night(w->is_night_phase());
 	return out;
 }
 

@@ -398,9 +398,9 @@ func _refresh_servers() -> void:
 func _show_population_status() -> void:
 	if _client == null:
 		return
-	var totals: Dictionary = _client.get_server_totals()
-	var servers := int(totals.get("total_servers", 0))
-	var players := int(totals.get("total_players", 0))
+	var totals := _client.get_server_totals()
+	var servers := totals.total_servers
+	var players := totals.total_players
 	if _population_label != null:
 		_population_label.text = "%d game%s • %d player%s online" % [
 			servers, "" if servers == 1 else "s",

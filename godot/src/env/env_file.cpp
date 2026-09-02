@@ -530,11 +530,12 @@ float EnvFile::get_fog_end_underwater() const {
 	return opennova::env::fog_end_underwater(water_murk);
 }
 
-Dictionary EnvFile::get_day_phase(float p_time) const {
+Ref<EnvDayPhase> EnvFile::get_day_phase(float p_time) const {
 	const opennova::env::DayPhase phase = opennova::env::compute_day_phase(p_time);
-	Dictionary result;
-	result["is_night"] = phase.is_night;
-	result["blend"] = phase.blend;
+	Ref<EnvDayPhase> result;
+	result.instantiate();
+	result->set_night(phase.is_night);
+	result->set_blend(phase.blend);
 	return result;
 }
 
@@ -644,11 +645,12 @@ float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
 	return opennova::env::cloud_uv_rate_per_second(steady);
 }
 
-Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
+Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
 	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
-	Dictionary result;
-	result["glare"] = glare.glare;
-	result["fog_whiten"] = glare.fog_whiten;
+	Ref<EnvSunGlare> result;
+	result.instantiate();
+	result->set_glare(glare.glare);
+	result->set_fog_whiten(glare.fog_whiten);
 	return result;
 }
 

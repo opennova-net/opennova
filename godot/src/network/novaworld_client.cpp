@@ -558,10 +558,11 @@ void NovaWorldClient::refresh_servers() {
 	trigger_gsb();
 }
 
-Dictionary NovaWorldClient::get_server_totals() const {
-	Dictionary totals;
-	totals["total_servers"] = total_servers_;
-	totals["total_players"] = total_players_;
+Ref<NovaWorldServerTotals> NovaWorldClient::get_server_totals() const {
+	Ref<NovaWorldServerTotals> totals;
+	totals.instantiate();
+	totals->set_total_servers(total_servers_);
+	totals->set_total_players(total_players_);
 	return totals;
 }
 

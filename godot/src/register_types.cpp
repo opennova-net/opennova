@@ -20,6 +20,7 @@
 #include "terrain/terrain_tile_info.h"
 #include "env/env_keyframe.h"
 #include "env/env_file.h"
+#include "env/env_records.h"
 #include "env/color_smoother.h"
 #include "env/mission_environment.h"
 #include "env/celestial.h"
@@ -95,6 +96,7 @@
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
 #include "simulation/tracer_ribbon_frame.h"
+#include "simulation/weather_home_state.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
 #include "hud/hud_draw_list_stats.h"
@@ -129,6 +131,7 @@
 #include "network/novaworld_server_browser.h"
 #include "network/host_session_options.h"
 #include "network/novaworld_server_row.h"
+#include "network/novaworld_server_totals.h"
 #include "network/novaworld_host.h"
 #include "network/udp_datagram.h"
 #include "network/udp_pump.h"
@@ -211,6 +214,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(GlareOcclusion);
 	GDREGISTER_CLASS(ObjectData);
 	GDREGISTER_CLASS(EnvLightValues);
+	GDREGISTER_CLASS(EnvDayPhase);
+	GDREGISTER_CLASS(EnvSunGlare);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);
 	GDREGISTER_CLASS(EntityRef);
@@ -301,6 +306,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponProfileSummary);
 	GDREGISTER_CLASS(TracerRibbonStrip);
 	GDREGISTER_CLASS(TracerRibbonFrame);
+	GDREGISTER_CLASS(WeatherHomeState);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);
@@ -383,6 +389,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);
 	GDREGISTER_CLASS(NovaWorldServerRow);
+	GDREGISTER_CLASS(NovaWorldServerTotals);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);
 	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(UdpDatagram);

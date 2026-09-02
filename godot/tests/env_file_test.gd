@@ -377,11 +377,11 @@ func test_weather_publishes_the_active_moon_direction_at_night() -> void:
 
 func test_day_phase_selects_night_and_day() -> void:
 	var env := _new_default_env()
-	var noon: Dictionary = env.get_day_phase(1200.0)
-	assert_false(bool(noon["is_night"]), "Noon should be day.")
-	assert_almost_eq(float(noon["blend"]), 1.0, 0.01, "Noon should be fully blended into day.")
-	assert_true(bool(env.get_day_phase(0.0)["is_night"]), "Midnight should be night.")
-	assert_true(bool(env.get_day_phase(1845.0)["is_night"]), "18:45 is the sunset switch into night.")
+	var noon := env.get_day_phase(1200.0)
+	assert_false(noon.night, "Noon should be day.")
+	assert_almost_eq(noon.blend, 1.0, 0.01, "Noon should be fully blended into day.")
+	assert_true(env.get_day_phase(0.0).night, "Midnight should be night.")
+	assert_true(env.get_day_phase(1845.0).night, "18:45 is the sunset switch into night.")
 
 
 func test_double_saturate_and_lit_water_helpers() -> void:

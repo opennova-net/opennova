@@ -750,14 +750,14 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 	# separable math is pinned through the public surface it delegates to.
 	var sweep := PackedStringArray()
 	for dot in GLARE_DOTS:
-		var glare: Dictionary = EnvFile.compute_sun_glare(dot, 255)
-		sweep.append("%02X%02X" % [int(glare.get("glare", 0)), int(glare.get("fog_whiten", 0))])
+		var glare := EnvFile.compute_sun_glare(dot, 255)
+		sweep.append("%02X%02X" % [glare.glare, glare.fog_whiten])
 	bytes["celestial/glare_sweep"] = " ".join(sweep)
 
 	var occlusion := PackedStringArray()
 	for brightness in GLARE_BRIGHTNESS:
-		var glare: Dictionary = EnvFile.compute_sun_glare(1.0, brightness)
-		occlusion.append("%02X%02X" % [int(glare.get("glare", 0)), int(glare.get("fog_whiten", 0))])
+		var glare := EnvFile.compute_sun_glare(1.0, brightness)
+		occlusion.append("%02X%02X" % [glare.glare, glare.fog_whiten])
 	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
 
 	# Bodies place at camera + direction * 64 [orig: render_celestial_bodies
