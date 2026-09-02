@@ -1528,7 +1528,7 @@ Array Simulation::drain_feed_events() {
 		// Camp events reuse the slots: attacker is the LEVEL index and victim
 		// is the TEAM byte, and their key gets a client-side team suffix
 		// [orig: case 59 @0x4272D7 / case 60 @0x4273DC].
-		const bool camp = ev.event_type == 59 || ev.event_type == 60;
+		const bool camp = opennova::hud::feed_event_is_camp(ev.event_type);
 		const bool own =
 				!camp && self_handle != 0xFFFF &&
 				(static_cast<uint16_t>(ev.attacker_index) == self_handle ||

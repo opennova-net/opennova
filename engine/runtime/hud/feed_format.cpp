@@ -169,8 +169,8 @@ std::string feed_format_camp_line(const std::string &tmpl,
 
 std::string feed_camp_key(uint8_t event_type, uint8_t team) {
 	const char *base = nullptr;
-	if (event_type == 59) base = "STRCND_FULLYCAMPED";
-	else if (event_type == 60) base = "STRCND_LOSTCAMP";
+	if (event_type == kFeedEventFullyCamped) base = "STRCND_FULLYCAMPED";
+	else if (event_type == kFeedEventLostCamp) base = "STRCND_LOSTCAMP";
 	if (base == nullptr) return std::string();
 	// Retail emits for team 1/2 only — no else branch [orig: the team tests
 	// @0x4272F4/@0x427338 (case 59) and @0x4273F9/@0x42743D (case 60)].

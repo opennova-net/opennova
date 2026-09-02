@@ -114,6 +114,14 @@ std::string feed_format_camp_line(const std::string &tmpl,
 // key and the line is dropped. Returns "" when the type is not a camp event.
 std::string feed_camp_key(uint8_t event_type, uint8_t team);
 
+// The two camp events, the only 0x1E types whose slots are not actors: the
+// attacker byte is the LEVEL and the victim byte the TEAM (see feed_camp_key).
+inline constexpr uint8_t kFeedEventFullyCamped = 59;
+inline constexpr uint8_t kFeedEventLostCamp = 60;
+inline bool feed_event_is_camp(uint8_t event_type) {
+	return event_type == kFeedEventFullyCamped || event_type == kFeedEventLostCamp;
+}
+
 // The WPNames key for a camp event's level slot: the wire attacker byte is the
 // level index and the key is built from index PLUS ONE
 // [orig: sprintf(key, "STRWPNAME%03d", v141 + 1) @0x4272EC/@0x4273F1 — unlike
