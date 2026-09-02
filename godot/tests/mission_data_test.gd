@@ -553,8 +553,8 @@ func test_item_database_enumeration_is_sorted_and_complete() -> void:
 	assert_eq(ids.size(), db.get_count(), "get_item_ids returns every id")
 
 	# Stable order: sorted with Godot's natural, case-insensitive comparator, matching
-	# ItemDatabase::sorted_items (so the assertion can actually catch a sort
-	# regression, not just lexicographic ordering that happens to coincide).
+	# the order ItemDatabase computes at load (so the assertion can actually catch a
+	# sort regression, not just lexicographic ordering that happens to coincide).
 	for i in range(1, ids.size()):
 		var prev := db.get_display_name(ids[i - 1])
 		var cur := db.get_display_name(ids[i])
