@@ -56,6 +56,7 @@
 #include "object/weapon_database.h"
 #include "object/avatar_database.h"
 #include "object/skeletal_anim.h"
+#include "hud/feed_row.h"
 #include "hud/hud_overlay.h"
 #include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
@@ -165,6 +166,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);

@@ -2,6 +2,7 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 
 #include <cmath>
 #include <cstring>
@@ -1499,80 +1500,34 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 }
 
 
-// Drain this frame's folded S2C 0x1E game events into feed rows. Actor names
-// resolve here against the decoded roster (a pool-0 INDEX on the wire becomes
-// the handle (0<<12)|index); the canned-message key, the camp key's team
-// suffix, and the line color all come from the witnessed policy in
-// engine/runtime/hud/feed_format.h. Suppressed types never surface
-// [orig: the LFP result set formats and returns @0x42702E-@0x42716D;
-// 58 posts to the tip system only @0x427202].
-Array Simulation::drain_feed_events() {
-	Array out;
+// Drain this frame's folded S2C 0x1E game events into typed feed rows. The
+// fold is the engine's (runtime/hud/feed_format.h feed_event_rows); this seam
+// only resolves actor names against the decoded roster (a pool-0 INDEX on the
+// wire becomes the handle (0<<12)|index) and packs the rows.
+TypedArray<FeedRow> Simulation::drain_feed_events() {
+	TypedArray<FeedRow> out;
 	if (!runtime_) return out;
 	opennova::netsim::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
-	auto name_of = [&cs](uint8_t index) -> String {
-		if (index == 0xFF) return String();
+	const auto name_of = [&cs](uint8_t index) -> std::string {
 		const opennova::netsim::ClientEntityState *e =
 				cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? String::utf8(e->name.c_str()) : String();
+		return e != nullptr ? e->name : std::string();
 	};
-	// A line the local player took no part in posts only while the MP verbose
-	// toggle is on [orig: g_MpVerbose2 @0x24D2154, seeded verbose-on from
-	// the session settings @0x551D0F]. The keybind that flips it (@0x49B78F,
-	// STRMISC_VERBOSE_ON/OFF) is unported, so the seed default stands.
-	constexpr bool mp_verbose = true;
+	std::vector<opennova::hud::FeedEventInput> inputs;
 	for (const opennova::netsim::ClientGameEvent &ev : runtime_->drain_game_events()) {
-		if (opennova::hud::feed_event_suppressed(ev.event_type)) continue;
-		// Camp events reuse the slots: attacker is the LEVEL index and victim
-		// is the TEAM byte, and their key gets a client-side team suffix
-		// [orig: case 59 @0x4272D7 / case 60 @0x4273DC].
-		const bool camp = opennova::hud::feed_event_is_camp(ev.event_type);
-		const bool own =
-				!camp && self_handle != 0xFFFF &&
-				(static_cast<uint16_t>(ev.attacker_index) == self_handle ||
-				 static_cast<uint16_t>(ev.victim_index) == self_handle);
-		if (!own && !mp_verbose &&
-				opennova::hud::feed_event_verbose_only(ev.event_type)) {
-			continue;
-		}
-		const std::string camp_key =
-				camp ? opennova::hud::feed_camp_key(ev.event_type, ev.victim_index)
-				     : std::string();
-		if (camp && camp_key.empty()) continue;   // team outside 1/2 draws nothing
-		const char *key = camp ? camp_key.c_str()
-		                       : opennova::game_event_strcnd_key(ev.event_type);
-		if (key == nullptr) continue;   // team/gametype-keyed at runtime — not ported
-		// The aux slot carries the bonus-credited player; only when that is
-		// the LOCAL player does retail re-compose the line through STRCND48
-		// "%s - Bonus for %s" with their name [orig: the 4th
-		// HUD_FormatKillEventMessage arg @0x422F5F -> the sprintf @0x422CA2].
-		String extra;
-		if (!camp && self_handle != 0xFFFF && ev.aux_index != 0xFF &&
-				static_cast<uint16_t>(ev.aux_index) == self_handle) {
-			extra = name_of(ev.aux_index);
-		}
-		Dictionary d;
-		d["event_type"] = ev.event_type;
-		d["kind"] = static_cast<int>(ev.kind);
-		// The engine decides the line's compose form; the presenter branches
-		// on this, never on which keys happen to be present.
-		d["camp"] = camp;
-		d["key"] = String::utf8(key);
-		d["attacker"] = camp ? String() : name_of(ev.attacker_index);
-		d["victim"] = camp ? String() : name_of(ev.victim_index);
-		d["extra"] = extra;
-		if (camp) {
-			// The camp template's %s takes the WPNames string of the level
-			// slot — index PLUS ONE [orig: sprintf @0x4272EC/@0x4273F1].
-			d["wpname_key"] = String::utf8(
-					opennova::hud::feed_camp_wpname_key(ev.attacker_index).c_str());
-		}
-		d["color"] = static_cast<int64_t>(opennova::hud::feed_event_color(
-				ev.event_type, own, camp ? ev.victim_index : 0));
-		d["own"] = own;
-		out.push_back(d);
+		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
+				ev.aux_index, ev.kind });
+	}
+	std::vector<opennova::hud::FeedRow> rows;
+	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), self_handle,
+			opennova::hud::kMpVerboseDefault, name_of, rows);
+	for (const opennova::hud::FeedRow &row : rows) {
+		Ref<FeedRow> r;
+		r.instantiate();
+		r->assign(row);
+		out.push_back(r);
 	}
 	return out;
 }

@@ -34,6 +34,7 @@
 #include <net/npwire/game_type.h>
 #include <net/npwire/wire_handle.h>
 #include <net/npwire/ingame_decode.h>
+#include <runtime/hud/feed_format.h>
 #include <net/npwire/ingame_message_catalog.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/serverlog_decode.h>
@@ -1312,10 +1313,10 @@ void print_tag_1e(const std::vector<uint8_t> &body) {
 		            body.size(), to_hex_sample(body.data(), body.size()).c_str());
 		return;
 	}
-	const GameEventKind k = game_event_kind(r.event_type);
-	const char *kind = k == GameEventKind::Kill ? "KILL"
-	                 : k == GameEventKind::Objective ? "OBJECTIVE" : "event";
-	const char *key = game_event_strcnd_key(r.event_type);
+	const hud::GameEventKind k = hud::game_event_kind(r.event_type);
+	const char *kind = k == hud::GameEventKind::Kill ? "KILL"
+	                 : k == hud::GameEventKind::Objective ? "OBJECTIVE" : "event";
+	const char *key = hud::game_event_strcnd_key(r.event_type);
 	auto idx = [](uint8_t i) {
 		return i == 0xFF ? std::string("none") : ("p0/s" + std::to_string(unsigned(i)));
 	};

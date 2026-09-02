@@ -104,6 +104,7 @@ add_library(${TARGET_NAME} SHARED
     object/avatar_database.cpp
     object/skeletal_anim.cpp
     hud/hud_overlay.cpp
+    hud/feed_row.cpp
     devtools/frame_stats.cpp
     devtools/imgui_pass_node.cpp
     devtools/dev_tools.cpp

@@ -994,66 +994,6 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 	return consumed == 8;
 }
 
-// event_type classification — the 0x426270 switch. The cases that resolve
-// attacker+victim (HUD_FormatKillEventMessage with both) are kills; the
-// flag/zone/camp/base cases are objectives; killer-less deaths are SelfDeath
-// (their victim/aux slots are literal zero on the wire) and the two medic
-// lines carry their own color. Corrected 2026-08-19: 38/39/45 were misfiled
-// as kills and 1/2/3 + 22/23/25/26 as Other by the earlier structural read.
-GameEventKind game_event_kind(uint8_t t) {
-	switch (t) {
-	case 4: case 5: case 6: case 7: case 8: case 9:
-	case 10: case 11: case 12: case 13: case 14: case 15:
-	case 24: case 32: case 33: case 34: case 49:
-		return GameEventKind::Kill;
-	// Deaths with no killer — the handler leaves victim/aux zero
-	// [orig: GameEvent_PlayerDeath @0x516DD0].
-	case 1: case 2: case 3: case 22: case 23: case 25: case 26:
-		return GameEventKind::SelfDeath;
-	// The medic trio, previously misfiled as kills by this structural read.
-	// 39 has no emitter in the image but the handler files it with 38/45 —
-	// all three share the one 0xFF008CEE post [orig: cases 38 @0x42640F /
-	// 39 @0x426456 / 45 @0x426442 fall into the shared sink call].
-	case 38: case 39: case 45:
-		return GameEventKind::Medic;
-	case 19: case 20: case 21:
-	case 41: case 42: case 43: case 44:
-	case 50: case 51: case 52: case 53:
-	case 54: case 55: case 56: case 57: case 58: case 59: case 60:
-		return GameEventKind::Objective;
-	default:
-		return GameEventKind::Other;
-	}
-}
-
-// The witnessed "Canned Msg" string key for an event_type, where the handler
-// uses a single deterministic key. Types that pick the string by team/gametype
-// at runtime (19/20/21/50-53/58) return nullptr. [orig: 0x426270 switch]
-const char *game_event_strcnd_key(uint8_t t) {
-	switch (t) {
-	case 1: return "STRCND01"; case 2: return "STRCND02"; case 3: return "STRCND03";
-	case 4: return "STRCND04"; case 5: return "STRCND05"; case 6: return "STRCND06";
-	case 7: case 8: case 9: return "STRCND07";
-	case 10: case 11: case 12: return "STRCND08";
-	case 13: return "STRCND09"; case 14: return "STRCND10"; case 15: return "STRCND11";
-	case 16: case 17: case 18: return "STRCND12";
-	case 22: case 23: return "STRCND19";
-	case 24: return "STRCND22"; case 25: return "STRCND28"; case 26: return "STRCND29";
-	case 27: return "STRCND33"; case 28: return "STRCND34"; case 29: return "STRCND31";
-	case 30: return "STRCND32"; case 31: return "STRCND35";
-	case 32: return "STRCND36"; case 33: return "STRCND37"; case 34: return "STRCND38";
-	case 35: return "STRCND39"; case 36: return "STRCND40"; case 37: return "STRCND41";
-	case 38: return "STRCND42"; case 39: return "STRCND43"; case 40: return "STRCND44";
-	case 41: return "STRCND_PSP_BLUEWARNING"; case 42: return "STRCND_PSP_REDWARNING";
-	case 43: return "STRCND_PSP_BLUETAKEN";   case 44: return "STRCND_PSP_REDTAKEN";
-	case 45: return "STRCND45"; case 48: return "STRCND46"; case 49: return "STRCND47";
-	case 54: return "STRCND_LFP_BLUEWARNING"; case 55: return "STRCND_LFP_REDWARNING";
-	case 56: return "STRCND_LFP_BLUETAKEN";   case 57: return "STRCND_LFP_REDTAKEN";
-	case 59: return "STRCND_FULLYCAMPED";     case 60: return "STRCND_LOSTCAMP";
-	default: return nullptr;
-	}
-}
-
 // S2C 0x26 entity kill replication. [orig: NapiNPClientMsg_0x026 @ 0x42EC30]
 // The handler is defensive: it reads the victim slot if 2 B are present and the
 // attacker if a further 2 B are present, then always kills. We mirror that —

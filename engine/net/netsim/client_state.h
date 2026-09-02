@@ -124,8 +124,8 @@ struct ClientRoundEvent {
 // resolution ($A/$B against the roster, the STRCND lookup) happens where the
 // name table lives [orig: NetPacket_HandleGameEvent @0x426270 ->
 // HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60].
-// `kind` is npwire's GameEventKind carried as its underlying byte so this
-// header stays free of the decoder include.
+// `kind` is hud::GameEventKind (runtime/hud/feed_format.h) carried as its
+// underlying byte so this header stays free of the runtime include.
 struct ClientGameEvent {
 	uint8_t event_type = 0;
 	uint8_t attacker_index = 0xFF;
