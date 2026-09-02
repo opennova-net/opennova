@@ -207,40 +207,15 @@ bool Simulation::local_player_toggle_mount() {
 TypedArray<Dictionary> Simulation::get_attach_labels() const {
 	TypedArray<Dictionary> out;
 	if (!kernel_) return out;
-	const opennova::world::Entity *player = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (player == nullptr || !player->alive || player->health <= 0) return out;
-	// Armory mode = standing in the type-6 armory volume; the label pass reads the raw
-	// flag [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4].
-	const bool armory_mode =
-	    (player->flags & opennova::world::kEntityFlagArmoryZone) != 0;
-	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
-	// plus the live mount, camera, scope, movement, air, and water gates. The
-	// query computes it directly so camera changes cannot lag one logic tick.
-	const AiEntity *body = kernel_->world.ai != nullptr
-			? kernel_->world.ai->for_handle(kernel_->world.cached.local_player)
-			: nullptr;
-	const bool can_fire = kernel_->local_player_can_fire(body);
 	std::vector<opennova::world::AttachLabel> labels;
-	opennova::world::collect_attach_labels(kernel_->world, *player, armory_mode, can_fire, labels);
+	kernel_->collect_attach_labels(labels);
 	for (const opennova::world::AttachLabel &l : labels) {
 		Dictionary d;
 		d["position"] = Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z);
 		d["seat_type"] = static_cast<int>(l.type);
 		d["armory"] = l.armory;
 		d["nearest"] = l.nearest;
-		String key;
-		if (l.type == opennova::world::SeatType::Gunner) {
-			// The USEGUN label text: the gun entity's primary weapon -> its weapon.def
-			// attachtextid key [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
-			const opennova::world::Entity *cand = kernel_->world.registry.get(l.entity);
-			if (cand != nullptr && !cand->primary_weapon.empty()) {
-				const int wi = kernel_->world.weapons.index_of(cand->primary_weapon.c_str());
-				if (wi >= 0)
-					key = String(kernel_->world.weapons.entries[static_cast<size_t>(wi)]
-					                     .attach_text_id.c_str());
-			}
-		}
-		d["attach_text_key"] = key;
+		d["attach_text_key"] = String::utf8(l.attach_text_key.c_str());
 		out.push_back(d);
 	}
 	return out;
@@ -644,16 +619,15 @@ Dictionary Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 }
 
 Error Simulation::load_weapon_profile(const String &p_path) {
-	// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0] — the caller supplies the already
-	// resolved absolute path, which retail builds as
-	// g_ExpansionName[0] ? "expansion\\<g_ExpansionName>\\weapon.sav" : "weapon.sav"
-	// [orig: @0x54f68c..@0x54f6b7]. weapon.sav is a SAVE file on the filesystem, not a
-	// PFF/mount entry, so it is read through FileAccess rather than the resource root.
-	// Any failure keeps the shipped defaults installed [orig: PlayerProfile_InitDefaults
-	// @0x54bb40] and reports the reason; a joiner still submits a class-legal pair.
+	// The caller supplies the already resolved absolute path (retail builds it
+	// as g_ExpansionName[0] ? "expansion\\<g_ExpansionName>\\weapon.sav" :
+	// "weapon.sav" [orig: @0x54f68c..@0x54f6b7]). weapon.sav is a SAVE file on
+	// the filesystem, not a PFF/mount entry, so it is read through FileAccess;
+	// the defaults / header-gate / class-clamp law is the engine's
+	// playersav::profile_or_defaults. A joiner still submits a class-legal pair.
 	weapon_profile_loaded_ = false;
-	weapon_profile_ = opennova::playersav::make_defaults().slots[0];
 	Error result = OK;
+	PackedByteArray bytes;
 	if (p_path.is_empty()) {
 		result = ERR_INVALID_PARAMETER;
 	} else {
@@ -664,27 +638,17 @@ Error Simulation::load_weapon_profile(const String &p_path) {
 					p_path));
 			result = ERR_FILE_CANT_OPEN;
 		} else {
-			const PackedByteArray bytes =
-					file->get_buffer(static_cast<int64_t>(file->get_length()));
+			bytes = file->get_buffer(static_cast<int64_t>(file->get_length()));
 			file->close();
-			opennova::playersav::File parsed;
-			if (!opennova::playersav::read(bytes.ptr(),
-			                               static_cast<std::size_t>(bytes.size()),
-			                               parsed)) {
-				// The header gate is magic "FPBC" (0x43425046) + version "0211"
-				// (0x31313230); anything else is not a profile file.
-				print_verbose(vformat(
-						"weapon.sav: \"%s\" is not a readable profile — keeping the shipped defaults",
-						p_path));
-				result = ERR_FILE_CORRUPT;
-			} else {
-				// The per-side [5,9] clamp retail applies at session start
-				// [orig: apply_session_settings_to_globals @0x5516ab..@0x5516ec].
-				opennova::playersav::clamp_classes(parsed);
-				weapon_profile_ = parsed.slots[0];
-				weapon_profile_loaded_ = true;
-			}
 		}
+	}
+	weapon_profile_loaded_ = opennova::playersav::profile_or_defaults(
+			bytes.ptr(), static_cast<std::size_t>(bytes.size()), weapon_profile_);
+	if (result == OK && !weapon_profile_loaded_) {
+		print_verbose(vformat(
+				"weapon.sav: \"%s\" is not a readable profile — keeping the shipped defaults",
+				p_path));
+		result = ERR_FILE_CORRUPT;
 	}
 	// The record just changed, so the resident kit buffer and the seam both have to
 	// follow it. Retail never has to re-run this because PlayerProfile_LoadAllFromDisk
