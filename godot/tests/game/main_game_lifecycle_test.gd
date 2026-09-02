@@ -1040,8 +1040,8 @@ func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
 	assert_eq(viewmodel_def.weapon_name, "WPN_M4")
 	assert_eq(viewmodel_def.gfx1, "M4_TEST_FIRST",
 		"the selected weapon's first-person model replaces the AK fallback")
-	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
-	assert_eq(String(inventory.get("equipped_name", "")), "WPN_M4",
+	var inventory: PlayerInventory = world.get_sim().get_local_player_inventory()
+	assert_eq(inventory.equipped_name, "WPN_M4",
 		"the spawned simulation equips the same selected primary")
 
 

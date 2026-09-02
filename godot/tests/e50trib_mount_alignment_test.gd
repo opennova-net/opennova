@@ -82,7 +82,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_eq(sim.spawn_local_player_at_start(), 1)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var personal_index := weapons.find_weapon("WPN_M4AUTO")

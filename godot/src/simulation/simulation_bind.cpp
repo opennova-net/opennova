@@ -14,6 +14,8 @@
 #include "simulation/player_weapon_event.h" // one ordered weapon presentation event
 #include "simulation/player_weapon_view.h" // the local weapon FSM view record
 #include "world/scar_draw_list.h" // one frame's impact-scar draw list
+#include "simulation/player_inventory.h" // the local inventory snapshot record
+#include "simulation/weapon_kit_entry.h" // one loadout tuple record
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
@@ -549,8 +551,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("has_explicit_spawn_loadout"),
 	                     &Simulation::has_explicit_spawn_loadout);
-	ClassDB::bind_method(D_METHOD("set_weapon_availability", "pairs"),
-	                     &Simulation::set_weapon_availability);
 	ClassDB::bind_method(D_METHOD("get_weapon_availability", "weapon_name"),
 	                     &Simulation::get_weapon_availability);
 	ClassDB::bind_method(D_METHOD("respawn_local_player_loadout"),

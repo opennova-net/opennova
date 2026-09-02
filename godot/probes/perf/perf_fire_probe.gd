@@ -413,21 +413,16 @@ func _equip_clip_weapon(forced: String) -> String:
 	var world := ctx.world()
 	if sim == null or world == null:
 		return ""
-	ctx.log("spawn inventory: %s" % str((sim.get_local_player_inventory() as Dictionary).get("slots", [])))
+	ctx.log("spawn inventory: %s" % str(sim.get_local_player_inventory().slots))
 	var candidates: Array = WEAPON_CANDIDATES.duplicate()
 	if not forced.is_empty():
 		candidates.push_front(forced)
 	for weapon_name in candidates:
-		var kit: Array[Dictionary] = [{
-			"name": weapon_name,
-			"ammo_primary": -1,
-			"ammo_secondary": -1,
-			"flags": -1,
-		}]
+		var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(weapon_name)]
 		if not bool(sim.apply_local_player_loadout(kit, 0)):
 			continue
-		var inventory: Dictionary = sim.get_local_player_inventory()
-		var equipped := String(inventory.get("equipped_name", ""))
+		var inventory := sim.get_local_player_inventory()
+		var equipped := inventory.equipped_name
 		if equipped.is_empty():
 			continue
 		# Mirror the armory's post-apply install exactly: world weapon THEN the

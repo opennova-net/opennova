@@ -202,17 +202,13 @@ func _apply_local_player_spawn_loadout() -> void:
 		return
 	if not has_loadout:
 		return
-	var kit: Array[Dictionary] = []
+	var kit: Array[WeaponKitEntry] = []
 	for slot_key in ["primary", "secondary", "accessory"]:
 		var weapon_name := String(loadout.get(slot_key, ""))
 		if weapon_name.is_empty():
 			continue
-		kit.append({
-			"name": weapon_name,
-			"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
-			"ammo_secondary": -1,
-			"flags": -1,
-		})
+		kit.append(WeaponKitEntry.make(weapon_name,
+				int(loadout.get(slot_key + "_clips", -1))))
 	if not bool(sim.apply_local_player_loadout(kit, int(loadout.get("player_class", 0)))):
 		return
 	if kit.is_empty():
@@ -222,10 +218,10 @@ func _apply_local_player_spawn_loadout() -> void:
 
 
 func _sync_local_player_weapon_from_inventory(sim: Simulation) -> void:
-	var inventory: Dictionary = sim.get_local_player_inventory()
-	if not bool(inventory.get("valid", false)):
+	var inventory := sim.get_local_player_inventory()
+	if not inventory.valid:
 		return
-	var equipped := String(inventory.get("equipped_name", ""))
+	var equipped := inventory.equipped_name
 	# A syntactically nonempty kit can still be rejected by mission/class rules.
 	# Keep the presentation aligned with the resulting authoritative inventory.
 	if equipped.is_empty():

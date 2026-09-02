@@ -127,7 +127,7 @@ func _wait_for_idle(max_ticks: int) -> bool:
 	return false
 
 
-func _boot_kit(kit: Array[Dictionary]) -> void:
+func _boot_kit(kit: Array[WeaponKitEntry]) -> void:
 	assert_true(_sim.apply_local_player_loadout(kit, 0), "loadout applied")
 	var boot := _step_and_pump(2)
 	if boot.is_empty():
@@ -149,16 +149,16 @@ func _switch_to(category: int, expect_name: String) -> void:
 			"equipped_adm_index stamped to %s" % expect_name)
 
 
-const KIT_M4_GRENADE: Array[Dictionary] = [
-	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
-	{"name": "WPN_GRENADEHE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_M4_GRENADE: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_M4AUTO"),
+	WeaponKitEntry.make("WPN_GRENADEHE"),
 ]
-const KIT_M4_CLAYMORE: Array[Dictionary] = [
-	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
-	{"name": "WPN_CLAYMORE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_M4_CLAYMORE: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_M4AUTO"),
+	WeaponKitEntry.make("WPN_CLAYMORE"),
 ]
-const KIT_SATCHEL: Array[Dictionary] = [
-	{"name": "WPN_SATCHEL_CHARGE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_SATCHEL: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_SATCHEL_CHARGE"),
 ]
 
 

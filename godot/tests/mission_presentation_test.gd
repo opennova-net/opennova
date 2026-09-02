@@ -33,7 +33,7 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
-		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
+		{"name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2"}]))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
 	var root := ResourceRoot.new()

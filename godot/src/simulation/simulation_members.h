@@ -432,9 +432,9 @@ private:
 	// equipped combo has settled, so the push must never drive a rebuild back.
 	bool pushing_joiner_loadout_kit_ = false;
 	bool apply_local_player_loadout_impl(
-			const TypedArray<Dictionary> &p_kit, int p_player_class,
+			const TypedArray<WeaponKitEntry> &p_kit, int p_player_class,
 			bool p_submit_joiner_request);
-	// The typed-rows core of the apply (the dict overload converts, the 0x5A
+	// The typed-rows core of the apply (the record overload converts, the 0x5A
 	// grant path feeds np::kit_from_authoritative_grant's rows directly).
 	bool apply_local_player_loadout_rows(
 			std::vector<opennova::world::WeaponKitEntry> p_kit,

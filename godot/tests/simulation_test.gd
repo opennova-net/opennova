@@ -2208,26 +2208,26 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
 	assert_false(sim.has_explicit_spawn_loadout(),
 		"the engine's WPN_M4AUTO fallback is not an authored spawn kit")
-	var fallback_loadout: Array = sim.get_local_player_loadout()
+	var fallback_loadout := sim.get_local_player_loadout()
 	assert_eq(fallback_loadout.size(), 1,
 		"the canonical transport exposes the effective default kit")
-	assert_eq(String((fallback_loadout[0] as Dictionary).get("name", "")), "WPN_M4AUTO")
+	assert_eq((fallback_loadout[0] as WeaponKitEntry).name, "WPN_M4AUTO")
 	assert_true(sim.set_local_player_class(7),
 		"profile class can commit without replacing the current weapon kit")
 	assert_eq(sim.get_local_player_class(), 7)
-	sim.set_spawn_loadout([{"name": "WPN_M4AUTO"}], true)
+	sim.set_spawn_loadout([WeaponKitEntry.make("WPN_M4AUTO")], true)
 	assert_true(sim.has_explicit_spawn_loadout(),
 		"a supplied mission/profile kit is distinguishable from the fallback")
 
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 6))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 6))
 	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
-	var accepted_loadout: Array = sim.get_local_player_loadout()
+	var accepted_loadout := sim.get_local_player_loadout()
 	assert_eq(accepted_loadout.size(), 1)
-	assert_eq(int((accepted_loadout[0] as Dictionary).get("ammo_primary", 0)), -1,
+	assert_eq((accepted_loadout[0] as WeaponKitEntry).ammo_primary, -1,
 		"unspecified canonical ammo remains the retail fallback sentinel")
-	var inv: Dictionary = sim.get_local_player_inventory()
-	assert_true(bool(inv.get("valid", false)), "the ACCEPT rebuilt the slot pool")
-	assert_eq(String(inv.get("equipped_name", "")), "WPN_M4AUTO",
+	var inv := sim.get_local_player_inventory()
+	assert_true(inv.valid, "the ACCEPT rebuilt the slot pool")
+	assert_eq(inv.equipped_name, "WPN_M4AUTO",
 		"the ACCEPT re-selected the accepted weapon")
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
@@ -2254,7 +2254,7 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	var m4_index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(m4_index, 0)
 	var m4: WeaponDef = weapons.get_weapon(m4_index)
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	sim.set_local_player_weapon(m4, {})
 	sim.step()
 	var full_clip := sim.get_local_player_weapon_state().clip
@@ -2264,14 +2264,14 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	var spent_clip := sim.get_local_player_weapon_state().clip
 	assert_lt(spent_clip, full_clip, "the live M4 spent a round before reopening armory")
 
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
-	var inventory: Dictionary = sim.get_local_player_inventory()
-	var equipped_combo := int(inventory.get("equipped_combo", -1))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	var inventory := sim.get_local_player_inventory()
+	var equipped_combo := inventory.equipped_combo
 	var rebuilt_clip := -1
-	for value in inventory.get("slots", []):
-		var slot: Dictionary = value
-		if int(slot.get("combo", -2)) == equipped_combo:
-			rebuilt_clip = int(slot.get("clip", -1))
+	for value in inventory.slots:
+		var slot: PlayerInventorySlot = value
+		if slot.combo == equipped_combo:
+			rebuilt_clip = slot.clip
 			break
 	assert_gt(rebuilt_clip, spent_clip, "ACCEPT rebuilt the same named slot at full clip")
 	sim.set_local_player_weapon(m4, {})
@@ -2299,8 +2299,8 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 
 	assert_true(sim.apply_local_player_loadout([
-		{"name": "WPN_M4AUTO"},
-		{"name": "WPN_colt45"},
+		WeaponKitEntry.make("WPN_M4AUTO"),
+		WeaponKitEntry.make("WPN_colt45"),
 	], 8))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
@@ -2336,8 +2336,8 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([
-		{"name": "WPN_M4AUTO"},
-		{"name": "WPN_colt45"},
+		WeaponKitEntry.make("WPN_M4AUTO"),
+		WeaponKitEntry.make("WPN_colt45"),
 	], 8))
 
 	var weapons := WeaponDatabase.new()
@@ -3033,7 +3033,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
@@ -3137,7 +3137,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
@@ -3254,7 +3254,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
-	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
@@ -3366,8 +3366,8 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([
-		{"name": "WPN_M4AUTO"},
-		{"name": "WPN_M4"},
+		WeaponKitEntry.make("WPN_M4AUTO"),
+		WeaponKitEntry.make("WPN_M4"),
 	], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
@@ -3394,7 +3394,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	var personal_rounds_before := wound_before_mount.round_ring_count
 	var personal_clip := sim.get_local_player_weapon_state().clip
 	var inventory_clip := int(
-			sim.get_local_player_inventory().get("slots", [])[0].get("clip", -1))
+			sim.get_local_player_inventory().slots[0].clip)
 
 	assert_true(sim.local_player_toggle_mount())
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
@@ -3450,8 +3450,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			sim.get_local_player_weapon_state().clip)
 	assert_eq(mounted_clip_after, mounted_before.clip - 1,
 			"local LMB consumes the parent's embedded weapon slot")
-	assert_eq(int(sim.get_local_player_inventory().get(
-			"slots", [])[0].get("clip", -1)), inventory_clip,
+	assert_eq(sim.get_local_player_inventory().slots[0].clip, inventory_clip,
 			"mounted fire cannot consume the saved personal magazine")
 
 	for _tick in range(180):

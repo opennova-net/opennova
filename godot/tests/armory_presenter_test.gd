@@ -150,7 +150,7 @@ func _weapon_display_text(row: WeaponDef) -> String:
 func _loadout_names(sim: Simulation) -> Array[String]:
 	var names: Array[String] = []
 	for value in sim.get_local_player_loadout():
-		names.append(String((value as Dictionary).get("name", "")))
+		names.append((value as WeaponKitEntry).name)
 	return names
 
 
@@ -178,7 +178,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var equipped := red_rifleman[0].name
 
 	var sim := _real_sim(2)
-	assert_true(sim.apply_local_player_loadout([{"name": equipped}], 8),
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make(equipped)], 8),
 			"the real simulation owns the equipped rifleman context")
 	var world := _make_world(sim, weapons)
 	var player_presenter := CapturePlayerPresenter.new()
@@ -252,18 +252,18 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	const PRIMARY_CLIPS := 3
 	const ACCESSORY_CLIPS := 1
 	assert_true(simulation.apply_local_player_loadout([
-		{"name": primary, "ammo_primary": PRIMARY_CLIPS},
-		{"name": expected, "ammo_primary": ACCESSORY_CLIPS}], 8),
+		WeaponKitEntry.make(primary, PRIMARY_CLIPS),
+		WeaponKitEntry.make(expected, ACCESSORY_CLIPS)], 8),
 		"the real simulation owns the primary + satchel kit before the armory opens")
 	var canonical_names := _loadout_names(simulation)
 	assert_eq(canonical_names, [primary, expected] as Array[String],
 		"the armory transport preserves only the selectable parent tuples")
 	assert_does_not_have(canonical_names, "WPN_AK47",
 		"the primary's hidden subclass is not part of the canonical armory buffer")
-	var inventory: Dictionary = simulation.get_local_player_inventory()
+	var inventory := simulation.get_local_player_inventory()
 	var inventory_names: Array[String] = []
-	for value in inventory.get("slots", []):
-		inventory_names.append(String((value as Dictionary).get("name", "")))
+	for value in inventory.slots:
+		inventory_names.append((value as PlayerInventorySlot).name)
 	assert_has(inventory_names, expected, "the authoritative inventory still contains the satchel")
 	assert_has(inventory_names, "WPN_AK47",
 		"the expanded runtime pool contains the misleading hidden subclass")
@@ -300,9 +300,8 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
-	for value in simulation.get_local_player_loadout():
-		var row := value as Dictionary
-		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	for row: WeaponKitEntry in simulation.get_local_player_loadout():
+		accepted_by_name[row.name] = row.ammo_primary
 	assert_eq(int(accepted_by_name.get(primary, -1)), PRIMARY_CLIPS,
 		"untouched ACCEPT converts the primary row back to the canonical clip count")
 	assert_eq(int(accepted_by_name.get(expected, -1)), ACCESSORY_CLIPS,
@@ -320,12 +319,9 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the canonical kit has a normal equipped primary")
 	var primary := primary_rows[0].name
-	var kit: Array[Dictionary] = [{"name": primary}]
+	var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(primary)]
 	for i in grenade_rows.size():
-		kit.append({
-			"name": grenade_rows[i].name,
-			"ammo_primary": i + 1,
-		})
+		kit.append(WeaponKitEntry.make(grenade_rows[i].name, i + 1))
 	assert_true(simulation.apply_local_player_loadout(kit, 8),
 		"the authoritative simulation owns all three grenade tuples before first open")
 
@@ -351,14 +347,13 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
-	for value in simulation.get_local_player_loadout():
-		var row := value as Dictionary
-		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	for row: WeaponKitEntry in simulation.get_local_player_loadout():
+		accepted_by_name[row.name] = row.ammo_primary
 	assert_true(accepted_by_name.has(primary),
 		"untouched ACCEPT keeps the normal primary beside the grenade tuples")
 	var inventory_names: Array[String] = []
-	for value in simulation.get_local_player_inventory().get("slots", []):
-		inventory_names.append(String((value as Dictionary).get("name", "")))
+	for value in simulation.get_local_player_inventory().slots:
+		inventory_names.append((value as PlayerInventorySlot).name)
 	for i in grenade_rows.size():
 		var grenade_name := grenade_rows[i].name
 		assert_eq(int(accepted_by_name.get(grenade_name, -1)), i + 1,
