@@ -40,7 +40,6 @@
     "occlusion_frame_pass.gd|func present_visibility()",
     "effect_world.gd|func get_debug_draw_list_report()",
     "game_render_diagnostics.gd|func to_json_value()",
-    "effect_light_report.gd|func to_json_value()",
     "debug_controls.gd|static func normalize_value(",
     "debug_arg_spec.gd|func to_json_value()",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
