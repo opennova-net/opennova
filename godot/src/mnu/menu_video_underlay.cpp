@@ -1,4 +1,5 @@
 #include "mnu/menu_video_underlay.h"
+#include "util/data_format.h"
 #include <base/io/perf_clock.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -155,9 +156,7 @@ bool MenuVideoUnderlay::upload_frame_(Slot &p_slot) {
 	if (frame.rgba.empty() || frame.width == 0 || frame.height == 0) {
 		return false;
 	}
-	PackedByteArray bytes;
-	bytes.resize(static_cast<int64_t>(frame.rgba.size()));
-	std::memcpy(bytes.ptrw(), frame.rgba.data(), frame.rgba.size());
+	const PackedByteArray bytes = to_packed_bytes(frame.rgba);
 	const Ref<Image> image = Image::create_from_data(
 			static_cast<int32_t>(frame.width),
 			static_cast<int32_t>(frame.height), false,

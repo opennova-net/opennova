@@ -1,4 +1,5 @@
 #include "terrain/foliage_dispatcher.h"
+#include "util/data_format.h"
 
 #include "render/visual_layers.h"
 #include "env/weather.h"
@@ -477,11 +478,7 @@ bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
   if (!runtime.build_fd_rgba_mip_chain(pixels.ptr(), width, height, chain)) {
     return false;
   }
-  PackedByteArray packed;
-  packed.resize(static_cast<int64_t>(chain.rgba.size()));
-  for (int64_t index = 0; index < packed.size(); ++index) {
-    packed[index] = chain.rgba[static_cast<size_t>(index)];
-  }
+  const PackedByteArray packed = to_packed_bytes(chain.rgba);
   const bool has_mipmaps = width > 1 || height > 1;
   p_image->set_data(width, height, has_mipmaps, Image::FORMAT_RGBA8, packed);
   return true;
