@@ -320,24 +320,19 @@ func spawn_light_record(info: ModelLight, world_transform: Transform3D,
 func _spawn_light_at(info: ModelLight, world_pos: Vector3,
 		owner_id: int = 0, blink_owner: Array = [],
 		spawner_is_building: bool = false) -> int:
-	var has_blink := blink_owner.size() >= 2
-	return int(_scene.spawn_model_light({
-		"position": world_pos,
-		"atten_end": info.atten_end,
-		"style": info.colorgen_style,
-		"phase": info.colorgen_phase,
-		"rate": info.colorgen_rate,
-		"color_start": info.color_start,
-		"color_end": info.color_end,
-		"attach_bone": info.subobject,
-		"spawning_entity": owner_id,
-		"spawner_is_building": spawner_is_building,
-		"blink_owner_entity": int(blink_owner[0]) if has_blink else 0,
-		"blink_section": int(blink_owner[1]) if has_blink else 0,
-		"disable_corona": info.disable_corona,
-		"disable_terrain": info.disable_lightterrain,
-		"disable_objects": info.disable_lightobjects,
-	}))
+	var spawn := ModelLightSpawn.make(world_pos, info.atten_end)
+	spawn.style = info.colorgen_style
+	spawn.phase = info.colorgen_phase
+	spawn.rate = info.colorgen_rate
+	spawn.color_start = info.color_start
+	spawn.color_end = info.color_end
+	spawn.attached(info.subobject, owner_id, spawner_is_building)
+	if blink_owner.size() >= 2:
+		spawn.in_blink_box(int(blink_owner[0]), int(blink_owner[1]))
+	spawn.disable_corona = info.disable_corona
+	spawn.disable_terrain = info.disable_lightterrain
+	spawn.disable_objects = info.disable_lightobjects
+	return int(_scene.spawn_model_light(spawn))
 
 
 ## The blink-box owner at one world point: retail runs ONE query at the
@@ -763,14 +758,9 @@ func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 	var owner_id := owner_id_for_wire(shooter_handle)
 	var handle := int(_entity_effect_handles.get(owner_id, 0))
 	if handle == 0:
-		handle = int(_scene.spawn_glow({
-			"position": world_pos,
-			"radius": LightScene.muzzle_glow_radius(),
-			"color": LightScene.muzzle_glow_color(),
-			"fade_mode": 3,
-			"fade_duration": -1,
-			"owner_entity": owner_id,
-		}))
+		handle = int(_scene.spawn_glow(GlowSpawn.make(world_pos,
+				LightScene.muzzle_glow_radius(), LightScene.muzzle_glow_color())
+				.fading(3, -1).owned_by(owner_id)))
 		if handle == 0:
 			return
 		_entity_effect_handles[owner_id] = handle
@@ -791,14 +781,10 @@ func on_impact_light(world_pos: Vector3, radius: float, color: Color,
 		duration_ticks: int) -> void:
 	if radius <= 0.0:
 		return
-	_scene.spawn_glow({
-		"position": world_pos + Vector3(0.0, radius * 0.5, 0.0),
-		"radius": radius,
-		"color": color,
-		"fade_mode": 2,
-		"fade_duration": duration_ticks,
-		"corona_lower_half_radius": true,
-	})
+	var spawn := GlowSpawn.make(world_pos + Vector3(0.0, radius * 0.5, 0.0), radius, color)
+	spawn.fading(2, duration_ticks)
+	spawn.corona_lower_half_radius = true
+	_scene.spawn_glow(spawn)
 
 
 ## One husk death flash [orig: Entity_SpawnDeathPieces @ 0x49351a — at the
@@ -806,14 +792,9 @@ func on_impact_light(world_pos: Vector3, radius: float, color: Color,
 func on_death_light(world_pos: Vector3, radius: float) -> void:
 	if radius <= 0.0:
 		return
-	_scene.spawn_glow({
-		"position": world_pos,
-		"radius": radius,
-		"color": LightScene.death_flash_color(),
-		"fade_mode": LightScene.death_flash_fade_mode(),
-		"fade_duration": LightScene.death_flash_fade_ticks(),
-		"disable_corona": true,
-	})
+	_scene.spawn_glow(GlowSpawn.make(world_pos, radius, LightScene.death_flash_color())
+			.fading(LightScene.death_flash_fade_mode(), LightScene.death_flash_fade_ticks())
+			.masking(true, false, false))
 
 
 ## The in-flight light_move glows, diffed against the sim's live rows [orig:
@@ -833,14 +814,9 @@ func sync_round_glows(rows: Array) -> void:
 			# The spawn rides radius/2 above the round; the per-tick follow
 			# re-centers at the raw round position [orig: @ 0x4ec8d6 vs the
 			# @ 0x4eaa9f SetPositionAndBounds follow].
-			handle = int(_scene.spawn_glow({
-				"position": pos + Vector3(0.0, radius * 0.5, 0.0),
-				"radius": radius,
-				"color": row.color,
-				"fade_mode": 1,
-				"fade_duration": -1,
-				"disable_terrain": true,
-			}))
+			handle = int(_scene.spawn_glow(
+					GlowSpawn.make(pos + Vector3(0.0, radius * 0.5, 0.0), radius, row.color)
+					.masking(false, true, false)))
 			if handle != 0:
 				_round_handles[id] = handle
 		else:

@@ -25,6 +25,7 @@
 #include <runtime/renderer/render_slot_shadow.h>
 
 #include "lights/effect_light_report.h" // CoronaRow (the corona inspection seam)
+#include "lights/light_spawn.h"
 
 namespace godot {
 
@@ -45,21 +46,15 @@ class LightScene : public RefCounted {
 public:
 	// Spawn/mutation handles cross the Variant boundary as opaque positive
 	// int64 leases: retail's slot word in bits 0..15, generation in bits 16..47.
-	// config keys: position (Vector3 Godot world), atten_end (float world
-	// units), color_start / color_end (Color), style / phase / rate (int),
-	// intensity (float), disable_corona / disable_terrain / disable_objects
-	// (bool), plus the owner-attach facts opennova::renderer::resolve_model_light_owner
-	// decides from: attach_bone (int, the record's authored subobject),
-	// spawning_entity (int), spawner_is_building (bool), and
-	// blink_owner_entity / blink_section (int) for the blink box the spawning
-	// entity stands in.
-	int64_t spawn_model_light(const Dictionary &p_config);
+	// The LGHT-record light (lights/light_spawn.h ModelLightSpawn): the
+	// owner-attach facts on the record are what
+	// opennova::renderer::resolve_model_light_owner decides from. 0 for a
+	// null request.
+	int64_t spawn_model_light(const Ref<ModelLightSpawn> &p_config);
 	// Transient glow spawn (muzzle / impact / death / round legs — the
-	// light_scene.h witness map). config keys: position (Vector3), radius
-	// (float world units), color (Color), fade_mode / fade_duration (int),
-	// owner_entity / owner_section (int), disable_corona / disable_terrain /
-	// disable_objects (bool).
-	int64_t spawn_glow(const Dictionary &p_config);
+	// light_scene.h witness map; lights/light_spawn.h GlowSpawn). 0 for a
+	// null request.
+	int64_t spawn_glow(const Ref<GlowSpawn> &p_config);
 	void despawn(int64_t p_handle);
 	void set_light_position(int64_t p_handle, const Vector3 &p_world);
 	// The witnessed instance re-arm setters (fade mode/duration, owner group,
