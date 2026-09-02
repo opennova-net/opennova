@@ -1,19 +1,10 @@
 #include "devtools/oned_ui.h"
+#include "util/string_convert.h"
 
 namespace godot {
 
-namespace {
-
-std::string to_std(const String &p_value) {
-	const CharString utf8 = p_value.utf8();
-	return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
-}
-
-String to_godot(const std::string &p_value) {
-	return String::utf8(p_value.c_str(), static_cast<int>(p_value.size()));
-}
-
-} // namespace
+using opennova::to_gd;
+using opennova::to_std;
 
 void OnedUiRequest::assign(const opennova::devtools::OnedRequest &p_request) {
 	action_ = static_cast<int>(p_request.action);
@@ -80,7 +71,7 @@ void OnedUi::set_resource_dir(const String &p_value) {
 }
 
 String OnedUi::get_resource_dir() const {
-	return to_godot(ui_->resource_dir());
+	return to_gd(ui_->resource_dir());
 }
 
 void OnedUi::set_game_code(const String &p_value) {
@@ -88,7 +79,7 @@ void OnedUi::set_game_code(const String &p_value) {
 }
 
 String OnedUi::get_game_code() const {
-	return to_godot(ui_->game_code());
+	return to_gd(ui_->game_code());
 }
 
 void OnedUi::set_expansion(const String &p_value) {
@@ -96,7 +87,7 @@ void OnedUi::set_expansion(const String &p_value) {
 }
 
 String OnedUi::get_expansion() const {
-	return to_godot(ui_->expansion());
+	return to_gd(ui_->expansion());
 }
 
 void OnedUi::set_retail_dir(const String &p_value) {
@@ -104,7 +95,7 @@ void OnedUi::set_retail_dir(const String &p_value) {
 }
 
 String OnedUi::get_retail_dir() const {
-	return to_godot(ui_->retail_dir());
+	return to_gd(ui_->retail_dir());
 }
 
 void OnedUi::set_recent_dirs(const PackedStringArray &p_dirs) {
@@ -119,7 +110,7 @@ void OnedUi::set_recent_dirs(const PackedStringArray &p_dirs) {
 PackedStringArray OnedUi::get_recent_dirs() const {
 	PackedStringArray dirs;
 	for (const std::string &dir : ui_->recent_dirs()) {
-		dirs.push_back(to_godot(dir));
+		dirs.push_back(to_gd(dir));
 	}
 	return dirs;
 }
@@ -129,11 +120,11 @@ void OnedUi::set_readiness(const String &p_opennova_block, const String &p_retai
 }
 
 String OnedUi::get_opennova_block() const {
-	return to_godot(ui_->opennova_block());
+	return to_gd(ui_->opennova_block());
 }
 
 String OnedUi::get_retail_block() const {
-	return to_godot(ui_->retail_block());
+	return to_gd(ui_->retail_block());
 }
 
 bool OnedUi::is_running() const {
@@ -151,7 +142,7 @@ void OnedUi::set_status(const String &p_text, const StringName &p_kind) {
 }
 
 String OnedUi::get_status_text() const {
-	return to_godot(ui_->status_text());
+	return to_gd(ui_->status_text());
 }
 
 StringName OnedUi::get_status_kind() const {
