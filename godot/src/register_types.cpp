@@ -94,6 +94,7 @@
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
+#include "simulation/tracer_ribbon_frame.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
 #include "hud/hud_draw_list_stats.h"
@@ -298,6 +299,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
+	GDREGISTER_CLASS(TracerRibbonStrip);
+	GDREGISTER_CLASS(TracerRibbonFrame);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);

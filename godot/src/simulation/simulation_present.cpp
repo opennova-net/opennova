@@ -3,6 +3,7 @@
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/tracer_ribbon_frame.h" // the compiled tracer strips
 #include "simulation/destruction_events.h"
 #include "simulation/debug_cards.h"
 #include "env/env_axes.h"
@@ -684,7 +685,7 @@ Array Simulation::get_round_glow_rows() const {
 // The styled half of the trail split: rows in, per-family strip runs out.
 // Family packing (positions + colors arrays) is transport shape only; the
 // geometry/color math lives in renderer/tracer_frame.cpp with its citations.
-Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
+Ref<TracerRibbonFrame> Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 		const Vector3 &camera) {
 	std::vector<opennova::renderer::TracerChannelInput> channels;
 	const float *r = rows.ptr();
@@ -709,7 +710,8 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 					static_cast<float>(camera.z)},
 			frame);
 	auto pack_family = [](const std::vector<float> &run) {
-		Dictionary family;
+		Ref<TracerRibbonStrip> family;
+		family.instantiate();
 		const int64_t verts = static_cast<int64_t>(run.size() / 7);
 		PackedVector3Array positions;
 		PackedColorArray colors;
@@ -722,14 +724,15 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 			pw[v] = Vector3(f[0], f[1], f[2]);
 			cw[v] = Color(f[3], f[4], f[5], f[6]);
 		}
-		family["positions"] = positions;
-		family["colors"] = colors;
+		family->set_positions(positions);
+		family->set_colors(colors);
 		return family;
 	};
-	Dictionary out;
-	out["additive"] = pack_family(frame.additive);
-	out["alpha"] = pack_family(frame.alpha);
-	out["channels"] = frame.channels;
+	Ref<TracerRibbonFrame> out;
+	out.instantiate();
+	out->set_additive(pack_family(frame.additive));
+	out->set_alpha(pack_family(frame.alpha));
+	out->set_channels(frame.channels);
 	return out;
 }
 
