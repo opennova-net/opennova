@@ -51,8 +51,20 @@ var _nav_stack: PackedStringArray = []
 var _screen_ids: Dictionary = {}      # screen name (upper) -> screen id
 var _screen_order: PackedStringArray = []
 var _name_to_id: Dictionary = {}      # widget NAME (upper) -> doc id (first)
-var _id_info: Dictionary = {}         # doc id -> {screen:String, name:String, kind:int}
-# Runtime widget state keyed by doc id, replayed onto the frame at configure.
+## One indexed document widget: its screen, authored name and kind.
+class WidgetInfo extends RefCounted:
+	var screen: String
+	var name: String
+	var kind: int
+
+	func _init(p_screen: String, p_name: String, p_kind: int) -> void:
+		screen = p_screen
+		name = p_name
+		kind = p_kind
+
+var _id_info: Dictionary = {}         # doc id -> WidgetInfo
+# Runtime widget state keyed by doc id (MenuWidgetState), replayed onto the
+# frame at configure.
 var _id_state: Dictionary = {}
 # Current screen's id<->pre-order-index maps.
 var _id_of_index: PackedInt64Array = []
@@ -146,11 +158,7 @@ func _index_document_screen(screen_name: String, screen_id: int) -> void:
 
 func _index_widget_subtree(screen_name: String, id: int) -> void:
 	var name := _doc.get_widget_name(id)
-	_id_info[id] = {
-		"screen": screen_name,
-		"name": name,
-		"kind": _doc.get_widget_type(id),
-	}
+	_id_info[id] = WidgetInfo.new(screen_name, name, _doc.get_widget_type(id))
 	if not name.is_empty() and not _name_to_id.has(name.to_upper()):
 		_name_to_id[name.to_upper()] = id
 	for child_id in _doc.get_child_ids(id):
@@ -238,9 +246,10 @@ func _seed_marquee_widgets() -> void:
 	if _root == null:
 		return
 	for id in _index_of_id:
-		if int(_id_info.get(id, {}).get("kind", -1)) != MnuDocument.TYPE_MARQUEE:
+		if widget_kind_of(int(id)) != MnuDocument.TYPE_MARQUEE:
 			continue
-		if _id_state.get(id, {}).has("marquee_lines"):
+		var seeded: MenuWidgetState = _id_state.get(id)
+		if seeded != null and seeded.has_marquee_lines:
 			continue  # embedder-seeded content wins
 		var datasource := _doc.get_widget_datasource(int(id))
 		if datasource.is_empty():
@@ -328,15 +337,18 @@ func widget_id(name: String) -> int:
 
 
 func widget_name_of(id: int) -> String:
-	return String(_id_info.get(id, {}).get("name", ""))
+	var info: WidgetInfo = _id_info.get(id)
+	return info.name if info != null else ""
 
 
 func widget_kind_of(id: int) -> int:
-	return int(_id_info.get(id, {}).get("kind", -1))
+	var info: WidgetInfo = _id_info.get(id)
+	return info.kind if info != null else -1
 
 
 func widget_screen_of(id: int) -> String:
-	return String(_id_info.get(id, {}).get("screen", ""))
+	var info: WidgetInfo = _id_info.get(id)
+	return info.screen if info != null else ""
 
 
 func has_widget(name: String) -> bool:
@@ -351,14 +363,19 @@ func _frame_index(id: int) -> int:
 	return int(_index_of_id.get(id, -1))
 
 
-func _state_of(id: int) -> Dictionary:
+func _state_of(id: int) -> MenuWidgetState:
 	# An absent widget (-1, the retail null CUIWidget_FindByName) has no
 	# state: its writes land in a throwaway so the store never grows a -1 row.
 	if id < 0:
-		return {}
+		return MenuWidgetState.new()
 	if not _id_state.has(id):
-		_id_state[id] = {}
+		_id_state[id] = MenuWidgetState.new()
 	return _id_state[id]
+
+
+## The saved state of a widget, or null when nothing was ever written.
+func _saved_state(id: int) -> MenuWidgetState:
+	return _id_state.get(id)
 
 
 ## The widget's rect in the frame Control's local coordinates (the design
@@ -384,7 +401,9 @@ func _design_scale() -> Vector2:
 
 
 func set_widget_shown(id: int, shown: bool) -> void:
-	_state_of(id)["shown"] = shown
+	var state := _state_of(id)
+	state.shown = shown
+	state.has_shown = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_shown_override(index, shown)
@@ -392,42 +411,48 @@ func set_widget_shown(id: int, shown: bool) -> void:
 
 
 func is_widget_shown(id: int) -> bool:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("shown"):
-		return bool(state["shown"])
+	var state := _saved_state(id)
+	if state != null and state.has_shown:
+		return state.shown
 	return (_doc.get_widget_flags(id) & MnuDocument.FLAG_HIDDEN) == 0
 
 
 func set_widget_disabled(id: int, disabled: bool) -> void:
-	_state_of(id)["disabled"] = disabled
+	var state := _state_of(id)
+	state.disabled = disabled
+	state.has_disabled = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_disabled(index, disabled)
 
 
 func is_widget_disabled(id: int) -> bool:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("disabled"):
-		return bool(state["disabled"])
+	var state := _saved_state(id)
+	if state != null and state.has_disabled:
+		return state.disabled
 	return (_doc.get_widget_flags(id) & MnuDocument.FLAG_DISABLED) != 0
 
 
 func set_widget_checked(id: int, checked: bool) -> void:
-	_state_of(id)["checked"] = checked
+	var state := _state_of(id)
+	state.checked = checked
+	state.has_checked = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_checked(index, checked)
 
 
 func is_widget_checked(id: int) -> bool:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("checked"):
-		return bool(state["checked"])
+	var state := _saved_state(id)
+	if state != null and state.has_checked:
+		return state.checked
 	return (_doc.get_widget_flags(id) & MnuDocument.FLAG_CHECKED) != 0
 
 
 func set_widget_text(id: int, text: String) -> void:
-	_state_of(id)["text"] = text
+	var state := _state_of(id)
+	state.text = text
+	state.has_text = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_text(index, text)
@@ -437,29 +462,32 @@ func get_widget_text(id: int) -> String:
 	var index := _frame_index(id)
 	if index >= 0:
 		return _frame.get_widget_text(index)
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("text"):
-		return String(state["text"])
+	var state := _saved_state(id)
+	if state != null and state.has_text:
+		return state.text
 	return _doc.get_widget_text(id)
 
 
 func set_widget_items(id: int, items: PackedStringArray) -> void:
 	var state := _state_of(id)
-	state["items"] = items
+	state.items = items
+	state.has_items = true
 	# Fresh rows reset the selection unless the caller re-selects (the
 	# Control set_items semantics).
-	state["selected_item"] = 0 if items.size() > 0 else -1
-	state["scroll_row"] = 0
+	state.selected_item = 0 if items.size() > 0 else -1
+	state.has_selected_item = true
+	state.scroll_row = 0
+	state.has_scroll_row = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_items(index, items)
-		_frame.set_widget_selection(index, int(state["selected_item"]), -1, 0)
+		_frame.set_widget_selection(index, state.selected_item, -1, 0)
 
 
 func get_widget_items(id: int) -> PackedStringArray:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("items"):
-		return state["items"]
+	var state := _saved_state(id)
+	if state != null and state.has_items:
+		return state.items
 	var out := PackedStringArray()
 	for i in range(_doc.get_item_count(id)):
 		out.append(String(_doc.get_item(id, i).get("text", "")))
@@ -467,9 +495,9 @@ func get_widget_items(id: int) -> PackedStringArray:
 
 
 func item_count(id: int) -> int:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("items"):
-		return (state["items"] as PackedStringArray).size()
+	var state := _saved_state(id)
+	if state != null and state.has_items:
+		return state.items.size()
 	var index := _frame_index(id)
 	if index >= 0:
 		return _frame.item_count(index)
@@ -477,9 +505,9 @@ func item_count(id: int) -> int:
 
 
 func item_text(id: int, row: int) -> String:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("items"):
-		var items: PackedStringArray = state["items"]
+	var state := _saved_state(id)
+	if state != null and state.has_items:
+		var items := state.items
 		return items[row] if row >= 0 and row < items.size() else ""
 	return String(_doc.get_item(id, row).get("text", ""))
 
@@ -507,24 +535,26 @@ func select_row_by_value(id: int, value: String, emit := true) -> void:
 
 func select_row(id: int, row: int, emit := true) -> void:
 	var state := _state_of(id)
-	state["selected_item"] = row
+	state.selected_item = row
+	state.has_selected_item = true
 	var index := _frame_index(id)
 	if index >= 0:
-		_frame.set_widget_selection(index, row, -1,
-				int(state.get("scroll_row", 0)))
+		_frame.set_widget_selection(index, row, -1, state.scroll_row)
 	if emit:
 		_emit_value_changed_for(id, row)
 
 
 func selected_row(id: int) -> int:
-	return int(_id_state.get(id, {}).get("selected_item",
-			0 if item_count(id) > 0 else -1))
+	var state := _saved_state(id)
+	if state != null and state.has_selected_item:
+		return state.selected_item
+	return 0 if item_count(id) > 0 else -1
 
 
 func selected_rows(id: int) -> PackedInt32Array:
-	var state: Dictionary = _id_state.get(id, {})
-	if state.has("selected_set"):
-		return state["selected_set"]
+	var state := _saved_state(id)
+	if state != null and state.has_selected_set:
+		return state.selected_set
 	var out := PackedInt32Array()
 	var row := selected_row(id)
 	if row >= 0:
@@ -534,12 +564,13 @@ func selected_rows(id: int) -> PackedInt32Array:
 
 func set_scroll_row(id: int, row: int) -> void:
 	var state := _state_of(id)
-	state["scroll_row"] = maxi(row, 0)
+	state.scroll_row = maxi(row, 0)
+	state.has_scroll_row = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_selection(index,
-				int(state.get("selected_item", -1)), -1,
-				int(state["scroll_row"]))
+				state.selected_item if state.has_selected_item else -1, -1,
+				state.scroll_row)
 
 
 # The engine pump's CScrollWnd interaction result (already clamped and
@@ -552,7 +583,8 @@ func _on_frame_scroll_value(index: int, value: int) -> void:
 	if widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
 		set_scroll_row(id, value)
 		return
-	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
+	var saved := _saved_state(id)
+	var scroll: MenuScrollRange = saved.scroll_range if saved != null else null
 	if scroll == null or value == scroll.value:
 		return
 	scroll.value = clampi(value, scroll.minimum, scroll.maximum)
@@ -569,7 +601,7 @@ func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 		maximum = 0
 	value = clampi(value, minimum, maximum)
 	var scroll := MenuScrollRange.new(minimum, maximum, page, value)
-	_state_of(id)["scroll_range"] = scroll
+	_state_of(id).scroll_range = scroll
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
@@ -578,11 +610,14 @@ func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 
 ## Current standalone scroll state, or null until seeded.
 func get_widget_scroll_range(id: int) -> MenuScrollRange:
-	return _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
+	var state := _saved_state(id)
+	return state.scroll_range if state != null else null
 
 
 func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
-	_state_of(id)["marquee_lines"] = lines
+	var state := _state_of(id)
+	state.marquee_lines = lines
+	state.has_marquee_lines = true
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_marquee_lines(index, lines)
@@ -606,24 +641,25 @@ func table_clear_rows(id: int) -> void:
 
 
 func table_row_count(id: int) -> int:
-	return MenuTableState.row_count(_id_state.get(id, {}))
+	return MenuTableState.row_count(_saved_state(id))
 
 
 func table_cell_text(id: int, row: int, col: int) -> String:
-	return MenuTableState.cell_text(_id_state.get(id, {}), row, col)
+	return MenuTableState.cell_text(_saved_state(id), row, col)
 
 
 func table_selected_rows(id: int) -> PackedInt32Array:
-	return _id_state.get(id, {}).get("table_selected", PackedInt32Array())
+	var state := _saved_state(id)
+	return state.table_selected if state != null else PackedInt32Array()
 
 
 func table_select_row(id: int, row: int, additive := false) -> void:
 	MenuTableState.select_row(_state_of(id), row, additive)
-	MenuTableState.push_selection(_frame, _frame_index(id), _id_state.get(id, {}))
+	MenuTableState.push_selection(_frame, _frame_index(id), _saved_state(id))
 
 
 func _push_table_rows(id: int) -> void:
-	MenuTableState.push_rows(_frame, _frame_index(id), _id_state.get(id, {}))
+	MenuTableState.push_rows(_frame, _frame_index(id), _saved_state(id))
 
 
 # --- Input: mouse ---------------------------------------------------------------
@@ -809,8 +845,7 @@ func _list_click(id: int, kind: int, row: int) -> void:
 	if kind == MnuDocument.TYPE_MULTI:
 		var additive := Input.is_key_pressed(KEY_CTRL)
 		var state := _state_of(id)
-		var selected: PackedInt32Array = state.get("selected_set",
-				PackedInt32Array()) if additive else PackedInt32Array()
+		var selected := state.selected_set if additive else PackedInt32Array()
 		if selected.has(row):
 			var kept := PackedInt32Array()
 			for r in selected:
@@ -819,7 +854,8 @@ func _list_click(id: int, kind: int, row: int) -> void:
 			selected = kept
 		else:
 			selected.append(row)
-		state["selected_set"] = selected
+		state.selected_set = selected
+		state.has_selected_set = true
 		var index := _frame_index(id)
 		if index >= 0:
 			_frame.set_widget_selected_set(index, selected)
@@ -852,10 +888,10 @@ func _select_radio(id: int) -> void:
 	for other_id in _id_info:
 		if other_id == id:
 			continue
-		var info: Dictionary = _id_info[other_id]
-		if String(info.get("screen", "")) != screen:
+		var info: WidgetInfo = _id_info[other_id]
+		if info.screen != screen:
 			continue
-		if int(info.get("kind", -1)) != MnuDocument.TYPE_RADIO:
+		if info.kind != MnuDocument.TYPE_RADIO:
 			continue
 		if _doc.get_widget_group(int(other_id)) != group:
 			continue
@@ -938,7 +974,9 @@ func _clear_edit_focus() -> void:
 	if index >= 0:
 		_frame.set_widget_focused(index, false)
 		# Persist the edited text for cross-screen reads.
-		_state_of(id)["text"] = _frame.get_widget_text(index)
+		var state := _state_of(id)
+		state.text = _frame.get_widget_text(index)
+		state.has_text = true
 	_emit_edit_changed(id)
 
 
