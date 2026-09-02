@@ -147,8 +147,7 @@ public:
 			const Vector3 &rotation_deg);
 
 	// --- witnessed eligibility (engine policy re-exported for shell/tests) -
-	static bool item_casts_dynamic_shadow(int item_type, uint32_t attrib,
-			uint32_t attrib2);
+	static bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2);
 	static bool item_casts_static_terrain_shadow(MissionData::EntityKind kind,
 			uint32_t entity_attrib, uint32_t item_attrib,
 			uint32_t item_attrib2);

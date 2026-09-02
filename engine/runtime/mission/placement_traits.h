@@ -50,12 +50,46 @@ inline constexpr int visual_item_id_for_runtime_type(
 	return item_id + kItemIdOffset;
 }
 
+// The presenter's full resolution over a catalog probe `has_item(id)`: the
+// runtime player type maps to the authored visual item when the catalog
+// carries it; an id the catalog already knows is an authored id and stays; a
+// wire/BMS id below kItemIdOffset resolves to its authored twin when present;
+// anything else is returned unchanged for the caller's own fallback.
+template <typename HasItem>
+inline int resolve_visual_item_id(int runtime_type_id, HasItem &&has_item) {
+	if (runtime_type_id == kPlayerRuntimeTypeId && has_item(kPlayerVisualItemId))
+		return kPlayerVisualItemId;
+	if (has_item(runtime_type_id))
+		return runtime_type_id;
+	if (runtime_type_id > 0 && runtime_type_id < kItemIdOffset &&
+			has_item(runtime_type_id + kItemIdOffset))
+		return runtime_type_id + kItemIdOffset;
+	return runtime_type_id;
+}
+
 // Live entity silhouettes ride the dynamic projection list: persons always,
 // otherwise the item's attrib2 dynamic-shadow bit
 // (docs/render/render-lighting-re.md: dynamic slots via Entity_InitFromModel).
 inline bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 	return item_type == kItemTypePerson ||
 			(attrib2 & kItemAttrib2DynamicShadow) != 0;
+}
+
+// A placed item that cannot ride a static MultiMesh population and needs its
+// own model node: every person, every dynamic-shadow caster, an item with an
+// animation definition, or one carrying occlusion records (the per-instance
+// building section handles; docs/render/render-occlusion-re.md). Multiple
+// authored RLODs are no reason to leave the batch: the retained populations
+// select the level per instance.
+inline bool needs_individual_node(int item_type, uint32_t attrib2, bool has_anim_def,
+		bool has_occlusion_records) {
+	if (item_type == kItemTypePerson)
+		return true;
+	if (item_casts_dynamic_shadow(item_type, attrib2))
+		return true;
+	if (has_anim_def)
+		return true;
+	return has_occlusion_records;
 }
 
 // Static terrain-tile silhouettes: buildings unless opted out, pool-1 items
