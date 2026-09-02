@@ -1,5 +1,4 @@
 #include "network/novaworld_identity.h"
-#include "util/string_convert.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -21,6 +20,10 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/translation_server.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+
+// After the Windows block on purpose: godot-cpp's headers must not first meet
+// winnetwk.h's CONNECT_DEFERRED macro through this include.
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <cstdint>
