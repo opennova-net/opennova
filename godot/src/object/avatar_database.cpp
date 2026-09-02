@@ -157,8 +157,8 @@ void AvatarDatabase::clear() {
 	loaded = false;
 }
 
-void AvatarDatabase::adopt_parsed(const void *avatars_file) {
-	const AvatarsFile *f = static_cast<const AvatarsFile *>(avatars_file);
+void AvatarDatabase::adopt_parsed(const AvatarsFile &avatars_file) {
+	const AvatarsFile *f = &avatars_file;
 	parts.clear();
 	nationalities.clear();
 	parts.reserve(f->parts_count);
@@ -205,9 +205,9 @@ void AvatarDatabase::adopt_parsed(const void *avatars_file) {
 				c.head_name = String(sc.head_name);
 				c.body_name = String(sc.body_name);
 				c.arms_name = String(sc.arms_name);
-				c.head = part_from_snapshot(&sc.head);
-				c.body = part_from_snapshot(&sc.body);
-				c.arms = part_from_snapshot(&sc.arms);
+				c.head = part_from_snapshot(sc.head);
+				c.body = part_from_snapshot(sc.body);
+				c.arms = part_from_snapshot(sc.arms);
 				c.has_arms = sc.has_arms != 0;
 				d.combos.push_back(c);
 			}
@@ -239,8 +239,8 @@ const AvatarDatabase::Part *AvatarDatabase::find_part(int kind, const String &na
 	return nullptr;
 }
 
-AvatarDatabase::Part AvatarDatabase::part_from_snapshot(const void *avatar_part_snapshot) const {
-	const AvatarPartSnapshot *sp = static_cast<const AvatarPartSnapshot *>(avatar_part_snapshot);
+AvatarDatabase::Part AvatarDatabase::part_from_snapshot(const AvatarPartSnapshot &snapshot) const {
+	const AvatarPartSnapshot *sp = &snapshot;
 	Part p;
 	p.kind = sp->kind;
 	p.name = String(sp->name);
@@ -288,7 +288,7 @@ Error AvatarDatabase::load(const String &path) {
 		last_error = String("avatars_parse_memory failed for ") + path;
 		return ERR_CANT_OPEN;
 	}
-	adopt_parsed(&file);
+	adopt_parsed(file);
 	avatars_free(&file);
 	registry_dirty_ = true;
 	emit_signal("changed");
@@ -317,7 +317,7 @@ Error AvatarDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 		last_error = String("avatars_parse_memory failed for ") + file_name;
 		return ERR_CANT_OPEN;
 	}
-	adopt_parsed(&file);
+	adopt_parsed(file);
 	avatars_free(&file);
 	source_path = file_name;
 	registry_dirty_ = true;

@@ -13,6 +13,10 @@
 #include <cstdint>
 #include <vector>
 
+// The parsed Avatars.def records (engine/formats/avatars/avatars.h, C structs).
+struct AvatarsFile;
+struct AvatarPartSnapshot;
+
 namespace godot {
 
 class ResourceRoot;
@@ -88,9 +92,9 @@ private:
 	bool loaded = false;
 
 	void clear();
-	void adopt_parsed(const void *avatars_file); // const AvatarsFile*
+	void adopt_parsed(const AvatarsFile &avatars_file);
 	const Part *find_part(int kind, const String &name) const; // case-insensitive
-	Part part_from_snapshot(const void *avatar_part_snapshot) const; // const AvatarPartSnapshot*
+	Part part_from_snapshot(const AvatarPartSnapshot &snapshot) const;
 	void resolve_combo_snapshots(Combo &combo);
 	Dictionary part_dict(const Part &p) const;
 	Dictionary diagnostic_dict(const Diagnostic &d) const;
