@@ -1816,13 +1816,13 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			Simulation.PF_AIM_OVERLAY_VALID]), 1)
 	assert_eq(int(snapshot[rotated_row_base +
 			Simulation.PF_AIM_OVERLAY_VALID]), 1)
-	var sections: Array = sim.get_hitbox_debug().get("organics", [])
+	var sections: Array = sim.get_hitbox_debug().organics
 	var reference_by_section := {}
 	var rotated_by_section := {}
 	for value in sections:
-		var row: Dictionary = value
-		var handle := int(row.get("entity_handle", -1))
-		var section := int(row.get("section", -1))
+		var row: HitboxDebugOrganic = value
+		var handle := row.entity_handle
+		var section := row.section
 		if handle == 0:
 			reference_by_section[section] = row
 		elif handle == 1:
@@ -1851,9 +1851,9 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 		var section := int(section_value)
 		if not reference_by_section.has(section):
 			continue
-		var row: Dictionary = reference_by_section[section]
-		var offset: Vector3 = row.get("pos", Vector3.ZERO) - reference_pos
-		var radius := maxf(float(row.get("radius", 0.0)), 0.001)
+		var row: HitboxDebugOrganic = reference_by_section[section]
+		var offset: Vector3 = row.pos - reference_pos
+		var radius := maxf(row.radius, 0.001)
 		var score := Vector2(offset.x, offset.z).length() / radius
 		if rotated_by_section.has(section) and score > selected_score:
 			selected_score = score
@@ -1861,13 +1861,11 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_gte(selected_section, 0,
 			"a shared off-axis authored section exists")
 	var reference_center: Vector3 = (
-			reference_by_section[selected_section] as Dictionary).get(
-					"pos", Vector3.ZERO)
+			reference_by_section[selected_section] as HitboxDebugOrganic).pos
 	var expected_center := rotated_pos + relative_basis * (
 			reference_center - reference_pos)
 	var collision_center: Vector3 = (
-			rotated_by_section[selected_section] as Dictionary).get(
-					"pos", Vector3.ZERO)
+			rotated_by_section[selected_section] as HitboxDebugOrganic).pos
 	assert_lt(collision_center.distance_to(expected_center), 0.01,
 			"posed collision follows the mounted entity's rendered body yaw")
 
@@ -2042,14 +2040,14 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 
 	var collision_head := Vector3.INF
 	var collision_hand := Vector3.INF
-	for value in sim.get_hitbox_debug().get("organics", []):
-		var section: Dictionary = value
-		if int(section.get("entity_handle", -1)) == enemy_handle \
-				and int(section.get("section", -1)) == 14:
-			collision_head = section.get("pos", Vector3.INF)
-		if int(section.get("entity_handle", -1)) == enemy_handle \
-				and int(section.get("section", -1)) == 16:
-			collision_hand = section.get("pos", Vector3.INF)
+	for value in sim.get_hitbox_debug().organics:
+		var section: HitboxDebugOrganic = value
+		if section.entity_handle == enemy_handle \
+				and section.section == 14:
+			collision_head = section.pos
+		if section.entity_handle == enemy_handle \
+				and section.section == 16:
+			collision_hand = section.pos
 	assert_ne(collision_head, Vector3.INF,
 			"authoritative collision exposes mounted head section 14")
 	if collision_head != Vector3.INF:
@@ -3152,13 +3150,12 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 			sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_WORLD_HEAT_GLOW_VALID), 0,
 			"an unoccupied carrier is outside retail's attachment writer scope")
-	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
 		sim.free()
 		return
-	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var before: PackedVector3Array = (before_rows[0] as HitboxDebugEntity).tris
 
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
@@ -3194,13 +3191,12 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 			Simulation.PF_WORLD_HEAT_GLOW), 0xFFFF,
 			"the same inline slot saturates the world model at 0xFFFF")
 
-	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_rows.size(), 1)
 	if after_rows.size() != 1:
 		sim.free()
 		return
-	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var after: PackedVector3Array = (after_rows[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
 	var moved := 0
 	for index in before.size():
@@ -3293,10 +3289,9 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			'no segment retains the pre-attach look as a torso twist')
 	var initial_pitch_control := initial_weapon_state.emplaced_gun_pitch
 
-	var before_entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var before_entities: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_entities.size(), 1)
-	var before: PackedVector3Array = (before_entities[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var before: PackedVector3Array = (before_entities[0] as HitboxDebugEntity).tris
 	assert_gt(before.size(), 0)
 
 	sim.set_local_player_mouse(511, false)
@@ -3309,9 +3304,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			"the mounted local player's authoritative yaw changed")
 	assert_ne(sim.get_local_player_weapon_state().emplaced_gun_yaw, initial_yaw_control,
 			"look yaw reaches the retail EWEAP_GUNYAW phase")
-	var yaw_entities: Array = sim.get_hitbox_debug().get("entities", [])
-	var after_yaw: PackedVector3Array = (yaw_entities[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var yaw_entities: Array = sim.get_hitbox_debug().entities
+	var after_yaw: PackedVector3Array = (yaw_entities[0] as HitboxDebugEntity).tris
 	var yaw_moved := 0
 	for index in before.size():
 		if before[index].distance_to(after_yaw[index]) > 0.001:
@@ -3329,9 +3323,8 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_ne(sim.get_local_player_weapon_state().emplaced_gun_pitch,
 			initial_pitch_control,
 			"look pitch reaches the retail EWEAP_GUNPITCH phase")
-	var pitch_entities: Array = sim.get_hitbox_debug().get("entities", [])
-	var after_pitch: PackedVector3Array = (pitch_entities[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var pitch_entities: Array = sim.get_hitbox_debug().entities
+	var after_pitch: PackedVector3Array = (pitch_entities[0] as HitboxDebugEntity).tris
 	var pitch_moved := 0
 	for index in after_yaw.size():
 		if after_yaw[index].distance_to(after_pitch[index]) > 0.001:
@@ -4419,13 +4412,13 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1,
 		"face-only CFAC remains a real collision model")
-	var entities: Array = sim.get_hitbox_debug().get("entities", [])
+	var entities: Array = sim.get_hitbox_debug().entities
 	assert_eq(entities.size(), 1)
 	if entities.size() == 1:
-		assert_eq(int((entities[0] as Dictionary).get("face_total", 0)), 18,
+		assert_eq((entities[0] as HitboxDebugEntity).face_total, 18,
 			"all authored bird faces reach the projectile walker")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	assert_true((sim.get_hitbox_debug().get("entities", []) as Array).is_empty(),
+	assert_true(sim.get_hitbox_debug().entities.is_empty(),
 		"the heavier non-organic mesh view retains its local 80-unit range")
 	sim.free()
 
@@ -4497,13 +4490,9 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.debug_set_panm_time_ms(0)
-	var before: PackedVector3Array = (
-		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
-		.get("tris", PackedVector3Array()))
+	var before: PackedVector3Array = (sim.get_hitbox_debug().entities[0] as HitboxDebugEntity).tris
 	sim.debug_set_panm_time_ms(640)
-	var after: PackedVector3Array = (
-		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
-		.get("tris", PackedVector3Array()))
+	var after: PackedVector3Array = (sim.get_hitbox_debug().entities[0] as HitboxDebugEntity).tris
 	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
 	sim.free()
 
@@ -4821,22 +4810,20 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
 		sim.free()
 		return 0
-	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var before: PackedVector3Array = (before_rows[0] as HitboxDebugEntity).tris
 	for _tick in range(80):
 		sim.step()
-	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	var after_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_rows.size(), 1)
 	if after_rows.size() != 1:
 		sim.free()
 		return 0
-	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
-			"tris", PackedVector3Array())
+	var after: PackedVector3Array = (after_rows[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
 	var moved := 0
 	for i in before.size():
@@ -4891,24 +4878,19 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_count(), 1)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	var before_debug: Array = sim.get_hitbox_debug().get(
-		'entities', [])
+	var before_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_debug.size(), 1)
-	assert_eq(int((before_debug[0] as Dictionary).get(
-		'face_total', 0)), 24)
-	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
-		'tris', PackedVector3Array())
+	assert_eq((before_debug[0] as HitboxDebugEntity).face_total, 24)
+	var before: PackedVector3Array = (before_debug[0] as HitboxDebugEntity).tris
 	assert_eq(before.size(), 24 * 3)
 
 	# No present pass/render node: collision reads authoritative AI state.
 	for _tick in range(80):
 		sim.step()
 	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65536)
-	var after_debug: Array = sim.get_hitbox_debug().get(
-		'entities', [])
+	var after_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_debug.size(), 1)
-	var after: PackedVector3Array = (after_debug[0] as Dictionary).get(
-		'tris', PackedVector3Array())
+	var after: PackedVector3Array = (after_debug[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
 	var moved := 0
 	var stayed := 0
@@ -4987,31 +4969,31 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	sim.set_asset_root(root)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 
-	var before: Array = sim.get_hitbox_debug().get("organics", [])
+	var before: Array = sim.get_hitbox_debug().organics
 	assert_eq(before.size(), 19, "one posed sphere per person COBJ/bone")
 	var before_by_section := {}
 	for value in before:
-		var row: Dictionary = value
-		assert_false(bool(row.get("fallback", true)))
-		var pos := row.get("pos", Vector3.ZERO) as Vector3
+		var row: HitboxDebugOrganic = value
+		assert_false(row.fallback)
+		var pos := row.pos as Vector3
 		assert_lt(pos.distance_to(Vector3(10, 0, 0)), 3.0,
 				"bind pose applies entity translation exactly once")
-		before_by_section[int(row.get("section", -1))] = pos
+		before_by_section[row.section] = pos
 	assert_true(before_by_section.has(14), "head COBJ/bone is present")
 
 	# No presentation node or Skeleton3D is involved: advancing authoritative
 	# clip_phase must move the CollisionWorld/F3 matrices directly.
 	for _tick in 2:
 		sim.step()
-	var after: Array = sim.get_hitbox_debug().get("organics", [])
+	var after: Array = sim.get_hitbox_debug().organics
 	assert_eq(after.size(), 19)
 	var moved_sections := 0
 	for value in after:
-		var row: Dictionary = value
-		var section := int(row.get("section", -1))
+		var row: HitboxDebugOrganic = value
+		var section := row.section
 		if before_by_section.has(section) and (
 				before_by_section[section] as Vector3).distance_to(
-						row.get("pos", Vector3.ZERO) as Vector3) > 0.0001:
+						row.pos as Vector3) > 0.0001:
 			moved_sections += 1
 	assert_gt(moved_sections, 0,
 			"current BAD pose, not bind/entity-only matrices, drives collision")
@@ -5043,7 +5025,7 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 
 	# F3 still exercises CollisionWorld's demand provider for late targets, but
 	# presentation filters the local avatar before any posed/fallback row escapes.
-	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+	assert_true((sim.get_hitbox_debug().organics as Array).is_empty(),
 			"the local avatar never renders posed or fallback hitboxes")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
@@ -5076,7 +5058,7 @@ func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
-	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	var rows: Array = sim.get_hitbox_debug().organics
 	assert_true(rows.is_empty(),
 			"F3 omits the 200-unit target while still excluding local handle 1")
 	sim.free()
@@ -5088,7 +5070,7 @@ func test_f3_hides_unresolved_local_player_fallback() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+	assert_true((sim.get_hitbox_debug().organics as Array).is_empty(),
 			"an unresolved local avatar never leaks through the fallback path")
 	sim.free()
 
@@ -5134,7 +5116,7 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1),
 			"US01 reuses the freed pool-0 slot")
 
-	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
+	assert_true((sim.get_hitbox_debug().organics as Array).is_empty(),
 			"the newly resolved local avatar remains hidden from F3")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
@@ -5182,7 +5164,7 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	for _tick in 16:
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty())
+	assert_true((sim.get_hitbox_debug().organics as Array).is_empty())
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
@@ -5193,13 +5175,13 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var restored := sim.get_destruction_debug(bms_id)
 	assert_true(bool(restored.get("has_collision_instance", false)),
 			"restart rebinds the baseline before any F3 or round demand query")
-	var restored_rows: Array = sim.get_hitbox_debug().get("organics", [])
+	var restored_rows: Array = sim.get_hitbox_debug().organics
 	assert_eq(restored_rows.size(), 19,
 			"the restored non-local actor exposes every authored section")
 	for value in restored_rows:
-		var row: Dictionary = value
-		assert_eq(int(row.get("entity_handle", -1)), 0)
-		assert_false(bool(row.get("fallback", true)))
+		var row: HitboxDebugOrganic = value
+		assert_eq(row.entity_handle, 0)
+		assert_false(row.fallback)
 	sim.free()
 
 
@@ -5220,13 +5202,13 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.debug_set_entity_health(1, 0)
 
-	var rows: Array = sim.get_hitbox_debug().get("organics", [])
+	var rows: Array = sim.get_hitbox_debug().organics
 	assert_eq(rows.size(), 96, "fallback entities obey the F3 target cap")
 	var handles := {}
 	for value in rows:
-		var row: Dictionary = value
-		assert_true(bool(row.get("fallback", false)))
-		handles[int(row.get("entity_handle", -1))] = true
+		var row: HitboxDebugOrganic = value
+		assert_true(row.fallback)
+		handles[row.entity_handle] = true
 	assert_false(handles.has(0), "the 200-unit actor is outside the local F3 range")
 	assert_true(handles.has(1), "a zero-health corpse retains its bullet fallback")
 	sim.free()
@@ -5271,14 +5253,12 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var fallback_tick := sim.get_logic_tick()
 	var fallback_before: PackedVector3Array = (
-		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)
-		.get('tris', PackedVector3Array()))
+		(sim.get_hitbox_debug().entities[0] as HitboxDebugEntity).tris)
 	for _tick in range(40):
 		sim.step()
 	assert_eq(sim.get_logic_tick() - fallback_tick, 40)
 	var fallback_after: PackedVector3Array = (
-		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)
-		.get('tris', PackedVector3Array()))
+		(sim.get_hitbox_debug().entities[0] as HitboxDebugEntity).tris)
 	var fallback_moved := 0
 	for i in fallback_before.size():
 		if fallback_before[i].distance_to(fallback_after[i]) > 0.002:
@@ -5287,16 +5267,14 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 		'direct/headless simulation uses deterministic logic_tick * 16')
 
 	sim.debug_set_panm_time_ms(0)
-	var before_debug: Array = sim.get_hitbox_debug().get('entities', [])
+	var before_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_debug.size(), 1)
-	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
-		'tris', PackedVector3Array())
+	var before: PackedVector3Array = (before_debug[0] as HitboxDebugEntity).tris
 	assert_gt(before.size(), 0)
 	sim.debug_set_panm_time_ms(640)
-	var after_debug: Array = sim.get_hitbox_debug().get('entities', [])
+	var after_debug: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_debug.size(), 1)
-	var after: PackedVector3Array = (after_debug[0] as Dictionary).get(
-		'tris', PackedVector3Array())
+	var after: PackedVector3Array = (after_debug[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
 	var moved := 0
 	for i in before.size():

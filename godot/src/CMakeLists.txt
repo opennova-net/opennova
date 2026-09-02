@@ -123,6 +123,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_local_view.cpp
     simulation/player_weapon_event.cpp
     simulation/destruction_events.cpp
+    simulation/hitbox_debug_report.cpp
     simulation/hud_view_records.cpp
     simulation/player_weapon_view.cpp
     simulation/player_inventory.cpp

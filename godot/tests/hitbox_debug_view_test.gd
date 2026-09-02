@@ -12,17 +12,37 @@ const ViewScript := preload("res://game/debug/hitbox_debug_view.gd")
 ## refreshes so the cadence tests observe the fetch schedule.
 class PayloadView:
 	extends ViewScript
-	var payload: Dictionary = {}
+	var payload: HitboxDebugReport = null
 	var copy_payload_each_read := false
 	var read_count := 0
 
 	func refresh_now() -> void:
 		read_count += 1
-		render_report(payload.duplicate(true)
-				if copy_payload_each_read else payload)
+		render_report(_copy_report(payload) if copy_payload_each_read else payload)
+
+	## Fresh records with the same values, the way the sim publishes a new
+	## payload at every debug cadence tick.
+	static func _copy_report(report: HitboxDebugReport) -> HitboxDebugReport:
+		var copy := HitboxDebugReport.new()
+		for e: HitboxDebugEntity in report.entities:
+			var entity := HitboxDebugEntity.new()
+			entity.entity_handle = e.entity_handle
+			entity.pos = e.pos
+			entity.bound_radius = e.bound_radius
+			entity.husk = e.husk
+			entity.has_faces = e.has_faces
+			entity.face_total = e.face_total
+			entity.tris = e.tris.duplicate()
+			entity.materials = e.materials.duplicate()
+			entity.flags = e.flags.duplicate()
+			copy.add_entity(entity)
+		for o: HitboxDebugOrganic in report.organics:
+			copy.add_organic(HitboxDebugOrganic.make(o.entity_handle, o.section, o.pos,
+					o.radius, o.authored_radius, o.masked, o.fallback))
+		return copy
 
 
-func _make_view(payload: Dictionary, copy_payload_each_read := false) -> PayloadView:
+func _make_view(payload: HitboxDebugReport, copy_payload_each_read := false) -> PayloadView:
 	var view := PayloadView.new()
 	view.payload = payload
 	view.copy_payload_each_read = copy_payload_each_read
@@ -31,22 +51,18 @@ func _make_view(payload: Dictionary, copy_payload_each_read := false) -> Payload
 	return view
 
 
-func _make_actor_budget_organic_payload() -> Dictionary:
-	var organics: Array = []
+func _make_actor_budget_organic_payload() -> HitboxDebugReport:
+	var organics: Array[HitboxDebugOrganic] = []
 	for actor_index in range(96):
 		for section in range(19):
 			var radius := 0.10 + float(section) * 0.01
-			organics.append({
-				'entity_handle': actor_index + 1,
-				'section': section,
-				'pos': Vector3(float(actor_index) * 2.0, float(section) * 0.25,
-						float(actor_index) * -0.5),
-				'radius': radius,
-				'authored_radius': radius * 0.75,
-				'masked': actor_index == 95 and section == 18,
-				'fallback': actor_index == 94 and section == 1,
-			})
-	return { 'entities': [], 'organics': organics }
+			organics.append(HitboxDebugOrganic.make(actor_index + 1, section,
+					Vector3(float(actor_index) * 2.0, float(section) * 0.25,
+							float(actor_index) * -0.5),
+					radius, radius * 0.75,
+					actor_index == 95 and section == 18,
+					actor_index == 94 and section == 1))
+	return HitboxDebugReport.make([], organics)
 
 
 func _organic_geometry_resource(view: Node3D) -> Resource:
@@ -78,20 +94,11 @@ func test_person_section_colors_distinguish_retail_roles() -> void:
 
 
 func test_draws_and_labels_posed_masked_and_fallback_sections() -> void:
-	var view := _make_view({
-		"entities": [],
-		"organics": [
-			{ "entity_handle": 7, "section": 14, "pos": Vector3(1, 1, 0),
-				"radius": 0.35, "authored_radius": 0.22,
-				"masked": false, "fallback": false },
-			{ "entity_handle": 7, "section": 15, "pos": Vector3(2, 1, 0),
-				"radius": 0.25, "authored_radius": 0.20,
-				"masked": true, "fallback": false },
-			{ "entity_handle": 8, "section": 1, "pos": Vector3(3, 1, 0),
-				"radius": 0.60, "authored_radius": 0.60,
-				"masked": false, "fallback": true },
-		],
-	})
+	var view := _make_view(HitboxDebugReport.make([], [
+			HitboxDebugOrganic.make(7, 14, Vector3(1, 1, 0), 0.35, 0.22, false, false),
+			HitboxDebugOrganic.make(7, 15, Vector3(2, 1, 0), 0.25, 0.20, true, false),
+			HitboxDebugOrganic.make(8, 1, Vector3(3, 1, 0), 0.60, 0.60, false, true),
+	]))
 	view.refresh_now()
 
 	var organic_geometry := _organic_geometry_resource(view)
@@ -119,14 +126,9 @@ func test_draws_and_labels_posed_masked_and_fallback_sections() -> void:
 
 
 func test_world_labels_use_compact_debug_font_scale() -> void:
-	var view := _make_view({
-		"entities": [],
-		"organics": [
-			{ "entity_handle": 7, "section": 14, "pos": Vector3(1, 1, 0),
-				"radius": 0.35, "authored_radius": 0.22,
-				"masked": false, "fallback": false },
-		],
-	})
+	var view := _make_view(HitboxDebugReport.make([], [
+			HitboxDebugOrganic.make(7, 14, Vector3(1, 1, 0), 0.35, 0.22, false, false),
+	]))
 	view.refresh_now()
 
 	var label := view.get_node("HitboxLabel0") as Label3D
@@ -211,9 +213,8 @@ func test_actor_budget_uses_one_packed_colored_organic_multimesh() -> void:
 	assert_eq(mutation_count[0], 0,
 			"equivalent snapshots perform zero MultiMesh mutations")
 
-	var organics := payload["organics"] as Array
-	var head_row := organics[head_index] as Dictionary
-	head_row["pos"] = Vector3(75.0, 4.0, -17.5)
+	var head_row := payload.organics[head_index] as HitboxDebugOrganic
+	head_row.pos = Vector3(75.0, 4.0, -17.5)
 	view.refresh_now()
 	assert_same(organic_lines.multimesh, first_multimesh,
 			"changed poses retain the MultiMesh resource")
@@ -234,7 +235,7 @@ func test_actor_budget_uses_one_packed_colored_organic_multimesh() -> void:
 
 func test_refresh_cadence_is_six_hz_at_common_frame_rates() -> void:
 	for fps in [60, 144, 240]:
-		var view := _make_view({ "entities": [], "organics": [] })
+		var view := _make_view(HitboxDebugReport.new())
 		view.set_process(false)
 		assert_eq(view.read_count, 0,
 				"setup does not fetch before the first scheduled cadence at %d FPS" % fps)
@@ -245,7 +246,7 @@ func test_refresh_cadence_is_six_hz_at_common_frame_rates() -> void:
 
 
 func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> void:
-	var view := _make_view({ "entities": [], "organics": [] })
+	var view := _make_view(HitboxDebugReport.new())
 	view.set_process(false)
 
 	view.advance_refresh(2.0)
@@ -262,7 +263,7 @@ func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> vo
 			"the tenth fresh 60 FPS frame reaches exactly one new cadence boundary")
 
 	for fps in [4, 2]:
-		var low_view := _make_view({ "entities": [], "organics": [] })
+		var low_view := _make_view(HitboxDebugReport.new())
 		low_view.set_process(false)
 		for frame_index in range(fps):
 			var before_frame_reads := low_view.read_count
@@ -274,14 +275,9 @@ func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> vo
 
 
 func test_cadence_equivalent_payload_does_not_rebuild_posed_geometry() -> void:
-	var view := _make_view({
-		"entities": [],
-		"organics": [
-			{ "entity_handle": 7, "section": 14, "pos": Vector3(1, 1, 0),
-				"radius": 0.35, "authored_radius": 0.22,
-				"masked": false, "fallback": false },
-		],
-	}, true)
+	var view := _make_view(HitboxDebugReport.make([], [
+			HitboxDebugOrganic.make(7, 14, Vector3(1, 1, 0), 0.35, 0.22, false, false),
+	]), true)
 	view.refresh_now()
 
 	var first_geometry := _organic_geometry_resource(view)
@@ -295,8 +291,8 @@ func test_cadence_equivalent_payload_does_not_rebuild_posed_geometry() -> void:
 	first_label.visibility_changed.connect(
 			func() -> void: visibility_change_count[0] += 1)
 
-	# Simulation publishes fresh Dictionary/Array containers at the debug
-	# cadence even when the posed collision values are unchanged. Equivalent
+	# Simulation publishes fresh records at the debug cadence even when the
+	# posed collision values are unchanged. Equivalent
 	# snapshots must not force the same wire geometry through RenderingServer.
 	for refresh_index in range(8):
 		view.refresh_now()
@@ -310,15 +306,10 @@ func test_cadence_equivalent_payload_does_not_rebuild_posed_geometry() -> void:
 
 
 func test_changed_organic_draw_inputs_invalidate_geometry_and_labels_update() -> void:
-	var payload := {
-		"entities": [],
-		"organics": [
-			{ "entity_handle": 7, "section": 5, "pos": Vector3(1, 1, 0),
-				"radius": 0.35, "authored_radius": 0.22,
-				"masked": false, "fallback": false },
-		],
-	}
-	var organic := payload["organics"][0] as Dictionary
+	var payload := HitboxDebugReport.make([], [
+			HitboxDebugOrganic.make(7, 5, Vector3(1, 1, 0), 0.35, 0.22, false, false),
+	])
+	var organic := payload.organics[0] as HitboxDebugOrganic
 	var view := _make_view(payload, true)
 	view.refresh_now()
 
@@ -331,46 +322,46 @@ func test_changed_organic_draw_inputs_invalidate_geometry_and_labels_update() ->
 	var label := view.get_node("HitboxLabel0") as Label3D
 
 	var before_count: int = int(change_count[0])
-	organic["pos"] = Vector3(3, 1, 0)
+	organic.pos = Vector3(3, 1, 0)
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "position invalidates posed geometry")
 	assert_eq(label.position.x, 3.0, "position updates the matching label")
 
 	before_count = change_count[0]
-	organic["radius"] = 0.55
+	organic.radius = 0.55
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "radius invalidates posed geometry")
 	assert_string_contains(label.text, "r 0.55")
 
 	before_count = change_count[0]
-	organic["section"] = 14
+	organic.section = 14
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "section color invalidates posed geometry")
 	assert_string_contains(label.text, "HEAD")
 
 	before_count = change_count[0]
-	organic["masked"] = true
+	organic.masked = true
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "masked color invalidates posed geometry")
 	assert_string_contains(label.text, "MASKED")
 
 	before_count = change_count[0]
-	organic["masked"] = false
+	organic.masked = false
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "clearing masked invalidates posed geometry")
 
 	before_count = change_count[0]
-	organic["fallback"] = true
+	organic.fallback = true
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "fallback color invalidates posed geometry")
 	assert_string_contains(label.text, "FALLBACK")
 
 	before_count = change_count[0]
-	organic["fallback"] = false
+	organic.fallback = false
 	view.refresh_now()
 	assert_gt(change_count[0], before_count, "clearing fallback invalidates posed geometry")
 	before_count = change_count[0]
-	organic["authored_radius"] = 0.44
+	organic.authored_radius = 0.44
 	view.refresh_now()
 	assert_eq(change_count[0], before_count,
 			"label-only authored radius does not invalidate posed geometry")
@@ -378,20 +369,15 @@ func test_changed_organic_draw_inputs_invalidate_geometry_and_labels_update() ->
 
 
 func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> void:
-	var entity := {
-		"entity_handle": 7,
-		"pos": Vector3.ZERO,
-		"husk": false,
-		"tris": PackedVector3Array([
-			Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0),
-		]),
-		"materials": PackedByteArray([0]),
-		"flags": PackedInt32Array([0]),
-		"bound_radius": 0.0,
-		"has_faces": true,
-		"face_total": 1,
-	}
-	var payload := { "entities": [entity], "organics": [] }
+	var entity := HitboxDebugEntity.new()
+	entity.entity_handle = 7
+	entity.tris = PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0),
+	])
+	entity.materials = PackedByteArray([0])
+	entity.flags = PackedInt32Array([0])
+	entity.face_total = 1
+	var payload := HitboxDebugReport.make([entity], [])
 	var view := _make_view(payload)
 	view.refresh_now()
 	var lines := view.get_node("HitboxLines") as MeshInstance3D
@@ -399,7 +385,7 @@ func test_static_hit_mesh_refreshes_when_only_transformed_triangles_change() -> 
 
 	# PANM/current section matrices change world-space triangles without moving
 	# the entity itself. The static-mesh signature must still invalidate.
-	entity["tris"] = PackedVector3Array([
+	entity.tris = PackedVector3Array([
 		Vector3(10, 0, 0), Vector3(11, 0, 0), Vector3(10, 1, 0),
 	])
 	view.refresh_now()

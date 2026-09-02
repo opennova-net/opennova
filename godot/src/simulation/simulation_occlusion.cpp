@@ -2,6 +2,7 @@
 // occlusion) and the world debug views (collision/hitbox/round/occlusion
 // dictionaries + debug round spawn).
 #include "simulation/simulation_internal.h"
+#include "simulation/hitbox_debug_report.h"
 
 #include <net/netsim/connection_fan.h>
 #include <runtime/world/occlusion_feed.h>
@@ -860,13 +861,10 @@ Dictionary Simulation::get_collision_debug() const {
 	return out;
 }
 
-Dictionary Simulation::get_hitbox_debug() {
+Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
 	constexpr int32_t kEntityCap = 96;
-	Dictionary out;
-	Array entities;
-	Array organics;
-	out["entities"] = entities;
-	out["organics"] = organics;
+	Ref<HitboxDebugReport> out;
+	out.instantiate();
 	if (!kernel_) return out;
 
 	// Anchor on the local player like the volume view. All hitbox payloads use
@@ -887,13 +885,14 @@ Dictionary Simulation::get_hitbox_debug() {
 	    kernel_->hitboxes(lp != nullptr ? lp->position : opennova::world::Vec3{},
 	                      lp != nullptr ? 80.0f : -1.0f, kEntityCap, 24000);
 	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
-		Dictionary d;
-		d["entity_handle"] = static_cast<int>(ent.handle.packed);
-		d["pos"] = godot_from_fixed3(ent.pos);
-		d["bound_radius"] = static_cast<float>(ent.bound_radius / kFixed16);
-		d["husk"] = ent.husk;
-		d["has_faces"] = ent.has_faces;
-		d["face_total"] = ent.face_total;
+		Ref<HitboxDebugEntity> d;
+		d.instantiate();
+		d->set_entity_handle(static_cast<int>(ent.handle.packed));
+		d->set_pos(godot_from_fixed3(ent.pos));
+		d->set_bound_radius(static_cast<float>(ent.bound_radius / kFixed16));
+		d->set_husk(ent.husk);
+		d->set_has_faces(ent.has_faces);
+		d->set_face_total(ent.face_total);
 		PackedVector3Array tris;
 		PackedByteArray materials;
 		PackedInt32Array flags;
@@ -909,10 +908,10 @@ Dictionary Simulation::get_hitbox_debug() {
 			mw[i] = f.material;
 			fw[i] = static_cast<int32_t>(f.flags);
 		}
-		d["tris"] = tris;
-		d["materials"] = materials;
-		d["flags"] = flags;
-		entities.push_back(d);
+		d->set_tris(tris);
+		d->set_materials(materials);
+		d->set_flags(flags);
+		out->add_entity(d);
 	}
 
 	// Posed pool-0 COBJ spheres from the exact person narrow phase. They share
@@ -931,16 +930,10 @@ Dictionary Simulation::get_hitbox_debug() {
 		const bool new_handle =
 		    posed_handles.find(person.handle.packed) == posed_handles.end();
 		if (new_handle && posed_handles.size() >= static_cast<size_t>(kEntityCap)) break;
-		Dictionary d;
-		d["entity_handle"] = static_cast<int>(person.handle.packed);
-		d["section"] = person.section;
-		d["pos"] = godot_from_fixed3(person.center);
-		d["radius"] = static_cast<float>(person.radius / kFixed16);
-		d["authored_radius"] =
-		    static_cast<float>(person.authored_radius / kFixed16);
-		d["masked"] = person.masked;
-		d["fallback"] = false;
-		organics.push_back(d);
+		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(person.handle.packed),
+		    person.section, godot_from_fixed3(person.center),
+		    static_cast<float>(person.radius / kFixed16),
+		    static_cast<float>(person.authored_radius / kFixed16), person.masked, false));
 		posed_handles[person.handle.packed] = true;
 	}
 	const size_t pool0 = kernel_->world.registry.pool_capacity(0);
@@ -963,17 +956,12 @@ Dictionary Simulation::get_hitbox_debug() {
 			    std::llabs(static_cast<int64_t>(ep[2]) - anchor[2]) > debug_range)
 				continue;
 		}
-		Dictionary d;
-		d["entity_handle"] = static_cast<int>(s);
-		d["section"] = 1;
-		d["pos"] = Vector3(e->position.x,
-		                   e->position.z + opennova::world::kOrganicStandInCenterZ,
-		                   -e->position.y);
-		d["radius"] = opennova::world::kOrganicStandInRadius;
-		d["authored_radius"] = opennova::world::kOrganicStandInRadius;
-		d["masked"] = false;
-		d["fallback"] = true;
-		organics.push_back(d);
+		out->add_organic(HitboxDebugOrganic::make(static_cast<int>(s), 1,
+		    Vector3(e->position.x,
+		            e->position.z + opennova::world::kOrganicStandInCenterZ,
+		            -e->position.y),
+		    opennova::world::kOrganicStandInRadius, opennova::world::kOrganicStandInRadius,
+		    false, true));
 		++fallback_entity_count;
 	}
 	return out;
