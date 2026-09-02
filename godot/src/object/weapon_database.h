@@ -6,9 +6,9 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <vector>
+#include <formats/def/def.h>
 
-struct DefWeaponDef;
+#include <vector>
 
 namespace godot {
 
@@ -23,85 +23,21 @@ class WeaponDatabase : public RefCounted {
 	GDCLASS(WeaponDatabase, RefCounted)
 
 private:
-	struct Weapon {
-		String name;           // weapon "<id>" — raw id, the display fallback
-		String display_textid; // loadout_menu_textid — GameText "WepDes" key
-		String round_type;     // ammo key (GameText "WepDes")
-		String icon;           // loadout_menu_icon
-		int selectable = 0;    // loadout_selectable (gate)
-		int loadout_subclasses = 0; // sub-entry expansion count (+36) — the *_AMMO2 walk bound
-		int slot = 0;          // weapon_class: 0=accessory 1=primary 2=secondary 3=grenade
-		int team_mask = 0;     // teamfilter: blue/yellow=2, red/violet=1
-		int class_mask = 0;    // charfilter: medic1 sniper2 gunner4 rifleman8 engineer16
-		float weight = 0.0f;   // weaponweight
-		float clip_weight = 0.0f;
-		int clipsize = 0;
-		int startrounds = 0;
-		int maxclips = 0;
-		// First-person viewmodel slice [orig: WeaponDef_ParseProperty @0x54d730
-		// rows; consumer Player_RenderFirstPersonViewModel @0x4ded60]: the FP gun
-		// model (gfx1), the 3P model (gfx3), the shared animation set (animadm),
-		// the hip/ADS view biases (pos/tpos: xyz raw file units + yaw/pitch/roll
-		// degrees), and renderfov (horizontal degrees, record default 80.0 — no
-		// shipped JO def sets it). gfx1a/gfx1b are recognized-and-DISCARDED
-		// tokens [orig: WeaponDefs_ParseLineCallback @0x5448d0 -> xor eax; the
-		// FP arms are the character combo's, see docs/playerinfo/avatars-re.md];
-		// the format lib still parses them, but nothing carries them past it.
-		String animadm;
-		String gfx1;
-		String gfx3;
-		float pos[6] = { 0, 0, 0, 0, 0, 0 };
-		float tpos[6] = { 0, 0, 0, 0, 0, 0 };
-		float renderfov = 80.0f;
-		// The witnessed WeaponDef+8 flag mask (engine/formats/def flag_table maps the file
-		// tokens: scoped 1, sighted 2, burst 0x20, auto 0x100, ...) and the ADS zoom
-		// magnification [orig: Player_ToggleWeaponScope @ 0x4df0c0 gates Flags & 3;
-		// scoped FOV = 80 / zoom @ 0x4df401].
-		int flags = 0;
-		int flags2 = 0;  // the second FLAGS dword (Inset 0x200 = the 7-step ADS ease)
-		float scope_max_mag = 0.0f;
-		// The SIGHTS card rows (dicts: texture/x1/y1/x2/y2/blend/scale/slide/
-		// slide_frames), authored order [orig: record +0x1C8, count +0x258].
-		Array sights;
-		// The 3P body-channel kinds (0 = absent, rifle): special_hold 1..8 picks the
-		// body hold-pose ladder 50-61 (2 also selects reload2), attack_anim 1/2 stamps
-		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
-		int special_hold = 0;
-		int attack_anim = 0;
-		// The heat model, in the def's pre-divided 16.16 units (0 = the weapon
-		// authors no heat, which is every infantry weapon in the shipped corpora)
-		// [orig: WeaponDef +0x36C / +0x370 / +0x374 / +0x358].
-		int heat_per_shot = 0;
-		int heat_decay_per_tick = 0;
-		int heat_glow_threshold = 0;
-		String heat_effect;
-		// Run-gait class: the forward-walk promotion adds this to the constant pitch
-		// tier 2 to pick run_2/run_3 [orig: 'run_anim' -> AdmDefs +0xAC; @ 0x4b729d].
-		int run_anim = 0;
-		// HUD weapon-coupled slice (docs/interface/hud-re.md): the 6-row dispersion
-		// table in DEGREES, rows = hip prone/crouch/stand then scoped prone/crouch/
-		// stand — the crosshair spread reads ERROR[stance + 3*scoped] [orig: weapon
-		// +0xB0 parse @0x543b21 (16.16); HUD_DrawCrosshair @0x592b84]. The clip
-		// graphic (HUDCLIPGFX: offset + texture [orig: parse @0x54427f]) and the
-		// per-round row (HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor,
-		// texture [orig: parse @0x5442fc -> weapon +644/+648/+652/+656/+727]).
-		float error[6] = { 0, 0, 0, 0, 0, 0 };
-		String hudclipgfx_texture;
-		int hudclipgfx_offset[2] = { 0, 0 };
-		String hudrndgfx_texture;
-		int hudrndgfx_offset[2] = { 0, 0 };
-		int hudrndgfx_layout[3] = { 0, 0, 0 }; // step_x, step_y, rounds-per-icon
-		// The weapon's ACTION blocks, verbatim rows for the weapon-FSM bake — Dicts
-		// {name, anim, function, delaystart, delayend} [orig: ActionDef_ParseScriptLine
-		// @ 0x4023c0; bound by Anim_InitActions @ 0x541fa0; net-re §5.62].
-		Array actions;
-	};
-	std::vector<Weapon> weapons; // file order (mirrors the engine's table order)
+	// The retained weapon.def parse (the ItemDatabase precedent): every getter
+	// reads the DefWeaponDef rows directly, the engine's loadout laws take the
+	// rows as they are, and nothing re-packs them. Freed at the top of every
+	// load attempt and in the destructor.
+	DefWeaponsFile weapons_file_ = {};
+	bool weapons_file_loaded_ = false;
 	String source_path;
 	String last_error;
 
+	void release_native_weapons();
 	Dictionary weapon_dict(int index) const;
-	void append_entry(const DefWeaponDef &e);
+	const DefWeaponDef *row(int index) const {
+		return (index < 0 || static_cast<size_t>(index) >= weapons_file_.count)
+				? nullptr : &weapons_file_.entries[index];
+	}
 
 protected:
 	static void _bind_methods();
@@ -153,6 +89,8 @@ public:
 		CLASS_MASK_ALL = 0x1F,
 	};
 
+	~WeaponDatabase() override;
+
 	Error load(const String &path);
 	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
@@ -162,9 +100,9 @@ public:
 	int get_count() const;
 
 	// The weapons that belong in `slot` for the given class + team masks, in table order.
-	// Faithful filter [orig: populate_weapon_slot_lists @ 0x560430]: a row is included only
-	// when selectable != 0 AND (class_mask & player_class_mask) AND (team_mask & player_team_mask).
-	// Each entry is a weapon_dict(); the caller prepends the "NONE" row.
+	// The filter is the engine's world::weapon_slot_indices
+	// [orig: populate_weapon_slot_lists @ 0x560430]. Each entry is a
+	// weapon_dict(); the caller prepends the "NONE" row.
 	Array get_slot_weapons(int slot, int class_mask, int team_mask) const;
 	// All weapons, unfiltered, in table order.
 	Dictionary get_weapon(int index) const;

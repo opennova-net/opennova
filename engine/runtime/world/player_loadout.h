@@ -10,6 +10,7 @@
 //  Player_InitPlayer @ 0x4e15f0]
 #pragma once
 
+#include <formats/def/def.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
 
@@ -154,6 +155,14 @@ int32_t armory_class_filter_mask(int selected_class);
 // else masks NOTHING on this screen (unlike the armory's all-weapons default).
 int32_t player_info_team_mask(int team);
 int32_t player_info_class_mask(int playerclass_value);
+
+// The weapons that belong in `slot` for the class + team masks, in table
+// order [orig: populate_weapon_slot_lists @0x560430]: a row is included only
+// when loadout_selectable != 0 AND (charfilter & class_mask) AND
+// (teamfilter & team_mask). The caller prepends its own "NONE" row.
+void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
+                         int32_t class_mask, int32_t team_mask,
+                         std::vector<int32_t> &out);
 
 // The ammo combo's default-select row [orig: the
 // `saved == i || (saved == -1 && i == maxclips)` select in

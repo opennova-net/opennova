@@ -207,6 +207,21 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
 
 // [orig: Armory_ResolveSelectedClass @0x5642f0] The scan-up + gunner fallback
 // against the host allow mask; a class with its bit set opens as-is.
+void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
+                         int32_t class_mask, int32_t team_mask,
+                         std::vector<int32_t> &out) {
+    out.clear();
+    for (size_t i = 0; i < count; ++i) {
+        const DefWeaponDef &w = rows[i];
+        if (w.weapon_class_slot != slot) continue;
+        // [orig: populate_weapon_slot_lists @0x560430] gate.
+        if (w.loadout_selectable == 0) continue;
+        if ((w.charfilter_mask & class_mask) == 0) continue;
+        if ((w.teamfilter_mask & team_mask) == 0) continue;
+        out.push_back(static_cast<int32_t>(i));
+    }
+}
+
 int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask) {
     // The &31 mirrors x86 shl's hardware count masking for an out-of-range
     // class byte (and keeps the C++ shift defined).
