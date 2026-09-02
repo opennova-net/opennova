@@ -1685,8 +1685,8 @@ public:
 	// the STROVER_USEGUN default). Armory mode rides the zone flag; the nearest-only
 	// gate consumes the same complete live fire verdict as body/HUD selection.
 	// (engine: runtime/hud/hud_frame.cpp)
-	TypedArray<Dictionary> get_attach_labels() const;
-	TypedArray<Dictionary> get_friendly_tags() const;
+	TypedArray<AttachLabelRow> get_attach_labels() const;
+	TypedArray<FriendlyTagRow> get_friendly_tags() const;
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the
