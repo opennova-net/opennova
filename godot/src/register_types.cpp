@@ -318,6 +318,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeatherSoundRow);
 	GDREGISTER_CLASS(ChatLineRow);
 	GDREGISTER_CLASS(MissionEffect);
+	GDREGISTER_CLASS(ObjectiveRow);
+	GDREGISTER_CLASS(DeathPieceRow);
+	GDREGISTER_CLASS(RoundGlowRow);
 	GDREGISTER_CLASS(AvatarDatabase);
 	GDREGISTER_CLASS(SkeletalAnim);
 	GDREGISTER_CLASS(HudPos);

@@ -819,15 +819,15 @@ func on_death_light(world_pos: Vector3, radius: float) -> void:
 ## The in-flight light_move glows, diffed against the sim's live rows [orig:
 ## RoundData_SpawnRound @ 0x4ec8da spawn (mode 1, radius/2 up, terrain
 ## disabled), the per-tick follow @ 0x4eaa9f, Projectile_ReleaseEffects
-## clear]. Rows: {id, pos, radius, color} from Simulation.get_round_glow_rows.
+## clear]. Rows: RoundGlowRow from Simulation.get_round_glow_rows.
 func sync_round_glows(rows: Array) -> void:
 	var seen: Dictionary = {}
 	for row_v in rows:
-		var row: Dictionary = row_v
-		var id := int(row.get("id", 0))
+		var row: RoundGlowRow = row_v
+		var id := row.id
 		seen[id] = true
-		var radius := float(row.get("radius", 0.0))
-		var pos: Vector3 = row.get("pos", Vector3.ZERO)
+		var radius := row.radius
+		var pos := row.pos
 		var handle := int(_round_handles.get(id, 0))
 		if handle == 0:
 			# The spawn rides radius/2 above the round; the per-tick follow
@@ -836,7 +836,7 @@ func sync_round_glows(rows: Array) -> void:
 			handle = int(_scene.spawn_glow({
 				"position": pos + Vector3(0.0, radius * 0.5, 0.0),
 				"radius": radius,
-				"color": row.get("color", Color.WHITE),
+				"color": row.color,
 				"fade_mode": 1,
 				"fade_duration": -1,
 				"disable_terrain": true,

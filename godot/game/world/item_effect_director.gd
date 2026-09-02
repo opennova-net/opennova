@@ -53,10 +53,52 @@ var _item_fx_pending_static: Dictionary = {}
 # startup. Portable lifecycle events activate them without polling.
 # identity alias -> true while the vehicle has any controlling occupant
 var _item_fx_control_active: Dictionary = {}
-# Node instance id -> {node, kind, item_id, aliases}
+# Node instance id -> ControlNode
 var _item_fx_control_nodes: Dictionary = {}
-# Node instance id -> {group_ids, owner_keys}
+# Node instance id -> ControlInstance
 var _item_fx_control_instances: Dictionary = {}
+
+
+## One PlayerControl item node waiting on its controller lifecycle edges.
+## `node` stays an untyped Variant: a despawned wire node is validity-checked
+## before any typed read.
+class ControlNode:
+	extends RefCounted
+	var node: Variant
+	var kind: int
+	var item_id: int
+	var aliases: Array[String]
+
+	func _init(p_node: ObjectModel, p_kind: int, p_item_id: int,
+			p_aliases: Array[String]) -> void:
+		node = p_node
+		kind = p_kind
+		item_id = p_item_id
+		aliases = p_aliases
+
+
+## The live effect groups and owner keys one controller-activated node spawned.
+class ControlInstance:
+	extends RefCounted
+	var group_ids: Array[int] = []
+	var owner_keys: Array[String] = []
+
+
+## One item attachment deferred while particles were hidden (the retail
+## master switch), replayed once by reattach_pending.
+class PendingNode:
+	extends RefCounted
+	var node: Variant
+	var kind: int
+	var item_id: int
+	var controller_active: bool
+
+	func _init(p_node: ObjectModel, p_kind: int, p_item_id: int,
+			p_controller_active: bool) -> void:
+		node = p_node
+		kind = p_kind
+		item_id = p_item_id
+		controller_active = p_controller_active
 
 
 ## One-time wiring from the owning GameWorld: the world whose public surface
@@ -301,58 +343,47 @@ func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:
 	return false
 
 
-func _item_fx_control_node_is_active(entry: Dictionary) -> bool:
-	for alias_v in entry.get("aliases", []):
-		if _item_fx_control_active.has(String(alias_v)):
+func _item_fx_control_node_is_active(entry: ControlNode) -> bool:
+	for alias in entry.aliases:
+		if _item_fx_control_active.has(alias):
 			return true
 	return false
 
 
 func _register_item_fx_control_node(node: ObjectModel, kind: int,
-		item_id: int) -> Dictionary:
+		item_id: int) -> ControlNode:
 	var aliases := _item_fx_control_node_aliases(node)
 	if aliases.is_empty():
-		return {}
-	var entry := {
-		"node": node,
-		"kind": kind,
-		"item_id": item_id,
-		"aliases": aliases,
-	}
+		return null
+	var entry := ControlNode.new(node, kind, item_id, aliases)
 	_item_fx_control_nodes[node.get_instance_id()] = entry
 	return entry
 
 
 func _track_item_fx_control_spawn(node_id: int, owner_key: String,
 		receipt: EffectSpawnReceipt) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {
-		"group_ids": [],
-		"owner_keys": [],
-	})
-	var group_ids: Array = instance.get("group_ids", [])
+	var instance: ControlInstance = _item_fx_control_instances.get(node_id)
+	if instance == null:
+		instance = ControlInstance.new()
+		_item_fx_control_instances[node_id] = instance
 	var group_id := receipt.group_id
-	if group_id > 0 and not group_ids.has(group_id):
-		group_ids.append(group_id)
-	var owner_keys: Array = instance.get("owner_keys", [])
-	if not owner_keys.has(owner_key):
-		owner_keys.append(owner_key)
-	instance["group_ids"] = group_ids
-	instance["owner_keys"] = owner_keys
-	_item_fx_control_instances[node_id] = instance
+	if group_id > 0 and not instance.group_ids.has(group_id):
+		instance.group_ids.append(group_id)
+	if not instance.owner_keys.has(owner_key):
+		instance.owner_keys.append(owner_key)
 
 
 func _stop_item_fx_control_node(node_id: int) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {})
+	var instance: ControlInstance = _item_fx_control_instances.get(node_id)
 	var effect_world: EffectWorld = _world.get_effect_world()
-	if effect_world != null:
-		for group_id_v in instance.get("group_ids", []):
-			var group_id := int(group_id_v)
-			if group_id > 0:
-				effect_world.stop_group(group_id)
-	for owner_key_v in instance.get("owner_keys", []):
-		var owner_key := String(owner_key_v)
-		_item_fx_nodes.erase(owner_key)
-		_item_fx_owner_refs.erase(owner_key)
+	if instance != null:
+		if effect_world != null:
+			for group_id in instance.group_ids:
+				if group_id > 0:
+					effect_world.stop_group(group_id)
+		for owner_key in instance.owner_keys:
+			_item_fx_nodes.erase(owner_key)
+			_item_fx_owner_refs.erase(owner_key)
 	_item_fx_control_instances.erase(node_id)
 	_item_fx_registered_nodes.erase(node_id)
 	_item_fx_pending_nodes.erase(node_id)
@@ -361,29 +392,25 @@ func _stop_item_fx_control_node(node_id: int) -> void:
 func _activate_item_fx_control_nodes(event_aliases: Array) -> void:
 	for node_id_v in _item_fx_control_nodes.keys().duplicate():
 		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
+		var entry: ControlNode = _item_fx_control_nodes.get(node_id)
+		if entry == null or not _item_fx_aliases_intersect(entry.aliases, event_aliases):
 			continue
-		var node_v: Variant = entry.get("node")
+		var node_v: Variant = entry.node
 		if not is_instance_valid(node_v) or not (node_v is ObjectModel):
 			_stop_item_fx_control_node(node_id)
 			_item_fx_control_nodes.erase(node_id)
 			continue
 		if not _item_fx_control_node_is_active(entry):
 			continue
-		_attach_item_effect_to_node(
-				node_v as ObjectModel,
-				int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)),
-				null,
-				true)
+		_attach_item_effect_to_node(node_v as ObjectModel, entry.kind, entry.item_id,
+				null, true)
 
 
 func _deactivate_item_fx_control_nodes(event_aliases: Array) -> void:
 	for node_id_v in _item_fx_control_nodes.keys().duplicate():
 		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
+		var entry: ControlNode = _item_fx_control_nodes.get(node_id)
+		if entry == null or not _item_fx_aliases_intersect(entry.aliases, event_aliases):
 			continue
 		if not _item_fx_control_node_is_active(entry):
 			_stop_item_fx_control_node(node_id)
@@ -432,7 +459,7 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 			if not _item_effect_controller_allows(kind, attrib):
 				return 0
 			var control_entry := _register_item_fx_control_node(node, kind, item_id)
-			if not control_entry.is_empty() and _item_fx_control_node_is_active(control_entry):
+			if control_entry != null and _item_fx_control_node_is_active(control_entry):
 				return _attach_item_effect_to_node(node, kind, item_id, item_db, true)
 			return 0
 	var fx := item_db.get_particle_fx(item_id)
@@ -447,12 +474,8 @@ func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
 		# The retail master switch makes every spawn facade a no-op. Remember
 		# persistent item attachments so re-enabling after a hidden mission load
 		# creates them exactly once instead of losing them for the mission.
-		_item_fx_pending_nodes[node_id] = {
-			"node": node,
-			"kind": kind,
-			"item_id": item_id,
-			"controller_active": controller_active,
-		}
+		_item_fx_pending_nodes[node_id] = PendingNode.new(node, kind, item_id,
+				controller_active)
 		return 0
 	var attached := 0
 	var matched := 0
@@ -570,23 +593,22 @@ func _retry_pending_item_effects() -> void:
 	var pending_ids := _item_fx_pending_nodes.keys().duplicate()
 	for node_id_v in pending_ids:
 		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_pending_nodes.get(node_id, {})
+		var entry: PendingNode = _item_fx_pending_nodes.get(node_id)
 		# A wire node may have despawned while particles were disabled. Keep the
 		# freed-object Variant untyped until after the validity guard; a typed cast
 		# can raise before is_instance_valid gets a chance to reject it.
-		var node_v: Variant = entry.get("node")
+		var node_v: Variant = entry.node
 		if not is_instance_valid(node_v) or not (node_v is ObjectModel):
 			_item_fx_pending_nodes.erase(node_id)
 			continue
 		var node := node_v as ObjectModel
-		var controller_active := bool(entry.get("controller_active", false))
-		if controller_active:
-			var control_entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-			if control_entry.is_empty() or not _item_fx_control_node_is_active(control_entry):
+		if entry.controller_active:
+			var control_entry: ControlNode = _item_fx_control_nodes.get(node_id)
+			if control_entry == null or not _item_fx_control_node_is_active(control_entry):
 				_item_fx_pending_nodes.erase(node_id)
 				continue
-		_attach_item_effect_to_node(node, int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)), null, controller_active)
+		_attach_item_effect_to_node(node, entry.kind, entry.item_id, null,
+				entry.controller_active)
 	var static_ids := _item_fx_pending_static.keys().duplicate()
 	for source_index_v in static_ids:
 		var source_index := int(source_index_v)

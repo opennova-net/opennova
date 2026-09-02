@@ -281,21 +281,22 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 	return out;
 }
 
-Array Simulation::get_objectives_view() const {
+TypedArray<ObjectiveRow> Simulation::get_objectives_view() const {
 	// The SP objectives panel's row walk: slots 1..8 until a 0/255 win id.
 	// [orig: HUD_DrawWinConditions @0x5ba9e0 — byte_A7628B[slot] 0/255 break;
 	//  row gate = show-win bit @0x5ba9ff; checkmark = won bit @0x5bab35]
-	Array out;
+	TypedArray<ObjectiveRow> out;
 	if (!kernel_) return out;
 	const auto &sg = kernel_->world.subgoals;
 	for (int slot = 1; slot <= 8; ++slot) {
 		const uint8_t id = sg.win_text_ids[slot];
 		if (id == 0 || id == 255) break;
-		Dictionary row;
-		row["slot"] = slot;
-		row["text_id"] = static_cast<int>(id);
-		row["shown"] = (sg.show_win & (1u << slot)) != 0;
-		row["done"] = (sg.won & (1u << slot)) != 0;
+		Ref<ObjectiveRow> row;
+		row.instantiate();
+		row->set_slot(slot);
+		row->set_text_id(static_cast<int>(id));
+		row->set_shown((sg.show_win & (1u << slot)) != 0);
+		row->set_done((sg.won & (1u << slot)) != 0);
 		out.push_back(row);
 	}
 	return out;
@@ -543,27 +544,28 @@ Ref<DestructionDrain> Simulation::drain_destruction_events() {
 
 // The live death-piece pool snapshot — the present pass renders each piece as
 // its single husk-model section [orig: the piece render mask piece[31]; §24].
-Array Simulation::get_death_pieces() const {
-	Array out;
+TypedArray<DeathPieceRow> Simulation::get_death_pieces() const {
+	TypedArray<DeathPieceRow> out;
 	if (!world_installed_) return out;
 	for (size_t slot = 0; slot < kernel_->world.death_pieces.pieces.size(); ++slot) {
 		const opennova::world::DeathPiece &p = kernel_->world.death_pieces.pieces[slot];
 		if (!p.active) continue;
-		Dictionary d;
-		d["slot"] = static_cast<int>(slot);
-		d["generation"] = static_cast<int64_t>(p.generation);
-		d["item_id"] = p.item_id;
-		d["section"] = static_cast<int>(p.section);
-		d["type_index"] = static_cast<int>(p.type_index);
+		Ref<DeathPieceRow> d;
+		d.instantiate();
+		d->set_slot(static_cast<int>(slot));
+		d->set_generation(static_cast<int64_t>(p.generation));
+		d->set_item_id(p.item_id);
+		d->set_section(static_cast<int>(p.section));
+		d->set_type_index(static_cast<int>(p.type_index));
 		// The debris-type trail effect, from the ONE native table [orig:
 		// g_death_piece_types @ 0x8404f0 +0x2C]; "" = no trail authored.
-		d["trail"] = String(
-				opennova::world::death_piece_trail_effect(p.type_index));
-		d["scale"] = p.render_scale;
-		d["pos"] = mission_to_godot(p.pos);
-		d["heading"] = p.heading;
-		d["pitch"] = p.pitch;
-		d["settled"] = p.settled;
+		d->set_trail(String(
+				opennova::world::death_piece_trail_effect(p.type_index)));
+		d->set_scale(p.render_scale);
+		d->set_pos(mission_to_godot(p.pos));
+		d->set_heading(p.heading);
+		d->set_pitch(p.pitch);
+		d->set_settled(p.settled);
 		out.push_back(d);
 	}
 	return out;
@@ -658,25 +660,26 @@ PackedFloat32Array Simulation::get_tracer_trails() const {
 // The in-flight round glows — see the header note. One row per active round
 // whose ammo authors `light_move`; the id is the round's presentation
 // generation so pool-slot reuse never teleports a glow.
-Array Simulation::get_round_glow_rows() const {
-	Array out;
+TypedArray<RoundGlowRow> Simulation::get_round_glow_rows() const {
+	TypedArray<RoundGlowRow> out;
 	if (!world_installed_) return out;
 	for (const opennova::world::LiveRound &r : kernel_->world.round_sim.rounds) {
 		if (!r.active || r.ammo_index < 0) continue;
 		const opennova::world::AmmoTableEntry *ammo =
 				kernel_->world.ammo.by_index(r.ammo_index);
 		if (ammo == nullptr || ammo->light_move_radius <= 0.0f) continue;
-		Dictionary d;
-		d["id"] = static_cast<int64_t>(r.presentation_generation);
+		Ref<RoundGlowRow> d;
+		d.instantiate();
+		d->set_id(static_cast<int64_t>(r.presentation_generation));
 		// The spawn rides radius/2 above the round and the per-tick follow
 		// re-centers at the round position [orig: @0x4ec8d6 / @0x4eaa9f,
 		// see renderer/light_scene.h].
-		d["pos"] = mission_to_godot(r.pos);
-		d["radius"] = ammo->light_move_radius;
-		d["color"] = Color(
+		d->set_pos(mission_to_godot(r.pos));
+		d->set_radius(ammo->light_move_radius);
+		d->set_color(Color(
 				static_cast<float>((ammo->light_move_color >> 16) & 0xFF) / 255.0f,
 				static_cast<float>((ammo->light_move_color >> 8) & 0xFF) / 255.0f,
-				static_cast<float>(ammo->light_move_color & 0xFF) / 255.0f);
+				static_cast<float>(ammo->light_move_color & 0xFF) / 255.0f));
 		out.push_back(d);
 	}
 	return out;
