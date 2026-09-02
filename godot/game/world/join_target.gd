@@ -43,15 +43,14 @@ func spectator_password_required() -> bool:
 	return server_flags >= 0 and (server_flags & FLAG_SPECTATOR_PASSWORD) != 0
 
 
-## Decode a LanSession discovery row (a transport edge; keys from
-## lan_session.cpp's row builder). Map identity is deliberately absent here:
-## retail LAN enumeration has not joined the session yet, so the mission arrives
-## in the normal post-auth 0x7B stream.
-static func from_lan_row(row: Dictionary) -> JoinTarget:
+## Decode a LanSession discovery row. Map identity is deliberately absent
+## here: retail LAN enumeration has not joined the session yet, so the mission
+## arrives in the normal post-auth 0x7B stream.
+static func from_lan_row(row: LanServerRow) -> JoinTarget:
 	var target := JoinTarget.new()
-	target.host_ip = String(row.get("host_ip", target.host_ip))
-	target.port = int(row.get("port", target.port))
-	target.server_name = String(row.get("server_name", row.get("name", "")))
-	target.game_type = int(row.get("gametype", -1))
-	target.server_flags = int(row.get("server_flags", -1))
+	target.host_ip = row.host_ip
+	target.port = row.port
+	target.server_name = row.server_name
+	target.game_type = row.gametype
+	target.server_flags = row.server_flags
 	return target

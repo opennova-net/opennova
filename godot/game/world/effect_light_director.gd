@@ -50,7 +50,22 @@ var _scene: LightScene = LightScene.new()
 var _spawned_static: Dictionary = {}
 var _static_sources_snapshot: Array = []
 var _static_owner_by_bms: Dictionary = {}
-var _spawned_nodes: Dictionary = {}
+var _spawned_nodes: Dictionary = {}  # node instance id -> SpawnedNode
+
+
+## One wire node whose authored lights this director spawned: a weak
+## reference to the node, the light owner id it was scoped to, and the
+## one-shot tree_exiting callback bound to it.
+class SpawnedNode:
+	extends RefCounted
+	var node: WeakRef
+	var owner_id: int
+	var tree_exiting: Callable
+
+	func _init(p_node: WeakRef, p_owner_id: int, p_tree_exiting: Callable) -> void:
+		node = p_node
+		owner_id = p_owner_id
+		tree_exiting = p_tree_exiting
 # Entity owner id -> its ONE cached EffectWorld handle. Retail does not own a
 # model-light handle array: every LGHT spawn overwrites entity+0x1B4, the
 # MF_Light muzzle path reuses that same word, and Entity_Destroy clears only
@@ -226,32 +241,28 @@ func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
 	# entity once; duplicate callback delivery must not turn a later free slot
 	# into an invented second spawn attempt.
 	var on_exit := _on_wire_node_exiting.bind(node_id)
-	_spawned_nodes[node_id] = {
-		"node": weakref(node),
-		"owner_id": owner_id,
-		"tree_exiting": on_exit,
-	}
+	_spawned_nodes[node_id] = SpawnedNode.new(weakref(node), owner_id, on_exit)
 	node.tree_exiting.connect(on_exit, Object.CONNECT_ONE_SHOT)
 
 
 func _on_wire_node_exiting(node_id: int) -> void:
-	var record: Dictionary = _spawned_nodes.get(node_id, {})
-	if record.is_empty():
+	var record: SpawnedNode = _spawned_nodes.get(node_id)
+	if record == null:
 		return
 	_spawned_nodes.erase(node_id)
 	# Entity_Destroy has one 16-bit EffectWorld word, not an owned-light list.
 	# Clear exactly the lease currently cached there; a husk swap does not exit
 	# the node and therefore does not touch any authored light.
-	var owner_id := int(record.get("owner_id", 0))
+	var owner_id := record.owner_id
 	var cached_handle := int(_entity_effect_handles.get(owner_id, 0))
 	if cached_handle != 0:
 		_scene.despawn(cached_handle)
 	_entity_effect_handles.erase(owner_id)
 
 
-func _disconnect_wire_node_exit(record: Dictionary) -> void:
-	var node_ref := record.get("node") as WeakRef
-	var on_exit: Callable = record.get("tree_exiting", Callable())
+func _disconnect_wire_node_exit(record: SpawnedNode) -> void:
+	var node_ref := record.node
+	var on_exit := record.tree_exiting
 	var node: Node = null
 	if node_ref != null:
 		node = node_ref.get_ref() as Node

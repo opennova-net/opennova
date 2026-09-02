@@ -40,6 +40,7 @@ add_library(${TARGET_NAME} SHARED
     network/udp_datagram.cpp
     network/udp_pump.cpp
     network/lan_session.cpp
+    network/lan_server_row.cpp
     network/net_protocol.cpp
     network/net_session_policy.cpp
     terrain/terrain.cpp

@@ -18,6 +18,14 @@ class _LanSessionFeed extends LanSession:
 		emit_signal("servers_changed", servers)
 
 
+# One browse row with the counts the LAN list formats.
+static func _lan_row(server_name: String, players: int, max_players: int) -> LanServerRow:
+	var row := LanServerRow.make(server_name, "192.168.1.10", 32768)
+	row.players = players
+	row.max_players = max_players
+	return row
+
+
 # --- Driver harness (the compiled-menu seam) ----------------------------------
 
 func _doc_from_xml(xml: String) -> MnuDocument:
@@ -386,13 +394,9 @@ func test_lan_join_emits_selected_server() -> void:
 	# injected LanSession's servers_changed signal.
 	var session := LanSession.new()
 	mp.set_lan_session(session)
-	session.servers_changed.emit([{
-		"name": "biggy",
-		"host_ip": "192.168.1.10",
-		"port": 32768,
-		"server_flags": JoinTarget.FLAG_ALLOW_SPECTATORS
-				| JoinTarget.FLAG_SPECTATOR_PASSWORD,
-	}])
+	var biggy := LanServerRow.make("biggy", "192.168.1.10", 32768)
+	biggy.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD
+	session.servers_changed.emit([biggy])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
@@ -417,11 +421,11 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	var session := _LanSessionFeed.new()
 	autofree(session)
 	mp.set_lan_session(session)
-	session.publish([{"name": "old", "host_ip": "192.168.1.10", "port": 32768}])
+	session.publish([LanServerRow.make("old", "192.168.1.10", 32768)])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.select_row(lan_list, 0)  # single click on the old row
 
-	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
+	session.publish([LanServerRow.make("replacement", "192.168.1.11", 32769)])
 	assert_eq(driver.item_count(lan_list), 1,
 		"a servers_changed payload replaces the prior full snapshot instead of appending")
 	assert_eq(driver.item_text(lan_list, 0), "replacement (0/0)")
@@ -440,8 +444,9 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	autofree(current)
 	mp.set_lan_session(previous)
 	mp.set_lan_session(current)
-	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])
-	previous.publish([{"name": "stale", "players": 4, "max_players": 4, "mission": "old.bms"}])
+	# (pre-auth rows carry no map identity: LanServerRow has no mission field)
+	current.publish([_lan_row("current", 1, 4)])
+	previous.publish([_lan_row("stale", 4, 4)])
 
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	assert_eq(driver.item_count(lan_list), 1)

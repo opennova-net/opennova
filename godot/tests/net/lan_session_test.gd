@@ -66,22 +66,22 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 		OS.delay_msec(2)
 	assert_eq(rows.size(), 1, "one endpoint reply becomes one browser row")
 	if rows.size() == 1:
-		var row: Dictionary = rows[0]
-		assert_eq(String(row.get("server_name", "")), "Kitchen LAN")
-		assert_eq(String(row.get("host_ip", "")), "127.0.0.1")
-		assert_eq(int(row.get("port", 0)), port)
-		assert_eq(int(row.get("players", 0)), 1, "listen host occupies one player slot")
-		assert_eq(int(row.get("max_players", 0)), 6)
-		assert_eq(int(row.get("gametype", 0)), 0x30020)
-		var flags := int(row.get("server_flags", 0))
+		var row: LanServerRow = rows[0]
+		assert_eq(row.server_name, "Kitchen LAN")
+		assert_eq(row.host_ip, "127.0.0.1")
+		assert_eq(row.port, port)
+		assert_eq(row.players, 1, "listen host occupies one player slot")
+		assert_eq(row.max_players, 6)
+		assert_eq(row.gametype, 0x30020)
+		var flags := row.server_flags
 		assert_ne(flags & JoinTarget.FLAG_ALLOW_SPECTATORS, 0,
 				"ServerHello.P2 advertises that spectators are enabled")
 		assert_ne(flags & JoinTarget.FLAG_SPECTATOR_PASSWORD, 0,
 				"ServerHello.P2 advertises the spectator-password prompt")
-		assert_eq(String(row.get("expansion", "")), "jox01")
-		assert_eq(String(row.get("session_id", "")), "",
+		assert_eq(row.expansion, "jox01")
+		assert_eq(row.session_id, "",
 				"an unmodeled SUS1 is omitted instead of fabricated")
-		assert_false(row.has("mission"),
+		assert_false("mission" in row,
 				"retail discovery does not invent pre-auth mission metadata")
 	browser.stop()
 	assert_false(browser.is_browsing())
@@ -167,9 +167,10 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 	var rows: Array = browser.get_servers()
 	assert_eq(rows.size(), 1, "duplicate 0x81 replies from one endpoint remain one browser row")
 	if rows.size() == 1:
-		assert_eq(String(rows[0].get("server_name", "")), "Duplicate Reply LAN")
-		assert_eq(String(rows[0].get("host_ip", "")), "127.0.0.1")
-		assert_eq(int(rows[0].get("port", 0)), responder_port)
+		var row: LanServerRow = rows[0]
+		assert_eq(row.server_name, "Duplicate Reply LAN")
+		assert_eq(row.host_ip, "127.0.0.1")
+		assert_eq(row.port, responder_port)
 
 	browser.stop()
 	responder.close()

@@ -741,12 +741,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	effects.size = Vector2(1024, 768)
 	add_child_autofree(effects)
 	effects.set_resource_root(fixture["root"])
-	effects.update_info({
-		"binoculars_view_active": true,
-		"binocular_range": 1000,
-		"nvg_visible": true,
-		"nvg_gain": 4,
-	})
+	effects.update_view(true, 1000, true, 4)
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
 
@@ -771,7 +766,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
 	assert_true(nvg.visible,
 			"First-person-visible NVG enables the post-process.")
-	effects.update_info({"nvg_visible": false})
+	effects.update_view(false, 1, false, 0)
 	assert_false(nvg.visible,
 			"Camera suppression hides the post-process without consuming simulation state.")
 

@@ -538,12 +538,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _sights_card != null:
 		_sights_card.set_card_up(scope_card and not binoculars_view_active)
 	if _view_effects != null:
-		_view_effects.update_info({
-			"binoculars_view_active": binoculars_view_active,
-			"binocular_range": binocular_range,
-			"nvg_visible": nvg_visible,
-			"nvg_gain": nvg_gain,
-		})
+		_view_effects.update_view(binoculars_view_active, binocular_range,
+				nvg_visible, nvg_gain)
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
