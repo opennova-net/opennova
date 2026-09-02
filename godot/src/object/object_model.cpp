@@ -3,6 +3,7 @@
 // Ported verbatim from object_model.gd (2026-08-09 de-scripting).
 
 #include "object/object_model.h"
+#include "object/model_light.h"
 
 #include <cmath>
 
@@ -1570,10 +1571,10 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 			p_index >= object_data_->get_light_count()) {
 		return get_global_position();
 	}
-	const Dictionary info = object_data_->get_light_info(p_index);
-	const Vector3 model_position = info.get("position", Vector3());
+	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
+	const Vector3 model_position = info->get_position();
 	Vector3 position = get_global_transform().xform(model_position);
-	const int subobject = int(info.get("subobject", 0));
+	const int subobject = info->get_subobject();
 	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
 	// the rest-to-live transform, matching the user-point attachment basis.
 	if (subobject > 0 && skeleton_ != nullptr &&

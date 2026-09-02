@@ -1,4 +1,5 @@
 #include "simulation/wire_present_pass.h"
+#include "object/model_user_point.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -465,11 +466,9 @@ Vector3 WirePresentPass::muzzle_world_for(int p_handle,
 	}
 	const int point_count = data->get_user_point_count();
 	for (int i = 0; i < point_count; ++i) {
-		Dictionary info = data->get_user_point_info(i);
-		if (String(info.get("name", String())).nocasecmp_to(p_userpoint) ==
-				0) {
-			return weapon->get_global_transform().xform(
-					Vector3(info.get("position", Vector3())));
+		const Ref<ModelUserPoint> info = data->get_user_point_info(i);
+		if (info.is_valid() && info->get_name().nocasecmp_to(p_userpoint) == 0) {
+			return weapon->get_global_transform().xform(info->get_position());
 		}
 	}
 	return body_origin;

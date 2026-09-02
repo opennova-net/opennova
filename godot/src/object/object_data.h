@@ -33,6 +33,9 @@ struct WeatherOscillator;
 
 namespace godot {
 
+class ModelLight;
+class ModelUserPoint;
+
 class ObjectData : public Resource {
 	GDCLASS(ObjectData, Resource)
 
@@ -201,9 +204,11 @@ public:
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
-	Dictionary get_light_info(int p_index) const;
+	// One LGHT record (object/model_light.h); null out of range.
+	Ref<ModelLight> get_light_info(int p_index) const;
 	int get_user_point_count() const;
-	Dictionary get_user_point_info(int p_index) const;
+	// One USRP row (object/model_user_point.h); null out of range.
+	Ref<ModelUserPoint> get_user_point_info(int p_index) const;
 	// The item-effect attach scan: name -> 16-bit mask over the FIRST 16
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]

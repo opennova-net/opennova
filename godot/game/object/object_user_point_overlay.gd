@@ -83,11 +83,11 @@ func _rebuild() -> void:
 		return
 	_ensure_marker_resources()
 	for i in range(get_user_point_count()):
-		var info: Dictionary = _object_data.get_user_point_info(i)
-		if info.is_empty():
+		var info := _object_data.get_user_point_info(i)
+		if info == null:
 			continue
-		var model_pos: Vector3 = info.get("position", Vector3.ZERO)
-		var subobject := int(info.get("subobject", -1))
+		var model_pos := info.position
+		var subobject := info.subobject
 		var marker := _make_marker(i, _label_text(info, i))
 		add_child(marker)
 		_markers.append({
@@ -123,8 +123,8 @@ func _make_marker(index: int, label_text: String) -> MeshInstance3D:
 	return marker
 
 
-func _label_text(info: Dictionary, index: int) -> String:
-	var text := String(info.get("name", "")).strip_edges()
+func _label_text(info: ModelUserPoint, index: int) -> String:
+	var text := info.name.strip_edges()
 	return text if not text.is_empty() else "userpoint_%02d" % index
 
 

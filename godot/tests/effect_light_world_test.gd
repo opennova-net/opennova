@@ -29,21 +29,16 @@ func _fixture_object_data(model: String) -> ObjectData:
 	return data
 
 
-func _barrel_light_info() -> Dictionary:
+func _barrel_light_info() -> ModelLight:
 	# The FireBrl3 shape: one style-113 light, atten 0..8, 1.12 above base.
-	return {
-		"position": Vector3(0.0004, 1.1157, -0.0044),
-		"atten_start": 0.0,
-		"atten_end": 8.0,
-		"color_start": Color(1.0, 0.78, 0.47),
-		"color_end": Color(0.31, 0.16, 0.04),
-		"colorgen_style": 113,
-		"colorgen_phase": 0,
-		"colorgen_rate": 0,
-		"disable_corona": false,
-		"disable_lightterrain": false,
-		"disable_lightobjects": false,
-	}
+	var light := ModelLight.new()
+	light.position = Vector3(0.0004, 1.1157, -0.0044)
+	light.atten_start = 0.0
+	light.atten_end = 8.0
+	light.color_start = Color(1.0, 0.78, 0.47)
+	light.color_end = Color(0.31, 0.16, 0.04)
+	light.colorgen_style = 113
+	return light
 
 
 func test_spawn_select_and_global_push_round_trip() -> void:
@@ -364,8 +359,8 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 		assert_true(world_pos.is_equal_approx(
 				transform * Vector3(0.0, 1.25, 0.0)),
 				"the record position rides the placement transform")
-	assert_eq(director.spawn_light_record({}, transform), 0,
-			"an empty record dictionary is skipped")
+	assert_eq(director.spawn_light_record(null, transform), 0,
+			"a missing record is skipped")
 	assert_gt(director.spawn_light_record(_barrel_light_info(), transform), 0,
 			"the public record seam spawns transient records directly")
 	assert_eq(director.get_report().live, 2)
@@ -391,10 +386,10 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	# authored position is asserted, not assumed.
 	var data := _synthetic_object_data(SYN_SHED_LGHT0_SUB2)
 	assert_eq(data.get_light_count(), 1)
-	var light: Dictionary = data.get_light_info(0)
-	assert_eq(int(light.get("subobject", -1)), 2)
-	assert_true((light.get("position", Vector3.ONE) as Vector3).is_equal_approx(Vector3.ZERO))
-	assert_almost_eq(float(light.get("atten_end", 0.0)), 100.0, 0.001)
+	var light := data.get_light_info(0)
+	assert_eq(light.subobject, 2)
+	assert_true((light.position as Vector3).is_equal_approx(Vector3.ZERO))
+	assert_almost_eq(light.atten_end, 100.0, 0.001)
 	var xform := Transform3D(Basis.IDENTITY, Vector3(5.0, 1.0, 0.0))
 	var source := {
 		"source_index": 0,
@@ -713,17 +708,17 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 			"the committed multi-part fixture exposes an authored light")
 	if data.get_light_count() <= 0:
 		return
-	var light: Dictionary = data.get_light_info(0)
-	var attach_part := int(light.get("subobject", -1))
+	var light := data.get_light_info(0)
+	var attach_part := light.subobject
 	assert_gt(attach_part, 0,
 			"the fixture attaches its LGHT to a nonzero ROBJ")
 	if attach_part <= 0:
 		return
 	var authored_position := Vector3(0.25, 0.5, -0.75)
-	assert_true((light.get("position", Vector3.ZERO) as Vector3).is_equal_approx(
+	assert_true((light.position as Vector3).is_equal_approx(
 			authored_position))
-	assert_almost_eq(float(light.get("atten_end", 0.0)), 1000.0, 0.001)
-	assert_false(bool(light.get("disable_lightobjects", true)))
+	assert_almost_eq(light.atten_end, 1000.0, 0.001)
+	assert_false(light.disable_lightobjects)
 	var node := ObjectModel.new()
 	container.add_child(node)
 	node.set_object_data(data)

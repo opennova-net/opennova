@@ -46,8 +46,8 @@ func _blackhawk_anchors(data: ObjectData) -> Array:
 	var anchors: Array = []
 	for wanted in ANCHOR_NAMES:
 		for index in range(data.get_user_point_count()):
-			var candidate: Dictionary = data.get_user_point_info(index)
-			if String(candidate.get("name", "")).to_lower() == wanted:
+			var candidate := data.get_user_point_info(index)
+			if candidate.name.to_lower() == wanted:
 				anchors.append(candidate)
 				break
 	return anchors
@@ -71,14 +71,14 @@ func _authored_attachment_anchors(
 			"anchor_found": false,
 		}
 		for index in range(data.get_user_point_count()):
-			var up: Dictionary = data.get_user_point_info(index)
-			if String(up.get("name", "")).strip_edges().nocasecmp_to(wanted) != 0:
+			var up := data.get_user_point_info(index)
+			if up.name.strip_edges().nocasecmp_to(wanted) != 0:
 				continue
 			row["anchor_found"] = true
-			row["source_name"] = String(up.get("name", ""))
-			row["subobject"] = int(up.get("subobject", -1))
-			row["raw_position"] = up.get("position", Vector3.ZERO)
-			row["raw_rotation"] = up.get("rotation", Vector3.ZERO)
+			row["source_name"] = up.name
+			row["subobject"] = up.subobject
+			row["raw_position"] = up.position
+			row["raw_rotation"] = up.rotation
 			break
 		rows.append(row)
 	return rows
@@ -162,16 +162,13 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 		var carrier_xform := MissionObjectPlacer.entity_transform(
 				carrier.get("position", Vector3.ZERO),
 				carrier.get("rotation_deg", Vector3.ZERO))
-		for anchor in anchors:
-			var direction: Vector3 = anchor.get("rotation", Vector3.ZERO)
+		for anchor: ModelUserPoint in anchors:
+			var direction := anchor.rotation
 			assert_gt(direction.length_squared(), 0.99,
-					"%s carries an authored forward direction" % anchor.get("name", ""))
+					"%s carries an authored forward direction" % anchor.name)
 			expected.append({
-				"label": "SSN %d %s" % [
-						int(carrier.get("bms_id", 0)),
-						String(anchor.get("name", ""))],
-				"position": carrier_xform * (
-						anchor.get("position", Vector3.ZERO) as Vector3),
+				"label": "SSN %d %s" % [int(carrier.get("bms_id", 0)), anchor.name],
+				"position": carrier_xform * anchor.position,
 				"forward": (
 						carrier_xform.basis
 						* _retail_attachment_basis(direction)

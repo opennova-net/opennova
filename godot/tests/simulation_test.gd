@@ -2549,12 +2549,12 @@ end
 	var ctrl_point := Vector3.INF
 	var passenger_point := Vector3.INF
 	for point_index in range(suv.get_user_point_count()):
-		var info: Dictionary = suv.get_user_point_info(point_index)
-		match String(info.get("name", "")):
+		var info := suv.get_user_point_info(point_index)
+		match info.name:
 			"ctrlx13":
-				ctrl_point = info.get("position", Vector3.ZERO)
+				ctrl_point = info.position
 			"sitex00d":
-				passenger_point = info.get("position", Vector3.ZERO)
+				passenger_point = info.position
 	assert_true(ctrl_point.is_finite(), "carrier authors its ctrlx13 point")
 	assert_true(passenger_point.is_finite(), "carrier authors its sitex00d point")
 
@@ -2933,9 +2933,9 @@ end
 	assert_eq(suv.open_file(dir.path_join("carrier.3di")), OK)
 	var ctrl_point := Vector3.INF
 	for point_index in range(suv.get_user_point_count()):
-		var info: Dictionary = suv.get_user_point_info(point_index)
-		if String(info.get("name", "")) == "ctrlx13":
-			ctrl_point = info.get("position", Vector3.ZERO)
+		var info := suv.get_user_point_info(point_index)
+		if info.name == "ctrlx13":
+			ctrl_point = info.position
 	assert_true(ctrl_point.is_finite())
 	var expected := MissionObjectPlacer.entity_transform(
 			Vector3(10, 0, 0), Vector3(0, -90, 0)) * ctrl_point
@@ -3226,15 +3226,15 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth/mount.3di")), OK)
-	var usegun_info: Dictionary = {}
+	var usegun_info: ModelUserPoint = null
 	for point_index in range(object_data.get_user_point_count()):
-		var info: Dictionary = object_data.get_user_point_info(point_index)
-		if String(info.get("name", "")).nocasecmp_to("Usegun") == 0:
+		var info := object_data.get_user_point_info(point_index)
+		if info.name.nocasecmp_to("Usegun") == 0:
 			usegun_info = info
-	assert_false(usegun_info.is_empty(), "mount exposes its authored Usegun seat")
+	assert_not_null(usegun_info, "mount exposes its authored Usegun seat")
 	var expected_usegun_world := MissionObjectPlacer.entity_transform(
 			Vector3(2, 0, 0), Vector3.ZERO) * Vector3(
-					usegun_info.get("position", Vector3.ZERO))
+					usegun_info.position)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -4192,9 +4192,9 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 
 	var expected := PackedVector3Array()
 	for point_index in range(husk_data.get_user_point_count()):
-		var info: Dictionary = husk_data.get_user_point_info(point_index)
-		if String(info.get("name", "")).nocasecmp_to("KZ") == 0:
-			var model_point: Vector3 = info.get("position", Vector3.ZERO)
+		var info := husk_data.get_user_point_info(point_index)
+		if info.name.nocasecmp_to("KZ") == 0:
+			var model_point: Vector3 = info.position
 			# Public model space is (source y, source z, source x); the
 			# destruction core consumes mission-local (forward, lateral, up).
 			expected.push_back(Vector3(model_point.z, model_point.x, model_point.y))
@@ -4232,9 +4232,9 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	assert_eq(dead_data.open_file(dead_dir.path_join("Barrel1X.3di")), OK)
 	var expected_dead := PackedVector3Array()
 	for point_index in range(dead_data.get_user_point_count()):
-		var info: Dictionary = dead_data.get_user_point_info(point_index)
-		if String(info.get("name", "")).nocasecmp_to("DEAD") == 0:
-			var model_point: Vector3 = info.get("position", Vector3.ZERO)
+		var info := dead_data.get_user_point_info(point_index)
+		if info.name.nocasecmp_to("DEAD") == 0:
+			var model_point: Vector3 = info.position
 			expected_dead.push_back(Vector3(
 					model_point.z, model_point.x, model_point.y))
 	assert_eq(expected_dead.size(), 1)
@@ -4346,11 +4346,11 @@ end
 	var expected_pos := Vector3.INF
 	var expected_dir := Vector3.INF
 	for point_index in range(source.get_user_point_count()):
-		var info: Dictionary = source.get_user_point_info(point_index)
-		if String(info.get("name", "")).nocasecmp_to("GLASS") != 0:
+		var info := source.get_user_point_info(point_index)
+		if info.name.nocasecmp_to("GLASS") != 0:
 			continue
-		var model_pos: Vector3 = info.get("position", Vector3.ZERO)
-		var model_dir: Vector3 = info.get("rotation", Vector3.ZERO)
+		var model_pos: Vector3 = info.position
+		var model_dir: Vector3 = info.rotation
 		expected_pos = Vector3(model_pos.z, model_pos.x, model_pos.y)
 		expected_dir = Vector3(model_dir.z, model_dir.x, model_dir.y)
 	assert_true(expected_pos.is_finite())
@@ -4642,17 +4642,17 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
 	var anchor_index := -1
-	var anchor_info := {}
+	var anchor_info: ModelUserPoint = null
 	for index in range(data.get_user_point_count()):
-		var candidate: Dictionary = data.get_user_point_info(index)
-		if String(candidate.get("name", "")).to_lower() == "ewep01":
+		var candidate := data.get_user_point_info(index)
+		if candidate.name.to_lower() == "ewep01":
 			anchor_index = index
 			anchor_info = candidate
 			break
 	assert_gte(anchor_index, 0, "tank fixture has its authored ewep01 attachment point")
 	if anchor_index < 0:
 		return
-	var anchor_part := int(anchor_info.get("subobject", -1))
+	var anchor_part := anchor_info.subobject
 	assert_gte(anchor_part, 0, "ewep01 is bound to a model part")
 	if anchor_part < 0:
 		return
@@ -4738,7 +4738,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	if initial_position.is_finite() and final_position.is_finite():
 		assert_gt(final_position.distance_to(initial_position), 3.9,
 				"presented attachment follows its animated userpoint, not only the parent root")
-		var expected: Vector3 = anchor_info.get("position", Vector3.ZERO) + Vector3(4, 0, 0)
+		var expected: Vector3 = anchor_info.position + Vector3(4, 0, 0)
 		assert_lt(final_position.distance_to(expected), 0.002,
 				"host snapshot uses the authoritative mounted child pose")
 

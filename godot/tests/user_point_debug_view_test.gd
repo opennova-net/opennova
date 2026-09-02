@@ -11,8 +11,8 @@ func test_live_overlay_maps_user_point_through_the_live_part_frame() -> void:
 	assert_gte(user_point_index, 0, "gun fixture should carry a part-owned user point")
 	if user_point_index < 0:
 		return
-	var info: Dictionary = data.get_user_point_info(user_point_index)
-	var part_index := int(info.get("subobject", -1))
+	var info := data.get_user_point_info(user_point_index)
+	var part_index := info.subobject
 
 	var model := ObjectModel.new()
 	add_child_autofree(model)
@@ -47,11 +47,11 @@ func test_live_overlay_maps_user_point_through_the_live_part_frame() -> void:
 	# frame, then out through the part's LIVE global transform.
 	var rest: Transform3D = data.evaluate_panm(0, 0, {})[part_index]
 	var expected: Vector3 = (part.global_transform * rest.affine_inverse()
-			* Vector3(info.get("position", Vector3.ZERO)))
+			* info.position)
 	assert_true(marker.global_position.is_equal_approx(expected),
 			"the marker rides the part's live frame, the muzzle-seam composition")
 	assert_false(marker.global_position.is_equal_approx(
-			model.global_transform * Vector3(info.get("position", Vector3.ZERO))),
+			model.global_transform * info.position),
 			"the regression would incorrectly leave the point on the model root")
 	assert_eq((marker as VisualInstance3D).layers, 1 << 11,
 			"the marker renders through the source viewmodel camera layer")
@@ -115,6 +115,6 @@ func _set_visual_layers(node: Node, layers: int) -> void:
 
 func _first_bone_user_point(data: ObjectData) -> int:
 	for i in range(data.get_user_point_count()):
-		if int(data.get_user_point_info(i).get("subobject", -1)) >= 0:
+		if data.get_user_point_info(i).subobject >= 0:
 			return i
 	return -1
