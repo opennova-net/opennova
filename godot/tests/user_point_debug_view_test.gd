@@ -71,11 +71,12 @@ func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() 
 	root.add_child(view)
 	var static_a := Transform3D(Basis.IDENTITY, Vector3(2.0, 0.0, 0.0))
 	var static_b := Transform3D(Basis(Vector3.UP, 0.5), Vector3(-3.0, 1.0, 4.0))
-	view.setup(root, [{
-		"graphic": "gun",
-		"object_data": data,
-		"transforms": [static_a, static_b],
-	}])
+	var source := StaticUserPointSource.new()
+	source.graphic = "gun"
+	source.object_data = data
+	var transforms: Array[Transform3D] = [static_a, static_b]
+	source.transforms = transforms
+	view.setup(root, [source])
 
 	assert_eq(view.get_static_overlay_count(), 2,
 			"one overlay is built per static entity, never per submesh")

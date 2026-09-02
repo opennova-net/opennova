@@ -82,11 +82,11 @@ func _process(_delta: float) -> void:
 func _build_static_overlays(static_sources: Array) -> void:
 	_static_overlay_count = 0
 	for source_index in range(static_sources.size()):
-		var row: Dictionary = static_sources[source_index]
-		var data := row.get("object_data") as ObjectData
+		var row: StaticUserPointSource = static_sources[source_index]
+		var data := row.object_data
 		if data == null or data.get_user_point_count() <= 0:
 			continue
-		var transforms: Array = row.get("transforms", [])
+		var transforms := row.transforms
 		for transform_index in range(transforms.size()):
 			var xform: Transform3D = transforms[transform_index]
 			var overlay := UserPointOverlay.new()

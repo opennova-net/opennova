@@ -18,18 +18,22 @@ namespace godot {
 // --- read-back seams ---------------------------------------------------------
 
 // Snapshot of successfully rendered static user-point sources for a world
-// debug view; transform arrays are duplicated so a consumer cannot mutate
-// the placer's placement record.
-Array MissionObjectPlacer::get_static_user_point_sources() {
+// debug view; every record is minted fresh so a consumer cannot mutate the
+// placer's placement record.
+TypedArray<StaticUserPointSource> MissionObjectPlacer::get_static_user_point_sources() {
 	_check_epoch();
-	Array out;
-	for (int i = 0; i < static_user_point_sources_.size(); ++i) {
-		const Dictionary row = static_user_point_sources_[i];
-		Dictionary copy;
-		copy["graphic"] = row.get("graphic", String());
-		copy["object_data"] = row.get("object_data", Variant());
-		copy["transforms"] = Array(row.get("transforms", Array())).duplicate();
-		out.push_back(copy);
+	TypedArray<StaticUserPointSource> out;
+	for (const StaticUserPointGroup &group : static_user_point_sources_) {
+		Ref<StaticUserPointSource> record;
+		record.instantiate();
+		record->set_graphic(group.graphic);
+		record->set_object_data(group.object_data);
+		TypedArray<Transform3D> transforms;
+		for (const Transform3D &xform : group.transforms) {
+			transforms.push_back(xform);
+		}
+		record->set_transforms(transforms);
+		out.push_back(record);
 	}
 	return out;
 }
@@ -37,24 +41,48 @@ Array MissionObjectPlacer::get_static_user_point_sources() {
 // Snapshot of successfully rendered static entities for mission-start item
 // effects. Every row is a value descriptor; no placed/render Node is
 // exposed; row order is placement order and stable for the mission.
-Array MissionObjectPlacer::get_static_item_effect_sources() {
+TypedArray<StaticEffectSource> MissionObjectPlacer::get_static_item_effect_sources() {
 	_check_epoch();
-	return static_item_effect_sources_.duplicate(true);
+	TypedArray<StaticEffectSource> out;
+	for (int i = 0; i < static_item_effect_sources_.size(); ++i) {
+		const StaticEffectSourceRow &row = static_item_effect_sources_[i];
+		Ref<StaticEffectSource> record;
+		record.instantiate();
+		record->set_kind(row.kind);
+		record->set_entity_index(row.entity_index);
+		record->set_bms_id(row.bms_id);
+		record->set_item_id(row.item_id);
+		record->set_source_index(i);
+		record->set_graphic(row.graphic);
+		record->set_world_transform(row.world_transform);
+		record->set_object_data(row.object_data);
+		out.push_back(record);
+	}
+	return out;
 }
 
 uint64_t MissionObjectPlacer::get_static_light_draw_source_revision() const {
 	return static_light_draw_source_revision_;
 }
 
-Array MissionObjectPlacer::get_static_light_draw_sources() {
+TypedArray<StaticLightDrawSource> MissionObjectPlacer::get_static_light_draw_sources() {
 	_check_epoch();
-	Array out = static_light_draw_sources_.duplicate(true);
-	for (int i = 0; i < out.size(); ++i) {
-		Dictionary row = out[i];
-		const int bms_id = int(row.get("bms_id", 0));
-		row["active"] = bms_id == 0 ||
-				!hidden_destruction_instances_.has(bms_id);
-		out[i] = row;
+	TypedArray<StaticLightDrawSource> out;
+	for (int i = 0; i < static_light_draw_sources_.size(); ++i) {
+		const StaticLightDrawRow &row = static_light_draw_sources_[i];
+		Ref<StaticLightDrawSource> record;
+		record.instantiate();
+		record->set_atlas_row(i);
+		record->set_source_index(row.source_index);
+		record->set_kind(row.kind);
+		record->set_entity_index(row.entity_index);
+		record->set_bms_id(row.bms_id);
+		record->set_item_id(row.item_id);
+		record->set_robj_index(row.robj_index);
+		record->set_world_bounds(row.world_bounds);
+		record->set_active(row.bms_id == 0 ||
+				!hidden_destruction_instances_.has(row.bms_id));
+		out.push_back(record);
 	}
 	return out;
 }
@@ -172,40 +200,42 @@ MissionObjectPlacer::get_static_terrain_shadow_sources() {
 	return out;
 }
 
-Array MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
-	Array out;
+TypedArray<StaticTerrainShadowSourceRow>
+MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
+	TypedArray<StaticTerrainShadowSourceRow> out;
 	const Vector<StaticTerrainShadowSource> sources =
 			get_static_terrain_shadow_sources();
 	for (const StaticTerrainShadowSource &source : sources) {
-		Dictionary row;
-		row["bms_id"] = source.bms_id;
-		row["item_id"] = source.item_id;
-		row["entity_kind"] = source.entity_kind;
-		row["entity_index"] = source.entity_index;
-		row["team"] = source.team;
-		row["entity_attrib"] = static_cast<int64_t>(source.entity_attrib);
-		row["item_attrib"] = static_cast<int64_t>(source.item_attrib);
-		row["item_attrib2"] = static_cast<int64_t>(source.item_attrib2);
-		row["graphic"] = source.graphic;
-		row["world_transform"] = source.world_transform;
-		row["object_data"] = source.object_data;
-		row["active"] = source.active;
+		Ref<StaticTerrainShadowSourceRow> row;
+		row.instantiate();
+		row->set_bms_id(source.bms_id);
+		row->set_item_id(source.item_id);
+		row->set_entity_kind(source.entity_kind);
+		row->set_entity_index(source.entity_index);
+		row->set_team(source.team);
+		row->set_entity_attrib(static_cast<int64_t>(source.entity_attrib));
+		row->set_item_attrib(static_cast<int64_t>(source.item_attrib));
+		row->set_item_attrib2(static_cast<int64_t>(source.item_attrib2));
+		row->set_graphic(source.graphic);
+		row->set_world_transform(source.world_transform);
+		row->set_object_data(source.object_data);
+		row->set_active(source.active);
 		out.push_back(row);
 	}
 	return out;
 }
 
 void MissionObjectPlacer::_record_static_user_point_group(
-		const String &p_graphic, const Array &p_transforms) {
+		const String &p_graphic, const Vector<Transform3D> &p_transforms) {
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
 	if (data.is_null() || data->get_user_point_count() <= 0) {
 		return;
 	}
-	Dictionary row;
-	row["graphic"] = p_graphic;
-	row["object_data"] = data;
-	row["transforms"] = p_transforms.duplicate();
-	static_user_point_sources_.push_back(row);
+	StaticUserPointGroup group;
+	group.graphic = p_graphic;
+	group.object_data = data;
+	group.transforms = p_transforms;
+	static_user_point_sources_.push_back(group);
 }
 
 int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
@@ -215,16 +245,15 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	if (data.is_null()) {
 		return -1;
 	}
-	Dictionary row;
-	row["kind"] = p_kind;
-	row["entity_index"] = p_entity_index;
-	row["bms_id"] = p_bms_id;
-	row["item_id"] = p_item_id;
-	row["graphic"] = p_graphic;
-	row["world_transform"] = p_xform;
-	row["object_data"] = data;
+	StaticEffectSourceRow row;
+	row.kind = p_kind;
+	row.entity_index = p_entity_index;
+	row.bms_id = p_bms_id;
+	row.item_id = p_item_id;
+	row.graphic = p_graphic;
+	row.world_transform = p_xform;
+	row.object_data = data;
 	const int source_index = static_item_effect_sources_.size();
-	row["source_index"] = source_index;
 	static_item_effect_sources_.push_back(row);
 	return source_index;
 }
@@ -232,16 +261,15 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 		int p_kind, int p_entity_index, int p_bms_id, int p_item_id,
 		int p_robj_index, const AABB &p_world_bounds) {
-	Dictionary row;
+	StaticLightDrawRow row;
 	const int atlas_row = static_light_draw_sources_.size();
-	row["atlas_row"] = atlas_row;
-	row["source_index"] = p_source_index;
-	row["kind"] = p_kind;
-	row["entity_index"] = p_entity_index;
-	row["bms_id"] = p_bms_id;
-	row["item_id"] = p_item_id;
-	row["robj_index"] = p_robj_index;
-	row["world_bounds"] = p_world_bounds;
+	row.source_index = p_source_index;
+	row.kind = p_kind;
+	row.entity_index = p_entity_index;
+	row.bms_id = p_bms_id;
+	row.item_id = p_item_id;
+	row.robj_index = p_robj_index;
+	row.world_bounds = p_world_bounds;
 	static_light_draw_sources_.push_back(row);
 	++static_light_draw_source_revision_;
 	return atlas_row;

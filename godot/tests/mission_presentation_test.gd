@@ -272,7 +272,7 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	var rows := placer.get_static_terrain_shadow_source_diagnostics()
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
-		assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform,
+		assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform,
 				"production presentation and the shadow registry share one pose")
 
 

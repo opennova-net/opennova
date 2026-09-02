@@ -338,12 +338,15 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	var transform := Transform3D(Basis.IDENTITY, Vector3(10.0, 27.0, 350.0))
 	var lit := _fixture_object_data("shed.3di")
 	var plain := _fixture_object_data("house.3di")
+	var plain_source := StaticEffectSource.new()
+	plain_source.object_data = plain
+	plain_source.world_transform = transform
+	var lit_source := StaticEffectSource.new()
+	lit_source.object_data = lit
+	lit_source.world_transform = transform
 	var director := EffectLightDirector.new()
 	director.setup(world, func() -> Array:
-		return [
-			{"object_data": plain, "world_transform": transform},
-			{"object_data": lit, "world_transform": transform},
-		], Callable())
+		return [plain_source, lit_source], Callable())
 	director.reattach()
 	assert_eq(director.get_report().live, 1,
 			"only the model with an authored light record spawns a pool light")
@@ -390,27 +393,24 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	assert_true((light.position as Vector3).is_equal_approx(Vector3.ZERO))
 	assert_almost_eq(light.atten_end, 100.0, 0.001)
 	var xform := Transform3D(Basis.IDENTITY, Vector3(5.0, 1.0, 0.0))
-	var source := {
-		"source_index": 0,
-		"kind": MissionData.KIND_BUILDING,
-		"entity_index": 0,
-		"bms_id": 7001,
-		"item_id": 1,
-		"object_data": data,
-		"world_transform": xform,
-	}
-	var draw := {
-		"atlas_row": 0,
-		"source_index": 0,
-		"kind": MissionData.KIND_BUILDING,
-		"entity_index": 0,
-		"bms_id": 7001,
-		"item_id": 1,
-		"robj_index": 2,
-		"world_bounds": AABB(Vector3(-5.0, -5.0, -5.0),
-				Vector3(20.0, 20.0, 20.0)),
-		"active": true,
-	}
+	var source := StaticEffectSource.new()
+	source.source_index = 0
+	source.kind = MissionData.KIND_BUILDING
+	source.entity_index = 0
+	source.bms_id = 7001
+	source.item_id = 1
+	source.object_data = data
+	source.world_transform = xform
+	var draw := StaticLightDrawSource.new()
+	draw.atlas_row = 0
+	draw.source_index = 0
+	draw.kind = MissionData.KIND_BUILDING
+	draw.entity_index = 0
+	draw.bms_id = 7001
+	draw.item_id = 1
+	draw.robj_index = 2
+	draw.world_bounds = AABB(Vector3(-5.0, -5.0, -5.0), Vector3(20.0, 20.0, 20.0))
+	draw.active = true
 	var director := EffectLightDirector.new()
 	director.setup(world, func() -> Array: return [source],
 			func() -> Array: return [draw])

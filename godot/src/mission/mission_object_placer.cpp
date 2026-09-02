@@ -396,9 +396,9 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
 	static_terrain_shadow_replacements_.clear();
-	static_user_point_sources_ = Array();
-	static_item_effect_sources_ = Array();
-	static_light_draw_sources_ = Array();
+	static_user_point_sources_.clear();
+	static_item_effect_sources_.clear();
+	static_light_draw_sources_.clear();
 	++static_light_draw_source_revision_;
 	static_terrain_shadow_sources_.clear();
 	static_terrain_shadow_source_rows_.clear();
@@ -613,11 +613,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 					i < group.item_ids.size() ? group.item_ids[i] : 0,
 					graphic, group.xforms[i], shadow_data);
 		}
-		Array xform_array;
-		for (const Transform3D &xform : group.xforms) {
-			xform_array.push_back(xform);
-		}
-		_record_static_user_point_group(graphic, xform_array);
+		_record_static_user_point_group(graphic, group.xforms);
 		Vector<int> effect_source_rows;
 		effect_source_rows.resize(instance_count);
 		for (int i = 0; i < effect_source_rows.size(); ++i) {

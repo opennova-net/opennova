@@ -153,23 +153,22 @@ func reattach() -> void:
 	# item can spawn inside a batched building that appears later in the source
 	# walk, and retail still binds it to that building's owner group.
 	for source_index in range(_static_sources_snapshot.size()):
-		var mapped_source: Dictionary = _static_sources_snapshot[source_index]
-		var bms_id := int(mapped_source.get("bms_id", 0))
+		var mapped_source: StaticEffectSource = _static_sources_snapshot[source_index]
+		var bms_id := mapped_source.bms_id
 		if bms_id != 0:
 			_static_owner_by_bms[bms_id] = owner_id_for_static_source(source_index)
 	for source_index in range(_static_sources_snapshot.size()):
-		var source: Dictionary = _static_sources_snapshot[source_index]
+		var source: StaticEffectSource = _static_sources_snapshot[source_index]
 		if _spawned_static.has(source_index):
 			continue
-		var data: ObjectData = source.get("object_data")
+		var data: ObjectData = source.object_data
 		if data == null:
 			continue
 		# Batched statics are entities too: a subobject record binds to this
 		# tagged owner and the atlas draw row declares the same identity.
 		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
-		var xform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
-		var is_building := int(source.get("kind", -1)) == \
-				MissionData.KIND_BUILDING
+		var xform: Transform3D = source.world_transform
+		var is_building := source.kind == MissionData.KIND_BUILDING
 		# Retail skips the blink query for a building's own records; every other
 		# static resolves containment once at its placement origin.
 		var blink_owner: Array = [] if is_building else _blink_owner_at(xform.origin)
@@ -425,9 +424,8 @@ func _rebuild_static_light_rows() -> void:
 	var descriptors: Array = _static_draw_sources.call() \
 			if _static_draw_sources.is_valid() else []
 	var row_count := 0
-	for descriptor_v in descriptors:
-		var descriptor: Dictionary = descriptor_v
-		row_count = max(row_count, int(descriptor.get("atlas_row", -1)) + 1)
+	for descriptor: StaticLightDrawSource in descriptors:
+		row_count = max(row_count, descriptor.atlas_row + 1)
 	var bounds_position_size := PackedVector3Array()
 	var owner_entities := PackedInt64Array()
 	var owner_sections := PackedInt32Array()
@@ -440,33 +438,31 @@ func _rebuild_static_light_rows() -> void:
 	interior_owners.resize(row_count)
 	interior_sections.resize(row_count)
 	active.resize(row_count)
-	for descriptor_v in descriptors:
-		var descriptor: Dictionary = descriptor_v
-		var atlas_row := int(descriptor.get("atlas_row", -1))
-		var source_index := int(descriptor.get("source_index", -1))
+	for descriptor: StaticLightDrawSource in descriptors:
+		var atlas_row := descriptor.atlas_row
+		var source_index := descriptor.source_index
 		if atlas_row < 0 or atlas_row >= row_count or source_index < 0 or \
 				source_index >= _static_sources_snapshot.size():
 			continue
-		var source: Dictionary = _static_sources_snapshot[source_index]
-		var world_bounds: AABB = descriptor.get("world_bounds", AABB())
+		var source: StaticEffectSource = _static_sources_snapshot[source_index]
+		var world_bounds := descriptor.world_bounds
 		bounds_position_size[atlas_row * 2] = world_bounds.position
 		bounds_position_size[atlas_row * 2 + 1] = world_bounds.size
-		active[atlas_row] = 1 if bool(descriptor.get("active", false)) else 0
+		active[atlas_row] = 1 if descriptor.active else 0
 		var static_owner := owner_id_for_static_source(source_index)
-		var is_building := int(descriptor.get("kind",
-				source.get("kind", -1))) == MissionData.KIND_BUILDING
+		var is_building := (descriptor.kind if descriptor.kind >= 0 else source.kind) \
+				== MissionData.KIND_BUILDING
 		if is_building:
 			# A building declares itself as interior section zero and re-scopes
 			# the owner section to this exact ROBJ.
 			owner_entities[atlas_row] = 0
-			owner_sections[atlas_row] = int(descriptor.get("robj_index", 0))
+			owner_sections[atlas_row] = descriptor.robj_index
 			interior_owners[atlas_row] = static_owner
 			interior_sections[atlas_row] = 0
 		else:
 			owner_entities[atlas_row] = static_owner
 			owner_sections[atlas_row] = 0
-			var xform: Transform3D = source.get(
-					"world_transform", Transform3D.IDENTITY)
+			var xform: Transform3D = source.world_transform
 			var interior := _blink_owner_at(xform.origin)
 			if interior.size() >= 2:
 				interior_owners[atlas_row] = int(interior[0])
