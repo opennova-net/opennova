@@ -27,6 +27,13 @@ in maturity_baseline.json:
                         d7): the MCP boundary converts typed records to JSON,
                         and a converter that needs a witness cite is
                         re-deriving. No baseline key exists for it.
+  godot_node_meta_sites Object metadata calls (set_meta / get_meta / has_meta /
+                        remove_meta) anywhere under godot/ (bindings, game
+                        scripts, modtools, probes, tests). An ABSOLUTE zero
+                        floor like mcp_boundary_cites: a fact hung on a node
+                        by string key is an untyped record nobody can find;
+                        it belongs on the node class as a typed property, on
+                        a RefCounted record, or in the owner's own table.
   gd_orig_cites         "[orig:" citations in godot/game, godot/modtools and
                         godot/probes GDScript -- witnessed engine behavior
                         still living in the game-level scripts (ADR 0034 d6's
@@ -454,6 +461,32 @@ def count_godot_src_dictionary_returns() -> int:
     return count
 
 
+NODE_META_CALL = re.compile(r"\b(?:set_meta|get_meta|has_meta|remove_meta)\s*\(")
+
+
+def count_godot_node_meta_sites() -> int:
+    """Object metadata calls under godot/ (every .gd/.cpp/.h outside the
+    addons and build trees): a fact hung on a node by string key is an
+    untyped record with no declared owner. The floor is zero — the placer,
+    the wire pass, the audio mixer and the model materials all moved theirs
+    onto typed node properties, RefCounted records or owner tables."""
+    count = 0
+    for path in (REPO / "godot").rglob("*"):
+        if path.suffix not in (".gd", ".cpp", ".h"):
+            continue
+        parts = path.relative_to(REPO).parts
+        if "addons" in parts or "third_party" in parts or _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            code = line.split("#", 1)[0] if path.suffix == ".gd" else line.split("//", 1)[0]
+            count += len(NODE_META_CALL.findall(code))
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true",
@@ -482,9 +515,11 @@ def main() -> int:
         "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
     }
 
-    # Absolute floor, no baseline key (ADR 0042 d7): the MCP boundary carries
-    # zero witness cites, forever — this never relaxes via --write-baseline.
+    # Absolute floors, no baseline key: the MCP boundary carries zero witness
+    # cites (ADR 0042 d7) and godot/ hangs zero facts on node metadata,
+    # forever — neither relaxes via --write-baseline.
     mcp_cites = count_mcp_boundary_cites()
+    meta_sites = count_godot_node_meta_sites()
 
     if args.write_baseline:
         config["counters"] = current
@@ -495,6 +530,9 @@ def main() -> int:
         if mcp_cites > 0:
             print(f"[ratchet] WARNING: mcp_boundary_cites is {mcp_cites} — the "
                   f"floor is 0 and has no baseline; --enforce will fail.")
+        if meta_sites > 0:
+            print(f"[ratchet] WARNING: godot_node_meta_sites is {meta_sites} — the "
+                  f"floor is 0 and has no baseline; --enforce will fail.")
         return 0
 
     failed = False
@@ -504,6 +542,13 @@ def main() -> int:
         print("[ratchet]   godot/game/mcp converts typed records to JSON; a "
               "converter that needs a witness cite is re-deriving (ADR 0042 d7). "
               "Move the witnessed logic to engine/ and delete the cite.")
+        failed = True
+    meta_marker = "OK" if meta_sites == 0 else "ABOVE FLOOR"
+    print(f"[ratchet] godot_node_meta_sites: {meta_sites} (absolute floor 0) {meta_marker}")
+    if meta_sites > 0:
+        print("[ratchet]   a fact hung on a node by string key is an untyped record "
+              "nobody can find. Put it on the node class as a typed property, "
+              "on a RefCounted record, or in the owner's own table.")
         failed = True
     for name, value in current.items():
         base = baseline.get(name)
