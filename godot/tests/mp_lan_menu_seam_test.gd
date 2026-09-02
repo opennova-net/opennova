@@ -111,11 +111,6 @@ func _start_host_config(mission_file: String) -> HostSessionConfig:
 	return get_signal_parameters(mp, "lan_host_start_requested")[0] as HostSessionConfig
 
 
-func test_owned_screens_default() -> void:
-	assert_true(MpMenuCompanion.OWNED_SCREENS.has("LAN_MULTI_PLAYER"))
-	assert_true(MpMenuCompanion.OWNED_SCREENS.has("MULTI_PLAYER_HOST"))
-
-
 func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
 	assert_true(mp.owns_menu(_make_host_driver()),

@@ -121,13 +121,11 @@ probe as `available: false`.
 awaits): `game() world() runtime() sim() presenter() hud_presenter()
 menu_shell() armory_presenter() deploy_presenter() dev_tools() frame_stats()
 viewport() camera() resource_root() effect_world() adapter()`; the waits
-`wait_frames / wait_ms / wait_mission_seconds / wait_for_local_player /
-wait_world_ready`; mission control `start_mission(bms)`,
+`wait_frames / wait_ms / wait_for_local_player / wait_world_ready`; mission control `start_mission(bms)`,
 `start_saved_mission(saved_path, bms, profile)`, `return_to_menu()`,
 `load_saved_mission(...)`; the guarded mutations `set_time_scale`,
-`freeze_shell / unfreeze_shell`, `set_menu_visible`, `set_window_size` and
-`defer_restore(Callable)` — every mutation is undone by `finish()` on every exit
-path; and `capture_png(label, viewport)`, `capture_bundle(args)`,
+`set_window_size` and `defer_restore(Callable)` — every mutation is undone by
+`finish()` on every exit path; and `capture_png(label, viewport)`,
 `artifact(label, path)`, `log(text)`, `progress(dict)`. A stage probe renders on a
 `ProbeStage` (its own `SubViewport` + `World3D`) so the live world never bleeds
 into a capture.

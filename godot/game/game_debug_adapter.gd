@@ -544,9 +544,5 @@ func _current_viewport() -> Viewport:
 	return get_viewport() if is_inside_tree() else null
 
 
-func _current_scene_tree() -> SceneTree:
-	return get_tree() if is_inside_tree() else null
-
-
 func _deferred_quit() -> void:
 	_seams.quit_action.call()

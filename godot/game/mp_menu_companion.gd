@@ -18,10 +18,6 @@ extends MenuCompanion
 # retail spectator controls. LAN search/join call the production LanSession
 # discovery seam.
 
-# The mp.mnu screens this companion owns. The shell skips its generic start/mission
-# wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
-const OWNED_SCREENS := ["LAN_MULTI_PLAYER", "MULTI_PLAYER_HOST"]
-
 # The player chose to join the highlighted discovered LAN server. The payload is the
 # typed dial target decoded from the discovery row (JoinTarget.from_lan_row).
 signal lan_join_requested(target: JoinTarget)

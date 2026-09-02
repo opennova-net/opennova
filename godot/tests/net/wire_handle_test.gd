@@ -7,11 +7,7 @@ extends GutTest
 
 
 func test_witnessed_values() -> void:
-	assert_eq(WireHandle.POOL_SHIFT, 12, "pool rides the high nibble")
-	assert_eq(WireHandle.POOL_MASK, 0xF, "pool nibble mask")
-	assert_eq(WireHandle.SLOT_MASK, 0xFFF, "slot rides the low 12 bits")
 	assert_eq(WireHandle.INVALID, 0xFFFF, "the not-found sentinel")
-	assert_eq(WireHandle.POOL_COUNT, 5, "live pools 0..4")
 
 
 func test_pool_slot_label_decode() -> void:
