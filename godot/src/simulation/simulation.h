@@ -48,6 +48,8 @@ class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
 class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
+class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
+class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -675,7 +677,7 @@ public:
 	// The blends run in exact BAM int math (engine: runtime/anim/aim_overlay.cpp); the shell converts each triple with
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds ObjectModel.set_aim_overlay. Empty/invalid when no player.
-	Dictionary get_local_player_aim_overlay() const;
+	Ref<PlayerAimOverlay> get_local_player_aim_overlay() const;
 	// The third-person held-weapon model name for an ADM index (weapon.def gfx3).
 	String get_weapon_third_person_model(int p_adm_index) const;
 
@@ -741,7 +743,7 @@ public:
 	void set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid);
 	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
 	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
-	Dictionary get_local_player_view() const;
+	Ref<PlayerLocalView> get_local_player_view() const;
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use (engine: runtime/world/player_view.cpp).
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);

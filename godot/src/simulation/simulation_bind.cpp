@@ -9,6 +9,8 @@
 #include "object/character_join_profile.h"
 #include "network/host_session_options.h" // the hosted-session request record
 #include "simulation/fp_viewmodel_spec.h" // the first-person submit spec record
+#include "simulation/player_aim_overlay.h" // the local per-segment aim overlay record
+#include "simulation/player_local_view.h" // the local view-state snapshot record
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)

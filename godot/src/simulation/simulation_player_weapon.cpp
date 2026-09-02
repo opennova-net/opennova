@@ -5,6 +5,7 @@
 // event queue, snapshots the per-frame state dictionary, and routes the two
 // wire request records (net-re §5.62).
 #include "simulation/simulation_internal.h"
+#include "simulation/player_aim_overlay.h"
 #include "object/weapon_def.h" // the typed weapon.def row the GUT install seams hand over
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
@@ -78,7 +79,7 @@ String Simulation::get_weapon_third_person_model(int p_adm_index) const {
 	return String::utf8(entry->third_person_model.c_str());
 }
 
-Dictionary Simulation::get_local_player_aim_overlay() const {
+Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// The torso-bend overlay state: the nine per-segment orientations from the exact BAM
 	// blends [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14],
 	// converted once here to mission-euler degrees — yaw via the canonical (90 - heading),
@@ -86,13 +87,11 @@ Dictionary Simulation::get_local_player_aim_overlay() const {
 	// and MissionObjectPlacer performs the matching basis conjugation). The shell builds
 	// Godot bases from these with that single-sourced conversion; delta(body class) is
 	// identity by construction.
-	Dictionary out;
-	out["valid"] = false;
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return out;
+	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return Ref<PlayerAimOverlay>();
 	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
 	const opennova::world::Entity *entity =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (!p || !entity) return out;
+	if (!p || !entity) return Ref<PlayerAimOverlay>();
 
 	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
@@ -111,25 +110,20 @@ Dictionary Simulation::get_local_player_aim_overlay() const {
 	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i) {
 		packed[i] = mission_euler_from_overlay(angles[i]);
 	}
-	out["valid"] = true;
-	out["aim_state"] = in.aim_state;
-	out["mount_mode"] = static_cast<int>(in.mount_mode);
-	out["mount_config_valid"] = in.mount_config_valid;
-	out["mount_config"] = in.mount_config_valid ? in.mount_config : 0;
-	out["body"] = mission_euler_from_overlay(
-			angles[opennova::anim::kOverlayBody]);
-	out["angles"] = packed;
+	Ref<PlayerAimOverlay> out;
+	out.instantiate();
+	out->set_state(in.aim_state, static_cast<int>(in.mount_mode), in.mount_config_valid,
+			in.mount_config_valid ? in.mount_config : 0);
 	// The THIRD-PERSON held weapon: its own attach basis, plus retail's draw gate.
 	// The basis is not one of the nine classes above — see the anim contract.
-	out["weapon_attach"] = mission_euler_from_overlay(
-			opennova::anim::compute_held_weapon_attach_angles(in));
-	out["weapon_visible"] = local_held_weapon_visible(*entity);
+	out->set_angles(mission_euler_from_overlay(angles[opennova::anim::kOverlayBody]), packed,
+			mission_euler_from_overlay(opennova::anim::compute_held_weapon_attach_angles(in)));
 	// Which of the two attach frames retail would use for this body — the same 0x80 test
 	// on the weapon channel's hold state that the wire path publishes as
 	// PF_HELD_WEAPON_HAND_FRAME, read here from our own infantry state so the local and
 	// remote legs cannot drift. [orig: gate @ 0x4b21b6 / branch @ 0x4b220f]
-	out["weapon_hand_frame"] =
-			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0;
+	out->set_weapon(local_held_weapon_visible(*entity),
+			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0);
 	return out;
 }
 

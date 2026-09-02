@@ -458,7 +458,7 @@ func test_binocular_toggle_refuses_during_powerthrow_windup() -> void:
 
 	assert_false(_sim.request_local_player_binoculars_toggle(),
 			"retail refuses binoculars during a live fire charge")
-	assert_false(bool(_sim.get_local_player_view().get("binoculars_requested", true)))
+	assert_false(_sim.get_local_player_view().binoculars_requested)
 	_sim.set_local_player_weapon_input(true, false, false)
 	_step_and_pump(2)
 	wound = _sim.get_local_player_weapon_state()
