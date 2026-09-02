@@ -152,8 +152,11 @@ func _refresh_from_sim(sim: Simulation) -> void:
 ## Render one hit-geometry snapshot (Simulation.get_hitbox_debug's shape).
 ## Split from the sim fetch so tests and probes can drive the view with
 ## report data directly.
-func render_report(debug: Dictionary) -> void:
-	_update(debug.get("entities", []), debug.get("organics", []))
+func render_report(debug: HitboxDebugReport) -> void:
+	if debug == null:
+		_update([], [])
+		return
+	_update(debug.entities, debug.organics)
 
 
 func _clear_all() -> void:
@@ -179,12 +182,12 @@ func get_debug_drawable_count() -> int:
 func _update(entities: Array, organics: Array) -> void:
 	_drawable_count = 0
 	for e_v in entities:
-		var e: Dictionary = e_v
-		var materials: PackedByteArray = e.get("materials", PackedByteArray())
-		if not materials.is_empty() or float(e.get("bound_radius", 0.0)) > 0.0:
+		var e: HitboxDebugEntity = e_v
+		var materials: PackedByteArray = e.materials
+		if not materials.is_empty() or e.bound_radius > 0.0:
 			_drawable_count += 1
 	for o_v in organics:
-		if float((o_v as Dictionary).get("radius", 0.0)) > 0.0:
+		if (o_v as HitboxDebugOrganic).radius > 0.0:
 			_drawable_count += 1
 
 	# Native debug snapshots allocate fresh containers at the fixed cadence, but
@@ -193,15 +196,15 @@ func _update(entities: Array, organics: Array) -> void:
 	# flow through _update_labels below.
 	var organic_signature: Array = []
 	for o_v in organics:
-		var o: Dictionary = o_v
-		var radius := float(o.get('radius', 0.0))
+		var o: HitboxDebugOrganic = o_v
+		var radius := float(o.radius)
 		if radius <= 0.0:
 			continue
-		organic_signature.append(o.get('pos', Vector3.ZERO))
+		organic_signature.append(o.pos)
 		organic_signature.append(radius)
-		organic_signature.append(int(o.get('section', -1)))
-		organic_signature.append(bool(o.get('masked', false)))
-		organic_signature.append(bool(o.get('fallback', false)))
+		organic_signature.append(int(o.section))
+		organic_signature.append(bool(o.masked))
+		organic_signature.append(bool(o.fallback))
 	var organic_geometry_changed := (
 			not _organic_signature_valid or organic_signature != _organic_signature)
 	if organic_geometry_changed:
@@ -211,8 +214,8 @@ func _update(entities: Array, organics: Array) -> void:
 	if organic_geometry_changed:
 		var instance_count := 0
 		for o_v in organics:
-			var o: Dictionary = o_v
-			if float(o.get("radius", 0.0)) > 0.0:
+			var o: HitboxDebugOrganic = o_v
+			if o.radius > 0.0:
 				instance_count += 1
 		if _dyn_multimesh.instance_count != instance_count:
 			_dyn_multimesh.instance_count = instance_count
@@ -223,13 +226,13 @@ func _update(entities: Array, organics: Array) -> void:
 			var bounds := AABB()
 			var has_bounds := false
 			for o_v in organics:
-				var o: Dictionary = o_v
-				var radius := float(o.get("radius", 0.0))
+				var o: HitboxDebugOrganic = o_v
+				var radius := o.radius
 				if radius <= 0.0:
 					continue
-				var pos: Vector3 = o.get("pos", Vector3.ZERO)
-				var color := organic_section_color(int(o.get("section", -1)),
-						bool(o.get("masked", false)), bool(o.get("fallback", false)))
+				var pos: Vector3 = o.pos
+				var color := organic_section_color(o.section,
+						o.masked, o.fallback)
 				var offset := packed_index * 16
 				packed[offset] = radius
 				packed[offset + 1] = 0.0
@@ -260,19 +263,19 @@ func _update(entities: Array, organics: Array) -> void:
 	# Statics only change on set membership, pose, or husk swap.
 	var sig_parts := []
 	for e_v in entities:
-		var e: Dictionary = e_v
-		sig_parts.append(e.get("entity_handle", -1))
-		sig_parts.append(e.get("pos", Vector3.ZERO))
-		sig_parts.append(e.get("husk", false))
-		sig_parts.append(e.get("bound_radius", 0.0))
-		sig_parts.append(e.get("has_faces", true))
+		var e: HitboxDebugEntity = e_v
+		sig_parts.append(e.entity_handle)
+		sig_parts.append(e.pos)
+		sig_parts.append(e.husk)
+		sig_parts.append(e.bound_radius)
+		sig_parts.append(e.has_faces)
 		# Generic/PANM section matrices can move the transformed CFAC triangles
 		# while the entity origin and husk state stay unchanged. Model swaps can
 		# also change face style without moving vertices. Hash every emitted mesh
 		# input so the cached F3 view follows the authoritative query payload.
-		sig_parts.append(hash(e.get("tris", PackedVector3Array())))
-		sig_parts.append(hash(e.get("materials", PackedByteArray())))
-		sig_parts.append(hash(e.get("flags", PackedInt32Array())))
+		sig_parts.append(hash(e.tris))
+		sig_parts.append(hash(e.materials))
+		sig_parts.append(hash(e.flags))
 	var sig := hash(sig_parts)
 	if sig == _signature:
 		_update_labels(entities, organics)
@@ -285,10 +288,10 @@ func _update(entities: Array, organics: Array) -> void:
 
 	var segments: Array = []
 	for e_v in entities:
-		var e: Dictionary = e_v
-		var tris: PackedVector3Array = e.get("tris", PackedVector3Array())
-		var mats: PackedByteArray = e.get("materials", PackedByteArray())
-		var flags: PackedInt32Array = e.get("flags", PackedInt32Array())
+		var e: HitboxDebugEntity = e_v
+		var tris: PackedVector3Array = e.tris
+		var mats: PackedByteArray = e.materials
+		var flags: PackedInt32Array = e.flags
 		for f in range(mats.size()):
 			var a := tris[f * 3]
 			var b := tris[f * 3 + 1]
@@ -304,11 +307,11 @@ func _update(entities: Array, organics: Array) -> void:
 			segments.append({ "a": c, "b": a, "color": color })
 		# The broad-phase bound sphere: dim white when the face mesh decides,
 		# AMBER when there is no face mesh (the sphere IS the hitbox).
-		var pos: Vector3 = e.get("pos", Vector3.ZERO)
-		var r := float(e.get("bound_radius", 0.0))
+		var pos: Vector3 = e.pos
+		var r := e.bound_radius
 		if r > 0.0:
 			var sphere_color := Color(1.0, 1.0, 1.0, 0.22)
-			if not bool(e.get("has_faces", true)):
+			if not e.has_faces:
 				sphere_color = Color(1.0, 0.75, 0.2, 0.9)
 			_wire_sphere(segments, pos, r, sphere_color)
 	if not segments.is_empty():
@@ -322,32 +325,32 @@ func _update_labels(entities: Array, organics: Array) -> void:
 	var cam_pos := cam.global_position if cam != null else Vector3.ZERO
 	var order: Array = []
 	for e_v in entities:
-		var e2: Dictionary = e_v
-		order.append([cam_pos.distance_to(e2.get("pos", Vector3.ZERO)), false, e2])
+		var e2: HitboxDebugEntity = e_v
+		order.append([cam_pos.distance_to(e2.pos), false, e2])
 	for o_v in organics:
-		var o: Dictionary = o_v
-		if float(o.get("radius", 0.0)) <= 0.0:
+		var o: HitboxDebugOrganic = o_v
+		if o.radius <= 0.0:
 			continue
-		order.append([cam_pos.distance_to(o.get("pos", Vector3.ZERO)), true, o])
+		order.append([cam_pos.distance_to(o.pos), true, o])
 	order.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
 	var visible_count := mini(order.size(), _labels.size())
 	for i in range(visible_count):
 		var lb := _labels[i]
 		var is_organic: bool = order[i][1]
-		var e3: Dictionary = order[i][2]
-		var ent := int(e3.get("entity_handle", Simulation.INVALID_WIRE_HANDLE))
-		var text := WireHandle.label(ent)
+		var text: String
 		var label_position: Vector3
 		var label_modulate: Color
 		if is_organic:
-			var section := int(e3.get("section", -1))
-			var radius := float(e3.get("radius", 0.0))
+			var o3: HitboxDebugOrganic = order[i][2]
+			text = WireHandle.label(o3.entity_handle)
+			var section := o3.section
+			var radius := o3.radius
 			text += "  bone %d" % section
 			# The engine zone table is the label truth (world/round_sim.h
 			# hit_zone_damage_multiplier; HEAD = the critical x3.0 rows,
 			# LIMB = the x0.5 rows).
 			var mult := Simulation.hit_zone_damage_multiplier(section)
-			if bool(e3.get("fallback", false)):
+			if o3.fallback:
 				text += "  damage neutral"
 			else:
 				text += "  damage x%.2f" % mult
@@ -363,32 +366,29 @@ func _update_labels(entities: Array, organics: Array) -> void:
 			if seat_mult != 1.0:
 				text += "  seat x%.1f" % seat_mult
 			text += "  r %.2f" % radius
-			if bool(e3.get("masked", false)):
+			if o3.masked:
 				text += "  MASKED"
-			elif bool(e3.get("fallback", false)):
+			elif o3.fallback:
 				text += "  FALLBACK"
 			else:
-				var authored := float(e3.get("authored_radius", radius))
-				text += "  authored %.2f" % authored
-			label_position = (e3.get("pos", Vector3.ZERO) as Vector3) \
-					+ Vector3(0.0, radius + 0.08, 0.0)
-			label_modulate = organic_section_color(section, bool(e3.get("masked", false)),
-					bool(e3.get("fallback", false)))
+				text += "  authored %.2f" % o3.authored_radius
+			label_position = o3.pos + Vector3(0.0, radius + 0.08, 0.0)
+			label_modulate = organic_section_color(section, o3.masked, o3.fallback)
 		else:
-			var total := int(e3.get("face_total", 0))
-			var drawn: int = (e3.get("materials", PackedByteArray()) as PackedByteArray).size()
-			if not bool(e3.get("has_faces", true)):
+			var e3: HitboxDebugEntity = order[i][2]
+			text = WireHandle.label(e3.entity_handle)
+			var total := e3.face_total
+			var drawn := e3.materials.size()
+			if not e3.has_faces:
 				text += "  SPHERE STAND-IN"
 			else:
 				text += "  %d faces" % total
 				if drawn < total:
 					text += " (drawn %d)" % drawn
-			if bool(e3.get("husk", false)):
+			if e3.husk:
 				text += "  HUSK"
-			label_position = (e3.get("pos", Vector3.ZERO) as Vector3) \
-					+ Vector3(0.0, float(e3.get("bound_radius", 1.0)) + 0.3, 0.0)
-			label_modulate = Color(1.0, 0.9, 0.5) \
-					if bool(e3.get("husk", false)) else Color(0.85, 0.95, 1.0)
+			label_position = e3.pos + Vector3(0.0, e3.bound_radius + 0.3, 0.0)
+			label_modulate = Color(1.0, 0.9, 0.5) if e3.husk else Color(0.85, 0.95, 1.0)
 		if lb.text != text:
 			lb.text = text
 		if lb.position != label_position:

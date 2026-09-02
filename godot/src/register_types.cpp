@@ -74,6 +74,7 @@
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
 #include "simulation/destruction_events.h"
+#include "simulation/hitbox_debug_report.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/player_weapon_view.h"
 #include "simulation/player_inventory.h"
@@ -236,6 +237,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HuskSwapEvent);
 	GDREGISTER_CLASS(DeathLightEvent);
 	GDREGISTER_CLASS(DestructionDrain);
+	GDREGISTER_CLASS(HitboxDebugEntity);
+	GDREGISTER_CLASS(HitboxDebugOrganic);
+	GDREGISTER_CLASS(HitboxDebugReport);
 	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(WeaponKitEntry);
 	GDREGISTER_CLASS(PlayerInventorySlot);

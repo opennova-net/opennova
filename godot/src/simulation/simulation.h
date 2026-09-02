@@ -66,6 +66,7 @@ class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
+class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
 }
 
 #include "wac/wac_program.h"
@@ -1558,19 +1559,16 @@ public:
 	// the entity's blink-box quad (see simulation_scars.cpp).
 	bool scar_owner_visible(uint16_t p_owner_packed) const;
 
-	// The round hit-detection reality for the F3 hitbox view:
-	// { entities: [ { entity_handle, pos, bound_radius, husk, has_faces,
-	//   face_total, tris (PackedVector3Array, triangle list, Godot world),
-	//   materials (PackedByteArray per tri), flags (PackedInt32Array per tri) } ],
-	//   organics: [ { entity_handle, section, pos (sphere center, Godot),
-	//   radius, authored_radius, masked, fallback } ] }.
+	// The round hit-detection reality for the F3 hitbox view as a
+	// HitboxDebugReport (simulation/hitbox_debug_report.h): the nearby entity
+	// hit meshes and the posed person section spheres.
 	// Triangles use the SAME husk-aware target_view + full-euler matrices the
 	// projectile raycast uses — the drawn mesh IS the tested mesh; capped at 96
 	// entities / 24000 item faces within 80 u of the local player (face_total
 	// exposes truncation). Organic posed/fallback spheres share the range/actor
 	// cap, omit the local avatar, and use the exact CollisionWorld target
 	// matrices consumed by RoundSim.
-	Dictionary get_hitbox_debug();
+	Ref<HitboxDebugReport> get_hitbox_debug();
 
 	// The F3 entity picker: one plain geometric trace_projectile segment
 	// (terrain / water / static + dynamic CFAC / person bone spheres, nearest
