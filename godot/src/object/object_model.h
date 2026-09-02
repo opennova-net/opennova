@@ -296,6 +296,10 @@ private:
 
 	Ref<ObjectData> object_data_;
 	HashMap<int64_t, Ref<ShaderMaterial>> material_cache_;
+	// The postmultiply proxy paired with a cached material (retail's
+	// multi-pass effects: one logical material, the strip submitted again),
+	// keyed like material_cache_; absent for materials without the pass.
+	HashMap<int64_t, Ref<ShaderMaterial>> postmultiply_cache_;
 	Vector<AlphaStripDraw> alpha_strip_draws_;
 	// level_surfaces_[lod] = that level's submeshes in authored order (empty
 	// for a level the build did not retain); surface_slots_ holds one
@@ -590,14 +594,19 @@ private:
 	// --- materials/environment (object_model_materials.cpp) ---
 	void build_material_defs();
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
-	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
+	Ref<ShaderMaterial> postmultiply_material_for_index(int p_material_array_index) const;
+	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def,
+			Ref<ShaderMaterial> &r_postmultiply);
 	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Color hash_color_for_index(int p_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
+	// One shader parameter written to a material and, when the material
+	// carries the postmultiply pass, to its proxy as well.
 	static void set_material_and_auxiliary_parameter(
-			const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+			const Ref<ShaderMaterial> &p_material,
+			const Ref<ShaderMaterial> &p_auxiliary, const StringName &p_name,
 			const Variant &p_value);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();

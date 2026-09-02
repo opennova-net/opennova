@@ -25,33 +25,18 @@ namespace {
 // index_hue.gd: golden-ratio conjugate hue spread.
 constexpr double kPhiConjugate = 0.618033988749895;
 
-const StringName &postmultiply_material_meta() {
-	static const StringName name("_opennova_postmultiply_material");
-	return name;
-}
-
-Ref<ShaderMaterial> auxiliary_for(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_meta) {
-	if (p_material.is_null() ||
-			!p_material->has_meta(p_meta)) {
-		return Ref<ShaderMaterial>();
-	}
-	return p_material->get_meta(p_meta, Variant());
-}
-
 } // namespace
 
 void ObjectModel::set_material_and_auxiliary_parameter(
-		const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+		const Ref<ShaderMaterial> &p_material,
+		const Ref<ShaderMaterial> &p_auxiliary, const StringName &p_name,
 		const Variant &p_value) {
 	if (p_material.is_null()) {
 		return;
 	}
 	p_material->set_shader_parameter(p_name, p_value);
-	const Ref<ShaderMaterial> postmultiply = auxiliary_for(
-			p_material, postmultiply_material_meta());
-	if (postmultiply.is_valid()) {
-		postmultiply->set_shader_parameter(p_name, p_value);
+	if (p_auxiliary.is_valid()) {
+		p_auxiliary->set_shader_parameter(p_name, p_value);
 	}
 }
 
@@ -77,14 +62,26 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 		return *cached;
 	}
 	const Dictionary *def = material_defs_.getptr(p_material_array_index);
-	const Ref<ShaderMaterial> material =
-			create_material(p_material_array_index, def != nullptr ? *def : Dictionary());
+	Ref<ShaderMaterial> postmultiply;
+	const Ref<ShaderMaterial> material = create_material(p_material_array_index,
+			def != nullptr ? *def : Dictionary(), postmultiply);
 	material_cache_[cache_key] = material;
+	if (postmultiply.is_valid()) {
+		postmultiply_cache_[cache_key] = postmultiply;
+	}
 	return material;
 }
 
+Ref<ShaderMaterial> ObjectModel::postmultiply_material_for_index(
+		int p_material_array_index) const {
+	const Ref<ShaderMaterial> *cached =
+			postmultiply_cache_.getptr(int64_t(p_material_array_index));
+	return cached != nullptr ? *cached : Ref<ShaderMaterial>();
+}
+
 Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
-		const Dictionary &p_material_def) {
+		const Dictionary &p_material_def, Ref<ShaderMaterial> &r_postmultiply) {
+	r_postmultiply = Ref<ShaderMaterial>();
 	Ref<ShaderMaterial> material;
 	material.instantiate();
 	const int material_index = int(p_material_def.get("index", p_index));
@@ -176,12 +173,12 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		proxy_material.instantiate();
 		proxy_material->set_shader(proxy_shader);
 		proxy_material->set_render_priority(opennova::renderer::kRungObjectPostMultiply);
-		material->set_meta(postmultiply_material_meta(), proxy_material);
+		r_postmultiply = proxy_material;
 	}
 	if (diffuse.is_valid()) {
-		set_material_and_auxiliary_parameter(material, "u_diffuse", diffuse);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", diffuse);
 	} else {
-		set_material_and_auxiliary_parameter(material, "u_diffuse",
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse",
 				solid_colour_texture(hash_color_for_index(p_index)));
 	}
 	if (detail.is_valid()) {
@@ -196,18 +193,18 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
 		// The ref byte feeds the compare exactly; the shader keeps a > ref
 		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold",
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold",
 				float(alpha_test_byte) / 255.0f);
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert",
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert",
 				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0
 						? 1.0f
 						: 0.0f);
 	} else {
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold", 0.0f);
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert", 0.0f);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
 	}
 	const Color reflect = info.is_valid() ? info->get_reflect_color() : Color(0.7f, 0.8f, 0.9f, 0.35f);
-	set_material_and_auxiliary_parameter(material, "u_reflect_color", reflect);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color", reflect);
 	// The PANM evaluator supplies the complete two-row affine transform.
 	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));

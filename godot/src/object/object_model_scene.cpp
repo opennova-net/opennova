@@ -60,6 +60,7 @@ void ObjectModel::rebuild_scene() {
 	set_notify_transform(false);
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
+	postmultiply_cache_.clear();
 	material_defs_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
@@ -156,12 +157,11 @@ void ObjectModel::rebuild_scene() {
 			}
 			surface.material = material;
 			// Retail multi-pass effects retain one logical material but submit the
-			// same strip geometry again. Pair those auxiliary materials through
-			// metadata and duplicate geometry only; never duplicate logical rows.
-			if (material.is_valid() &&
-					material->has_meta("_opennova_postmultiply_material")) {
+			// same strip geometry again. Pair the cached proxy by material index
+			// and duplicate geometry only; never duplicate logical rows.
+			if (material.is_valid()) {
 				surface.auxiliary_material =
-						material->get_meta("_opennova_postmultiply_material", Variant());
+						postmultiply_material_for_index(surface.material_index);
 			}
 			// The ROBJ part nodes are the union over every retained level so the
 			// dense PANM apply array and the section mask cover a part the

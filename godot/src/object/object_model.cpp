@@ -1443,7 +1443,8 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					frame_index < frames->size()) {
 				const Ref<Texture2D> frame = (*frames)[frame_index];
 				if (frame.is_valid()) {
-					set_material_and_auxiliary_parameter(material, "u_diffuse", frame);
+					set_material_and_auxiliary_parameter(material,
+							postmultiply_material_for_index(material_index), "u_diffuse", frame);
 					stamp.anim_frame = frame_index;
 					q3_parameters_changed = true;
 				}
