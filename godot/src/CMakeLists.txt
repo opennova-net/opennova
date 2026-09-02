@@ -48,6 +48,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/terrain_foliage_def.cpp
     terrain/terrain_foliage_map.cpp
     terrain/foliage_dispatcher.cpp
+    terrain/foliage_frame_stats.cpp
     terrain/terrain_tile_entry.cpp
     terrain/terrain_tile_info.cpp
     cbin/cbin_credits_resource.cpp

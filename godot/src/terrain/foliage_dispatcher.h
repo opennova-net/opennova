@@ -16,6 +16,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "terrain/foliage_frame_stats.h"
+
 #include <formats/foliage/runtime.h>
 #include <runtime/renderer/foliage_frame.h>
 
@@ -118,7 +120,8 @@ public:
 
   void reset();
   int get_total_instances() const;
-  Dictionary get_frame_stats() const;
+  // One snapshot of this frame's counters (terrain/foliage_frame_stats.h).
+  Ref<FoliageFrameStats> get_frame_stats() const;
   // Device-only diagnostics for tests and live inspection. `draws` is the
   // active draw-list order; the retained RenderingServer RIDs stay opaque.
   Dictionary get_backend_report() const;
@@ -150,46 +153,9 @@ protected:
 
 private:
   struct FrameStats {
-    int64_t frame_calls = 0;
-    int64_t detail_cells = 0;
-    int64_t silhouette_anchors_input = 0;
-    int64_t silhouette_anchors_visible = 0;
-    int64_t runtime_detail_intents = 0;
-    int64_t runtime_silhouette_intents = 0;
-    int64_t detail_high_instances = 0;
-    int64_t detail_low_instances = 0;
-    int64_t silhouette_instances = 0;
-    int64_t detail_vertices = 0;
-    int64_t silhouette_vertices = 0;
-    int64_t render_batches = 0;
-    int64_t detail_cache_hits = 0;
-    int64_t detail_cache_misses = 0;
-    int64_t detail_cache_regenerations = 0;
-    int64_t detail_cache_evictions = 0;
-    int64_t detail_cache_residents = 0;
-    int64_t detail_cache_submissions = 0;
-    int64_t model_cache_hits = 0;
-    int64_t model_cache_misses = 0;
-    int64_t model_cache_regenerations = 0;
-    int64_t model_cache_evictions = 0;
-    int64_t model_cache_residents = 0;
-    int64_t model_cache_submissions = 0;
-    int64_t detail_mesh_hits = 0;
-    int64_t detail_mesh_uploads = 0;
-    int64_t model_mesh_hits = 0;
-    int64_t model_mesh_uploads = 0;
-    int64_t backend_instance_creates = 0;
-    int64_t backend_scenario_writes = 0;
-    int64_t backend_configuration_writes = 0;
-    int64_t backend_base_writes = 0;
-    int64_t backend_material_writes = 0;
-    int64_t backend_material_parameter_writes = 0;
-    int64_t backend_uniform_writes = 0;
-    int64_t backend_visibility_writes = 0;
-    int64_t terrain_scene_counter = 0;
-    bool native_detail_source = false;
-    bool preview_detail_source = false;
-    bool path_blocker_available = false;
+#define FOLIAGE_FRAME_COUNTER_MEMBER(m_type, m_name) m_type m_name = {};
+    FOLIAGE_FRAME_COUNTERS(FOLIAGE_FRAME_COUNTER_MEMBER)
+#undef FOLIAGE_FRAME_COUNTER_MEMBER
   };
 
   struct MeshCacheKey {
@@ -304,6 +270,7 @@ private:
   bool material_inputs_written_ = false;
 
   FrameStats frame_stats_{};
+  int64_t backend_server_writes() const;
   int64_t total_frame_calls_ = 0;
 
   opennova::renderer::FoliageSlotGeometry

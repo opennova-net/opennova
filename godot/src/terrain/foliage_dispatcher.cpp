@@ -884,43 +884,27 @@ int FoliageDispatcher::get_total_instances() const {
       std::min<int64_t>(total, std::numeric_limits<int>::max()));
 }
 
-Dictionary FoliageDispatcher::get_frame_stats() const {
-  Dictionary result;
-  result["frame_calls"] = frame_stats_.frame_calls;
-  result["detail_cells"] = frame_stats_.detail_cells;
-  result["silhouette_anchors_input"] = frame_stats_.silhouette_anchors_input;
-  result["silhouette_anchors_visible"] =
-      frame_stats_.silhouette_anchors_visible;
-  result["runtime_detail_intents"] = frame_stats_.runtime_detail_intents;
-  result["runtime_silhouette_intents"] =
-      frame_stats_.runtime_silhouette_intents;
-  result["detail_high_instances"] = frame_stats_.detail_high_instances;
-  result["detail_low_instances"] = frame_stats_.detail_low_instances;
-  result["silhouette_instances"] = frame_stats_.silhouette_instances;
-  result["detail_vertices"] = frame_stats_.detail_vertices;
-  result["silhouette_vertices"] = frame_stats_.silhouette_vertices;
-  result["render_batches"] = frame_stats_.render_batches;
-  result["detail_cache_hits"] = frame_stats_.detail_cache_hits;
-  result["detail_cache_misses"] = frame_stats_.detail_cache_misses;
-  result["detail_cache_regenerations"] =
-      frame_stats_.detail_cache_regenerations;
-  result["detail_cache_evictions"] = frame_stats_.detail_cache_evictions;
-  result["detail_cache_residents"] = frame_stats_.detail_cache_residents;
-  result["detail_cache_submissions"] = frame_stats_.detail_cache_submissions;
-  result["model_cache_hits"] = frame_stats_.model_cache_hits;
-  result["model_cache_misses"] = frame_stats_.model_cache_misses;
-  result["model_cache_regenerations"] =
-      frame_stats_.model_cache_regenerations;
-  result["model_cache_evictions"] = frame_stats_.model_cache_evictions;
-  result["model_cache_residents"] = frame_stats_.model_cache_residents;
-  result["model_cache_submissions"] = frame_stats_.model_cache_submissions;
-  result["detail_mesh_hits"] = frame_stats_.detail_mesh_hits;
-  result["detail_mesh_uploads"] = frame_stats_.detail_mesh_uploads;
-  result["model_mesh_hits"] = frame_stats_.model_mesh_hits;
-  result["model_mesh_uploads"] = frame_stats_.model_mesh_uploads;
-  result["foliage_backend"] = "rendering_server_rid";
-  result["backend_pool_size"] = static_cast<int64_t>(
-      detail_draw_pool_.size() + model_draw_pool_.size());
+int64_t FoliageDispatcher::backend_server_writes() const {
+  return frame_stats_.backend_instance_creates +
+         frame_stats_.backend_scenario_writes +
+         frame_stats_.backend_configuration_writes +
+         frame_stats_.backend_base_writes +
+         frame_stats_.backend_material_writes +
+         frame_stats_.backend_material_parameter_writes +
+         frame_stats_.backend_uniform_writes +
+         frame_stats_.backend_visibility_writes;
+}
+
+Ref<FoliageFrameStats> FoliageDispatcher::get_frame_stats() const {
+  Ref<FoliageFrameStats> stats;
+  stats.instantiate();
+#define FOLIAGE_FRAME_COUNTER_COPY(m_type, m_name) \
+  stats->set_##m_name(frame_stats_.m_name);
+  FOLIAGE_FRAME_COUNTERS(FOLIAGE_FRAME_COUNTER_COPY)
+#undef FOLIAGE_FRAME_COUNTER_COPY
+  stats->set_foliage_backend("rendering_server_rid");
+  stats->set_backend_pool_size(static_cast<int64_t>(
+      detail_draw_pool_.size() + model_draw_pool_.size()));
   int64_t backend_active_draws = 0;
   int64_t backend_visible_draws = 0;
   const auto count_draws = [&](const std::vector<DrawInstanceStamp> &p_stamps) {
@@ -936,38 +920,13 @@ Dictionary FoliageDispatcher::get_frame_stats() const {
   };
   count_draws(detail_draw_stamps_);
   count_draws(model_draw_stamps_);
-  result["backend_active_draws"] = backend_active_draws;
-  result["backend_visible_draws"] = backend_visible_draws;
-  result["backend_instance_creates"] =
-      frame_stats_.backend_instance_creates;
-  result["backend_scenario_writes"] =
-      frame_stats_.backend_scenario_writes;
-  result["backend_configuration_writes"] =
-      frame_stats_.backend_configuration_writes;
-  result["backend_base_writes"] = frame_stats_.backend_base_writes;
-  result["backend_material_writes"] = frame_stats_.backend_material_writes;
-  result["backend_material_parameter_writes"] =
-      frame_stats_.backend_material_parameter_writes;
-  result["backend_uniform_writes"] = frame_stats_.backend_uniform_writes;
-  result["backend_visibility_writes"] =
-      frame_stats_.backend_visibility_writes;
-  result["backend_server_writes"] =
-      frame_stats_.backend_instance_creates +
-      frame_stats_.backend_scenario_writes +
-      frame_stats_.backend_configuration_writes +
-      frame_stats_.backend_base_writes +
-      frame_stats_.backend_material_writes +
-      frame_stats_.backend_material_parameter_writes +
-      frame_stats_.backend_uniform_writes +
-      frame_stats_.backend_visibility_writes;
-  result["terrain_scene_counter"] = frame_stats_.terrain_scene_counter;
-  result["native_detail_source"] = frame_stats_.native_detail_source;
-  result["preview_detail_source"] = frame_stats_.preview_detail_source;
-  result["path_blocker_available"] = frame_stats_.path_blocker_available;
-  result["authored_slots"] = authored_slot_count_;
-  result["enabled_slots"] = enabled_slot_count_;
-  result["disabled_slots"] = disabled_slot_count_;
-  return result;
+  stats->set_backend_active_draws(backend_active_draws);
+  stats->set_backend_visible_draws(backend_visible_draws);
+  stats->set_backend_server_writes(backend_server_writes());
+  stats->set_authored_slots(authored_slot_count_);
+  stats->set_enabled_slots(enabled_slot_count_);
+  stats->set_disabled_slots(disabled_slot_count_);
+  return stats;
 }
 
 Dictionary FoliageDispatcher::get_backend_report() const {
@@ -1028,17 +987,16 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   result["visible_draws"] = visible_draws;
   result["draws"] = draws;
 
-  const Dictionary stats = get_frame_stats();
-  result["instance_creates"] = stats["backend_instance_creates"];
-  result["scenario_writes"] = stats["backend_scenario_writes"];
-  result["configuration_writes"] = stats["backend_configuration_writes"];
-  result["base_writes"] = stats["backend_base_writes"];
-  result["material_writes"] = stats["backend_material_writes"];
+  result["instance_creates"] = frame_stats_.backend_instance_creates;
+  result["scenario_writes"] = frame_stats_.backend_scenario_writes;
+  result["configuration_writes"] = frame_stats_.backend_configuration_writes;
+  result["base_writes"] = frame_stats_.backend_base_writes;
+  result["material_writes"] = frame_stats_.backend_material_writes;
   result["material_parameter_writes"] =
-      stats["backend_material_parameter_writes"];
-  result["uniform_writes"] = stats["backend_uniform_writes"];
-  result["visibility_writes"] = stats["backend_visibility_writes"];
-  result["server_writes"] = stats["backend_server_writes"];
+      frame_stats_.backend_material_parameter_writes;
+  result["uniform_writes"] = frame_stats_.backend_uniform_writes;
+  result["visibility_writes"] = frame_stats_.backend_visibility_writes;
+  result["server_writes"] = backend_server_writes();
   return result;
 }
 

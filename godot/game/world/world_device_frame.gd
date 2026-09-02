@@ -713,7 +713,8 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime_us": _world._perf_runtime_us,
 		"audio_us": _world._perf_audio_us,
 		"runtime": _world._runtime.get_perf_counters() if _world._runtime != null else {},
-		"foliage": _world._dispatcher.get_frame_stats() if _world._dispatcher != null else {},
+		"foliage": (_world._dispatcher.get_frame_stats().to_json_value()
+				if _world._dispatcher != null else {}),
 		"foliage_backend": foliage_backend,
 		"framefx": _world._framefx.get_backend_report() if _world._framefx != null else {},
 		"mission_placement": _world._mission_stats.duplicate(true),

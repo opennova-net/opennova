@@ -603,6 +603,6 @@ func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> v
 	assert_eq(String(diagnostics[1].graphic), 'missing_veg')
 
 	var stats := _dispatcher.get_frame_stats()
-	assert_eq(int(stats.get('authored_slots', -1)), 3)
-	assert_eq(int(stats.get('enabled_slots', -1)), 1)
-	assert_eq(int(stats.get('disabled_slots', -1)), 2)
+	assert_eq(stats.authored_slots, 3)
+	assert_eq(stats.enabled_slots, 1)
+	assert_eq(stats.disabled_slots, 2)

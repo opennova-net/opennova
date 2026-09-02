@@ -15,6 +15,7 @@
 #include "terrain/terrain_foliage_def.h"
 #include "terrain/terrain_foliage_map.h"
 #include "terrain/foliage_dispatcher.h"
+#include "terrain/foliage_frame_stats.h"
 #include "terrain/terrain_tile_entry.h"
 #include "terrain/terrain_tile_info.h"
 #include "env/env_keyframe.h"
@@ -152,6 +153,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainSurfaceInputs);
 	GDREGISTER_CLASS(TerrainFoliageDef);
 	GDREGISTER_CLASS(TerrainFoliageMap);
+	GDREGISTER_CLASS(FoliageFrameStats);
 	GDREGISTER_CLASS(FoliageDispatcher);
 	GDREGISTER_CLASS(TerrainTileEntry);
 	GDREGISTER_CLASS(TerrainTileInfo);
