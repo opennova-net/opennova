@@ -54,7 +54,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return _sink.verdict("compare")
 	if not RENDER_MODES.has(mode):
 		return ProbeVerdict.failed("unknown mode %s" % mode)
-	if DisplayServer.get_name() == "headless":
+	if GameRuntimeRoot.is_headless():
 		return ProbeVerdict.failed("mode %s needs a real rasterizer; launch without --headless" % mode)
 	_stage = ProbeStage.create(ctx, WINDOW_SIZE, ctx.viewport())
 	match mode:

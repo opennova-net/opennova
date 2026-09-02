@@ -1,6 +1,9 @@
 class_name McpHttpParser
 extends RefCounted
 
+const CR := 13
+const LF := 10
+
 ## Incremental HTTP/1.1 request parser for the embedded MCP server. Socket-free
 ## by design: the connection layer push()es raw bytes as they arrive and asks
 ## next_request() for complete requests, which makes the parser the unit-test
@@ -78,7 +81,7 @@ func next_request() -> Dictionary:
 # RFC 9112 allows (and recommends tolerating) CRLFs before the request line.
 func _skip_leading_crlf() -> void:
 	var start := 0
-	while start + 1 < _buffer.size() and _buffer[start] == 13 and _buffer[start + 1] == 10:
+	while start + 1 < _buffer.size() and _buffer[start] == CR and _buffer[start + 1] == LF:
 		start += 2
 	if start > 0:
 		_buffer = _buffer.slice(start)
@@ -91,7 +94,7 @@ func _find_head_end() -> int:
 	var from := _scan_from
 	var i := _buffer.find(13, from)
 	while i >= 0 and i + 3 < _buffer.size():
-		if _buffer[i + 1] == 10 and _buffer[i + 2] == 13 and _buffer[i + 3] == 10:
+		if _buffer[i + 1] == LF and _buffer[i + 2] == CR and _buffer[i + 3] == LF:
 			return i
 		i = _buffer.find(13, i + 1)
 	_scan_from = maxi(_buffer.size() - 3, 0)

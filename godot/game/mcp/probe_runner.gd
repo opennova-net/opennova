@@ -68,7 +68,7 @@ func start(name: String, raw_args: Variant) -> Dictionary:
 	if _active != null:
 		return { "refused": "Probe '%s' is still running as %s; wait for it or cancel it first." % [
 				_active.name, _active.run_id] }
-	if def.needs_window and DisplayServer.get_name() == "headless":
+	if def.needs_window and GameRuntimeRoot.is_headless():
 		return { "refused": "Probe '%s' needs a window; launch the game without --headless." % name }
 	if def.needs_mission:
 		var world: GameWorld = _live_world()

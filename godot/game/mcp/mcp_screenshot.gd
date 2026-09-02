@@ -32,7 +32,7 @@ static func capture(
 ) -> Dictionary:
 	if _cancel_requested(cancel_requested):
 		return { "ok": false, "error": "Screenshot capture was cancelled." }
-	if DisplayServer.get_name() == "headless":
+	if GameRuntimeRoot.is_headless():
 		return { "ok": false, "error": "No rendering in headless mode — screenshots need a windowed game." }
 	if viewport == null:
 		return { "ok": false, "error": "No viewport to capture." }

@@ -129,7 +129,7 @@ func begin_start_mission_splash() -> bool:
 ## resolve a sidecar image and would otherwise hold the presentation forever
 ## with no input to dismiss it.
 func maybe_begin_start_mission_splash(audio: MissionAudio,
-		headless_skip: bool = DisplayServer.get_name() == "headless") -> bool:
+		headless_skip: bool = GameRuntimeRoot.is_headless()) -> bool:
 	if is_session_load() or not has_custom_background() or headless_skip:
 		return false
 	if not begin_start_mission_splash():

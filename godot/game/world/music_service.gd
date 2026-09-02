@@ -60,6 +60,9 @@ func current_script() -> MusicScript:
 ## script always come from the SAME stem (the script's play ops index that
 ## bank's entries), so halves are never mixed — the MusicPair typed record
 ## carries the two halves (ADR 0017).
+# `root` stays untyped on this seam: menu_shell_test's _MissingBankMusicRoot double
+# observes the script-read count behind the bank gate, which a real
+# ResourceRoot cannot report.
 static func resolve_menu_music_pair(root) -> MusicPair:
 	if root == null:
 		return MusicPair.new()
