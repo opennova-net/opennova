@@ -139,6 +139,37 @@ struct WaterStripView {
 	int32_t fog_end_fp = 0;
 };
 
+// The camera/viewport half of a strip view from the embedder's camera. Inputs
+// are render-basis floats (the Godot world coincides componentwise with the
+// render basis, both (-engY, engZ, engX) of the engine axes [orig:
+// Math_FixedPointToFloat3_YNegated @ 0x611210]); proj_columns is the
+// embedder's 4x4 flattened column by column ([input][output]).
+//  - view: the D3D row-vector view matrix, the camera's world-basis vectors in
+//    the COLUMNS (0 right / 1 up / 2 forward) and row 3 = -dot(axis, eye)
+//    [orig: viewMatrix @ 0xA7845C, consumed row-vector by
+//    Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80];
+//  - view_inv: retail inverts the cached view numerically per pass [orig:
+//    Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]; for the rigid camera
+//    that inverse IS the transposed rotation with the eye in row 3, built here
+//    from the same source data;
+//  - proj: the complete embedder matrix (orthographic and off-center frustums
+//    included) with the view-Z input sign flipped, since the embedder looks
+//    down -Z while the D3D/render view measures +forward [orig: mat
+//    @ 0x2721980; m11 read @ 0x2721994];
+//  - cam_right / cam_forward: the basis rows for the texm3x2 bump rows [orig:
+//    flt_27219C0 row 0 / row 2, Math_CopyVec3Row0/2 @ 0x611fb0 / @ 0x611f70];
+//  - cam_*_fp: the 16.16 camera block [orig: 0xA78364 / 0xA78368 / 0xA7836C];
+//  - vp_*: min 0, max = px - 1 (the clip rect's right/bottom edges are
+//    max + 1 = px), center = px / 2 [orig: 0xA78384..0xA783A8];
+//  - fog_end_fp: the pass fog end, 16.16, clamped to one unit because the row
+//    colors integer-divide by it [orig: Environment_GetFogEndDistance
+//    @ 0x57e3e0, fetched with the underwater flag @ 0x5c28a2].
+void water_strip_view_from_camera(const float right[3], const float up[3],
+                                  const float forward[3], const float eye[3],
+                                  const float proj_columns[16], int viewport_w,
+                                  int viewport_h, float fog_end_world,
+                                  WaterStripView &out);
+
 // The 40-byte screen block [orig: terrain_project_sector_to_screen @ 0x5c0bf0]:
 // the water plane at the strip's height projected at camera +
 // horizontal-forward x 2000 -> origin [0..1]; the screen delta of a

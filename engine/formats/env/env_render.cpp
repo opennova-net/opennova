@@ -1,4 +1,5 @@
 #include <formats/env/env_celestial.h>
+#include <base/io/fixed.h>
 #include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
@@ -814,6 +815,80 @@ void water_project_point(const WaterStripView &view, const float world[3], float
 }
 
 } // namespace
+
+void water_strip_view_from_camera(const float right[3], const float up[3],
+                                  const float forward[3], const float eye[3],
+                                  const float proj_columns[16], int viewport_w,
+                                  int viewport_h, float fog_end_world,
+                                  WaterStripView &out) {
+	const auto dot = [](const float a[3], const float b[3]) {
+		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	};
+	float *view = out.view;
+	view[0] = right[0];
+	view[1] = up[0];
+	view[2] = forward[0];
+	view[3] = 0.0f;
+	view[4] = right[1];
+	view[5] = up[1];
+	view[6] = forward[1];
+	view[7] = 0.0f;
+	view[8] = right[2];
+	view[9] = up[2];
+	view[10] = forward[2];
+	view[11] = 0.0f;
+	view[12] = -dot(right, eye);
+	view[13] = -dot(up, eye);
+	view[14] = -dot(forward, eye);
+	view[15] = 1.0f;
+
+	float *inv = out.view_inv;
+	inv[0] = right[0];
+	inv[1] = right[1];
+	inv[2] = right[2];
+	inv[3] = 0.0f;
+	inv[4] = up[0];
+	inv[5] = up[1];
+	inv[6] = up[2];
+	inv[7] = 0.0f;
+	inv[8] = forward[0];
+	inv[9] = forward[1];
+	inv[10] = forward[2];
+	inv[11] = 0.0f;
+	inv[12] = eye[0];
+	inv[13] = eye[1];
+	inv[14] = eye[2];
+	inv[15] = 1.0f;
+
+	for (int input = 0; input < 4; ++input) {
+		const float input_sign = input == 2 ? -1.0f : 1.0f;
+		for (int k = 0; k < 4; ++k) {
+			out.proj[input * 4 + k] = proj_columns[input * 4 + k] * input_sign;
+		}
+	}
+
+	for (int k = 0; k < 3; ++k) {
+		out.cam_right[k] = right[k];
+		out.cam_forward[k] = forward[k];
+	}
+
+	out.cam_x_fp = io::float_to_fp16_16_round_sat(eye[0]);
+	out.cam_y_fp = io::float_to_fp16_16_round_sat(eye[1]);
+	out.cam_z_fp = io::float_to_fp16_16_round_sat(eye[2]);
+
+	out.vp_min_x = 0;
+	out.vp_min_y = 0;
+	out.vp_max_x = viewport_w - 1;
+	out.vp_max_y = viewport_h - 1;
+	out.vp_center_x = viewport_w / 2;
+	out.vp_center_y = viewport_h / 2;
+
+	int32_t fog_end_fp = io::float_to_fp16_16_round_sat(fog_end_world);
+	if (fog_end_fp < 1) {
+		fog_end_fp = 1;
+	}
+	out.fog_end_fp = fog_end_fp;
+}
 
 void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_height_fp,
                                    WaterScreenBlock &out) {
