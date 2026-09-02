@@ -37,6 +37,16 @@ in maturity_baseline.json:
   oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
+  gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
+                        code lines of the shipping GDScript (godot/game,
+                        godot/modtools), excluding godot/game/mcp -- the
+                        sanctioned JSON transport edge. Each is a record that
+                        crosses untyped (ADR 0017); typed records burn it down.
+  godot_src_dictionary_returns
+                        Binding methods declared to return Dictionary or
+                        TypedArray<Dictionary> in godot/src/**/*.h -- the seams
+                        still handing GDScript untyped records instead of a
+                        RefCounted row (ADR 0042 d5).
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -392,6 +402,58 @@ def count_cpp_binding_console_writes() -> int:
     return count
 
 
+GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
+
+
+def count_gd_dict_key_sites() -> int:
+    """Dictionary-keyed reads in the shipping GDScript (godot/game and
+    godot/modtools; godot/game/mcp excluded as the sanctioned JSON edge):
+    `row["key"]` and `.get("key"` on code lines. Each site is a record
+    crossing a seam untyped (ADR 0017); a typed RefCounted row removes its
+    sites. The floor is the documented transport edges (the dict-contract
+    allowlist in this file's baseline)."""
+    count = 0
+    for sub in ("game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            if sub == "game" and len(parts) > 2 and parts[2] == "mcp":
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                count += len(GD_DICT_KEY_SITE.findall(line.split("#", 1)[0]))
+    return count
+
+
+GODOT_SRC_DICTIONARY_RETURN = re.compile(
+    r"^\s*(static\s+)?(virtual\s+)?(TypedArray<Dictionary>|Dictionary)\s+\w+\s*\(")
+
+
+def count_godot_src_dictionary_returns() -> int:
+    """Binding methods declared to return Dictionary or TypedArray<Dictionary>
+    in godot/src/**/*.h: the seams that still hand GDScript an untyped record
+    where ADR 0042 d5 wants a RefCounted row (EntityRow, FeedRow, ...). A
+    to_json_value() converter is not counted (it returns to the MCP edge);
+    only method declarations whose return TYPE is the Dictionary."""
+    count = 0
+    for path in (REPO / "godot" / "src").rglob("*.h"):
+        parts = path.relative_to(REPO).parts
+        if _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if GODOT_SRC_DICTIONARY_RETURN.match(line) and "to_json_value" not in line:
+                count += 1
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true",
@@ -416,6 +478,8 @@ def main() -> int:
         "oversize_gd_files": count_oversize_gd_files(),
         "has_method_guards": count_has_method_guards(),
         "gd_orig_cites": count_gd_orig_cites(),
+        "gd_dict_key_sites": count_gd_dict_key_sites(),
+        "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
     }
 
     # Absolute floor, no baseline key (ADR 0042 d7): the MCP boundary carries
