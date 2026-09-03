@@ -5,7 +5,7 @@ extends RefCounted
 # GameWorld: the WAC/BMS effect routing (dialog audio, fx2ssn emitters), the
 # per-source-tick impact/scorch drains, the runtime signal handlers, and the
 # weather resync after a sim restore. Plain RefCounted on the internal-member
-# pattern (OcclusionFramePass / WorldDeviceFrame / WorldPlayerVisuals).
+# pattern (OcclusionFramePass / WorldDeviceFrame).
 #
 # GameWorld keeps a route_mission_effects delegate (tests drive it) plus thin
 # on_runtime_effects/on_runtime_fixed_tick/on_runtime_simulation_restarted
@@ -134,8 +134,8 @@ func on_runtime_fixed_tick(_logic_tick: int) -> void:
 	# frame's global particle update. Consume each source tick synchronously so
 	# admission slots, first emission, and catch-up chronology are exact; only
 	# mission render Nodes remain batched until the session frame returns.
-	if _world._local_player_weapon_tick_consumer.is_valid():
-		_world._local_player_weapon_tick_consumer.call(
+	if _world._local_view_presenter != null:
+		_world._local_view_presenter.present_fixed_weapon_tick(
 				_world.drain_local_player_weapon_events())
 	_route_terrain_scorches()
 	_route_round_impacts()
@@ -162,8 +162,8 @@ func on_runtime_simulation_restarted() -> void:
 	# A Stop/restart can restore the saved personal slot while the presenter still
 	# owns an emplaced model. Consume that control event synchronously; no fixed
 	# tick runs while stopped.
-	if _world._local_player_weapon_tick_consumer.is_valid():
-		_world._local_player_weapon_tick_consumer.call(
+	if _world._local_view_presenter != null:
+		_world._local_view_presenter.present_fixed_weapon_tick(
 				_world.drain_local_player_weapon_events())
 	if _world._terrain != null:
 		_world._terrain.clear_terrain_scorches()

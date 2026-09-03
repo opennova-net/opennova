@@ -2,8 +2,6 @@ extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
-const FirstPersonArmsWitness := preload(
-		"res://game/world/first_person_arms_witness.gd")
 
 
 func after_each() -> void:
@@ -604,13 +602,14 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	# The strict call ledger ["weapon", "impact", "advance"] the recording
 	# EffectWorld double kept has no public twin. The same contract is pinned
-	# through its observable consequences on the real objects: the weapon
-	# consumer the fixed-tick drain calls FIRST still sees no impact group on
-	# the tick that presents the hit (the impact spawns after it), the group it
-	# then finds rides that drain's source tick, and its emitters carry exactly
-	# the particle advances that ran AFTER the spawn (initial tick + the
-	# presenting frame's advances), so the source tick was presented
-	# chronologically before its particle pass.
+	# through its observable consequences on the real objects: the fixed-tick
+	# drain hands EVERY tick's weapon batch to the world's local view
+	# presenter FIRST (its fixed_weapon_batches_consumed read seam advances
+	# once per logic tick), no impact group exists before the presenting
+	# frame's drains ran, the group the drain then presents rides that drain's
+	# source tick, and its emitters carry exactly the particle advances that
+	# ran AFTER the spawn (initial tick + the presenting frame's advances), so
+	# the source tick was presented chronologically before its particle pass.
 	var root_dir := _stage_impact_fixture("impact_order")
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
@@ -618,38 +617,54 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
 	var effects := world.get_effect_world()
 	var sim := world.get_sim()
-	var consumer_ticks: Array[int] = []  # the logic tick at each weapon consume
-	var groups_at_consume: Array[int] = []  # live groups the consumer saw then
-	world.set_local_player_weapon_tick_consumer(
-			func(_events: Array[PlayerWeaponEvent]) -> void:
-				consumer_ticks.append(int(sim.get_logic_tick()))
-				groups_at_consume.append(effects.live_group_count()))
+	# A REAL presenter (no camera: the drain seam is what is under test) binds
+	# itself as the world's local view presenter from setup to teardown.
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null)
+	assert_eq(world.local_view_presenter(), presenter,
+			"setup binds the presenter as the world's local view presenter")
+	var tick_at_attach := int(sim.get_logic_tick())
 
 	assert_gte(int(sim.debug_spawn_round(
 			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0)
-	_tick_until_impact(world)
+	# Frame until the hit presents, remembering the drain count and the live
+	# groups seen at the start of the presenting frame.
+	var consumed_before_frame := presenter.fixed_weapon_batches_consumed()
+	var groups_before_frame := effects.live_group_count()
+	var presented := false
+	for _frame in range(30):
+		consumed_before_frame = presenter.fixed_weapon_batches_consumed()
+		groups_before_frame = effects.live_group_count()
+		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		if effects.live_group_count() > 0:
+			presented = true
+			break
+	assert_true(presented, "the terrain hit presented its transient")
 
 	var rows := effects.get_debug_group_report()
 	assert_eq(rows.size(), 1, "the terrain hit presented its transient")
-	assert_false(consumer_ticks.is_empty(),
-			"the weapon consumer runs from the fixed-tick drain")
-	if rows.size() != 1 or consumer_ticks.is_empty():
+	var consumed := presenter.fixed_weapon_batches_consumed()
+	assert_gt(consumed, 0, "the weapon consumer runs from the fixed-tick drain")
+	if rows.size() != 1 or not presented:
+		presenter.teardown()
 		return
 	var spawn: EffectGroupReport = rows[0]
+	assert_eq(consumed, int(sim.get_logic_tick()) - tick_at_attach,
+			"every fixed tick's drain hands the presenter one weapon batch")
+	assert_gt(consumed, consumed_before_frame,
+			"the weapon consumer ran on the fixed tick that presented the impact")
+	assert_eq(groups_before_frame, 0,
+			"the weapon events of the presenting tick are consumed before its impact spawns")
 	# The counter has already bumped once past the row's production tick when
 	# the drain runs (see the generic routing test above): the drain that
 	# presented the hit is the one that consumed weapon events at tick + 1.
 	var presenting_tick := int(spawn.source_tick) + 1
-	var consume_index := consumer_ticks.find(presenting_tick)
-	assert_gte(consume_index, 0,
-			"the weapon consumer ran on the fixed tick that presented the impact")
-	if consume_index < 0:
-		return
-	assert_eq(groups_at_consume[consume_index], 0,
-			"the weapon events of the presenting tick are consumed before its impact spawns")
 	# Every fixed tick from the presenting one through the end of that frame
 	# ran one particle advance after its drain.
-	var advances_after_spawn := consumer_ticks.size() - consume_index
+	var advances_after_spawn := int(sim.get_logic_tick()) - presenting_tick + 1
+	assert_gte(advances_after_spawn, 1,
+			"the presenting tick lies inside the frame that presented the hit")
 	for emitter_v in spawn.emitters:
 		var age := (emitter_v as EffectEmitterReport).age
 		assert_gte(age, float(advances_after_spawn) * Simulation.tick_dt() - 0.0001,
@@ -657,6 +672,10 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 		# Same-frame drain: at most the one counter bump of initial age on top.
 		assert_lte(age, float(advances_after_spawn + 1) * Simulation.tick_dt() + 0.0001,
 				"a physical collision is visible in its production frame without catch-up aging")
+	# teardown releases the seam: later drains reach no presenter.
+	presenter.teardown()
+	assert_null(world.local_view_presenter(),
+			"teardown releases the world's local view presenter")
 
 
 func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
@@ -878,11 +897,11 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
-	world.set_local_player_spawn_loadout({
-		"primary": "WPN_M4AUTO",
-		"accessory": "WPN_SATCHEL_CHARGE",
-		"player_class": 8,
-	})
+	var loadout := PlayerSpawnLoadout.new()
+	loadout.primary = "WPN_M4AUTO"
+	loadout.accessory = "WPN_SATCHEL_CHARGE"
+	loadout.player_class = 8
+	world.set_local_player_spawn_loadout(loadout)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
 	var weapons: WeaponDatabase = world.get_weapon_database()

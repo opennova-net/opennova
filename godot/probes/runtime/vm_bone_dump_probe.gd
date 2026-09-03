@@ -103,7 +103,7 @@ func _dump(presenter: LocalPlayerPresenter, weapon: String) -> int:
 			weapon, str(rig.PLAYER_VIEWMODEL_POS_UNITS), str(rig.PLAYER_VIEWMODEL_TPOS_UNITS),
 			str(rig.PLAYER_VIEWMODEL_ROT_BIAS_DEF), str(rig.PLAYER_VIEWMODEL_ROT),
 			str(rig.PLAYER_VIEWMODEL_RENDERFOV_H_DEG)])
-	var world := presenter.world()
+	var world := presenter.world() as GameWorld
 	var def: PlayerViewmodelDef = world.local_player_viewmodel_def() if world != null else null
 	if def != null:
 		_note("def: pos=%s tpos=%s rot=%s fov=%s" % [

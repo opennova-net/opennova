@@ -37,7 +37,7 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 var _world: GameWorld
 var _load_mission_internal_cb := Callable()  # (mission, bms_name, resource_root) -> int
 var _resolve_root_cb := Callable()  # (dir) -> ResourceRoot (or null after load_failed)
-var _spawn_loadout_cb := Callable()  # () -> Dictionary (the staged PLAYER_INFO snapshot)
+var _spawn_loadout_cb := Callable()  # () -> PlayerSpawnLoadout (the staged PLAYER_INFO record)
 
 # The native session policy: windows, latches, edge ordering, reason text.
 var _policy := NetSessionPolicy.new()
@@ -68,7 +68,7 @@ var _join_preload_root: ResourceRoot
 ## One-time wiring from the owning GameWorld: the world reference the public
 ## calls + signal emissions go through, and the three private internals it
 ## lends as Callables (its _load_mission_internal, its _resolve_root, and a
-## reader for its staged _local_player_spawn_loadout).
+## reader for its staged PlayerSpawnLoadout).
 func setup(world: GameWorld, internal_load: Callable, resolve_root: Callable,
 		spawn_loadout: Callable) -> void:
 	_world = world
@@ -121,8 +121,17 @@ static func character_join_profile_from_database(
 	return db.character_join_profile(selection)
 
 
+## The same projection over the typed spawn record the world stages
+## (PlayerSpawnLoadout; null = no side selected, the per-side defaults).
+static func character_join_profile_from_loadout(
+		db: AvatarDatabase, loadout: PlayerSpawnLoadout) -> CharacterJoinProfile:
+	if db == null:
+		return null
+	return db.character_join_profile_from_loadout(loadout)
+
+
 func _build_join_character_profile(
-		resource_root: ResourceRoot, selection: Dictionary) -> CharacterJoinProfile:
+		resource_root: ResourceRoot, loadout: PlayerSpawnLoadout) -> CharacterJoinProfile:
 	if resource_root == null:
 		return null
 	var db := AvatarDatabase.new()
@@ -131,7 +140,7 @@ func _build_join_character_profile(
 		push_warning("NetSessionDrive: Avatars.def not loaded for LAN join profile (%s)"
 				% db.get_last_error())
 		return null
-	return character_join_profile_from_database(db, selection)
+	return character_join_profile_from_loadout(db, loadout)
 
 
 ## Load as a LAN co-op JOINER (a non-authority client). Every endpoint authenticates

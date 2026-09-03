@@ -210,8 +210,8 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	if sim != null:
 		sim.set_character_avatar_database(avatar_db)
 	if avatar_db != null:
-		_world._local_character_profile = NetSessionDrive.character_join_profile_from_database(
-				avatar_db, _world._local_player_spawn_loadout)
+		_world._local_character_profile = avatar_db.character_join_profile_from_loadout(
+				_world._player_visuals.spawn_loadout())
 	else:
 		push_warning("GameWorld: Avatars.def unavailable; players draw their item model")
 		_world._local_character_profile = null
@@ -272,7 +272,6 @@ func unload() -> void:
 	if _world._env != null:
 		_world._env.set_underwater_view(false)
 		_world._env.set_underwater_overlay_view(false)
-	_world._local_player_spawn_loadout = {}
 	_world._local_character_profile = null
 	_clear_mission_tile_info()
 	_world._device_frame._restore_idle_frame_clear_color()
@@ -333,18 +332,9 @@ func unload() -> void:
 	_world._mission_audio = null
 	_world._placer = null
 	_world._weapon_db = null  # re-resolves against the next load's mounted root
-	_world._local_weapon = null
-	# The decoded view record is keyed on the resolved name; the next mission
-	# re-decodes from ITS weapon.def even when the name repeats, or the memo
-	# would short-circuit with the dict above left empty.
-	_world._viewmodel_def_name = ""
-	_world._viewmodel_def = null
-	_world._local_weapon_preserve_slot_state = false
-	# Armory selections belong to the entity from the mission being torn down.
-	# A new spawn must resolve from its own equipped AdmDef instead of inheriting
-	# either the previous mission's override or its authored NONE state.
-	_world._viewmodel_weapon_override = ""
-	_world._viewmodel_weapon_cleared = false
+	# The staged spawn loadout and every equipped-weapon memo drop with the
+	# mission (LocalPlayerVisuals.reset carries the memo/override rules).
+	_world._player_visuals.reset()
 	_world._mission_stats = null
 
 
@@ -778,7 +768,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# selected by the very class byte it also puts on the wire
 	# [orig: Game_StartMission @ 0x525767-0x525836].
 	_load_player_weapon_profile()
-	_world._player_visuals._apply_local_player_spawn_loadout()
+	_world._player_visuals.apply_local_player_spawn_loadout()
 	_world._runtime.set_presentation_time_ms(_world._panm_clock.time_ms)
 	if _world._water != null:
 		# Water may have been built before the runtime existed — re-push the

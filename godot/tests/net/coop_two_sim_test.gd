@@ -2486,7 +2486,7 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
 
-	# Mirror _apply_local_player_spawn_loadout: apply, then sync the FSM only on
+	# Mirror LocalPlayerVisuals.apply_local_player_spawn_loadout: apply, then sync the FSM only on
 	# success + a valid inventory — the shell's exact gate chain.
 	var applied := bool(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	var inventory_valid := false

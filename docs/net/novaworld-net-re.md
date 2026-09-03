@@ -5312,7 +5312,7 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
   pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
 
-**Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `local_player_presenter.gd` uses
+**Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `godot/src/player/local_player_presenter.cpp` uses
 the IN-PLAY chase state — distance **1.0**, orbit yaw/pitch **0**, the round-start reset
 (`Camera_ResetToLocalPlayer @ 0x4a3d30` ← `Game_StartMission @ 0x525c54` /
 `Game_InitNewRound @ 0x4227a2`; the tight over-the-shoulder view). The 3.0 / 5.625°
@@ -5338,9 +5338,9 @@ bump `@ 0x437e8f`, the recoil-doubled pitch `@ 0x437fc7`, roll = torsoRoll + lea
 the 0.125u pivot nudge `@ 0x43818a` backed off by the march's no-collision landing
 `@ 0x438213..0x43832e` — landed 0.75u at the reset distance 1.0), and the FP
 viewmodel bias (`pos`/`tpos` /256 blend + the NoCardSwitch suppression) is
-`player_view_bias_view_units`. `local_player_presenter.gd` converts the
+`player_view_bias_view_units`. `godot/src/player/local_player_presenter.cpp` converts the
 `PlayerLocalView.camera_*` pose to the Godot frame and stamps the node;
-`player_viewmodel_rig.gd` maps the view-frame bias onto camera axes. The ctest
+`godot/src/player/player_viewmodel_rig.cpp` maps the view-frame bias onto camera axes. The ctest
 `player_view` pins the composition (march table, recoil doubling, nudge, floor,
 bump); the deferral list above is unchanged.
 
@@ -5941,7 +5941,7 @@ through the SAME transform `[orig: HUD_DrawCrosshair @0x592a0f aim_direction = (
 the view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]`. The AK's `|x| ≈ |y|` had masked
 the swap; the JOX/REVX M4 `tpos` made it glare (the canted-ADS report). Godot camera-local is
 (x right, y up, −z forward), so the map is `view x (forward) → −z`, `view y (left) → −x`,
-`view z (up) → y` — i.e. `Vector3(−y, z, −x)`, `player_viewmodel_rig.gd::_viewmodel_view_offset`
+`view z (up) → y` — i.e. `Vector3(−y, z, −x)`, `player_viewmodel_rig.cpp` (the view-offset swizzle)
 (oscarmike's onhook-derived map agrees). Only the `z→up` term of the 2026-06-21 reading survives.
 **Deferrals:** the `pos`→`tpos` ADS swap and the per-weapon `Bone.rot` *(both landed)*; the velocity
 lead (`>>7`, clamps `@0x4dd4f2..`) and the prone Z drop (`−1280 @0x4dd578`) remain unported tails
@@ -9425,7 +9425,7 @@ loads — the expansion setting must name it (config, not code).
 
 Reimpl: `engine/runtime/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
 `weapon_inventory`), `Simulation` (`rebuild_local_player_loadout` + the switch/commit
-seams), `local_player_presenter.gd` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
+seams), `godot/src/player/player_input_router.cpp` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
 (availability filter + multi-slot ACCEPT), `godot/src/mission/mission_root.cpp` (the .bms promote), GUT
 `simulation_test.gd` / `armory_presenter_test.gd`.
 

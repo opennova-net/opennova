@@ -230,6 +230,16 @@ add_library(${TARGET_NAME} SHARED
     mnu/menu_audio.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
+    player/first_person_arms_witness.cpp
+    player/gameplay_camera.cpp
+    player/local_player_presenter.cpp
+    player/local_player_visuals.cpp
+    player/player_input_router.cpp
+    player/player_move_intent.cpp
+    player/player_spawn_loadout.cpp
+    player/player_viewmodel_def.cpp
+    player/player_viewmodel_rig.cpp
+    player/player_weapon_effects.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
