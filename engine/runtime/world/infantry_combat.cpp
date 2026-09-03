@@ -441,7 +441,7 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
         return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
-    const bool slot_bound = vehicle_bind_use_gun_slot(world, *occ, *mount);
+    const bool slot_bound = world.vehicles.bind_use_gun_slot(*occ, *mount);
     if (!inf.combat_target.valid() || !slot_bound) return;
 
     // The dedicated request runs on its four-tick infantry cadence, then a

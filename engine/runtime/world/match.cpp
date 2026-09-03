@@ -891,8 +891,8 @@ void Match::update_objective_proximity(const World &world) {
             if (!within_2d(player_entity->position, zone->position, radius) ||
                 dz > radius * 0.5f)
                 continue;
-            if (!zone_chain_is_capturable(world, world.zone_chain, 1, *zone) &&
-                !zone_chain_is_capturable(world, world.zone_chain, 2, *zone))
+            if (!world.zones.is_capturable(1, *zone) &&
+                !world.zones.is_capturable(2, *zone))
                 continue;
             in_capturable_entity = true;
             if (live && team_mode && zone->team < 8u)
@@ -1238,7 +1238,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     bool saw_zone = false;
     bool uniform_zones = true;
     uint8_t uniform_team = 0;
-    for (const EntityHandle handle : world.zone_chain.zones) {
+    for (const EntityHandle handle : world.zones.chain.zones) {
         const Entity *zone = world.registry.get(handle);
         if (zone == nullptr)
             continue;
@@ -1434,7 +1434,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // tie. [orig: Server_CheckWinConditions @0x51B49E..0x51B4E6]
         int32_t team1 = 0;
         int32_t team2 = 0;
-        for (const EntityHandle handle : world.zone_chain.zones) {
+        for (const EntityHandle handle : world.zones.chain.zones) {
             const Entity *zone = world.registry.get(handle);
             if (zone == nullptr)
                 continue;
@@ -1477,7 +1477,7 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.team_row_count = scoreboard_team_row_count(rules_);
     if (rules_.game_type == gt::kAdvanceAndSecure ||
         rules_.game_type == gt::kConquerAndControl) {
-        for (const EntityHandle handle : world.zone_chain.zones) {
+        for (const EntityHandle handle : world.zones.chain.zones) {
             const Entity *zone = world.registry.get(handle);
             if (zone == nullptr)
                 continue;

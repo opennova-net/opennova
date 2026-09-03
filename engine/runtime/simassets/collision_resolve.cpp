@@ -343,7 +343,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// sentinel-boxed hull (its solve-active test also fails).
 		if (h.pool() == 1) {
 			world::VehicleTraits *vt =
-					world.tables.vehicle_traits.get_mutable(e->item_id);
+					world.vehicles.traits.get_mutable(e->item_id);
 			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
 				const Threedi3di3 *vm3 = deps.models.has_index()
 						? deps.models.model_for(key)

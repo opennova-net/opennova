@@ -25,6 +25,8 @@
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/system.h>
+#include <runtime/world/vehicle_system.h>
+#include <runtime/world/zone_system.h>
 #include <runtime/world/trigger_relations.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/water_cross.h>
@@ -397,12 +399,6 @@ struct MissionTables {
     // host from the parsed config; zero/!valid until then, which makes every award
     // a no-op rather than a guess.
     ScoreRules score_rules;
-    // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
-    // it — Simulation::resolve_item_traits). The AI tick's vehicle pass runs the
-    // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
-    // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
-    // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
-    VehicleTraitsTable vehicle_traits;
     // items.def display names per item type (the def row's `name`), filled by
     // the item-traits sweep once per distinct id so the inspection records can
     // name an entity by its item, not only by its BMS label. Tooling only.
@@ -547,7 +543,7 @@ struct WorldOutbox {
 
 class World {
 public:
-    World() : commands(*this) {}
+    World() : commands(*this), vehicles(*this), zones(*this) {}
     // World has stable identity: commands binds this object and registered
     // systems retain mission-lifetime relationships. Memberwise copy/move
     // would preserve pointers/references into the source World and create a
@@ -577,6 +573,11 @@ public:
     MissionTables tables;
     SessionRules rules;
     WorldOutbox out;
+    // The two systems that own their state and their verbs (vehicle_system.h,
+    // zone_system.h); the AI tick runs the vehicle motors, the host tick the
+    // zone capture transaction.
+    VehicleSystem vehicles;
+    ZoneSystem zones;
     // Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
@@ -639,25 +640,6 @@ public:
 
 
 
-    // The Advance & Secure zone-slot chain (empty until the host builds it after the
-    // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds
-    // the 0x0F owned-zone mask, the 0x0E deploy gates, and the 0x1E frontier hint.
-    // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
-    // from Game_StartMission; net-re §5.61]
-    ZoneChain zone_chain;
-    // The capture request/active transaction is mission state, not host-wire
-    // scratch. Keeping it beside the chain prevents a second lifecycle or a
-    // static server singleton. [orig: CaptureCtx_Reset @0x53BD00]
-    ZoneCaptureState zone_capture_state;
-    // Mission-built deploy wave groups. Keeping them beside spawn selection
-    // gives immediate picks and timed releases one lifecycle and no host-only
-    // shadow table. [orig: SpawnWaveList_BuildFromMission @0x52A920]
-    SpawnWaveList spawn_waves;
-    // One mission-global round-robin shared by default spawn selection and a
-    // picked numbered zone's type-6007 scatter choices.
-    // [orig: g_spawn_cycle_counter @0x24C10D0;
-    // Server_PositionPlayerForSpawn @0x50CF60]
-    uint32_t spawn_cycle_counter = 0;
 
 
 

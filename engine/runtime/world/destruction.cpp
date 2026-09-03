@@ -152,7 +152,7 @@ int32_t piece_physics_rest_floor_q16(const World &world, const Entity &entity) {
                 : nullptr;
         return husk != nullptr ? husk->min[2] : 0;
     }
-    const VehicleTraits *vehicle = world.tables.vehicle_traits.get(entity.item_id);
+    const VehicleTraits *vehicle = world.vehicles.traits.get(entity.item_id);
     return vehicle != nullptr ? vehicle->box_z_lo : 0;
 }
 

@@ -186,11 +186,6 @@ private:
     std::unordered_map<int32_t, VehicleTraits> by_item_;
 };
 
-// The controlling occupant of a PlayerControl vehicle: the first live, internally
-// consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
-// +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in
-// Entity_UpdateVehiclePhysics @0x48af00]
-Entity *resolve_vehicle_controller(World &world, Entity &veh);
 
 // The AI-driver command block, computed by the AI system from the vehicle's brain (the
 // witnessed leg lives inside the vehicle physics; our brain state is AiSystem-owned, so
@@ -224,33 +219,7 @@ struct VehicleCtrlRegisters {
 VehicleCtrlRegisters vehicle_ctrl_registers(
         const Entity::VehicleMotorState &state);
 
-// One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
-// traits carry a non-zero `physics` selector). Consumes the controlling occupant's
-// replicated input (or the AI-driver command when the controller is an NPC), advances
-// Entity::position / Entity::yaw and the persistent Entity::veh motor state.
-// [orig: Entity_UpdateVehiclePhysics @0x48af00 — the authority drive core;
-// block-level cites inline]
-void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                        const VehicleDriveCmd *ai_cmd = nullptr);
 
-// The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
-// subset of the cbot family function — per-record chase plus local-driver input
-// or remote register mirroring, steer/thrust/drag/keel prediction, contact drags,
-// and X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480].
-// The local driver reconciles longitudinal command with the received register
-// while retaining local steer. Z, pitch/roll, and the
-// afloat/airborne latches come from the platform solve below. Consumes the staged
-// VehicleMotorState net_* cluster; the sim runs it once per world tick on a
-// non-authority world for staged pool-1 Watercraft entities.
-// The boat platform solve — buoyancy, hull attitude, and the airborne/afloat
-// flags, run every tick after integration exactly where the retail caller sits
-// [orig: Entity_ProcessPlatformPhysics @0x481870, called @0x48ECE7; client
-// subset — the authority damage/latch legs, entity-entity collision, the
-// planing lean machine @0x45AEA0, and the wreck-tumble path are cited
-// deferrals]. Writes veh.veh.air_pitch_bam/air_roll_bam (the shared attitude
-// fields the sim mirrors to the presented row) and position Z.
-void watercraft_platform_solve(World &world, Entity &veh,
-                               const VehicleTraits &traits);
 
 // The carrier pose in the deck-ride's units (16.16 position / BAM32
 // attitude): predicted vehicles serve the exact motor registers, everything
@@ -264,28 +233,9 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 // per-mover prologue stamps of +0x80..+0x94].
 void stamp_saved_live_pose(Entity &e);
 
-void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
-// One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
-// occupant/AI/parked input staging behind the witnessed gate, capsize damage,
-// then the same steer/thrust/drag/contact/integration core the client subset
-// runs. The AI command block comes from AiSystem::watercraft_ai_drive.
-// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path behind
-// the @0x48DF8C..0x48DFA2 input gate; witnessed 2026-08-06]
-void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                           const VehicleDriveCmd *ai_cmd = nullptr);
 
-// The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
-// remote registers driving tick_vehicle_motor's core with the input block bypassed;
-// the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
-void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
-// The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is
-// a thunk): the client subset of Entity_UpdateAircraftPhysics @0x490310 —
-// three-register mirror, tilt-command attitude model, altitude-hold servo on the
-// record-seeded target Z (no gravity constant), airborne aero / grounded sheds,
-// and the terrain-clamp stand-in for the unported 0x47EF10 contact solve.
-void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
 

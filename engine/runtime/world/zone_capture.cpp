@@ -1,3 +1,4 @@
+#include <runtime/world/zone_system.h>
 #include <runtime/world/zone_capture.h>
 
 #include <algorithm>
@@ -153,13 +154,14 @@ bool change_entity_team(World &world, ZoneCaptureEvents &out,
 
 bool capture_request_available(const World &world, const Entity &zone) {
     if (zone.zone_number == 0) return true;
-    return zone_chain_is_capturable(world, world.zone_chain, 1, zone) ||
-           zone_chain_is_capturable(world, world.zone_chain, 2, zone);
+    return world.zones.is_capturable(1, zone) ||
+           world.zones.is_capturable(2, zone);
 }
 
 } // namespace
 
-void zone_capture_contact_tick(World &world) {
+void ZoneSystem::capture_contact_tick() {
+    World &world = world_;
     if (world.collision == nullptr) return;
     const std::vector<CollisionWorld::GameplayContact> contacts =
             world.collision->take_change_team_contacts();
@@ -171,7 +173,7 @@ void zone_capture_contact_tick(World &world) {
     // [orig: @0x4B31DD..0x4B3238]
     if ((world.match.rules().game_type & 0x30000u) == 0) return;
 
-    ZoneCaptureState &state = world.zone_capture_state;
+    ZoneCaptureState &state = world.zones.capture;
     for (const CollisionWorld::GameplayContact &contact : contacts) {
         const Entity *player = world.registry.get(contact.source);
         const Entity *zone = world.registry.get(contact.target);
@@ -207,10 +209,11 @@ void zone_capture_contact_tick(World &world) {
     }
 }
 
-void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
+void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
+    World &world = world_;
     out.clear();
-    ZoneChain &chain = world.zone_chain;
-    ZoneCaptureState &state = world.zone_capture_state;
+    ZoneChain &chain = world.zones.chain;
+    ZoneCaptureState &state = world.zones.capture;
     const MatchRules &rules = world.match.rules();
 
     // Playing-player census: per-team counts + stable handles for radius/scoring.
@@ -231,7 +234,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
     int shared_count[32] = {};
     int owned_spawn_zones[ZoneChain::kTeamCount] = {};
     int numbered_spawn_zones = 0;
-    const SpawnZoneRegistry spawn_zones = build_spawn_zone_list(world);
+    const SpawnZoneRegistry spawn_zones = world.zones.build_spawn_zone_list();
     for (const EntityHandle handle : spawn_zones.entries) {
         const Entity *zone = world.registry.get(handle);
         if (zone == nullptr || zone->zone_number == 0) continue;
@@ -254,7 +257,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             if (!in_zone_radius(*player, *zone)) continue;
             if (zone->team != 0 && player->team == zone->team) {
                 ++friendlies;
-            } else if (zone_chain_is_capturable(world, chain, player->team, *zone)) {
+            } else if (world.zones.is_capturable(player->team, *zone)) {
                 ++enemies;
                 if (player->team < ZoneChain::kTeamCount)
                     ++attackers_by_team[player->team];
@@ -278,7 +281,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         for (uint8_t team = 1;
                 team < ZoneChain::kTeamCount && !reachable_by_enemy; ++team) {
             if (team != zone->team &&
-                    zone_chain_is_capturable(world, chain, team, *zone))
+                    world.zones.is_capturable(team, *zone))
                 reachable_by_enemy = true;
         }
         if (!reachable_by_enemy) {
@@ -426,7 +429,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         }
 
         change_entity_team(world, out, zone->handle, active.team);
-        world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
+        world.zones.spawn_waves.reset_on_zone_team_change(world, zone->handle);
         out.ordered.emplace_back(ZoneCaptureEvents::TimedCompletion{
                 zone->handle, active.capturer, active.team,
                 zone->is_spawn_point});
@@ -466,15 +469,15 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         if (zone->zone_number != 0 || rules.capture_duration_seconds <= 0) {
             const uint8_t old_team = zone->team;
             const uint8_t cap_frontier_before =
-                    zone_chain_frontier_zone(world, chain, request.team);
+                    world.zones.frontier_zone(request.team);
             const uint8_t loser_frontier_before =
-                    zone_chain_frontier_zone(world, chain, enemy_of(request.team));
+                    world.zones.frontier_zone(enemy_of(request.team));
             if (old_team != 0)
                 change_entity_team(world, out, zone->handle, 0);
             change_entity_team(world, out, zone->handle, request.team);
-            world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
+            world.zones.spawn_waves.reset_on_zone_team_change(world, zone->handle);
             zone->zone_control = 0;
-            zone_chain_rebuild_masks(world, chain);
+            world.zones.rebuild_masks();
 
             ZoneCaptureEvents::Flip flip;
             flip.zone = zone->handle;
@@ -492,9 +495,8 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
             flip.new_team = request.team;
             flip.capturer_team = request.team;
             flip.capturer_frontier =
-                    zone_chain_frontier_zone(world, chain, request.team);
-            flip.loser_frontier = zone_chain_frontier_zone(
-                    world, chain, enemy_of(request.team));
+                    world.zones.frontier_zone(request.team);
+            flip.loser_frontier = world.zones.frontier_zone(enemy_of(request.team));
             flip.frontier_changed =
                     flip.capturer_frontier != cap_frontier_before ||
                     flip.loser_frontier != loser_frontier_before;
@@ -507,7 +509,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
 
         if (zone->team != 0) {
             change_entity_team(world, out, zone->handle, 0);
-            world.spawn_waves.reset_on_zone_team_change(world, zone->handle);
+            world.zones.spawn_waves.reset_on_zone_team_change(world, zone->handle);
         }
         ZoneCaptureState::Active *active = find_active(state, request.zone);
         bool started = false;
@@ -533,7 +535,7 @@ void zone_capture_second_tick(World &world, ZoneCaptureEvents &out) {
         remove_zone_requests(state, request.zone);
     }
 
-    zone_chain_rebuild_masks(world, chain);
+    world.zones.rebuild_masks();
 }
 
 } // namespace opennova::world

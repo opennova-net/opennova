@@ -3360,13 +3360,13 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	const w::EntityHandle gun_h = world.registry.spawn_from(1, 0, gun);
 	if (!expect(gun_h.valid() && gun_h.packed == 0x1000,
 	            "B50Cal occupies the first pool-1 carrier handle")) return false;
-	if (!expect(w::entity_process_vehicle_attach(world, infantry_h, gun_h, 6),
+	if (!expect(world.vehicles.process_attach(infantry_h, gun_h, 6),
 	            "infantry attaches to the B50Cal gunner bone")) return false;
 	w::Entity *infantry_live = world.registry.get(infantry_h);
 	const w::Entity *gun_live = world.registry.get(gun_h);
 	if (!expect(infantry_live != nullptr && gun_live != nullptr,
 	            "mounted startup fixture entities resolve")) return false;
-	w::pose_mounted_occupant(world, *infantry_live, *gun_live, gun_live->seats[0]);
+	world.vehicles.pose_mounted_occupant(*infantry_live, *gun_live, gun_live->seats[0]);
 
 	ns::LoopbackChannel host_loop;
 	inmatch::HostOwner owner;

@@ -1153,8 +1153,6 @@ private:
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     std::vector<int> handle_to_ai_index_;
-    std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
-                                                     // motor pass (reused, no realloc)
     std::vector<EntityHandle> mounted_weapon_handles_; // global UseGun pump scratch
     std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)
     bool baseline_captured_ = false;

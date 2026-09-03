@@ -196,7 +196,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 				freed_pool0_entity ? static_cast<uint16_t>(owned_entity.slot()) : uint16_t{0};
 		if (ctx.world != nullptr && owned_entity.valid()) {
 			ctx.world->match.remove_player(*ctx.world, owned_entity);
-			world::entity_detach_from_vehicle(*ctx.world, owned_entity);
+			ctx.world->vehicles.detach(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
 		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's

@@ -141,19 +141,6 @@ int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits);
 
 // --- the tick ------------------------------------------------------------
 
-// 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
-//  the client window @0x47e793..0x47e7ee; tank @0x477760..0x4777bf +
-//  @0x478b6c..0x478bd6]: (a) |up.z| under the flip bound (the ABSOLUTE
-//  value: `cdq; xor; sub` @0x47d722..0x47d726 / @0x477748..0x477753 — an
-//  inverted hull does not tip-test), or — tracked only — the replicated bit
-//  set, while airborne; (b) the authority: |slide_z| > 0x7000 — a client:
-//  airborne with the bit; (c) the CLIENT window: with fresh_2f1 == 0,
-//  !crashed (and, tank only, !settle_2f0): stamp the airborne tick once,
-//  request while the stamp is under 10 ticks old, else clear the stamp and
-//  raise fresh_2f1.
-void vehicle_suspension_crash_tests(World &world, Entity &veh,
-                                    const VehicleTraits &traits, int32_t up_z16,
-                                    SuspensionFamily family);
 
 // 1b. The bike's live crash test [orig: @0x47b32d..0x47b375]: both wheels off
 //  the ground, the bike has been driven, and any of the three spine probes
@@ -169,32 +156,8 @@ void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
 void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheels,
                                    int32_t growth, bool latch_gated, bool pre_gate_skip);
 
-// 3a. The GROUNDED spring loop [orig: @0x47E960..0x47EC1F], per wheel with
-//  spring != 0: the free-fall catch-up (corner −= max(sink − growth, 0)), the
-//  landing IMPULSE (sink > thr && contact → energy += 0.5·mass·sink², the
-//  impact sink += 1.25·energy), the settle term (energy <= 0: e = depth −
-//  minDepth − amp_0 (wheel 0's amplitude — the witnessed unindexed read) →
-//  energy += spring·min(e,4095)²), then energy > 0 → compress by
-//  min(ftol(sqrt(energy/spring)), 4095) else amp != 0 && all sinks < 2000 →
-//  free decay; the resolved `depth −= Δ` lifts the corner. `depth` is
-//  in/out; `corner_adj` receives the catch-up term.
-void vehicle_suspension_grounded_loop(World &world, Entity &veh,
-                                      const VehicleTraits &traits, int wheels,
-                                      int32_t depth[4], const bool contact[4],
-                                      int32_t growth, int32_t corner_adj[4]);
 
-// 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
-//  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
-//  → free decay; then the catch-up under !crashed && !crash_request.
-void vehicle_suspension_airborne_loop(World &world, Entity &veh,
-                                      const VehicleTraits &traits, int wheels,
-                                      int32_t growth, int32_t corner_adj[4]);
 
-// 4. Arming — the seed all three families share [orig:
-//  Entity_ProcessWheeledVehicleSuspension @0x46b1a6..0x46b213; the tank twin
-//  @0x469933..0x46999e; the bike twin @0x468b00..0x468b3b which also EJECTS
-//  every occupant]. Returns true when the latch set this tick.
-bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants);
 
 // 5. After the conform [orig: tracked @0x47ece9..0x47ed60]: each pad in
 //  contact zeroes its own sink @0x47eced..0x47ed17; then a DIAGONAL PAIR in

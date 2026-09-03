@@ -596,7 +596,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		for (const auto &[field, enabled] : owner.ctx.config.scoreboard_fields)
 			match_rules.score_fields.push_back({field, enabled});
 		owner.ctx.world->match.configure(match_rules);
-		owner.ctx.world->spawn_waves.build_from_mission(
+		owner.ctx.world->zones.spawn_waves.build_from_mission(
 				*owner.ctx.world, owner.ctx.config.spawn_wave_time_base,
 				owner.ctx.config.spawn_wave_time_zone);
 		owner.ctx.world->rules.mp_session =

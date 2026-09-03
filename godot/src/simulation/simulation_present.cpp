@@ -1694,7 +1694,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md]
 		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
 		const bool zone_ctrl = e.zone_number != 0 &&
-				opennova::world::zone_chain_zone_info_byte(w.zone_chain, e) != 0;
+				opennova::world::zone_chain_zone_info_byte(w.zones.chain, e) != 0;
 		const int32_t signed_team = e.team < 0x80u
 				? static_cast<int32_t>(e.team)
 				: static_cast<int32_t>(e.team) - 0x100;

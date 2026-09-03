@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/vehicle_motor.h>
 #include <base/io/fixed.h>
 
@@ -45,11 +46,7 @@ bool air_contact_solve_active(const VehicleTraits &traits) {
            ((traits.box_y_hi - traits.box_y_lo) >> 2) > 0;
 }
 
-void aircraft_contact_solve(World &world, Entity &veh,
-                            const VehicleTraits &traits,
-                            Entity::VehicleMotorState &m,
-                            int32_t start_x, int32_t start_y,
-                            int32_t &px, int32_t &py, int32_t &pz) {
+void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // Boxless/degenerate rows keep the terrain-clamp stand-in (lib embedders /
     // unresolved graphics); the caller derives the branch picks locally for
     // exactly the same rows.
@@ -241,10 +238,7 @@ bool ground_contact_solve_active(const VehicleTraits &traits) {
            ((traits.box_y_hi - traits.box_y_lo) >> 2) > 0;
 }
 
-void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
-                          Entity::VehicleMotorState &m,
-                          int32_t start_x, int32_t start_y,
-                          int32_t &px, int32_t &py, int32_t &pz) {
+void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // ---- sleep fast-path: an at-rest hull undoes the mover's vertical dribble
     // and skips the whole solve [orig: @0x47C244..0x47C44B]. Live gates:
     // velocities/speed/yaw-rate zero, not airborne, the slide window, the
@@ -384,7 +378,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     //  0x47E7EE; the extend loop @0x47DB70..0x47DBD1, its pre-gate
     //  @0x47DB76..0x47DBA8; the dt select on +0x2EC @0x47C1DE..0x47C222].
     const bool pad_contact[4] = {d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0};
-    vehicle_suspension_crash_tests(world, veh, traits, up_z16, SuspensionFamily::Tracked);
+    world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tracked);
     const int32_t sink_growth = static_cast<int32_t>(
             (m.crashed != 0 ? kSuspensionDtCrashed : kSuspensionDtNormal) *
             static_cast<float>(kSinkGrowthPerTick));
@@ -421,10 +415,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
         // The airborne spring loop runs before the flag [orig: @0x47E283..
         // 0x47E344]; the crash latch arms in the NULL-contact suspension call
         // after it [orig: @0x47E5E6]; the tail clears the per-tick request.
-        vehicle_suspension_airborne_loop(world, veh, traits, 4, sink_growth,
+        world.vehicles.suspension_airborne_loop(veh, traits, 4, sink_growth,
                                          corner_adj);
         veh.flags |= kEntityFlagInAir;
-        (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/false);
+        (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/false);
         vehicle_suspension_tick_tail(veh, traits);
         return;
     }
@@ -435,7 +429,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // RESOLVES d_k (the wheel absorbs the compression delta) and the
     // compressions feed NEXT tick's pad points above
     // [orig: the loop @0x47E960..0x47EC1F; `d_k -= delta` @0x47EBC3].
-    vehicle_suspension_grounded_loop(world, veh, traits, 4, d, pad_contact,
+    world.vehicles.suspension_grounded_loop(veh, traits, 4, d, pad_contact,
                                      sink_growth, corner_adj);
     // The pad-rectangle bounding quad, in the witnessed winding — corner k
     // sits over pad k, so the identity d_k lift pairing is geometric here
@@ -492,7 +486,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // (per pad, then the diagonal-pair clear on an upright hull)
     // [orig: @0x47ECE9..0x47ED60] and the tail clears the per-tick request
     // [orig: @0x47EEEE].
-    (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/false);
+    (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/false);
     vehicle_suspension_post_contact(veh, pad_contact, 4, up_z16);
     vehicle_suspension_tick_tail(veh, traits);
 }
@@ -524,11 +518,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 // the fixed -28672 Z renormalize — the mover keeps its level-frame re-derive,
 // D-NET-161), and scrape/landing sounds, splash FX + the water
 // enter/exit overlay sends.
-void wheeled_contact_solve(World &world, Entity &veh,
-                           const VehicleTraits &traits,
-                           Entity::VehicleMotorState &m,
-                           int32_t start_x, int32_t start_y,
-                           int32_t &px, int32_t &py, int32_t &pz) {
+void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // ---- sleep fast-path [orig: @0x475E5C..0x475FB2]: the tracked gate set
     // (velocities/speed/rates zero, not airborne, not carried, slideDecay in
     // (-350,-1] via the unsigned `> 0xFFFFFEA2` compare, planar
@@ -732,7 +722,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // [orig: @0x478510..0x47852B]. The tank's own spring pair (the linear
     // compress / slow oscillator) is the header's named residual.
     const bool wheel_contact[4] = {d[0] != 0, d[1] != 0, d[2] != 0, d[3] != 0};
-    vehicle_suspension_crash_tests(world, veh, traits, up_z16, SuspensionFamily::Tank);
+    world.vehicles.suspension_crash_tests(veh, traits, up_z16, SuspensionFamily::Tank);
     vehicle_suspension_grow_sinks(veh, wheel_contact, 4, kSinkGrowthTank,
                                   /*latch_gated=*/true, /*pre_gate_skip=*/false);
 
@@ -755,7 +745,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
         // 0x2000 @0x478522; the client parked spring apply riding replicated
         // Flags 0x10 is deferred @0x478509..].
         veh.flags |= kEntityFlagInAir;
-        (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/false);
+        (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/false);
         vehicle_suspension_tick_tail(veh, traits);
         return;
     }
@@ -819,7 +809,7 @@ void wheeled_contact_solve(World &world, Entity &veh,
     // The crash latch arms inside the suspension call [orig: @0x4698A0's seed
     // @0x469933..0x46999E]; the tail clears the per-tick request [orig:
     // @0x4795DA].
-    (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/false);
+    (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/false);
     vehicle_suspension_tick_tail(veh, traits);
     // Airborne tick counter [orig: @0x4795D4..0x4795F1].
     m.plat_airborne_ticks =
@@ -856,10 +846,7 @@ bool light_contact_solve_active(const VehicleTraits &traits) {
            (((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000) > 0;
 }
 
-void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
-                         Entity::VehicleMotorState &m,
-                         int32_t start_x, int32_t start_y,
-                         int32_t &px, int32_t &py, int32_t &pz) {
+void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
     // ---- sleep fast-path [orig: @0x47972C..0x479790]: velocities/speed/
     // rates zero, not airborne, not carried, slideDecay in (-300,-1] (the
     // unsigned `> 0xFFFFFED4` compare — the bike window is 300, not the
@@ -1028,10 +1015,10 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         // Flags |= 0x2000 @0x47AC84; the crashed/parked Z-lift and the
         // spine-crash latch are deferred with the wreck machine].
         m.light_rear_contact_ticks = 0;
-        vehicle_suspension_airborne_loop(world, veh, traits, 2, kSinkGrowthBike,
+        world.vehicles.suspension_airborne_loop(veh, traits, 2, kSinkGrowthBike,
                                          corner_adj);
         veh.flags |= kEntityFlagInAir;
-        (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/true);
+        (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
         vehicle_suspension_tick_tail(veh, traits);
         m.plat_airborne_ticks += 1;
         return;
@@ -1048,7 +1035,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // shape — vehicle_suspension.h names the bike's own loop a residual)
     // [orig: the light solve's Suspension_CompressWheelQuadratic @0x47B431 /
     //  @0x47BAD0 and OscillateWheelFast calls].
-    vehicle_suspension_grounded_loop(world, veh, traits, 2, d, wheel_contact,
+    world.vehicles.suspension_grounded_loop(veh, traits, 2, d, wheel_contact,
                                      kSinkGrowthBike, corner_adj);
     const int32_t half_len =
             ((traits.foot_x_hi - r) - (traits.foot_x_lo + r)) >> 1;
@@ -1124,7 +1111,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // riders) [orig: @0x468B00..0x468B3B]; the wheels back in contact reset
     // the sinks (the tracked form, both wheels as the pair); the tail clears
     // the per-tick request [orig: @0x47C0B6].
-    (void)vehicle_suspension_arm(world, veh, /*eject_occupants=*/true);
+    (void)world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
     vehicle_suspension_post_contact(veh, wheel_contact, 2, up_z16);
     vehicle_suspension_tick_tail(veh, traits);
 }

@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/vehicle_motor.h>
 
 // Split out of vehicle_motor.cpp (the oversize-TU ratchet). Motion only — every
@@ -140,7 +141,8 @@ static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
     }
 }
 
-void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &traits) {
+    World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     // Authority AI flight: chel_ai_drive staged this tick's commands; run the
     // same servos/integration the predicted path uses, skipping the client
@@ -650,7 +652,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
             static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
     // The part-animation accumulators — the air mover's tail call [orig:
     // Entity_UpdatePartSpinAccumulator @0x4928B0 from the CHel/cpln callback].
-    vehicle_part_anim_tick(world, veh, traits);
+    world.vehicles.part_anim_tick(veh, traits);
 }
 
 } // namespace opennova::world

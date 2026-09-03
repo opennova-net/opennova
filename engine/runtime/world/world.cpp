@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/world.h>
 #include <runtime/devtools/tick_profile.h>
 
@@ -21,249 +22,6 @@ namespace opennova::world {
 // proxy for the occupant-model+144 vehicle link the original resolves through the entity
 // hierarchy. A manned-gun soldier is placed on/next to its gun, so this is generous.
 
-static void emit_vehicle_control(World &world, const char *kind, uint16_t target_net_id,
-                                 int32_t target_bms_id, uint32_t target_spawn_origin,
-                                 uint16_t target_wire_handle) {
-    Effect effect;
-    effect.kind = kind;
-    effect.a = static_cast<int32_t>(target_net_id);
-    effect.b = target_bms_id;
-    effect.c = static_cast<int32_t>(target_spawn_origin);
-    effect.d = static_cast<int32_t>(target_wire_handle);
-    world.out.effects.push(std::move(effect));
-}
-
-void emit_vehicle_control_started(World &world, const Entity &vehicle) {
-    emit_vehicle_control(world, "vehicle_control_started", vehicle.net_id, vehicle.bms_id,
-                         vehicle.spawn_origin, vehicle.handle.packed);
-}
-
-void emit_vehicle_control_stopped(World &world, const Entity &vehicle) {
-    emit_vehicle_control_stopped(world, vehicle.net_id, vehicle.bms_id, vehicle.spawn_origin,
-                                 vehicle.handle.packed);
-}
-
-void emit_vehicle_control_stopped(World &world, uint16_t target_net_id,
-                                  int32_t target_bms_id, uint32_t target_spawn_origin,
-                                  uint16_t target_wire_handle) {
-    emit_vehicle_control(world, "vehicle_control_stopped", target_net_id, target_bms_id,
-                         target_spawn_origin, target_wire_handle);
-}
-
-bool vehicle_claim_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant,
-                                    SeatType seat) {
-    // [orig: Entity_AttachToVehicleSlot @0x4946d0] ctrlx(2)/drvrx(5) claim +368 when it is
-    // empty or already theirs (@0x4947b3..0x4947d2 / @0x4948b9..0x4948d8); UseGun(3) claims
-    // only when empty (@0x494944..0x49495e); sitex passengers never touch +368.
-    const bool was_empty = !vehicle.primary_occupant.valid();
-    switch (seat) {
-        case SeatType::Controller:
-        case SeatType::Driver:
-            if (!was_empty && vehicle.primary_occupant != occupant) return false;
-            break;
-        case SeatType::Gunner:
-            if (!was_empty) return vehicle.primary_occupant == occupant;
-            break;
-        default:
-            return false;
-    }
-    vehicle.primary_occupant = occupant;
-    // The empty -> claimed edge is the retail engine-start edge (the per-tick spawner
-    // fires once its latch sees +368 set) [orig: @0x48faad..0x48fb0c].
-    if (was_empty) emit_vehicle_control_started(world, vehicle);
-    return true;
-}
-
-bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandle occupant) {
-    // [orig: Entity_DetachFromVehicle @0x4355f0] the stop leg runs ONLY when the detaching
-    // entity IS the claimant (@0x4356e9); anyone else leaving — including a second control
-    // occupant — leaves the latch untouched.
-    if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
-        return false;
-    stop_ground_vehicle_sound(world, vehicle);
-    vehicle.primary_occupant = EntityHandle{};
-    emit_vehicle_control_stopped(world, vehicle);
-    return true;
-}
-
-bool vehicle_prepare_weapon_slot(World &world, Entity &vehicle) {
-    const int weapon_index = world.tables.weapons.index_of(vehicle.primary_weapon.c_str());
-    if (weapon_index < 0 || weapon_index > 0xFF) return false;
-    const uint8_t adm = static_cast<uint8_t>(weapon_index);
-    const WeaponTableEntry *weapon = world.tables.weapons.by_index(adm);
-    if (weapon == nullptr) return false;
-    if (vehicle.primary_weapon_slot_adm != adm) {
-        vehicle.primary_weapon_slot = WeaponSlotState{};
-        vehicle.primary_weapon_slot_adm = adm;
-        if (weapon->clipsize < 0) {
-            vehicle.primary_weapon_slot.clip = -1;
-        } else {
-            vehicle.primary_weapon_slot.clip = weapon->clipsize;
-            vehicle.primary_weapon_slot.reserve = std::max<int32_t>(
-                    0, static_cast<int32_t>(weapon->startrounds) - weapon->clipsize);
-        }
-    }
-    return true;
-}
-
-bool vehicle_bind_use_gun_slot(World &world, Entity &occupant, Entity &vehicle) {
-    if (!occupant.use_gun_slot_swapped) {
-        occupant.pre_use_gun_equipped_adm_index = occupant.equipped_adm_index;
-        occupant.use_gun_slot_swapped = true;
-    }
-    vehicle.primary_weapon_owner = occupant.handle;
-    if (!vehicle_prepare_weapon_slot(world, vehicle)) {
-        occupant.equipped_adm_index = 0xFF;
-        return false;
-    }
-    occupant.equipped_adm_index = vehicle.primary_weapon_slot_adm;
-    return true;
-}
-
-const WeaponSlotState *resolve_mounted_ammo_slot(
-        const World &world, const Entity &mount) {
-    // Retail proves the item definition and the EWeap attrib before resolving
-    // ANY slot: the shared helper bails to NULL and the phase-8 writer emits
-    // the zero-word form when either is missing [orig: shared helper @0x5460E0
-    // (!itemDef -> 0; !(attrib & 0x20) -> 0); writer gate @0x4FFE0B]. A tool
-    // world that installs authored seat specs before the item database
-    // therefore resolves no slot until traits arrive.
-    if (!mount.has_item_def ||
-        (mount.item_attrib & kItemAttribEweap) == 0u)
-        return nullptr;
-    // The unredirected route is the entity's already-bound embedded MountSlot.
-    // Only following the mutable route bit to another entity needs the
-    // cross-entity relationship proof below.
-    if (!mount.primary_weapon_slot.redirect_to_parent_slot)
-        return &mount.primary_weapon_slot;
-    // Stand-in note: the shared helper routes vehicles via the def+84 attrib
-    // bit 0x40 [orig: Entity_GetWeaponSlots @ 0x5460E0] while the phase-8
-    // writer keys def+92 type==1 [orig: @ 0x4FFE3F]; the shipped corpus stamps
-    // both together on every EWeap vehicle, so type==1 serves both sites.
-    if (mount.item_type == 1u)
-        return &mount.primary_weapon_slot;
-
-    // Retail follows entity+0x28 (groundEntity), not the addeweap metadata
-    // pointer. Promotion/materialization capture the same relationship's live
-    // generation so packed-handle reuse cannot redirect into an unrelated row.
-    if (!mount.ground_target.valid() ||
-        mount.emplacement_parent != mount.ground_target ||
-        mount.emplacement_parent_spawn_id == 0)
-        return nullptr;
-    const Entity *parent = world.registry.get(mount.ground_target);
-    if (parent == nullptr ||
-        parent->registry_spawn_id != mount.emplacement_parent_spawn_id ||
-        !parent->has_item_def || parent->item_type != 1u ||
-        (parent->item_attrib & kItemAttribEweap) == 0u)
-        return nullptr;
-    return &parent->primary_weapon_slot;
-}
-
-WeaponSlotState *resolve_mounted_ammo_slot(World &world, Entity &mount) {
-    return const_cast<WeaponSlotState *>(resolve_mounted_ammo_slot(
-            static_cast<const World &>(world),
-            static_cast<const Entity &>(mount)));
-}
-
-void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
-    if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
-        vehicle->primary_weapon_owner = EntityHandle{};
-    if (!occupant.use_gun_slot_swapped) return;
-    const bool is_player =
-            ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
-    occupant.equipped_adm_index =
-            is_player ? occupant.pre_use_gun_equipped_adm_index : 0xFF;
-    occupant.pre_use_gun_equipped_adm_index = 0xFF;
-    occupant.use_gun_slot_swapped = false;
-}
-
-Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
-    // Build the SAME frame collision serves (target_view): heading from the
-    // stored mission yaw, pitch/roll BAM-wrapped from degrees, through
-    // collision_matrix_from_euler [orig: @0x613f40]. Pure-yaw carriers keep the
-    // pre-existing 2D rotate bit-for-bit (the euler matrix reduces to it, but
-    // the trig paths differ in rounding; the fast path also skips the matrix).
-    const Vec3 &L = local;
-    if (vehicle.pitch == 0 && vehicle.roll == 0) {
-        constexpr double kDeg2Rad = io::kRadiansPerDegree;
-        const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
-        const double ca = std::cos(a), sa = std::sin(a);
-        Vec3 p;
-        p.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
-        p.y = vehicle.position.y + static_cast<float>(L.x * sa + L.y * ca);
-        p.z = vehicle.position.z + L.z;
-        return p;
-    }
-    const int32_t heading =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
-    const int32_t origin[3] = {0, 0, 0};
-    const CollisionMatrix m = collision_matrix_from_euler(
-            heading,
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(vehicle.roll)), origin);
-    // seat_local is pre-swizzled ((-y, x, z) over the raw authored ints — a
-    // baked-in Rz(90)), while the collision euler matrix with heading
-    // bam(90 - yaw) expects RAW model coordinates: un-swizzle first, so the
-    // flat case reduces bit-for-bit to the legacy -yaw rotate above.
-    const int32_t lf[3] = {static_cast<int32_t>(L.y * 65536.0f),
-                           static_cast<int32_t>(-L.x * 65536.0f),
-                           static_cast<int32_t>(L.z * 65536.0f)};
-    int32_t wf[3];
-    m.rotate_point(lf, wf);
-    Vec3 p;
-    p.x = vehicle.position.x + static_cast<float>(wf[0]) / 65536.0f;
-    p.y = vehicle.position.y + static_cast<float>(wf[1]) / 65536.0f;
-    p.z = vehicle.position.z + static_cast<float>(wf[2]) / 65536.0f;
-    return p;
-}
-
-static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
-    if (seat.attachment_frame)
-        return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
-    if (seat.type == SeatType::Gunner)
-        return static_cast<int16_t>(vehicle.yaw - seat.yaw_offset);
-    return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
-}
-
-void presnap_vehicle_attach_heading(World &world, Entity &occupant,
-                                    const Entity &vehicle, const Seat &seat) {
-    const int16_t seat_yaw = mounted_pose_yaw(vehicle, seat);
-    occupant.yaw = seat_yaw;
-    AiEntity *body = world.ai.for_handle(occupant.handle);
-    if (body == nullptr) return;
-
-    const int32_t seat_heading =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(seat_yaw));
-    body->heading = seat_heading;
-    // Retail has one entity Yaw. OpenNova separates the local input-owned look
-    // target from the render heading, so both must receive the same attach snap.
-    if (body->inf.is_local_player)
-        body->inf.target_heading = seat_heading;
-}
-
-void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
-                           const Seat &seat) {
-    MountedPose live;
-    if (world.pose_provider != nullptr &&
-        world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
-        occ.position = live.position;
-        occ.yaw = live.yaw;
-        occ.pitch = live.pitch;
-        occ.roll = live.roll;
-        return;
-    }
-    // The seat-local offset through the carrier's FULL orientation frame (yaw +
-    // pitch + roll). Retail's seat bone path reads the one entity orientation
-    // matrix, the same matrix the collision shell is posed with; a yaw-only
-    // rotate here left every mounted body (and its dismount start) in an
-    // unrolled frame while the collision volumes leaned with the vehicle.
-    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over
-    //  Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
-    occ.position = entity_local_point_world(vehicle, seat.seat_local);
-    occ.yaw = mounted_pose_yaw(vehicle, seat);
-    occ.pitch = vehicle.pitch;
-    occ.roll = vehicle.roll;
-}
 
 // Attached emplacement children are allocated breadth-first after their carrier,
 // so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
@@ -294,7 +52,7 @@ static void pose_emplacement_attachments(World &world) {
                     occupants.push_back(candidate.handle);
             });
             for (EntityHandle occupant : occupants)
-                entity_detach_from_vehicle(world, occupant);
+                world.vehicles.detach(occupant);
             world.registry.despawn(orphan);
         }
     }
@@ -319,7 +77,7 @@ static void pose_emplacement_attachments(World &world) {
         anchor.seat_local = child->emplacement_local;
         anchor.yaw_offset = child->emplacement_yaw_offset;
         anchor.attachment_frame = true;
-        pose_mounted_occupant(world, *child, *parent, anchor);
+        world.vehicles.pose_mounted_occupant(*child, *parent, anchor);
     });
     lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
 
@@ -338,8 +96,7 @@ static void pose_emplacement_attachments(World &world) {
             world.ai.pose_if_mounted(*body, world);
             return;
         }
-        pose_mounted_occupant(
-                world, *occupant, *target, target->seats[snapshot.mount_seat]);
+        world.vehicles.pose_mounted_occupant(*occupant, *target, target->seats[snapshot.mount_seat]);
     });
     lap.mark(devtools::Slot::SIM_ATTACHMENT_RIDERS);
 }
@@ -600,9 +357,9 @@ World::Snapshot World::snapshot() const {
     s.env = env;
     s.weather = weather;
     s.match = match;
-    s.spawn_waves = spawn_waves;
-    s.zone_capture_state = zone_capture_state;
-    s.spawn_cycle_counter = spawn_cycle_counter;
+    s.spawn_waves = zones.spawn_waves;
+    s.zone_capture_state = zones.capture;
+    s.spawn_cycle_counter = zones.spawn_cycle_counter;
     s.logic_tick = logic_tick;
     s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
@@ -618,9 +375,9 @@ void World::restore(const Snapshot &s) {
     env = s.env;
     weather = s.weather;
     match = s.match;
-    spawn_waves = s.spawn_waves;
-    zone_capture_state = s.zone_capture_state;
-    spawn_cycle_counter = s.spawn_cycle_counter;
+    zones.spawn_waves = s.spawn_waves;
+    zones.capture = s.zone_capture_state;
+    zones.spawn_cycle_counter = s.spawn_cycle_counter;
     logic_tick = s.logic_tick;
     preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
@@ -653,7 +410,7 @@ void World::restore(const Snapshot &s) {
     if (collision != nullptr) collision->refresh_after_registry_change(*this);
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
-            emit_vehicle_control_started(*this, vehicle);
+            vehicles.emit_control_started(vehicle);
     });
 }
 

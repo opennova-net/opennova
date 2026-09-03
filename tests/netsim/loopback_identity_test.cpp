@@ -1023,7 +1023,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	vehicle.seats.push_back(seat); // zero local pose: occupant lands at carrier origin.
 	const w::EntityHandle vh = world.registry.spawn_from(1, 0, vehicle);
 	if (!expect(vh.valid(), "carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(world, ih, vh, 3),
+	if (!expect(world.vehicles.process_attach(ih, vh, 3),
 	            "infantry attaches to witnessed wire bone")) return false;
 	if (!expect(ai.pose_if_mounted(*ae, world),
 	            "mounted infantry synchronizes to the seat frame")) return false;
@@ -1084,7 +1084,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	            "client lifts carrier-local infantry pose through current decoded carrier"))
 		return false;
 
-	if (!expect(w::entity_detach_from_vehicle(world, ih), "infantry detaches")) return false;
+	if (!expect(world.vehicles.detach(ih), "infantry detaches")) return false;
 	ns::test::emit_all(world, conns);
 	if (!expect(channel.client_recv(dg), "dismounted infantry frame dequeued")) return false;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
@@ -1395,7 +1395,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.seats.push_back(driver);
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	if (!expect(vh.valid(), "death-test carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 3),
+	if (!expect(world.vehicles.process_attach(ph, vh, 3),
 	            "remote player occupies the actual driver seat")) return false;
 
 	w::Entity *host_peer = world.registry.get(ph);

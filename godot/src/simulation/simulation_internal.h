@@ -148,7 +148,7 @@ inline void write_present_vehicle_motion_controls(float *record,
 	// moving item. Only the authority owns the full steer and currentSpeed
 	// fields; ClientEntityState carries neither and must leave VALID clear.
 	if (entity.handle.pool() != 1 ||
-			world.tables.vehicle_traits.get(entity.item_id) == nullptr)
+			world.vehicles.traits.get(entity.item_id) == nullptr)
 		return;
 	const opennova::world::VehicleCtrlRegisters controls =
 			opennova::world::vehicle_ctrl_registers(entity.veh);

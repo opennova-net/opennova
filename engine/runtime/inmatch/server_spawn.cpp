@@ -311,7 +311,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0
 	// each frame while pending]. The host's OWN loopback player skips the hold — it
 	// deploys through the local flow, not the wire. (D-NET-156)
-	if (!is_host_own && world::world_has_spawn_zone(world)) {
+	if (!is_host_own && world.zones.has_spawn_zone()) {
 		conn.link.respawn_pending = true;
 		if (!conn.link.spectator) {
 			if (world::Entity *pe = world.registry.get(h)) {
@@ -413,7 +413,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 
 	world::AiEntity *ai =
 			world.ai.for_handle(player->handle);
-	world::entity_detach_from_vehicle(world, player->handle);
+	world.vehicles.detach(player->handle);
 	// The deploy-hold bit is untouched on ENTERING spectator mode (retail's
 	// runtime conversion @0x519e76 leaves slot+89912 alone — a deployed
 	// convert has it clear, an undeployed one keeps holding it); LEAVING runs

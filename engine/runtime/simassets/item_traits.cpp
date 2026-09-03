@@ -207,7 +207,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // g_EntityClassPhysicsTable @0x82abc8; ground dispatch @0x48ef90..0x48f060;
         // Entity_UpdateAircraftPhysics @0x490310]
         if (e->handle.pool() == 1 &&
-                world.tables.vehicle_traits.get(e->item_id) == nullptr &&
+                world.vehicles.traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             const std::string fam = fourcc_prefix(def->move_function);
             const bool direct_air_mover = fam == "chel" || fam == "cpln";
@@ -287,7 +287,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.sound_profile = def->sound_profile;
                 for (size_t i = 0; i < vt.sound_loops.size(); ++i)
                     vt.sound_loops[i] = def->soundloops[i];
-                world.tables.vehicle_traits.set(e->item_id, vt);
+                world.vehicles.traits.set(e->item_id, vt);
             }
         }
     }
@@ -321,9 +321,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     // is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
     // [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
     // the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
-    world.zone_capture_state.clear(); // [orig: CaptureCtx_Reset @0x53BD00]
-    world::zone_chain_build_from_mission(world, world.zone_chain);
-    world::zone_chain_latch_control(world, world.zone_chain);
+    world.zones.capture.clear(); // [orig: CaptureCtx_Reset @0x53BD00]
+    world.zones.build_chain_from_mission();
+    world.zones.latch_control();
 }
 
 // The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/

@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/vehicle_sound.h>
 
 #include <algorithm>
@@ -170,9 +171,8 @@ int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
 
 } // namespace
 
-void update_ground_vehicle_sound(World &world, Entity &vehicle,
-                                 const VehicleTraits &traits, bool wrecked,
-                                 bool collided) {
+void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {
+    World &world = world_;
     const audio::SoundProfile *profile = profile_for(world, traits);
 
     // The PlayerControl ground caller skips the movement-sound function entirely
@@ -270,8 +270,9 @@ void update_ground_vehicle_sound(World &world, Entity &vehicle,
     }
 }
 
-void stop_ground_vehicle_sound(World &world, Entity &vehicle) {
-    const VehicleTraits *traits = world.tables.vehicle_traits.get(vehicle.item_id);
+void VehicleSystem::stop_ground_sound(Entity &vehicle) {
+    World &world = world_;
+    const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
     if (traits == nullptr || !traits->player_control) return;
     const audio::SoundProfile *profile = profile_for(world, *traits);
     emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,

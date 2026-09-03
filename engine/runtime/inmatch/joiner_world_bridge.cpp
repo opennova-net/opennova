@@ -704,15 +704,14 @@ void JoinerWorldBridge::sync_authoritative_mount(
 	bool changed = false;
 	if (!wire_mounted) {
 		if (local->mounted)
-			changed = world::entity_detach_from_vehicle(ctx.world, local->handle);
+			changed = ctx.world.vehicles.detach(local->handle);
 	} else if (!local->mounted ||
 			local->mount_target.packed != self->carrier_handle ||
 			local->mount_bone != self->mount_bone) {
 		// Wire-materialized mission entities retain the host's exact packed
 		// pool/slot identity in the joiner's native world. The
 		// server has already validated this exact carrier+bone pair.
-		changed = world::entity_process_vehicle_attach(
-				ctx.world, local->handle,
+		changed = ctx.world.vehicles.process_attach(local->handle,
 				world::EntityHandle{self->carrier_handle},
 				self->mount_bone);
 	}
@@ -734,7 +733,7 @@ void JoinerWorldBridge::sync_authoritative_mount(
 			bool route_valid = mount->has_item_def && mount->item_type != 1u &&
 					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
 					(mount->emplacement_attachment_flags & 0x02u) != 0u &&
-					world::vehicle_prepare_weapon_slot(ctx.world, *mount);
+					ctx.world.vehicles.prepare_weapon_slot(*mount);
 			uint8_t equipped_adm = mount->primary_weapon_slot_adm;
 			if (route_valid && self->seat_type == 2u && mount->ground_target.valid() &&
 					mount->emplacement_parent == mount->ground_target &&
@@ -746,7 +745,7 @@ void JoinerWorldBridge::sync_authoritative_mount(
 								mount->emplacement_parent_spawn_id &&
 						parent->has_item_def && parent->item_type == 1u &&
 						(parent->item_attrib & world::kItemAttribEweap) != 0u &&
-						world::vehicle_prepare_weapon_slot(ctx.world, *parent);
+						ctx.world.vehicles.prepare_weapon_slot(*parent);
 				if (route_valid)
 					equipped_adm = parent->primary_weapon_slot_adm;
 			} else if (self->seat_type == 2u) {
@@ -800,7 +799,7 @@ void JoinerWorldBridge::apply_mounted_ammo_update(const PumpContext &ctx) {
 	if (mount == nullptr) return;
 
 	world::WeaponSlotState *slot =
-			world::resolve_mounted_ammo_slot(ctx.world, *mount);
+			ctx.world.vehicles.resolve_mounted_ammo_slot(*mount);
 	if (slot != nullptr) {
 		// Retail stores both words in signed 16-bit MountSlot fields. Preserve the
 		// 0xffff sentinel as -1 rather than widening it to 65535.
@@ -864,7 +863,7 @@ void JoinerWorldBridge::mirror_mission_entities(const PumpContext &ctx) {
 		// after the tick (mirror_predicted_vehicles).
 		if (pool == 1 && es.cls == EntityClass::Vehicle) {
 			const world::VehicleTraits *traits =
-					ctx.world.tables.vehicle_traits.get(local->item_id);
+					ctx.world.vehicles.traits.get(local->item_id);
 			if (traits != nullptr) {
 				es.net_world_mover = true;
 				// The row-side fallback chase selects its constant set by
@@ -987,7 +986,7 @@ void JoinerWorldBridge::mirror_predicted_vehicles(const PumpContext &ctx) {
 		// pose, not a validity sentinel. A boxless ground row's motor never
 		// advances the seeded wire attitude, so the mirror is stable there.
 		const world::VehicleTraits *traits =
-				ctx.world.tables.vehicle_traits.get(local->item_id);
+				ctx.world.vehicles.traits.get(local->item_id);
 		const bool owns_attitude = traits != nullptr;
 		if (owns_attitude) {
 			es.pitch_bam = local->veh.air_pitch_bam;

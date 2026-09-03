@@ -1129,7 +1129,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
             // the edge also clears Flags 0x40 @0x4b9d2a].
             if (ent != nullptr && ent->mounted)
-                entity_detach_from_vehicle(world, e.handle);
+                world.vehicles.detach(e.handle);
             // Corpse timer = the item's deathtime [orig: +0x148 = def+0x890 @0x4b9c97].
             // Unmodeled edge variant (D-AI-9): the +0x134-bit0 silent cleanup
             // (timer-61, tickets cleared, no scream @0x4b9c68) — JO persons never

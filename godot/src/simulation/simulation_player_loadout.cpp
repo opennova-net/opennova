@@ -206,8 +206,7 @@ bool Simulation::local_player_toggle_mount() {
 			return runtime_->queue_vehicle_detach(
 					toggle_player->mount_target.packed);
 		opennova::world::VehicleSeatSelection hit;
-		if (!opennova::world::find_mount_toggle_candidate(
-					kernel_->world, *toggle_player, hit))
+		if (!kernel_->world.vehicles.find_mount_toggle_candidate(*toggle_player, hit))
 			return false;
 		opennova::world::Entity *vehicle = kernel_->world.registry.get(hit.vehicle);
 		if (vehicle == nullptr || hit.seat_index < 0 ||
