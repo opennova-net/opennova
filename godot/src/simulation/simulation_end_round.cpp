@@ -73,7 +73,7 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 		// The authority reads its own Match clock; a joiner reads the folded
 		// 0x0A sub-block-1 copy. [orig: g_round_time_remaining @0x24C1958,
 		// the joiner store @0x430219..0x430235]
-		const int32_t remaining = joiner_
+		const int32_t remaining = is_joiner()
 				? runtime_->state().round_time_remaining_ticks
 				: (kernel_ ? kernel_->world.match.remaining_ticks() : -1);
 		v.round_ticks = std::max(0, remaining);
@@ -87,7 +87,9 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 		// expiry closes the session [orig: Server_TickUpdate's drain sets
 		// g_mission_exit_reason = 3 @0x51db63 — the map cycle]; a joiner's
 		// session dies with the host's exit.
-		v.session_open = joiner_ ? !runtime_->session_lost() : ctx_.is_in_session != 0;
+		const opennova::inmatch::NapiNPServerCtx *host = host_ctx();
+		v.session_open = is_joiner() ? !runtime_->session_lost()
+				: host != nullptr && host->is_in_session != 0;
 	}
 	record->assign(v);
 	return record;
@@ -118,7 +120,7 @@ opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const 
 	// Authority: the Match clock; joiner: the folded 0x0A sub-block-1 copy
 	// [orig: g_round_time_remaining @0x24C1958 — the game-time line and the
 	// timed/untimed arm picks read it on every role].
-	in.round_time_remaining_ticks = std::max(0, joiner_
+	in.round_time_remaining_ticks = std::max(0, is_joiner()
 			? runtime_->state().round_time_remaining_ticks
 			: (kernel_ ? kernel_->world.match.remaining_ticks() : -1));
 	return in;

@@ -305,6 +305,14 @@ public:
 	simassets::AdmRootMotion root_motion;
 	std::vector<ItemSeatSpec> seat_specs;
 	std::unordered_map<int32_t, std::string> mounted_graphics;
+	// The loaded document is a true S2C 0x0B mission: the 616-byte BMS header
+	// alone. Retail allocates pools 1..3 while consuming 0x0D/0x10/0x20; the
+	// joiner role's materializer gives local world consumers the same exact
+	// packed rows, and the seat-spec refresh keys on this flag for every
+	// role. Full-BMS joiners never enter that path and keep ordinary
+	// promotion untouched. Per-load state the embedder sets after the
+	// document opens (a fresh kernel reads false).
+	bool wire_header_world = false;
 	std::vector<PromoteOptions::AiProfileRow> ai_profiles;
 	PromoteResult promo;
 	int collision_attached = 0;

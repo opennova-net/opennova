@@ -43,8 +43,13 @@
 
 namespace opennova::inmatch {
 
+JoinerRole::JoinerRole(KitSeams seams) : kit_seams(std::move(seams)) {}
+
 ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRole join_role,
 		const std::string &spectator_password) {
+	player_name_ = player_name;
+	join_role_ = join_role;
+	spectator_password_ = spectator_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 	runtime->set_join_request(join_role, spectator_password);
@@ -54,6 +59,25 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 void JoinerRole::bind(mission::MissionKernel &kernel) {
 	Role::bind(kernel);
 	if (runtime) runtime->set_profile(&kernel.profile);
+}
+
+// The boot hook's bring-up. A retail-style menu join has already
+// authenticated and learned the map from S2C 0x7B before this local load:
+// preserve that exact runtime/socket; rebuilding it here would silently
+// reconnect and discard the witnessed pre-load session. Direct-loaded
+// callers have not started yet and retain the historical fresh-runtime
+// reset (the true return: the embedder re-installs its retained join
+// inputs on the fresh runtime).
+bool JoinerRole::bring_up() {
+	const bool rebuild = !started_ || !runtime;
+	if (rebuild) {
+		create_runtime(player_name_, join_role_, spectator_password_);
+		reset_for_runtime_rebuild();
+	}
+	runtime->set_world_ready(true);
+	reset_for_load(runtime->deployment_release_revision());
+	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
+	return rebuild;
 }
 
 
@@ -132,7 +156,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 			if (lifetime.handle.pool() != 1) continue;
 			if (world::Entity *entity = kernel.world.registry.get(lifetime))
 				simassets::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
-						wire_header_world_);
+						kernel.wire_header_world);
 		}
 	};
 	refresh_seats(sync.spawned);
@@ -728,7 +752,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
 	if (!handle.valid()) return nullptr;
-	if (wire_header_world_)
+	if (kernel_->wire_header_world)
 		return materializer_.owned(world, handle);
 	world::Entity *entity = world.registry.get(handle);
 	return entity != nullptr &&
@@ -742,7 +766,7 @@ void JoinerRole::materialize_replica_world() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	if (!wire_header_world_) return;
+	if (!kernel_->wire_header_world) return;
 
 	const replication::ClientState &state = rt.state();
 	if (wire_world_topology_revision_seen_ == state.topology_revision &&
@@ -1091,7 +1115,7 @@ void JoinerRole::apply_mounted_ammo_update() {
 	}
 
 	const world::EntityHandle handle{ammo.mount_handle};
-	world::Entity *mount = wire_header_world_
+	world::Entity *mount = kernel_->wire_header_world
 			? materializer_.owned(world, handle)
 			: world.registry.get(handle);
 	// A streamed row can arrive in a later initial-state page. Unlike an invalid
@@ -1620,7 +1644,6 @@ void JoinerRole::reset_materialization() {
 }
 
 void JoinerRole::reset_world_stream() {
-	wire_header_world_ = false;
 	wire_world_static_initialized_ = false;
 	reset_materialization();
 }
@@ -1640,7 +1663,7 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 		error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
 		return false;
 	}
-	if (wire_header_world_) reset_materialization();
+	if (kernel_->wire_header_world) reset_materialization();
 	return true;
 }
 

@@ -188,6 +188,16 @@ public:
 	virtual ClientRuntime *client_runtime() { return nullptr; }
 	// The last tick's wire leg, for the shell's stats board.
 	virtual int64_t last_net_us() const { return 0; }
+	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
+	// run between the world wiring and the system registration [orig:
+	// SinglePlayer_StartMission @0x561af0]: the host stands its session up
+	// from its staged bring-up record, the joiner (re)builds its non-authority
+	// ClientRuntime, the bare local role installs nothing. True when a FRESH
+	// joiner ClientRuntime replaced the previous one (the embedder re-installs
+	// its retained join inputs on it); the host's own HostClient view is
+	// rebuilt every bring-up and carries no embedder inputs, so it reports
+	// false.
+	virtual bool bring_up() { return false; }
 
 	// The frame's input onto the local player, shared by every role: movement
 	// keys, mouse look, the fire/reload bits and the medic edge [orig: the

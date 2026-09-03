@@ -225,7 +225,7 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 	// so the F3 Weapon window's hold is OR'd in here rather than raced against
 	// the shell's own per-frame write.
 	opennova::world::local_weapon_set_input(kernel_->local.weapon, kernel_->local.view,
-			p_fire_held || debug_weapon_fire_held_, p_fire_pressed, p_reload_pressed);
+			p_fire_held || player_.debug_weapon_fire_held, p_fire_pressed, p_reload_pressed);
 }
 
 Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
@@ -668,7 +668,7 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	}
 }
 
-void Simulation::debug_weapon_set_fire_held(bool p_held) { debug_weapon_fire_held_ = p_held; }
+void Simulation::debug_weapon_set_fire_held(bool p_held) { player_.debug_weapon_fire_held = p_held; }
 
 void Simulation::debug_weapon_arm_trace(bool p_armed) {
 	if (!kernel_) return;

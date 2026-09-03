@@ -129,8 +129,8 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	// every client, the listen host's own included].
 	if (!runtime_) return Ref<ScoreFeedback>();
 	const opennova::replication::ClientState &cs = runtime_->state();
-	if (cs.score_feedback.updates == score_feedback_updates_seen_) return Ref<ScoreFeedback>();
-	score_feedback_updates_seen_ = cs.score_feedback.updates;
+	if (cs.score_feedback.updates == net_.score_feedback_updates_seen) return Ref<ScoreFeedback>();
+	net_.score_feedback_updates_seen = cs.score_feedback.updates;
 	const opennova::hud::ScoreTone tone =
 			opennova::hud::score_delta_tone(cs.score_feedback.delta, cs.exp_fanfare);
 	opennova::hud::ScoreFeedbackView v;

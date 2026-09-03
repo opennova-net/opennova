@@ -31,6 +31,18 @@ void before_server_tick(void *context) {
 
 HostRole::HostRole() = default;
 
+HostRole::HostRole(RoleKind kind,
+		replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver)
+		: kind_(kind), item_class_resolver_(std::move(item_class_resolver)) {}
+
+// The boot hook's bring-up: the staged record through the general bring-up
+// (the HostClient view follows on serve-and-play, taking the resolver this
+// role holds).
+bool HostRole::bring_up() {
+	bring_up(staged_bringup_);
+	return false;
+}
+
 void HostRole::set_item_class_resolver(
 		replication::ClientReplicaPipeline::ItemClassResolver resolver) {
 	item_class_resolver_ = std::move(resolver);

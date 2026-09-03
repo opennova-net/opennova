@@ -64,11 +64,17 @@ public:
 	};
 	KitSeams kit_seams;
 
-	// (Re)build the runtime for a join or a load that rebuilds an as-yet
-	// unstarted joiner; the shell installs its tables on the new runtime after.
+	JoinerRole() = default;
+	// The embedder's form: constructed with the loadout profile seams it keeps.
+	explicit JoinerRole(KitSeams seams);
+
+	// (Re)build the runtime for a join; the request is retained so a load that
+	// rebuilds an as-yet unstarted joiner (bring_up) rebuilds it the same way.
+	// The shell installs its tables on the new runtime after.
 	ClientRuntime &create_runtime(const std::string &player_name, JoinRole join_role,
 			const std::string &spectator_password);
 	void bind(mission::MissionKernel &kernel) override;
+	bool bring_up() override;
 
 	// The dialed socket and the host it reaches; null = socketless (every send
 	// dropped, nothing received — the headless tests).
@@ -117,12 +123,9 @@ public:
 	// when it moves.
 	uint64_t world_sync_serial() const { return world_sync_serial_; }
 
-	// A true S2C 0x0B mission carries only the 616-byte BMS header. Retail
-	// allocates pools 1..3 while consuming 0x0D/0x10/0x20; the materializer
-	// gives local world consumers the same exact packed rows. Full-BMS joiners
-	// never enter that path and keep ordinary promotion untouched.
-	void set_wire_header_world(bool v) { wire_header_world_ = v; }
-	bool wire_header_world() const { return wire_header_world_; }
+	// The exact-packed-row materializer of a wire-header world (the kernel's
+	// wire_header_world flag names the mission form; the joiner frame owns
+	// the fold, the embedder reads the placed rows it stamped).
 	replication::ClientWorldMaterializer &materializer() { return materializer_; }
 	const replication::ClientWorldMaterializer &materializer() const {
 		return materializer_;
@@ -220,9 +223,12 @@ private:
 	// the World before it rebuilds the runtime).
 	world::World *world_ = nullptr;
 
+	// The join request create_runtime was last given (the rebuild's inputs).
+	std::string player_name_;
+	JoinRole join_role_ = JoinRole::Player;
+	std::string spectator_password_;
 	bool started_ = false;       // ClientHello emitted (Idle -> Hello)
 	bool local_spawned_ = false; // L spawned at reached_in_match (one-shot guard)
-	bool wire_header_world_ = false;
 	bool wire_world_static_initialized_ = false;
 	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};
 	uint64_t wire_world_stream_revision_seen_ = ~uint64_t{0};

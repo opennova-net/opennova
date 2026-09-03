@@ -183,10 +183,10 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 			runtime_ ? runtime_->state().minimap.revision : 0;
 	const uint64_t tick = kernel_ != nullptr
 			? static_cast<uint64_t>(kernel_->world.logic_tick) : 0;
-	if (minimap_snapshot_valid_ && revision == minimap_snapshot_revision_ &&
-			tick == minimap_snapshot_tick_ &&
-			local_marker_handle == minimap_snapshot_local_handle_) {
-		return minimap_snapshot_cache_;
+	if (present_.minimap_snapshot_valid && revision == present_.minimap_snapshot_revision &&
+			tick == present_.minimap_snapshot_tick &&
+			local_marker_handle == present_.minimap_snapshot_local_handle) {
+		return present_.minimap_snapshot_cache;
 	}
 	// The rows (the bank walk, the policy resolve, the restored local row) and
 	// the feed layout are the engine's; this leg only packs the array.
@@ -202,11 +202,11 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	PackedInt32Array out;
 	out.resize(static_cast<int64_t>(feed.size()));
 	std::copy(feed.begin(), feed.end(), out.ptrw());
-	minimap_snapshot_cache_ = out;
-	minimap_snapshot_revision_ = revision;
-	minimap_snapshot_tick_ = tick;
-	minimap_snapshot_local_handle_ = local_marker_handle;
-	minimap_snapshot_valid_ = true;
+	present_.minimap_snapshot_cache = out;
+	present_.minimap_snapshot_revision = revision;
+	present_.minimap_snapshot_tick = tick;
+	present_.minimap_snapshot_local_handle = local_marker_handle;
+	present_.minimap_snapshot_valid = true;
 	return out;
 }
 
@@ -623,7 +623,7 @@ std::vector<opennova::world::inspect::EntityRow> Simulation::native_entity_direc
 	if (!kernel_) return {};
 	// A joiner never mixes its non-authoritative tooling AI pool into the
 	// decoded view; the host joins registry rows to their AI cards.
-	return opennova::world::inspect::entity_directory(kernel_->world, /*with_brains=*/!joiner_);
+	return opennova::world::inspect::entity_directory(kernel_->world, /*with_brains=*/!is_joiner());
 }
 
 opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle) const {
@@ -632,7 +632,7 @@ opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle
 	// joins the decoded view, so the F3 card shows no AI half for a row the
 	// list beside it calls brainless.
 	return opennova::world::inspect::build_entity_card(
-			kernel_->world, /*with_brains=*/!joiner_,
+			kernel_->world, /*with_brains=*/!is_joiner(),
 			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); });
 }
@@ -648,7 +648,7 @@ Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 			kernel_->world, /*with_brains=*/true, handle,
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
 	// The joiner's decoded replica row for the same handle, when one exists.
-	if (joiner_ && runtime_ != nullptr) {
+	if (is_joiner() && runtime_ != nullptr) {
 		card->assign_replica(opennova::inmatch::client_replica_card(
 				runtime_->state(), handle.packed));
 	}
@@ -772,45 +772,45 @@ PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const 
 }
 
 void Simulation::invalidate_present_effect_pose_cache() const {
-	present_effect_pose_cache_valid_ = false;
-	present_effect_pose_cache_runtime_ = nullptr;
-	present_effect_poses_by_handle_.clear();
-	present_effect_handles_by_bms_id_.clear();
-	present_effect_handles_by_ssn_.clear();
-	present_effect_handles_by_origin_.clear();
-	present_effect_missing_handles_.clear();
-	present_effect_missing_bms_ids_.clear();
-	present_effect_missing_ssns_.clear();
-	present_effect_missing_origins_.clear();
+	present_.effect_pose_cache_valid = false;
+	present_.effect_pose_cache_runtime = nullptr;
+	present_.effect_poses_by_handle.clear();
+	present_.effect_handles_by_bms_id.clear();
+	present_.effect_handles_by_ssn.clear();
+	present_.effect_handles_by_origin.clear();
+	present_.effect_missing_handles.clear();
+	present_.effect_missing_bms_ids.clear();
+	present_.effect_missing_ssns.clear();
+	present_.effect_missing_origins.clear();
 }
 
 void Simulation::ensure_present_effect_pose_cache() const {
 	if (!kernel_ || !runtime_) {
-		if (present_effect_pose_cache_valid_) invalidate_present_effect_pose_cache();
+		if (present_.effect_pose_cache_valid) invalidate_present_effect_pose_cache();
 		return;
 	}
 
 	const opennova::replication::ClientState &client = runtime_->state();
 	const uint32_t logic_tick = kernel_->world.logic_tick;
-	if (present_effect_pose_cache_valid_ &&
-			present_effect_pose_cache_runtime_ == runtime_ &&
-			present_effect_pose_cache_logic_tick_ == logic_tick &&
-			present_effect_pose_cache_client_frame_ == client.frames_applied) {
+	if (present_.effect_pose_cache_valid &&
+			present_.effect_pose_cache_runtime == runtime_ &&
+			present_.effect_pose_cache_logic_tick == logic_tick &&
+			present_.effect_pose_cache_client_frame == client.frames_applied) {
 		return;
 	}
 
-	present_effect_poses_by_handle_.clear();
-	present_effect_handles_by_bms_id_.clear();
-	present_effect_handles_by_ssn_.clear();
-	present_effect_handles_by_origin_.clear();
-	present_effect_missing_handles_.clear();
-	present_effect_missing_bms_ids_.clear();
-	present_effect_missing_ssns_.clear();
-	present_effect_missing_origins_.clear();
-	present_effect_pose_cache_logic_tick_ = logic_tick;
-	present_effect_pose_cache_client_frame_ = client.frames_applied;
-	present_effect_pose_cache_runtime_ = runtime_;
-	present_effect_pose_cache_valid_ = true;
+	present_.effect_poses_by_handle.clear();
+	present_.effect_handles_by_bms_id.clear();
+	present_.effect_handles_by_ssn.clear();
+	present_.effect_handles_by_origin.clear();
+	present_.effect_missing_handles.clear();
+	present_.effect_missing_bms_ids.clear();
+	present_.effect_missing_ssns.clear();
+	present_.effect_missing_origins.clear();
+	present_.effect_pose_cache_logic_tick = logic_tick;
+	present_.effect_pose_cache_client_frame = client.frames_applied;
+	present_.effect_pose_cache_runtime = runtime_;
+	present_.effect_pose_cache_valid = true;
 }
 
 bool Simulation::cache_present_effect_pose(
@@ -819,12 +819,12 @@ bool Simulation::cache_present_effect_pose(
 	// wire echo H is not drawn and therefore cannot own a presented effect.
 	// Packed handle zero is a valid pool-0 identity, so presence rides the
 	// runtime's explicit validity seam, never a zero sentinel.
-	if (joiner_ && runtime_ && runtime_->has_self_handle() &&
+	if (is_joiner() && runtime_ && runtime_->has_self_handle() &&
 			p_entity_state.handle == runtime_->self_handle()) {
 		return false;
 	}
-	if (present_effect_poses_by_handle_.find(p_entity_state.handle) !=
-			present_effect_poses_by_handle_.end()) {
+	if (present_.effect_poses_by_handle.find(p_entity_state.handle) !=
+			present_.effect_poses_by_handle.end()) {
 		return true;
 	}
 
@@ -832,7 +832,7 @@ bool Simulation::cache_present_effect_pose(
 	// Host/listen presentation can recover the authored pitch and roll from the
 	// authoritative registry. The compact peer row only carries yaw; joiners
 	// therefore retain the wire-only zeroes here.
-	const opennova::world::Entity *entity = joiner_ ? nullptr : kernel_->world.registry.get(
+	const opennova::world::Entity *entity = is_joiner() ? nullptr : kernel_->world.registry.get(
 			opennova::world::EntityHandle{p_entity_state.handle});
 	PresentEffectPose pose;
 	pose.position = Vector3(
@@ -844,39 +844,39 @@ bool Simulation::cache_present_effect_pose(
 			static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(
 					heading_bam)),
 			entity ? static_cast<float>(entity->roll) : 0.0f);
-	present_effect_poses_by_handle_[p_entity_state.handle] = pose;
-	present_effect_missing_handles_.erase(p_entity_state.handle);
+	present_.effect_poses_by_handle[p_entity_state.handle] = pose;
+	present_.effect_missing_handles.erase(p_entity_state.handle);
 
 	// A joiner's decoded handles belong to the host, so only wire identity is
 	// meaningful there. Host/listen views can resolve every alias from the same
 	// registry entity used by get_present_snapshot().
-	if (joiner_ || !entity) return true;
+	if (is_joiner() || !entity) return true;
 	if (entity->bms_id > 0) {
 		const int bms_id = static_cast<int>(entity->bms_id);
-		present_effect_handles_by_bms_id_[bms_id] =
+		present_.effect_handles_by_bms_id[bms_id] =
 				p_entity_state.handle;
-		present_effect_missing_bms_ids_.erase(bms_id);
+		present_.effect_missing_bms_ids.erase(bms_id);
 	}
 	if (entity->net_id > 0) {
 		const int ssn = static_cast<int>(entity->net_id);
-		present_effect_handles_by_ssn_[ssn] =
+		present_.effect_handles_by_ssn[ssn] =
 				p_entity_state.handle;
-		present_effect_missing_ssns_.erase(ssn);
+		present_.effect_missing_ssns.erase(ssn);
 	}
 	const int kind = opennova::world::spawn_origin_kind(entity->spawn_origin);
 	const int index = static_cast<int>(opennova::world::spawn_origin_index(entity->spawn_origin));
 	const uint64_t origin = present_effect_origin_key(kind, index);
-	present_effect_handles_by_origin_[origin] =
+	present_.effect_handles_by_origin[origin] =
 			p_entity_state.handle;
-	present_effect_missing_origins_.erase(origin);
+	present_.effect_missing_origins.erase(origin);
 	return true;
 }
 
 bool Simulation::cache_present_effect_pose(
 		const opennova::world::Entity &p_entity) const {
 	const uint16_t handle = p_entity.handle.packed;
-	if (present_effect_poses_by_handle_.find(handle) !=
-			present_effect_poses_by_handle_.end()) {
+	if (present_.effect_poses_by_handle.find(handle) !=
+			present_.effect_poses_by_handle.end()) {
 		return true;
 	}
 	const AiEntity *ae = kernel_->world.ai.for_handle(p_entity.handle);
@@ -888,32 +888,32 @@ bool Simulation::cache_present_effect_pose(
 			static_cast<float>(opennova::inmatch::pool_present_yaw_deg(
 					p_entity, ae, opennova::replication::entity_class_of(p_entity))),
 			static_cast<float>(p_entity.roll));
-	present_effect_poses_by_handle_[handle] = pose;
-	present_effect_missing_handles_.erase(handle);
+	present_.effect_poses_by_handle[handle] = pose;
+	present_.effect_missing_handles.erase(handle);
 	if (p_entity.bms_id > 0) {
 		const int bms_id = static_cast<int>(p_entity.bms_id);
-		present_effect_handles_by_bms_id_[bms_id] = handle;
-		present_effect_missing_bms_ids_.erase(bms_id);
+		present_.effect_handles_by_bms_id[bms_id] = handle;
+		present_.effect_missing_bms_ids.erase(bms_id);
 	}
 	if (p_entity.net_id > 0) {
 		const int ssn = static_cast<int>(p_entity.net_id);
-		present_effect_handles_by_ssn_[ssn] = handle;
-		present_effect_missing_ssns_.erase(ssn);
+		present_.effect_handles_by_ssn[ssn] = handle;
+		present_.effect_missing_ssns.erase(ssn);
 	}
 	const int kind = opennova::world::spawn_origin_kind(p_entity.spawn_origin);
 	const int index = static_cast<int>(
 			opennova::world::spawn_origin_index(p_entity.spawn_origin));
 	const uint64_t origin = present_effect_origin_key(kind, index);
-	present_effect_handles_by_origin_[origin] = handle;
-	present_effect_missing_origins_.erase(origin);
+	present_.effect_handles_by_origin[origin] = handle;
+	present_.effect_missing_origins.erase(origin);
 	return true;
 }
 
 PackedVector3Array Simulation::cached_present_effect_state_for_handle(
 		uint16_t p_handle) const {
 	PackedVector3Array out;
-	const auto found = present_effect_poses_by_handle_.find(p_handle);
-	if (found == present_effect_poses_by_handle_.end()) return out;
+	const auto found = present_.effect_poses_by_handle.find(p_handle);
+	if (found == present_.effect_poses_by_handle.end()) return out;
 	out.resize(EFFECT_STATE_COUNT);
 	out.set(EFFECT_STATE_POSITION, found->second.position);
 	out.set(EFFECT_STATE_ROTATION_DEG, found->second.rotation_deg);
@@ -924,17 +924,17 @@ PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle
 	ensure_present_effect_pose_cache();
 	PackedVector3Array cached = cached_present_effect_state_for_handle(p_handle);
 	if (!cached.is_empty() || !runtime_) return cached;
-	if (present_effect_missing_handles_.find(p_handle) !=
-			present_effect_missing_handles_.end()) {
+	if (present_.effect_missing_handles.find(p_handle) !=
+			present_.effect_missing_handles.end()) {
 		return PackedVector3Array();
 	}
-	if (!joiner_) {
+	if (!is_joiner()) {
 		const opennova::world::Entity *entity =
 				kernel_->world.registry.get(opennova::world::EntityHandle{p_handle});
 		if (entity != nullptr && cache_present_effect_pose(*entity)) {
 			return cached_present_effect_state_for_handle(p_handle);
 		}
-		present_effect_missing_handles_.insert(p_handle);
+		present_.effect_missing_handles.insert(p_handle);
 		return PackedVector3Array();
 	}
 	for (const opennova::replication::ClientEntityState &entity_state :
@@ -945,20 +945,20 @@ PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle
 		}
 		break;
 	}
-	present_effect_missing_handles_.insert(p_handle);
+	present_.effect_missing_handles.insert(p_handle);
 	return PackedVector3Array();
 }
 
 PackedVector3Array Simulation::get_present_effect_state_for_ssn(int p_ssn) const {
 	if (p_ssn <= 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
-	const auto found = present_effect_handles_by_ssn_.find(p_ssn);
-	if (found != present_effect_handles_by_ssn_.end()) {
+	const auto found = present_.effect_handles_by_ssn.find(p_ssn);
+	if (found != present_.effect_handles_by_ssn.end()) {
 		return cached_present_effect_state_for_handle(found->second);
 	}
-	if (!runtime_ || joiner_) return PackedVector3Array();
-	if (present_effect_missing_ssns_.find(p_ssn) !=
-			present_effect_missing_ssns_.end()) {
+	if (!runtime_ || is_joiner()) return PackedVector3Array();
+	if (present_.effect_missing_ssns.find(p_ssn) !=
+			present_.effect_missing_ssns.end()) {
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *match = nullptr;
@@ -968,7 +968,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_ssn(int p_ssn) const
 	if (match != nullptr && cache_present_effect_pose(*match)) {
 		return cached_present_effect_state_for_handle(match->handle.packed);
 	}
-	present_effect_missing_ssns_.insert(p_ssn);
+	present_.effect_missing_ssns.insert(p_ssn);
 	return PackedVector3Array();
 }
 
@@ -984,13 +984,13 @@ PackedVector3Array Simulation::get_present_effect_state_for_wire_handle(
 PackedVector3Array Simulation::get_present_effect_state_for_bms_id(int p_bms_id) const {
 	if (p_bms_id <= 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
-	const auto found = present_effect_handles_by_bms_id_.find(p_bms_id);
-	if (found != present_effect_handles_by_bms_id_.end()) {
+	const auto found = present_.effect_handles_by_bms_id.find(p_bms_id);
+	if (found != present_.effect_handles_by_bms_id.end()) {
 		return cached_present_effect_state_for_handle(found->second);
 	}
-	if (!runtime_ || joiner_) return PackedVector3Array();
-	if (present_effect_missing_bms_ids_.find(p_bms_id) !=
-			present_effect_missing_bms_ids_.end()) {
+	if (!runtime_ || is_joiner()) return PackedVector3Array();
+	if (present_.effect_missing_bms_ids.find(p_bms_id) !=
+			present_.effect_missing_bms_ids.end()) {
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *entity =
@@ -998,7 +998,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_bms_id(int p_bms_id)
 	if (entity != nullptr && cache_present_effect_pose(*entity)) {
 		return cached_present_effect_state_for_handle(entity->handle.packed);
 	}
-	present_effect_missing_bms_ids_.insert(p_bms_id);
+	present_.effect_missing_bms_ids.insert(p_bms_id);
 	return PackedVector3Array();
 }
 
@@ -1007,13 +1007,13 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 	if (p_kind < 0 || p_index < 0) return PackedVector3Array();
 	ensure_present_effect_pose_cache();
 	const uint64_t requested_origin = present_effect_origin_key(p_kind, p_index);
-	const auto found = present_effect_handles_by_origin_.find(requested_origin);
-	if (found != present_effect_handles_by_origin_.end()) {
+	const auto found = present_.effect_handles_by_origin.find(requested_origin);
+	if (found != present_.effect_handles_by_origin.end()) {
 		return cached_present_effect_state_for_handle(found->second);
 	}
-	if (!runtime_ || joiner_) return PackedVector3Array();
-	if (present_effect_missing_origins_.find(requested_origin) !=
-			present_effect_missing_origins_.end()) {
+	if (!runtime_ || is_joiner()) return PackedVector3Array();
+	if (present_.effect_missing_origins.find(requested_origin) !=
+			present_.effect_missing_origins.end()) {
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *match = nullptr;
@@ -1026,7 +1026,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 	if (match != nullptr && cache_present_effect_pose(*match)) {
 		return cached_present_effect_state_for_handle(match->handle.packed);
 	}
-	present_effect_missing_origins_.insert(requested_origin);
+	present_.effect_missing_origins.insert(requested_origin);
 	return PackedVector3Array();
 }
 
@@ -1101,26 +1101,26 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 	// AI pool for tooling.
 	PackedFloat32Array out;
 	if (runtime_ && kernel_) {
-		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, joiner_};
-		if (joiner_) {
-			opennova::inmatch::build_client_replica_present_rows(context, present_rows_scratch_);
+		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
+		if (is_joiner()) {
+			opennova::inmatch::build_client_replica_present_rows(context, present_.rows_scratch);
 			// Consume-once: each transition pulse dispatches exactly one presented
 			// frame (the rows copied any live pulse into PF_ANIM_STATE_PULSE).
 			runtime_->state().clear_anim_pulses();
 		} else {
 			opennova::inmatch::build_world_present_rows(
-					context, pool_present_lifecycle_, present_rows_scratch_);
+					context, present_.pool_lifecycle, present_.rows_scratch);
 		}
-		out.resize(static_cast<int64_t>(present_rows_scratch_.size()));
-		if (!present_rows_scratch_.empty())
-			std::memcpy(out.ptrw(), present_rows_scratch_.data(),
-					present_rows_scratch_.size() * sizeof(float));
+		out.resize(static_cast<int64_t>(present_.rows_scratch.size()));
+		if (!present_.rows_scratch.empty())
+			std::memcpy(out.ptrw(), present_.rows_scratch.data(),
+					present_.rows_scratch.size() * sizeof(float));
 	}
-	last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
+	present_.last_entity_count = static_cast<int>(out.size() / PF_STRIDE);
 	std::vector<PresentRowIdentity> next_layout;
-	next_layout.reserve(static_cast<std::size_t>(last_present_entity_count_));
+	next_layout.reserve(static_cast<std::size_t>(present_.last_entity_count));
 	const float *rows = out.ptr();
-	for (int i = 0; i < last_present_entity_count_; ++i) {
+	for (int i = 0; i < present_.last_entity_count; ++i) {
 		const float *row = rows + static_cast<int64_t>(i) * PF_STRIDE;
 		next_layout.push_back(PresentRowIdentity{
 				static_cast<int32_t>(row[PF_WIRE_HANDLE]),
@@ -1129,11 +1129,11 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 				static_cast<int32_t>(row[PF_KIND]),
 				static_cast<int32_t>(row[PF_INDEX])});
 	}
-	if (next_layout != present_layout_) {
-		present_layout_ = std::move(next_layout);
-		++present_layout_revision_;
+	if (next_layout != present_.layout) {
+		present_.layout = std::move(next_layout);
+		++present_.layout_revision;
 	}
 	if (runtime_profiling_enabled_)
-		last_present_snapshot_us_ = opennova::io::perf_now_us() - start_us;
+		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
 	return out;
 }

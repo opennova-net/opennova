@@ -88,7 +88,9 @@ opennova::bms::File make_demo_mission() {
 
 Simulation::Simulation() {
 	session_.set_tick_observer(this);
-	install_joiner_kit_seams();
+	// The bare local role from construction; the shell's session choices
+	// (enable_listen_server / enable_host_listen / enable_join) replace it.
+	(void)install_role(std::make_unique<opennova::inmatch::LocalRole>());
 	reset_world();
 }
 
@@ -104,13 +106,13 @@ void Simulation::reset_world() {
 	_release_weather_owner();
 	// The drawer's last-camera latch is mission-scoped: a stale one would
 	// hand the next mission's first rain frame a bogus (clamped) streak.
-	precipitation_draw_ = opennova::renderer::PrecipitationDrawState{};
-	joiner_role_.reset_world_stream();
+	assets_.precipitation_draw = opennova::renderer::PrecipitationDrawState{};
+	if (joiner_role_ != nullptr) joiner_role_->reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
 	// dead/respawn mirrors cannot tell the next mission's occupant apart
 	// from this one's by epoch: the lifecycle table dies with the world.
-	pool_present_lifecycle_.clear();
+	present_.pool_lifecycle.clear();
 	// One fresh kernel per load (ADR 0042 d3): the world, its systems, the
 	// sim asset caches, the local-player weapon/loadout/view state and the
 	// terrain field store all reset inside it. Retail reloads its model cache
@@ -128,61 +130,58 @@ void Simulation::reset_world() {
 		kept_look_settings = kernel_->local.look_settings;
 	}
 	kernel_ = std::make_unique<opennova::mission::MissionKernel>();
-	local_role_.bind(*kernel_);
-	host_role_.bind(*kernel_);
-	joiner_role_.bind(*kernel_);
+	role_->bind(*kernel_);
 	kernel_->seat_specs = std::move(kept_seat_specs);
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
 	kernel_->local.look_settings = kept_look_settings;
 	kernel_->set_asset_index(
-			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr);
+			assets_.root.is_valid() ? &assets_.root->native_index() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
 	kernel_->profile.set_active(runtime_profiling_enabled_);
-	// Mission-scoped, while weapon_profile_ is player-scoped and outlives every
+	// Mission-scoped, while player_.weapon_profile is player-scoped and outlives every
 	// load [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup
 	// path, not Game_StartMission]: the RESIDENT BUFFER is rebuilt per mission,
 	// so the next session must re-copy its side's page.
-	weapon_profile_seeded_side_ = -1;
+	player_.weapon_profile_seeded_side = -1;
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
-	hud_map_control_.reset_spawn();
+	player_.hud_map_control.reset_spawn();
 	apply_character_traits_to_world();
 	// The fresh World's per-class ATTRIBUTES words (the medic plate / map
 	// marker feed) come from the retained charattr table [orig: the
 	// process-scoped g_CharAttr outlives every mission, CharAttr_LoadFromDef
 	// @0x412140 runs once at boot; see docs/interface/hud-re.md].
 	sync_class_attribute_flags();
-	kernel_->world.rules.projectile_authority = !joiner_;
-	kernel_->world.rules.mp_session = host_listen_ || joiner_;
+	apply_session_rules();
 	world_installed_ = false;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
-	last_occlusion_build_us_ = 0;
-	last_occlusion_probe_us_ = 0;
-	last_present_snapshot_us_ = 0;
-	last_present_entity_count_ = 0;
+	present_.last_occlusion_build_us = 0;
+	present_.last_occlusion_probe_us = 0;
+	present_.last_snapshot_us = 0;
+	present_.last_entity_count = 0;
 	reset_occlusion_apply_baseline();
-	present_layout_.clear();
-	++present_layout_revision_;
+	present_.layout.clear();
+	++present_.layout_revision;
 	// The retained per-load shell inputs are mission-scoped: drop them with
 	// the world (the boot re-supplies them).
-	collision_item_db_.unref();
-	item_traits_db_.unref();
-	infantry_adm_resource_root_.unref();
-	infantry_adm_item_db_.unref();
-	occlusion_culled_bms_.clear();
-	minimap_snapshot_valid_ = false;
+	assets_.collision_item_db.unref();
+	assets_.item_traits_db.unref();
+	assets_.infantry_adm_resource_root.unref();
+	assets_.infantry_adm_item_db.unref();
+	present_.occlusion_culled_bms.clear();
+	present_.minimap_snapshot_valid = false;
 	// Rebuild the kernel's terrain store from the retained TerrainData (the
 	// legacy pre-load set_terrain_height_field seam), then layer the shell-fed
 	// surface extras back on.
-	if (terrain_data_.is_valid() && terrain_data_->is_loaded()) {
-		const std::vector<uint8_t> &charmap = terrain_data_->get_charmap_indices();
+	if (assets_.terrain_data.is_valid() && assets_.terrain_data->is_loaded()) {
+		const std::vector<uint8_t> &charmap = assets_.terrain_data->get_charmap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
-				terrain_data_->get_cpt(), terrain_data_->get_trn(),
+				assets_.terrain_data->get_cpt(), assets_.terrain_data->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
-				terrain_data_->get_charmap_width(),
-				terrain_data_->get_charmap_height());
+				assets_.terrain_data->get_charmap_width(),
+				assets_.terrain_data->get_charmap_height());
 	}
 	apply_terrain_to_ai();
 	// The fresh world's collision/mounted-pose providers wire immediately (the
@@ -205,7 +204,7 @@ void Simulation::seed_weather(const opennova::world::WeatherSeed &p_seed) {
 }
 
 void Simulation::set_weather_render_owner(Weather *p_owner) {
-	weather_owner_id_ = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
+	assets_.weather_owner_id = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
 										: ObjectID();
 	if (kernel_ == nullptr) return;
 	kernel_->weather_render =
@@ -216,10 +215,10 @@ void Simulation::_release_weather_owner() {
 	if (kernel_ != nullptr) {
 		kernel_->weather_render = nullptr;
 	}
-	if (!weather_owner_id_.is_valid()) return;
+	if (!assets_.weather_owner_id.is_valid()) return;
 	Weather *owner = Object::cast_to<Weather>(
-			ObjectDB::get_instance(weather_owner_id_));
-	weather_owner_id_ = ObjectID();
+			ObjectDB::get_instance(assets_.weather_owner_id));
+	assets_.weather_owner_id = ObjectID();
 	if (owner != nullptr) {
 		owner->release_simulation();
 	}
@@ -238,9 +237,9 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 		int p_terrain_light_rgb) {
 	if (!world_installed_ || kernel_ == nullptr) {
-		precipitation_frame_.clear();
-		precipitation_frame_.snow = false;
-		return precipitation_frame_;
+		assets_.precipitation_frame.clear();
+		assets_.precipitation_frame.snow = false;
+		return assets_.precipitation_frame;
 	}
 	opennova::world::WeatherState &weather = kernel_->world.weather;
 	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
@@ -260,10 +259,10 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 	camera.up[0] = p_camera_up.x;
 	camera.up[1] = p_camera_up.y;
 	camera.up[2] = p_camera_up.z;
-	opennova::renderer::PrecipitationDrawFrame &frame = precipitation_frame_;
+	opennova::renderer::PrecipitationDrawFrame &frame = assets_.precipitation_frame;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
-			static_cast<uint32_t>(p_terrain_light_rgb), camera, precipitation_draw_, frame);
+			static_cast<uint32_t>(p_terrain_light_rgb), camera, assets_.precipitation_draw, frame);
 	return frame;
 }
 
@@ -347,7 +346,7 @@ bool Simulation::native_environment_snapshot(
 	out.lightning_timer_a = core.lightning.timer_a;
 	out.lightning_timer_b = core.lightning.timer_b;
 	out.lightning_level = core.lightning.level;
-	out.authority = !joiner_;
+	out.authority = !is_joiner();
 	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
 	return true;
 }
@@ -355,7 +354,7 @@ bool Simulation::native_environment_snapshot(
 // The MCP/debug rows' commands: authority-gated forwarders into the ONE
 // command layer (world::EntityCommands, ADR 0042 d5).
 #define OPENNOVA_WEATHER_COMMAND(call)                                    \
-	if (!world_installed_ || joiner_ || kernel_ == nullptr) return false; \
+	if (!world_installed_ || is_joiner() || kernel_ == nullptr) return false; \
 	kernel_->world.commands.call;                                         \
 	return true
 
@@ -392,9 +391,9 @@ void Simulation::apply_terrain_to_ai() {
 	// charmap the sampler's early return-1 skips the walk exactly like
 	// retail, so attaching the tiles unconditionally is faithful.
 	kernel_->world.tables.surface_map.tiles =
-			surface_tiles_.empty() ? nullptr : surface_tiles_.data();
-	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
+			assets_.surface_tiles.empty() ? nullptr : assets_.surface_tiles.data();
+	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(assets_.surface_tiles.size());
+	kernel_->world.tables.surface_map.tile_surface = assets_.tile_surface_table.data();
 	apply_sound_state_to_world();
 }
 
@@ -406,10 +405,10 @@ void Simulation::apply_terrain_to_ai() {
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
 	kernel_->world.tables.sound_profiles.clear();
-	if (!sndprof_text_.empty())
-		kernel_->world.tables.sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
-		                             sndprof_text_.size());
-	kernel_->world.env.water_z = env_water_z_q16_;
+	if (!assets_.sndprof_text.empty())
+		kernel_->world.tables.sound_profiles.parse(reinterpret_cast<const char *>(assets_.sndprof_text.data()),
+		                             assets_.sndprof_text.size());
+	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
 }
 
@@ -418,7 +417,7 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 	// the engine's one owning cpt/trn(+charmap) field builder (ADR 0042 d4),
 	// living on the kernel; the Ref is retained so a reload (which recreates
 	// the kernel) can rebuild the store from the same source.
-	terrain_data_ = p_terrain;
+	assets_.terrain_data = p_terrain;
 	kernel_->terrain_store.clear();
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
 		const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
@@ -431,21 +430,21 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 }
 
 void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
-	sndprof_text_.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
+	assets_.sndprof_text.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
 	apply_sound_state_to_world();
 }
 
 void Simulation::apply_character_traits_to_world() {
 	if (!kernel_) return;
 	kernel_->world.tables.character_traits.clear();
-	for (const CharacterSexRow &row : character_sex_rows_)
+	for (const CharacterSexRow &row : assets_.character_sex_rows)
 		kernel_->world.tables.character_traits.set(row.character_id, row.female);
 }
 
 void Simulation::set_water_z(double p_water_y) {
-	env_water_z_q16_ = static_cast<int32_t>(p_water_y * 65536.0);
+	assets_.env_water_z_q16 = static_cast<int32_t>(p_water_y * 65536.0);
 	if (kernel_) {
-		kernel_->world.env.water_z = env_water_z_q16_;
+		kernel_->world.env.water_z = assets_.env_water_z_q16;
 		kernel_->sync_water_plane();
 	}
 }
@@ -492,75 +491,63 @@ void Simulation::finish_kernel_boot() {
 	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
-	hud_map_control_.set_mission_map_zoom(kernel_->mission.header.map_zoom);
+	player_.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
 	// The score row keys off the mission's game-mode bit, so re-resolve it now
 	// that the flags are known (the config may load before OR after the boot).
 	refresh_score_rules();
-	if (!kernel_->wac_loaded && wac_program_ && wac_program_->is_ok())
-		kernel_->wac.set_program(wac_program_->native_program());
+	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
+		kernel_->wac.set_program(assets_.wac_program->native_program());
 }
 
-// The kernel boot's bringup_net_session hook for this sim's role: the listen
-// host stands its npruntime session up between the world wiring and
-// the system registration [orig: SinglePlayer_StartMission @0x561af0]; a
-// joiner (re)builds its non-authority ClientRuntime at the same point. The
-// bare no-net world installs only the decode-view class table.
+// The kernel boot's bringup_net_session hook: the active role's own bring-up
+// (the listen host stands its npruntime session up between the world wiring
+// and the system registration [orig: SinglePlayer_StartMission @0x561af0];
+// a joiner (re)builds its non-authority ClientRuntime at the same point; the
+// bare no-net world installs nothing), then the binding's tail: the live
+// runtime pointer, the retained join inputs on a fresh joiner runtime, the
+// joiner's per-load loadout/zone resets, and the decode-view class table.
 std::function<void()> Simulation::role_bringup_hook() {
-	if (listen_server_ && !joiner_) {
-		return [this] {
-			bringup_host_runtime();
-			install_item_class_resolver();
-		};
-	}
-	if (joiner_) {
-		return [this] {
-			// A retail-style menu join has already authenticated and learned the
-			// map from S2C 0x7B before this local load. Preserve that exact
-			// runtime/socket; rebuilding it here would silently reconnect and
-			// discard the witnessed pre-load session. Direct-loaded callers have
-			// not started yet and retain the historical fresh-runtime reset.
-			if (!joiner_role_.started() || !runtime_) {
-				runtime_ = &joiner_role_.create_runtime(joiner_player_name_, join_role_,
-						join_spectator_password_);
-				joiner_role_.reset_for_runtime_rebuild();
-				install_charattr_challenge_table();
-				install_character_join_vars();
-				install_join_integrity_profile();
-				install_expansion_version_root();
-			}
-			runtime_->set_world_ready(true);
-			joiner_role_.reset_for_load(runtime_->deployment_release_revision());
-			joiner_applied_loadout_revision_ = 0;
-			kernel_->local.loadout.pending_player_class = -1; // the shell re-applies the kit after each load
-			deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
+	opennova::inmatch::Role &role = active_role();
+	if (host_role_ != nullptr) host_role_->stage_bringup(host_bringup());
+	return [this, &role] {
+		const bool fresh_joiner_runtime = role.bring_up();
+		runtime_ = role.client_runtime();
+		if (fresh_joiner_runtime) {
+			install_charattr_challenge_table();
+			install_character_join_vars();
+			install_join_integrity_profile();
+			install_expansion_version_root();
+		}
+		if (is_joiner()) {
+			net_.joiner_applied_loadout_revision = 0;
+			net_.deploy_zone_registry_built = false; // fresh world -> fresh zone registry
 			// Re-arm the 0x2F submission seam from the carried sim state. The fresh
 			// kernel holds an EMPTY weapon catalog, so this is a deliberate no-op
 			// that leaves the capture-default fallback armed; the real arm happens
 			// when the shell's load_weapon_table lands.
 			push_joiner_loadout_kit();
-			install_item_class_resolver();
-		};
-	}
-	return [this] { install_item_class_resolver(); };
+		}
+		install_item_class_resolver();
+	};
 }
 
 void Simulation::apply_host_session_mission_header(const opennova::bms::File &file) {
 	std::vector<uint8_t> header_blob;
 	std::string error;
 	if (opennova::bms::encode_loaded_header_blob(file, header_blob, error)) {
-		host_session_config_.mission_header_blob = std::move(header_blob);
+		net_.host_session_config.mission_header_blob = std::move(header_blob);
 	} else {
-		host_session_config_.mission_header_blob.clear();
+		net_.host_session_config.mission_header_blob.clear();
 	}
 
 	const std::string mission_name = file.get_mission_name();
 	if (!mission_name.empty()) {
-		host_session_config_.mission_name = mission_name;
-		if (host_session_config_.spawn_names.empty()) {
-			host_session_config_.spawn_names.push_back(mission_name);
+		net_.host_session_config.mission_name = mission_name;
+		if (net_.host_session_config.spawn_names.empty()) {
+			net_.host_session_config.spawn_names.push_back(mission_name);
 		}
 	}
-	// host_session_config_ is consumed by create_session at the next load through
+	// net_.host_session_config is consumed by create_session at the next load through
 	// bringup_host_runtime; there is deliberately nothing to refresh live.
 }
 
@@ -611,30 +598,30 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	set_terrain_til_data(p_terrain_til);
 	// The previous mission's retained terrain must not rebuild into the fresh
 	// kernel: set_terrain_height_field below builds the store exactly once.
-	terrain_data_.unref();
+	assets_.terrain_data.unref();
 
 	reset_world();
 	if (p_resource_root.is_valid()) set_asset_root(p_resource_root);
 	if (p_item_db.is_valid()) {
 		// Hand the shell's parsed items.def rows over as the kernel's item
 		// table (the Ref pins their lifetime for the kernel's).
-		item_traits_db_ = p_item_db;
+		assets_.item_traits_db = p_item_db;
 		kernel_->set_items_table(&p_item_db->native_items());
 	}
-	joiner_role_.set_wire_header_world(p_mission->is_wire_header_only());
+	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	kernel_->open_document(p_mission->native_file(),
 			std::string(p_mission_file_basename.utf8().get_data()), files);
 	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
 	// exactly the ctest embedder's order; the D-SND-15 .TSD tile table rides
 	// beside it.
 	set_terrain_height_field(p_terrain);
-	tile_surface_table_.fill(0);
+	assets_.tile_surface_table.fill(0);
 	if (p_terrain.is_valid() && p_terrain->is_loaded() && files.valid()) {
 		opennova::terrain::SurfaceTileFileSource tile_files;
 		tile_files.has_file = files.has_file;
 		tile_files.read_file = files.read_file;
 		opennova::terrain::resolve_tileset_surface_table(tile_files,
-				p_terrain->get_trn().tilestrip, tile_surface_table_.data());
+				p_terrain->get_trn().tilestrip, assets_.tile_surface_table.data());
 	}
 	apply_terrain_to_ai();
 	// SndProf.def -> the footstep/foley/landing/scream slot table: the kernel
@@ -651,7 +638,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 
 	ms::KernelBootOptions options;
 	options.playable = p_playable;
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// setter above built, or none): the kernel never loads one from files here.
 	options.terrain = false;
@@ -662,8 +649,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 			? std::string(ms::kDefaultInfantryAdm)
 			: std::string(p_infantry_adm.utf8().get_data());
 	options.people_name_resolver = [this](int32_t index) {
-		const auto it = mission_people_names_.find(index);
-		return it != mission_people_names_.end() ? it->second : std::string();
+		const auto it = net_.mission_people_names.find(index);
+		return it != net_.mission_people_names.end() ? it->second : std::string();
 	};
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -677,12 +664,12 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// net-free boot cannot make: the wire entity classes from the netsim
 	// ItemReplicationCatalog, then the collision Ref retention.
 	if (p_resource_root.is_valid() && p_item_db.is_valid()) {
-		infantry_adm_resource_root_ = p_resource_root;
-		infantry_adm_item_db_ = p_item_db;
+		assets_.infantry_adm_resource_root = p_resource_root;
+		assets_.infantry_adm_item_db = p_item_db;
 	}
 	if (p_item_db.is_valid()) {
 		resolve_item_traits(p_item_db);
-		collision_item_db_ = p_item_db;
+		assets_.collision_item_db = p_item_db;
 	}
 	// score.ini rides the boot's session-data step. DIVERGENCE (placement):
 	// retail loads it far earlier, when it builds the default gametype settings
@@ -708,10 +695,10 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;
 	reset_world();
-	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
+	// Do not infer this from the role: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
 	// Only the production 616-byte S2C header needs wire-time materialization.
-	joiner_role_.set_wire_header_world(p_mission->is_wire_header_only());
+	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with NO file source: the file-fed boot steps skip and
 	// this stays the bare promote + systems + role bring-up path.
@@ -719,7 +706,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 			std::string(), opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -735,12 +722,12 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 void Simulation::build_demo_mission() {
 	if (!begin_session_load()) return;
 	reset_world();
-	host_session_config_.mission_file = "demo.bms";
+	net_.host_session_config.mission_file = "demo.bms";
 	kernel_->open_document(make_demo_mission(), std::string(),
 			opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
 	options.playable = false;
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -764,28 +751,28 @@ void Simulation::restore_world_baseline() {
 	runtime_ = active_role().client_runtime();
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
-	minimap_snapshot_valid_ = false;
-	if (joiner_role_.wire_header_world()) {
+	present_.minimap_snapshot_valid = false;
+	if (kernel_->wire_header_world) {
 		// ClientState survives Stop/Start, while the body-empty baseline removes
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		deploy_zone_registry_built_ = false;
+		net_.deploy_zone_registry_built = false;
 	}
-	if (collision_item_db_.is_valid())
-		resolve_collision_instances(collision_item_db_);
+	if (assets_.collision_item_db.is_valid())
+		resolve_collision_instances(assets_.collision_item_db);
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
 	invalidate_present_effect_pose_cache();
 }
 
 void Simulation::set_wac_program(std::shared_ptr<WacProgram> p_program) {
-	wac_program_ = std::move(p_program);
+	assets_.wac_program = std::move(p_program);
 	if (!world_installed_) {
 		return; // the next kernel boot applies it (finish_kernel_boot)
 	}
-	if (wac_program_ && wac_program_->is_ok()) {
-		kernel_->wac.set_program(wac_program_->native_program());
+	if (assets_.wac_program && assets_.wac_program->is_ok()) {
+		kernel_->wac.set_program(assets_.wac_program->native_program());
 	} else {
 		kernel_->wac.set_program(opennova::wac::Program());
 	}
@@ -810,21 +797,21 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	// Adopt the registry-compiled program into the holder so the retained
 	// WacProgram carries its diagnostics either way.
 	holder->adopt(std::move(program));
-	wac_program_ = std::move(holder);
-	if (!wac_program_->is_ok()) {
+	assets_.wac_program = std::move(holder);
+	if (!assets_.wac_program->is_ok()) {
 		return false;
 	}
-	kernel_->wac.set_program(wac_program_->native_program());
+	kernel_->wac.set_program(assets_.wac_program->native_program());
 	return true;
 }
 
 bool Simulation::run_mission_start_wac() {
-	if (!world_installed_ || joiner_) return false;
+	if (!world_installed_ || is_joiner()) return false;
 	return kernel_->wac.execute_initial(kernel_->world);
 }
 
 void Simulation::seal_mission_start_baseline() {
-	if (!world_installed_ || joiner_) return;
+	if (!world_installed_ || is_joiner()) return;
 	kernel_->capture_baseline();
 }
 
@@ -833,9 +820,9 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	runtime_profiling_enabled_ = p_enabled;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
-	last_present_snapshot_us_ = 0;
-	last_occlusion_build_us_ = 0;
-	last_occlusion_probe_us_ = 0;
+	present_.last_snapshot_us = 0;
+	present_.last_occlusion_build_us = 0;
+	present_.last_occlusion_probe_us = 0;
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
@@ -876,12 +863,12 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["loaded"] = is_loaded();
 	out["listen_server"] = listen_server_;
 	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
-	out["present_entity_count"] = last_present_entity_count_;
+	out["present_entity_count"] = present_.last_entity_count;
 	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
 	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
-	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
-	out["occlusion_build_us"] = static_cast<int64_t>(last_occlusion_build_us_);
-	out["occlusion_probe_us"] = static_cast<int64_t>(last_occlusion_probe_us_);
+	out["present_snapshot_us"] = static_cast<int64_t>(present_.last_snapshot_us);
+	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
+	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
 	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile).
 	const opennova::world::CollisionWorld::TraceProfile &tp =
@@ -915,7 +902,7 @@ void Simulation::set_mission_variable(int index, int value) {
 }
 
 Error Simulation::debug_kill_player_entity(int p_handle) {
-	if (!kernel_ || joiner_) return ERR_UNAVAILABLE;
+	if (!kernel_ || is_joiner()) return ERR_UNAVAILABLE;
 	// The engine transaction (EntityCommands::kill_player): the health write
 	// the real damage path makes plus the RoundDeath record, the local player
 	// as the killer.

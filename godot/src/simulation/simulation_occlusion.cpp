@@ -68,14 +68,14 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	const uint64_t occl_probe_start =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 	if (runtime_profiling_enabled_)
-		last_occlusion_build_us_ = occl_probe_start - occl_build_start;
+		present_.last_occlusion_build_us = occl_probe_start - occl_build_start;
 
 	// The entity collectors' render gates over the non-building entities the
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
 	// collect_visible_entities_for_terrain @ 0x5c8c60]
-	occlusion_culled_bms_.clear();
+	present_.occlusion_culled_bms.clear();
 	std::vector<opennova::world::EntityHandle> &handles =
-			occlusion_probe_handles_;
+			present_.occlusion_probe_handles;
 	handles.clear();
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind == opennova::world::EntityKind::Building ||
@@ -88,7 +88,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		opennova::world::Entity *e = kernel_->world.registry.get(h);
 		if (e == nullptr) continue;
 		if (!kernel_->occlusion.entity_render_visible(kernel_->world, kernel_->collision, *e, cam))
-			occlusion_culled_bms_.push_back(e->bms_id);
+			present_.occlusion_culled_bms.push_back(e->bms_id);
 	}
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's
@@ -97,7 +97,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// sphere_render_visible). A row with a registry twin uses that twin's
 	// collision bound sphere (the host's runtime spawns); a bare row is the
 	// position-centred unit sphere the organics leg above falls back to.
-	occlusion_culled_wire_.clear();
+	present_.occlusion_culled_wire.clear();
 	if (runtime_ != nullptr) {
 		// A latch belongs to one row lifetime: drop the counters of handles
 		// that left the state so a reused handle starts fresh (retail memsets
@@ -106,10 +106,10 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		for (const opennova::replication::ClientEntityState &es :
 				runtime_->state().entities)
 			live_handles.insert(es.handle);
-		for (auto it = wire_occlusion_latch_.begin();
-				it != wire_occlusion_latch_.end();) {
+		for (auto it = present_.wire_occlusion_latch.begin();
+				it != present_.wire_occlusion_latch.end();) {
 			if (live_handles.count(it->first) == 0)
-				it = wire_occlusion_latch_.erase(it);
+				it = present_.wire_occlusion_latch.erase(it);
 			else
 				++it;
 		}
@@ -128,7 +128,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
 			const opennova::world::EntityHandle h{handle};
 			const opennova::world::Entity *twin = nullptr;
-			if (!joiner_ || h.pool() != 0) {
+			if (!is_joiner() || h.pool() != 0) {
 				const opennova::world::Entity *candidate =
 						kernel_->world.registry.get(h);
 				if (candidate != nullptr &&
@@ -153,14 +153,14 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 								es.heading_bam, center_world);
 				pose.transform_point(center_local, center_world);
 			}
-			uint8_t &latch = wire_occlusion_latch_[handle];
+			uint8_t &latch = present_.wire_occlusion_latch[handle];
 			if (!kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
 						center_world, radius, latch, kernel_->world.logic_tick))
-				occlusion_culled_wire_.push_back(static_cast<int32_t>(handle));
+				present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
 		}
 	}
 	if (runtime_profiling_enabled_)
-		last_occlusion_probe_us_ = opennova::io::perf_now_us() - occl_probe_start;
+		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 }
 
 PackedInt64Array Simulation::get_building_visibility() const {
@@ -196,7 +196,7 @@ bool Simulation::building_visibility_visible(int64_t p_packed) {
 
 PackedInt32Array Simulation::get_render_culled_bms_ids() const {
 	PackedInt32Array out;
-	for (const int32_t id : occlusion_culled_bms_) out.push_back(id);
+	for (const int32_t id : present_.occlusion_culled_bms) out.push_back(id);
 	return out;
 }
 
@@ -218,9 +218,9 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 		    has_occlusion ? kernel_->occlusion.section_mask(e.handle) : 0xFFFFFFFFu;
 		const int64_t packed = opennova::world::pack_building_visibility(mask, visible);
 		const uint32_t key = e.handle.packed;
-		auto it = occl_apply_building_last_.find(key);
-		if (it != occl_apply_building_last_.end() && it->second == packed) return;
-		occl_apply_building_last_[key] = packed;
+		auto it = present_.occl_apply_building_last.find(key);
+		if (it != present_.occl_apply_building_last.end() && it->second == packed) return;
+		present_.occl_apply_building_last[key] = packed;
 		out.push_back(e.bms_id);
 		out.push_back(packed);
 	});
@@ -243,11 +243,11 @@ static PackedInt32Array culled_changes_since(const std::vector<int32_t> &p_now,
 }
 
 PackedInt32Array Simulation::get_wire_render_culled_changes() {
-	return culled_changes_since(occlusion_culled_wire_, occl_apply_culled_wire_last_);
+	return culled_changes_since(present_.occlusion_culled_wire, present_.occl_apply_culled_wire_last);
 }
 
 PackedInt32Array Simulation::get_render_culled_changes() {
-	return culled_changes_since(occlusion_culled_bms_, occl_apply_culled_last_);
+	return culled_changes_since(present_.occlusion_culled_bms, present_.occl_apply_culled_last);
 }
 
 float Simulation::sun_quality_factor(int p_quality) const {
@@ -276,11 +276,11 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 		opennova::world::to_fixed(-p_light_dir.z * 200.0f),
 		opennova::world::to_fixed(p_light_dir.y * 200.0f)};
 
-	std::unordered_set<int32_t> culled(occlusion_culled_bms_.begin(),
-	                                   occlusion_culled_bms_.end());
-	if (sun_quality_present_layout_revision_ != present_layout_revision_) {
-		sun_quality_last_by_wire_.clear();
-		sun_quality_present_layout_revision_ = present_layout_revision_;
+	std::unordered_set<int32_t> culled(present_.occlusion_culled_bms.begin(),
+	                                   present_.occlusion_culled_bms.end());
+	if (present_.sun_quality_layout_revision != present_.layout_revision) {
+		present_.sun_quality_last_by_wire.clear();
+		present_.sun_quality_layout_revision = present_.layout_revision;
 	}
 
 	const auto entity_quality = [&](const opennova::world::Entity &e) {
@@ -301,7 +301,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	// witnessed effectScale=1 exemption while the third-person body dims.
 	const opennova::world::Entity *local =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	local_sun_quality_ = local != nullptr ? entity_quality(*local) : 4;
+	present_.local_sun_quality = local != nullptr ? entity_quality(*local) : 4;
 
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind == opennova::world::EntityKind::Building ||
@@ -318,11 +318,11 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 		// until it renders again (the stack slot is simply never pushed).
 		if (culled.count(e.bms_id) != 0) return;
 		const uint8_t quality = entity_quality(e);
-		const auto it = sun_quality_last_by_bms_.find(e.bms_id);
+		const auto it = present_.sun_quality_last_by_bms.find(e.bms_id);
 		const uint8_t last =
-				it != sun_quality_last_by_bms_.end() ? it->second : 4;
+				it != present_.sun_quality_last_by_bms.end() ? it->second : 4;
 		if (quality == last) return;
-		sun_quality_last_by_bms_[e.bms_id] = quality;
+		present_.sun_quality_last_by_bms[e.bms_id] = quality;
 		out.push_back(-1);
 		out.push_back(e.bms_id);
 		out.push_back(quality);
@@ -346,7 +346,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	// docs/render/render-lighting-re.md]. Throttling the casts themselves to
 	// that cadence would hold a moving vehicle's sun factor stale for up to
 	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
-	if (!joiner_) {
+	if (!is_joiner()) {
 		// The host presents its own pools (D-NET-140 closed): the wire-rendered
 		// rows are the runtime-spawned pool-0 organics and pool-1 dynamics with
 		// no authored identity; placed rows went through the walk above.
@@ -355,7 +355,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 				const uint16_t handle = e.handle.packed;
 				if (e.item_id == 0 || e.handle == kernel_->world.cached.local_player ||
 						e.spawn_origin != opennova::world::kSpawnOriginNone) {
-					sun_quality_last_by_wire_.erase(handle);
+					present_.sun_quality_last_by_wire.erase(handle);
 					return;
 				}
 				// A hidden row is not drawn, so retail does not push a new stack
@@ -369,15 +369,15 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 						kernel_->wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
 								.pool1_candidate_source_eligible;
 				if (!person_source && !dynamic_source) {
-					sun_quality_last_by_wire_.erase(handle);
+					present_.sun_quality_last_by_wire.erase(handle);
 					return;
 				}
 				const uint8_t quality = entity_quality(e);
-				const auto it = sun_quality_last_by_wire_.find(handle);
+				const auto it = present_.sun_quality_last_by_wire.find(handle);
 				const uint8_t last =
-						it != sun_quality_last_by_wire_.end() ? it->second : 4;
+						it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
 				if (quality == last) return;
-				sun_quality_last_by_wire_[handle] = quality;
+				present_.sun_quality_last_by_wire[handle] = quality;
 				out.push_back(handle);
 				out.push_back(0);
 				out.push_back(quality);
@@ -385,7 +385,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 		}
 	} else if (runtime_) {
 		const std::unordered_set<int32_t> wire_culled(
-				occlusion_culled_wire_.begin(), occlusion_culled_wire_.end());
+				present_.occlusion_culled_wire.begin(), present_.occlusion_culled_wire.end());
 		for (const opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
 			const uint16_t handle = es.handle;
@@ -393,7 +393,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 					es.type_id == 0 ||
 					(runtime_->has_self_handle() &&
 					 handle == runtime_->self_handle())) {
-				sun_quality_last_by_wire_.erase(handle);
+				present_.sun_quality_last_by_wire.erase(handle);
 				continue;
 			}
 			// Retail only rays a drawn entity; a culled one keeps its last
@@ -409,7 +409,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			const opennova::world::EntityHandle h{handle};
 			const opennova::world::Entity *native = nullptr;
 			const opennova::world::Entity *joiner_twin = nullptr;
-			if (!joiner_) {
+			if (!is_joiner()) {
 				const opennova::world::Entity *candidate =
 						kernel_->world.registry.get(h);
 				if (candidate != nullptr &&
@@ -430,7 +430,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			if (h == kernel_->world.cached.local_player ||
 					(placed != nullptr && placed->spawn_origin !=
 							opennova::world::kSpawnOriginNone)) {
-				sun_quality_last_by_wire_.erase(handle);
+				present_.sun_quality_last_by_wire.erase(handle);
 				continue;
 			}
 
@@ -442,7 +442,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			const bool dynamic_source = h.pool() == 1 &&
 					shape.pool1_candidate_source_eligible;
 			if (!person_source && !dynamic_source) {
-				sun_quality_last_by_wire_.erase(handle);
+				present_.sun_quality_last_by_wire.erase(handle);
 				continue;
 			}
 
@@ -460,11 +460,11 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 				quality = static_cast<uint8_t>(4 - blocked);
 			}
 
-			const auto it = sun_quality_last_by_wire_.find(handle);
+			const auto it = present_.sun_quality_last_by_wire.find(handle);
 			const uint8_t last =
-					it != sun_quality_last_by_wire_.end() ? it->second : 4;
+					it != present_.sun_quality_last_by_wire.end() ? it->second : 4;
 			if (quality == last) continue;
-			sun_quality_last_by_wire_[handle] = quality;
+			present_.sun_quality_last_by_wire[handle] = quality;
 			out.push_back(handle);
 			out.push_back(0);
 			out.push_back(quality);
@@ -489,15 +489,15 @@ bool Simulation::entity_present_visible(int p_bms_id) const {
 }
 
 void Simulation::reset_occlusion_apply_baseline() {
-	occl_apply_building_last_.clear();
-	occl_apply_culled_last_.clear();
-	occl_apply_culled_wire_last_.clear();
-	sun_quality_last_by_bms_.clear();
-	sun_quality_last_by_wire_.clear();
-	sun_quality_present_layout_revision_ = -1;
-	local_sun_quality_ = 4;
-	iris_interior_group_entity_ = opennova::world::EntityHandle{};
-	iris_interior_group_section_ = 0;
+	present_.occl_apply_building_last.clear();
+	present_.occl_apply_culled_last.clear();
+	present_.occl_apply_culled_wire_last.clear();
+	present_.sun_quality_last_by_bms.clear();
+	present_.sun_quality_last_by_wire.clear();
+	present_.sun_quality_layout_revision = -1;
+	present_.local_sun_quality = 4;
+	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
+	present_.iris_interior_group_section = 0;
 }
 
 bool Simulation::occlusion_water_visible() const {
@@ -626,17 +626,17 @@ int64_t Simulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
 opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const {
 	if (!kernel_ || p_bms_id <= 0) return opennova::world::EntityHandle{};
 	const uint64_t serial = kernel_->world.registry.spawn_serial();
-	if (bms_handle_index_world_ != &kernel_->world || bms_handle_index_serial_ != serial) {
-		bms_handle_index_.clear();
+	if (present_.bms_handle_index_world != &kernel_->world || present_.bms_handle_index_serial != serial) {
+		present_.bms_handle_index.clear();
 		kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-			if (e.bms_id > 0 && bms_handle_index_.find(e.bms_id) == bms_handle_index_.end())
-				bms_handle_index_[e.bms_id] = e.handle;
+			if (e.bms_id > 0 && present_.bms_handle_index.find(e.bms_id) == present_.bms_handle_index.end())
+				present_.bms_handle_index[e.bms_id] = e.handle;
 		});
-		bms_handle_index_world_ = &kernel_->world;
-		bms_handle_index_serial_ = serial;
+		present_.bms_handle_index_world = &kernel_->world;
+		present_.bms_handle_index_serial = serial;
 	}
-	const auto found = bms_handle_index_.find(p_bms_id);
-	if (found == bms_handle_index_.end()) return opennova::world::EntityHandle{};
+	const auto found = present_.bms_handle_index.find(p_bms_id);
+	if (found == present_.bms_handle_index.end()) return opennova::world::EntityHandle{};
 	// A despawned row's slot may have been reused; confirm the occupant still
 	// carries the id before handing the handle out.
 	const opennova::world::Entity *e = kernel_->world.registry.get(found->second);
@@ -673,8 +673,8 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	opennova::world::compute_iris_march(kernel_->world, kernel_->collision, kernel_->occlusion,
 			cam, end, sun, march);
 	if (march.count == 0) return out;
-	iris_interior_group_entity_ = march.interior_group_entity;
-	iris_interior_group_section_ = march.interior_group_section;
+	present_.iris_interior_group_entity = march.interior_group_entity;
+	present_.iris_interior_group_section = march.interior_group_section;
 	for (int i = 0; i < march.count; ++i) out.append(march.samples[i]);
 	return out;
 }
