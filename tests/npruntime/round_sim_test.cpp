@@ -22,17 +22,17 @@
 // spawn health without a second respawn implementation.
 
 #include <runtime/world/ammo_table_build.h>
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_server_ctx.h>
-#include <runtime/session/server_message_dispatch.h>
-#include <runtime/session/server_tick.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h>
 
 #include <runtime/replication/connection.h>
-#include <runtime/session/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/entity_wire_bridge.h>
-#include <runtime/session/session_transport.h>
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/replication_model.h>
@@ -60,8 +60,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -132,11 +132,11 @@ std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t adm, int32_t px, int32_
 	return b;
 }
 
-void dispatch_fire(np::NapiNPConnection &conn, std::vector<np::NapiNPConnection> &roster,
+void dispatch_fire(inmatch::NapiNPConnection &conn, std::vector<inmatch::NapiNPConnection> &roster,
                    w::World &world, const std::vector<uint8_t> &body) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x06, body));
-	np::dispatch_session_replies(np::GameConfig{}, conn, msgs, 100, roster, &world);
+	inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 }
 
 // Drain ALL staged S2C datagrams (0x0A noise included) once; pick tags from the result.
@@ -207,7 +207,7 @@ bool run_death_feed_classifier_matrix() {
 
 	ns::LoopbackChannel host;
 	ns::UdpSessionTransport victim_wire(ns::UdpSessionTransport::Role::Host);
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -255,7 +255,7 @@ bool run_death_feed_classifier_matrix() {
 	};
 	auto route = [&](const w::RoundDeath &d) {
 		world.round_sim.deaths.push_back(d);
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		const Drained host_out = drain_all(host);
 		drain_all(victim_wire);
 		return host_out.tag(0x1E);
@@ -391,7 +391,7 @@ bool run_death_feed_classifier_matrix() {
 	submerged->position.z = 0.0f;
 	submerged->eye_offset_z = 0;
 	roster[1].link.underwater_breath_samples = 80;
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	{
 		const Drained host_out = drain_all(host);
 		drain_all(victim_wire);
@@ -948,7 +948,7 @@ int main() {
 	ns::ClientReplicaPipeline client_b_view;
 	ns::ClientReplicaPipeline client_c_view;
 
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -968,7 +968,7 @@ int main() {
 		roster[i].reply.player_slot = static_cast<uint8_t>(i);
 	// These fixture players predate the measured 620-tick recent-spawn window.
 	// Individual sub-cases below stamp a fresh deploy when they exercise that arm.
-	for (np::NapiNPConnection &conn : roster) {
+	for (inmatch::NapiNPConnection &conn : roster) {
 		conn.link.last_deploy_tick = world.logic_tick - 620u;
 		conn.link.last_deploy_tick_valid = true;
 	}
@@ -998,7 +998,7 @@ int main() {
 		roster[2].link.auto_medic_enabled = false;
 		std::vector<ProtocolMessage> short_pref{
 				make_protocol_message(0x03, {1, 0})};
-		np::dispatch_session_replies(
+		inmatch::dispatch_session_replies(
 				ctx.config, roster[2], short_pref, world.logic_tick,
 				roster, &world);
 		if (!expect(roster[2].link.auto_medic_enabled,
@@ -1006,7 +1006,7 @@ int main() {
 			return 1;
 		std::vector<ProtocolMessage> manual_medic{
 				make_protocol_message(0x03, {1, 0, 0, 0})};
-		np::dispatch_session_replies(
+		inmatch::dispatch_session_replies(
 				ctx.config, roster[2], manual_medic, world.logic_tick,
 				roster, &world);
 		if (!expect(!roster[2].link.auto_medic_enabled,
@@ -1016,7 +1016,7 @@ int main() {
 	auto advance_second_boundaries = [&](int count) {
 		int crossed = 0;
 		while (crossed < count) {
-			np::Server_TickUpdate(ctx);
+			inmatch::Server_TickUpdate(ctx);
 			if (world.match.periodic_second()) ++crossed;
 		}
 	};
@@ -1043,7 +1043,7 @@ int main() {
 
 	// --- 2. Three ticks reach the victim at x=30; the hit applies the kinetic number:
 	// min(62*13.77, 1219)=854 -> 854*62/875 = 60. ---
-	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 3; ++i) inmatch::Server_TickUpdate(ctx);
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
 	// The hit queued ONE impact for the presenting host: tag 23 'flesh'. The person
@@ -1139,7 +1139,7 @@ int main() {
 	for (int shot = 0; shot < 2; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
-		for (int i = 0; i < 4; ++i) np::Server_TickUpdate(ctx);
+		for (int i = 0; i < 4; ++i) inmatch::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	const Drained after_kill_b = drain_all(udp_b);
@@ -1302,12 +1302,12 @@ int main() {
 	// @0x528180 type 1 -> "<prefix>_MEDIC_REQUEST"]
 	{
 		ctx.server_text.medic_request_format = "%s needs a medic!";
-		auto send_medic_request = [&](np::NapiNPConnection &requester) {
-			np::ServerDispatchInputs inputs;
+		auto send_medic_request = [&](inmatch::NapiNPConnection &requester) {
+			inmatch::ServerDispatchInputs inputs;
 			inputs.medic_request_format = &ctx.server_text.medic_request_format;
 			MedicRequest request;
 			request.entity_index = requester.link.owned_entity.packed & 0xFFFu;
-			return np::dispatch_session_replies(
+			return inmatch::dispatch_session_replies(
 					ctx.config, requester,
 					{make_protocol_message(c2s::MEDIC_REQUEST,
 							encode_medic_request(request))},
@@ -1376,7 +1376,7 @@ int main() {
 				return 1;
 			// A player-sync pull of the victim's slot with field 0x0008 folds the
 			// same latch into 0x46 [orig: NetPacket_SerializePlayerSync0x46 @0x505E80].
-			const std::vector<ProtocolMessage> sync = np::dispatch_session_replies(
+			const std::vector<ProtocolMessage> sync = inmatch::dispatch_session_replies(
 					ctx.config, roster[1],
 					{make_protocol_message(c2s::PLAYER_SYNC_REQUEST,
 							{roster[2].reply.player_slot, 0x08, 0x00})},
@@ -1421,7 +1421,7 @@ int main() {
 	std::vector<ProtocolMessage> default_pick{
 			make_protocol_message(0x0E, {0xFF, 0xFF})};
 	auto request_client_respawn = [&]() {
-		return np::dispatch_session_replies(
+		return inmatch::dispatch_session_replies(
 				ctx.config, roster[2], default_pick, world.logic_tick,
 				roster, &world);
 	};
@@ -1465,7 +1465,7 @@ int main() {
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
-		for (int i = 0; i < 6; ++i) np::Server_TickUpdate(ctx);
+		for (int i = 0; i < 6; ++i) inmatch::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(ha)->health == 0, "host player dead")) return 1;
 	if (!expect(roster[0].link.respawn_delay_seconds == 3,
@@ -1486,12 +1486,12 @@ int main() {
 	// own local copy).
 	// [orig: Server_BroadcastMedicRequest @0x515390 — no loopback early-out]
 	{
-		np::ServerDispatchInputs inputs;
+		inmatch::ServerDispatchInputs inputs;
 		inputs.medic_request_format = &ctx.server_text.medic_request_format;
 		drain_all(udp_b);
 		drain_all(loop);
 		world.slot_sounds.clear();
-		const std::vector<ProtocolMessage> host_call = np::dispatch_session_replies(
+		const std::vector<ProtocolMessage> host_call = inmatch::dispatch_session_replies(
 				ctx.config, roster[0],
 				{make_protocol_message(c2s::MEDIC_REQUEST,
 						encode_medic_request(MedicRequest{}))},
@@ -1536,7 +1536,7 @@ int main() {
 		if (!expect(roster[0].link.respawn_delay_seconds == 0 && host->health == 0,
 		            "expiry and deployment remain distinct retail phases"))
 			return 1;
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
 		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,
@@ -1565,7 +1565,7 @@ int main() {
 	{
 		const w::EntityHandle jb = w::spawn_remote_player(world, player_spawn(0xFFF3, 5, 5, 0));
 		if (!expect(jb.valid(), "deploy-test joiner spawned")) return 1;
-		np::NapiNPConnection conn =
+		inmatch::NapiNPConnection conn =
 				make_conn(7, 1, &udp_b, ns::TransportMode::Client, jb, /*spawned=*/true);
 		conn.link.respawn_pending = true;
 		w::Entity *je = world.registry.get(jb);
@@ -1590,7 +1590,7 @@ int main() {
 		target_pick.push_back(make_protocol_message(
 				0x0E, {static_cast<uint8_t>(zone.packed),
 				       static_cast<uint8_t>(zone.packed >> 8)}));
-		if (!expect(np::dispatch_session_replies(
+		if (!expect(inmatch::dispatch_session_replies(
 		                    ctx.config, conn, target_pick, 99, roster, &world).empty() &&
 		                    conn.link.respawn_pending,
 		            "+364 silently rejects a real spawn-target pick"))
@@ -1598,8 +1598,8 @@ int main() {
 
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)
-		std::vector<ProtocolMessage> replies = np::dispatch_session_replies(
-				np::GameConfig{}, conn, msgs, 100, roster, &world);
+		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
+				inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 
 		bool saw_5a = false, saw_61 = false;
 		for (const ProtocolMessage &m : replies) {
@@ -1637,8 +1637,8 @@ int main() {
 
 		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):
 		// no bundle, no reposition.
-		std::vector<ProtocolMessage> again = np::dispatch_session_replies(
-				np::GameConfig{}, conn, msgs, 101, roster, &world);
+		std::vector<ProtocolMessage> again = inmatch::dispatch_session_replies(
+				inmatch::GameConfig{}, conn, msgs, 101, roster, &world);
 		for (const ProtocolMessage &m : again)
 			if (!expect(m.tag != 0x5A && m.tag != 0x61,
 			            "alive deployed 0x0E draws no release bundle"))

@@ -8,7 +8,7 @@
 #include "netsim/conn_fan_test_util.h"
 
 #include <runtime/replication/entity_wire_bridge.h>
-#include <runtime/session/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/world/world.h>
 
@@ -17,7 +17,7 @@
 
 namespace {
 
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace nw = opennova;
 namespace w = opennova::world;
 

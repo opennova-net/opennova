@@ -11,9 +11,9 @@
 #include <cmath>
 #include <cstring>
 
-#include <runtime/session/server_initial_state.h> // install_mission_location_names
-#include <runtime/session/server_spawn.h> // Server_SetPlayerSpectator
-#include <runtime/session/session_status.h>
+#include <runtime/inmatch/server_initial_state.h> // install_mission_location_names
+#include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
+#include <runtime/inmatch/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -47,7 +47,7 @@ using namespace sim_internal;
 // player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
 // resolve_player_spawn_pose marker chain), and its own loopback client renders the per-frame 0x0A.
 void Simulation::bringup_host_runtime() {
-	namespace np = opennova::np;
+	namespace inmatch = opennova::inmatch;
 	// ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
 	// points straight at the kernel's adopted document, which outlives the match.
 	host_loop_.clear();
@@ -63,7 +63,7 @@ void Simulation::bringup_host_runtime() {
 	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
 	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].
 	const bool serve_and_play = host_listen_ ? host_serve_and_play_ : true;
-	host_owner_ = np::HostOwner{};
+	host_owner_ = inmatch::HostOwner{};
 	host_owner_.host_loopback = &host_loop_;
 	host_owner_.serve_and_play = serve_and_play;
 	ctx_.world = &kernel_->world;
@@ -72,7 +72,7 @@ void Simulation::bringup_host_runtime() {
 	ctx_.mission_text_loaded = mission_text_loaded_;
 	ctx_.mission_briefing3 = mission_briefing3_;
 	ctx_.mission_briefing2 = mission_briefing2_;
-	np::install_mission_location_names(ctx_, kernel_->mission, mission_location_texts_);
+	inmatch::install_mission_location_names(ctx_, kernel_->mission, mission_location_texts_);
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
 	// separate net ISystem (retired P8).
 
@@ -80,7 +80,7 @@ void Simulation::bringup_host_runtime() {
 	// gametype / mission + the §5.1 reply slice from the GDScript-configured host_session_config_; SP is
 	// the faithful "SINGLEPLAYERGAME" / 1 player. game_type (g_GameType) now feeds BOTH the S2C 0x08
 	// block dword[3] AND the 0x7B/0x60 bodies (§6.9; NapiNPMsg_0x7B_BuildPayload @0x507740).
-	np::GameConfig host_config;
+	inmatch::GameConfig host_config;
 	if (host_listen_) {
 		host_config = host_session_config_; // mission/player/spawn + game_type/mp_attributes from the UI
 		if (host_config.server_name.empty()) host_config.server_name = "OpenNova LAN Host";
@@ -108,21 +108,21 @@ void Simulation::bringup_host_runtime() {
 	// whole-world 0x0A its local view renders from). host_owner_.host_loopback / .serve_and_play + ctx_.world
 	// were set above; this replaces the copy that had drifted out of the helper. [orig: SinglePlayer_StartMission
 	// @0x561af0]. The one GameConfig carries the §5.1 reactive-reply config for the joiner replies too.
-	np::HostConfig host_cfg;
+	inmatch::HostConfig host_cfg;
 	host_cfg.config = host_config;
-	host_cfg.socket_mode = host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless;
+	host_cfg.socket_mode = host_listen_ ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	host_cfg.serve_and_play = serve_and_play;
 	// The shell's resolved PLAYER_INFO selection for the host's own player; the
 	// HostConfig default is the stock fresh-profile seed until one is installed.
 	if (local_character_vars_set_) {
 		host_cfg.local_character_vars = local_character_vars_;
 	}
-	np::start_host_session(host_owner_, host_cfg);
+	inmatch::start_host_session(host_owner_, host_cfg);
 	kernel_->session_open = true; // the retail is_in_session fact
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
-		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(host_loop_);
 		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 		// Phase-3 0x0A objective width is gated by the same g_GameType
 		// carried to remote clients in 0x7B extra; the local loopback has no
@@ -148,12 +148,12 @@ void Simulation::bringup_host_runtime() {
 }
 
 namespace {
-// UdpPump-backed netsim::IDatagramSocket — the Godot adapter the shared host owner loop pumps. A
+// UdpPump-backed opennova::IDatagramSocket — the Godot adapter the shared host owner loop pumps. A
 // null/closed pump (pure SP) yields recv 0 / send no-op, so the loop's socket legs go inert exactly as
 // the old host_listen_-gated code did. PeerAddr <-> "a.b.c.d" uses the LE octet packing PeerAddr
 // documents (octet 0 in the low byte; 127.0.0.1 -> 0x0100007F) — the conversion formerly in
 // peer_from_addr / send_datagram.
-class UdpPumpDatagramSocket : public opennova::netsim::IDatagramSocket {
+class UdpPumpDatagramSocket : public opennova::IDatagramSocket {
 public:
 	explicit UdpPumpDatagramSocket(UdpPump *pump) : pump_(pump) {}
 
@@ -186,12 +186,12 @@ private:
 } // namespace
 
 // P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
-// (engine/runtime/session) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
+// (engine/runtime/inmatch) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
 // longer drift. Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
 void Simulation::host_pump() {
-	namespace np = opennova::np;
+	namespace inmatch = opennova::inmatch;
 	const bool profiling = runtime_profiling_enabled_;
 	const uint64_t prep_start = profiling ? opennova::io::perf_now_us() : 0;
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
@@ -245,7 +245,7 @@ void Simulation::host_pump() {
 		kernel_->last_reload = opennova::world::LocalWeaponReloadWire{};
 	}
 	// The host's measurable net leg for the F3 Stats board: the ClientState
-	// fold. The S2C serialize/emit half rides inside np::host_session_pump
+	// fold. The S2C serialize/emit half rides inside inmatch::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
 	// npruntime grows a phase seam.
 	const uint64_t net_start = profiling ? opennova::io::perf_now_us() : 0;
@@ -258,8 +258,8 @@ void Simulation::host_pump() {
 	}
 }
 
-// host_pump's dispatch_event + admit_peer were promoted into engine/runtime/session (np::dispatch_event /
-// np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
+// host_pump's dispatch_event + admit_peer were promoted into engine/runtime/inmatch (inmatch::dispatch_event /
+// inmatch::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
 // the Godot binding and the headless server can no longer drift.
 
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
@@ -273,7 +273,7 @@ void Simulation::resolve_client_row_adm_ids() {
 			infantry_adm_resource_root_.is_null() ||
 			infantry_adm_item_db_.is_null())
 		return;
-	for (opennova::netsim::ClientEntityState &es :
+	for (opennova::replication::ClientEntityState &es :
 			runtime_->state().entities) {
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != opennova::EntityClass::Player &&
@@ -308,7 +308,7 @@ void Simulation::resolve_client_row_adm_ids() {
 // collision/occlusion instances and caches, refresh traits + seat specs, then
 // re-fold the retained 0x0D mountHandles image through the bridge materializer.
 void Simulation::on_replica_world_changed(
-		const opennova::netsim::ClientWorldSyncResult &p_sync) {
+		const opennova::replication::ClientWorldSyncResult &p_sync) {
 	for (const opennova::world::EntityLifetime lifetime : p_sync.retired) {
 		if (!lifetime.valid()) continue;
 		const auto cached =
@@ -356,7 +356,7 @@ void Simulation::on_replica_world_changed(
 Array Simulation::get_streamed_placement_records() const {
 	Array out;
 	if (!joiner_ || !kernel_) return out;
-	for (const opennova::netsim::StreamedPlacementRecord &rec :
+	for (const opennova::replication::StreamedPlacementRecord &rec :
 			joiner_bridge_.materializer().placement_records(kernel_->world)) {
 		Dictionary d;
 		d["kind"] = rec.kind;
@@ -401,11 +401,11 @@ void Simulation::joiner_pump() {
 	// binding supplies the shell legs: the socket, the render-coupled asset
 	// resolution, the loadout profile seams (S7b disposition), device input,
 	// the view/weapon pumps shared with the host path, and the clocks.
-	opennova::np::JoinerWorldBridge::PumpContext ctx{
+	opennova::inmatch::JoinerWorldBridge::PumpContext ctx{
 			kernel_->world, *runtime_, kernel_->weapon, kernel_->loadout,
 			kernel_->inventory, kernel_->inventory_valid, kernel_->seat_specs,
 			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
-	opennova::np::JoinerWorldBridge::PumpHooks hooks;
+	opennova::inmatch::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
 	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };
 	hooks.resolve_row_adm_ids = [this] { resolve_client_row_adm_ids(); };
@@ -421,7 +421,7 @@ void Simulation::joiner_pump() {
 	hooks.on_diagnostic_sample =
 			[this] { print_joiner_net_diagnostic_sample(); };
 	hooks.on_replica_world_changed =
-			[this](const opennova::netsim::ClientWorldSyncResult &sync) {
+			[this](const opennova::replication::ClientWorldSyncResult &sync) {
 				on_replica_world_changed(sync);
 			};
 	hooks.on_replica_world_static_ready = [this] { occlusion_init_mission(); };
@@ -649,7 +649,7 @@ bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes)
 	const std::string text(
 			reinterpret_cast<const char *>(p_score_ini_bytes.ptr()),
 			static_cast<std::size_t>(p_score_ini_bytes.size()));
-	return opennova::np::load_session_score_config(host_session_config_, text);
+	return opennova::inmatch::load_session_score_config(host_session_config_, text);
 }
 
 bool Simulation::enable_host_listen(int p_port) {
@@ -700,7 +700,7 @@ int Simulation::get_host_peer_count() const {
 	// loopback is excluded; a pre-Hello garbage datagram registers no node (handle_server_datagram
 	// drops bad envelopes), so it stays 0 until a real JointOperations peer handshakes.
 	int n = 0;
-	for (const opennova::np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
+	for (const opennova::inmatch::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
 		if (c.type == 1) ++n;
 	}
 	return n;
@@ -708,10 +708,10 @@ int Simulation::get_host_peer_count() const {
 
 void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options) {
 	if (p_options.is_null()) return;
-	const opennova::np::GameConfig &in = p_options->config();
+	const opennova::inmatch::GameConfig &in = p_options->config();
 	// Start from the live config so the sim-owned fields (mission header blob,
 	// score tables, PCID) survive; every user-facing field lands from the record.
-	opennova::np::GameConfig config = host_session_config_;
+	opennova::inmatch::GameConfig config = host_session_config_;
 	host_bind_port_ = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	config.server_name = in.server_name;
 	config.mission_name = in.mission_name;
@@ -736,7 +736,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 		const String requested = p_options->get_integrity_profile().strip_edges();
 		const std::string id(requested.utf8().get_data());
 		if (id.empty() ||
-				opennova::np::find_integrity_challenge_profile(id) != nullptr) {
+				opennova::inmatch::find_integrity_challenge_profile(id) != nullptr) {
 			config.integrity_profile = id;
 		} else {
 			UtilityFunctions::push_warning(
@@ -786,7 +786,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// loopback fold at bring-up; max_players is the lobby-advertised cap, clamped to the witnessed 1..65.
 	host_serve_and_play_ = p_options->get_serve_and_play();
 	host_max_players_ = static_cast<uint32_t>(std::clamp(p_options->get_max_players(), 1,
-			static_cast<int>(opennova::np::kMaxPlayersCap)));
+			static_cast<int>(opennova::inmatch::kMaxPlayersCap)));
 	host_session_config_ = std::move(config);
 	if (kernel_ && host_listen_) {
 		kernel_->world.fat_bullets = host_session_config_.fat_bullets;
@@ -828,7 +828,7 @@ bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
 		install_join_integrity_profile();
 		return true;
 	}
-	if (opennova::np::find_integrity_challenge_profile(id) == nullptr) {
+	if (opennova::inmatch::find_integrity_challenge_profile(id) == nullptr) {
 		join_integrity_profile_id_.clear();
 		install_join_integrity_profile();
 		return false;
@@ -867,7 +867,7 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		const String &p_player_name, int p_join_role,
 		const String &p_spectator_password) {
-	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load by the boot's role hook;
+	// P7: the joiner is a non-authority inmatch::ClientRuntime (Joiner role) built per-load by the boot's role hook;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
 	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
@@ -887,14 +887,14 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	}
 	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
 	join_role_ = p_join_role == static_cast<int>(
-			opennova::np::JoinRole::Spectator)
-			? opennova::np::JoinRole::Spectator
-			: opennova::np::JoinRole::Player;
+			opennova::inmatch::JoinRole::Spectator)
+			? opennova::inmatch::JoinRole::Spectator
+			: opennova::inmatch::JoinRole::Player;
 	join_spectator_password_ =
 			std::string(p_spectator_password.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); each (re)load's role hook rebuilds it fresh.
-	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+	runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(joiner_player_name_);
 	runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 	runtime_->set_join_request(join_role_, join_spectator_password_);
 	install_charattr_challenge_table();
@@ -920,10 +920,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 
 bool Simulation::is_local_spectator() const {
 	if (joiner_) return runtime_ != nullptr && runtime_->is_spectator();
-	for (const opennova::np::NapiNPConnection &connection :
+	for (const opennova::inmatch::NapiNPConnection &connection :
 			ctx_.np_protocol.connection_list) {
 		if (connection.type ==
-				opennova::np::NapiNPConnection::kTypeClientSide) {
+				opennova::inmatch::NapiNPConnection::kTypeClientSide) {
 			return connection.link.spectator;
 		}
 	}
@@ -934,13 +934,13 @@ bool Simulation::set_local_spectator(bool p_spectator) {
 	// A joiner is non-authoritative: its S2C 0x75 state is intentionally
 	// read-only. F3 mutates only the in-process SP/listen-host player.
 	if (joiner_ || kernel_ == nullptr || !ctx_.is_authority) return false;
-	for (opennova::np::NapiNPConnection &connection :
+	for (opennova::inmatch::NapiNPConnection &connection :
 			ctx_.np_protocol.connection_list) {
 		if (connection.type !=
-				opennova::np::NapiNPConnection::kTypeClientSide) {
+				opennova::inmatch::NapiNPConnection::kTypeClientSide) {
 			continue;
 		}
-		if (!opennova::np::Server_SetPlayerSpectator(
+		if (!opennova::inmatch::Server_SetPlayerSpectator(
 					ctx_, connection, kernel_->world, p_spectator)) {
 			return false;
 		}
@@ -965,7 +965,7 @@ bool Simulation::load_charattr_challenge(
 				p_resource_root->read_file("charattr.def");
 		if (!bytes.is_empty()) {
 			charattr_challenge_loaded_ =
-					opennova::np::parse_charattr_challenge_table(
+					opennova::inmatch::parse_charattr_challenge_table(
 							bytes.ptr(),
 							static_cast<std::size_t>(bytes.size()),
 							charattr_challenge_table_);
@@ -1058,13 +1058,13 @@ PackedByteArray Simulation::get_join_mission_header() const {
 int64_t Simulation::get_join_terrain_til_state() const {
 	if (!joiner_ || !runtime_) return JOIN_TERRAIN_TIL_ABSENT;
 	switch (runtime_->terrain_til_state()) {
-	case opennova::np::TerrainTilState::Absent:
+	case opennova::inmatch::TerrainTilState::Absent:
 		return JOIN_TERRAIN_TIL_ABSENT;
-	case opennova::np::TerrainTilState::Receiving:
+	case opennova::inmatch::TerrainTilState::Receiving:
 		return JOIN_TERRAIN_TIL_RECEIVING;
-	case opennova::np::TerrainTilState::Complete:
+	case opennova::inmatch::TerrainTilState::Complete:
 		return JOIN_TERRAIN_TIL_COMPLETE;
-	case opennova::np::TerrainTilState::Invalid:
+	case opennova::inmatch::TerrainTilState::Invalid:
 		return JOIN_TERRAIN_TIL_INVALID;
 	}
 	return JOIN_TERRAIN_TIL_INVALID;
@@ -1147,7 +1147,7 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 	out["deployed"] = runtime_ && runtime_->is_deployed();
 	if (runtime_) {
 		out["stage"] = String(runtime_->admission_stage_name());
-		const opennova::np::JoinerConnection::ChallengeDiagnostics challenges =
+		const opennova::inmatch::JoinerConnection::ChallengeDiagnostics challenges =
 				runtime_->challenge_diagnostics();
 		Dictionary crc;
 		crc["entity_checksum_seen"] = static_cast<int64_t>(challenges.entity_checksum_seen);
@@ -1159,7 +1159,7 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 		crc["charattr_row_missing"] = static_cast<int64_t>(challenges.charattr_row_missing);
 		crc["property_clears"] = static_cast<int64_t>(challenges.property_clears);
 		out["challenges"] = crc;
-		const opennova::np::JoinerConnection::JoinRejectRecord reject =
+		const opennova::inmatch::JoinerConnection::JoinRejectRecord reject =
 				runtime_->last_join_reject();
 		if (reject.set) {
 			Dictionary r;
@@ -1233,7 +1233,7 @@ std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
 	if (!kernel_ || !joiner_ || !runtime_) return rows;
 	const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 	const uint8_t team = runtime_->assigned_team();
-	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle = runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu;
 	for (size_t i = 0; i < reg.entries.size(); ++i) {
 		const opennova::world::Entity *e = kernel_->world.registry.get(reg.entries[i]);
@@ -1272,14 +1272,14 @@ std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
 					o.handle = member;
 					std::string name;
 					const opennova::world::EntityHandle mh{member};
-					for (const opennova::netsim::ClientRosterSlot &slot : cs.roster) {
+					for (const opennova::replication::ClientRosterSlot &slot : cs.roster) {
 						if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) {
 							name = slot.name;
 							break;
 						}
 					}
 					if (name.empty()) {
-						if (const opennova::netsim::ClientEntityState *row_state = cs.find(member))
+						if (const opennova::replication::ClientEntityState *row_state = cs.find(member))
 							name = row_state->name;
 					}
 					o.name = name;
@@ -1360,7 +1360,7 @@ void Simulation::ship_to_host(const std::vector<uint8_t> &dg) {
 }
 
 // (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through joiner_pump
-//  over an np::ClientRuntime; the legacy JoinerSession path is retired here.)
+//  over an inmatch::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
 	if (!host_listen_ || !kernel_->world.ai) return false;
@@ -1374,13 +1374,13 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 	// so the connection is well-formed. The synthetic admit (no handshake) mirrors the post-PeerSpawned
 	// state; with the host already at net_id 0xFFF0 the joiner allocates 0xFFF1.
 	const opennova::PeerAddr peer{0x0100007Fu, static_cast<uint16_t>(40000 + host_owner_.peers.size())};
-	opennova::np::PeerLink &link = host_owner_.peers[peer];
+	opennova::inmatch::PeerLink &link = host_owner_.peers[peer];
 	if (!link.transport) {
-		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
-				opennova::netsim::UdpSessionTransport::Role::Host);
+		link.transport = std::make_unique<opennova::replication::UdpSessionTransport>(
+				opennova::replication::UdpSessionTransport::Role::Host);
 	}
 	const opennova::world::EntityHandle h =
-			opennova::np::admit_synthetic_peer(
+			opennova::inmatch::admit_synthetic_peer(
 					ctx_, kernel_->world, peer, spawn, link.transport.get());
 	kernel_->resolve_new_infantry_adm_ids();
 	return h.valid();
@@ -1394,16 +1394,16 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 TypedArray<FeedRow> Simulation::drain_feed_events() {
 	TypedArray<FeedRow> out;
 	if (!runtime_) return out;
-	opennova::netsim::ClientState &cs = runtime_->state();
+	opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
 	const auto name_of = [&cs](uint8_t index) -> std::string {
-		const opennova::netsim::ClientEntityState *e =
+		const opennova::replication::ClientEntityState *e =
 				cs.find(static_cast<uint16_t>(index));
 		return e != nullptr ? e->name : std::string();
 	};
 	std::vector<opennova::hud::FeedEventInput> inputs;
-	for (const opennova::netsim::ClientGameEvent &ev : runtime_->drain_game_events()) {
+	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
 		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
 				ev.aux_index, ev.kind });
 	}
@@ -1481,14 +1481,14 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 // The Tab board's header as the shell needs it. Row data no longer rides a
 // script Dictionary: HudOverlay pulls the drawn rows natively through
 // fill_scoreboard_rows, and the counts here come from the same netsim
-// projection (netsim::scoreboard_header — the accepted-rows-minus-spectators
+// projection (replication::scoreboard_header — the accepted-rows-minus-spectators
 // players count is the witnessed header arithmetic, retail @0x4231dd).
 Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
 	Ref<ScoreboardHeader> out;
 	out.instantiate();
 	if (!runtime_) return out;
-	const opennova::netsim::ClientScoreboardHeader header =
-			opennova::netsim::scoreboard_header(runtime_->state());
+	const opennova::replication::ClientScoreboardHeader header =
+			opennova::replication::scoreboard_header(runtime_->state());
 	out->set_known(header.known);
 	out->set_team_mode(header.team_mode);
 	out->set_timed(header.timed);
@@ -1510,7 +1510,7 @@ bool Simulation::fill_scoreboard_rows(
 		r_rows.clear();
 		return false;
 	}
-	opennova::netsim::project_scoreboard(runtime_->state(), r_rows);
+	opennova::replication::project_scoreboard(runtime_->state(), r_rows);
 	return true;
 }
 

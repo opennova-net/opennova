@@ -1,6 +1,6 @@
 // P6 — two endpoints over REAL UDP sockets run a full join -> spawn -> play loop. Converts the P5
 // in-process round-trip (client_runtime_test) to two bound loopback UDP sockets driven single-threaded
-// (poll-pump, no threads/sleeps beyond the socket recv timeouts): a np::ClientRuntime joiner on one
+// (poll-pump, no threads/sleeps beyond the socket recv timeouts): a inmatch::ClientRuntime joiner on one
 // socket and the host owner-loop (npruntime/host_session.h, the SAME loop main.cpp runs) on the
 // other. Bytes cross via real sendto/recvfrom — the only difference from the in-process test.
 //
@@ -17,19 +17,19 @@
 //       Order-only (body byte-parity is deferred: our world stream is built from our own minimal
 //       World).
 
-#include <runtime/session/host_session.h> // the host owner loop (promoted to engine/runtime/session; SAME loop main.cpp runs)
+#include <runtime/inmatch/host_session.h> // the host owner loop (promoted to engine/runtime/inmatch; SAME loop main.cpp runs)
 
-#include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter (for the host loop)
+#include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter (for the host loop)
 
-#include <runtime/session/client_runtime.h>
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_protocol.h>
-#include <runtime/session/server_session.h>
-#include <runtime/session/server_spawn.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_spawn.h>
 
 #include "host_test_setup.h"
 
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/wire_capture.h>
@@ -56,8 +56,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -122,22 +122,22 @@ int main() {
 	mission.header.magic[3] = static_cast<char>(bms::kMinVersion);
 
 	// ---- host: stand up the dedicated HostOnly runtime (no local player). ----
-	np::HostOwner owner;
+	inmatch::HostOwner owner;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
-	np::HostConfig host_cfg;
+	inmatch::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
 	// This test isolates the per-frame UDP round trip. Retail LAN cadence is
 	// covered separately; keep every scripted client frame on an open boundary.
 	host_cfg.config.send_holdoff_ticks = 1;
-	host_cfg.socket_mode = np::SocketMode::Lan;
+	host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	host_cfg.serve_and_play = false;
-	np::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs
+	inmatch::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs
 
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
-	np::ClientRuntime client(kName);
+	inmatch::ClientRuntime client(kName);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82
 	//      handshake is included so decode_capture_to_messages recovers the SCRK). ----
@@ -173,7 +173,7 @@ int main() {
 	ship_joiner(client.start());
 	bool ready = false;
 	for (int f = 0; f < 400 && !ready; ++f) {
-		np::host_session_pump(owner, host_dgram);
+		inmatch::host_session_pump(owner, host_dgram);
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
 		++tick;
@@ -188,7 +188,7 @@ int main() {
 	// owned_entity was assigned by the automatic spawn pipeline.
 	const PeerAddr jpeer = joiner_peer_addr(joiner_port);
 	w::EntityHandle Hh{}, host_h{};
-	for (np::NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
 		if (c.type == 1 && c.peer == jpeer) Hh = c.link.owned_entity;
 		else if (c.type == 2) host_h = c.link.owned_entity;
 	}
@@ -213,7 +213,7 @@ int main() {
 	for (int f = 0; f < 12; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) ship_joiner(d);
 		++tick;
-		np::host_session_pump(owner, host_dgram);
+		inmatch::host_session_pump(owner, host_dgram);
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d); // fold + 0x2C
 		++tick;

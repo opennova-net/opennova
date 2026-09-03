@@ -5,20 +5,20 @@
 #ifndef OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
 #define OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
 
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/replication/connection.h>        // netsim::TransportMode
-#include <runtime/session/session_transport.h> // netsim::ISessionTransport
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/replication/connection.h>        // replication::TransportMode
+#include <runtime/inmatch/session_transport.h> // replication::ISessionTransport
 #include <runtime/world/entity.h>         // world::EntityHandle
 
 #include <cstdint>
 
 namespace conn_fixture {
 
-inline opennova::np::NapiNPConnection make_conn(uint32_t id, int type,
-                                                opennova::netsim::ISessionTransport *t,
-                                                opennova::netsim::TransportMode mode,
+inline opennova::inmatch::NapiNPConnection make_conn(uint32_t id, int type,
+                                                opennova::replication::ISessionTransport *t,
+                                                opennova::replication::TransportMode mode,
                                                 opennova::world::EntityHandle owned, bool spawned) {
-	opennova::np::NapiNPConnection c;
+	opennova::inmatch::NapiNPConnection c;
 	c.connection_id = id;
 	c.type = type;
 	c.link.transport = t;
@@ -26,7 +26,7 @@ inline opennova::np::NapiNPConnection make_conn(uint32_t id, int type,
 	c.link.owned_entity = owned;
 	c.burst.spawned = spawned;
 	c.spawned_announced = spawned;
-	c.phase = spawned ? opennova::np::ConnectionPhase::InMatch : opennova::np::ConnectionPhase::New;
+	c.phase = spawned ? opennova::inmatch::ConnectionPhase::InMatch : opennova::inmatch::ConnectionPhase::New;
 	return c;
 }
 

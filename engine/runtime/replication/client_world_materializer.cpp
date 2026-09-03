@@ -14,7 +14,7 @@
 // @ 0x432C40 (mount-occupancy gate @ 0x4330b1, D-NET-53); pool-3 slot keying
 // @ 0x425C00, net-re 5.29].
 
-namespace opennova::netsim {
+namespace opennova::replication {
 namespace {
 
 world::EntityKind kind_for_pool(int pool) {
@@ -414,4 +414,4 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	return result;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

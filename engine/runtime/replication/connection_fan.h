@@ -9,9 +9,9 @@
 
 #include <runtime/replication/connection.h>
 #include <runtime/replication/entity_wire_bridge.h>
-#include <runtime/session/session_transport.h>
+#include <runtime/inmatch/session_transport.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // In-match message tags (the inner-message tag, not the session opcode) are the
 // direction-scoped constants in npwire/ingame_message_id.h (s2c::PER_FRAME_UPDATE etc.).
@@ -19,7 +19,7 @@ namespace opennova::netsim {
 // The per-connection in-match replication primitives. A host owns a CONNECTION TABLE (the reimpl of
 // the original's per-connection fan); both the legacy listen-server binding and npruntime's
 // Server_TickUpdate own that table elsewhere (npruntime: NapiNPProtocol.connection_list, each node's
-// embedded netsim::Connection `link`) and call these two functions per node, so there is ONE
+// embedded replication::Connection `link`) and call these two functions per node, so there is ONE
 // drain/emit implementation (ADR 0011 / npruntime ROADMAP P4). Faithful frame order
 // [orig: Game_ProcessMainFrame @ 0x5263f0]:
 //
@@ -77,4 +77,4 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          uint32_t game_type = 0,
                          std::size_t max_frame_body_bytes = 0);
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

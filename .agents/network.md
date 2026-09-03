@@ -4,7 +4,7 @@ Redirect. The pre-NET-2 runbook that lived here named modules and classes the
 npruntime rebuild retired; the maturity program's NET track re-homed its
 content. Current owners:
 
-- `engine/runtime/session/ROADMAP.md` — the in-match runtime (server + client): the
+- `engine/runtime/inmatch/ROADMAP.md` — the in-match runtime (server + client): the
   module map, frame order, what P8 retired, and the test-harness design. It is
   the completed P0–P8.2 build record, not live status.
 - `docs/divergence-ledger.md` (`PAR-NET` slice) + `docs/net/novaworld-net-re.md`

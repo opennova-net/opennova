@@ -16,10 +16,10 @@
 #include <runtime/replication/connection.h>
 #include <runtime/replication/connection_fan.h>
 #include <runtime/replication/entity_wire_bridge.h>
-#include <runtime/session/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/client_replica_pipeline.h>
-#include <runtime/session/session_transport.h>
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
 
@@ -42,7 +42,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {

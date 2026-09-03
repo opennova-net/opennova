@@ -63,7 +63,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// priority builder to read (D-NET-139: the LOS gate + the +200 inside-view
 	// bonus). Headless embedders that never run an occlusion frame leave it 0,
 	// which disables both terms exactly like an unwritten retail global.
-	opennova::netsim::set_view_distance_units(static_cast<int>(p_fog_dist_units));
+	opennova::replication::set_view_distance_units(static_cast<int>(p_fog_dist_units));
 
 	const uint64_t occl_build_start =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
@@ -106,7 +106,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		// that left the state so a reused handle starts fresh (retail memsets
 		// the destroyed entity, latch included).
 		std::unordered_set<uint16_t> live_handles;
-		for (const opennova::netsim::ClientEntityState &es :
+		for (const opennova::replication::ClientEntityState &es :
 				runtime_->state().entities)
 			live_handles.insert(es.handle);
 		for (auto it = wire_occlusion_latch_.begin();
@@ -119,7 +119,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		const uint16_t self_handle = runtime_->has_self_handle()
 				? runtime_->self_handle()
 				: opennova::world::EntityHandle::kInvalid;
-		for (const opennova::netsim::ClientEntityState &es :
+		for (const opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
 			const uint16_t handle = es.handle;
 			if (handle == opennova::world::EntityHandle::kInvalid ||
@@ -364,7 +364,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 				// A hidden row is not drawn, so retail does not push a new stack
 				// value; preserve the last emitted quality (see the wire loop).
 				if ((e.flags & 0x01u) != 0) return;
-				const opennova::EntityClass cls = opennova::netsim::entity_class_of(e);
+				const opennova::EntityClass cls = opennova::replication::entity_class_of(e);
 				const bool person_source = pool == 0 &&
 						(cls == opennova::EntityClass::Player ||
 						 cls == opennova::EntityClass::Infantry);
@@ -389,7 +389,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	} else if (runtime_) {
 		const std::unordered_set<int32_t> wire_culled(
 				occlusion_culled_wire_.begin(), occlusion_culled_wire_.end());
-		for (const opennova::netsim::ClientEntityState &es :
+		for (const opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
 			const uint16_t handle = es.handle;
 			if (handle == opennova::world::EntityHandle::kInvalid ||

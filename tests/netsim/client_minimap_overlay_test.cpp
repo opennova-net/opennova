@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <vector>
 
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 namespace {
 

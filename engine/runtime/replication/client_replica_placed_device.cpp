@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void ClientReplicaPipeline::apply_deployed_item(
 		const std::vector<uint8_t> &body) {
@@ -190,4 +190,4 @@ void ClientReplicaPipeline::apply_objective_entity_state(
 	state_.mark_topology_changed();
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

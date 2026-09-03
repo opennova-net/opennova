@@ -115,7 +115,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - The in-match session owns lifecycle, role policy, fixed-tick banking, and
-  input consumption in portable C++ (`engine/runtime/session/session.*`; ADR 0036,
+  input consumption in portable C++ (`engine/runtime/inmatch/session.*`; ADR 0036,
   superseding ADR 0035's old name/location). An `inmatch::TickTarget` supplies
   the concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device

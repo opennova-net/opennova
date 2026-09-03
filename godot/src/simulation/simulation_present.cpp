@@ -12,10 +12,10 @@
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
 #include "simulation/entity_row.h"  // one typed entity-directory row
 
-#include <runtime/session/client_replica_card.h> // the joiner's decoded replica section
-#include <runtime/session/minimap_markers.h> // the retained marker rows (bank walk + local restore)
+#include <runtime/inmatch/client_replica_card.h> // the joiner's decoded replica section
+#include <runtime/inmatch/minimap_markers.h> // the retained marker rows (bank walk + local restore)
 #include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
-#include <runtime/session/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
+#include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
 #include <cstring>
@@ -176,7 +176,7 @@ Ref<HudMapGridOrigin> Simulation::get_hud_map_grid_origin() const {
 	int32_t x_q16 = present ? kernel_->world.map_grid_origin_x : 0;
 	int32_t y_q16 = present ? kernel_->world.map_grid_origin_y : 0;
 	if (!present && runtime_ != nullptr) {
-		present = opennova::netsim::client_minimap_grid_origin(
+		present = opennova::replication::client_minimap_grid_origin(
 				runtime_->state(), x_q16, y_q16);
 	}
 	out->set_present(present);
@@ -208,13 +208,13 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	}
 	// The rows (the bank walk, the policy resolve, the restored local row) and
 	// the feed layout are the engine's; this leg only packs the array.
-	opennova::np::MinimapMarkerInputs in;
+	opennova::inmatch::MinimapMarkerInputs in;
 	in.map = runtime_ ? &runtime_->state().minimap : nullptr;
 	in.world = &kernel_->world;
 	in.local_marker_handle = local_marker_handle;
 	in.local_heading_bam = static_cast<int32_t>(get_local_player_heading_bam());
 	std::vector<opennova::hud::HudMinimapMarker> markers;
-	opennova::np::build_minimap_markers(in, markers);
+	opennova::inmatch::build_minimap_markers(in, markers);
 	std::vector<int32_t> feed;
 	opennova::hud::minimap_feed_encode(markers, feed);
 	PackedInt32Array out;
@@ -737,7 +737,7 @@ Ref<TracerRibbonFrame> Simulation::compile_tracer_ribbons(const PackedFloat32Arr
 // The typed entity inspection API (ADR 0042 d5): the directory join and the
 // per-entity card are engine facts (world/inspect.h); this binding forwards
 // and converts into the typed records. The joiner's decoded replica section
-// is the npruntime card (runtime/session/client_replica_card.h).
+// is the npruntime card (runtime/inmatch/client_replica_card.h).
 TypedArray<EntityRow> Simulation::entity_directory() const {
 	TypedArray<EntityRow> out;
 	if (!kernel_) return out;
@@ -782,7 +782,7 @@ Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
 	// The joiner's decoded replica row for the same handle, when one exists.
 	if (joiner_ && runtime_ != nullptr) {
-		card->assign_replica(opennova::np::client_replica_card(
+		card->assign_replica(opennova::inmatch::client_replica_card(
 				runtime_->state(), handle.packed));
 	}
 	return card->native_valid() ? card : Ref<EntityCard>();
@@ -923,7 +923,7 @@ void Simulation::ensure_present_effect_pose_cache() const {
 		return;
 	}
 
-	const opennova::netsim::ClientState &client = runtime_->state();
+	const opennova::replication::ClientState &client = runtime_->state();
 	const uint32_t logic_tick = kernel_->world.logic_tick;
 	if (present_effect_pose_cache_valid_ &&
 			present_effect_pose_cache_runtime_ == runtime_.get() &&
@@ -947,7 +947,7 @@ void Simulation::ensure_present_effect_pose_cache() const {
 }
 
 bool Simulation::cache_present_effect_pose(
-		const opennova::netsim::ClientEntityState &p_entity_state) const {
+		const opennova::replication::ClientEntityState &p_entity_state) const {
 	// Match present_snapshot_from_client_replicas' joiner self-filter: the host's
 	// wire echo H is not drawn and therefore cannot own a presented effect.
 	// Packed handle zero is a valid pool-0 identity, so presence rides the
@@ -1020,7 +1020,7 @@ bool Simulation::cache_present_effect_pose(
 	pose.rotation_deg = Vector3(
 			static_cast<float>(p_entity.pitch),
 			static_cast<float>(pool_present_yaw_deg(
-					p_entity, ae, opennova::netsim::entity_class_of(p_entity))),
+					p_entity, ae, opennova::replication::entity_class_of(p_entity))),
 			static_cast<float>(p_entity.roll));
 	present_effect_poses_by_handle_[handle] = pose;
 	present_effect_missing_handles_.erase(handle);
@@ -1071,7 +1071,7 @@ PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle
 		present_effect_missing_handles_.insert(p_handle);
 		return PackedVector3Array();
 	}
-	for (const opennova::netsim::ClientEntityState &entity_state :
+	for (const opennova::replication::ClientEntityState &entity_state :
 			runtime_->state().entities) {
 		if (entity_state.handle != p_handle) continue;
 		if (cache_present_effect_pose(entity_state)) {
@@ -1263,7 +1263,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 	PackedFloat32Array out;
 	if (!kernel_ || !runtime_) return out;
 	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
-	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::replication::ClientState &cs = runtime_->state();
 	const opennova::world::Entity *local_player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
@@ -1275,14 +1275,14 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
-	const opennova::np::ClientReplicaPresentContext replica_present_context{
+	const opennova::inmatch::ClientReplicaPresentContext replica_present_context{
 			&kernel_->seat_specs, &kernel_->world.weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
-		const opennova::netsim::ClientEntityState &es = cs.entities[i];
-		opennova::np::initialize_client_replica_present_row(r);
+		const opennova::replication::ClientEntityState &es = cs.entities[i];
+		opennova::inmatch::initialize_client_replica_present_row(r);
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
 		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
@@ -1295,7 +1295,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// The canonical decoded-client projection owns wire identity, pose,
 		// lifecycle, and remote Person appearance for every role. The remainder
 		// of this method is role/world enrichment only.
-		opennova::np::project_client_replica_present_row(
+		opennova::inmatch::project_client_replica_present_row(
 				r, es, cs, replica_present_context);
 
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored
@@ -1593,9 +1593,9 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	w.registry.for_each([&](const opennova::world::Entity &e) {
 		float *r = rows + static_cast<int64_t>(i++) * PF_STRIDE;
 		const opennova::world::EntityHandle h = e.handle;
-		const opennova::EntityClass cls = opennova::netsim::entity_class_of(e);
+		const opennova::EntityClass cls = opennova::replication::entity_class_of(e);
 		const AiEntity *ae = w.ai != nullptr ? w.ai->for_handle(h) : nullptr;
-		opennova::np::initialize_client_replica_present_row(r);
+		opennova::inmatch::initialize_client_replica_present_row(r);
 
 		// Wire identity + lifecycle, exactly what project_client_replica_present_row
 		// derives for a decoded row, sourced from the authoritative record.
@@ -1613,7 +1613,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		if (cls == opennova::EntityClass::Player) {
 			// A player's wire net_id IS its packed character id (entity+0x15C).
 			r[PF_CHARACTER_ID] =
-					static_cast<float>(opennova::netsim::player_wire_net_id(e));
+					static_cast<float>(opennova::replication::player_wire_net_id(e));
 		}
 		r[PF_POS_X] = e.position.x;
 		r[PF_POS_Y] = e.position.z;
@@ -1627,7 +1627,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		// re-seeds the same way on the host.
 		{
 			const uint8_t dead_bit = cls == opennova::EntityClass::Vehicle
-					? opennova::netsim::kVehicleFlagDeadPose
+					? opennova::replication::kVehicleFlagDeadPose
 					: static_cast<uint8_t>(opennova::world::kEntityFlagDead);
 			const bool dead = (e.flags & dead_bit) != 0u;
 			PoolPresentLifecycle &life = pool_present_lifecycle_[h.packed];

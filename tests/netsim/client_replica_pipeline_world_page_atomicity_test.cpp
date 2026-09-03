@@ -5,7 +5,7 @@
 // preexisting replica state is untouched by the failure.
 
 #include <runtime/replication/client_replica_pipeline.h>
-#include <runtime/session/client_replica_present_projection.h>
+#include <runtime/inmatch/client_replica_present_projection.h>
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -20,7 +20,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 struct StateStamp {
 	std::uint64_t revision = 0;
@@ -145,9 +145,9 @@ bool test_player_character_identity_reaches_present_row() {
 		return false;
 
 	float present[nw::world::PF_STRIDE];
-	nw::np::initialize_client_replica_present_row(present);
-	nw::np::ClientReplicaPresentContext context;
-	nw::np::project_client_replica_present_row(
+	nw::inmatch::initialize_client_replica_present_row(present);
+	nw::inmatch::ClientReplicaPresentContext context;
+	nw::inmatch::project_client_replica_present_row(
 			present, *row, pipeline.state(), context);
 	bool ok = expect(
 			static_cast<int>(present[nw::world::PF_CHARACTER_ID]) == rec.net_id,
@@ -160,8 +160,8 @@ bool test_player_character_identity_reaches_present_row() {
 			"carrier sentinel") && ok;
 	ns::ClientEntityState linked = *row;
 	linked.carrier_handle = 0x1234u;
-	nw::np::initialize_client_replica_present_row(present);
-	nw::np::project_client_replica_present_row(
+	nw::inmatch::initialize_client_replica_present_row(present);
+	nw::inmatch::project_client_replica_present_row(
 			present, linked, pipeline.state(), context);
 	ok = expect(
 			static_cast<int>(present[nw::world::PF_CARRIER_HANDLE]) == 0x1234,

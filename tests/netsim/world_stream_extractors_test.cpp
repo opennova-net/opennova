@@ -19,7 +19,7 @@
 namespace {
 
 namespace w = opennova::world;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace nw = opennova;
 
 bool expect(bool cond, const char *msg) {

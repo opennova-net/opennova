@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace opennova::np {
+namespace opennova {
 
 // Godot- and socket-free projection of the retail fields carried by one LAN
 // host's NP/NAPI 0x81 ServerHello.
@@ -109,4 +109,4 @@ private:
 	bool browsing_ = false;
 };
 
-} // namespace opennova::np
+} // namespace opennova

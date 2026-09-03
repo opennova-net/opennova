@@ -12,7 +12,7 @@ namespace opennova::world {
 class World;
 }
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 struct ClientWorldSyncResult {
 	std::vector<world::EntityLifetime> spawned;
@@ -90,4 +90,4 @@ private:
 	int placement_index_next_[4] = {0, 0, 0, 0};
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

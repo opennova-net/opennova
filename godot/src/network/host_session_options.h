@@ -6,24 +6,24 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <runtime/session/game_config.h>
+#include <runtime/inmatch/game_config.h>
 
 namespace godot {
 
 // The hosted-session request as the Simulation takes it
 // (Simulation.configure_host_session) and reports it back
 // (Simulation.get_host_session_config): the user-facing half of the engine's
-// np::GameConfig — identity, the g_GameType word, the S2C 0x08 rule globals,
+// inmatch::GameConfig — identity, the g_GameType word, the S2C 0x08 rule globals,
 // the send cadence, the projectile options, the advertised spawn — plus the
 // binding-side bind port, lobby cap, serve-and-play selector and the install
 // root the expansion checksum is CRC'd from. Every field is read-write and
 // defaults to the engine's GameConfig default; the sim-owned fields (the
 // mission header blob, the score tables, the PCID) are not carried here.
-// Field witnesses live on np::GameConfig.
+// Field witnesses live on inmatch::GameConfig.
 class HostSessionOptions : public RefCounted {
 	GDCLASS(HostSessionOptions, RefCounted)
 
-	opennova::np::GameConfig config_;
+	opennova::inmatch::GameConfig config_;
 	int bind_port_ = 64220;
 	int max_players_ = 16;
 	bool serve_and_play_ = true;
@@ -34,8 +34,8 @@ protected:
 
 public:
 	// The config-shaped half (the sim copies the user-facing fields out of it).
-	const opennova::np::GameConfig &config() const { return config_; }
-	void assign_config(const opennova::np::GameConfig &p_config) { config_ = p_config; }
+	const opennova::inmatch::GameConfig &config() const { return config_; }
+	void assign_config(const opennova::inmatch::GameConfig &p_config) { config_ = p_config; }
 
 #define HOST_SESSION_TEXT(m_name)                 \
 	String get_##m_name() const;                  \

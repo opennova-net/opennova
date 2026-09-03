@@ -2,7 +2,7 @@
 
 #include <runtime/world/infantry.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		uint8_t ratio_byte, bool is_player, bool wire_dead, bool row_was_dead,
@@ -54,4 +54,4 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 	direct_commit();
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

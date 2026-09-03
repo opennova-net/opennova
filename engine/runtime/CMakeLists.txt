@@ -228,34 +228,34 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/serializing_sink.cpp
-    # session — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
+    # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/character_registry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/charattr_challenge.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_replica_card.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_replica_present_projection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_runtime.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/end_round_protocol.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/host_session.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/integrity_challenge_profile.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/join_session_policy.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/joiner_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/joiner_world_bridge.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/listen_host.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/loadout_submit.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/loopback_channel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/minimap_markers.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/napi_np_protocol.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_initial_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_message_dispatch.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_session.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_spawn.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_tick.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/session.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/session_status.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/stat_screen_feed.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/udp_session_transport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_world_bridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/listen_host.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

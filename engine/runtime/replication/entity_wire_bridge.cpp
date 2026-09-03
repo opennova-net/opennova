@@ -12,7 +12,7 @@
 #include <runtime/world/infantry.h>    // kInfantryAirborneGap / remote body state
 #include <runtime/world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // npwire's wire_handle packing and world's EntityHandle are the same witnessed
 // layout [orig: EntityPool_FindByNetId @ 0x4f0a20]; world stays net-agnostic and
@@ -854,4 +854,4 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	return up;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

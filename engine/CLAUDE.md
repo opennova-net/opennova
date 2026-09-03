@@ -25,7 +25,7 @@
     framing, capture decode, the LAN discovery codec, the datagram-socket
     seam) and novaworld (the session/gate legs + the service). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
-  - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/session`
+  - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (ex net/inmatch + net/npruntime: `session.*` owns lifecycle, role policy,
     fixed-tick banking and input consumption over a `TickTarget`; the
     listen-host frame; the IDA-faithful server/client state machines and
@@ -71,7 +71,7 @@
   for session/replication/wac/mission/world the `runtime/terrain/` prefix is fully
   forbidden; the seam is terrain_query's `<runtime/terrain_query/...>` headers),
   and every runtime lib but session/replication is NET-AGNOSTIC (no `net/`,
-  `runtime/session/` or `runtime/replication/` include — the same lint).
+  `runtime/inmatch/` or `runtime/replication/` include — the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every

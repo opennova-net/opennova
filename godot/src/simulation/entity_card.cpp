@@ -197,7 +197,7 @@ Dictionary world_json(const WorldDetail &d) {
 }
 
 // The client card's MCP JSON key set (docs/mcp.md).
-Dictionary replica_json(const opennova::np::ClientReplicaCard &d) {
+Dictionary replica_json(const opennova::inmatch::ClientReplicaCard &d) {
 	Dictionary out;
 	out["handle"] = d.handle;
 	out["type_id"] = d.type_id;

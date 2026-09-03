@@ -75,7 +75,7 @@ public:
 
 	// The untouched-ammo sentinel: retail serializes -1 until the user picks a
 	// clip row, and every default-select/weight leg keys on it
-	// (engine: runtime/session/loadout_submit.cpp).
+	// (engine: runtime/inmatch/loadout_submit.cpp).
 	enum {
 		CLIP_COUNT_DEF_DEFAULT = -1,
 	};

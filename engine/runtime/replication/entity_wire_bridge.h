@@ -10,7 +10,7 @@
 
 #include <runtime/replication/player_intent.h> // PlayerIntent
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // The single deliberate bridge between the engine/runtime/world runtime entity model
 // (world::Entity / EntityRegistry) and the engine/net/novaworld wire model
@@ -120,4 +120,4 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
                                          const world::Entity &e,
                                          const world::AiEntity &ae);
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

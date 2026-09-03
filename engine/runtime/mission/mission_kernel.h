@@ -15,7 +15,7 @@
 // Deliberately NOTHING net: the no-net tick has headless consumers that must
 // not link the wire stack (the group order — runtime never includes net). The
 // net half — the SP listen bring-up, the local C2S drain, the per-tick
-// session frame — is inmatch::listen_host (engine/runtime/session/listen_host.h),
+// session frame — is inmatch::listen_host (engine/runtime/inmatch/listen_host.h),
 // which drives this kernel through the public per-tick legs below and
 // interposes at boot through the bringup_net_session hook.
 
@@ -282,7 +282,7 @@ public:
 	// cannot lag one logic tick.
 	void collect_attach_labels(std::vector<world::AttachLabel> &out);
 	// The authority's read of the local player's dead bit (the entity flags;
-	// a joiner reads its replica through np::ClientRuntime::local_player_dead).
+	// a joiner reads its replica through inmatch::ClientRuntime::local_player_dead).
 	bool local_player_dead() const;
 
 	// --- the medic call (the dead player's C2S 0x2E) -------------------------

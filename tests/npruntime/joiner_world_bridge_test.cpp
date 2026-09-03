@@ -6,8 +6,8 @@
 // depth (health folds, mount sync, mirrors) is covered by the GUT net suites
 // and the S10 live A/B; this test locks the portable sequencing contract.
 
-#include <runtime/session/client_runtime.h>
-#include <runtime/session/joiner_world_bridge.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_world_bridge.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
@@ -24,7 +24,7 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -45,7 +45,7 @@ struct Harness {
 	w::LocalPlayerLoadout loadout;
 	w::WeaponInventory inventory;
 	std::vector<mission::ItemSeatSpec> seat_specs;
-	np::JoinerWorldBridge bridge;
+	inmatch::JoinerWorldBridge bridge;
 
 	std::vector<std::string> calls;
 	int sends = 0;
@@ -61,14 +61,14 @@ struct Harness {
 		world.registry.configure_pool(0, 16);
 	}
 
-	np::JoinerWorldBridge::PumpContext ctx(np::ClientRuntime &runtime) {
-		return np::JoinerWorldBridge::PumpContext{
+	inmatch::JoinerWorldBridge::PumpContext ctx(inmatch::ClientRuntime &runtime) {
+		return inmatch::JoinerWorldBridge::PumpContext{
 				world, runtime, weapon, loadout, inventory,
 				inventory_valid, seat_specs, /*root_motion=*/nullptr};
 	}
 
-	np::JoinerWorldBridge::PumpHooks hooks() {
-		np::JoinerWorldBridge::PumpHooks h;
+	inmatch::JoinerWorldBridge::PumpHooks hooks() {
+		inmatch::JoinerWorldBridge::PumpHooks h;
 		h.send = [this](const std::vector<uint8_t> &) { ++sends; };
 		h.deposit_inbound = [this] { calls.push_back("deposit"); };
 		h.resolve_row_adm_ids = [this] { calls.push_back("adm"); };
@@ -81,7 +81,7 @@ struct Harness {
 		h.push_loadout_kit = [this] { calls.push_back("push_kit"); };
 		h.on_diagnostic_sample = [this] { calls.push_back("diag"); };
 		h.on_replica_world_changed =
-				[this](const netsim::ClientWorldSyncResult &) {
+				[this](const replication::ClientWorldSyncResult &) {
 					calls.push_back("world_changed");
 				};
 		h.on_replica_world_static_ready =
@@ -111,7 +111,7 @@ struct Harness {
 // weapon FSM (L does not exist).
 bool run_pre_match_frame_order() {
 	Harness h;
-	np::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
+	inmatch::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
 	const auto hooks = h.hooks();
 
 	h.bridge.pump(h.ctx(runtime), hooks);
@@ -143,7 +143,7 @@ bool run_pre_match_frame_order() {
 // in that same frame (the gate reads the latch set earlier in the sequence).
 bool run_in_match_spawn_edge() {
 	Harness h;
-	np::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
+	inmatch::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
 	const auto hooks = h.hooks();
 	// Production order: the pre-load preload pump ships the ClientHello (the
 	// bridge latch arms there), the session establishes later. runtime.start()
@@ -184,7 +184,7 @@ bool run_in_match_spawn_edge() {
 // reset_for_join re-arms the per-session latches for a fresh dial.
 bool run_reset_for_join() {
 	Harness h;
-	np::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
+	inmatch::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
 	const auto hooks = h.hooks();
 	h.bridge.pump(h.ctx(runtime), hooks);
 	if (!expect(h.bridge.started(), "reset: latch armed before")) return false;
@@ -207,7 +207,7 @@ bool run_reset_for_join() {
 // carries the default adm on the C2S 0x0C uplink until the next respawn.
 bool run_spawn_stamps_equipped_adm_from_midpump_grant() {
 	Harness h;
-	np::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
+	inmatch::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
 	auto hooks = h.hooks();
 	// Model retail's mid-pump apply: flip the live inventory-valid flag and arm
 	// the equipped combo, exactly as apply_authoritative_loadout ->

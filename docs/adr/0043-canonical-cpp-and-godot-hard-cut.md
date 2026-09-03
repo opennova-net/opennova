@@ -76,8 +76,8 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    `AiEntity`'s 16.16 pose mirror STAYS: unifying it with the float
    `Entity::position` is behavior-bearing and is a ledgered follow-up.
 
-3. **One session with roles.** `session::Session` (today's `inmatch::Session`:
-   banking, state machine, input retention unchanged) owns a `Role` strategy —
+3. **One session with roles.** `inmatch::Session` (banking, state machine,
+   input retention unchanged) owns a `Role` strategy —
    `LocalRole`, `HostRole` (listen and dedicated), `JoinerRole` — and the one
    non-virtual `run_one_tick` whose six ordered hooks are each role's current
    leg order line for line. `TickTarget`, `listen_host::frame`,
@@ -91,14 +91,20 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
 
 4. **`net/` means wire.** `net/` keeps `novacrypto`, `napi`, `npwire`,
    `novaworld`; `netsim` becomes `runtime/replication/`, `npruntime` +
-   `inmatch` + the transports become `runtime/session/` (namespace `session`,
-   unifying `np::` and `inmatch::`). The chain flips to
-   `io -> crt -> formats -> base -> net -> runtime`; `opennova_net` never links
-   `opennova_runtime`; the protocol tests and `nw_pp` link `opennova_net` only
-   (linker-enforced, `link_graph_check.py`); the NET-AGNOSTIC tree rule keeps
+   `inmatch` + the transports become `runtime/inmatch/` (ONE namespace,
+   `inmatch`, absorbing the former `np::`; `session` was rejected as a
+   namespace name because hundreds of locals are named `session` and would
+   shadow it). The two wire-only survivors stay in `net/npwire` in the plain
+   `opennova` namespace: the LAN discovery codec and the datagram-socket
+   seam. The chain flips to `io -> crt -> formats -> base -> net -> runtime`;
+   `opennova_net` never links `opennova_runtime`; the protocol tests,
+   `nw_lan_probe` and `apps/common` link `opennova_net` only (linker-enforced,
+   `link_graph_check.py`; `nw_pp` links the runtime for the HUD feed-kind
+   table it prints, and the NovaWorld server for the in-match host session
+   it hosts JO peers through); the NET-AGNOSTIC tree rule keeps
    `runtime/{world,wac,mission,terrain,terrain_query,simassets,anim,audio,
    particle,renderer,hud,menu,environment,controls,devtools}` free of `net/`,
-   `runtime/session/` and `runtime/replication/` includes
+   `runtime/inmatch/` and `runtime/replication/` includes
    (`include_graph_check.py`). The one `net -> runtime` include today
    (`npwire/game_type.h`) becomes `base/gameprofile/game_type.h`. Per-peer:
    `PeerLink` and the three parallel maps fold into `NapiNPConnection`. The

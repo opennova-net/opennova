@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <base/io/fixed.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 
 // ---- ClientReplicaPipeline -----------------------------------------------
@@ -2470,4 +2470,4 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.mark_changed();
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

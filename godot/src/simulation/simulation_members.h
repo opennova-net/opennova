@@ -155,7 +155,7 @@ private:
 	mutable bool present_effect_pose_cache_valid_ = false;
 	mutable uint32_t present_effect_pose_cache_logic_tick_ = 0;
 	mutable uint32_t present_effect_pose_cache_client_frame_ = 0;
-	mutable const opennova::np::ClientRuntime *present_effect_pose_cache_runtime_ = nullptr;
+	mutable const opennova::inmatch::ClientRuntime *present_effect_pose_cache_runtime_ = nullptr;
 	mutable std::unordered_map<uint16_t, PresentEffectPose> present_effect_poses_by_handle_;
 	mutable std::unordered_map<int, uint16_t> present_effect_handles_by_bms_id_;
 	mutable std::unordered_map<int, opennova::world::EntityHandle> bms_handle_index_;
@@ -174,7 +174,7 @@ private:
 	void invalidate_present_effect_pose_cache() const;
 	void ensure_present_effect_pose_cache() const;
 	bool cache_present_effect_pose(
-			const opennova::netsim::ClientEntityState &p_entity_state) const;
+			const opennova::replication::ClientEntityState &p_entity_state) const;
 	// The host's pool row (D-NET-140: the listen host never presents from ClientState).
 	bool cache_present_effect_pose(const opennova::world::Entity &p_entity) const;
 	PackedVector3Array cached_present_effect_state_for_handle(uint16_t p_handle) const;
@@ -188,12 +188,12 @@ private:
 	bool host_listen_ = false;
 	Ref<UdpPump> pump_;
 	String capture_pcap_path_;
-	opennova::np::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
+	opennova::inmatch::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
 	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
 	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
-	// start_host_session's gating (engine: runtime/session/listen_host.cpp).
+	// start_host_session's gating (engine: runtime/inmatch/listen_host.cpp).
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell (which owns the resource
@@ -231,20 +231,20 @@ private:
 	};
 	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
-	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
+	// --- co-op LAN joiner: a pure non-authority inmatch::ClientRuntime (Joiner role, built in enable_join /
 	// the boot's role hook; runtime_ is in the P7 block below). joiner_pump drives the connect legs +
 	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
-	// runs run_logic_tick(false), remotes render wire-direct. (engine: runtime/session/joiner_connection.h)
+	// runs run_logic_tick(false), remotes render wire-direct. (engine: runtime/inmatch/joiner_connection.h)
 	bool joiner_ = false;
 	// The F3 Weapon window's held-trigger latch (OR'd into per-tick weapon input).
 	bool debug_weapon_fire_held_ = false;
 	bool joiner_net_diagnostics_ = false;
-	opennova::np::JoinRole join_role_ = opennova::np::JoinRole::Player;
+	opennova::inmatch::JoinRole join_role_ = opennova::inmatch::JoinRole::Player;
 	std::string join_spectator_password_;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): frame sequence, latches
 	// (started/spawned/redeploy/tripwire), wire-header materializer, and per-replica resolver
-	// state live in engine/runtime/session; this binding supplies the shell legs as PumpHooks.
-	opennova::np::JoinerWorldBridge joiner_bridge_;
+	// state live in engine/runtime/inmatch; this binding supplies the shell legs as PumpHooks.
+	opennova::inmatch::JoinerWorldBridge joiner_bridge_;
 	// The shell-asset leg of the bridge's materialize phase: rebuild the
 	// collision/occlusion/trait/seat caches for the changed streamed rows.
 	// The joiner's streamed pool-1..3 rows with a placed identity, as the
@@ -256,7 +256,7 @@ private:
 	// re-typed): the shell hides their placed representation.
 	PackedInt32Array take_retired_placement_ids();
 	void on_replica_world_changed(
-			const opennova::netsim::ClientWorldSyncResult &p_sync);
+			const opennova::replication::ClientWorldSyncResult &p_sync);
 	// The env-gated ~1 Hz tripwire print (the bridge owns the sampled state).
 	void print_joiner_net_diagnostic_sample();
 	// Input-latch resets + adm resolution at L's spawn/redeploy edges.
@@ -265,11 +265,11 @@ private:
 	// Retail authenticates with one packed Avatars.def selection for each side.
 	// GameWorld resolves the active profile before enable_join; retain it here
 	// because a direct-loaded join rebuilds ClientRuntime at load.
-	opennova::np::CharacterJoinVars join_character_vars_{};
+	opennova::inmatch::CharacterJoinVars join_character_vars_{};
 	bool join_character_vars_set_ = false;
 	// The listen host's own type-2 connection consumes the same profile shape,
 	// installed before its authoritative player spawn.
-	opennova::np::CharacterJoinVars local_character_vars_{};
+	opennova::inmatch::CharacterJoinVars local_character_vars_{};
 	bool local_character_vars_set_ = false;
 	// Explicit resource-corpus identity for the retail anti-cheat 0x30/0x31
 	// sources. Empty keeps safe silence. Retained across direct-load runtime
@@ -299,7 +299,7 @@ private:
 	// latch lives on the world-typed loadout aggregate
 	// (kernel_->loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
-	// spawn performs. (engine: runtime/session/host_session.h)
+	// spawn performs. (engine: runtime/inmatch/host_session.h)
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 
@@ -308,7 +308,7 @@ private:
 	// request_stance / look_settings); this binding only converts device
 	// input and routes the joiner's wire edges.
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
-	// iff the soldier may fire it. (engine: runtime/session/client_replica_present.h)
+	// iff the soldier may fire it. (engine: runtime/inmatch/client_replica_present.h)
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
 	// The M-cycle map mode + the two radar zooms — the engine-side state
 	// machine carries the retail lifecycle (cycle, zoom routing, spawn
@@ -396,16 +396,16 @@ private:
 				kernel_->world, kernel_->weapon,
 				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
 	}
-	// Player_InitPlayer's weapon leg (engine: runtime/session/host_session.h); shared by table load,
+	// Player_InitPlayer's weapon leg (engine: runtime/inmatch/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/session/loadout_submit.h). False when
+	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h). False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
-	// a later S2C 0x50 reassignment (engine: runtime/session/joiner_connection.cpp).
+	// a later S2C 0x50 reassignment (engine: runtime/inmatch/joiner_connection.cpp).
 	bool reseed_session_kit_on_side_change();
 	// Which side the resident kit buffer was last copied from (-1 = never seeded).
 	int weapon_profile_seeded_side_ = -1;
@@ -419,7 +419,7 @@ private:
 			const TypedArray<WeaponKitEntry> &p_kit, int p_player_class,
 			bool p_submit_joiner_request);
 	// The typed-rows core of the apply (the record overload converts, the 0x5A
-	// grant path feeds np::kit_from_authoritative_grant's rows directly).
+	// grant path feeds inmatch::kit_from_authoritative_grant's rows directly).
 	bool apply_local_player_loadout_rows(
 			std::vector<opennova::world::WeaponKitEntry> p_kit,
 			int p_player_class, bool p_submit_joiner_request);
@@ -447,11 +447,11 @@ private:
 	// hud::HudMapControl::on_local_player_dead).
 	void tick_hud_map_death_gate();
 
-	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/session ----------------
+	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/inmatch ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
 	// listen server (NapiNPServerCtx ctx_ + its own loopback client over host_loop_, driven by
 	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
-	// the joiner is a non-authority np::ClientRuntime. The Godot net bindings stay PURE socket
+	// the joiner is a non-authority inmatch::ClientRuntime. The Godot net bindings stay PURE socket
 	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/network.md).
 	// host_loop_ MUST be declared before runtime_: the HostClient ClientRuntime holds a
 	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
@@ -460,26 +460,26 @@ private:
 	// loopback + the np host owner the ONE listen frame
 	// (inmatch::listen_host::frame) drives — ctx + per-peer transports +
 	// now_tick + serve_and_play, shared with host_session_pump
-	// (engine/runtime/session). MUST be declared before the aliases and before
+	// (engine/runtime/inmatch). MUST be declared before the aliases and before
 	// runtime_ (the HostClient runtime references host_state_.host_loop). The
 	// HostClient/Joiner ClientRuntime stays a binding member (runtime_ below,
 	// ADR 0042 d3: no headless joiner consumer; the binding also folds the
 	// host's own view with its perf clocks), so state.client_runtime is unused.
 	opennova::inmatch::ListenHostState host_state_;
-	opennova::np::HostOwner &host_owner_ = host_state_.host_owner;
-	opennova::np::NapiNPServerCtx &ctx_ = host_state_.host_owner.ctx; // alias: host only (is_authority)
-	opennova::netsim::LoopbackChannel &host_loop_ = host_state_.host_loop; // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
-	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
+	opennova::inmatch::HostOwner &host_owner_ = host_state_.host_owner;
+	opennova::inmatch::NapiNPServerCtx &ctx_ = host_state_.host_owner.ctx; // alias: host only (is_authority)
+	opennova::replication::LoopbackChannel &host_loop_ = host_state_.host_loop; // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
+	std::unique_ptr<opennova::inmatch::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
 	// Retail loads this process-scoped table from charattr.def before joining.
 	// Keep the byte image outside ClientRuntime so a direct mission load can
 	// reinstall it when a load rebuilds an as-yet-unstarted joiner.
-	opennova::np::CharAttrChallengeTable charattr_challenge_table_{};
+	opennova::inmatch::CharAttrChallengeTable charattr_challenge_table_{};
 	bool charattr_challenge_loaded_ = false;
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
 	// One immutable items.def catalog supplies both the authoritative entity stamp
 	// and the decoded-client record-width resolver. The callback codec, physical
 	// motion family, and allocation inputs remain independent traits.
-	std::shared_ptr<const opennova::netsim::ItemReplicationCatalog>
+	std::shared_ptr<const opennova::replication::ItemReplicationCatalog>
 			item_replication_catalog_;
 	Ref<ItemDatabase> item_replication_catalog_db_;
 	uint64_t item_replication_catalog_revision_ = 0;
@@ -495,7 +495,7 @@ private:
 	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
 	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
 	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump (engine: runtime/session/charattr_challenge.cpp).
+	// after each net pump (engine: runtime/inmatch/charattr_challenge.cpp).
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();

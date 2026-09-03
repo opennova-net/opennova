@@ -13,7 +13,7 @@
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/protocol_message.h>
-#include <runtime/session/host_session.h>
+#include <runtime/inmatch/host_session.h>
 
 namespace opennova {
 class ConnectionManager;
@@ -151,7 +151,7 @@ private:
 	void run_loop();
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
-	static void observe_jo_event(void *context, const np::HostAcceptEvent &event);
+	static void observe_jo_event(void *context, const inmatch::HostAcceptEvent &event);
 
 	ConnectionManager &manager_;
 	std::thread worker_;
@@ -170,7 +170,7 @@ private:
 	std::unique_ptr<world::AiSystem> jo_ai_;
 	std::unique_ptr<world::World> jo_world_;
 	std::unique_ptr<bms::File> jo_mission_;
-	std::unique_ptr<np::HostOwner> jo_owner_;
+	std::unique_ptr<inmatch::HostOwner> jo_owner_;
 	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
 	mutable std::mutex lobby_states_mu_;
 	// Every peer address this listener admitted onto the lobby route. This is

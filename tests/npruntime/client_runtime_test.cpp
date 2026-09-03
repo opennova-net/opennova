@@ -1,4 +1,4 @@
-// P5 — np::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
+// P5 — inmatch::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
 //      + the production apply_in_match_c2s consumer + the ClientReplicaPipeline S2C fold:
@@ -19,13 +19,13 @@
 //      (NOT the dvxi5 fallback), and a HostClient ClientRuntime folds it off the loopback. Guards that
 //      the host's own local view is no longer starved and anchors correctly.
 
-#include <runtime/session/charattr_challenge.h>
-#include <runtime/session/client_runtime.h>
-#include <runtime/session/host_session.h>
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_protocol.h>
-#include <runtime/session/server_spawn.h>
-#include <runtime/session/server_tick.h>
+#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
 
 #include "host_test_setup.h"
 
@@ -33,9 +33,9 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/idatagram_socket.h>
 #include "common/null_datagram_socket.h"
-#include <runtime/session/loopback_channel.h>
-#include <runtime/session/session_transport.h>
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -67,8 +67,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 std::vector<uint8_t> make_organic_spawn(
@@ -235,9 +235,9 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 			header.connection_flags == 0;
 }
 
-bool build_joiner_client_auth(np::JoinRole role,
+bool build_joiner_client_auth(inmatch::JoinRole role,
 		std::string password, ClientAuth &out) {
-	np::JoinerConnection joiner("SpectatorWire");
+	inmatch::JoinerConnection joiner("SpectatorWire");
 	joiner.set_join_request(role, std::move(password));
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
@@ -255,7 +255,7 @@ bool build_joiner_client_auth(np::JoinRole role,
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	const np::JoinerConnection::PollResult result =
+	const inmatch::JoinerConnection::PollResult result =
 			joiner.handle_datagram(reply.data(), reply.size());
 	return result.outbound.size() == 1 &&
 			nw_decode_inbound(
@@ -283,7 +283,7 @@ bool auth_has_cu(const ClientAuth &auth,
 bool run_spectator_clientauth_and_state_latch() {
 	ClientAuth player;
 	if (!expect(build_joiner_client_auth(
-				np::JoinRole::Player, "", player),
+				inmatch::JoinRole::Player, "", player),
 			"ordinary player ClientAuth builds")) {
 		return false;
 	}
@@ -295,7 +295,7 @@ bool run_spectator_clientauth_and_state_latch() {
 
 	ClientAuth spectator;
 	if (!expect(build_joiner_client_auth(
-				np::JoinRole::Spectator, "watch", spectator),
+				inmatch::JoinRole::Spectator, "watch", spectator),
 			"spectator ClientAuth builds")) {
 		return false;
 	}
@@ -309,11 +309,11 @@ bool run_spectator_clientauth_and_state_latch() {
 	const std::string server_scrk = "SERVER-SPECTATOR-STATE-SCRK";
 	constexpr uint32_t kSession = 0x10203040u;
 	constexpr uint32_t kClientKey = 0x50607080u;
-	np::ClientRuntime runtime("SpectatorState");
+	inmatch::ClientRuntime runtime("SpectatorState");
 	runtime.seed_session(
 			kSession, kClientKey, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	std::vector<uint8_t> state = frame_server_session(
 			server_seq, server_scrk, kClientKey,
 			{make_protocol_message(0x75, {0x01, 0x00})});
@@ -333,7 +333,7 @@ bool run_spectator_clientauth_and_state_latch() {
 }
 
 bool run_seeded_objective_layout_hint() {
-	np::ClientRuntime client("Replay");
+	inmatch::ClientRuntime client("Replay");
 	client.seed_session(0x1234u, 0u, "client-key", "server-key",
 	                    7, 6, 0x0001, w::kPlayerInfantryTypeId, 0x30020u);
 	if (!expect(client.view().game_type() == 0x30020u,
@@ -363,17 +363,17 @@ bool run_challenge_diagnostics_pass_through_the_runtime() {
 	const std::string client_scrk = "CLIENT-CHALLENGE-DIAG-SCRK";
 	const std::string server_scrk = "SERVER-CHALLENGE-DIAG-SCRK";
 	constexpr uint32_t kChallengeClientKey = 0x0BADCAFEu;
-	np::ClientRuntime runtime("ChallengeDiag");
+	inmatch::ClientRuntime runtime("ChallengeDiag");
 	runtime.seed_session(
 			0x11223344u, kChallengeClientKey, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> challenge = frame_server_session(
 			server_seq, server_scrk, kChallengeClientKey,
 			{make_protocol_message(0x30, {0xFF, 0x00, 0x00})});
 	runtime.receive(challenge.data(), challenge.size());
 	(void)runtime.Client_ProcessNetworkFrame(1);
-	const np::JoinerConnection::ChallengeDiagnostics challenges =
+	const inmatch::JoinerConnection::ChallengeDiagnostics challenges =
 			runtime.challenge_diagnostics();
 	if (!expect(challenges.entity_checksum_seen == 1 &&
 	                    challenges.entity_checksum_answered == 0,
@@ -382,7 +382,7 @@ bool run_challenge_diagnostics_pass_through_the_runtime() {
 	if (!expect(!runtime.last_join_reject().set && !runtime.has_disconnect_event(),
 	            "a healthy session carries no reject or disconnect record"))
 		return false;
-	np::ClientRuntime unseeded("ChallengeDiagDefaults");
+	inmatch::ClientRuntime unseeded("ChallengeDiagDefaults");
 	return expect(unseeded.challenge_diagnostics().entity_checksum_seen == 0 &&
 	                      !unseeded.last_join_reject().set &&
 	                      !unseeded.has_disconnect_event(),
@@ -396,7 +396,7 @@ bool run_fire_queue_stamps_runtime_tick() {
 	// The network-role clock is ANCHORED to the host's tick seed, never free-run from
 	// zero: a replay seeds it the way the capture's S2C 0x61 did.
 	constexpr uint32_t kTickSeed = 0x00110000u;
-	np::ClientRuntime client("Shooter");
+	inmatch::ClientRuntime client("Shooter");
 	client.seed_session(0x11223344u, 0u, client_scrk, server_scrk,
 	                    1, 0, self_handle, w::kPlayerInfantryTypeId, 0u, kTickSeed);
 
@@ -466,7 +466,7 @@ bool run_tick_seed_anchors_the_client_clock() {
 	// (a) UNSEEDED: the tick stays parked at zero across frames — five Client frames must
 	// not advance it — and the shot is STILL queued, stamped with that zero, exactly as
 	// retail's client arm does. The zero is what the host's own gate rejects.
-	np::ClientRuntime unseeded("Unseeded");
+	inmatch::ClientRuntime unseeded("Unseeded");
 	unseeded.seed_session(0x33445566u, 0u, client_scrk, server_scrk,
 	                      1, 0, self_handle, w::kPlayerInfantryTypeId, 0u, /*tick_seed=*/0u);
 	for (int i = 0; i < 5; ++i) (void)unseeded.Client_ProcessNetworkFrame(100 + i);
@@ -503,14 +503,14 @@ bool run_tick_seed_anchors_the_client_clock() {
 
 	// (b) SEEDED via the wire: an S2C 0x61 re-bases the clock, and the very next frame's
 	// shot stamps seed+1 — comfortably past the freshness floor the host stamped.
-	np::JoinerConnection joiner("TickSeed", [] { return uint64_t(0); });
+	inmatch::JoinerConnection joiner("TickSeed", [] { return uint64_t(0); });
 	joiner.seed_in_match(0x44556677u, 1u, client_scrk, server_scrk,
 	                     1, 0, self_handle, 0x14B9);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> seed_dg = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x61, {0x00, 0x00, 0x11, 0x00})});
-	const np::JoinerConnection::PollResult seeded =
+	const inmatch::JoinerConnection::PollResult seeded =
 			joiner.handle_datagram(seed_dg.data(), seed_dg.size());
 	if (!expect(seeded.tick_seed_set && seeded.tick_seed == kSeed,
 			"S2C 0x61 surfaces the per-player tick seed")) {
@@ -521,7 +521,7 @@ bool run_tick_seed_anchors_the_client_clock() {
 	// real seed that parks the clock again.
 	const std::vector<uint8_t> short_dg = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x61, {0x01, 0x02})});
-	const np::JoinerConnection::PollResult short_seed =
+	const inmatch::JoinerConnection::PollResult short_seed =
 			joiner.handle_datagram(short_dg.data(), short_dg.size());
 	if (!expect(short_seed.tick_seed_set && short_seed.tick_seed == 0u,
 			"a short 0x61 body seeds zero rather than reading past the payload")) {
@@ -530,7 +530,7 @@ bool run_tick_seed_anchors_the_client_clock() {
 	const std::vector<uint8_t> disarm_dg = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x61, {0x00, 0x00, 0x00, 0x00})});
-	const np::JoinerConnection::PollResult disarm =
+	const inmatch::JoinerConnection::PollResult disarm =
 			joiner.handle_datagram(disarm_dg.data(), disarm_dg.size());
 	return expect(disarm.tick_seed_set && disarm.tick_seed == 0u,
 			"the round-end disarm form is a witnessed seed of zero");
@@ -539,12 +539,12 @@ bool run_tick_seed_anchors_the_client_clock() {
 bool run_end_round_header_pulls_complete_board() {
 	const std::string client_scrk = "CLIENT-END-ROUND-SCRK";
 	const std::string server_scrk = "SERVER-END-ROUND-SCRK";
-	np::JoinerConnection joiner("RoundPull");
+	inmatch::JoinerConnection joiner("RoundPull");
 	// A team game type: the 0x1D form is the session-state pick, so the
 	// joiner must know g_GameType before the header arrives.
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0x10000u);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	auto replica_owned = std::make_unique<ns::ClientReplicaPipeline>();
 	ns::ClientReplicaPipeline &replica = *replica_owned;
 	replica.set_game_type(0x10000u);
@@ -559,7 +559,7 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_HEADER,
 					encode_end_round_header(header, /*non_team_form=*/false))});
-	const np::JoinerConnection::PollResult header_result =
+	const inmatch::JoinerConnection::PollResult header_result =
 			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
 	if (!expect(header_result.queued_send_messages.size() == 1 &&
 			header_result.queued_send_messages[0].tag ==
@@ -599,7 +599,7 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_STATS,
 					encode_end_round_stats_chunk(board_wire, 0))});
-	const np::JoinerConnection::PollResult first =
+	const inmatch::JoinerConnection::PollResult first =
 			joiner.handle_datagram(first_datagram.data(), first_datagram.size());
 	if (!expect(first.queued_send_messages.size() == 1 &&
 			first.queued_send_messages[0].tag ==
@@ -620,7 +620,7 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_STATS,
 					encode_end_round_stats_chunk(board_wire, 200))});
-	const np::JoinerConnection::PollResult final =
+	const inmatch::JoinerConnection::PollResult final =
 			joiner.handle_datagram(final_datagram.data(), final_datagram.size());
 	if (!expect(final.queued_send_messages.empty(),
 			"the completing S2C 0x56 queues no further pull")) {
@@ -641,10 +641,10 @@ bool run_end_round_header_pulls_complete_board() {
 bool run_end_round_named_header_kicks_and_folds() {
 	const std::string client_scrk = "CLIENT-END-ROUND-DM-SCRK";
 	const std::string server_scrk = "SERVER-END-ROUND-DM-SCRK";
-	np::JoinerConnection joiner("RoundPullDM");
+	inmatch::JoinerConnection joiner("RoundPullDM");
 	joiner.seed_in_match(0x10203041u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId, /*game_type=*/0u);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	ns::ClientReplicaPipeline replica;
 	replica.set_game_type(0u);
 	replica.set_mp_session(true);
@@ -659,7 +659,7 @@ bool run_end_round_named_header_kicks_and_folds() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_HEADER,
 					encode_end_round_header(header, /*non_team_form=*/true))});
-	const np::JoinerConnection::PollResult header_result =
+	const inmatch::JoinerConnection::PollResult header_result =
 			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
 	if (!expect(header_result.queued_send_messages.size() == 1 &&
 			header_result.queued_send_messages[0].tag ==
@@ -691,10 +691,10 @@ bool run_end_round_named_header_kicks_and_folds() {
 bool run_unknown_scoreboard_row_requests_player_sync() {
 	const std::string client_scrk = "CLIENT-SYNC-RETRY-SCRK";
 	const std::string server_scrk = "SERVER-SYNC-RETRY-SCRK";
-	np::ClientRuntime client("SyncRetryRuntime");
+	inmatch::ClientRuntime client("SyncRetryRuntime");
 	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	PlayerReplicationState known;
 	known.player_slot = 3;
 	known.player_name = "Known";
@@ -736,7 +736,7 @@ bool run_unknown_scoreboard_row_requests_player_sync() {
 bool run_class_allow_mask_follows_retail_host() {
 	const std::string client_scrk = "CLIENT-CLASS-MASK-SCRK";
 	const std::string server_scrk = "SERVER-CLASS-MASK-SCRK";
-	np::JoinerConnection joiner("ClassMask");
+	inmatch::JoinerConnection joiner("ClassMask");
 	joiner.seed_in_match(0x52637485u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	if (!expect(joiner.class_allow_mask() == 0x03FFu,
@@ -744,7 +744,7 @@ bool run_class_allow_mask_follows_retail_host() {
 		return false;
 	}
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> configured = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x76, {0x55, 0x01})});
@@ -765,10 +765,10 @@ bool run_class_allow_mask_follows_retail_host() {
 
 	// The embedding runtime must expose the same receive-side state to its UI
 	// adapter, not merely consume it inside JoinerConnection.
-	np::ClientRuntime client("ClassMaskRuntime");
+	inmatch::ClientRuntime client("ClassMaskRuntime");
 	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing runtime_server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing runtime_server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> runtime_mask = frame_server_session(
 			runtime_server_tx, server_scrk, 1u,
 			{make_protocol_message(0x76, {0xAA, 0x02})});
@@ -807,7 +807,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	const std::string server_scrk = "SERVER-JOIN-TOKENS-SCRK";
 	const std::vector<uint8_t> cookie = {'P', 'U', 'B', '1', 0, 'v', 'a', 'l', 0};
 
-	auto hello_to_client_auth = [&](np::JoinerConnection &joiner,
+	auto hello_to_client_auth = [&](inmatch::JoinerConnection &joiner,
 	                                ServerHello &server_hello,
 	                                ClientAuth &client_auth) -> bool {
 		const std::vector<uint8_t> hello_datagram = joiner.start();
@@ -826,7 +826,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 		server_hello.sus2 = "revx02";
 		const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-		const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+		const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
 				server_hello_datagram.data(), server_hello_datagram.size());
 		if (!expect(hello_result.outbound.size() == 1,
 		            "join-tokens: ServerHello emits one ClientAuth")) {
@@ -857,7 +857,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	};
 
 	// --- the NovaWorld joiner: APPID after COUNTRYCODE, CD after VERSIONCRCSTRING
-	np::JoinerConnection joiner("JoinTokens");
+	inmatch::JoinerConnection joiner("JoinTokens");
 	joiner.set_app_id("3225");
 	joiner.set_cd_cookie(cookie);
 	ServerHello server_hello;
@@ -886,7 +886,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
 	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<ProtocolMessage> initial_settings = {
 			make_protocol_message(
 					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
@@ -895,7 +895,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	};
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck, initial_settings);
-	const np::JoinerConnection::PollResult settings_result =
+	const inmatch::JoinerConnection::PollResult settings_result =
 			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 	            "join-tokens: initial settings emit ACK then JOIN")) {
@@ -920,7 +920,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	}
 
 	// --- the LAN joiner: no APPID chunk
-	np::JoinerConnection lan("JoinTokensLan");
+	inmatch::JoinerConnection lan("JoinTokensLan");
 	ServerHello lan_hello;
 	ClientAuth lan_auth;
 	if (!hello_to_client_auth(lan, lan_hello, lan_auth)) return false;
@@ -934,7 +934,7 @@ bool run_retail_post_auth_prelude() {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
-	np::JoinerConnection joiner("RetailPrelude");
+	inmatch::JoinerConnection joiner("RetailPrelude");
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -955,7 +955,7 @@ bool run_retail_post_auth_prelude() {
 	server_hello.sus2 = "revx02";
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	if (!expect(hello_result.outbound.size() == 1,
 			"ServerHello emits one ClientAuth")) {
@@ -977,7 +977,7 @@ bool run_retail_post_auth_prelude() {
 	server_auth.mi = kConnectionId;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const np::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
 			server_auth_datagram.data(), server_auth_datagram.size());
 	if (!expect(auth_result.outbound.empty(),
 			"ServerAuth waits for retail's initial sequenced settings packet")) {
@@ -987,7 +987,7 @@ bool run_retail_post_auth_prelude() {
 	// Golden retail frame 6: two settings-update records in S2C sequence 1.
 	// The client acknowledges that packet with an empty sequence 1, then sends
 	// the exact JOIN request in sequence 2.
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<ProtocolMessage> initial_settings = {
 			make_protocol_message(
 					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
@@ -998,7 +998,7 @@ bool run_retail_post_auth_prelude() {
 	};
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck, initial_settings);
-	const np::JoinerConnection::PollResult settings_result =
+	const inmatch::JoinerConnection::PollResult settings_result =
 			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 			"initial settings emit header-only ACK then JOIN")) {
@@ -1038,7 +1038,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> join_ack_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x00, {})});
-	const np::JoinerConnection::PollResult join_ack_result =
+	const inmatch::JoinerConnection::PollResult join_ack_result =
 			joiner.handle_datagram(join_ack_datagram.data(), join_ack_datagram.size());
 	if (!expect(join_ack_result.outbound.size() == 2,
 			"S2C JOIN ack emits header-only ACK then form post")) {
@@ -1083,7 +1083,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> padding_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x02, std::move(padding_probe))});
-	const np::JoinerConnection::PollResult padding_result =
+	const inmatch::JoinerConnection::PollResult padding_result =
 			joiner.handle_datagram(padding_datagram.data(), padding_datagram.size());
 	if (!expect(padding_result.outbound.size() == 1 &&
 				decode_client_session(
@@ -1120,7 +1120,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> metadata_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x03, {0x01})});
-	const np::JoinerConnection::PollResult metadata_result =
+	const inmatch::JoinerConnection::PollResult metadata_result =
 			joiner.handle_datagram(metadata_datagram.data(), metadata_datagram.size());
 	if (!expect(metadata_result.outbound.empty(),
 			"metadata with no semantic response defers its ACK to the send boundary")) {
@@ -1152,7 +1152,7 @@ bool run_retail_post_auth_prelude() {
 					make_protocol_message(0x04, retail_slot_assignment()),
 					make_protocol_message(0x7B, retail_full_player_info()),
 			});
-	const np::JoinerConnection::PollResult game_start_result =
+	const inmatch::JoinerConnection::PollResult game_start_result =
 			joiner.handle_datagram(
 					game_start_datagram.data(), game_start_datagram.size());
 	if (!expect(game_start_result.outbound.size() == 1 &&
@@ -1190,7 +1190,7 @@ bool run_retail_post_auth_prelude() {
 					make_protocol_message(
 							0x60, retail_transfer_chunk(1, 171, 0xA5)),
 			});
-	const np::JoinerConnection::PollResult server_info_result =
+	const inmatch::JoinerConnection::PollResult server_info_result =
 			joiner.handle_datagram(
 					server_info_datagram.data(), server_info_datagram.size());
 	if (!expect(server_info_result.outbound.size() == 2,
@@ -1236,7 +1236,7 @@ bool run_retail_post_auth_prelude() {
 					make_protocol_message(
 							0x64, std::move(mission_data_chunk)),
 			});
-	const np::JoinerConnection::PollResult mission_data_result =
+	const inmatch::JoinerConnection::PollResult mission_data_result =
 			joiner.handle_datagram(
 					mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
@@ -1249,7 +1249,7 @@ bool run_retail_post_auth_prelude() {
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
 					0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
-	const np::JoinerConnection::PollResult player_list_result =
+	const inmatch::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
 	if (!expect(player_list_result.outbound.size() == 1 &&
@@ -1274,7 +1274,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x11, {})});
-	const np::JoinerConnection::PollResult sync_tail_result =
+	const inmatch::JoinerConnection::PollResult sync_tail_result =
 			joiner.handle_datagram(
 					sync_tail_datagram.data(), sync_tail_datagram.size());
 	if (!expect(sync_tail_result.outbound.empty(),
@@ -1318,7 +1318,7 @@ bool run_retail_post_auth_prelude() {
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
-	const np::JoinerConnection::PollResult world_end_result =
+	const inmatch::JoinerConnection::PollResult world_end_result =
 			joiner.handle_datagram(
 					world_end_datagram.data(), world_end_datagram.size());
 	if (!expect(world_end_result.outbound.size() == 1 &&
@@ -1352,7 +1352,7 @@ bool run_retail_post_auth_prelude() {
 					make_organic_spawn(
 							kRetailSelfHandle, "RetailPrelude",
 							0x10000, 0x20000, 0x30000, 0, 1, 7))});
-	const np::JoinerConnection::PollResult self_spawn_result =
+	const inmatch::JoinerConnection::PollResult self_spawn_result =
 			joiner.handle_datagram(
 					self_spawn_datagram.data(), self_spawn_datagram.size());
 	if (!expect(self_spawn_result.outbound.empty() &&
@@ -1370,7 +1370,7 @@ bool run_retail_post_auth_prelude() {
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
 					0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
-	const np::JoinerConnection::PollResult first_grant_result =
+	const inmatch::JoinerConnection::PollResult first_grant_result =
 			joiner.handle_datagram(
 					first_grant_datagram.data(), first_grant_datagram.size());
 	if (!expect(first_grant_result.outbound.empty() &&
@@ -1400,7 +1400,7 @@ bool run_retail_post_auth_prelude() {
 					make_protocol_message(0x19, {0x40, 0x30, 0x20, 0x10}),
 					make_protocol_message(0x0F, std::move(zoned_world_state)),
 			});
-	const np::JoinerConnection::PollResult granted_loadout_result =
+	const inmatch::JoinerConnection::PollResult granted_loadout_result =
 			joiner.handle_datagram(
 					deployment_policy_datagram.data(),
 					deployment_policy_datagram.size());
@@ -1444,7 +1444,7 @@ bool run_retail_post_auth_prelude() {
 					{make_protocol_message(
 							0x5A,
 							{0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
-	const np::JoinerConnection::PollResult split_second_grant_result =
+	const inmatch::JoinerConnection::PollResult split_second_grant_result =
 			joiner.handle_datagram(
 					split_second_grant_datagram.data(),
 					split_second_grant_datagram.size());
@@ -1474,7 +1474,7 @@ bool run_retail_post_auth_prelude() {
 bool run_early_sync_tail_latch() {
 	constexpr uint32_t kServerKey = 0x22334455u;
 	constexpr uint32_t kConnectionId = 5;
-	np::JoinerConnection joiner("EarlyTail");
+	inmatch::JoinerConnection joiner("EarlyTail");
 
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
@@ -1491,7 +1491,7 @@ bool run_early_sync_tail_latch() {
 	server_hello.hk = 0x99AA0011u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	if (!expect(hello_result.outbound.size() == 1, "early-tail: ClientAuth emitted")) {
 		return false;
@@ -1516,7 +1516,7 @@ bool run_early_sync_tail_latch() {
 	// Settings -> [header ACK, JOIN]; S2C 0x00 -> [header ACK, 0x01 {0}]; probe -> echo;
 	// game-start bundle -> the grouped admission packet. Same legs the prelude pins —
 	// here they only position the FSM at AwaitServerInfo.
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<ProtocolMessage> initial_settings = {
 			make_protocol_message(
 					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
@@ -1623,7 +1623,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
-	const np::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
 			player_list_datagram.data(), player_list_datagram.size());
 	if (!expect(player_list_result.outbound.size() == 1 &&
 				decode_client_session(
@@ -1653,7 +1653,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
-	const np::JoinerConnection::PollResult world_end_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult world_end_result = joiner.handle_datagram(
 			world_end_datagram.data(), world_end_datagram.size());
 	return expect(world_end_result.outbound.size() == 1 &&
 				decode_client_session(
@@ -1669,7 +1669,7 @@ bool run_early_sync_tail_latch() {
 bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
 	const std::string server_scrk = "SERVER-REPLAY-SCRK";
-	np::JoinerConnection joiner("Replay");
+	inmatch::JoinerConnection joiner("Replay");
 	joiner.seed_in_match(0x11223344u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -1686,13 +1686,13 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 	const std::vector<uint8_t> first =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(first_body));
 
-	np::JoinerConnection::PollResult initial =
+	inmatch::JoinerConnection::PollResult initial =
 			joiner.handle_datagram(first.data(), first.size());
 	if (!expect(initial.inbound_gameplay.size() == 1 &&
 	                    initial.inbound_gameplay[0].first == 0x49,
 	            "first S2C 0x83 surfaces its one-shot reload event"))
 		return false;
-	np::JoinerConnection::PollResult duplicate =
+	inmatch::JoinerConnection::PollResult duplicate =
 			joiner.handle_datagram(first.data(), first.size());
 	if (!expect(duplicate.inbound_gameplay.empty(),
 	            "exact duplicate S2C 0x83 does not replay its one-shot event"))
@@ -1734,7 +1734,7 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 bool run_client_reducer_preserves_packet_message_order() {
 	const std::string client_scrk = "CLIENT-REDUCER-ORDER";
 	const std::string server_scrk = "SERVER-REDUCER-ORDER";
-	np::JoinerConnection joiner("ReducerOrder");
+	inmatch::JoinerConnection joiner("ReducerOrder");
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -1776,7 +1776,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			});
 	if (!expect(!datagram.empty(), "frame mixed reducer-order packet"))
 		return false;
-	const np::JoinerConnection::PollResult poll =
+	const inmatch::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(datagram.data(), datagram.size());
 	const std::array<uint8_t, 10> expected{
 			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x6E, 0x81, 0x40, 0x6B}};
@@ -1796,7 +1796,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 using opennova::testrig::NullDatagramSocket;
 
 struct HostPumpHookProbe {
-	np::HostOwner *owner = nullptr;
+	inmatch::HostOwner *owner = nullptr;
 	w::World *world = nullptr;
 	w::AiSystem *ai = nullptr;
 	PeerAddr peer{};
@@ -1812,11 +1812,11 @@ struct HostPumpHookProbe {
 void observe_host_before_server_tick(void *opaque) {
 	auto &probe = *static_cast<HostPumpHookProbe *>(opaque);
 	++probe.calls;
-	for (np::NapiNPConnection &conn : probe.owner->ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &conn : probe.owner->ctx.np_protocol.connection_list) {
 		if (!(conn.peer == probe.peer)) continue;
 		probe.spawned = conn.link.owned_entity;
 		probe.saw_spawned_connection =
-				conn.burst.spawned && conn.phase == np::ConnectionPhase::Spawned;
+				conn.burst.spawned && conn.phase == inmatch::ConnectionPhase::Spawned;
 		probe.saw_live_entity = probe.spawned.valid() &&
 				probe.world->registry.get(probe.spawned) != nullptr;
 		probe.saw_ai_component = probe.spawned.valid() &&
@@ -1881,17 +1881,17 @@ bool run_roundtrip() {
 	const PeerAddr peer{0x0100007Fu, 30000}; // 127.0.0.1:30000
 	const std::string kName = "JoinerOne";
 
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	// HostClient listen host (mode 3). local_client = nullptr: no host loopback connection in this
 	// run — the only connection is the joiner, keeping the round-trip focused (the host loopback path
 	// is run (B)). The host advertises this HK; ClientRuntime echoes it so the join HK gate passes.
-	np::GameConfig host_config;
+	inmatch::GameConfig host_config;
 	host_config.game_type = 0x30020u; // captured Co-op: phase-3 objective layout is active
 	host_config.server_name = "Retail Sequence Host";
 	host_config.mission_name = "Cooperative Test Mission";
 	host_config.mission_file = "COOP_TEST.BMS";
 	host_config.expansion = "jox01";
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
 	// The host's authoritative World. ctx.world set BEFORE the join so tick_connections'
@@ -1909,9 +1909,9 @@ bool run_roundtrip() {
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;
 
-	np::ClientRuntime client(kName);
+	inmatch::ClientRuntime client(kName);
 	client.set_world_ready(false); // discover the authoritative mission before installing its world
-	np::CharacterJoinVars join_profile;
+	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
 	join_profile.team_request = 0xFF;
@@ -1934,8 +1934,8 @@ bool run_roundtrip() {
 	bool client_auth_has_retail_character_profile = false;
 	bool saw_world_drive_while_held = false;
 	std::string spawn_name;
-	auto note_event = [&](const np::HostAcceptEvent &e) {
-		if (e.kind == np::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
+	auto note_event = [&](const inmatch::HostAcceptEvent &e) {
+		if (e.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
 			spawned = true;
 			spawn_name = e.peer_name;
 		}
@@ -2008,7 +2008,7 @@ bool run_roundtrip() {
 						avatar[1] == join_profile.avatar[1];
 			}
 		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
-			for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 				if (!(conn.peer == peer)) continue;
 				SessionSequencing seq = conn.seq;
 				ProtocolPacketHeader hdr;
@@ -2040,8 +2040,8 @@ bool run_roundtrip() {
 				break;
 			}
 		}
-		np::HandleResult r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
-		for (const np::HostAcceptEvent &e : r.events) note_event(e);
+		inmatch::HandleResult r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
+		for (const inmatch::HostAcceptEvent &e : r.events) note_event(e);
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	};
 
@@ -2072,25 +2072,25 @@ bool run_roundtrip() {
 			"game ClientAuth sends a complete retail character-profile CU block")) {
 		return false;
 	}
-	if (!expect(client.phase() == np::JoinerConnection::Phase::Driving && !spawned,
+	if (!expect(client.phase() == inmatch::JoinerConnection::Phase::Driving && !spawned,
 	            "mission discovery stays on the same pre-spawn connection")) return false;
 
 	uint32_t held_server_key = 0;
 	uint32_t held_connection_id = 0;
-	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+	for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!(conn.peer == peer)) continue;
 		held_server_key = conn.server_sk;
 		held_connection_id = conn.connection_id;
 	}
 	for (int f = 0; f < 4; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
-		for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
-			for (const np::HostAcceptEvent &e : t.events) note_event(e);
+		for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+			for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 		}
 	}
 	if (!expect(!saw_world_drive_while_held &&
-	                    !spawned && !np::connection_spawned(ctx, peer),
+	                    !spawned && !inmatch::connection_spawned(ctx, peer),
 	            "0x0A and loadout/status wait for world-ready")) return false;
 
 	// Install the advertised mission, then resume on the exact authenticated session.
@@ -2102,17 +2102,17 @@ bool run_roundtrip() {
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
 		// spawn gate opens; ship the burst replies back to the client.
 		for (int k = 0; k < 6; ++k) {
-			for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
-				for (const np::HostAcceptEvent &e : t.events) note_event(e);
+			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
 		}
 	}
 	if (!expect(spawned, "the spawn-gate burst trips PeerSpawned")) return false;
 	if (!expect(spawn_name == kName, "PeerSpawned carries the joiner's ClientAuth.na name")) return false;
-	if (!expect(np::connection_spawned(ctx, peer), "host marks the peer spawned")) return false;
+	if (!expect(inmatch::connection_spawned(ctx, peer), "host marks the peer spawned")) return false;
 	bool resumed_same_session = false;
-	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+	for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		if (conn.peer == peer)
 			resumed_same_session = conn.server_sk == held_server_key &&
 			                       conn.connection_id == held_connection_id;
@@ -2122,7 +2122,7 @@ bool run_roundtrip() {
 	//        owned_entity) + stream a NAMED organic-spawn so the client name-matches. ---
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
 	w::EntityHandle Hh{};
-	for (np::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (c.peer == peer) {
 			c.link.transport = &udp_host;
 			c.link.mode = ns::TransportMode::Client;
@@ -2152,7 +2152,7 @@ bool run_roundtrip() {
 				Hh.packed, spawn_name, sx, sy, sz, 0x40000000, 2,
 				je0->minimap_net_id, je0->anim_slot);
 		std::vector<uint8_t> sdg;
-		if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0C, body, sdg), "host frames the named 0x0C"))
+		if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x0C, body, sdg), "host frames the named 0x0C"))
 			return false;
 		client.receive(sdg.data(), sdg.size());
 		// The name-match and the post-0x0E deploy release may arrive on adjacent
@@ -2208,8 +2208,8 @@ bool run_roundtrip() {
 	            "one deployed client tick batches RTT and uplink into one session datagram"))
 		return false;
 	for (std::vector<uint8_t> &d : client_frame) {
-		np::HandleResult r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
-		for (const np::HostAcceptEvent &e : r.events) staged += np::apply_in_match_c2s(ctx, e);
+		inmatch::HandleResult r = inmatch::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
+		for (const inmatch::HostAcceptEvent &e : r.events) staged += inmatch::apply_in_match_c2s(ctx, e);
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	}
 	if (!expect(staged == 1, "exactly one C2S 0x0C staged via apply_in_match_c2s")) return false;
@@ -2217,9 +2217,9 @@ bool run_roundtrip() {
 	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
 	// the remote peer's per-connection send boundary exactly as the owner does
 	// before the authoritative tick.
-	for (np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
-	np::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
+	inmatch::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
 
 	const w::Entity *je = world.registry.get(Hh);
 	if (!expect(je != nullptr, "joiner entity present after the tick")) return false;
@@ -2240,7 +2240,7 @@ bool run_roundtrip() {
 		if (raw.empty() || raw[0] != 0x0A) continue;
 		std::vector<uint8_t> inner(raw.begin() + 1, raw.end());
 		std::vector<uint8_t> dg83;
-		if (np::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
+		if (inmatch::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
 			client.receive(dg83.data(), dg83.size());
 			got_0a = true;
 		}
@@ -2270,7 +2270,7 @@ bool run_roundtrip() {
 	const uint32_t frames_before_short_frame = client.state().frames_applied;
 	std::vector<uint8_t> short_0a(14, 0); // anchor + flags, short before sub-block/tail
 	std::vector<uint8_t> short_dg;
-	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0A, short_0a, short_dg),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x0A, short_0a, short_dg),
 	            "host frames the deliberately short 0x0A")) return false;
 	client.receive(short_dg.data(), short_dg.size());
 	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
@@ -2291,14 +2291,14 @@ bool run_roundtrip() {
 	victim->alive = false;
 	victim->flags |= 2u;
 	const uint32_t frames_before_death = client.state().frames_applied;
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 
 	bool got_death_0a = false;
 	while (udp_host.pop_outbound(raw)) {
 		if (raw.empty() || raw[0] != 0x0A) continue;
 		std::vector<uint8_t> inner(raw.begin() + 1, raw.end());
 		std::vector<uint8_t> dg83;
-		if (np::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
+		if (inmatch::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
 			client.receive(dg83.data(), dg83.size());
 			got_death_0a = true;
 		}
@@ -2307,9 +2307,9 @@ bool run_roundtrip() {
 
 	std::size_t staged_after_death = 0;
 	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) {
-		np::HandleResult r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
-		for (const np::HostAcceptEvent &event : r.events)
-			staged_after_death += np::apply_in_match_c2s(ctx, event);
+		inmatch::HandleResult r = inmatch::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
+		for (const inmatch::HostAcceptEvent &event : r.events)
+			staged_after_death += inmatch::apply_in_match_c2s(ctx, event);
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	}
 	if (!expect(client.state().frames_applied == frames_before_death + 1,
@@ -2332,7 +2332,7 @@ bool run_roundtrip() {
 	// release flags — only the deploy flow reopens it.
 	{
 		// Capture a dead 0x0A inner while the victim is still down.
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		std::vector<uint8_t> dead_inner;
 		while (udp_host.pop_outbound(raw)) {
 			if (!raw.empty() && raw[0] == 0x0A)
@@ -2355,7 +2355,7 @@ bool run_roundtrip() {
 				std::vector<uint8_t> session_body;
 				if (nw_decode_inbound(d.data(), d.size(), opcode, session_body) &&
 						opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
-					for (const np::NapiNPConnection &conn :
+					for (const inmatch::NapiNPConnection &conn :
 							ctx.np_protocol.connection_list) {
 						if (!(conn.peer == peer)) continue;
 						SessionSequencing seq = conn.seq;
@@ -2371,7 +2371,7 @@ bool run_roundtrip() {
 						break;
 					}
 				}
-				np::HandleResult r = np::handle_server_datagram(
+				inmatch::HandleResult r = inmatch::handle_server_datagram(
 						ctx, peer, d.data(), d.size(), tick++);
 				for (const std::vector<uint8_t> &o : r.outbound)
 					client.receive(o.data(), o.size());
@@ -2379,15 +2379,15 @@ bool run_roundtrip() {
 			// The client's send boundary opens on receive: keep the host's
 			// keepalive stream flowing (the invalid pick produces no release
 			// on this path — the resolve-miss break drops it host-side).
-			for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
+			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 				for (const std::vector<uint8_t> &o : t.outbound)
 					client.receive(o.data(), o.size());
 			}
 		}
 		if (!expect(repick_on_wire == 1,
 				"the invalid re-pick reached the wire exactly once")) return false;
-		const np::NapiNPConnection *jc = nullptr;
-		for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		const inmatch::NapiNPConnection *jc = nullptr;
+		for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
 			if (conn.peer == peer) jc = &conn;
 		if (!expect(jc != nullptr && !jc->reply.last_loadout_reply.empty(),
 				"host retains the last 0x5A grant body")) return false;
@@ -2396,7 +2396,7 @@ bool run_roundtrip() {
 		const uint64_t release_revision_before =
 				client.deployment_release_revision();
 		std::vector<uint8_t> dg;
-		if (!expect(np::frame_in_match_s2c_batch(ctx, peer,
+		if (!expect(inmatch::frame_in_match_s2c_batch(ctx, peer,
 				{make_protocol_message(0x5A, jc->reply.last_loadout_reply),
 				 make_protocol_message(0x0A, dead_inner)}, dg),
 				"host frames the release + dead tail into one datagram")) return false;
@@ -2439,8 +2439,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	const PeerAddr peer{0x0100007Fu, 30001}; // 127.0.0.1:30001
 	const std::string kName = "ZonesJoiner";
 
-	np::NapiNPServerCtx ctx;
-	np::GameConfig host_config;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig host_config;
 	host_config.game_type = 0x30020u;
 	host_config.server_name = "Zones Host";
 	host_config.mission_name = "Zones Test Mission";
@@ -2448,7 +2448,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// With the dictated send boundary closed, framing the joiner's uplinks waits
 	// for the next period-four boundary.
 	if (under_send_holdoff) host_config.send_holdoff_ticks = 4;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
 	w::World world;
@@ -2484,14 +2484,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "zones: host player spawned")) return false;
 
-	np::ClientRuntime client(kName);
+	inmatch::ClientRuntime client(kName);
 	client.set_world_ready(false);
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
 	// stays host-owned — this co-op joiner latches the same team 1 reservation
 	// the later player-add pass consumes from the host's S2C 0x04.
 	{
-		np::JoinerConnection::LoadoutKit kit;
+		inmatch::JoinerConnection::LoadoutKit kit;
 		kit.player_class = 6;
 		kit.equipped_combo = 212;
 		kit.rows.push_back(LoadoutSubmitEntry{0x18, 0x03, 0xFF, 0xFF});
@@ -2512,8 +2512,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	std::size_t staged_in_match_c2s = 0;
 	std::vector<std::vector<uint8_t>> deploy_picks;
 	std::vector<std::vector<uint8_t>> submitted_loadouts;
-	auto note_event = [&](const np::HostAcceptEvent &e) {
-		if (e.kind == np::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
+	auto note_event = [&](const inmatch::HostAcceptEvent &e) {
+		if (e.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
 			spawned = true;
 			spawn_name = e.peer_name;
 		}
@@ -2524,7 +2524,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 		std::vector<uint8_t> session_body;
 		if (nw_decode_inbound(dg.data(), dg.size(), opcode, session_body) &&
 		    opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
-			for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 				if (!(conn.peer == peer)) continue;
 				SessionSequencing seq = conn.seq;
 				ProtocolPacketHeader hdr;
@@ -2558,11 +2558,11 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 				break;
 			}
 		}
-		np::HandleResult r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
-		for (const np::HostAcceptEvent &e : r.events) {
+		inmatch::HandleResult r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
+		for (const inmatch::HostAcceptEvent &e : r.events) {
 			note_event(e);
 			if (stage_in_match_c2s) {
-				const std::size_t staged = np::apply_in_match_c2s(ctx, e);
+				const std::size_t staged = inmatch::apply_in_match_c2s(ctx, e);
 				staged_in_match_c2s += staged;
 				if (staged != 0) stage_in_match_c2s = false;
 			}
@@ -2579,8 +2579,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		for (int k = 0; k < 6; ++k) {
-			for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
-				for (const np::HostAcceptEvent &e : t.events) note_event(e);
+			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
 		}
@@ -2591,7 +2591,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// streamed pool 0 before this entity existed) — same leg run_roundtrip pins.
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
 	w::EntityHandle Hh{};
-	for (np::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (!(c.peer == peer)) continue;
 		c.link.transport = &udp_host;
 		c.link.mode = ns::TransportMode::Client;
@@ -2604,7 +2604,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 				Hh.packed, spawn_name, w::to_fixed(50.0), w::to_fixed(60.0),
 				w::to_fixed(1.0), 0x40000000, 1, je0 ? je0->net_id : 0);
 		std::vector<uint8_t> sdg;
-		if (!expect(np::frame_in_match_s2c(ctx, peer, 0x0C, named, sdg),
+		if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x0C, named, sdg),
 				"zones: host frames the named 0x0C")) {
 			return false;
 		}
@@ -2617,8 +2617,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 		for (int f = 0; f < frames && !until(); ++f) {
 			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick))
 				pump_host(std::move(d));
-			for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
-				for (const np::HostAcceptEvent &e : t.events) note_event(e);
+			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
 		}
@@ -2650,7 +2650,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// The host-side D-NET-156 pick hold persists: the joiner is not deployed on the host
 	// until a C2S 0x0E, which the client no longer sends on the initial join.
 	bool host_still_pending = false;
-	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+	for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		if (conn.peer == peer) host_still_pending = conn.link.respawn_pending;
 	if (!expect(host_still_pending,
 			"zones: host keeps the D-NET-156 pick hold (client-side pick deferred)"))
@@ -2688,7 +2688,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 	constexpr uint16_t kRemoteHandle = 0x0007;
 	constexpr uint16_t kNonPersonHandle = 0x1003;
 
-	np::ClientRuntime client("ReloadOrder");
+	inmatch::ClientRuntime client("ReloadOrder");
 	client.seed_session(
 			0x10203040u, 1u, client_scrk, server_scrk,
 			1, 0, kSelfHandle, w::kPlayerInfantryTypeId,
@@ -2698,7 +2698,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 		return EntityClass::Unknown;
 	});
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> spawn = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(
@@ -2708,7 +2708,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 							0x10000, 0x20000, 0x30000, 0, 2, 9))});
 	client.receive(spawn.data(), spawn.size());
 	(void)client.Client_ProcessNetworkFrame(1);
-	netsim::ClientEntityState &non_person =
+	replication::ClientEntityState &non_person =
 			client.state().upsert(kNonPersonHandle);
 	non_person.cls = EntityClass::Vehicle;
 
@@ -2724,7 +2724,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 	client.receive(reload_echo.data(), reload_echo.size());
 	(void)client.Client_ProcessNetworkFrame(2);
 
-	const netsim::ClientEntityState *remote = client.state().find(kRemoteHandle);
+	const replication::ClientEntityState *remote = client.state().find(kRemoteHandle);
 	if (!expect(remote != nullptr && remote->cls == EntityClass::Player,
 			"reload order: the addressed remote Person row exists"))
 		return false;
@@ -2751,7 +2751,7 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 
 bool run_host_client_discards_authority_owned_reload_echoes() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 
 	WeaponReload reload;
 	reload.entity_handle = 0x0001;
@@ -2770,7 +2770,7 @@ bool run_host_client_discards_authority_owned_reload_echoes() {
 
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 	constexpr uint16_t kZone = 0x3001;
 
 	int32_t percent = -1;
@@ -2823,7 +2823,7 @@ bool run_host_zone_timer_value_matches_retail_entry() {
 
 bool run_zone_timer_channels_share_one_retail_entry() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 	constexpr uint16_t kZone = 0x3002;
 
 	host_loop.host_send(
@@ -2904,7 +2904,7 @@ bool run_zone_timer_channels_share_one_retail_entry() {
 
 bool run_zone_presence_updates_only_a_tracked_window() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 	constexpr uint16_t kZone = 0x1003;
 
 	host_loop.host_send(
@@ -2937,7 +2937,7 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 	// rate and clamps progress <= target for a positive rate — so the count
 	// never moves it (the inert positive-rate clamp) — and the untracked 0x6C
 	// left the rate alone.
-	const np::ClientRuntime::TrackedCaptureWindow &w = host_view.tracked_capture_window();
+	const inmatch::ClientRuntime::TrackedCaptureWindow &w = host_view.tracked_capture_window();
 	if (!expect(w.tracked() && w.zone == kZone && w.rate == 3 && w.target == 0 &&
 	                    w.limit == 62 * 15 && w.progress == 0 && w.mode_a == 0 && w.mode_b == 1,
 	            "tracked window: the 0x53 seed + the 0x6C re-rate + the inert clamp"))
@@ -2973,7 +2973,7 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 // S2C 0x54 seed and the 0x46 bit-0x0008 seed feed the same slot bytes.
 bool run_roster_revive_countdown_ticks_once_per_63_frames() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 
 	PlayerReplicationState rep;
 	rep.player_slot = 3;
@@ -3031,7 +3031,7 @@ bool run_roster_revive_countdown_ticks_once_per_63_frames() {
 bool run_medic_request_queues_one_reliable_0x2e() {
 	const std::string client_scrk = "CLIENT-MEDIC-SCRK";
 	const std::string server_scrk = "SERVER-MEDIC-SCRK";
-	np::ClientRuntime client("MedicJoiner", [] { return uint64_t{0x10203040}; });
+	inmatch::ClientRuntime client("MedicJoiner", [] { return uint64_t{0x10203040}; });
 	if (!expect(!client.queue_medic_request(),
 	            "medic request: an unconnected joiner cannot queue"))
 		return false;
@@ -3056,7 +3056,7 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 	            "medic request: the call is reliable"))
 		return false;
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 	return expect(!host_view.queue_medic_request(),
 	              "medic request: the host's own view never uplinks");
 }
@@ -3077,22 +3077,22 @@ bool run_session_vars_exp_fanfare_walk() {
 	kv(body, "GAMETYPE", {0x20, 0x00, 0x03, 0x00});
 	kv(body, "EXP_FANFARE", {5, 20});
 	kv(body, "MISSIONFILENAME", {'x', 0});
-	if (!expect(np::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
+	if (!expect(inmatch::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
 	            "exp_fanfare: lo byte 5 / hi byte 20 land as the u16"))
 		return false;
 	std::vector<uint8_t> absent;
 	kv(absent, "SERVERNAME", {'b', 0});
-	if (!expect(np::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
+	if (!expect(inmatch::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
 	            "exp_fanfare: an absent key reads 0"))
 		return false;
 	std::vector<uint8_t> truncated(body.begin(), body.begin() + 20);
-	return expect(np::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
+	return expect(inmatch::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
 	              "exp_fanfare: a truncated stream fails closed");
 }
 
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
 	ns::LoopbackChannel host_loop;
-	np::ClientRuntime host_view(host_loop);
+	inmatch::ClientRuntime host_view(host_loop);
 	int32_t percent = -1;
 
 	// 34,636,833 * 62 = INT32_MAX-1. Adding two wraps to INT32_MIN,
@@ -3135,13 +3135,13 @@ bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
 bool run_joiner_zone_timer_preserves_mixed_wire_order() {
 	const std::string client_scrk = "CLIENT-ZONE-TIMER-SCRK";
 	const std::string server_scrk = "SERVER-ZONE-TIMER-SCRK";
-	np::ClientRuntime client("ZoneJoiner");
+	inmatch::ClientRuntime client("ZoneJoiner");
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
 			0, 0x00100000u, /*replay_mode=*/true);
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> mixed = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{
@@ -3181,9 +3181,9 @@ bool run_joiner_zone_timer_preserves_mixed_wire_order() {
 }
 
 bool run_host_as_client() {
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ns::LoopbackChannel host_loop; // the in-process channel the host emits its own S2C onto
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        0x0FE0E112u, &host_loop);
 
 	w::World world;
@@ -3196,14 +3196,14 @@ bool run_host_as_client() {
 
 	// Spawn the host's own player through the real pipeline (type-2 loopback -> spawn_player ->
 	// cached.local_player; binds conn.link.owned_entity = the host player, the D-NET-121 anchor).
-	const int spawned = np::Server_ProcessPendingPlayerSpawns(ctx, world);
+	const int spawned = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	if (!expect(spawned == 1, "the host's own player spawned via the pipeline")) return false;
 
 	// Find the host loopback connection; confirm its owned_entity is the host player + mark it in-match.
 	// (In production burst.spawned latches when the host loopback's §5.2a burst completes — covered by
 	// npruntime_initial_state_burst; here we set it directly to exercise the per-frame emit path.)
-	np::NapiNPConnection *self = nullptr;
-	for (np::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+	inmatch::NapiNPConnection *self = nullptr;
+	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (c.type == 2) self = &c;
 	}
 	if (!expect(self != nullptr, "host loopback connection present")) return false;
@@ -3242,13 +3242,13 @@ bool run_host_as_client() {
 			"vehicle fixture occupies the last retail minimap phase"))
 		return false;
 
-	np::ClientRuntime host_view(host_loop); // HostClient recv-fold only
+	inmatch::ClientRuntime host_view(host_loop); // HostClient recv-fold only
 	ns::ClientEntityState &decoded_map = host_view.state().upsert(map_handle.packed);
 	decoded_map.x = w::to_fixed(map_entity.position.x);
 	decoded_map.y = w::to_fixed(map_entity.position.y);
 	decoded_map.z = w::to_fixed(map_entity.position.z);
 
-	np::Server_TickUpdate(ctx); // fans a per-frame 0x0A to the host loopback (is_in_match), anchored to hp
+	inmatch::Server_TickUpdate(ctx); // fans a per-frame 0x0A to the host loopback (is_in_match), anchored to hp
 
 	if (!expect(host_view.is_authority(), "host-as-client runtime is authority (no 0x0C)")) return false;
 	std::vector<std::vector<uint8_t>> out = host_view.Client_ProcessNetworkFrame();
@@ -3293,13 +3293,13 @@ bool run_host_as_client() {
 			"late-phase vehicle is absent before its dynamic scan"))
 		return false;
 	for (int tick = 2; tick <= 1778; ++tick) {
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		(void)host_view.Client_ProcessNetworkFrame();
 	}
 	if (!expect(!has_vehicle_overlay(),
 			"late-phase vehicle remains absent through tick 1778"))
 		return false;
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	(void)host_view.Client_ProcessNetworkFrame();
 	if (!expect(has_vehicle_overlay(),
 			"late-phase vehicle arrives and is retained on phase-127 tick 1779"))
@@ -3310,11 +3310,11 @@ bool run_host_as_client() {
 	// connection's one-shot initial scan so the producer re-sends the
 	// persistent pool-2 markers to the fresh epoch (without the re-arm the
 	// building/zone markers would be missing for the rest of the session).
-	np::ClientRuntime restart_view(host_loop);
-	np::Server_RearmMinimapInitialScan(ctx);
+	inmatch::ClientRuntime restart_view(host_loop);
+	inmatch::Server_RearmMinimapInitialScan(ctx);
 	bool restart_map_overlay = false;
 	for (int tick = 0; tick < 16 && !restart_map_overlay; ++tick) {
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		(void)restart_view.Client_ProcessNetworkFrame();
 		for (const ns::ClientMinimapOverlaySlot &slot :
 				restart_view.state().minimap.persistent) {
@@ -3373,20 +3373,20 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	w::pose_mounted_occupant(world, *infantry_live, *gun_live, gun_live->seats[0]);
 
 	ns::LoopbackChannel host_loop;
-	np::HostOwner owner;
+	inmatch::HostOwner owner;
 	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
-	np::HostConfig cfg;
+	inmatch::HostConfig cfg;
 	cfg.config.server_name = "SINGLEPLAYERGAME";
 	cfg.config.max_players = 1;
-	cfg.socket_mode = np::SocketMode::Socketless;
+	cfg.socket_mode = inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = true;
-	np::start_host_session(owner, cfg);
+	inmatch::start_host_session(owner, cfg);
 
 	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
 	// then fold the queued initial stream and first whole-world compact frame together.
-	np::Server_TickUpdate(owner.ctx);
-	np::ClientRuntime host_view(host_loop);
+	inmatch::Server_TickUpdate(owner.ctx);
+	inmatch::ClientRuntime host_view(host_loop);
 	host_view.view().set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x14B9u) return EntityClass::Player;
 		if (type_id == 5311u) return EntityClass::Infantry;
@@ -3417,8 +3417,8 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	            "the host's pool row retains its B50Cal carrier and raw Usegun bone"))
 		return false;
 
-	const np::NapiNPConnection *self = nullptr;
-	for (const np::NapiNPConnection &conn : owner.ctx.np_protocol.connection_list)
+	const inmatch::NapiNPConnection *self = nullptr;
+	for (const inmatch::NapiNPConnection &conn : owner.ctx.np_protocol.connection_list)
 		if (conn.type == 2) self = &conn;
 	if (!expect(self != nullptr && self->burst.spawned && self->burst.entity_batch_count > 0,
 	            "host startup reaches in-match through the real initial-state burst")) return false;
@@ -3432,12 +3432,12 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 bool run_host_startup_maps_claymore_preference() {
 	{
 		w::World world;
-		np::HostOwner owner;
+		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
-		np::HostConfig cfg;
+		inmatch::HostConfig cfg;
 		cfg.config.mp_attributes = 0x8000u;
-		cfg.socket_mode = np::SocketMode::Socketless;
-		np::start_host_session(owner, cfg);
+		cfg.socket_mode = inmatch::SocketMode::Socketless;
+		inmatch::start_host_session(owner, cfg);
 		if (!expect(world.throwables.team_trigger_claymore,
 		            "host startup enables same-team claymore triggers for mp_attributes 0x8000"))
 			return false;
@@ -3446,12 +3446,12 @@ bool run_host_startup_maps_claymore_preference() {
 	{
 		w::World world;
 		world.throwables.team_trigger_claymore = true;
-		np::HostOwner owner;
+		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
-		np::HostConfig cfg;
+		inmatch::HostConfig cfg;
 		cfg.config.mp_attributes = 0x3A06u;
-		cfg.socket_mode = np::SocketMode::Socketless;
-		np::start_host_session(owner, cfg);
+		cfg.socket_mode = inmatch::SocketMode::Socketless;
+		inmatch::start_host_session(owner, cfg);
 		if (!expect(!world.throwables.team_trigger_claymore,
 		            "host startup disables same-team claymore triggers for default mp_attributes 0x3A06"))
 			return false;
@@ -3465,12 +3465,12 @@ bool run_host_startup_maps_claymore_preference() {
 bool run_host_startup_maps_no_tracers_rule() {
 	{
 		w::World world;
-		np::HostOwner owner;
+		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
-		np::HostConfig cfg;
+		inmatch::HostConfig cfg;
 		cfg.config.mp_attributes = 0x0001u;
-		cfg.socket_mode = np::SocketMode::Socketless;
-		np::start_host_session(owner, cfg);
+		cfg.socket_mode = inmatch::SocketMode::Socketless;
+		inmatch::start_host_session(owner, cfg);
 		if (!expect(world.round_sim.no_tracers_rule,
 		            "host startup arms the NoTracers rule for mp_attributes 0x0001"))
 			return false;
@@ -3479,12 +3479,12 @@ bool run_host_startup_maps_no_tracers_rule() {
 	{
 		w::World world;
 		world.round_sim.no_tracers_rule = true;
-		np::HostOwner owner;
+		inmatch::HostOwner owner;
 		owner.ctx.world = &world;
-		np::HostConfig cfg;
+		inmatch::HostConfig cfg;
 		cfg.config.mp_attributes = 0x3A06u;
-		cfg.socket_mode = np::SocketMode::Socketless;
-		np::start_host_session(owner, cfg);
+		cfg.socket_mode = inmatch::SocketMode::Socketless;
+		inmatch::start_host_session(owner, cfg);
 		if (!expect(!world.round_sim.no_tracers_rule,
 		            "host startup clears the NoTracers rule for default mp_attributes 0x3A06"))
 			return false;
@@ -3503,23 +3503,23 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	world.ai = &ai;
 	world.registry.configure_pool(0, 16);
 
-	np::HostOwner owner;
-	np::test::bring_up_host(owner.ctx, np::ConnectionMode::HostClient,
-			np::SocketMode::Socketless, 0x0FE0E112u);
+	inmatch::HostOwner owner;
+	inmatch::test::bring_up_host(owner.ctx, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E112u);
 	owner.ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 31000};
-	np::PeerLink &peer_link = owner.peers[peer];
+	inmatch::PeerLink &peer_link = owner.peers[peer];
 	peer_link.transport = std::make_unique<ns::UdpSessionTransport>(
 			ns::UdpSessionTransport::Role::Host);
 
-	np::NapiNPConnection conn;
+	inmatch::NapiNPConnection conn;
 	conn.peer = peer;
 	conn.type = 1;
-	conn.connection_id = np::kFirstJoinerDcb;
+	conn.connection_id = inmatch::kFirstJoinerDcb;
 	conn.player_name = "LateJoiner";
 	conn.self_id_seen = true;
-	conn.phase = np::ConnectionPhase::PendingSpawn;
+	conn.phase = inmatch::ConnectionPhase::PendingSpawn;
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = ns::TransportMode::Client;
 	conn.reply.roster_pushed = true;
@@ -3529,7 +3529,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	conn.burst.loadout_received = true;
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
-	owner.ctx.np_protocol.next_connection_id = np::kFirstJoinerDcb + 1;
+	owner.ctx.np_protocol.next_connection_id = inmatch::kFirstJoinerDcb + 1;
 	// The fixture starts on the boundary after its already-pushed roster. Initial
 	// world records intentionally cannot share the roster's send tick.
 	owner.now_tick = 1;
@@ -3540,10 +3540,10 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	world.add_system(&logic_probe);
 
 	NullDatagramSocket sock;
-	np::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
+	inmatch::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
 
-	np::NapiNPConnection *remote = nullptr;
-	for (np::NapiNPConnection &candidate : owner.ctx.np_protocol.connection_list) {
+	inmatch::NapiNPConnection *remote = nullptr;
+	for (inmatch::NapiNPConnection &candidate : owner.ctx.np_protocol.connection_list) {
 		if (candidate.peer == peer) remote = &candidate;
 	}
 	if (!expect(hook.calls == 1, "pre-Server_TickUpdate hook runs exactly once")) return false;
@@ -3575,7 +3575,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 //  host side NapiNPServerMsg_AnimChecksumRequest @0x501D40 (discard @0x501d71 + counter
 //  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, validate_time_sync @0x502210]
 bool build_retail_class8_charattr_table(
-		np::CharAttrChallengeTable &table) {
+		inmatch::CharAttrChallengeTable &table) {
 	// Sections 1..7 only need to exist: CharAttr_LoadFromDef stops at the
 	// first missing CHARACTER section. CHARACTER8 uses the authoritative JO
 	// resource.pff/localres.pff text and therefore produces the captured row.
@@ -3601,14 +3601,14 @@ ARCTIC_CAMMO    = 5305
 RUN_MODIFIER    = 0
 ATTRIBUTES      = KnifeBonus
 )CHARATTR";
-	return np::parse_charattr_challenge_table(
+	return inmatch::parse_charattr_challenge_table(
 			reinterpret_cast<const uint8_t *>(source.data()),
 			source.size(), table);
 }
 
 // All sixteen sections present, every property S2C 0x41 can clear nonzero and distinct per
 // row, so a missed id or a wrong offset leaves a surviving dword the assertions can see.
-bool build_full_charattr_table(np::CharAttrChallengeTable &table) {
+bool build_full_charattr_table(inmatch::CharAttrChallengeTable &table) {
 	std::string source;
 	for (int section = 1; section <= 16; ++section) {
 		const std::string n = std::to_string(section);
@@ -3623,19 +3623,19 @@ bool build_full_charattr_table(np::CharAttrChallengeTable &table) {
 		source += "SCOPE_MUTE   = " + n + "8\n";
 		source += "ATTRIBUTES   = AutoScope, Medic\n";
 	}
-	return np::parse_charattr_challenge_table(
+	return inmatch::parse_charattr_challenge_table(
 			reinterpret_cast<const uint8_t *>(source.data()),
 			source.size(), table);
 }
 
 bool run_charattr_challenge_table_matches_retail() {
-	np::CharAttrChallengeTable table;
+	inmatch::CharAttrChallengeTable table;
 	if (!expect(build_retail_class8_charattr_table(table),
 			"charattr parser accepts the authoritative CHARACTER syntax")) {
 		return false;
 	}
 
-	np::CharAttrChallengeRow expected{};
+	inmatch::CharAttrChallengeRow expected{};
 	auto put_u32 = [&](std::size_t offset, uint32_t value) {
 		expected[offset + 0] = static_cast<uint8_t>(value);
 		expected[offset + 1] = static_cast<uint8_t>(value >> 8);
@@ -3658,8 +3658,8 @@ bool run_charattr_challenge_table_matches_retail() {
 	put_u32(52, 5305);        // ARCTIC_CAMMO
 	put_u32(56, 0);           // RUN_MODIFIER; +60..123 remain zero
 
-	const np::CharAttrChallengeRow *row =
-			np::find_charattr_challenge_row(table, 8);
+	const inmatch::CharAttrChallengeRow *row =
+			inmatch::find_charattr_challenge_row(table, 8);
 	if (!expect(row != nullptr && *row == expected,
 			"CHARACTER8 is the exact 124-byte g_CharAttr row")) {
 		return false;
@@ -3673,9 +3673,9 @@ bool run_charattr_challenge_table_matches_retail() {
 			"the row reproduces both independent retail 0x1C replies")) {
 		return false;
 	}
-	if (!expect(np::find_charattr_challenge_row(table, 0) == nullptr &&
-	                    np::find_charattr_challenge_row(table, 17) == nullptr &&
-	                    np::find_charattr_challenge_row(table, 255) == nullptr,
+	if (!expect(inmatch::find_charattr_challenge_row(table, 0) == nullptr &&
+	                    inmatch::find_charattr_challenge_row(table, 17) == nullptr &&
+	                    inmatch::find_charattr_challenge_row(table, 255) == nullptr,
 			"class 0 and wrapped out-of-range classes fail the embedded-id check")) {
 		return false;
 	}
@@ -3684,31 +3684,31 @@ bool run_charattr_challenge_table_matches_retail() {
 	// exists in the file.
 	static constexpr std::string_view skipped =
 			"[CHARACTER1]\nSTEALTH=1\n[CHARACTER3]\nSTEALTH=3\n";
-	np::CharAttrChallengeTable gap_table;
-	if (!expect(np::parse_charattr_challenge_table(
+	inmatch::CharAttrChallengeTable gap_table;
+	if (!expect(inmatch::parse_charattr_challenge_table(
 				reinterpret_cast<const uint8_t *>(skipped.data()),
 				skipped.size(), gap_table) &&
-	                    np::find_charattr_challenge_row(gap_table, 1) != nullptr &&
-	                    np::find_charattr_challenge_row(gap_table, 3) == nullptr,
+	                    inmatch::find_charattr_challenge_row(gap_table, 1) != nullptr &&
+	                    inmatch::find_charattr_challenge_row(gap_table, 3) == nullptr,
 			"first missing CHARACTER section terminates retail enumeration")) {
 		return false;
 	}
 
-	np::CharAttrChallengeTable empty_table;
+	inmatch::CharAttrChallengeTable empty_table;
 	empty_table.rows[0].fill(0xFF);
-	const np::CharAttrChallengeTable all_zero{};
-	if (!expect(!np::parse_charattr_challenge_table(
+	const inmatch::CharAttrChallengeTable all_zero{};
+	if (!expect(!inmatch::parse_charattr_challenge_table(
 				nullptr, 0, empty_table) &&
 	                    empty_table.rows == all_zero.rows,
 			"missing/empty source clears the table and leaves every slot inactive")) {
 		return false;
 	}
 
-	np::CharAttrChallengeTable cleared = table;
-	np::clear_charattr_challenge_property(cleared, 5);
-	np::CharAttrChallengeRow expected_cleared = expected;
+	inmatch::CharAttrChallengeTable cleared = table;
+	inmatch::clear_charattr_challenge_property(cleared, 5);
+	inmatch::CharAttrChallengeRow expected_cleared = expected;
 	std::fill(expected_cleared.begin() + 20, expected_cleared.begin() + 24, 0);
-	if (!expect(*np::find_charattr_challenge_row(cleared, 8) == expected_cleared,
+	if (!expect(*inmatch::find_charattr_challenge_row(cleared, 8) == expected_cleared,
 			"property 5 clears exactly RECOIL_MUTE across the checksum row")) {
 		return false;
 	}
@@ -3729,19 +3729,19 @@ bool run_charattr_challenge_table_matches_retail() {
 			{8, 32}, // XHAIRDX_MUTE
 			{9, 24}, // RELOAD_MUTE
 	};
-	np::CharAttrChallengeTable full;
+	inmatch::CharAttrChallengeTable full;
 	if (!expect(build_full_charattr_table(full),
 			"sixteen CHARACTER sections with every clearable property set")) {
 		return false;
 	}
 	constexpr uint32_t kClearSeed = 0x3D5D0000u;
 	for (const ClearCase &c : kClearMap) {
-		np::CharAttrChallengeTable mutated = full;
-		np::clear_charattr_challenge_property(mutated, c.property_id);
+		inmatch::CharAttrChallengeTable mutated = full;
+		inmatch::clear_charattr_challenge_property(mutated, c.property_id);
 		bool rows_match = true;
 		const auto field = static_cast<std::ptrdiff_t>(c.offset);
-		for (std::size_t r = 0; r < np::kCharAttrChallengeRowCount; ++r) {
-			np::CharAttrChallengeRow expected_row = full.rows[r];
+		for (std::size_t r = 0; r < inmatch::kCharAttrChallengeRowCount; ++r) {
+			inmatch::CharAttrChallengeRow expected_row = full.rows[r];
 			// Falsifiability guard: the fixture must have made this dword nonzero.
 			rows_match = rows_match &&
 					std::any_of(expected_row.begin() + field,
@@ -3755,10 +3755,10 @@ bool run_charattr_challenge_table_matches_retail() {
 				std::to_string(c.property_id) +
 				" zeroes exactly its witnessed dword in all sixteen rows";
 		if (!expect(rows_match, rows_label.c_str())) return false;
-		const np::CharAttrChallengeRow *before_row =
-				np::find_charattr_challenge_row(full, 8);
-		const np::CharAttrChallengeRow *after_row =
-				np::find_charattr_challenge_row(mutated, 8);
+		const inmatch::CharAttrChallengeRow *before_row =
+				inmatch::find_charattr_challenge_row(full, 8);
+		const inmatch::CharAttrChallengeRow *after_row =
+				inmatch::find_charattr_challenge_row(mutated, 8);
 		if (!expect(before_row != nullptr && after_row != nullptr,
 				"the class-8 checksum row stays selectable across the clear")) {
 			return false;
@@ -3773,8 +3773,8 @@ bool run_charattr_challenge_table_matches_retail() {
 	}
 	// Only id 1 and ids >= 10 reach the original's default arm.
 	for (const uint8_t no_op_id : {uint8_t{1}, uint8_t{10}, uint8_t{255}}) {
-		np::CharAttrChallengeTable untouched = full;
-		np::clear_charattr_challenge_property(untouched, no_op_id);
+		inmatch::CharAttrChallengeTable untouched = full;
+		inmatch::clear_charattr_challenge_property(untouched, no_op_id);
 		const std::string label = "S2C 0x41 property " +
 				std::to_string(no_op_id) + " is an exact no-op";
 		if (!expect(untouched.rows == full.rows, label.c_str())) return false;
@@ -3786,11 +3786,11 @@ bool run_periodic_request_quartet_is_answered() {
 	const std::string client_scrk = "CLIENT-QUARTET-SCRK";
 	const std::string server_scrk = "SERVER-QUARTET-SCRK";
 	uint64_t now_ms = 4242;
-	np::JoinerConnection joiner("Quartet", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection joiner("Quartet", [&now_ms] { return now_ms; });
 	joiner.seed_in_match(0x77889900u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, 0x14B9);
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	// The host fires all four together in ONE datagram, exactly as captured.
 	const std::vector<uint8_t> quartet = frame_server_session(
 			server_tx, server_scrk, 1u,
@@ -3800,7 +3800,7 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x43, {0x11, 0x22, 0x33, 0x44}), // server stamp
 					make_protocol_message(0x68, {0x32, 0x00, 0x00, 0x00}), // page start 50
 			});
-	const np::JoinerConnection::PollResult r =
+	const inmatch::JoinerConnection::PollResult r =
 			joiner.handle_datagram(quartet.data(), quartet.size());
 	if (!expect(r.outbound.empty() && r.queued_send_messages.size() == 3,
 			"periodic replies remain semantic until the client send boundary"))
@@ -3866,13 +3866,13 @@ bool run_periodic_request_quartet_is_answered() {
 	// deliberately ordered/duplicated renderer-definition snapshot. The response
 	// must use the challenge seed and page the frozen values VERBATIM, at most fifty
 	// dwords after the echoed cursor. This is not a live network-entity census.
-	np::CharAttrChallengeTable charattr;
+	inmatch::CharAttrChallengeTable charattr;
 	if (!expect(build_retail_class8_charattr_table(charattr),
 			"build production charattr challenge table")) {
 		return false;
 	}
-	const np::CharAttrChallengeRow class8_row =
-			*np::find_charattr_challenge_row(charattr, 8);
+	const inmatch::CharAttrChallengeRow class8_row =
+			*inmatch::find_charattr_challenge_row(charattr, 8);
 	joiner.set_charattr_challenge_table(charattr);
 	std::vector<uint32_t> model_snapshot;
 	for (uint32_t i = 0; i < 60; ++i)
@@ -3891,7 +3891,7 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 					make_protocol_message(0x68, {0x01, 0x00, 0x00, 0x00}),
 			});
-	const np::JoinerConnection::PollResult active_result =
+	const inmatch::JoinerConnection::PollResult active_result =
 			joiner.handle_datagram(active.data(), active.size());
 	if (!expect(active_result.outbound.empty() &&
 	                    active_result.queued_send_messages.size() == 2,
@@ -3948,7 +3948,7 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x41, {0x05, 0xA5}),
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 			});
-	const np::JoinerConnection::PollResult cleared_result =
+	const inmatch::JoinerConnection::PollResult cleared_result =
 			joiner.handle_datagram(
 					clear_then_challenge.data(), clear_then_challenge.size());
 	const std::vector<std::vector<uint8_t>> cleared_framed =
@@ -3964,7 +3964,7 @@ bool run_periodic_request_quartet_is_answered() {
 			"same-packet 0x41 then 0x39 emits one ordered checksum reply")) {
 		return false;
 	}
-	np::CharAttrChallengeRow cleared_row = class8_row;
+	inmatch::CharAttrChallengeRow cleared_row = class8_row;
 	std::fill(cleared_row.begin() + 20, cleared_row.begin() + 24, 0);
 	const uint32_t cleared_crc =
 			kChallenge ^ crc32_napi(cleared_row.data(), cleared_row.size());
@@ -3990,7 +3990,7 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x5A, {0x08, 0xFF}),
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 			});
-	const np::JoinerConnection::PollResult ordered_result =
+	const inmatch::JoinerConnection::PollResult ordered_result =
 			joiner.handle_datagram(ordered_classes.data(), ordered_classes.size());
 	const std::vector<std::vector<uint8_t>> ordered_framed =
 			joiner.frame_messages(ordered_result.queued_send_messages);
@@ -4013,14 +4013,14 @@ bool run_periodic_request_quartet_is_answered() {
 bool run_reverse_rtt_probe_is_echoed() {
 	const std::string client_scrk = "CLIENT-REVERSE-RTT-SCRK";
 	const std::string server_scrk = "SERVER-REVERSE-RTT-SCRK";
-	np::JoinerConnection joiner("ReverseRtt", [] { return uint64_t{0x55667788u}; });
+	inmatch::JoinerConnection joiner("ReverseRtt", [] { return uint64_t{0x55667788u}; });
 	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> probe = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x57, {0x44, 0x33, 0x22, 0x11, 0x01})});
-	const np::JoinerConnection::PollResult result =
+	const inmatch::JoinerConnection::PollResult result =
 			joiner.handle_datagram(probe.data(), probe.size());
 	if (!expect(result.outbound.empty() && result.queued_send_messages.size() == 1,
 			"S2C 0x57 flag=1 queues one C2S response"))
@@ -4046,7 +4046,7 @@ bool run_reverse_rtt_probe_is_echoed() {
 
 bool run_direct_uplink_framing_is_transient() {
 	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
-	np::JoinerConnection joiner("DirectUplink");
+	inmatch::JoinerConnection joiner("DirectUplink");
 	joiner.seed_in_match(
 			0x31415926u, 1u, client_scrk, "SERVER-DIRECT-UPLINK-SCRK",
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -4070,7 +4070,7 @@ bool run_direct_uplink_framing_is_transient() {
 bool run_network_spawn_does_not_mutate_loaded_model_snapshot() {
 	const std::string client_scrk = "CLIENT-MODEL-SNAPSHOT-SCRK";
 	const std::string server_scrk = "SERVER-MODEL-SNAPSHOT-SCRK";
-	np::ClientRuntime client("ModelSnapshot", [] { return uint64_t{1000}; });
+	inmatch::ClientRuntime client("ModelSnapshot", [] { return uint64_t{1000}; });
 	client.seed_session(
 			0x20304050u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4079,7 +4079,7 @@ bool run_network_spawn_does_not_mutate_loaded_model_snapshot() {
 			{0xA1B2C3D4u, 0u, 0u});
 
 	constexpr uint16_t kFreshHandle = 0x0123;
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> receive_boundary = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{
@@ -4128,7 +4128,7 @@ bool run_network_spawn_does_not_mutate_loaded_model_snapshot() {
 bool run_split_batch_keeps_deployment_pick_ack_causal() {
 	const std::string client_scrk = "CLIENT-PICK-SPLIT-SCRK";
 	const std::string server_scrk = "SERVER-PICK-SPLIT-SCRK";
-	np::ClientRuntime client("PickSplit", [] { return uint64_t{2000}; });
+	inmatch::ClientRuntime client("PickSplit", [] { return uint64_t{2000}; });
 	client.seed_session(
 			0x30405060u, 1u, client_scrk, server_scrk,
 			10, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4144,7 +4144,7 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 	FrameUpdate death;
 	death.mount_handle = 0xFFFF;
 	death.health = 0;
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> death_datagram = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x0A, encode_frame_update(death))});
@@ -4210,13 +4210,13 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 bool run_unrelated_loadout_cannot_revive_dead_client() {
 	const std::string client_scrk = "CLIENT-DEAD-LOADOUT-SCRK";
 	const std::string server_scrk = "SERVER-DEAD-LOADOUT-SCRK";
-	np::ClientRuntime client("DeadLoadout", [] { return uint64_t{3000}; });
+	inmatch::ClientRuntime client("DeadLoadout", [] { return uint64_t{3000}; });
 	client.seed_session(
 			0x40506070u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
 			0, 0x00100000u, /*replay_mode=*/false);
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	FrameUpdate death;
 	death.mount_handle = 0xFFFF;
 	death.health = 0;
@@ -4264,7 +4264,7 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	const std::string client_scrk = "CLIENT-LIVE-BATCH-SCRK";
 	const std::string server_scrk = "SERVER-LIVE-BATCH-SCRK";
 	uint64_t now_ms = 0x11223344u;
-	np::ClientRuntime client("LiveBatch", [&now_ms] { return now_ms; });
+	inmatch::ClientRuntime client("LiveBatch", [&now_ms] { return now_ms; });
 	client.seed_session(
 			0x55667788u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4346,7 +4346,7 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 bool run_mounted_slot_select_and_reload_producers() {
 	const std::string client_scrk = "CLIENT-MOUNTED-SLOT-SCRK";
 	const std::string server_scrk = "SERVER-MOUNTED-SLOT-SCRK";
-	np::ClientRuntime client("MountedSlot", [] { return uint64_t{0x10203040}; });
+	inmatch::ClientRuntime client("MountedSlot", [] { return uint64_t{0x10203040}; });
 	client.seed_session(
 			0x55667788u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4388,7 +4388,7 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	constexpr uint32_t kServerKey = 0x31415926u;
 	constexpr uint32_t kConnectionId = 7;
 	const std::string server_scrk = "SERVER-HOLDOFF-ADMISSION-SCRK";
-	np::ClientRuntime client("HoldoffAdmission");
+	inmatch::ClientRuntime client("HoldoffAdmission");
 
 	const std::vector<uint8_t> hello_datagram = client.start();
 	uint8_t opcode = 0;
@@ -4440,7 +4440,7 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	// field-3 period. HandleCSConfigUpdate stores that period without loading
 	// the active counter: the earlier join-response reset left the first
 	// post-handshake boundary open, and only this open send reloads the period.
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> settings = frame_server_session(
 			server_tx, server_scrk, client_auth.ck,
 			{
@@ -4504,7 +4504,7 @@ bool run_holdoff_defers_transient_header_reconstruction() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-RETAINED-SCRK";
 	uint64_t now_ms = 0x10203040u;
-	np::ClientRuntime client(
+	inmatch::ClientRuntime client(
 			"HoldoffRetained", [&now_ms] { return now_ms; });
 	client.seed_session(
 			0x55667788u, 1u, client_scrk, server_scrk,
@@ -4528,7 +4528,7 @@ bool run_holdoff_defers_transient_header_reconstruction() {
 			"C2S RTT is pruned after its first physical send"))
 		return false;
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> hold = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(
@@ -4586,12 +4586,12 @@ bool run_holdoff_defers_transient_header_reconstruction() {
 bool run_settings_update_preserves_active_holdoff_countdown() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-UPDATE-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-UPDATE-SCRK";
-	np::ClientRuntime client("HoldoffUpdate");
+	inmatch::ClientRuntime client("HoldoffUpdate");
 	client.seed_session(
 			0x61728394u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
 			0, 0x00100000u, /*replay_mode=*/false);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	auto settings_update = [&](uint32_t period) {
 		return frame_server_session(
 				server_tx, server_scrk, 1u,
@@ -4632,12 +4632,12 @@ bool run_settings_send_holdoff_blocks_exact_frame_count() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-SCRK";
 	uint64_t now_ms = 1000;
-	np::ClientRuntime client("Holdoff", [&now_ms] { return now_ms; });
+	inmatch::ClientRuntime client("Holdoff", [&now_ms] { return now_ms; });
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
 			0, 0x00100000u, /*replay_mode=*/false);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> update = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{
@@ -4702,7 +4702,7 @@ bool run_send_holdoff_defers_due_housekeeping() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-DUE-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-DUE-SCRK";
 	uint64_t now_ms = 2000;
-	np::ClientRuntime client("HoldoffDue", [&now_ms] { return now_ms; });
+	inmatch::ClientRuntime client("HoldoffDue", [&now_ms] { return now_ms; });
 	client.seed_session(
 			0x778899AAu, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4726,7 +4726,7 @@ bool run_send_holdoff_defers_due_housekeeping() {
 		(void)client.Client_ProcessNetworkFrame(frame);
 		++now_ms;
 	}
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> hold = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(
@@ -4759,7 +4759,7 @@ bool run_send_holdoff_defers_due_housekeeping() {
 bool run_finite_quality_retention_expires_on_flush_310() {
 	const std::string client_scrk = "CLIENT-QUALITY-TTL-SCRK";
 	const std::string server_scrk = "SERVER-QUALITY-TTL-SCRK";
-	np::ClientRuntime client("QualityTtl", [] { return uint64_t{9000}; });
+	inmatch::ClientRuntime client("QualityTtl", [] { return uint64_t{9000}; });
 	client.seed_session(
 			0x66778899u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4795,7 +4795,7 @@ bool run_start_resets_reusable_runtime_state() {
 	const std::string client_scrk = "CLIENT-REUSE-SCRK";
 	const std::string server_scrk = "SERVER-REUSE-SCRK";
 	uint64_t now_ms = 0x01020304u;
-	np::ClientRuntime client("Reusable", [&now_ms] { return now_ms; });
+	inmatch::ClientRuntime client("Reusable", [&now_ms] { return now_ms; });
 	client.seed_session(
 			0x44556677u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId,
@@ -4807,7 +4807,7 @@ bool run_start_resets_reusable_runtime_state() {
 	client.queue_loadout_resubmit();
 	client.queue_deployment_pick(0xFFFFu);
 
-	SessionSequencing first_server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing first_server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> authoritative = frame_server_session(
 			first_server_tx, server_scrk, 1u,
 			{
@@ -4838,7 +4838,7 @@ bool run_start_resets_reusable_runtime_state() {
 	// Leave a sequence-one packet queued at the receive boundary. If start()
 	// fails to discard the old FIFO, it is valid under the freshly seeded
 	// session below and reinstalls a nine-frame holdoff.
-	SessionSequencing stale_server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing stale_server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> stale_inbound = frame_server_session(
 			stale_server_tx, server_scrk, 1u,
 			{make_protocol_message(
@@ -4848,7 +4848,7 @@ bool run_start_resets_reusable_runtime_state() {
 
 	const std::vector<uint8_t> hello = client.start();
 	if (!expect(!hello.empty() &&
-	                    client.phase() == np::JoinerConnection::Phase::Hello,
+	                    client.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"reused runtime starts a fresh handshake"))
 		return false;
 	if (!expect(client.authoritative_loadout_revision() == 0 &&
@@ -4884,7 +4884,7 @@ bool run_start_resets_reusable_runtime_state() {
 }
 
 bool run_joiner_correlates_handshake_echoes() {
-	np::JoinerConnection joiner("EchoGuard");
+	inmatch::JoinerConnection joiner("EchoGuard");
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -4898,20 +4898,20 @@ bool run_joiner_correlates_handshake_echoes() {
 	wrong_hello.ci ^= 0x100u;
 	const std::vector<uint8_t> wrong_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(wrong_hello));
-	const np::JoinerConnection::PollResult ignored_hello =
+	const inmatch::JoinerConnection::PollResult ignored_hello =
 			joiner.handle_datagram(wrong_hello_datagram.data(), wrong_hello_datagram.size());
 	if (!expect(ignored_hello.outbound.empty() &&
-	                    joiner.phase() == np::JoinerConnection::Phase::Hello,
+	                    joiner.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"a ServerHello for another CI is ignored without advancing"))
 		return false;
 
 	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 32769);
 	const std::vector<uint8_t> valid_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
-	const np::JoinerConnection::PollResult auth_request =
+	const inmatch::JoinerConnection::PollResult auth_request =
 			joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
 	if (!expect(auth_request.outbound.size() == 1 &&
-	                    joiner.phase() == np::JoinerConnection::Phase::Auth,
+	                    joiner.phase() == inmatch::JoinerConnection::Phase::Auth,
 			"matching ServerHello advances to Auth"))
 		return false;
 	ClientAuth client_auth;
@@ -4928,7 +4928,7 @@ bool run_joiner_correlates_handshake_echoes() {
 	const std::vector<uint8_t> wrong_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(wrong_auth));
 	(void)joiner.handle_datagram(wrong_auth_datagram.data(), wrong_auth_datagram.size());
-	return expect(joiner.phase() == np::JoinerConnection::Phase::Auth &&
+	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Auth &&
 	                      joiner.server_key() == 0,
 			"a ServerAuth with mismatched CK cannot install server keys");
 }
@@ -4944,7 +4944,7 @@ bool run_joiner_correlates_handshake_echoes() {
 bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-LATCH-SCRK";
-	np::JoinerConnection joiner("TeamLatch");
+	inmatch::JoinerConnection joiner("TeamLatch");
 	joiner.seed_in_match(0x33445566u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
@@ -4966,7 +4966,7 @@ bool run_team_latch_is_falsifiable() {
 		return false;
 	}
 
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> assign = frame_server_session(server_tx, server_scrk, 1u,
 			{make_protocol_message(0x04, retail_slot_assignment(0x03))});
 	(void)joiner.handle_datagram(assign.data(), assign.size());
@@ -5007,10 +5007,10 @@ bool run_team_latch_is_falsifiable() {
 bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 	const std::string client_scrk = "CLIENT-PLAYER-SYNC-WALK-SCRK";
 	const std::string server_scrk = "SERVER-PLAYER-SYNC-WALK-SCRK";
-	np::JoinerConnection joiner("RosterWalk");
+	inmatch::JoinerConnection joiner("RosterWalk");
 	joiner.seed_in_match(0x10293847u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 
 	std::vector<uint8_t> slot_config = retail_slot_assignment();
 	slot_config[18] = 4; // inclusive maximum roster slot: walk 0,1,2,3,4
@@ -5025,7 +5025,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 				{make_protocol_message(0x46, std::move(body))});
 		return joiner.handle_datagram(datagram.data(), datagram.size());
 	};
-	const np::JoinerConnection::PollResult slot_zero = apply_sync({
+	const inmatch::JoinerConnection::PollResult slot_zero = apply_sync({
 			0x00, 0x05, 0x40, // slot 0, name|team|queue-ack
 			0x34, 'H', 0x00, 0x01,
 	});
@@ -5037,7 +5037,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 		return false;
 	}
 
-	const np::JoinerConnection::PollResult empty_slot_one = apply_sync({
+	const inmatch::JoinerConnection::PollResult empty_slot_one = apply_sync({
 			0x01, 0x00, 0xC0, // removal|queue-ack
 	});
 	if (!expect(empty_slot_one.cleared_player_slots == std::vector<uint8_t>({0x01}) &&
@@ -5048,7 +5048,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 		return false;
 	}
 
-	const np::JoinerConnection::PollResult max_slot = apply_sync({
+	const inmatch::JoinerConnection::PollResult max_slot = apply_sync({
 			0x04, 0x05, 0x40, // maximum slot, name|team|queue-ack
 			0x40, 'T', 0x00, 0x02,
 	});
@@ -5058,7 +5058,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 
 bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_body) {
 	constexpr uint32_t kServerKey = 0x66778899u;
-	np::JoinerConnection joiner("PadClamp");
+	inmatch::JoinerConnection joiner("PadClamp");
 
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
@@ -5074,7 +5074,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	server_hello.hk = 0x44556677u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	if (!expect(hello_result.outbound.size() == 1, "pad-clamp: ClientAuth emitted")) {
 		return false;
@@ -5095,7 +5095,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
 	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
 
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{
@@ -5137,7 +5137,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 			{make_protocol_message(0x02, std::move(probe))});
 	ProtocolPacketHeader client_header;
 	std::vector<ProtocolMessage> client_messages;
-	const np::JoinerConnection::PollResult padding_result =
+	const inmatch::JoinerConnection::PollResult padding_result =
 			joiner.handle_datagram(padding_datagram.data(), padding_datagram.size());
 	if (!expect(padding_result.outbound.size() == 1 &&
 				decode_client_session(
@@ -5177,16 +5177,16 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0; Nwu_HandleClientGoodbye @0x624250]
 bool run_joiner_goodbye_tears_down_host() {
 	const PeerAddr peer{0x0100007Fu, 32771};
-	np::NapiNPServerCtx host;
-	np::test::bring_up_host(host, np::ConnectionMode::HostClient,
-			np::SocketMode::Socketless, 0x0FE0E112u);
-	np::ClientRuntime client("GoodbyeJoiner");
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E112u);
+	inmatch::ClientRuntime client("GoodbyeJoiner");
 	if (!expect(client.disconnect().empty(),
 			"goodbye: nothing to send before ServerAuth assigns the session key")) {
 		return false;
 	}
 	const std::vector<uint8_t> hello = client.start();
-	const np::HandleResult hello_result = np::handle_server_datagram(
+	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
 	if (!expect(hello_result.outbound.size() == 1, "goodbye: host answers ServerHello")) {
 		return false;
@@ -5194,7 +5194,7 @@ bool run_joiner_goodbye_tears_down_host() {
 	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
 	const std::vector<std::vector<uint8_t>> auth = client.Client_ProcessNetworkFrame(0);
 	if (!expect(auth.size() == 1, "goodbye: client emits ClientAuth")) return false;
-	const np::HandleResult auth_result = np::handle_server_datagram(
+	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
 			host, peer, auth[0].data(), auth[0].size(), 0);
 	if (!expect(!auth_result.outbound.empty() &&
 				host.np_protocol.connection_list.size() == 1,
@@ -5223,7 +5223,7 @@ bool run_joiner_goodbye_tears_down_host() {
 		}
 	}
 	for (const std::vector<uint8_t> &dg : burst)
-		(void)np::handle_server_datagram(host, peer, dg.data(), dg.size(), 1);
+		(void)inmatch::handle_server_datagram(host, peer, dg.data(), dg.size(), 1);
 	if (!expect(host.np_protocol.connection_list.empty(),
 			"goodbye: the host tears the connection down (idempotent across the burst)")) {
 		return false;
@@ -5234,7 +5234,7 @@ bool run_joiner_goodbye_tears_down_host() {
 bool run_joiner_admits_exact_retail_message_prefix() {
 	const std::string client_scrk = "CLIENT-MSG-OUT-MAX-SCRK";
 	const std::string server_scrk = "SERVER-MSG-OUT-MAX-SCRK";
-	np::JoinerConnection reliable_joiner("ReliablePrefix");
+	inmatch::JoinerConnection reliable_joiner("ReliablePrefix");
 	reliable_joiner.seed_in_match(
 			0x12345678u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
@@ -5265,13 +5265,13 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 			"at 1,199 retained nodes retail admits the first queued node and drops the tail"))
 		return false;
 
-	np::JoinerConnection failing_joiner("FailedSuffix");
+	inmatch::JoinerConnection failing_joiner("FailedSuffix");
 	failing_joiner.seed_in_match(
 			0xAABBCCDDu, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	ProtocolMessage invalid = make_protocol_message(
 			0x64, std::vector<uint8_t>(0x10000u, 0xCC), 0x20);
-	const np::JoinerConnection::FrameMessagesResult failed =
+	const inmatch::JoinerConnection::FrameMessagesResult failed =
 			failing_joiner.frame_messages_detailed({
 					make_protocol_message(0x65, {0x01}),
 					std::move(invalid),
@@ -5287,7 +5287,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 	// already framed in this OPEN boundary still occupies msg_out_max. A single
 	// semantic queue spanning multiple MTU packets therefore admits exactly the
 	// same first 1,200 nodes as retail's per-node Create loop.
-	np::JoinerConnection transient_joiner("TransientPrefix");
+	inmatch::JoinerConnection transient_joiner("TransientPrefix");
 	transient_joiner.seed_in_match(
 			0x87654321u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);

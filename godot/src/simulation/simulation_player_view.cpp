@@ -104,7 +104,7 @@ opennova::world::LocalViewSessionInputs Simulation::local_view_session_inputs() 
 	s.local_dead = local_player_dead();
 	s.death_camera_target_known = runtime_ != nullptr;
 	if (runtime_ != nullptr) {
-		const opennova::netsim::ClientDeathCameraTarget &t = runtime_->state().death_camera;
+		const opennova::replication::ClientDeathCameraTarget &t = runtime_->state().death_camera;
 		s.death_camera_target[0] = t.x;
 		s.death_camera_target[1] = t.y;
 		s.death_camera_target[2] = t.z;

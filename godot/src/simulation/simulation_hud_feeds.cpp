@@ -98,7 +98,7 @@ bool Simulation::fill_lfp_zones(int p_local_team,
 	// The 0x6B ring slots land in the special bank here, so both are searched.
 	const opennova::world::LfpCaptureFlagsLookup capture_flags =
 			[this](opennova::world::EntityHandle h) -> uint8_t {
-				const opennova::netsim::ClientMinimapState &map =
+				const opennova::replication::ClientMinimapState &map =
 						runtime_->state().minimap;
 				for (const auto &slot : map.transient) {
 					if (slot.active && slot.handle == h.packed) return slot.flags;
@@ -126,7 +126,7 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	// role-agnostic [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
 	// every client, the listen host's own included].
 	if (!runtime_) return Ref<ScoreFeedback>();
-	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::replication::ClientState &cs = runtime_->state();
 	if (cs.score_feedback.updates == score_feedback_updates_seen_) return Ref<ScoreFeedback>();
 	score_feedback_updates_seen_ = cs.score_feedback.updates;
 	const opennova::hud::ScoreTone tone =
@@ -146,7 +146,7 @@ TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
 	// 2 = the message queue (no ring), 3 = channel 3 (the unported third ring).
 	TypedArray<ChatLineRow> out;
 	if (!runtime_) return out;
-	for (const opennova::netsim::ClientChatLine &line :
+	for (const opennova::replication::ClientChatLine &line :
 			runtime_->view().drain_chat_lines()) {
 		Ref<ChatLineRow> d;
 		d.instantiate();

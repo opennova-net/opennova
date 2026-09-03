@@ -1,6 +1,6 @@
 #include <runtime/replication/serializing_sink.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void SerializingSink::send_command(world::EntityHandle /*owner*/,
                                    uint16_t /*command_id*/,
@@ -11,4 +11,4 @@ void SerializingSink::send_command(world::EntityHandle /*owner*/,
 	(void)channel_;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

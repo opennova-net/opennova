@@ -10,7 +10,7 @@
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
 #include <runtime/replication/client_state.h>
-#include <runtime/session/session_transport.h>
+#include <runtime/inmatch/session_transport.h>
 
 namespace opennova::world {
 class IRootMotionSource;
@@ -20,7 +20,7 @@ namespace opennova::terrain {
 struct TerrainHeightField;
 } // namespace opennova::terrain
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // The local client's decode pump: drains S2C datagrams off the loopback and folds
 // them into a ClientState via the witnessed ingame_decode codec. This is the "local
@@ -386,4 +386,4 @@ private:
 	uint32_t prng16_ = 0;
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

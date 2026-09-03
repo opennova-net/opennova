@@ -37,7 +37,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -186,4 +186,4 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 	if (changed) state_.mark_changed();
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

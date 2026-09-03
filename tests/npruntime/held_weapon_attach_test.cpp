@@ -15,7 +15,7 @@
 #include <base/vfs/vfs.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
-#include <runtime/session/client_replica_present.h>
+#include <runtime/inmatch/client_replica_present.h>
 #include <runtime/anim/aim_overlay.h>
 #include <runtime/simassets/adm_skeletal_clips.h>
 #include <runtime/simassets/collision_resolve.h>
@@ -92,7 +92,7 @@ int main() {
 		in.aim_yaw = bam_deg(90.0 - c.yaw); // mission yaw -> engine heading
 		in.roll = bam_deg(c.roll);
 		float r[kRecordFloats] = {};
-		np::write_present_held_weapon(r, 1, false, in, world::anim_state::kIdle);
+		inmatch::write_present_held_weapon(r, 1, false, in, world::anim_state::kIdle);
 		const double rec_p = r[world::PF_HELD_WEAPON_PITCH_DEG];
 		const double rec_y = wrap_deg(r[world::PF_HELD_WEAPON_YAW_DEG]);
 		const double rec_r = r[world::PF_HELD_WEAPON_ROLL_DEG];
@@ -117,18 +117,18 @@ int main() {
 		in.roll = bam_deg(4.0);
 		float r[kRecordFloats] = {};
 		if (hand_frame_state >= 0) {
-			np::write_present_held_weapon(r, 1, false, in, hand_frame_state);
+			inmatch::write_present_held_weapon(r, 1, false, in, hand_frame_state);
 			expect(r[world::PF_HELD_WEAPON_HAND_FRAME] == 1.0f,
 					"a 0x80 hold state flags the hand frame");
 		}
 		expect(std::fabs(r[world::PF_HELD_WEAPON_ROLL_DEG] - 9.0) < 0.01,
 				"the lean adds to the body roll");
 		std::memset(r, 0, sizeof(r));
-		np::write_present_held_weapon(r, 1, true, in, world::anim_state::kIdle);
+		inmatch::write_present_held_weapon(r, 1, true, in, world::anim_state::kIdle);
 		expect(r[world::PF_HELD_WEAPON_ADM] == 0.0f, "a dead body writes no held weapon");
 		in.rolling = true;
 		std::memset(r, 0, sizeof(r));
-		np::write_present_held_weapon(r, 1, false, in, world::anim_state::kIdle);
+		inmatch::write_present_held_weapon(r, 1, false, in, world::anim_state::kIdle);
 		expect(std::fabs(r[world::PF_HELD_WEAPON_ROLL_DEG] - 5.0) < 0.01,
 				"a rolling body drops the body roll and keeps the lean");
 	}

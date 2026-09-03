@@ -13,15 +13,15 @@
 // rejects further fire until the 0x25 relay refills; a no-clip weapon (clipsize -1) never
 // rejects; a table-less host accepts without bookkeeping.
 
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_protocol.h>
-#include <runtime/session/napi_np_server_ctx.h>
-#include <runtime/session/server_message_dispatch.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
-#include <runtime/session/loopback_channel.h>
-#include <runtime/session/session_transport.h>
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -45,8 +45,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -103,22 +103,22 @@ std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t fire_flags, uint8_t adm
 	return b;
 }
 
-int dispatch_fire(np::NapiNPConnection &conn, std::vector<np::NapiNPConnection> &roster,
+int dispatch_fire(inmatch::NapiNPConnection &conn, std::vector<inmatch::NapiNPConnection> &roster,
                   w::World &world, const std::vector<uint8_t> &body) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x06, body));
 	std::vector<ProtocolMessage> replies =
-			np::dispatch_session_replies(np::GameConfig{}, conn, msgs, 100, roster, &world);
+			inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 	return int(replies.size());
 }
 
 void dispatch_gameplay(uint8_t tag, const std::vector<uint8_t> &body,
-		np::NapiNPConnection &conn,
-		std::vector<np::NapiNPConnection> &roster, w::World &world) {
+		inmatch::NapiNPConnection &conn,
+		std::vector<inmatch::NapiNPConnection> &roster, w::World &world) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(tag, body));
-	(void)np::dispatch_session_replies(
-			np::GameConfig{}, conn, msgs, 100, roster, &world);
+	(void)inmatch::dispatch_session_replies(
+			inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 }
 
 bool check_mounted_slot_select_fire_and_reload() {
@@ -175,7 +175,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	player->use_gun_slot_swapped = true;
 	player->equipped_adm_index = 5;
 
-	std::vector<np::NapiNPConnection> roster;
+	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
 
@@ -275,11 +275,11 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	const PeerAddr peer{0x0100007Fu, 30123};
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
 	const std::string server_scrk = "SERVER-REPLAY-SCRK";
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
-	np::NapiNPConnection conn =
+	inmatch::NapiNPConnection conn =
 			make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true);
 	conn.peer = peer;
 	conn.client_scrk = client_scrk;
@@ -299,7 +299,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	const std::vector<uint8_t> fire_datagram =
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(session_body));
 
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
 	if (!expect(world.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
 		return false;
 	const uint16_t combo = uint16_t(3 * 65 + 2);
@@ -307,7 +307,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	            "first C2S 0x06 spends one cartridge"))
 		return false;
 
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
 	if (!expect(world.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
 		return false;
 	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
@@ -321,14 +321,14 @@ bool check_duplicate_c2s_session_does_not_refire() {
 		return false;
 	const std::vector<uint8_t> heartbeat_datagram =
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(heartbeat_body));
-	np::handle_server_datagram(ctx, peer, heartbeat_datagram.data(), heartbeat_datagram.size(), 102);
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 103);
+	inmatch::handle_server_datagram(ctx, peer, heartbeat_datagram.data(), heartbeat_datagram.size(), 102);
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 103);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2,
 	            "replayed older C2S packet cannot regress the host ACK latch"))
 		return false;
 
 	std::vector<uint8_t> ack_datagram;
-	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x34, {}, ack_datagram),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x34, {}, ack_datagram),
 	            "host frames an ACK-bearing S2C packet"))
 		return false;
 	uint8_t opcode = 0;
@@ -387,7 +387,7 @@ int main() {
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -492,7 +492,7 @@ int main() {
 		put_u16(reload, uint16_t(3 * 65 + 2));
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x25, reload));
-		np::dispatch_session_replies(np::GameConfig{}, roster[1], msgs, 101, roster, &world);
+		inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], msgs, 101, roster, &world);
 		// Drain the relayed 0x49s so later checks stay clean.
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;

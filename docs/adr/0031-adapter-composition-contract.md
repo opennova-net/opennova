@@ -79,7 +79,7 @@ the adapter's total):
 
 | TU | Verdict |
 |---|---|
-| `client_replica_present_projection.*` | **Moved** to `engine/runtime/session` with its composition helpers (`client_replica_present.h`); the `PF_*` row layout became the engine contract `world/present_rows.h` and `Simulation`'s bound enum is a value-assigned re-export. |
+| `client_replica_present_projection.*` | **Moved** to `engine/runtime/inmatch` with its composition helpers (`client_replica_present.h`); the `PF_*` row layout became the engine contract `world/present_rows.h` and `Simulation`'s bound enum is a value-assigned re-export. |
 | `simulation_assets.cpp` | **Re-opened** (maintainer decision 2026-08-08, overriding the S7b "render-coupled asset resolution" leg): the collision/occlusion resolution loops and the seat-spec install family move to `engine/runtime/simassets` beside the receptacles that already exist; the adapter keeps thin model-loading hooks. The shape-C2 round also moved the mounted-pose CTRL-bus composition and PANM clock into `simassets/mounted_pose`. |
 | `simulation_player_loadout.cpp` | **Split re-opened** (same decision): the joiner 0x2F kit pushes and session-kit seed/reseed move engine-side; the dict conversion + playersav profile READING stay, per the S7b seam shape. The shape-C2 round moved the remaining live math: the mount-toggle gate/candidate (`world/vehicle_attach`), the mission chunk-tuple stash (`mission/promote`), and the 0x5A grant→kit conversion (`npruntime/loadout_submit`). |
 | `simulation_net.cpp` | Stays: socket + signal pumps over the npruntime state machines. Its cites document bring-up sequencing at the seam. |

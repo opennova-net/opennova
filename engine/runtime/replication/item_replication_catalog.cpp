@@ -8,7 +8,7 @@
 #include <formats/def/def.h>
 #include <base/io/strutil.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -243,4 +243,4 @@ std::optional<EntityClass> ItemReplicationCatalog::resolve_wire_entity_class(
 	return it->second;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

@@ -1,7 +1,7 @@
 // LoopbackChannel — FIFO ordering + directionality (the in-process transport-mode-1
 // byte path, ADR 0011 Decision 2).
 
-#include <runtime/session/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include <cstdio>
 
@@ -14,13 +14,13 @@ bool expect(bool cond, const char *msg) {
 }
 
 bool check_s2c_fifo_order() {
-	opennova::netsim::LoopbackChannel ch;
+	opennova::replication::LoopbackChannel ch;
 	ch.host_send(0x0A, {1, 2, 3});
 	ch.host_send(0x10, {4});
 	ch.host_send(0x0A, {5, 6});
 	if (!expect(ch.s2c_pending() == 3, "three S2C datagrams queued")) return false;
 	// The host side never sees its own S2C traffic.
-	opennova::netsim::Datagram dg;
+	opennova::replication::Datagram dg;
 	if (!expect(!ch.host_recv(dg), "host_recv finds no C2S")) return false;
 
 	if (!expect(ch.client_recv(dg) && dg.tag == 0x0A && dg.body.size() == 3 &&
@@ -34,10 +34,10 @@ bool check_s2c_fifo_order() {
 }
 
 bool check_c2s_direction() {
-	opennova::netsim::LoopbackChannel ch;
+	opennova::replication::LoopbackChannel ch;
 	ch.client_send(0x0C, {7, 8});
 	if (!expect(ch.c2s_pending() == 1, "one C2S queued")) return false;
-	opennova::netsim::Datagram dg;
+	opennova::replication::Datagram dg;
 	if (!expect(!ch.client_recv(dg), "client_recv finds no S2C")) return false;
 	if (!expect(ch.host_recv(dg) && dg.tag == 0x0C && dg.body.size() == 2 &&
 	            dg.body[0] == 7, "host_recv pulls the C2S")) return false;
@@ -46,7 +46,7 @@ bool check_c2s_direction() {
 }
 
 bool check_clear() {
-	opennova::netsim::LoopbackChannel ch;
+	opennova::replication::LoopbackChannel ch;
 	ch.host_send(0x0A, {1});
 	ch.client_send(0x0C, {2});
 	ch.clear();

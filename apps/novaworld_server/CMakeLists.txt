@@ -21,7 +21,7 @@ add_executable(opennova_novaworld_server ${NOVAWORLD_SERVER_SOURCES})
 # The service target (the one sqlite consumer), the wire group (gate/session
 # legs, npwire, napi, novacrypto — opennova_net), and the runtime group for
 # the in-match host session the JO listener hosts peers through
-# (runtime/session, ADR 0043 d4).
+# (runtime/inmatch, ADR 0043 d4).
 target_link_libraries(opennova_novaworld_server
     PRIVATE
         opennova_novaworld_service

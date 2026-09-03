@@ -1,10 +1,10 @@
-// Pins the character registry (runtime/session/character_registry.h) — the
+// Pins the character registry (runtime/inmatch/character_registry.h) — the
 // packed-id decode with its alignment gate, the per-side default walk — and
 // the joiner's profile-to-wire projection (join_character_profile.h): the
 // fresh-profile defaults, a persisted side selection, the class-byte rule.
 
-#include <runtime/session/character_registry.h>
-#include <runtime/session/join_character_profile.h>
+#include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/join_character_profile.h>
 
 #include <formats/avatars/avatars.h>
 
@@ -126,7 +126,7 @@ int main() {
 		p.player_classes[1] = 300;
 		p.avatars[0] = 3;
 		p.avatars[1] = -1;
-		const opennova::np::CharacterJoinVars vars = character_join_vars(p);
+		const opennova::inmatch::CharacterJoinVars vars = character_join_vars(p);
 		check(vars.char_id[0] == 0x0400 && vars.char_id[1] == 0x8207, "packed ids ride as-is");
 		check(vars.char_class[0] == 6 && vars.char_class[1] == 0xFF, "class bytes clamp to a byte");
 		check(vars.avatar[0] == 3 && vars.avatar[1] == 0, "avatar bytes clamp to a byte");

@@ -12,7 +12,7 @@ extends Node
 # The POLICY of all of that — the two ConnectOrHost windows (0xEA60), the
 # promote validation, the admission/deploy/loss edge machine with its latches,
 # and the expansion reconcile DECISION — is native
-# (engine/runtime/session/join_session_policy.cpp, bound as
+# (engine/runtime/inmatch/join_session_policy.cpp, bound as
 # NetSessionPolicy). This node keeps the signals and the lifetime: it reads
 # simulation state, forwards it to the policy each frame, and executes exactly
 # what the returned edges say — signal emission, the settle call, the preload
@@ -107,7 +107,7 @@ func _clear_pending_session() -> void:
 # invent a network-only player id, it packs the two profile character
 # selections from Avatars.def plus the two class and avatar bytes. The
 # projection, its per-side defaults and its witnesses are the engine's
-# (runtime/session/join_character_profile.h via AvatarDatabase); `selection` is
+# (runtime/inmatch/join_character_profile.h via AvatarDatabase); `selection` is
 # the PLAYER_INFO profile (PlayerCharacterSelectionState's shape).
 static func character_join_profile_from_database(
 		db: AvatarDatabase, selection: Dictionary = {}) -> CharacterJoinProfile:
@@ -277,7 +277,7 @@ func _drive_join_preload_step() -> void:
 # connect @ 0x569ded) -> Expansion_SwitchTo @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380
 # / PFF_OpenAllArchives @ 0x4a4310]. There is no second mount object, and the switch is
 # sticky: the shell keeps running on the host's expansion after the session.
-# The keep/remount/fail DECISION is native (np::decide_join_expansion); this
+# The keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this
 # executes it against the live mount. Returns false when the join has been
 # failed and the driver must stop.
 func _reconcile_join_expansion() -> bool:
@@ -349,7 +349,7 @@ func _reconcile_join_expansion() -> bool:
 	if String(resource_root.get_expansion()).to_lower() != target_expansion.to_lower():
 		# The installed set is rendered by the same native helper the decision
 		# leg uses ("none — base game only" when empty), so both abort reasons
-		# read identically (one impl — engine/runtime/session join_session_policy).
+		# read identically (one impl — engine/runtime/inmatch join_session_policy).
 		_fail_join_preload("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)" % [
 			target_expansion, dir, String(resource_root.get_expansion()),
 			NetSessionPolicy.describe_installed(resource_root.list_expansions(dir))])

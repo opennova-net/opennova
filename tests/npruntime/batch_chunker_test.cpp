@@ -1,8 +1,8 @@
-// Unit test for np::slice_batch_pages — the shared byte-budget spawn/world-stream chunker (ADR 0013),
+// Unit test for inmatch::slice_batch_pages — the shared byte-budget spawn/world-stream chunker (ADR 0013),
 // factored out of server_initial_state.cpp's emit_paged_pool. Verifies conventional pre-write paging,
 // retail's per-pool post-write guard, exact tile pages, lone oversized records, budget, and cursor resume.
 
-#include <runtime/session/batch_chunker.h>
+#include <runtime/inmatch/batch_chunker.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 
 namespace {
 
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -44,7 +44,7 @@ int main() {
 	// 10-byte records, 25-byte page cap: header(2)+2*10=22 <= 25 fits, +3rd = 32 > 25 -> 2 records/page.
 	// 5 records, unlimited pages this call -> [2, 2, 1] = 3 pages, exhausted.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(5, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(5, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 0, 100);
 		ok = expect(r.pages.size() == 3, "5 recs @ 2/page -> 3 pages") && ok;
 		ok = expect(r.pages[0].size() == 22 && r.pages[1].size() == 22, "full pages are 2 records (22 B)") && ok;
 		ok = expect(r.pages[2].size() == 12, "last page is the leftover 1 record (12 B)") && ok;
@@ -55,8 +55,8 @@ int main() {
 
 	// Retail pool-3 guard: record 62 crosses written+30 > 650 but remains in the page.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(
-				65, np::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				65, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 100);
 		ok = (r.pages.size() == 2) && ok;
 		ok = (r.pages[0].size() == 624) && ok;
 		ok = (r.pages[1].size() == 34) && ok;
@@ -65,8 +65,8 @@ int main() {
 
 	// The retail comparison is strict: 610 written + 40 margin == 650 continues one more record.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(
-				103, np::initial_state_page_limits::pool2_static(), FixedRecordEncoder{6, 4}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				103, inmatch::initial_state_page_limits::pool2_static(), FixedRecordEncoder{6, 4}, 0, 100);
 		ok = (r.pages.size() == 2) && ok;
 		ok = (r.pages[0].size() == 616) && ok;
 		ok = (r.pages[1].size() == 10) && ok;
@@ -74,27 +74,27 @@ int main() {
 
 	// The named production policies pin every witnessed entity-pool margin and the tile pre-check.
 	{
-		const np::BatchPageLimit p2 = np::initial_state_page_limits::pool2_static();
-		const np::BatchPageLimit p1 = np::initial_state_page_limits::pool1_entities();
-		const np::BatchPageLimit p0 = np::initial_state_page_limits::pool0_organics();
-		const np::BatchPageLimit p3 = np::initial_state_page_limits::pool3_markers();
-		const np::BatchPageLimit tiles = np::initial_state_page_limits::terrain_tiles();
+		const inmatch::BatchPageLimit p2 = inmatch::initial_state_page_limits::pool2_static();
+		const inmatch::BatchPageLimit p1 = inmatch::initial_state_page_limits::pool1_entities();
+		const inmatch::BatchPageLimit p0 = inmatch::initial_state_page_limits::pool0_organics();
+		const inmatch::BatchPageLimit p3 = inmatch::initial_state_page_limits::pool3_markers();
+		const inmatch::BatchPageLimit tiles = inmatch::initial_state_page_limits::terrain_tiles();
 		ok = (p2.byte_budget == 650 && p2.headroom == 40) && ok;
 		ok = (p1.byte_budget == 650 && p1.headroom == 110) && ok;
 		ok = (p0.byte_budget == 650 && p0.headroom == 100) && ok;
 		ok = (p3.byte_budget == 650 && p3.headroom == 30) && ok;
-		ok = (p2.check == np::BatchPageLimit::Check::AfterEachRecord &&
-		      p1.check == np::BatchPageLimit::Check::AfterEachRecord &&
-		      p0.check == np::BatchPageLimit::Check::AfterEachRecord &&
-		      p3.check == np::BatchPageLimit::Check::AfterEachRecord) && ok;
+		ok = (p2.check == inmatch::BatchPageLimit::Check::AfterEachRecord &&
+		      p1.check == inmatch::BatchPageLimit::Check::AfterEachRecord &&
+		      p0.check == inmatch::BatchPageLimit::Check::AfterEachRecord &&
+		      p3.check == inmatch::BatchPageLimit::Check::AfterEachRecord) && ok;
 		ok = (tiles.byte_budget == 650 && tiles.headroom == 0 &&
-		      tiles.check == np::BatchPageLimit::Check::BeforeNextRecord) && ok;
+		      tiles.check == inmatch::BatchPageLimit::Check::BeforeNextRecord) && ok;
 	}
 
 	// Retail 0x45: first page 20+52*12=644 bytes; continuation 4+53*12=640 bytes.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(
-				105, np::initial_state_page_limits::terrain_tiles(), TerrainTileEncoder{}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				105, inmatch::initial_state_page_limits::terrain_tiles(), TerrainTileEncoder{}, 0, 100);
 		ok = (r.pages.size() == 2) && ok;
 		ok = (r.pages[0].size() == 644) && ok;
 		ok = (r.pages[1].size() == 640) && ok;
@@ -104,7 +104,7 @@ int main() {
 	// Lone oversized record: 100-byte records, 25-byte cap -> each page must still ship exactly 1 record
 	// (>= 1 per page even when it alone exceeds the cap), so 3 records -> 3 pages.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(3, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{100}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(3, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{100}, 0, 100);
 		ok = expect(r.pages.size() == 3, "oversized records -> one record per page") && ok;
 		ok = expect(r.pages[0].size() == 102, "an oversized page still carries its single record") && ok;
 		ok = expect(r.exhausted, "oversized batch fully paged") && ok;
@@ -113,23 +113,23 @@ int main() {
 	// Per-call page budget + cursor resume: max_pages=1 emits one page/call and saves the cursor.
 	{
 		std::size_t cursor = 0;
-		np::BatchPageResult a = np::slice_batch_pages(5, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, cursor, 1);
+		inmatch::BatchPageResult a = inmatch::slice_batch_pages(5, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, cursor, 1);
 		ok = expect(a.pages.size() == 1 && a.next_cursor == 2 && !a.exhausted, "call 1: 1 page, resume @2") && ok;
-		np::BatchPageResult b = np::slice_batch_pages(5, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, a.next_cursor, 1);
+		inmatch::BatchPageResult b = inmatch::slice_batch_pages(5, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, a.next_cursor, 1);
 		ok = expect(b.pages.size() == 1 && b.next_cursor == 4 && !b.exhausted, "call 2: 1 page, resume @4") && ok;
-		np::BatchPageResult c = np::slice_batch_pages(5, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, b.next_cursor, 1);
+		inmatch::BatchPageResult c = inmatch::slice_batch_pages(5, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, b.next_cursor, 1);
 		ok = expect(c.pages.size() == 1 && c.next_cursor == 5 && c.exhausted, "call 3: last page, exhausted") && ok;
 	}
 
 	// Zero page budget (tick already full): no pages, cursor preserved, not exhausted mid-batch.
 	{
-		np::BatchPageResult r = np::slice_batch_pages(5, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 2, 0);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(5, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 2, 0);
 		ok = expect(r.pages.empty() && r.next_cursor == 2 && !r.exhausted, "budget 0 -> no pages, cursor held") && ok;
 	}
 
 	// Empty batch: no records -> no pages, exhausted (the emit_paged_pool wrapper emits the header-only marker).
 	{
-		np::BatchPageResult r = np::slice_batch_pages(0, np::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 0, 100);
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(0, inmatch::BatchPageLimit::pre_write(25), FixedRecordEncoder{10}, 0, 100);
 		ok = expect(r.pages.empty() && r.exhausted, "empty batch -> no pages, exhausted") && ok;
 	}
 

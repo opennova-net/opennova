@@ -32,7 +32,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -156,4 +156,4 @@ void ClientReplicaPipeline::tick_guided_missiles() {
 	}
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

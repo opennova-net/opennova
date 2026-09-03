@@ -28,7 +28,7 @@
 namespace {
 
 using namespace opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace as = opennova::world::anim_state;
 
 int failures = 0;

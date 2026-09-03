@@ -27,7 +27,7 @@ struct Options {
 
 struct Result {
 	Status status = Status::Timeout;
-	np::LanDiscoveryServer server;
+	opennova::LanDiscoveryServer server;
 	net::Endpoint source;
 	int probes_sent = 0;
 };

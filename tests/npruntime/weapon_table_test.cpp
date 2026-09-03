@@ -14,7 +14,7 @@
 
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/ammo_table_build.h>
-#include <runtime/session/loadout_submit.h>
+#include <runtime/inmatch/loadout_submit.h>
 
 #include <formats/def/def.h>
 #include <base/resource_index/resource_index.h>
@@ -247,21 +247,21 @@ int main(void) {
 		inventory.slots[197].adm_index = 3;
 		inventory.slots[260].adm_index = 4;
 
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 199) == 196);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 3, 199) == 196);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 2, 199) == 199);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 0, 199) == 199);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 258) == 196);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 260) == 260);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, nullptr, 1, 199) == 199);
-		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 900) == 900);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 199) == 196);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 3, 199) == 196);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 2, 199) == 199);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 0, 199) == 199);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 258) == 196);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 260) == 260);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, nullptr, 1, 199) == 199);
+		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 900) == 900);
 
 		world::World submit_world;
 		submit_world.weapons = slots_table;
 		playersav::Record profile;
 		world::LocalPlayerLoadout loadout;
-		np::JoinerConnection::LoadoutKit wire_kit;
-		np::build_joiner_loadout_kit(submit_world, profile, 1, loadout, 199,
+		inmatch::JoinerConnection::LoadoutKit wire_kit;
+		inmatch::build_joiner_loadout_kit(submit_world, profile, 1, loadout, 199,
 				&inventory, wire_kit);
 		CHECK(wire_kit.equipped_combo == 196);
 	}

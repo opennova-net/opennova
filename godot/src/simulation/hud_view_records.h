@@ -260,7 +260,7 @@ private:
 
 // One RESULTLIST column (Simulation::get_end_round_columns): the header text
 // resolved through the gametext Overlays table plus the engine column's key,
-// fallback, literal, width and field id (np::StatScreenColumn).
+// fallback, literal, width and field id (inmatch::StatScreenColumn).
 #define END_ROUND_COLUMN_FIELDS(X) \
 	X(String, header)              \
 	X(String, header_key)          \
@@ -284,7 +284,7 @@ private:
 
 // One RESULTLIST row (Simulation::get_end_round_rows): the roster slot and
 // team, name and squad, the stat cells in column order, the row colour
-// (ARGB) and the local-player selection (np::StatScreenRow).
+// (ARGB) and the local-player selection (inmatch::StatScreenRow).
 #define END_ROUND_ROW_FIELDS(X)  \
 	X(int, slot)                 \
 	X(int, team)                 \

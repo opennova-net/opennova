@@ -8,7 +8,7 @@
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
-#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include "rtxt/rtxt_string_file.h"
@@ -22,7 +22,7 @@ using namespace godot;
 
 bool Simulation::local_player_dead() const {
 	// The one role-agnostic read of the local player's dead bit: the joiner's
-	// replica (np::ClientRuntime), the authority's entity flags (the kernel).
+	// replica (inmatch::ClientRuntime), the authority's entity flags (the kernel).
 	if (joiner_) return runtime_ != nullptr && runtime_->local_player_dead();
 	return kernel_ != nullptr && kernel_->local_player_dead();
 }
@@ -61,9 +61,9 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 	// The rtxt "Server" table's STRSRV_MEDREQ format the host's medic
 	// broadcast prints the caller's name into (Server_BroadcastMedicRequest
 	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
-	opennova::np::ServerTextTable text;
+	opennova::inmatch::ServerTextTable text;
 	text.medic_request_format = p_medic_request_format.utf8().get_data();
-	opennova::np::set_server_text(ctx_, std::move(text));
+	opennova::inmatch::set_server_text(ctx_, std::move(text));
 }
 
 Ref<DeployStatus> Simulation::get_deploy_status() {
@@ -78,7 +78,7 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	bool self_zone_numbered = false;
 	int self_zone_countdown = 0;
 	if (joiner_ && runtime_) {
-		const opennova::netsim::ClientState &cs = runtime_->state();
+		const opennova::replication::ClientState &cs = runtime_->state();
 		penalty = cs.respawn_penalty_seconds;
 		revive = cs.local_revive_seconds;
 		hold = cs.spawn_hold_seconds;
