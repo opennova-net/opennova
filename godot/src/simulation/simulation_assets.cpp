@@ -26,7 +26,6 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 	const int default_clip_count = kernel_->install_infantry_anim(
 			std::string(p_adm_name.utf8().get_data()),
 			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
-	client_row_adm_by_type_.clear();
 	if (runtime_ != nullptr && joiner_) {
 		for (opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
@@ -218,15 +217,10 @@ int Simulation::resolve_collision_instances(
 				"Simulation: no asset root installed — collision/occlusion "
 				"extraction has no model source (install set_asset_root first)");
 	}
-	apply_collision_to_ai();
-	// The sweep itself is engine code (simassets::resolve_collision_instances,
-	// ADR 0031 re-opening the S7b asset-resolution leg): this binding supplies
-	// the retained items.def rows and the engine systems, nothing else.
-	const opennova::simassets::CollisionResolveDeps deps{
-			kernel_->collision, kernel_->occlusion, kernel_->collision_pose,
-			kernel_->models};
-	return opennova::simassets::resolve_collision_instances(
-			kernel_->world, p_item_db->native_items(), kernel_->collision_state, deps);
+	// The sweep itself is the kernel's (simassets::resolve_collision_instances
+	// over its retained items.def rows and its own systems, ADR 0031 re-opening
+	// the S7b asset-resolution leg); this binding supplies the rows, nothing else.
+	return kernel_->resolve_collision_instances();
 }
 
 void Simulation::stamp_seat_spec_turret_limits() {
@@ -238,7 +232,7 @@ void Simulation::refresh_item_seat_spec(
 		opennova::world::Entity &p_entity) {
 	if (!kernel_) return;
 	opennova::simassets::refresh_item_seat_spec(kernel_->world, kernel_->seat_specs,
-			p_entity, joiner_bridge_.wire_header_world());
+			p_entity, joiner_role_.wire_header_world());
 }
 
 // (set_ai_profile_speeds retired with S9b: the .aip resolve is native in
@@ -264,8 +258,8 @@ void Simulation::finalize_installed_seat_specs() {
 			if (entity.handle.pool() == 1) items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
-			opennova::world::Entity *entity = joiner_bridge_.wire_header_world()
-					? joiner_bridge_.materializer().owned(kernel_->world, handle)
+			opennova::world::Entity *entity = joiner_role_.wire_header_world()
+					? joiner_role_.materializer().owned(kernel_->world, handle)
 					: kernel_->world.registry.get(handle);
 			if (entity != nullptr)
 				refresh_item_seat_spec(*entity);
@@ -273,8 +267,8 @@ void Simulation::finalize_installed_seat_specs() {
 		// A header-only join may receive its model/seat table after the 0x0D
 		// row. Definitions were installed above; now apply the retained fixed
 		// mountHandles image without creating synthetic seats.
-		if (joiner_bridge_.wire_header_world() && runtime_ != nullptr)
-			(void)joiner_bridge_.materializer().sync(runtime_->state(), kernel_->world);
+		if (joiner_role_.wire_header_world() && runtime_ != nullptr)
+			(void)joiner_role_.materializer().sync(runtime_->state(), kernel_->world);
 	}
 }
 

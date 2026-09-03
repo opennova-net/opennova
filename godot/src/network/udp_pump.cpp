@@ -178,6 +178,17 @@ int UdpPump::send_to(const String &ip, int port, const PackedByteArray &bytes) {
 	return static_cast<int>(err);
 }
 
+opennova::PeerAddr UdpPump::dialed_host() const {
+	opennova::PeerAddr addr;
+	if (dest_port_ == 0) return addr;
+	const PackedStringArray octets = dest_ip_.split(".");
+	if (octets.size() != 4) return addr;
+	return opennova::peer_addr_from_octets(
+			{static_cast<uint8_t>(octets[0].to_int()), static_cast<uint8_t>(octets[1].to_int()),
+					static_cast<uint8_t>(octets[2].to_int()), static_cast<uint8_t>(octets[3].to_int())},
+			static_cast<uint16_t>(dest_port_));
+}
+
 int UdpPump::send_to_host(const PackedByteArray &bytes) {
 	if (!socket_.is_valid() || dest_port_ == 0) return static_cast<int>(ERR_UNCONFIGURED);
 	socket_->set_dest_address(dest_ip_, dest_port_);

@@ -2410,9 +2410,9 @@ add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burs
 # S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
 # [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello
 # one-shot, the in-match spawn edge for L + the weapon-pump L-gate, and the per-session resets.
-add_executable(npruntime_joiner_world_bridge_test npruntime/joiner_world_bridge_test.cpp)
-target_link_libraries(npruntime_joiner_world_bridge_test PRIVATE opennova_net opennova_runtime)
-add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridge_test)
+add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
+target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
 
 # The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
 # promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >

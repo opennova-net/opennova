@@ -131,7 +131,6 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/inmatch/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
 #include <runtime/inmatch/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
 #include <runtime/inmatch/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
-#include <runtime/inmatch/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/inmatch_session_values.h"
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
@@ -729,7 +728,7 @@ public:
 	                                         bool p_preserve_slot_state = false);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
-	// queued presentation (engine: runtime/inmatch/joiner_world_bridge.cpp).
+	// queued presentation (engine: runtime/inmatch/joiner_role.cpp).
 	void rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                const Dictionary &p_clip_seconds,
 	                                bool p_preserve_slot_state = false);
@@ -948,7 +947,7 @@ public:
 	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
 	static String weapon_profile_relpath(const String &p_expansion_name);
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
-	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_world_bridge.cpp)). `character_arms` is the local
+	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
 	// has_def=false is the bring-up path; an empty gun on a resolved def means

@@ -19,12 +19,9 @@
 using namespace sim_internal;
 
 void Simulation::occlusion_init_mission() {
-	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission
-	// @ 0x525e11 — runs over the static prox tables, so make sure they exist
-	// before the register pass walks the building prefix.]
+	// The kernel's mission-start portal init (the witness lives there).
 	if (!kernel_) return;
-	kernel_->collision.build_initial_tables(kernel_->world);
-	kernel_->occlusion.init_mission(kernel_->world, kernel_->collision);
+	kernel_->occlusion_init_mission();
 }
 
 void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
@@ -369,7 +366,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 						(cls == opennova::EntityClass::Player ||
 						 cls == opennova::EntityClass::Infantry);
 				const bool dynamic_source = pool == 1 &&
-						wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
+						kernel_->wire_collision_shape_for_type(static_cast<uint16_t>(e.item_id))
 								.pool1_candidate_source_eligible;
 				if (!person_source && !dynamic_source) {
 					sun_quality_last_by_wire_.erase(handle);
@@ -441,7 +438,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 					(es.cls == opennova::EntityClass::Player ||
 					 es.cls == opennova::EntityClass::Infantry);
 			const opennova::world::ResolvedCollisionShape shape =
-					wire_collision_shape_for_type(es.type_id);
+					kernel_->wire_collision_shape_for_type(es.type_id);
 			const bool dynamic_source = h.pool() == 1 &&
 					shape.pool1_candidate_source_eligible;
 			if (!person_source && !dynamic_source) {

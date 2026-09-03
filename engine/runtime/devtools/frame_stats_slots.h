@@ -147,7 +147,7 @@
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
     X(SIM_CLIENT_MAINTENANCE, "decoded-state timers and movers") \
     X(SIM_CLIENT_SEND, "joiner-only C2S build/frame") \
-    /* The joiner pump after its wire leg (JoinerWorldBridge::pump phases). */ \
+    /* The joiner frame after its wire leg (JoinerRole::pump phases). */ \
     X(SIM_CLIENT_MATERIALIZE, "joiner: stream materialize + decoded-state folds (spawn/health/mount/ammo/events/weather)") \
     X(SIM_CLIENT_MIRROR, "joiner: wire pose mirror into the registry (both passes + predicted vehicles)") \
     X(SIM_CLIENT_PROXIES, "joiner: wire collision proxy rebuild") \

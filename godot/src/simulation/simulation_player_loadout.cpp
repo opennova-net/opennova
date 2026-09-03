@@ -436,6 +436,18 @@ bool Simulation::seed_session_kit_from_profile() {
 			weapon_profile_seeded_side_);
 }
 
+// The loadout profile seams the joiner role keeps shell-side (the weapon.sav
+// page composition, the respawn rebuild with its view/map resets); every other
+// leg of the joiner frame is the role's (ADR 0043 d3, slice E8b).
+void Simulation::install_joiner_kit_seams() {
+	joiner_role_.kit_seams.apply_authoritative =
+			[this] { apply_joiner_authoritative_loadout(); };
+	joiner_role_.kit_seams.reseed_on_side_change =
+			[this] { return reseed_session_kit_on_side_change(); };
+	joiner_role_.kit_seams.push = [this] { push_joiner_loadout_kit(); };
+	joiner_role_.kit_seams.respawn = [this] { respawn_local_player_loadout(); };
+}
+
 bool Simulation::reseed_session_kit_on_side_change() {
 	if (!joiner_ && !host_listen_) return false;
 	if (!kernel_) return false;

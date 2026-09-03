@@ -138,6 +138,10 @@ void Simulation::after_tick() {
 	// The dead-player map-mode clear rides every advanced tick -- retail's
 	// render-frame gate, observed before the presenters read the mode.
 	tick_hud_map_death_gate();
+	// The joiner's ~1 Hz frozen-session tripwire sampled this tick: the
+	// env-gated print is the shell's channel.
+	if (joiner_ && joiner_role_.take_diagnostic_sample())
+		print_joiner_net_diagnostic_sample();
 }
 
 bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {

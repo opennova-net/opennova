@@ -132,6 +132,12 @@ public:
     // The post-tick local pumps in retail order: the sim-wrote-the-view fold,
     // the per-frame view promoter, then the equipped-slot FSM pump.
     void run_local_player_post_tick();
+    // One 62.5 Hz tick of the view state over view_session_inputs, before the
+    // weapon pump (the order the world tick keeps: retail's
+    // Player_UpdatePerFrame call precedes the later
+    // WeaponAction_ProcessAllEntities call). The joiner frame runs it between
+    // its heading fold and its own weapon pump.
+    void tick_view();
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();

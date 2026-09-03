@@ -140,8 +140,84 @@ void MissionKernel::set_asset_index(const ResourceIndex *asset_index_ptr) {
 
 void MissionKernel::resolve_item_traits(simassets::ItemWireClassFn wire_class) {
 	item_wire_class_ = std::move(wire_class);
-	if (items_table() != nullptr)
+	resweep_item_traits();
+}
+
+void MissionKernel::resweep_item_traits() {
+	if (item_wire_class_ && items_table() != nullptr)
 		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+}
+
+int MissionKernel::resolve_collision_instances() {
+	if (items_table() == nullptr) return 0;
+	collision_items_resolved_ = true;
+	// The kernel is the ONE registered section-matrix/mounted-pose provider;
+	// wire_collision points the world/AI systems at its collision world.
+	wire_collision();
+	const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
+	collision_attached = simassets::resolve_collision_instances(
+			world, *items_table(), collision_state, deps);
+	return collision_attached;
+}
+
+int MissionKernel::refresh_collision_instances() {
+	if (!collision_items_resolved_) return 0;
+	return resolve_collision_instances();
+}
+
+w::ResolvedCollisionShape MissionKernel::wire_collision_shape_for_type(uint16_t type_id) {
+	const auto cached = wire_collision_shape_by_type_.find(type_id);
+	if (cached != wire_collision_shape_by_type_.end()) return cached->second;
+	w::ResolvedCollisionShape shape;
+	if (collision_items_resolved_ && items_table() != nullptr) {
+		const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
+		shape = simassets::collision_shape_for_runtime_type(
+				static_cast<int>(type_id), *items_table(), collision_state, deps);
+	}
+	wire_collision_shape_by_type_.emplace(type_id, shape);
+	return shape;
+}
+
+void MissionKernel::retire_replica_entity(const w::EntityLifetime &lifetime) {
+	if (!lifetime.valid()) return;
+	const auto cached = collision_state.resolution_attempted.find(lifetime.handle.packed);
+	if (cached != collision_state.resolution_attempted.end() &&
+			cached->second != lifetime.registry_spawn_id)
+		return;
+	const w::EntityHandle handle = lifetime.handle;
+	collision.remove_entity_instance(handle);
+	occlusion.remove_entity_instance(handle);
+	collision_pose.remove_entity(handle);
+	collision_state.resolution_attempted.erase(handle.packed);
+}
+
+void MissionKernel::occlusion_init_mission() {
+	collision.build_initial_tables(world);
+	occlusion.init_mission(world, collision);
+}
+
+int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
+	const auto cached = adm_by_runtime_type_.find(type_id);
+	if (cached != adm_by_runtime_type_.end()) return cached->second;
+	const DefItemsFile *item_rows = items_table();
+	if (!infantry_adm_retained_ || item_rows == nullptr || root_motion.empty()) return -1;
+	const ResourceIndex *adm_source = adm_index_ != nullptr ? adm_index_ : asset_index();
+	const int visual = simassets::visual_item_id_for_runtime_type(type_id, *item_rows);
+	const DefItemDef *def = simassets::find_item_def(*item_rows, visual);
+	int adm_id = -1;
+	if (def != nullptr && def->anim_def[0] != '\0') {
+		std::string adm = def->anim_def;
+		if (!strutil::ends_with_icase(adm, ".adm")) adm += ".adm";
+		adm_id = root_motion.register_adm(adm_source, adm);
+	}
+	if (adm_id < 0 && !root_motion.empty()) adm_id = 0; // the default set
+	adm_by_runtime_type_[type_id] = adm_id;
+	return adm_id;
+}
+
+int MissionKernel::cached_adm_id_for_runtime_type(uint16_t type_id) const {
+	const auto cached = adm_by_runtime_type_.find(type_id);
+	return cached != adm_by_runtime_type_.end() ? cached->second : -1;
 }
 
 void MissionKernel::set_items_table(const DefItemsFile *items_table_ptr) {
@@ -300,6 +376,8 @@ int MissionKernel::install_infantry_anim(const std::string &adm_name,
 		const ResourceIndex *adm_index) {
 	adm_index_ = adm_index != nullptr ? adm_index : asset_index();
 	root_motion.clear();
+	// The decoded-row adm cache indexes the registry that just died.
+	adm_by_runtime_type_.clear();
 	infantry_adm_resolved_ai_count_ = 0;
 	const int default_adm = root_motion.register_adm(adm_index_, adm_name);
 	if (default_adm != 0)
@@ -471,8 +549,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	};
 	steps.occlusion_init = [&] {
 		if (!options.collision) return;
-		collision.build_initial_tables(world);
-		occlusion.init_mission(world, collision);
+		occlusion_init_mission();
 	};
 	steps.load_weapon_table = [&] {
 		if (!load_weapon_table(files_, nullptr))
@@ -630,8 +707,7 @@ bool MissionKernel::restore_baseline() {
 	// authoritative callback/health traits now, before any client view is
 	// rebuilt from the restored rows: the encoder and the client classifier
 	// must agree on every 0x0A record width.
-	if (item_wire_class_ && items_table() != nullptr)
-		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+	resweep_item_traits();
 	return true;
 }
 

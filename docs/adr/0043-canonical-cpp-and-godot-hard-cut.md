@@ -89,14 +89,23 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    spectator gate and the medic send are the role's facts), then the role's
    `run_tick`, each role's current leg order line for line, then the shell's
    `TickObserver`. `TickTarget`, `listen_host::frame`,
-   `MissionKernel::tick_no_net` and `JoinerWorldBridge::PumpHooks` die (E8a
-   lands the roles and the frames; the hook split is E8b). The
-   hook-split rule: a leg the sim reads before the frame ends is engine-side
-   and synchronous; a leg that only mutates Godot nodes is a typed event on
-   `TickOutcome` the shell drains. Only the three loadout profile seams stay
-   constructor-injected functions. (Amends ADR 0042 d3: the kernel owns no
-   tick; the "no runtime class" clause is superseded by this consolidation,
-   which is not the mirror facade ADR 0036 d4 rejected.)
+   `MissionKernel::tick_no_net`, `JoinerWorldBridge` and its `PumpHooks` die
+   (E8a landed the roles and the frames; E8b folded the bridge into
+   `JoinerRole` and split its nineteen shell hooks). The hook-split rule as
+   built: a leg the sim reads before the frame ends is engine-side and
+   synchronous (the socket seam the shell installs as an `IDatagramSocket`
+   plus the host address, the decoded-row asset resolution through the
+   kernel's own verbs — `adm_id_for_runtime_type`,
+   `wire_collision_shape_for_type`, `retire_replica_entity`,
+   `resweep_item_traits`, `refresh_collision_instances`,
+   `occlusion_init_mission` — the local-player pumps, the charattr words);
+   a leg that only feeds the shell is an observer read after the tick (the
+   role's one-shot diagnostic sample, its world-sync serial the shell's
+   registry-derived caches re-derive from). Only the loadout profile seams
+   stay shell-installed functions (`JoinerRole::KitSeams`: the weapon.sav
+   page composition and the respawn rebuild). (Amends ADR 0042 d3: the
+   kernel owns no tick; the "no runtime class" clause is superseded by this
+   consolidation, which is not the mirror facade ADR 0036 d4 rejected.)
 
 4. **`net/` means wire.** `net/` keeps `novacrypto`, `napi`, `npwire`,
    `novaworld`; `netsim` becomes `runtime/replication/`, `npruntime` +

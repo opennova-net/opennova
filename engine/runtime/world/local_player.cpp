@@ -347,7 +347,7 @@ void LocalPlayer::run_local_player_post_tick() {
 	// Retail promotes the per-frame view before weapon actions; the sim-wrote-
 	// the-view fold runs first so the pumps read the settled look.
 	sync_local_mounted_input_heading();
-	w::local_player_view_tick(&world, weapon, view, view_tracker, view_session_inputs);
+	tick_view();
 	w::LocalWeaponPumpIO io;
 	io.view = &view;
 	io.inventory = inventory_valid ? &inventory : nullptr;
@@ -357,6 +357,11 @@ void LocalPlayer::run_local_player_post_tick() {
 	// producer the listen drain consumes; a joiner's fired-round uplink).
 	last_fired = io.fired;
 	last_reload = io.reload;
+}
+
+void LocalPlayer::tick_view() {
+	World &world = world_;
+	w::local_player_view_tick(&world, weapon, view, view_tracker, view_session_inputs);
 }
 
 void LocalPlayer::reset_local_player_input_to_player_facing() {

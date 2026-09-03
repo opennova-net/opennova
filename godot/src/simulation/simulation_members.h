@@ -66,10 +66,6 @@ private:
 	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
 	// against (0 = headless / no drawable viewport, D-NET-206).
 	int32_t renderer_viewport_height() const;
-	// Wire-side collision initialization for decoded rows, sharing the exact
-	// typed engine result and by-graphic caches used by local entities.
-	std::unordered_map<uint16_t, opennova::world::ResolvedCollisionShape>
-			wire_collision_shape_by_type_;
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
@@ -195,10 +191,10 @@ private:
 	// consumed by create_session). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<UdpPump> pump_;
-	// The pump as the host role's opennova::IDatagramSocket (installed by
-	// enable_host_listen, so the SP/test host stays socketless: every datagram
-	// dropped, the role's socket legs inert).
-	std::unique_ptr<opennova::IDatagramSocket> host_socket_;
+	// The pump as the active role's opennova::IDatagramSocket (installed by
+	// enable_host_listen / enable_join, so the SP/test host stays socketless:
+	// every datagram dropped, the role's socket legs inert).
+	std::unique_ptr<opennova::IDatagramSocket> pump_socket_;
 	String capture_pcap_path_;
 	opennova::inmatch::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
@@ -253,12 +249,11 @@ private:
 	bool joiner_net_diagnostics_ = false;
 	opennova::inmatch::JoinRole join_role_ = opennova::inmatch::JoinRole::Player;
 	std::string join_spectator_password_;
-	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): frame sequence, latches
-	// (started/spawned/redeploy/tripwire), wire-header materializer, and per-replica resolver
-	// state live in engine/runtime/inmatch; this binding supplies the shell legs as PumpHooks.
-	opennova::inmatch::JoinerWorldBridge &joiner_bridge_ = joiner_role_.bridge;
-	// The shell-asset leg of the bridge's materialize phase: rebuild the
-	// collision/occlusion/trait/seat caches for the changed streamed rows.
+	// The joiner's per-frame world<->net frame (S10a, ADR 0028; ADR 0043 d3):
+	// frame sequence, latches (started/spawned/redeploy/tripwire), wire-header
+	// materializer, per-replica resolver state and every engine leg live on
+	// joiner_role_; this binding keeps the loadout profile seams
+	// (install_joiner_kit_seams) and reads the role's observer facts.
 	// The joiner's streamed pool-1..3 rows with a placed identity, as the
 	// entity dictionaries MissionObjectPlacer.place_entities consumes (kind,
 	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
@@ -267,13 +262,9 @@ private:
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the shell hides their placed representation.
 	PackedInt32Array take_retired_placement_ids();
-	void on_replica_world_changed(
-			const opennova::replication::ClientWorldSyncResult &p_sync);
-	// The env-gated ~1 Hz tripwire print (the bridge owns the sampled state).
+	// The env-gated ~1 Hz tripwire print (the role owns the sampled state and
+	// raises the one-shot the observer's after_tick consumes).
 	void print_joiner_net_diagnostic_sample();
-	// Input-latch resets + adm resolution at L's spawn/redeploy edges.
-	void on_joiner_local_player_spawned(int32_t p_look_heading_bam);
-	void on_joiner_local_player_redeployed(int32_t p_look_heading_bam);
 	// Retail authenticates with one packed Avatars.def selection for each side.
 	// GameWorld resolves the active profile before enable_join; retain it here
 	// because a direct-loaded join rebuilds ClientRuntime at load.
@@ -312,8 +303,6 @@ private:
 	// (kernel_->local.loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
 	// spawn performs. (engine: runtime/inmatch/host_session.h)
-	// Send one framed datagram to the dialed host (the joiner's send_datagram).
-	void ship_to_host(const std::vector<uint8_t> &dg);
 
 	// The local-player frame input, look accumulators, stance latch and mouse
 	// settings all live on the kernel (kernel_->local.input / look() /
@@ -374,7 +363,6 @@ private:
 	// The Dictionary/def-row feeders both build the world install payload.
 	static opennova::world::WeaponInstallData install_data_from_def(
 			const DefWeaponDef &p_def, const Dictionary &p_clip_seconds);
-	void tick_local_player_weapon();
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
 	// The slot pool, spawn kit, availability table and pre-spawn class latch
@@ -446,19 +434,21 @@ private:
 	std::vector<opennova::world::DeployZoneRow> deploy_zone_rows();
 	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
 	bool deploy_zone_registry_built_ = false;
+	// The joiner role's world-sync serial the registry was last derived at
+	// (a streamed topology change moves it; the registry re-derives).
+	uint64_t deploy_zone_registry_sync_serial_ = 0;
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// The view state and its trackers live on the kernel (kernel_->local.view /
 	// kernel_->local.view_tracker; the witnessed gates in world/local_player_view.h);
 	// this class converts frames and routes wire requests
 	// (simulation_player_view.cpp).
-	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
-	void tick_local_player_view();
 	// The dead-player map-mode clear, run once per advanced tick (witness at
 	// hud::HudMapControl::on_local_player_dead).
 	void tick_hud_map_death_gate();
-	void install_joiner_hooks();
+	// The loadout profile seams the joiner role keeps shell-side.
+	void install_joiner_kit_seams();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/inmatch ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
@@ -529,15 +519,8 @@ private:
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
 	// binding supplying the viewport-height seam, the local ClientState fold + perf
 	// clocks, and the local reload relay.
-	// The per-frame non-authority client loop, now the bridge's pump (S10a):
-	// this binding builds the PumpContext/PumpHooks and delegates. The
-	// pre-mission preload pump shares the bridge's hello latch + clock.
-	// Deposit received framed datagrams for this frame's recv pump.
-	void joiner_deposit_inbound();
-	// Wire-side authored-shape resolution for one decoded runtime type id
-	// (items.def graphic -> the shared by-graphic collision model cache).
-	opennova::world::ResolvedCollisionShape wire_collision_shape_for_type(
-			uint16_t type_id);
+	// The per-frame non-authority client loop is the joiner role's frame
+	// (S10a, ADR 0043 d3); the pre-mission preload frame is the role's too.
 
 	// Terrain: the kernel owns the one cpt/trn(+charmap) field store
 	// (kernel_->terrain_store, ADR 0042 d4); this binding retains the source
@@ -566,8 +549,6 @@ private:
 	// root-motion source (kernel_->root_motion) and the per-entity resolution
 	// sweep. This binding retains the Refs that pin the shell's sources (the
 	// anim root and item db a joiner's decoded-row resolve reads through).
-	void resolve_client_row_adm_ids();
-	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
 	Ref<ResourceRoot> infantry_adm_resource_root_;
 	// Retained score.ini parse; the row is re-resolved whenever the mission's
 	// attrib flags change (either load order is legal).

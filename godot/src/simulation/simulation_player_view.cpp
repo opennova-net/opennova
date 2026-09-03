@@ -92,18 +92,6 @@ bool Simulation::local_death_screen_active() const {
 	return runtime_ != nullptr && runtime_->state().death_screen_active;
 }
 
-opennova::world::LocalViewSessionInputs Simulation::local_view_session_inputs() const {
-	return opennova::inmatch::Role::view_session_inputs_for(runtime_, joiner_, local_player_dead());
-}
-
-// One 62.5 Hz tick of the view state, before the weapon pump (the order the
-// world tick keeps: retail's Player_UpdatePerFrame call precedes the later
-// WeaponAction_ProcessAllEntities call).
-void Simulation::tick_local_player_view() {
-	opennova::world::local_player_view_tick(
-			&kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker, local_view_session_inputs());
-}
-
 void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) {
 	// Godot (x, y, z) -> mission (x, -z, y), the get_local_player_position inverse.
 	const float eye[3] = {p_eye_godot.x, -p_eye_godot.z, p_eye_godot.y};

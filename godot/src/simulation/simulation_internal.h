@@ -113,8 +113,8 @@ static_assert(opennova::mission::kPlayerRuntimeTypeId ==
 using opennova::simassets::aim_overlay_inputs_for;
 
 // The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
-// the engine with the joiner bridge (S10a, ADR 0028):
-// engine/runtime/inmatch joiner_world_bridge.h. The using declarations keep this
+// the engine with the joiner frame (S10a, ADR 0028):
+// engine/runtime/inmatch replica_query.h. The using declarations keep this
 // family's call sites unchanged.
 using opennova::inmatch::client_entity_for_handle;
 using opennova::inmatch::wire_carrier_exclusion_for;

@@ -210,7 +210,10 @@ Single player is still an in-process listen server
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). Authority roles pump
 `inmatch::host_session_pump`; joiners drive `ClientRuntime`. Both are reached
-inside the session target tick. A joiner's decoded entities use the one
+inside the role's tick (`HostRole::run_tick`, `JoinerRole::run_tick` — the
+joiner frame owns its socket seam, the decoded-row asset resolution through
+the kernel and the local-player pumps; the shell keeps only the loadout
+profile seams, ADR 0043 d3). A joiner's decoded entities use the one
 `ClientReplicaPipeline` path and `WirePresentPass`. The listen host presents
 its own pools (its loopback 0x0A is retail's header-only frame, D-NET-140):
 authored rows through the placed present pass, runtime-spawned rows through

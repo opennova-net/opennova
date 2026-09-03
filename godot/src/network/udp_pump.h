@@ -45,6 +45,8 @@ public:
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }
+	// The dialed default destination as a packed PeerAddr (zero before dial).
+	opennova::PeerAddr dialed_host() const;
 	void close();
 
 	// Drain every datagram currently available on the socket into the inbound queue, tagging each

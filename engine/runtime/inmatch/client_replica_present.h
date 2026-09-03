@@ -7,7 +7,7 @@
 // witness citations travel with each body.
 #pragma once
 
-#include <runtime/inmatch/joiner_world_bridge.h> // client_entity_for_handle
+#include <runtime/inmatch/replica_query.h> // client_entity_for_handle
 
 #include <runtime/replication/client_state.h>
 #include <net/npwire/entity_class.h>
