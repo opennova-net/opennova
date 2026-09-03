@@ -163,36 +163,24 @@ std::vector<int32_t> ClientWorldMaterializer::take_retired_placement_ids() {
 	return out;
 }
 
-std::vector<StreamedPlacementRecord> ClientWorldMaterializer::placement_records(
+std::vector<const world::Entity *> ClientWorldMaterializer::placed_rows(
 		const world::World &world) const {
-	std::vector<StreamedPlacementRecord> out;
+	std::vector<const world::Entity *> out;
 	out.reserve(materialized_rows_.size());
 	for (const auto &row : materialized_rows_) {
 		const world::EntityHandle handle{row.first};
 		const world::Entity *entity = owned(world, handle);
 		if (entity == nullptr || entity->spawn_origin == world::kSpawnOriginNone)
 			continue;
-		StreamedPlacementRecord rec;
-		rec.kind = world::spawn_origin_kind(entity->spawn_origin);
-		rec.index = world::spawn_origin_index(entity->spawn_origin);
-		rec.bms_id = entity->bms_id;
-		rec.item_id = entity->item_id;
-		rec.x = entity->position.x;
-		rec.y = entity->position.y;
-		rec.z = entity->position.z;
-		rec.pitch = entity->pitch;
-		rec.yaw = entity->yaw;
-		rec.roll = entity->roll;
-		rec.team = entity->team;
-		rec.group = entity->group_id;
-		rec.bms_attributes =
-				world::bms_attributes_from_entity_flags(entity->engine_flags);
-		out.push_back(rec);
+		out.push_back(entity);
 	}
 	std::sort(out.begin(), out.end(),
-			[](const StreamedPlacementRecord &a, const StreamedPlacementRecord &b) {
-				if (a.kind != b.kind) return a.kind < b.kind;
-				return a.index < b.index;
+			[](const world::Entity *a, const world::Entity *b) {
+				const int ka = world::spawn_origin_kind(a->spawn_origin);
+				const int kb = world::spawn_origin_kind(b->spawn_origin);
+				if (ka != kb) return ka < kb;
+				return world::spawn_origin_index(a->spawn_origin) <
+						world::spawn_origin_index(b->spawn_origin);
 			});
 	return out;
 }

@@ -102,22 +102,26 @@ void Simulation::bringup_host_runtime() {
 Array Simulation::get_streamed_placement_records() const {
 	Array out;
 	if (!joiner_ || !kernel_) return out;
-	for (const opennova::replication::StreamedPlacementRecord &rec :
-			joiner_role_.materializer().placement_records(kernel_->world)) {
+	// The placed identity and the record-space fields read straight off the
+	// registry rows the materializer stamped (a BMS entity record's shape, the
+	// same batched/placed path the host's own statics take).
+	for (const opennova::world::Entity *row :
+			joiner_role_.materializer().placed_rows(kernel_->world)) {
 		Dictionary d;
-		d["kind"] = rec.kind;
-		d["index"] = rec.index;
-		d["bms_id"] = rec.bms_id;
+		d["kind"] = opennova::world::spawn_origin_kind(row->spawn_origin);
+		d["index"] = opennova::world::spawn_origin_index(row->spawn_origin);
+		d["bms_id"] = row->bms_id;
 		// The placer resolves graphics by items.def id: the wire type plus the
 		// catalog offset (pools 1..3 never carry the runtime player type).
 		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(
-				rec.item_id, false);
-		d["position"] = Vector3(rec.x, rec.y, rec.z);
-		d["rotation_deg"] = Vector3(static_cast<float>(rec.pitch),
-				static_cast<float>(rec.yaw), static_cast<float>(rec.roll));
-		d["team"] = rec.team;
-		d["group"] = rec.group;
-		d["ai_flags"] = static_cast<int64_t>(rec.bms_attributes);
+				row->item_id, false);
+		d["position"] = Vector3(row->position.x, row->position.y, row->position.z);
+		d["rotation_deg"] = Vector3(static_cast<float>(row->pitch),
+				static_cast<float>(row->yaw), static_cast<float>(row->roll));
+		d["team"] = row->team;
+		d["group"] = row->group_id;
+		d["ai_flags"] = static_cast<int64_t>(
+				opennova::world::bms_attributes_from_entity_flags(row->engine_flags));
 		out.push_back(d);
 	}
 	return out;

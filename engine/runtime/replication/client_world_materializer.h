@@ -28,21 +28,6 @@ struct ClientWorldSyncResult {
 // while consuming S2C 0x10/0x0D/0x20. This deliberately excludes pool 0:
 // Simulation owns a separate local-player entity and remote organics stay
 // in ClientState/presentation.
-// One streamed pool-1..3 row's placed identity, in the shape the shell's
-// mission placer consumes (a BMS entity record): the same batched/placed
-// path the host's own statics take.
-struct StreamedPlacementRecord {
-	int kind = 0;         // world::EntityKind value (Marker 0, Item 1, Building 2)
-	int index = 0;        // per-kind ordinal = spawn_origin index
-	int32_t bms_id = 0;   // the synthetic placed id (nonzero, unique per handle)
-	int item_id = 0;
-	float x = 0.0f, y = 0.0f, z = 0.0f; // mission space
-	int pitch = 0, yaw = 0, roll = 0;   // integer degrees, as a record stores them
-	int team = 0;
-	int group = 0;
-	uint32_t bms_attributes = 0; // Reflective/NoShadow/Indestructible bits
-};
-
 class ClientWorldMaterializer {
 public:
 	ClientWorldSyncResult sync(const ClientState &state, world::World &world);
@@ -52,10 +37,11 @@ public:
 	// complete (the pool-0 fence); rows streamed later stay wire-direct like
 	// the host's own runtime spawns. Returns how many rows were stamped.
 	int assign_placement_origins(world::World &world);
-	// Every stamped row, ordered by (kind, index) — the shell places them
-	// through its mission placer.
-	std::vector<StreamedPlacementRecord> placement_records(
-			const world::World &world) const;
+	// Every stamped row, ordered by (kind, index) — the registry rows
+	// themselves carry the placed identity (spawn_origin, bms_id) the shell's
+	// mission placer keys on, the same batched/placed path the host's own
+	// statics take (ADR 0043 slice E10: no record twin of the row).
+	std::vector<const world::Entity *> placed_rows(const world::World &world) const;
 	// Placed identities whose slot was retired or re-typed since the last
 	// take: the shell hides their placed representation (a re-typed slot's
 	// new occupant is wire-direct). A same-type re-spawn of a stamped slot
@@ -80,7 +66,11 @@ private:
 		// that point; unset bits allow definitions that arrive later to catch up.
 		uint16_t projected_mount_slots = 0;
 		// The placed identity stamped at the fence (kSpawnOriginNone / 0 =
-		// none), carried across same-type re-spawns of this slot.
+		// none). Deliberately a copy of the registry row's pair (ADR 0043
+		// slice E10 kept it): it is the identity's TOMBSTONE — it outlives the
+		// row so a vanished stamped slot still retires its id to the shell, and
+		// a same-type re-spawn of the slot inherits it even when the previous
+		// lifetime is already gone.
 		uint32_t spawn_origin = 0xFFFFFFFFu;
 		int32_t bms_id = 0;
 	};

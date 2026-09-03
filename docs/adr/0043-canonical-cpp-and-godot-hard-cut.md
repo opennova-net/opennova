@@ -140,14 +140,24 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
 6. **Entity representations.** Survive, each a witnessed boundary:
    `bms::Entity`, `world::Entity`, `world::AiEntity`, `ClientEntityState`, the
    npwire decode records, `GameEntitySnapshot`, `inspect::EntityRow/Card`.
-   Die: `mission::EntityRecord`/`EntityProperties`, `StreamedPlacementRecord`,
-   the identity half of `MaterializedRow`. One joiner path: wire -> decode
-   record -> `ClientEntityState` -> `world::Entity`.
+   Die: `mission::EntityRecord`/`EntityProperties`, `StreamedPlacementRecord`
+   (E10: the shell reads the materializer's placed registry rows). The
+   identity pair on `MaterializedRow` (`spawn_origin`, `bms_id`) STAYS (E10
+   decision): it is the placed identity's tombstone — it outlives the
+   registry row so a vanished stamped slot still retires its id to the shell
+   and a same-type re-spawn inherits it after the previous lifetime is gone;
+   deriving it from the row alone changes those two edges. One joiner path:
+   wire -> decode record -> `ClientEntityState` -> `world::Entity`.
 
 7. **The terrain seam stays; the kernel loads its own terrain.**
    `terrain_query/terrain_field_build.h` is whitelisted for
    `engine/runtime/mission` only, so `MissionKernel::boot` fills its own
-   `terrain_store` and the embedders stop pre-building it (amends ADR 0020).
+   `terrain_store` through its asset index when the embedder built none
+   (`KernelBootOptions::terrain`; E9: the dedicated host and the retail rig
+   stopped pre-building). The shell keeps the parsed-document entry (its
+   `TerrainData` through `terrain_field_store_build` before the boot, with
+   `terrain = false`): one builder, two entries, both through
+   `height_field_apply_trn` (amends ADR 0020 d3).
 
 8. **`formats/mission` is `bms::File` plus free functions.** `MissionDocument`
    (the 90-method pimpl with string-keyed setters) retires; its capabilities

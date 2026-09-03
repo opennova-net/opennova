@@ -963,7 +963,7 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;
 	materializer.sync(pipeline.state(), world);
-	if (!expect(materializer.placement_records(world).empty() &&
+	if (!expect(materializer.placed_rows(world).empty() &&
 			world.registry.get(w::EntityHandle{0x2025})->spawn_origin ==
 					w::kSpawnOriginNone &&
 			world.registry.get(w::EntityHandle{0x2025})->bms_id == 0,
@@ -991,21 +991,27 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			"a second fence pass stamps nothing"))
 		return false;
 
-	const std::vector<ns::StreamedPlacementRecord> records =
-			materializer.placement_records(world);
-	if (!expect(records.size() == 4 && records[0].kind == 0 &&
-			records[1].kind == 1 && records[1].index == 0 &&
-			records[1].item_id == 0x0601 && records[1].bms_id == 0x2027 &&
-			records[1].bms_attributes == 0x01000000u &&
-			records[2].kind == 1 && records[2].index == 1 &&
-			records[2].item_id == 5008 && records[2].team == 1 &&
-			records[2].bms_attributes == 0 &&
-			records[3].kind == 2 && records[3].bms_id == 0x2026 &&
-			records[3].item_id == 0x0600 && records[3].team == 2 &&
-			records[3].yaw == 37 &&
-			std::fabs(records[3].x - 11.0f) < 0.0001f &&
-			records[3].bms_attributes == 0x00A00000u,
-			"records are (kind, index)-ordered and carry the record-space attributes"))
+	// The placed rows ARE the registry rows (no record twin): (kind, index)-
+	// ordered, carrying the identity and the record-space attributes.
+	const std::vector<const w::Entity *> rows = materializer.placed_rows(world);
+	const auto kind_of = [](const w::Entity *e) { return w::spawn_origin_kind(e->spawn_origin); };
+	const auto index_of = [](const w::Entity *e) { return w::spawn_origin_index(e->spawn_origin); };
+	const auto attribs_of = [](const w::Entity *e) {
+		return w::bms_attributes_from_entity_flags(e->engine_flags);
+	};
+	if (!expect(rows.size() == 4 && kind_of(rows[0]) == 0 &&
+			kind_of(rows[1]) == 1 && index_of(rows[1]) == 0 &&
+			rows[1]->item_id == 0x0601 && rows[1]->bms_id == 0x2027 &&
+			attribs_of(rows[1]) == 0x01000000u &&
+			kind_of(rows[2]) == 1 && index_of(rows[2]) == 1 &&
+			rows[2]->item_id == 5008 && rows[2]->team == 1 &&
+			attribs_of(rows[2]) == 0 &&
+			kind_of(rows[3]) == 2 && rows[3]->bms_id == 0x2026 &&
+			rows[3]->item_id == 0x0600 && rows[3]->team == 2 &&
+			rows[3]->yaw == 37 &&
+			std::fabs(rows[3]->position.x - 11.0f) < 0.0001f &&
+			attribs_of(rows[3]) == 0x00A00000u,
+			"placed rows are (kind, index)-ordered and carry the record-space attributes"))
 		return false;
 
 	// A row streamed after the fence stays wire-direct until the next stamp,
