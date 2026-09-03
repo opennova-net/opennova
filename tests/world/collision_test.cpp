@@ -2338,18 +2338,15 @@ void test_cached_raycast_spatial_candidates() {
     CHECK(!cw.raycast_clear(world, a, b, EntityHandle{}, EntityHandle{}));
 
     cw.prepare_cached_raycast_queries(world);
-    CollisionWorld::RaycastPerf perf;
-    CHECK(!cw.raycast_clear_cached(
-            world, a, b, EntityHandle{}, EntityHandle{}, &perf));
-    CHECK(perf.sector_candidates == 1);
+    CHECK(!cw.raycast_clear_cached(world, a, b, EntityHandle{}, EntityHandle{}));
+    CHECK(cw.last_los_sector_candidates() == 1);
 
     // Resetting the stable epoch restores the ordinary live table path. A
     // moved target is then observed immediately rather than through stale
     // indexed bounds.
     world.registry.get(blocker)->position.y = 200.0f;
     cw.reset_query_view_cache();
-    CHECK(cw.raycast_clear_cached(
-            world, a, b, EntityHandle{}, EntityHandle{}, nullptr));
+    CHECK(cw.raycast_clear_cached(world, a, b, EntityHandle{}, EntityHandle{}));
 }
 
 void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
@@ -2380,10 +2377,8 @@ void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
     const int32_t a[3] = {fx(-100.0), 0, fx(1.0)};
     const int32_t b[3] = {0, 0, fx(1.0)};
     cw.prepare_cached_raycast_queries(world);
-    CollisionWorld::RaycastPerf perf;
-    CHECK(!cw.raycast_clear_cached(
-            world, a, b, EntityHandle{}, EntityHandle{}, &perf));
-    CHECK(perf.sector_candidates == 1);
+    CHECK(!cw.raycast_clear_cached(world, a, b, EntityHandle{}, EntityHandle{}));
+    CHECK(cw.last_los_sector_candidates() == 1);
 }
 
 void test_raycast_uses_stamped_bound_for_live_section_pose() {

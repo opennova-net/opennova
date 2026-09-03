@@ -141,9 +141,9 @@ public:
 
 	// One bare no-net authoritative logic tick between the local-player pumps
 	// (the AI-path and convoy drives; a live session orders the same legs
-	// around its session pump — inmatch::listen_host::frame). `perf` is
-	// optional world-phase attribution for the embedder's stats board.
-	void tick_no_net(world::LogicTickPerf *perf = nullptr);
+	// around its session pump — inmatch::listen_host::frame). The tick's phase
+	// attribution lands on `profile`.
+	void tick_no_net();
 
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:
@@ -370,6 +370,15 @@ public:
 	// kernel grounds and surface-picks on exactly the game's field. The
 	// embedder fills it BEFORE boot() from its parsed terrain documents.
 	terrain::TerrainFieldStore terrain_store;
+
+	// --- the tick profile (ADR 0043 d5) ---------------------------------------
+	// The ONE collector every tick-side span and count lands on (the world,
+	// the AI system, the collision resolver, the host session pump, the
+	// replication fan, the client frame, the joiner pump). world.profile
+	// points here for the kernel's lifetime; the embedder sets it active with
+	// its capture window, folds the touched slots onto its board once per
+	// render frame, and resets it.
+	devtools::TickProfile profile;
 
 	// --- the local player's weapon and view ----------------------------------
 	DefWeaponsFile weapon_defs{};

@@ -9,10 +9,6 @@
 
 #include <net/npruntime/napi_np_server_ctx.h> // NapiNPServerCtx
 
-namespace opennova::world {
-struct LogicTickPerf;
-}
-
 namespace opennova::np {
 
 // One explicit global countdown: reset 0 emits at the next boundary, reload
@@ -22,133 +18,6 @@ inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS =
 		30u * uint32_t(io::kTicksPerSecondInt);
 inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS =
 		12u * uint32_t(io::kTicksPerSecondInt);
-
-// Optional attribution for one authoritative Server_TickUpdate. Callers pass
-// nullptr outside an active diagnostics capture; the zero-initialized value is
-// flattened so bindings can forward it without depending on World internals.
-struct ServerTickPerf {
-	uint64_t input_us = 0;
-	uint64_t world_us = 0;
-	uint64_t world_setup_us = 0;
-	uint64_t world_scripts_us = 0;
-	uint64_t world_ai_us = 0;
-	uint64_t world_ai_reactions_us = 0;
-	uint64_t world_ai_collision_tables_us = 0;
-	uint64_t world_ai_entities_us = 0;
-	uint64_t world_ai_infantry_entities_us = 0;
-	uint64_t world_ai_infantry_remote_us = 0;
-	uint64_t world_ai_infantry_combat_us = 0;
-	uint64_t world_ai_infantry_animation_us = 0;
-	uint64_t world_ai_infantry_collision_us = 0;
-	uint64_t world_ai_infantry_collision_contacts_us = 0;
-	uint64_t world_ai_infantry_collision_repulsion_us = 0;
-	uint64_t world_ai_infantry_collision_ground_us = 0;
-	uint64_t world_ai_other_entities_us = 0;
-	uint64_t world_ai_authority_vehicles_us = 0;
-	uint64_t world_ai_vehicle_scan_us = 0;
-	uint64_t world_ai_vehicle_motors_us = 0;
-	uint64_t world_ai_vehicle_riders_us = 0;
-	uint64_t world_ai_client_vehicles_us = 0;
-	uint64_t world_ai_events_us = 0;
-	uint64_t world_attachments_us = 0;
-	uint64_t world_attachment_orphans_us = 0;
-	uint64_t world_attachment_child_pose_us = 0;
-	uint64_t world_attachment_riders_us = 0;
-	uint64_t world_throwables_us = 0;
-	uint64_t world_weapons_us = 0;
-	uint64_t world_projectiles_us = 0;
-	uint64_t world_destruction_us = 0;
-	uint64_t world_housekeeping_us = 0;
-	uint64_t match_us = 0;
-	uint64_t rules_us = 0;
-	uint64_t replication_us = 0;
-	uint64_t replication_query_prep_us = 0;
-	uint64_t replication_query_collect_us = 0;
-	uint64_t replication_query_grid_us = 0;
-	uint64_t replication_query_grid_span_us = 0;
-	uint64_t replication_query_grid_bucket_us = 0;
-	uint64_t replication_query_grid_workspace_us = 0;
-	uint64_t replication_snapshot_us = 0;
-	uint64_t replication_fan_us = 0;
-	uint64_t replication_fan_setup_us = 0;
-	uint64_t replication_round_selection_us = 0;
-	uint64_t replication_entity_selection_us = 0;
-	uint64_t replication_entity_setup_us = 0;
-	uint64_t replication_entity_scoring_us = 0;
-	uint64_t replication_entity_los_us = 0;
-	uint64_t replication_entity_los_terrain_us = 0;
-	uint64_t replication_entity_los_sector_us = 0;
-	uint64_t replication_entity_sort_us = 0;
-	uint64_t replication_entity_budget_us = 0;
-	uint64_t replication_encode_us = 0;
-	uint64_t replication_enqueue_us = 0;
-
-	// Sum another record into this one (a render frame consumes 0..N ticks;
-	// the shell keeps one summed record per frame).
-	// Add one World::run_logic_tick attribution onto the world_* rows. The
-	// server tick assigns its own per-tick record; the direct (no-net) and
-	// joiner ticks accumulate 0..N ticks per frame through this.
-	void add_logic_tick(const world::LogicTickPerf &p);
-
-	ServerTickPerf &operator+=(const ServerTickPerf &o) {
-		input_us += o.input_us;
-		world_us += o.world_us;
-		world_setup_us += o.world_setup_us;
-		world_scripts_us += o.world_scripts_us;
-		world_ai_us += o.world_ai_us;
-		world_ai_reactions_us += o.world_ai_reactions_us;
-		world_ai_collision_tables_us += o.world_ai_collision_tables_us;
-		world_ai_entities_us += o.world_ai_entities_us;
-		world_ai_infantry_entities_us += o.world_ai_infantry_entities_us;
-		world_ai_infantry_remote_us += o.world_ai_infantry_remote_us;
-		world_ai_infantry_combat_us += o.world_ai_infantry_combat_us;
-		world_ai_infantry_animation_us += o.world_ai_infantry_animation_us;
-		world_ai_infantry_collision_us += o.world_ai_infantry_collision_us;
-		world_ai_infantry_collision_contacts_us += o.world_ai_infantry_collision_contacts_us;
-		world_ai_infantry_collision_repulsion_us += o.world_ai_infantry_collision_repulsion_us;
-		world_ai_infantry_collision_ground_us += o.world_ai_infantry_collision_ground_us;
-		world_ai_other_entities_us += o.world_ai_other_entities_us;
-		world_ai_authority_vehicles_us += o.world_ai_authority_vehicles_us;
-		world_ai_vehicle_scan_us += o.world_ai_vehicle_scan_us;
-		world_ai_vehicle_motors_us += o.world_ai_vehicle_motors_us;
-		world_ai_vehicle_riders_us += o.world_ai_vehicle_riders_us;
-		world_ai_client_vehicles_us += o.world_ai_client_vehicles_us;
-		world_ai_events_us += o.world_ai_events_us;
-		world_attachments_us += o.world_attachments_us;
-		world_attachment_orphans_us += o.world_attachment_orphans_us;
-		world_attachment_child_pose_us += o.world_attachment_child_pose_us;
-		world_attachment_riders_us += o.world_attachment_riders_us;
-		world_throwables_us += o.world_throwables_us;
-		world_weapons_us += o.world_weapons_us;
-		world_projectiles_us += o.world_projectiles_us;
-		world_destruction_us += o.world_destruction_us;
-		world_housekeeping_us += o.world_housekeeping_us;
-		match_us += o.match_us;
-		rules_us += o.rules_us;
-		replication_us += o.replication_us;
-		replication_query_prep_us += o.replication_query_prep_us;
-		replication_query_collect_us += o.replication_query_collect_us;
-		replication_query_grid_us += o.replication_query_grid_us;
-		replication_query_grid_span_us += o.replication_query_grid_span_us;
-		replication_query_grid_bucket_us += o.replication_query_grid_bucket_us;
-		replication_query_grid_workspace_us += o.replication_query_grid_workspace_us;
-		replication_snapshot_us += o.replication_snapshot_us;
-		replication_fan_us += o.replication_fan_us;
-		replication_fan_setup_us += o.replication_fan_setup_us;
-		replication_round_selection_us += o.replication_round_selection_us;
-		replication_entity_selection_us += o.replication_entity_selection_us;
-		replication_entity_setup_us += o.replication_entity_setup_us;
-		replication_entity_scoring_us += o.replication_entity_scoring_us;
-		replication_entity_los_us += o.replication_entity_los_us;
-		replication_entity_los_terrain_us += o.replication_entity_los_terrain_us;
-		replication_entity_los_sector_us += o.replication_entity_los_sector_us;
-		replication_entity_sort_us += o.replication_entity_sort_us;
-		replication_entity_budget_us += o.replication_entity_budget_us;
-		replication_encode_us += o.replication_encode_us;
-		replication_enqueue_us += o.replication_enqueue_us;
-		return *this;
-	}
-};
 
 // Stage retail's high-table H:0x03 LogPuntEvent record for one remote. The
 // first event wins and immediately closes that connection's gameplay gate;
@@ -196,7 +65,7 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 // mutually exclusive: listen/dedicated hosts call this path, joiners call the client path, and
 // offline play calls tick_no_net. The drain/emit primitives are invoked only here over
 // connection_list; the parallel NetSystem-as-ISystem owner was removed at P8.
-void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf = nullptr);
+void Server_TickUpdate(NapiNPServerCtx &ctx);
 
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_state runs once per client

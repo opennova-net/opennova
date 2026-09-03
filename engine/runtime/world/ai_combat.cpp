@@ -404,7 +404,7 @@ static EntityHandle los_exclude_handle(const World &world, EntityHandle h) {
 
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
-    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/false, nullptr);
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/false);
 }
 
 // The stable-phase replication form of line_of_sight_clear: identical
@@ -413,17 +413,15 @@ bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32
 // hull [orig: the same raycast_find_collision_entity endpoint resolve].
 bool AiSystem::line_of_sight_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle from,
-                                          EntityHandle to,
-                                          CollisionWorld::RaycastPerf *perf) const {
-    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/true, perf);
+                                          EntityHandle to) const {
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/true);
 }
 
 // One body for both LOS forms; `cached` picks the raycast_clear /
 // raycast_clear_cached sector leg.
 bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle from,
-                                        EntityHandle to, bool cached,
-                                        CollisionWorld::RaycastPerf *perf) const {
+                                        EntityHandle to, bool cached) const {
     if (terrain == nullptr || !terrain->valid()) return true;
     if (collision != nullptr) {
         // Each endpoint folds through los_exclude_handle (the +0x268 link,
@@ -434,7 +432,7 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
                 collision, cached
                         ? CollisionWorld::RayDebugCategory::kReplicationLos
                         : CollisionWorld::RayDebugCategory::kAiLos);
-        return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h, perf)
+        return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h)
                       : collision->raycast_clear(world, a, b, from_h, to_h);
     }
     return !los_terrain_blocked(*terrain, a, b);

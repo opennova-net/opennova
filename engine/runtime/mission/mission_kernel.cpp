@@ -54,6 +54,7 @@ MissionKernel::MissionKernel() {
 	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
 	// per frame [orig: one WeaponAction_ProcessAllEntities walk @0x542690].
 	world.external_local_mounted_weapon_pump = true;
+	world.profile = &profile;
 }
 
 MissionKernel::~MissionKernel() {
@@ -666,9 +667,9 @@ bool MissionKernel::request_stance(int stance) {
 	return true;
 }
 
-void MissionKernel::tick_no_net(w::LogicTickPerf *perf) {
+void MissionKernel::tick_no_net() {
 	apply_player_input_pre_tick();
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay, perf);
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	tick_weather();

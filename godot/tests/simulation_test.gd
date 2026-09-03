@@ -8,39 +8,19 @@ const NATIVE_RUNTIME_TIMING_KEYS := [
 	"occlusion_probe_us",
 ]
 
-const SESSION_PHASE_TIMING_KEYS := [
-	"host_prep_us", "host_pump_us", "host_receive_us", "host_connections_us",
-	"host_adapter_us", "server_tick_us", "server_input_us", "server_world_us",
-	"world_setup_us", "world_scripts_us", "world_ai_us",
-	"world_ai_reactions_us", "world_ai_collision_tables_us", "world_ai_entities_us",
-	"world_ai_infantry_entities_us", "world_ai_infantry_remote_us",
-	"world_ai_infantry_combat_us", "world_ai_infantry_animation_us",
-	"world_ai_infantry_collision_us", "world_ai_infantry_collision_contacts_us",
-	"world_ai_infantry_collision_repulsion_us", "world_ai_infantry_collision_ground_us",
-	"world_ai_other_entities_us",
-	"world_ai_authority_vehicles_us", "world_ai_vehicle_scan_us",
-	"world_ai_vehicle_motors_us", "world_ai_vehicle_riders_us",
-	"world_ai_client_vehicles_us", "world_ai_events_us",
-	"world_attachments_us", "world_attachment_orphans_us",
-	"world_attachment_child_pose_us", "world_attachment_riders_us",
-	"world_throwables_us", "world_weapons_us", "world_projectiles_us",
-	"world_destruction_us", "world_housekeeping_us", "match_us",
-	"server_rules_us", "server_replication_us", "replication_query_prep_us",
-	"replication_query_collect_us", "replication_query_grid_us",
-	"replication_query_grid_span_us", "replication_query_grid_bucket_us",
-	"replication_query_grid_workspace_us",
-	"replication_snapshot_us",
-	"replication_fan_us", "replication_fan_setup_us", "replication_round_selection_us",
-	"replication_entity_selection_us", "replication_entity_setup_us",
-	"replication_entity_scoring_us", "replication_entity_los_us",
-	"replication_entity_los_terrain_us", "replication_entity_los_sector_us",
-	"replication_entity_sort_us",
-	"replication_entity_budget_us", "replication_encode_us", "replication_enqueue_us",
-	"host_send_us", "host_player_us", "client_decode_us", "client_setup_us",
-	"client_receive_us", "client_maintenance_us", "client_send_us",
-	"client_materialize_us", "client_mirror_us", "client_proxies_us",
-	"client_world_us", "client_attach_us", "client_player_us",
-	"adm_resolve_us", "sink_us",
+# The world-update rows every role's logic tick lands on the frame-stats
+# board through the kernel's one tick profile (ADR 0043 d5): the direct
+# (no-net) tick fills exactly these; the host/joiner-only rows stay unsampled.
+const WORLD_PHASE_SLOTS := [
+	FrameStats.SIM_SERVER_WORLD, FrameStats.SIM_WORLD_SETUP,
+	FrameStats.SIM_WORLD_SCRIPTS, FrameStats.SIM_WORLD_AI,
+	FrameStats.SIM_WORLD_ATTACHMENTS, FrameStats.SIM_WORLD_THROWABLES,
+	FrameStats.SIM_WORLD_WEAPONS, FrameStats.SIM_WORLD_PROJECTILES,
+	FrameStats.SIM_WORLD_DESTRUCTION, FrameStats.SIM_WORLD_HOUSEKEEPING,
+]
+const HOST_ONLY_SLOTS := [
+	FrameStats.SIM_HOST_PUMP, FrameStats.SIM_SERVER_TICK,
+	FrameStats.SIM_SERVER_INPUT, FrameStats.SIM_SERVER_REPLICATION,
 ]
 
 # Simulation (the GDExtension binding): promote a synthetic BMS mission into a live
@@ -561,18 +541,27 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 		sampled_us += int(counters.get(key, 0))
 	assert_gt(sampled_us, 0,
 			"the enabled gate records at least one native runtime span")
+	# The tick profile folds onto the frame-stats board once per session
+	# frame: every world-update row the direct tick ran is sampled, the
+	# host-only rows are not.
+	var stats := FrameStats.new()
+	sim.set_frame_stats(stats)
+	stats.set_capture_active(true)
 	var frame_input := MissionFrameInput.new()
 	frame_input.delta_seconds = Simulation.tick_dt()
 	var frame_outcome := sim.step_session_frame(frame_input, Callable())
 	assert_not_null(frame_outcome)
-	var session_perf: Dictionary = sim.get_session_perf()
-	for key in SESSION_PHASE_TIMING_KEYS:
-		assert_true(session_perf.has(key), "the session exports the '%s' F3 phase" % key)
+	var window := stats.drain()
+	var samples: PackedInt32Array = window.get_sample_frames()
+	var sums: PackedInt64Array = window.get_sums()
 	var world_phase_us := 0
-	for key in ["world_setup_us", "world_scripts_us", "world_ai_us",
-			"world_attachments_us", "world_throwables_us", "world_weapons_us",
-			"world_projectiles_us", "world_destruction_us", "world_housekeeping_us"]:
-		world_phase_us += int(session_perf.get(key, 0))
+	for slot in WORLD_PHASE_SLOTS:
+		assert_gt(samples[slot], 0,
+				"the direct tick samples the '%s' F3 phase" % FrameStats.slot_name(slot))
+		world_phase_us += sums[slot]
+	for slot in HOST_ONLY_SLOTS:
+		assert_eq(samples[slot], 0,
+				"a direct tick never samples the host-only '%s' row" % FrameStats.slot_name(slot))
 	assert_gt(world_phase_us, 0,
 			"an enabled direct tick attributes work below the world-update box")
 
@@ -597,14 +586,16 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	counters = sim.get_runtime_perf_counters()
 	_assert_native_runtime_timings_zero(counters)
 	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+	stats.set_capture_active(true)
 	frame_outcome = sim.step_session_frame(frame_input, Callable())
 	assert_not_null(frame_outcome)
-	session_perf = sim.get_session_perf()
-	assert_true(session_perf.has("ticks"),
+	assert_eq(frame_outcome.get_ticks_run(), 1,
 			"the tick accounting is exported with profiling closed")
-	for key in SESSION_PHASE_TIMING_KEYS:
-		assert_false(session_perf.has(key),
-				"%s is not exported while F3/native profiling is closed" % key)
+	window = stats.drain()
+	samples = window.get_sample_frames()
+	for slot in WORLD_PHASE_SLOTS:
+		assert_eq(samples[slot], 0,
+				"'%s' is not sampled while F3/native profiling is closed" % FrameStats.slot_name(slot))
 	sim.free()
 
 

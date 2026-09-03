@@ -122,7 +122,8 @@ void Simulation::bringup_host_runtime() {
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
-		runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
+		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 		// Phase-3 0x0A objective width is gated by the same g_GameType
 		// carried to remote clients in 0x7B extra; the local loopback has no
 		// handshake, so seed its view directly from the consolidated config.
@@ -222,18 +223,15 @@ void Simulation::host_pump() {
 	kernel_->view_session_inputs = local_view_session_inputs();
 	UdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	if (profiling)
-		frame_phase_perf_.host_prep_us +=
-				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start);
+		kernel_->profile.add(opennova::devtools::Slot::SIM_HOST_PREP,
+				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start));
 	// The ONE listen frame (ADR 0042 d3): the local C2S drain, the pre-tick
 	// input apply, host_session_pump (Server_TickUpdate's owner loop), the
 	// local view/weapon pumps, and the new-soldier .adm ground — over this
-	// sim's kernel and host state. [orig: Game_ProcessMainFrame @0x5263f0]
-	np::HostSessionPerf host_perf;
+	// sim's kernel and host state; its phases land on the kernel's profile.
+	// [orig: Game_ProcessMainFrame @0x5263f0]
 	opennova::inmatch::listen_host::frame(*kernel_, host_state_, sock,
-			static_cast<int32_t>(viewport_height),
-			profiling ? &host_perf : nullptr);
-	if (profiling)
-		frame_phase_perf_.host_session += host_perf;
+			static_cast<int32_t>(viewport_height));
 	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	// The kernel pump's wire-facing reload outcome relays onto the loopback so
 	// the shared dispatcher broadcasts the S2C 0x49 to every client next frame
@@ -251,15 +249,12 @@ void Simulation::host_pump() {
 	// (fused with the logic tick) and stays inside the Sim step number until
 	// npruntime grows a phase seam.
 	const uint64_t net_start = profiling ? opennova::io::perf_now_us() : 0;
-	np::ClientFramePerf client_perf;
 	if (runtime_)
-		runtime_->Client_ProcessNetworkFrame(
-				now, profiling ? &client_perf : nullptr); // fold host_loop_ -> ClientState
+		runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState
 	if (profiling) {
 		last_net_tick_us_ = opennova::io::perf_now_us() - net_start;
-		frame_phase_perf_.client_decode_us +=
-				static_cast<int64_t>(last_net_tick_us_);
-		frame_phase_perf_.client += client_perf;
+		kernel_->profile.add(opennova::devtools::Slot::SIM_NET,
+				static_cast<int64_t>(last_net_tick_us_));
 	}
 }
 
@@ -409,8 +404,7 @@ void Simulation::joiner_pump() {
 	opennova::np::JoinerWorldBridge::PumpContext ctx{
 			kernel_->world, *runtime_, kernel_->weapon, kernel_->loadout,
 			kernel_->inventory, kernel_->inventory_valid, kernel_->seat_specs,
-			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion,
-			runtime_profiling_enabled_ ? &frame_phase_perf_.joiner : nullptr};
+			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
 	opennova::np::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
 	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };
@@ -901,6 +895,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); each (re)load's role hook rebuilds it fresh.
 	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+	runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 	runtime_->set_join_request(join_role_, join_spectator_password_);
 	install_charattr_challenge_table();
 	install_character_join_vars();

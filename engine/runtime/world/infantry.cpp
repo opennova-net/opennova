@@ -46,7 +46,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
-#include <base/io/perf_clock.h>
+#include <runtime/devtools/tick_profile.h>
 
 #include <runtime/audio/footstep_slot.h>
 #include <base/io/bam.h>
@@ -1032,8 +1032,7 @@ static bool entity_is_player_class(const World &world, EntityHandle handle) {
     return ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0;
 }
 
-void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
-                             AiTickPerf *perf) {
+void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Recoil/dispersion live ahead of the network-snap motor exit [orig: the
     // Entity_UpdateInfantryAI flag test @0x4b9a03 exits past the sound block]. Received
     // shots are applied during the network pump, then decay in this frame's
@@ -1074,10 +1073,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // resolver call @0x4B7CE0..0x4B7CF4]
     if (e.net_is_remote_peer) {
         if (is_authority) {
-            const uint64_t remote_start = perf != nullptr ? io::perf_now_us() : 0;
+            const devtools::ProfileScope remote_scope(
+                    world.profile, devtools::Slot::SIM_AI_INFANTRY_REMOTE);
             remote_player_body_anim(e, world, logic_tick);
-            if (perf != nullptr)
-                perf->infantry_remote_us += io::perf_now_us() - remote_start;
         }
         return;
     }
@@ -1305,10 +1303,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // matching the original's later-in-flow targetAnimState overrides.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
     if (!inf.is_local_player && is_authority && e.health > 0) {
-        const uint64_t combat_start = perf != nullptr ? io::perf_now_us() : 0;
+        const devtools::ProfileScope combat_scope(
+                world.profile, devtools::Slot::SIM_AI_INFANTRY_COMBAT);
         infantry_combat_think(e, world, key);
-        if (perf != nullptr)
-            perf->infantry_combat_us += io::perf_now_us() - combat_start;
     }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
@@ -1341,7 +1338,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     // updaters pass their out-array to AnimMap_UpdateDualChannels @0x40b8c0, so an AI
     // body's secondary channel promotes and steps like anyone's — but its SELECTION
     // writer @0x4b9a28 is unwitnessed, so its state is never re-selected here.
-    const uint64_t animation_start = perf != nullptr ? io::perf_now_us() : 0;
+    devtools::ProfileLap animation_lap(world.profile);
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
     else infantry_weapon_channel_advance(e);
 
@@ -1355,8 +1352,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
         inf.prev_capsule_bottom = frame.capsule_bottom;
     }
     inf.last_events = have_clip ? frame.events : 0;
-    if (perf != nullptr)
-        perf->infantry_animation_us += io::perf_now_us() - animation_start;
+    animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
 
     // 3'. The eye-offset restamp (the entity+0x6C/+0x70/+0x74 triple).
     // Entity_UpdateInfantryPlayerBody restamps org2 bodies at two sites —
@@ -1514,24 +1510,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
                                        inf.eye_offset_z};
         if ((key & 7u) == 0 && collision != nullptr) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
-            CollisionWorld::ResolvePerf resolve_perf;
-            const uint64_t collision_start =
-                    perf != nullptr ? io::perf_now_us() : 0;
+            const devtools::ProfileScope collision_scope(
+                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                     entity_is_player_class(world, e.handle), is_authority,
                     logic_tick, inf.anim_state,
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
-                    &mounted_lio, eye_offset,
-                    perf != nullptr ? &resolve_perf : nullptr);
-            if (perf != nullptr) {
-                perf->infantry_collision_us +=
-                        io::perf_now_us() - collision_start;
-                perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
-                perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
-                perf->infantry_collision_ground_us += resolve_perf.ground_us;
-            }
+                    &mounted_lio, eye_offset, world.profile);
         }
         finish_infantry_tick(e, world);
         return;
@@ -1912,23 +1899,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
             const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
                                            inf.eye_offset_z}; // [orig: +0x74, see above]
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
-            CollisionWorld::ResolvePerf resolve_perf;
-            const uint64_t collision_start =
-                    perf != nullptr ? io::perf_now_us() : 0;
+            const devtools::ProfileScope collision_scope(
+                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                 entity_is_player_class(world, e.handle), is_authority, logic_tick,
                 inf.anim_state, infantry_anim_flags(inf.anim_state), e.health,
-                nullptr, &lio, eye_offset,
-                perf != nullptr ? &resolve_perf : nullptr);
-            if (perf != nullptr) {
-                perf->infantry_collision_us +=
-                        io::perf_now_us() - collision_start;
-                perf->infantry_collision_contacts_us += resolve_perf.contacts_us;
-                perf->infantry_collision_repulsion_us += resolve_perf.repulsion_us;
-                perf->infantry_collision_ground_us += resolve_perf.ground_us;
-            }
+                nullptr, &lio, eye_offset, world.profile);
             // The ladder legs may have written the view channels (the yaw
             // chase, the pitch restore); refresh the mouse-instant mirrors so
             // the render/aim pose and the embedder write-back see them.

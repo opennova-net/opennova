@@ -2,6 +2,7 @@
 // from the Godot binding's simulation_net.cpp. See joiner_world_bridge.h
 // for the ownership split; every phase keeps its original witnesses.
 #include <net/npruntime/joiner_world_bridge.h>
+#include <runtime/devtools/tick_profile.h>
 
 #include <net/netsim/client_replica_pipeline.h>
 #include <net/netsim/entity_wire_bridge.h> // build_player_uplink (the C2S 0x0C body)
@@ -70,16 +71,11 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// The provider closures below persist on the pipeline across frames; they
 	// read this latched pointer at call time, never a per-call reference.
 	world_ = &ctx.world;
-	// The phase clocks (F3 Stats): each span below adds onto the embedder's
-	// per-frame record; a null record reads no clock at all.
-	JoinerPumpPerf *perf = ctx.perf;
-	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
-	const auto lap = [&](uint64_t &slot) {
-		if (perf == nullptr) return;
-		const uint64_t now = io::perf_now_us();
-		slot += now - phase_start;
-		phase_start = now;
-	};
+	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
+	// rows of the world's profile; an inactive profile reads no clock at all.
+	// The wire leg (Client_ProcessNetworkFrame) has its own rows.
+	ctx.runtime.set_profile(ctx.world.profile);
+	devtools::ProfileLap lap(ctx.world.profile);
 	wire_frame_providers(ctx, hooks);
 	hooks.resolve_row_adm_ids();
 	send_hello_once(ctx.runtime, hooks.send);
@@ -89,48 +85,46 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// predicate. Mirror it onto World before any local entity/system work.
 	ctx.world.preround_delay_seconds =
 			ctx.runtime.state().preround_delay_seconds;
-	if (perf != nullptr) phase_start = io::perf_now_us(); // the wire leg has its own rows
+	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world(ctx, hooks);
 	spawn_and_arm_local_player(ctx, hooks);
 	if (decoded.health) apply_authoritative_health(ctx, hooks);
 	sync_authoritative_mount(ctx, hooks);
 	apply_mounted_ammo_update(ctx);
-	lap(perf != nullptr ? perf->materialize_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 	mirror_mission_entities(ctx);
-	lap(perf != nullptr ? perf->mirror_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
 	// them here is the retail recv-before-actions boundary, not presentation work.
 	refresh_wire_collision_proxies(ctx, hooks);
-	lap(perf != nullptr ? perf->proxies_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
 	apply_gameplay_events(ctx);
 	apply_weather_sample(ctx);
-	lap(perf != nullptr ? perf->materialize_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
 	const bool preround_active = ctx.world.preround_delay_seconds != 0;
 	hooks.apply_input_pre_tick(); // input latches stay live through the phase
-	lap(perf != nullptr ? perf->player_us : phase_start);
-	// run_logic_tick assigns the record it is handed (one tick's phases); the
-	// embedder folds it per tick, so the world record is per tick, not summed.
+	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
+	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
 	ctx.world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
-			                : world::TickPhase::Gameplay,
-			perf != nullptr ? &perf->world : nullptr);
-	lap(perf != nullptr ? perf->world_us : phase_start);
+			                : world::TickPhase::Gameplay);
+	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	if (!preround_active)
 		mirror_predicted_vehicles(ctx); // predicted boat poses -> presented rows
-	lap(perf != nullptr ? perf->mirror_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
 	// seat/deck/object attachment from that final pose in this same frame, then
 	// publish the refreshed rows back to the local registry consumers. This is
 	// the retail second carrier-follow phase; doing it before the world mover
 	// leaves children one tick behind their vehicle.
 	if (!preround_active) ctx.runtime.refresh_remote_attachments();
-	lap(perf != nullptr ? perf->attach_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	mirror_mission_entities(ctx);
-	lap(perf != nullptr ? perf->mirror_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 	// The local mounted body was seat-posed earlier in AiSystem::tick, before
 	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
 	// final same-frame transform so the camera/view never trails its seat by one
@@ -142,7 +136,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 			ctx.world.ai->refresh_mounted_pose(*local_ai, ctx.world);
 		}
 	}
-	lap(perf != nullptr ? perf->attach_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	// The weather tick follows the entity update on a client exactly as on
 	// the host [orig: Game_ProcessMainFrame @ 0x52674b -> @ 0x526774].
 	if (hooks.tick_weather) hooks.tick_weather();
@@ -155,7 +149,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// round short.
 	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
 	if (local_spawned_) hooks.tick_weapon();
-	lap(perf != nullptr ? perf->player_us : phase_start);
+	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	++now_tick_;
 }
 
@@ -343,14 +337,12 @@ JoinerWorldBridge::FrameSignals JoinerWorldBridge::run_client_net_frame(
 			ctx.runtime.is_deployed() && e != nullptr && ae != nullptr &&
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
-	ClientFramePerf *client_perf =
-			ctx.perf != nullptr ? &ctx.perf->client : nullptr;
 	if (can_offer_uplink) {
 		const PlayerExtendedUplink up =
 				netsim::build_player_uplink(ctx.world, *e, *ae);
-		outs = ctx.runtime.Client_ProcessNetworkFrame(up, now, client_perf);
+		outs = ctx.runtime.Client_ProcessNetworkFrame(up, now);
 	} else {
-		outs = ctx.runtime.Client_ProcessNetworkFrame(now, client_perf);
+		outs = ctx.runtime.Client_ProcessNetworkFrame(now);
 	}
 	for (const std::vector<uint8_t> &dg : outs) hooks.send(dg);
 	if (hooks.on_wire_leg_complete) hooks.on_wire_leg_complete();

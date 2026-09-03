@@ -1,5 +1,5 @@
 #include <runtime/world/ai.h>
-#include <base/io/perf_clock.h>
+#include <runtime/devtools/tick_profile.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -27,20 +27,6 @@ namespace opennova::world {
 using namespace detail; // the shared AI helpers, unqualified as before
 
 namespace {
-
-class ScopedAiPerfTimer {
-public:
-    explicit ScopedAiPerfTimer(uint64_t *target) : target_(target) {
-        if (target_ != nullptr) start_ = io::perf_now_us();
-    }
-    ~ScopedAiPerfTimer() {
-        if (target_ != nullptr) *target_ += io::perf_now_us() - start_;
-    }
-
-private:
-    uint64_t *target_ = nullptr;
-    uint64_t start_ = 0;
-};
 
 // Apply only the carrier-owned body frame. This is deliberately separate from
 // pose_if_mounted's input, gunner-look, animation, and wire-state work so the
@@ -366,16 +352,12 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
 }
 
 void AiSystem::tick(World &world, const TickContext &ctx) {
-    tick_profiled(world, ctx, nullptr);
-}
-
-void AiSystem::tick_profiled(World &world, const TickContext &ctx,
-                             AiTickPerf *perf) {
-    if (perf != nullptr) *perf = {};
     // AI does not run during the BMS pre-mission script pass: that invocation only
     // settles initial scripted state (EventFlags PreMission), it does not step brains.
     if (ctx.phase != TickPhase::Gameplay) return;
-    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+    // The phases lap onto the SIM_AI_* rows of the world's profile (ADR 0043
+    // d5); an inactive profile reads no clock.
+    devtools::ProfileLap lap(world.profile);
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
@@ -415,11 +397,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         }
     }
     world.round_sim.hits.clear();
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->reactions_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_REACTIONS);
     // Rebuild the pool-0/1 proximity tables once per tick, before any entity update
     // (the pool-2 statics table rebuilds only on its registry/instance edges).
     // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
@@ -461,11 +439,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             });
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->collision_tables_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_COLLISION);
     // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
     // entity==g_local_player branch (line below, no authority guard) motor-sims the
     // joiner's own player from input, while NPC think/select stays authority-gated. A
@@ -476,9 +450,9 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
-        ScopedAiPerfTimer entity_timer(perf == nullptr ? nullptr
-                : (e.inf.active ? &perf->infantry_entities_us
-                                : &perf->other_entities_us));
+        const devtools::ProfileScope entity_scope(
+                world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
+                                            : devtools::Slot::SIM_AI_OTHER_ENTITIES);
         if (e.inf.active) {
             // Joiners retain seat-follow presentation for wire-owned peers. The
             // authority continues into the remote org2 animation/collision tail:
@@ -500,7 +474,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
             // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
             // Entity_UpdateInfantryAI @0x4b9910]
-            tick_infantry(e, world, ctx.logic_tick, perf);
+            tick_infantry(e, world, ctx.logic_tick);
             continue;
         }
         // Non-infantry mounted controllers retain the seat-follow shortcut.
@@ -530,11 +504,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->entities_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     // Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
     // `physics` selector non-zero) runs its family's drive core — ground/bike
     // through the cveh core, watercraft through the cbot mover — consuming a
@@ -547,7 +517,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
     // authority drive gates @0x48b0ff / @0x48DF8C]
     if (is_authority && !world.vehicle_traits.empty()) {
-        uint64_t vehicle_phase_start = perf != nullptr ? io::perf_now_us() : 0;
+        devtools::ProfileLap vehicle_lap(world.profile);
         vehicle_pass_handles_.clear();
         world.registry.for_each_in_pool(1, [&](const Entity &e) {
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
@@ -559,11 +529,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
                 !vehicle_family_uses_direct_air_mover(traits->family)) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
-        if (perf != nullptr) {
-            const uint64_t now = io::perf_now_us();
-            perf->vehicle_scan_us = now - vehicle_phase_start;
-            vehicle_phase_start = now;
-        }
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_SCAN);
         for (const EntityHandle h : vehicle_pass_handles_) {
             Entity *veh = world.registry.get(h);
             if (veh == nullptr) continue;
@@ -683,11 +649,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
                         : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
             }
         }
-        if (perf != nullptr) {
-            const uint64_t now = io::perf_now_us();
-            perf->vehicle_motors_us = now - vehicle_phase_start;
-            vehicle_phase_start = now;
-        }
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_MOTORS);
         // Pool-0 bodies were seat-posed in the entity loop above, before these
         // pool-1 motors advanced their carriers. Recompose only their carrier-
         // owned frame now so the authority snapshot writes a stable seat-local
@@ -696,14 +658,9 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         // makes every remote rider trail by one vehicle motor step.
         for (int i = 0; i < count(); ++i)
             refresh_mounted_pose(*at(i), world);
-        if (perf != nullptr)
-            perf->vehicle_riders_us = io::perf_now_us() - vehicle_phase_start;
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_RIDERS);
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->authority_vehicles_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_AUTH_VEHICLES);
     // A joiner does not integrate its replicated pool-1 vehicle copies here, but
     // retail still executes the per-entity ground callback's presentation leg on
     // clients. Evaluate sound from the current wire/local state after the authority
@@ -777,14 +734,9 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
                                         /*collided=*/false);
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->client_vehicles_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_CLIENT_VEHICLES);
     events.process_timed(*this, world);
-    if (perf != nullptr)
-        perf->events_us = io::perf_now_us() - phase_start;
+    lap.mark(devtools::Slot::SIM_AI_EVENTS);
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {

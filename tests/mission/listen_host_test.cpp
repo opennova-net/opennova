@@ -146,11 +146,11 @@ int main() {
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
 		// Pin the single-owner invariant at one frame, then across a short run.
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
+		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
 		CHECK(kernel.world.logic_tick == tick0 + 1);
 		CHECK(host.host_owner.now_tick == now0 + 1);
 		for (int i = 0; i < 7; ++i)
-			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
+			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
 		CHECK(kernel.world.logic_tick == tick0 + 8);
 		CHECK(host.host_owner.now_tick == now0 + 8);
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 0u);
@@ -158,7 +158,7 @@ int main() {
 			CHECK(host.client_runtime->state().frames_applied > 0);
 			CHECK(!host.client_runtime->state().entities.empty());
 		}
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/768, nullptr);
+		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/768);
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
 
@@ -185,7 +185,7 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// The next frame's Server_TickUpdate drains what the local drain left.
 		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
+		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
 		CHECK(host.host_loop.c2s_pending() == 0);
 	}
 
@@ -228,7 +228,7 @@ int main() {
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
 		for (int i = 0; i < 4; ++i)
-			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0, nullptr);
+			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
 		CHECK(kernel.world.logic_tick == tick0 + 4);
 		CHECK(host.host_owner.now_tick == now0 + 4);
 		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);

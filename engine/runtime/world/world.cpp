@@ -1,5 +1,5 @@
 #include <runtime/world/world.h>
-#include <base/io/perf_clock.h>
+#include <runtime/devtools/tick_profile.h>
 
 #include <algorithm>
 #include <cmath>
@@ -270,8 +270,8 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
 // so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
 // Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
 // zero takes pose_mounted_occupant's parent-root/local fallback.
-static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
-    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+static void pose_emplacement_attachments(World &world) {
+    devtools::ProfileLap lap(world.profile);
     // Parent ownership ends when the carrier dies, even though ordinary item
     // destruction keeps that carrier resident as a husk. Peel orphan chains
     // without mutating registry slots during traversal.
@@ -299,11 +299,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
             world.registry.despawn(orphan);
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->attachment_orphans_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.emplacement_parent.valid()) return;
         // A stock streamed child carries an exact absolute spawn pose, but its
@@ -326,11 +322,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
         anchor.attachment_frame = true;
         pose_mounted_occupant(world, *child, *parent, anchor);
     });
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->attachment_child_pose_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
 
     // A gunner riding an attached child was posed earlier in the AI system loop,
     // before the carrier moved. Refresh those occupants from the child's fresh pose.
@@ -352,8 +344,7 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
         pose_mounted_occupant(
                 world, *occupant, *target, target->seats[snapshot.mount_seat]);
     });
-    if (perf != nullptr)
-        perf->attachment_riders_us = io::perf_now_us() - phase_start;
+    lap.mark(devtools::Slot::SIM_ATTACHMENT_RIDERS);
 }
 
 // ----------------------------------------------------------------------------
@@ -378,10 +369,12 @@ void World::load_systems() {
     for (ISystem *s : systems_) s->on_load(*this);
 }
 
-void World::run_logic_tick(bool is_authority, TickPhase phase,
-                           LogicTickPerf *perf) {
-    if (perf != nullptr) *perf = {};
-    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+void World::run_logic_tick(bool is_authority, TickPhase phase) {
+    // The whole tick lands on SIM_SERVER_WORLD for every role (the server
+    // tick, the joiner's local tick and the bare no-net tick alike); the
+    // phases below lap onto the SIM_WORLD_* rows.
+    const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
+    devtools::ProfileLap lap(profile);
     // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
@@ -407,11 +400,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     round_sim.local_player = cached.local_player;
     if (const Entity *lp = registry.get(cached.local_player))
         round_sim.local_team = static_cast<uint8_t>(lp->team);
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->setup_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_SETUP);
     // The system loop runs on BOTH the authoritative host and a non-authority client
     // (the original client also runs a tick): each system self-gates on
     // ctx.is_authority. WacSystem / BmsEventSystem early-out on a client (scripting is
@@ -422,55 +411,21 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     if (phase != TickPhase::PreRound) {
         for (ISystem *s : systems_) {
-            const uint64_t system_start =
-                    perf != nullptr ? io::perf_now_us() : 0;
-            AiTickPerf ai_perf;
-            if (perf != nullptr && s == ai)
-                ai->tick_profiled(*this, ctx, &ai_perf);
-            else
-                s->tick(*this, ctx);
-            if (perf != nullptr) {
-                const uint64_t elapsed = io::perf_now_us() - system_start;
-                if (s == ai) {
-                    perf->ai_us += elapsed;
-                    perf->ai_reactions_us += ai_perf.reactions_us;
-                    perf->ai_collision_tables_us += ai_perf.collision_tables_us;
-                    perf->ai_entities_us += ai_perf.entities_us;
-                    perf->ai_infantry_entities_us += ai_perf.infantry_entities_us;
-                    perf->ai_infantry_remote_us += ai_perf.infantry_remote_us;
-                    perf->ai_infantry_combat_us += ai_perf.infantry_combat_us;
-                    perf->ai_infantry_animation_us += ai_perf.infantry_animation_us;
-                    perf->ai_infantry_collision_us += ai_perf.infantry_collision_us;
-                    perf->ai_infantry_collision_contacts_us +=
-                            ai_perf.infantry_collision_contacts_us;
-                    perf->ai_infantry_collision_repulsion_us +=
-                            ai_perf.infantry_collision_repulsion_us;
-                    perf->ai_infantry_collision_ground_us +=
-                            ai_perf.infantry_collision_ground_us;
-                    perf->ai_other_entities_us += ai_perf.other_entities_us;
-                    perf->ai_authority_vehicles_us += ai_perf.authority_vehicles_us;
-                    perf->ai_vehicle_scan_us += ai_perf.vehicle_scan_us;
-                    perf->ai_vehicle_motors_us += ai_perf.vehicle_motors_us;
-                    perf->ai_vehicle_riders_us += ai_perf.vehicle_riders_us;
-                    perf->ai_client_vehicles_us += ai_perf.client_vehicles_us;
-                    perf->ai_events_us += ai_perf.events_us;
-                } else {
-                    perf->scripts_us += elapsed;
-                }
-            }
+            // The AI system's own phases lap onto the SIM_AI_* rows inside its
+            // tick; every other registered system is an authored script.
+            const devtools::ProfileScope system_scope(
+                    profile, s == ai ? devtools::Slot::SIM_WORLD_AI
+                                     : devtools::Slot::SIM_WORLD_SCRIPTS);
+            s->tick(*this, ctx);
         }
-        if (perf != nullptr) phase_start = io::perf_now_us();
-        pose_emplacement_attachments(*this, perf);
+        lap.restart();
+        pose_emplacement_attachments(*this);
         // Static attachment poses can change after AI collision queries. The
         // projectile/destruction half of the tick starts a fresh matrix-view
         // epoch so it never inherits a pre-attachment target transform.
         if (collision != nullptr) collision->reset_query_view_cache();
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->attachments_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_ATTACHMENTS);
     // Entity_UpdateAllEntities walks pool 1 before the projectile pool. That
     // prevents a newly converted charge from losing an arm-delay tick and lets
     // claymore shrapnel fly later in its detonation frame [orig:
@@ -493,11 +448,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     if (gameplay && cached.local_player.valid())
         weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
                                         weather.precipitation_kind);
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->throwables_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_THROWABLES);
     // The global weapon-action pump follows the complete entity/system update and
     // precedes projectile stepping. This is where an AI UseGun nextAction write can
     // become a same-frame round.
@@ -510,11 +461,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
     if (phase != TickPhase::PreMission && ai != nullptr)
         ai->pump_mounted_weapon_slots(*this, logic_tick);
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->weapons_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
     // Live rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
     // every decoded/predicted round carries VisualOnly through all consequence
@@ -524,11 +471,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->projectiles_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
@@ -557,11 +500,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         destruction_tick_dead_items(*this, terrain, water_z, destruction);
         death_pieces.tick(*this, terrain, water_z, destruction);
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->destruction_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
     // is that client — the pure-client view is D-HUD-16). Position converts to
@@ -590,8 +529,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     sound_emitters.prune(logic_tick);
-    if (perf != nullptr)
-        perf->housekeeping_us = io::perf_now_us() - phase_start;
+    lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
 }
 
 // Shared semantic half of Server_ProcessRoundEnd @0x5164f0. The authority

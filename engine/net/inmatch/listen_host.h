@@ -70,11 +70,11 @@ void drain_host_client_gameplay_requests(mission::MissionKernel &kernel,
 // through the shared owner loop, the
 // local view/weapon pumps, the local ClientState fold, then the new-soldier
 // .adm ground. `viewport_height` feeds the S2C 0x68 wrap seam (0 for a
-// headless embedder — npruntime then suppresses 0x68, D-NET-206); `perf` is
-// optional phase attribution. [orig: Game_ProcessMainFrame @0x5263f0]
+// headless embedder — npruntime then suppresses 0x68, D-NET-206); the phase
+// attribution lands on the kernel's profile. [orig: Game_ProcessMainFrame
+// @0x5263f0]
 void frame(mission::MissionKernel &kernel, ListenHostState &state,
-		netsim::IDatagramSocket &socket, int32_t viewport_height,
-		np::HostSessionPerf *perf);
+		netsim::IDatagramSocket &socket, int32_t viewport_height);
 
 } // namespace listen_host
 

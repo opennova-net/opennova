@@ -404,13 +404,6 @@ public:
 	bool resume_session();
 	bool reset_session();
 	void close_session();
-	// Last frame's spans — the probe/F3 accounting seam. Always: frame_us,
-	// tick_us, ticks. Only while runtime profiling is on: sim_us, sink_us,
-	// net_us and the phase keys flattened from frame_phase_perf_ (the
-	// HostSessionPerf/ServerTickPerf/ClientFramePerf fields plus the shell
-	// legs). The frame-stats board receives the same spans natively
-	// (fold_frame_stats); this Dictionary stays the probes' transport edge.
-	Dictionary get_session_perf() const;
 	// The dev tools' board: SIM_STEP and the SIM_* phase slots are fed here
 	// while the profiling clocks run and the board captures.
 	void set_frame_stats(const Ref<FrameStats> &p_stats);

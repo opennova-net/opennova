@@ -57,6 +57,7 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 	host_cfg.session_seed_id = state.session_seed_id;
 	np::start_host_session(state.host_owner, host_cfg);
 	state.client_runtime = std::make_unique<np::ClientRuntime>(state.host_loop);
+	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(config.game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.mp_session);
 	// Seed the look heading from the auto-spawned player's facing.
@@ -105,8 +106,7 @@ void drain_host_client_gameplay_requests(mission::MissionKernel &kernel,
 // loop, the local view/weapon pumps, then the local ClientState fold.
 // [orig: Game_ProcessMainFrame @0x5263f0]
 void frame(mission::MissionKernel &kernel, ListenHostState &state,
-		netsim::IDatagramSocket &socket, int32_t viewport_height,
-		np::HostSessionPerf *perf) {
+		netsim::IDatagramSocket &socket, int32_t viewport_height) {
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps against
 	// the renderer viewport height [orig: Server_SendRandomSeedSync @0x511360];
 	// a missing viewport leaves the seam unset and npruntime suppresses 0x68
@@ -117,14 +117,14 @@ void frame(mission::MissionKernel &kernel, ListenHostState &state,
 	drain_host_client_gameplay_requests(kernel, state);
 	kernel.apply_player_input_pre_tick();
 	np::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
-			nullptr, nullptr, perf);
+			nullptr, nullptr);
 	// The weather tick follows the server tick's entity update [orig:
 	// Game_ProcessMainFrame @ 0x52674b -> @ 0x526774]; the next frame's 0x0A
 	// fan projects the advanced weather.
 	kernel.tick_weather();
 	kernel.run_local_player_post_tick();
 	if (state.client_runtime)
-		state.client_runtime->Client_ProcessNetworkFrame(now, nullptr); // fold host_loop -> ClientState
+		state.client_runtime->Client_ProcessNetworkFrame(now); // fold host_loop -> ClientState
 	kernel.resolve_new_infantry_adm_ids();
 }
 

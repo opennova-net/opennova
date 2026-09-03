@@ -33,6 +33,7 @@
 #include <runtime/world/weather_state.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/terrain_scorch_events.h>
+#include <runtime/devtools/tick_profile.h>
 #include <runtime/world/var_store.h>
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/ammo_table.h>
@@ -50,44 +51,6 @@ struct TerrainHeightField;
 }
 
 namespace opennova::world {
-
-// Optional attribution for one World::run_logic_tick call. The caller owns the
-// value and passes nullptr during ordinary play, so the production hot path has
-// no clock reads or counter writes. Mission registration is WAC -> BMS -> AI;
-// the World can identify its explicit AiSystem pointer and groups every other
-// registered system under authored scripts.
-struct LogicTickPerf {
-    uint64_t setup_us = 0;
-    uint64_t scripts_us = 0;
-    uint64_t ai_us = 0;
-    uint64_t ai_reactions_us = 0;
-    uint64_t ai_collision_tables_us = 0;
-    uint64_t ai_entities_us = 0;
-    uint64_t ai_infantry_entities_us = 0;
-    uint64_t ai_infantry_remote_us = 0;
-    uint64_t ai_infantry_combat_us = 0;
-    uint64_t ai_infantry_animation_us = 0;
-    uint64_t ai_infantry_collision_us = 0;
-    uint64_t ai_infantry_collision_contacts_us = 0;
-    uint64_t ai_infantry_collision_repulsion_us = 0;
-    uint64_t ai_infantry_collision_ground_us = 0;
-    uint64_t ai_other_entities_us = 0;
-    uint64_t ai_authority_vehicles_us = 0;
-    uint64_t ai_vehicle_scan_us = 0;
-    uint64_t ai_vehicle_motors_us = 0;
-    uint64_t ai_vehicle_riders_us = 0;
-    uint64_t ai_client_vehicles_us = 0;
-    uint64_t ai_events_us = 0;
-    uint64_t attachments_us = 0;
-    uint64_t attachment_orphans_us = 0;
-    uint64_t attachment_child_pose_us = 0;
-    uint64_t attachment_riders_us = 0;
-    uint64_t throwables_us = 0;
-    uint64_t weapons_us = 0;
-    uint64_t projectiles_us = 0;
-    uint64_t destruction_us = 0;
-    uint64_t housekeeping_us = 0;
-};
 
 class CollisionWorld;
 
@@ -395,6 +358,9 @@ public:
     io::CrtRand crt_rand;
     CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
                                          // the host owns the mission CollisionWorld.
+    // The one tick-profile collector (ADR 0043 d5): non-owning, the kernel's.
+    // Null or inactive costs every span one branch; the embedder drains it.
+    devtools::TickProfile *profile = nullptr;
     IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
                                                            // null/false keeps static geometry.
     IMuzzlePoseProvider *muzzle_pose_provider = nullptr; // non-owning authored muzzle seam;
@@ -700,8 +666,7 @@ public:
     // pre-mission seam so no caller can mistake a pre-round freeze for a script
     // initialization pass.
     void run_logic_tick(bool is_authority = true,
-                        TickPhase phase = TickPhase::Gameplay,
-                        LogicTickPerf *perf = nullptr);
+                        TickPhase phase = TickPhase::Gameplay);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed

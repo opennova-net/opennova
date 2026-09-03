@@ -97,22 +97,6 @@ inline uint16_t wire_carrier_exclusion_for(
 	return 0xFFFFu;
 }
 
-// The joiner pump's phase attribution (microseconds; the F3 Stats board's
-// joiner rows). Filled only when the embedder hands pump() a record: the
-// span fields ADD per pump (the shell keeps one record per render frame);
-// `world` and `client` are assigned per tick by the passes they time, so the
-// embedder folds them after every pump.
-struct JoinerPumpPerf {
-	uint64_t materialize_us = 0; // stream materialize + decoded-state folds
-	uint64_t mirror_us = 0;      // wire pose -> registry mirror (both passes)
-	uint64_t proxies_us = 0;     // wire collision proxy rebuild
-	uint64_t world_us = 0;       // the local World::run_logic_tick
-	uint64_t attach_us = 0;      // remote attachment recompose + local re-pose
-	uint64_t player_us = 0;      // weather/heading/view/weapon device pumps
-	world::LogicTickPerf world;  // the tick's own phase breakdown (summed)
-	ClientFramePerf client;      // the wire leg's own phases (summed)
-};
-
 class JoinerWorldBridge {
 public:
 	// What this frame's client net pump decoded (drives the later phases).
@@ -144,8 +128,6 @@ public:
 		// The per-model .adm registry the authority movers ground on (null =
 		// none loaded; the row-side root-motion leg then stays chase-only).
 		world::IRootMotionSource *root_motion = nullptr;
-		// Phase attribution sink (null = no clocks; the profiling gate).
-		JoinerPumpPerf *perf = nullptr;
 	};
 
 	// The shell/binding-owned legs of the frame, in the order pump() invokes
