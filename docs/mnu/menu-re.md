@@ -1580,7 +1580,7 @@ persistence), `options_menu_controller.gd` (arm/capture/cancel +
 DEFAULTS/CLEAR_KEY, presence-gated on a CONTROL_MAPPING document since the
 2026-09-01 tidy; moved out of `menu_shell.gd` by PR #611; a screen change
 cancels an armed capture like retail's screen-owned pump state), and
-`player_input_router.gd` samples gameplay input through the live records. Divergences: persistence rides `user://controls.cfg` until the
+`godot/src/player/player_input_router.cpp` samples gameplay input through the live records. Divergences: persistence rides `user://controls.cfg` until the
 player.sav profile format slice exists, and the joystick capture page is not
 wired (both under D-CTRL rows). The retail arm also fires on a single click
 of the already-selected row; the reimpl arms on the driver's double-click

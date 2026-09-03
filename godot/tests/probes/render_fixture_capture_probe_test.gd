@@ -3,8 +3,6 @@ extends GutTest
 const Probe := preload("res://probes/render/render_fixture_capture_probe.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
-const FirstPersonArmsWitness := preload(
-		"res://game/world/first_person_arms_witness.gd")
 
 
 class RecordingWeather:

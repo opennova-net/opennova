@@ -1,9 +1,11 @@
 class_name FlyCamera
-extends Camera3D
+extends GameplayCamera
 ## Editor-style free camera for runtime. RDP-compatible (no mouse capture).
 ## Middle mouse: orbit. Scroll: zoom. Shift+middle: pan.
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
+## The GameplayCamera hooks below are what LocalPlayerPresenter drives through
+## the base class's set_gameplay_locked / set_spectator_mode.
 
 # Esc was pressed. Shell-neutral: each shell decides what the key means.
 signal escape_pressed
@@ -41,7 +43,7 @@ func _ready() -> void:
 			& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
 			| Water.VISUAL_LAYER_SHADOW_CASTER_MASK)
 
-func set_gameplay_locked(locked: bool) -> void:
+func _set_gameplay_locked(locked: bool) -> void:
 	_gameplay_locked = locked
 	if locked:
 		_orbiting = false
@@ -56,7 +58,7 @@ func is_gameplay_locked() -> bool:
 ## Adopt the camera pose the player presenter last stamped before spectator
 ## free-flight takes ownership. Without this edge sync, the first mouse motion
 ## would jump back to FlyCamera's scene-start yaw/pitch.
-func set_spectator_mode(active: bool) -> void:
+func _set_spectator_mode(active: bool) -> void:
 	if active == _spectator_mode:
 		return
 	_spectator_mode = active

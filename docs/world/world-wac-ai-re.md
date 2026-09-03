@@ -560,7 +560,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are fed live from
     `InfantryState.torso_roll` / `.recoil_pitch` through
     `player_view_compose_camera` (the earlier "producers open" note is superseded;
-    residual gate legs stay on D-INF-17). `local_player_presenter.gd`.
+    residual gate legs stay on D-INF-17). `godot/src/player/local_player_presenter.cpp`.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased

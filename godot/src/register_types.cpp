@@ -168,6 +168,15 @@
 #include "mnu/menu_audio.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
+#include "player/first_person_arms_witness.h"
+#include "player/gameplay_camera.h"
+#include "player/local_player_presenter.h"
+#include "player/local_player_visuals.h"
+#include "player/player_move_intent.h"
+#include "player/player_spawn_loadout.h"
+#include "player/player_viewmodel_def.h"
+#include "player/player_viewmodel_rig.h"
+#include "player/player_weapon_effects.h"
 
 using namespace godot;
 
@@ -425,6 +434,19 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	GDREGISTER_CLASS(ControlsModel);
+	// The local player's presentation (ADR 0043 slice G8): the presenter node,
+	// its registered viewmodel rig, the world's local-player visuals, the
+	// gameplay-camera seam and the four typed records; the weapon-effects
+	// object is RefCounted only so its anchor Callables have an Object target.
+	GDREGISTER_CLASS(PlayerMoveIntent);
+	GDREGISTER_CLASS(PlayerSpawnLoadout);
+	GDREGISTER_CLASS(PlayerViewmodelDef);
+	GDREGISTER_CLASS(FirstPersonArmsWitness);
+	GDREGISTER_CLASS(GameplayCamera);
+	GDREGISTER_CLASS(PlayerViewmodelRig);
+	GDREGISTER_INTERNAL_CLASS(PlayerWeaponEffects);
+	GDREGISTER_CLASS(LocalPlayerVisuals);
+	GDREGISTER_CLASS(LocalPlayerPresenter);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);
 	GDREGISTER_CLASS(JoinTarget);

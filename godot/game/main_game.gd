@@ -11,7 +11,6 @@ extends GameShell
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
-const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
@@ -237,11 +236,13 @@ func _ready() -> void:
 	# owner decides what it means).
 	if not _camera.escape_pressed.is_connected(_on_camera_escape):
 		_camera.escape_pressed.connect(_on_camera_escape)
-	_player_presenter = LocalPlayerPresenterScript.new()
+	_player_presenter = LocalPlayerPresenter.new()
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
-	_player_presenter.setup(_world, _camera, _camera)
-	_world.set_local_view_presenter(_player_presenter)  # D-RORD-8 view leg
+	# setup binds the presenter as the world's local view presenter (the
+	# D-RORD-8 view leg + the fixed-tick weapon drain); the live binding table
+	# is the shell's ControlsBindings model.
+	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in the annex's wire_shell, so menu-less entries (the env launch hooks)
 	# still get them; the HUD presenter's
@@ -728,7 +729,7 @@ func start_world_load(load_info: LoadingScreenInfo, operation: Callable) -> void
 	if _lan_session != null:
 		_lan_session.stop()
 	_world_load_pending = true
-	_world.set_local_player_spawn_loadout(_chosen_avatar)
+	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
 	_begin_world_load()
 	if _world_load.start(self, _root, _world, load_info, operation) == null:
 		_on_world_load_failed("mission load handoff could not start")
@@ -1012,7 +1013,7 @@ func _teardown_world_to_menu() -> void:
 	_dev_tools.set_simulation(null)
 	_world.unload()
 	if _player_presenter != null:
-		_player_presenter.setup(_world, _camera, _camera)
+		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):

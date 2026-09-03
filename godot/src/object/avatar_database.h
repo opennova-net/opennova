@@ -24,6 +24,7 @@ class AvatarNationalityRow;
 class AvatarPartRow;
 class CharacterJoinProfile;
 class ObjectModel;
+class PlayerSpawnLoadout;
 class ResourceRoot;
 
 // GDExtension wrapper over engine/formats/avatars (the Avatars.def parse): the
@@ -157,6 +158,11 @@ public:
 	// (side_profiles [blue, red] each carrying nationality/division/combo tree
 	// indices and player_class).
 	Ref<CharacterJoinProfile> character_join_profile(const Dictionary &p_selection = Dictionary()) const;
+	// The same projection over the typed spawn record the world stages
+	// (player/player_spawn_loadout.h): its two per-side selections feed the
+	// engine walk; null = no side present (the per-side defaults).
+	Ref<CharacterJoinProfile> character_join_profile_from_loadout(
+			const Ref<PlayerSpawnLoadout> &p_loadout) const;
 	// Native projection consumed by Simulation's portable character-traits
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.

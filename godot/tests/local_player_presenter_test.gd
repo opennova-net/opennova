@@ -1,7 +1,8 @@
 extends GutTest
 
 # LocalPlayerPresenter over a REAL GameWorld + Simulation (the ADR 0033 typed
-# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: FlyCamera)).
+# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: GameplayCamera,
+# controls: ControlsModel); scripted movement rides a PlayerMoveIntent).
 # Every test stages the minimal mission fixture, loads mnml.bms through the packaged
 # world scene (playable auto-spawn: the ADR 0011 listen-server host player), and
 # observes behavior through the sim's own getters, the PlayerLocalView snapshot,
@@ -184,11 +185,11 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_shared_root), OK)
 	world.set_resource_root(root)
-	world.set_local_player_spawn_loadout({
-		"primary": "WPN_M4AUTO",
-		"accessory": "WPN_SATCHEL_CHARGE",
-		"player_class": 8,
-	})
+	var loadout := PlayerSpawnLoadout.new()
+	loadout.primary = "WPN_M4AUTO"
+	loadout.accessory = "WPN_SATCHEL_CHARGE"
+	loadout.player_class = 8
+	world.set_local_player_spawn_loadout(loadout)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	if baked_terrain:
@@ -212,9 +213,17 @@ func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresent
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera)
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	return presenter
+
+
+# A scripted movement frame (the neutral intent by default): the same seven
+# bits the live binding table would produce.
+func _move_intent(forward: bool = false, lean_left: bool = false) -> PlayerMoveIntent:
+	var intent := PlayerMoveIntent.new()
+	intent.forward = forward
+	intent.lean_left = lean_left
+	return intent
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
@@ -291,23 +300,20 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 
 	# Held forward reaches the motor's body selection: the walk/run promotion
 	# leaves idle [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d].
-	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": true})
+	presenter.set_input_override(_move_intent(true))
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_anim_key()) != "anim_idle"),
 			"held forward promotes the body selection off idle")
 
 	# Releasing the source settles the motor back to idle.
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_anim_key()) == "anim_idle"),
 			"releasing input settles the motor back to idle")
 
 	# A live UI overlay keeps the world ticking but submits a NEUTRAL movement
 	# frame: the same held source no longer reaches the motor.
-	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": true})
+	presenter.set_input_override(_move_intent(true))
 	var tick_before := int(sim.get_logic_tick())
 	for i in 30:
 		var frame_input := presenter.before_world_tick(TICK, false, false)
@@ -321,15 +327,13 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 	# Q/E lean is entity state the sim composes into the camera roll (lean/4
 	# rides fp_roll). Sign: positive roll tilts right, so lean LEFT is negative
 	# [orig: roll = entity+0x2DC + (entity+0xB0)/4 @0x437fe6].
-	presenter.set_input_source(func() -> Dictionary:
-		return {"lean_left": true})
+	presenter.set_input_override(_move_intent(false, true))
 	_frame(world, presenter, camera, 30)
 	var view := world.local_player_view()
 	assert_lt(view.camera_roll_deg, -5.0, "held lean-left composes a leftward camera roll")
 	assert_lt(camera.global_basis.y.x, -0.01,
 			"negative composed roll tilts the stamped view left")
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	_frame(world, presenter, camera, 60)
 	assert_almost_eq(world.local_player_view().camera_roll_deg, 0.0, 1.0,
 			"releasing the lean eases the composed roll back out")

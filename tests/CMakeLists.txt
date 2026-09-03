@@ -1654,6 +1654,17 @@ add_executable(occlusion_camera_test world/occlusion_camera_test.cpp)
 target_link_libraries(occlusion_camera_test PRIVATE opennova_runtime)
 add_test(NAME occlusion_camera COMMAND occlusion_camera_test)
 
+# The local player's presentation law (runtime/world/player_present): the
+# camera-mode split, the FP submit AND-composition, the lighting split, the
+# local fire-effect gate + gfx pick, the fixed-tick batch order, the per-submit
+# CTRL writers, the raw-key latch, the def precedence/memo, the spawn-loadout
+# projection.
+add_executable(player_present_test world/player_present_test.cpp)
+target_link_libraries(player_present_test PRIVATE opennova_runtime)
+target_include_directories(player_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_present_test PRIVATE cxx_std_17)
+add_test(NAME player_present COMMAND player_present_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

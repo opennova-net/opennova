@@ -11,8 +11,6 @@ extends RefCounted
 
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
-const FirstPersonArmsWitness := preload(
-		"res://game/world/first_person_arms_witness.gd")
 const CaptureVariant := preload(
 		"res://probes/render/render_capture_variant.gd")
 

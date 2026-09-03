@@ -23,8 +23,6 @@ const VegAssets := preload("res://game/terrain/veg_assets.gd")
 # a shader that declares instance uniforms; see _instance_uniform_geometry_estimate.
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const FirstPersonArmsWitness := preload(
-		"res://game/world/first_person_arms_witness.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -117,14 +115,8 @@ var _mission_stats: MissionPlacementStats = null
 var _placer: MissionObjectPlacer  # kept so mission audio reuses its item database
 var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
-var _local_weapon: WeaponDef = null  # the resolved weapon.def row (the viewmodel/HUD slices decode it)
 var _mission_audio: MissionAudio
 var _effect_world: EffectWorld  # the runtime .ptl effect world (render-only, per mission)
-# GameWorld-owned first-person presentation seam. MissionRoot invokes GameWorld
-# once per completed fixed tick; this callback consumes that tick's weapon
-# events before EffectWorld advances, matching retail's action -> particle-pass
-# order without coupling the simulation to LocalPlayerPresenter Nodes.
-var _local_player_weapon_tick_consumer := Callable()
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
@@ -142,11 +134,12 @@ var _occlusion: OcclusionFramePass
 var _device_frame: WorldDeviceFrame
 # The load-plan stage bodies (WorldLoadStages), reached through this handle.
 var _load_stages: WorldLoadStages
-# The local-player visuals (world_player_visuals.gd): the FP viewmodel/arms
-# composition, the third-person avatar + held-gun builders, the armory weapon
-# apply/clear and spawn-loadout projection, and the typed local-player view
-# decodes, on the same pattern. Delegates below keep the names on GameWorld.
-var _player_visuals: WorldPlayerVisuals
+# The local-player visuals (LocalPlayerVisuals, godot/src/player): the FP
+# viewmodel/arms composition, the third-person avatar + held-gun builders, the
+# armory weapon apply/clear and spawn-loadout projection, and the typed
+# local-player view decodes; it OWNS the equipped-weapon state and the staged
+# spawn loadout. Delegates below keep the names on GameWorld.
+var _player_visuals: LocalPlayerVisuals
 # The mission-effect/fixed-tick presentation router
 # (world_effect_router.gd): the WAC/BMS effect fan-out, the impact/scorch
 # drains, and the runtime signal handler bodies, on the same pattern.
@@ -176,7 +169,6 @@ var _net_drive: NetSessionDrive
 # names on GameWorld; get_item_effect_director() is its read seam.
 var _item_fx: ItemEffectDirector
 var _light_director: EffectLightDirector
-var _local_player_spawn_loadout: Dictionary = {}
 # The local player's two per-side character selections + classes projected for
 # the sim (the listen host's own type-2 connection / a joiner's ClientAuth).
 var _local_character_profile: CharacterJoinProfile = null
@@ -193,12 +185,14 @@ func set_resource_root(root: ResourceRoot) -> void:
 	_injected_root = root
 
 
-## Configure the local player's profile for the next mission runtime start. The
-## value is consumed once the runtime exists (or discarded by _load_stages.unload after a
-## failed/abandoned load). An empty dictionary preserves the historical fallback;
-## a profile carrying empty slot names explicitly requests an all-NONE kit.
-func set_local_player_spawn_loadout(loadout: Dictionary) -> void:
-	_local_player_spawn_loadout = loadout.duplicate(true)
+## Configure the local player's staged PLAYER_INFO selection for the next
+## mission runtime start (PlayerSpawnLoadout; the shell decodes its profile
+## snapshot through PlayerSpawnLoadout.from_profile). The record is consumed
+## once the runtime exists (or discarded by _load_stages.unload after a
+## failed/abandoned load). Null preserves the historical fallback; a record
+## carrying empty slot names explicitly requests an all-NONE kit.
+func set_local_player_spawn_loadout(loadout: PlayerSpawnLoadout) -> void:
+	_player_visuals.set_spawn_loadout(loadout)
 
 
 func set_playable(enabled: bool) -> void:
@@ -238,7 +232,7 @@ func _init() -> void:
 	_net_drive.setup(self,
 			_load_stages._load_mission_internal,
 			_resolve_root,
-			func() -> Dictionary: return _local_player_spawn_loadout)
+			func() -> PlayerSpawnLoadout: return _player_visuals.spawn_loadout())
 	add_child(_net_drive)
 	# The render-occlusion frame pass: plain RefCounted (no tree presence),
 	# direct-called from tick() every frame. Constructed exactly once — its two
@@ -249,7 +243,7 @@ func _init() -> void:
 	# RefCounted, wired once, direct-called through the leg delegates below.
 	_device_frame = WorldDeviceFrame.new()
 	_device_frame.setup(self)
-	_player_visuals = WorldPlayerVisuals.new()
+	_player_visuals = LocalPlayerVisuals.new()
 	_player_visuals.setup(self)
 	_effect_router = WorldEffectRouter.new()
 	_effect_router.setup(self)
@@ -823,9 +817,17 @@ func load_stages() -> WorldLoadStages:
 	return _load_stages
 
 
-## One-time handoff from the shell that owns the local-player presenter.
+## The handoff from the local-player presenter (its setup binds, its teardown
+## releases): the local-view device leg and the fixed-tick weapon drain reach
+## the presenter through this seam.
 func set_local_view_presenter(presenter: LocalPlayerPresenter) -> void:
 	_local_view_presenter = presenter
+
+
+## The presenter the local-view leg and the fixed-tick weapon drain reach
+## (null in worlds without one).
+func local_view_presenter() -> LocalPlayerPresenter:
+	return _local_view_presenter
 
 
 func get_effect_light_report() -> EffectLightReport:
@@ -868,17 +870,21 @@ func get_scar_present_stats() -> ScarPresentStats:
 
 
 # --- Local-player visuals (viewmodel / avatar / loadout) ----------------------
-# The builder/apply/decode bodies live in WorldPlayerVisuals
-# (world_player_visuals.gd); these one-line delegates keep the
-# presenter/probe/test names on GameWorld (the component calls back through
-# _world for the viewmodel def, the character id, the FP-model-available push
-# and the armory apply/clear pair).
+# The builder/apply/decode bodies live in LocalPlayerVisuals (godot/src/player,
+# ADR 0043 slice G8); these one-line delegates keep the presenter/probe/test
+# names on GameWorld (the component reaches the sim, the runtime's placer, the
+# resource root and the environment through this node's public surface).
+
+## The local-player visuals object itself (the presenter binds to it at setup).
+func local_player_visuals() -> LocalPlayerVisuals:
+	return _player_visuals
+
 
 func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 	return _player_visuals.build_local_player_held_weapon(graphic)
 
 
-func build_local_player_avatar() -> Node3D:
+func build_local_player_avatar() -> ObjectModel:
 	return _player_visuals.build_local_player_avatar()
 
 
@@ -887,25 +893,7 @@ func build_local_player_avatar() -> Node3D:
 ## the one word its third-person body/head and first-person arms key on, read
 ## from the sim rather than re-derived from team + profile here.
 func local_player_character_id() -> int:
-	var sim := get_sim()
-	return int(sim.get_local_player_character_id()) if sim != null else 0
-
-
-# The armory-equipped weapon name; overrides the bring-up fallback/env once the
-# player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
-# Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot].
-var _viewmodel_weapon_override := ""
-# NONE is distinct from the pre-armory empty override, which falls back to the
-# witnessed bring-up default until an equipped weapon is resolved.
-var _viewmodel_weapon_cleared := false
-# The decoded weapon.def view record and the resolved name it was built from
-# (the mounted slot's def pointer; re-decoded only when the name changes).
-var _viewmodel_def_name := ""
-var _viewmodel_def: PlayerViewmodelDef = null
-# A UseGun presentation rebuild follows a slot-pointer commit that has already
-# selected a persistent parent/personal slot. Both the dict-only install and the
-# later ADM-duration rebake must preserve that slot's action/ammo state.
-var _local_weapon_preserve_slot_state := false
+	return _player_visuals.local_player_character_id()
 
 
 func set_local_player_weapon_by_name(weapon_name: String,
@@ -916,12 +904,6 @@ func set_local_player_weapon_by_name(weapon_name: String,
 
 func clear_local_player_weapon() -> void:
 	_player_visuals.clear_local_player_weapon()
-
-
-func _set_local_player_first_person_model_available(available: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_first_person_model_available(available)
 
 
 ## Whether the last first-person build found a model for the equipped weapon
@@ -945,11 +927,8 @@ func build_local_player_viewmodel() -> Node3D:
 
 ## The FP viewmodel's typed model parts (arms/gun), rebuilt with the
 ## container — the rig consumes this instead of scanning children.
-var _local_viewmodel_parts: Array[ObjectModel] = []
-
-
 func local_player_viewmodel_parts() -> Array[ObjectModel]:
-	return _local_viewmodel_parts
+	return _player_visuals.local_player_viewmodel_parts()
 
 
 func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
@@ -968,8 +947,13 @@ func local_player_view() -> PlayerLocalView:
 	return _player_visuals.local_player_view()
 
 
+## The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX, clipsize,
+## name), decoded from the resolved weapon.def row at this edge (ADR 0017) —
+## the HUD reads it per frame, mirroring the original HUD info struct's
+## weapon-def pointer [orig: HUD_BuildEntityInfo @0x4b8561 -> hudInfo+552].
+## Null until a weapon resolves.
 func local_player_hud_weapon_def() -> PlayerHudWeaponDef:
-	return _player_visuals.local_player_hud_weapon_def()
+	return PlayerHudWeaponDef.from_weapon_def(_player_visuals.local_weapon())
 
 
 func local_player_weapon_view() -> PlayerWeaponView:
@@ -978,10 +962,6 @@ func local_player_weapon_view() -> PlayerWeaponView:
 
 func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 	return _player_visuals.drain_local_player_weapon_events()
-
-
-func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
-	_player_visuals.set_local_player_weapon_tick_consumer(consumer)
 
 
 func local_player_viewmodel_def() -> PlayerViewmodelDef:

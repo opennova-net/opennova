@@ -3,6 +3,7 @@
 #include "object/avatar_records.h"
 #include "object/character_join_profile.h"
 #include "object/object_model.h"
+#include "player/player_spawn_loadout.h"
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
 
@@ -117,6 +118,8 @@ void AvatarDatabase::_bind_methods() {
 			&AvatarDatabase::first_character_id);
 	ClassDB::bind_method(D_METHOD("character_join_profile", "selection"),
 			&AvatarDatabase::character_join_profile, DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("character_join_profile_from_loadout", "loadout"),
+			&AvatarDatabase::character_join_profile_from_loadout);
 
 	BIND_ENUM_CONSTANT(PART_HEAD);
 	BIND_ENUM_CONSTANT(PART_BODY);
@@ -382,6 +385,18 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 		saved[side].combo_index = dict_int(sd, "combo", -1);
 		saved[side].player_class = dict_int(sd, "player_class",
 				opennova::npruntime::kJoinDefaultPlayerClass);
+	}
+	Ref<CharacterJoinProfile> out;
+	out.instantiate();
+	out->assign(opennova::npruntime::join_character_profile(character_registry(), saved));
+	return out;
+}
+
+Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_from_loadout(
+		const Ref<PlayerSpawnLoadout> &p_loadout) const {
+	opennova::npruntime::JoinSideSelection saved[2];
+	if (p_loadout.is_valid()) {
+		p_loadout->fill_join_sides(saved);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
