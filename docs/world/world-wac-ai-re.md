@@ -4751,7 +4751,7 @@ itemDef+0x8B8, then `"helo1"`) [orig: `Entity_InitVehicleAIFromDef
 @ 0x4686C0` — the seeds @ 0x4688C7/@ 0x4688D3]. The port:
 `PromoteOptions::ai_profile_speeds` (raw values, keyed by ai_textfile;
 scale applied at the brain seed in `init_brain`), resolved natively by
-`mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp, driven by `boot_mission`) inside `run_mission_boot` (S9, ADR
+`mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp, driven by `boot_mission`) inside `MissionKernel::boot` (S9, ADR
 0028; the former shell `AiProfileSpeeds.build` reader + the
 `set_ai_profile_speeds` seam are deleted). d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
 `mission_promote` ctest. The REST of the profile parse stays D-AI-11 (h).

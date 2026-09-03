@@ -70,6 +70,41 @@ bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= 
 
 } // namespace
 
+// The boot gates through the trace: a joiner never spawns its own player
+// here (L spawns on the name-match inside the joiner frame); a rootless boot
+// keeps only the root-free steps.
+static void run_boot_trace_gates() {
+	std::map<std::string, std::string> files;
+	{
+		bms::File m{};
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		ms::MissionKernel kernel;
+		kernel.open_document(std::move(m), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.joiner = true;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const std::vector<std::string> expected = {
+				"ai_profiles", "mission_text", "load_mission", "infantry_anim", "wac",
+				"weapon_table", "ammo_table"};
+		CHECK(kernel.boot_trace == expected);
+		CHECK(!kernel.local.has_local_player());
+	}
+	{
+		bms::File m{};
+		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1));
+		ms::MissionKernel kernel;
+		kernel.open_document(std::move(m), "synth", ms::BootFileSource{});
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const std::vector<std::string> expected = {
+				"mission_text", "load_mission", "spawn_local_player"};
+		CHECK(kernel.boot_trace == expected);
+		CHECK(kernel.local.has_local_player());
+	}
+}
+
 // The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
 // kernel itself owns no tick).
 static void tick_no_net(opennova::mission::MissionKernel &kernel) {
@@ -117,6 +152,18 @@ int main() {
 	CHECK(kernel.have_baseline);
 	CHECK(!kernel.has_terrain()); // no terrain documents were supplied
 	CHECK(kernel.text_source == ms::MissionTextSource::kNone);
+	// The boot ORDER (ADR 0043 slice E9): the file source is present, no item
+	// db (no items.def in the source), no terrain, a playable non-joiner --
+	// the trace is the literal step sequence with those gates applied.
+	{
+		const std::vector<std::string> expected = {
+				"ai_profiles", "mission_text", "load_mission", "infantry_anim", "wac",
+				"spawn_local_player", "weapon_table", "ammo_table"};
+		CHECK(kernel.boot_trace == expected);
+		if (kernel.boot_trace != expected)
+			for (const std::string &s : kernel.boot_trace) std::printf("  trace: %s\n", s.c_str());
+	}
+	run_boot_trace_gates();
 
 	// One no-net tick advances the authoritative logic clock.
 	const uint32_t tick0 = kernel.world.logic_tick;

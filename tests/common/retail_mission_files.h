@@ -58,9 +58,9 @@ class RetailMissionRig : public mission::MissionKernel {
 public:
 	RetailMissionRig();
 
-	// The S9 boot over the opened mission: the terrain load first (the
-	// engine's one cpt/trn(+charmap) loader into the kernel's store), then the
-	// kernel boot with the listen bring-up hook when listen_server is on.
+	// The S9 boot over the opened mission (the kernel loads the terrain field
+	// through the mounted root itself), with the listen bring-up hook when
+	// listen_server is on.
 	bool boot(const BootOptions &options, std::string &error);
 
 	// One authoritative logic tick through the active role: the host role's
@@ -77,9 +77,6 @@ public:
 	inmatch::HostRole host_role;
 	inmatch::ListenHostState &host = host_role.state;
 	inmatch::Role &role() { return listen_server ? static_cast<inmatch::Role &>(host_role) : local_role; }
-
-private:
-	bool load_terrain(std::string &error);
 };
 
 // Mission-space helpers.

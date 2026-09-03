@@ -1,6 +1,6 @@
-// S9 (ADR 0028): the mission boot policy — see runtime_boot.h for the order
-// contract. The file-resolution rules here are structural translations of the
-// shell resolvers they replace; each carries its witness.
+// S9 (ADR 0028): the mission boot's file-resolution rules — structural
+// translations of the shell resolvers they replace; each carries its witness.
+// The boot ORDER is MissionKernel::boot (ADR 0043 slice E9).
 #include <runtime/mission/runtime_boot.h>
 #include <base/io/strutil.h>
 
@@ -92,34 +92,6 @@ std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
 		}
 	}
 	return rows;
-}
-
-BootAbort run_mission_boot(const BootParams &params, const BootSteps &steps) {
-	if (params.has_resource_root && params.has_item_db)
-		steps.install_seat_specs();
-	if (params.has_resource_root) steps.install_ai_profiles();
-	if (params.has_terrain_til) steps.install_terrain_til();
-	steps.install_mission_text();
-	if (!steps.load_mission()) return BootAbort::kLoadFailed;
-	if (params.has_terrain) steps.install_terrain_field();
-	if (params.has_resource_root) steps.install_sound_profiles();
-	if (params.has_resource_root) steps.install_infantry_anim();
-	if (params.has_resource_root && params.has_wac) steps.install_wac();
-	if (params.playable && !params.is_joiner) steps.spawn_local_player();
-	if (params.has_resource_root && params.has_item_db)
-		steps.resolve_infantry_adm();
-	if (params.has_item_db) steps.resolve_item_traits();
-	if (params.has_item_db) {
-		if (params.has_resource_root) steps.install_asset_root();
-		steps.resolve_collision();
-		steps.occlusion_init();
-	}
-	if (params.has_resource_root) {
-		steps.load_weapon_table();
-		const bool ammo_ok = steps.load_ammo_table();
-		if (ammo_ok && params.has_item_db) steps.resolve_ai_weapons();
-	}
-	return BootAbort::kNone;
 }
 
 } // namespace opennova::mission

@@ -9,8 +9,9 @@
 // asset caches (models, collision pose, root motion, clip index), the seat
 // specs and ai-profile installs, the terrain field store, the weapon/ammo
 // tables, and the local-player frame state (input, weapon, loadout, view,
-// stance latch, look accumulators). boot() is THE one filler of
-// run_mission_boot's functor table (runtime_boot.h — the ctest-locked order).
+// stance latch, look accumulators). boot() IS the mission boot order: one
+// straight-line sequence with its gates, recorded step by step in boot_trace
+// (the ctest-locked order; ADR 0043 slice E9).
 //
 // Deliberately NOTHING net: the no-net tick has headless consumers that must
 // not link the wire stack (the group order — runtime never includes net). The
@@ -72,6 +73,15 @@ struct KernelBootOptions {
 	bool wac_strict_diagnostics = false;
 	bool collision = true;
 	bool seat_specs = true; // the native seat/mount table (S16); off = the bare promote
+	// The mission's .cpt/.trn(+charmap) height field: when the embedder built
+	// no store before the boot (the shell hands its parsed documents over
+	// through terrain_field_store_build), the kernel loads it through its own
+	// asset index -- the file entry of the one builder (the dedicated host,
+	// the ctests). Off = never load (the shell owns the parsed-document entry).
+	bool terrain = true;
+	// Receives the raw .til bytes beside that load (the S2C 0x45 terrain-tile
+	// stream a wire joiner streams, net-re 5.37); null = not wanted.
+	std::vector<uint8_t> *terrain_til_bytes = nullptr;
 	// A joiner world: never spawns its own player here (L spawns on the
 	// name-match inside the joiner pump — the joiner ROLE stays with the
 	// embedder, ADR 0042 d3; this only gates the boot's spawn step).
@@ -176,12 +186,14 @@ public:
 	int adm_id_for_runtime_type(uint16_t type_id);
 	// The cached id only (no registration): -1 when the type never resolved.
 	int cached_adm_id_for_runtime_type(uint16_t type_id) const;
-	// The S9 boot (runtime_boot.h) over the opened mission — the ONE filler
-	// of run_mission_boot's step table. The embedder builds terrain_store
-	// FIRST when it has terrain (terrain_field_store_build over its parsed
-	// cpt/trn documents — the format-typed leg stays on the far side of the
-	// ADR 0020 seam); has_terrain is terrain_store.valid().
+	// The S9 boot over the opened mission: the terrain field (the embedder's
+	// parsed documents when it built the store, else the kernel's own load),
+	// then the ordered step sequence with its gates (a missing file source
+	// skips every file-fed step, a missing item db the trait/collision steps,
+	// a joiner never spawns its own player). Every step that ran lands in
+	// boot_trace, in order — the ctest-locked contract.
 	bool boot(const KernelBootOptions &options, std::string &error);
+	std::vector<std::string> boot_trace;
 
 
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------

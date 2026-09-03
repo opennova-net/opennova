@@ -12,6 +12,7 @@
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/seat_spec_extract.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_build.h> // the terrain field's file entry (ADR 0043 E9)
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/angle.h>
@@ -456,60 +457,97 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	collision_pose.set_resource_index(asset_index());
 	bringup_net_session_ = options.bringup_net_session;
 	people_name_resolver_ = options.people_name_resolver;
+	boot_trace.clear();
 
-	BootParams params;
-	params.is_joiner = options.joiner;
-	params.playable = options.playable;
-	params.has_resource_root = files_.valid();
-	params.has_item_db = items_table() != nullptr;
-	params.has_terrain = terrain_store.valid();
-	params.has_terrain_til = false;
-	params.has_wac = options.wac;
+	// The mission's .cpt/.trn(+charmap) height field: the shell hands its
+	// parsed documents over before the boot (terrain_field_store_build, the
+	// parsed-document entry); an embedder that holds none (the dedicated host,
+	// the ctests) has the kernel load through its own index here (the file
+	// entry) — one builder, two entries, both through height_field_apply_trn.
+	if (options.terrain && !terrain_store.valid() && asset_index() != nullptr) {
+		std::string terrain_error;
+		if (!terrain::terrain_field_store_load(terrain_store, *asset_index(),
+					mission.get_terrain(), terrain_error, options.terrain_til_bytes))
+			io::logf(io::LogLevel::kWarn,
+					"mission kernel: terrain not loaded (%s) - the ground solve will not run",
+					terrain_error.c_str());
+	}
 
-	BootSteps steps;
-	steps.install_seat_specs = [&] {
+	// The gates: a missing file source skips every file-fed step, a missing
+	// item db the trait/collision steps, a joiner never spawns its own player
+	// here (L spawns on the name-match inside the joiner frame).
+	const bool has_files = files_.valid();
+	const bool has_item_db = items_table() != nullptr;
+	const auto step = [this](const char *name) { boot_trace.emplace_back(name); };
+
+	// Seat/mount specs install before promotion (they persist across resets).
+	if (has_files && has_item_db) {
+		step("seat_specs");
 		seat_specs.clear();
 		mounted_graphics.clear();
-		if (!options.seat_specs) return;
-		std::vector<int> seeds;
-		const auto seed_group = [&seeds](const std::vector<bms::Entity> &v) {
-			for (const bms::Entity &e : v)
-				if (e.type_id > 0)
-					seeds.push_back(static_cast<int>(e.type_id) + static_cast<int>(kItemIdOffset));
-		};
-		seed_group(mission.items);
-		seed_group(mission.buildings);
-		seed_group(mission.markers);
-		seed_group(mission.organics);
-		if (!seeds.empty() && items_table() != nullptr) {
-			simassets::SeatSpecExtraction native;
-			simassets::extract_item_seat_specs(*items_table(),
-					[this](const std::string &graphic) { return models.model_for(graphic); },
-					seeds, native);
-			seat_specs = std::move(native.specs);
-			mounted_graphics = std::move(native.graphic_by_type);
+		if (options.seat_specs) {
+			std::vector<int> seeds;
+			const auto seed_group = [&seeds](const std::vector<bms::Entity> &v) {
+				for (const bms::Entity &e : v)
+					if (e.type_id > 0)
+						seeds.push_back(static_cast<int>(e.type_id) + static_cast<int>(kItemIdOffset));
+			};
+			seed_group(mission.items);
+			seed_group(mission.buildings);
+			seed_group(mission.markers);
+			seed_group(mission.organics);
+			if (!seeds.empty()) {
+				simassets::SeatSpecExtraction native;
+				simassets::extract_item_seat_specs(*items_table(),
+						[this](const std::string &graphic) { return models.model_for(graphic); },
+						seeds, native);
+				seat_specs = std::move(native.specs);
+				mounted_graphics = std::move(native.graphic_by_type);
+			}
+			std::sort(seat_specs.begin(), seat_specs.end(),
+					[](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
+			simassets::stamp_seat_spec_turret_limits(world, seat_specs);
 		}
-		std::sort(seat_specs.begin(), seat_specs.end(),
-				[](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
-		simassets::stamp_seat_spec_turret_limits(world, seat_specs);
-	};
-	steps.install_ai_profiles = [&] {
+	}
+	// The .aip profiles per mission ai_textfile — without them, unscripted AI
+	// vehicles crawl at the promote stand-in speed and SM weapons stay unarmed.
+	if (has_files) {
+		step("ai_profiles");
 		ai_profiles = resolve_ai_profiles(files_, mission, ai_profile_defaults_fn());
-	};
-	steps.install_terrain_til = [] {};
-	steps.install_mission_text = [&] {
+	}
+	// The per-mission RTXT table retail's NetPacket_WriteBriefingText reads
+	// for world-stream phase 6 (S2C 0x7E). Runs unconditionally.
+	{
+		step("mission_text");
 		std::vector<uint8_t> text;
 		text_source = resolve_mission_text(files_, mission_basename, text);
 		text_size = text.size();
-	};
-	steps.load_mission = [&] { return load_mission_into_world(); };
-	steps.install_terrain_field = [&] { wire_terrain(); };
-	steps.install_sound_profiles = [] {}; // the footstep/foley slot table is presentation-side
-	steps.install_infantry_anim = [&] {
+	}
+	// Load + promote the mission; a failure aborts the boot (nothing later
+	// runs). (The shell re-stamps its presentation/PANM clock right after the
+	// boot — the load reset cleared it; an order-free scalar, not a boot step.)
+	step("load_mission");
+	if (!load_mission_into_world()) {
+		error = "mission boot aborted (load failed)";
+		return false;
+	}
+	// Ground the AI on the terrain field.
+	if (terrain_store.valid()) {
+		step("terrain");
+		wire_terrain();
+	}
+	// (SndProf.def -> the footstep/foley/landing/scream slot table
+	// [orig: SoundProfile_LoadAll @ 0x527490 from Game_InitSubsystems] is the
+	// presentation-owning embedder's, layered onto the world after the boot.)
+	// The infantry clip set (.adm -> .bad root-motion tracks).
+	if (has_files) {
+		step("infantry_anim");
 		(void)install_infantry_anim(options.infantry_adm);
-	};
+	}
+	// Mission WAC scripts [orig: WacScript_InitAndLoad]; absent files skip.
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
-	steps.install_wac = [&] {
+	if (has_files && options.wac) {
+		step("wac");
 		wac_loaded = false;
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
@@ -518,52 +556,71 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {
 			if (options.wac_strict_diagnostics) {
 				wac_blocked_error = std::move(wac_error);
-				return;
+			} else {
+				io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
+						wac_error.c_str());
 			}
-			io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
-					wac_error.c_str());
-			return;
+		} else {
+			wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
 		}
-		wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
-	};
-	steps.spawn_local_player = [&] {
+	}
+	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
+	// net-re §5.2b) — after load (the spawn needs the AI system wired). A
+	// joiner's L spawns on the name-match instead.
+	if (options.playable && !options.joiner) {
+		step("spawn_local_player");
 		const int status = spawn_local_player_at_start(options.game_type);
 		if (status < 0)
 			io::logf(io::LogLevel::kWarn, "mission kernel: spawn_local_player failed");
 		else if (status == 0)
 			io::logf(io::LogLevel::kWarn,
 					"mission kernel: no player-start marker - spawned at the origin");
-	};
-	steps.resolve_infantry_adm = [&] { rearm_infantry_adm(); };
-	steps.resolve_item_traits = [&] {
+	}
+	// Per-entity grounding: each soldier's OWN model .adm (D-INF-6). After
+	// the NPC promote AND the player spawn so both are covered.
+	if (has_files && has_item_db) {
+		step("infantry_adm");
+		rearm_infantry_adm();
+	}
+	// items.def wire traits onto every entity + the replica-pipeline class
+	// table (D-NET-97; §5.10b). The kernel's own sweep classifies every
+	// definition Unknown; the embedder's sweep re-stamps with its wire-class
+	// source (resolve_item_traits).
+	if (has_item_db) {
+		step("item_traits");
 		simassets::resolve_item_traits(world, *items_table(),
 				[](int32_t) -> uint8_t { return 0; });
-	};
-	steps.install_asset_root = [] {};
-	steps.resolve_collision = [&] {
-		if (!options.collision) return;
+	}
+	if (has_item_db && options.collision) {
+		// World-object collision instances (BVOL/BPLN) [orig: the movement
+		// collision resolver @0x4b2bd0 + the query set; §15] over the sim's
+		// own .3di source (ADR 0028).
+		step("collision");
 		wire_collision();
 		const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
 		collision_attached = simassets::resolve_collision_instances(world,
 				*items_table(), collision_state, deps);
-	};
-	steps.occlusion_init = [&] {
-		if (!options.collision) return;
+		// Mission-start portal init over the occlusion models just attached.
+		step("occlusion");
 		occlusion_init_mission();
-	};
-	steps.load_weapon_table = [&] {
+	}
+	if (has_files) {
+		// Armory table (weapon.def) — the 0x5A ammo resolve + 0x2F filter
+		// source; the stashed mission loadout/availability chunks promote
+		// INSIDE it through the witnessed SP-vs-net gate (S7b)
+		// [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694].
+		step("weapon_table");
 		if (!load_weapon_table(files_, nullptr))
 			io::logf(io::LogLevel::kWarn, "mission kernel: local.weapon.def not loaded");
-	};
-	steps.load_ammo_table = [&] { return load_ammo_table(files_); };
-	steps.resolve_ai_weapons = [&] {
-		simassets::resolve_ai_weapons(world, *items_table());
-	};
-
-	const BootAbort abort = run_mission_boot(params, steps);
-	if (abort != BootAbort::kNone) {
-		error = "mission boot aborted (load failed)";
-		return false;
+		// Ballistics table (ammo.def) + round_type resolve.
+		step("ammo_table");
+		const bool ammo_ok_now = load_ammo_table(files_);
+		// Seed each NPC's anim-fire weapon (the D-AI-5 host seed) — only
+		// against a loaded ammo table.
+		if (ammo_ok_now && has_item_db) {
+			step("ai_weapons");
+			simassets::resolve_ai_weapons(world, *items_table());
+		}
 	}
 	if (!wac_blocked_error.empty()) {
 		error = wac_blocked_error;

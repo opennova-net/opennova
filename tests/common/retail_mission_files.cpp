@@ -2,7 +2,6 @@
 
 #include <base/io/log.h>
 #include <base/gameprofile/game_type.h>
-#include <runtime/terrain_query/terrain_field_build.h>
 
 #include <cstdio>
 #include <string>
@@ -23,22 +22,14 @@ RetailMissionRig::RetailMissionRig() {
 		});
 }
 
-bool RetailMissionRig::load_terrain(std::string &error) {
-	// The same field the game builds (Simulation::set_terrain_height_field):
-	// the engine's one owning cpt/trn(+charmap) loader (ADR 0042 d4), filled
-	// into the kernel's own store.
-	return terrain::terrain_field_store_load(terrain_store, index, mission.get_terrain(), error);
-}
-
 bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 	listen_server = options.listen_server;
-	std::string terrain_error;
-	if (options.terrain && !load_terrain(terrain_error))
-		std::printf("rig: terrain not loaded (%s) - the ground solve will not run\n",
-				terrain_error.c_str());
 	mission::KernelBootOptions kernel_options;
 	kernel_options.playable = options.playable;
 	kernel_options.wac = options.wac;
+	// The terrain field is the kernel boot's own load through the mounted
+	// root (the same field the game builds from its parsed documents).
+	kernel_options.terrain = options.terrain;
 	kernel_options.collision = options.collision;
 	kernel_options.seat_specs = options.seat_specs;
 	kernel_options.infantry_adm = options.infantry_adm;
