@@ -199,9 +199,18 @@ func _placer() -> MissionObjectPlacer:
 	return MissionObjectPlacer.create(root, item_db)
 
 
+# The pass keeps only the sim's ObjectID; the RefCounted sim lives while the
+# test holds it here (released after each case).
+var _sims: Array[Simulation] = []
+
+
+func after_each() -> void:
+	_sims.clear()
+
+
 func _sim() -> Simulation:
 	var sim := Simulation.new()
-	autofree(sim)
+	_sims.append(sim)
 	return sim
 
 
@@ -214,7 +223,7 @@ func _ticking_sim() -> Simulation:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var sim := Simulation.new()
-	autofree(sim)
+	_sims.append(sim)
 	assert_true(sim.load_from_mission_data(mission))
 	return sim
 

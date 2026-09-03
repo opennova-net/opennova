@@ -129,10 +129,8 @@ void Weather::_bind_methods() {
 			D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
 			&Weather::get_water_uv_state);
 
-	// The externally-callable render-frame drive (the _process body): a
-	// GDExtension virtual override is invisible to has_method and cannot be
-	// called from GDScript, and binding the `_process` name would displace
-	// the engine's virtual hook — so the test harness drives frames here.
+	// The render-frame drive: the frame pipeline's environment leg and the
+	// tests call it; the node never self-clocks through a process callback.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Weather::advance_frame);
 
@@ -221,8 +219,6 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 }
 
 void Weather::_ready() {
-	set_process_priority(-10);
-	set_process(true);
 	_resolve_environment();
 }
 
@@ -232,10 +228,6 @@ void Weather::_exit_tree() {
 
 Weather::~Weather() {
 	bind_simulation(nullptr);
-}
-
-void Weather::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void Weather::advance_frame(double p_delta) {

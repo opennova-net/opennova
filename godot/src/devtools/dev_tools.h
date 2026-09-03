@@ -66,7 +66,7 @@ public:
 	// join, world::inspect::entity_directory, at the window's 0.5 s cadence
 	// and only while the window shows) and drains the windows' typed
 	// DebugRequests into the same debug delegates the MCP control plane uses.
-	void set_simulation(Simulation *p_simulation);
+	void set_simulation(const Ref<Simulation> &p_simulation);
 
 	// The shell's world pick lands here as a typed request into the Entities
 	// window carrying only the engine handle: the window opens, focuses, and

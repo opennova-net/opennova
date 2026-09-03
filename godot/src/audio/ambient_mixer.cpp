@@ -77,8 +77,8 @@ void AmbientMixer::clear() {
 	provider_id_ = ObjectID();
 }
 
-void AmbientMixer::set_occlusion_provider(Simulation *provider) {
-	provider_id_ = provider != nullptr ? provider->get_instance_id() : ObjectID();
+void AmbientMixer::set_occlusion_provider(const Ref<Simulation> &provider) {
+	provider_id_ = provider.is_valid() ? provider->get_instance_id() : ObjectID();
 	sim_ = nullptr;
 }
 

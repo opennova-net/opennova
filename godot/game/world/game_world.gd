@@ -291,23 +291,23 @@ func _ready() -> void:
 			# The detail sway phase reads the weather oscillator's ring slot 0
 			# (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
 			_dispatcher.set_weather(_weather)
-	_sun_shadow = SunShadow.new()
-	_sun_shadow.name = "SunShadow"
-	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
-	add_child(_sun_shadow)
-	_sun_shadow.set_environment_node(_env)
+	# The two shadow nodes live in game_world.tscn (after Celestial) like the
+	# other env presenters, absent from a code-built world; the environment
+	# node is wired here (no NodePath property).
+	_sun_shadow = get_node_or_null("SunShadow") as SunShadow
+	if _sun_shadow != null:
+		_sun_shadow.set_environment_node(_env)
 	# The render-slot entity ground shadows: the per-slot silhouette capture
 	# device + the terrain drape publisher (retail's per-entity RT pipeline —
 	# engine/runtime/renderer/render_slot_shadow.h carries the witness map).
-	_slot_shadow = SlotShadow.new()
-	_slot_shadow.name = "SlotShadow"
-	# The highest selectable retail profile is SHADOWQUALITY=3. Detail 4 is an
-	# internal oversample tier (1024px slot 0 and all slots every frame), not the
-	# shipped maximum; profile 3 uses 512px captures and retail's half-rate
-	# stagger for non-player slots.
-	_slot_shadow.set_shadow_detail(3)
-	add_child(_slot_shadow)
-	_slot_shadow.set_environment_node(_env)
+	_slot_shadow = get_node_or_null("SlotShadow") as SlotShadow
+	if _slot_shadow != null:
+		# The highest selectable retail profile is SHADOWQUALITY=3. Detail 4 is an
+		# internal oversample tier (1024px slot 0 and all slots every frame), not the
+		# shipped maximum; profile 3 uses 512px captures and retail's half-rate
+		# stagger for non-player slots.
+		_slot_shadow.set_shadow_detail(3)
+		_slot_shadow.set_environment_node(_env)
 	# The retained water renderer starts dormant until a successful load chooses
 	# its runtime mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
@@ -315,14 +315,9 @@ func _ready() -> void:
 	# Freeze the retained weather node until a load selects autonomous bare/net
 	# rendering or prepares a mission-owned fixed tick.
 	_load_stages._set_weather_world_tick_driven(true)
-	# The env presenters self-clock through _process when they stand alone
-	# (tests, standalone scenes). Under this world GameFramePipeline drives
-	# their advance_frame at a defined ladder slot (render_environment_nodes_frame
-	# and render_water_frame), so their idle callbacks stay off here: a process
-	# callback races the camera placement and the legs that consume them.
-	for presenter in [_weather, _sun_shadow, _sky_dome, _celestial, _water]:
-		if presenter != null:
-			(presenter as Node).set_process(false)
+	# The env presenters never self-clock: GameFramePipeline drives their
+	# advance_frame at a defined ladder slot (render_environment_nodes_frame
+	# and render_water_frame); the render diagnostics report that.
 	_env_presenters_world_driven = true
 
 

@@ -161,7 +161,6 @@ func test_apply_configures_a_new_simulation_mouse_state() -> void:
 	sim.step()
 	assert_gt(sim.get_local_player_pitch_deg(), 8.0,
 			"the persisted max sensitivity and inverted Y reach the new sim")
-	sim.free()
 
 
 func _assert_bus_volume(bus_name: StringName, volume: int) -> void:

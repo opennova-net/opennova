@@ -252,7 +252,6 @@ func _join_against_host(host_expansion: String, dir: String,
 			break
 		host.step()
 		await get_tree().process_frame
-	host.free()
 	assert_true(not failures.is_empty() or world.is_loaded(),
 		"the preload reached a decision within %d frames" % PRELOAD_PUMP_FRAMES)
 	return String(failures[0]) if not failures.is_empty() else ""

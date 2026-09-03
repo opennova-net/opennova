@@ -85,7 +85,6 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 				"retail discovery does not invent pre-auth mission metadata")
 	browser.stop()
 	assert_false(browser.is_browsing())
-	host.free()
 
 
 func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
@@ -129,7 +128,6 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 	if probe.is_empty() or browser_port <= 0:
 		browser.stop()
 		responder.close()
-		host.free()
 		return
 
 	assert_eq(responder.set_dest_address("127.0.0.1", host_port), OK)
@@ -151,7 +149,6 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 	if reply.is_empty():
 		browser.stop()
 		responder.close()
-		host.free()
 		return
 
 	assert_eq(responder.set_dest_address(browser_ip, browser_port), OK)
@@ -174,7 +171,6 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 
 	browser.stop()
 	responder.close()
-	host.free()
 
 
 func test_invalid_port_range_fails_without_browsing() -> void:

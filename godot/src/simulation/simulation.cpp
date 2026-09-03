@@ -89,7 +89,6 @@ Simulation::Simulation() {
 	session_.set_tick_observer(this);
 	install_joiner_kit_seams();
 	reset_world();
-	set_process(false);
 }
 
 Simulation::~Simulation() {

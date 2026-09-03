@@ -244,7 +244,7 @@ func unload() -> void:
 	# typed request staging, and the NovaWorld gate registration.
 	_world._net_drive.reset()
 	# The environment's weather view points into the departing sim's World:
-	# detach before the runtime (and its off-tree sim) is freed.
+	# detach before the runtime (and the sim it owns) is freed.
 	if _world._weather != null:
 		_world._weather.bind_simulation(null)
 	_set_weather_world_tick_driven(true)
@@ -293,7 +293,7 @@ func unload() -> void:
 	_world._loaded_mission = null
 	_world._loaded_mission_file = ""
 	if _world._runtime != null:
-		_world._runtime.queue_free()  # frees its off-tree sim too (MissionPresentation._exit_tree)
+		_world._runtime.queue_free()  # drops its sim too (MissionPresentation._exit_tree)
 	_world._runtime = null
 	if _world._effect_world != null:
 		_world._effect_world.release_runtime_renderer_resources()

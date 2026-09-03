@@ -65,7 +65,6 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
 	_apply_projection_masks();
-	set_process(true);
 	_update_direction();
 }
 
@@ -92,10 +91,6 @@ void SunShadow::_apply_projection_masks() {
 		// direction law but does not allocate a second shadow map.
 		set_shadow(false);
 	}
-}
-
-void SunShadow::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void SunShadow::advance_frame(double p_delta) {

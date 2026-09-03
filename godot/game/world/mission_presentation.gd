@@ -77,7 +77,7 @@ var _effect_pose_snapshot_tick := -1
 ## (HostSessionConfig) or options.join_target (JoinTarget). Returns the AI
 ## entity count, or 0 on load failure (the orphan sim is
 ## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
-## failure. The sim is held off-tree by this driver.
+## failure. The sim is a RefCounted this driver owns.
 func setup(mission: MissionData, container: Node,
 		options: MissionSetupOptions = null) -> int:
 	if options == null:
@@ -136,7 +136,6 @@ func setup(mission: MissionData, container: Node,
 			push_warning("MissionPresentation: unknown join integrity profile '%s'." % \
 					join_target.integrity_profile)
 			_setup_error = ERR_INVALID_PARAMETER
-			_sim.free()
 			_sim = null
 			_has_trace_stats_sampling = false
 			return 0
@@ -195,7 +194,6 @@ func setup(mission: MissionData, container: Node,
 			# Never degrade into the visually-identical socketless SP/listen path:
 			# the caller must surface the bind failure and keep the menu active.
 			_setup_error = ERR_CANT_CREATE
-			_sim.free()
 			_sim = null
 			_has_trace_stats_sampling = false
 			return 0
@@ -221,16 +219,15 @@ func setup(mission: MissionData, container: Node,
 			playable))
 	if boot_err != OK:
 		_setup_error = ERR_CANT_OPEN
-		_sim.free()  # Simulation is a Node (not RefCounted); free the orphan on load failure
-		_sim = null
+		_sim = null  # the RefCounted sim drops with its last reference
 		_has_trace_stats_sampling = false
 		return 0
 	# The shared render/PANM presentation DWORD — re-stamped after the boot
 	# because the load reset cleared it (an order-free scalar, not a boot step).
 	if _presentation_time_ms >= 0:
 		_sim.set_panm_time_ms(_presentation_time_ms)
-	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
-	# node never self-ticks via _process; it is freed explicitly in _exit_tree.
+	# The SIM is a RefCounted this driver owns: only this driver advances it; it
+	# drops with the last reference in _exit_tree.
 	# This MissionPresentation node itself IS in the tree — GameWorld adds it and
 	# drives advance_session_frame() explicitly (ADR 0025: the game shell is the only live runtime owner).
 	_index = EntityIndex.new()
@@ -942,7 +939,7 @@ func _for_each_present_node(fn: Callable) -> void:
 			fn.call(node)
 
 
-# The sim is held off-tree, so free it explicitly when this driver leaves the tree (a reload / Stop
+# The sim drops with this driver's reference when it leaves the tree (a reload / Stop
 # queue_free()s the driver).
 func _exit_tree() -> void:
 	if _frame_stats != null:
@@ -982,6 +979,4 @@ func _exit_tree() -> void:
 			simulation_restarted.disconnect(reset_scars)
 		_scar_present.teardown()  # frees the scar meshes under the owner models
 		_scar_present = null
-	if _sim != null and is_instance_valid(_sim):
-		_sim.free()
-		_sim = null
+	_sim = null

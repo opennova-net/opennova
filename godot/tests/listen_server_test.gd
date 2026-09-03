@@ -191,7 +191,6 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 			assert_eq(int(dismounted_snapshot[dismounted_base
 					+ Simulation.PF_RIGHT_HAND_COLLAPSED]), 0,
 					"dismount clears the transient bone-collapse verdict")
-		sim.free()
 
 
 func test_listen_server_present_reads_client_decoded_state() -> void:
@@ -253,7 +252,6 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 			"presented position is the authoritative pool position")
 		matched += 1
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
-	sim.free()
 
 
 func test_items_attachment_follows_through_listen_client() -> void:
@@ -304,7 +302,6 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	if child_base >= 0:
 		assert_gt(absf(snapshot[child_base + Simulation.PF_POS_X] - spawn_x), 15.0,
 				"the child follows the decoded carrier instead of freezing at spawn")
-	sim.free()
 
 
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
@@ -415,7 +412,6 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	assert_gt(replacement_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
 			"world replacement invalidates an equal-tick pose cache")
-	sim.free()
 
 
 func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
@@ -449,7 +445,6 @@ func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
 				snapshot[row_base + Simulation.PF_POS_Y],
 				snapshot[row_base + Simulation.PF_POS_Z])
 		assert_true(state[Simulation.EFFECT_STATE_POSITION].is_equal_approx(expected))
-	sim.free()
 
 
 func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> void:
@@ -503,7 +498,6 @@ func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> vo
 	assert_true(sim.get_present_effect_state_for_wire_handle(
 			absent_handle).is_empty(),
 			"a new epoch retries a formerly missing identity")
-	sim.free()
 
 
 func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
@@ -531,7 +525,6 @@ func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
 			break
 	assert_true(found_player,
 			"the restored host player still replicates through the loopback client")
-	sim.free()
 
 
 func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
@@ -576,7 +569,6 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 			assert_eq(int(snap[base + Simulation.PF_INDEX]), 0xFFFFFF,
 				"player carries the synthetic origin index sentinel")
 	assert_true(found_player, "the auto-spawned local player replicated into the client-decoded present")
-	sim.free()
 
 
 # (P7: test_listen_server_off_uses_ai_pool_present deleted — the no-net AI-pool present is retired;

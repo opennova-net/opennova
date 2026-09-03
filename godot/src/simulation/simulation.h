@@ -1,6 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -168,9 +167,9 @@ class ResourceRoot;
 // presentation side effects (text/dialog/win) drain out of the World EffectLog
 // each tick. Runtime transport and fixture teardown share the
 // play/pause/step/restart surface.
-class Simulation : public Node3D,
+class Simulation : public RefCounted,
                        private opennova::inmatch::TickObserver {
-	GDCLASS(Simulation, Node3D)
+	GDCLASS(Simulation, RefCounted)
 
 public:
 	// The bound enum/constant surface — a class-body fragment (its file

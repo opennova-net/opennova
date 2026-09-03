@@ -345,10 +345,9 @@ static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
 		"projection_mode": shadow.get_projection_mode(),
 		"visible": shadow.visible,
 		"visible_in_tree": shadow.is_visible_in_tree(),
-		# Live = following the sun each frame: through its own _process when it
-		# stands alone, or through the world's render_environment_nodes_frame
-		# (which turns that callback off and calls advance_frame itself).
-		"processing": shadow.is_processing() or world_driven,
+		# Live = following the sun each frame through the world's
+		# render_environment_nodes_frame (the node never self-clocks).
+		"processing": world_driven,
 		"shadow_enabled": shadow.has_shadow(),
 		"global_transform": shadow.global_transform,
 		"emission_direction": -shadow.global_transform.basis.z,

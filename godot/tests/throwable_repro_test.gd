@@ -61,8 +61,6 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	if _sim != null:
-		_sim.free()
 	_sim = null
 	_db = null
 	_root = null

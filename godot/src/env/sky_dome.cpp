@@ -61,7 +61,7 @@ void SkyDome::_bind_methods() {
 			&SkyDome::get_sky_material);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&SkyDome::get_mesh_instance);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SkyDome::advance_frame);
@@ -130,7 +130,6 @@ Weather *SkyDome::_weather_node() {
 }
 
 void SkyDome::_ready() {
-	set_process(true);
 	build();
 }
 
@@ -172,10 +171,6 @@ void SkyDome::build() {
 	mesh_instance_->set_mesh(mesh);
 	add_child(mesh_instance_);
 	built_ = true;
-}
-
-void SkyDome::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void SkyDome::advance_frame(double p_delta) {

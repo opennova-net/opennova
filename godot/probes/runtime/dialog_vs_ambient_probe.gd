@@ -177,7 +177,6 @@ func _sim_arm(mission: MissionData, sim_ticks: int, data: Dictionary) -> Vector3
 	else:
 		_ctx.log("sim load FAILED")
 		data["sim_load_failed"] = true
-	sim.free()
 	return player_pos
 
 

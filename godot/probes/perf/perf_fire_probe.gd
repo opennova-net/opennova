@@ -196,13 +196,10 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentati
 	var reflection: SubViewport = water.get_reflection_viewport() if water != null else null
 	if water != null and reflection != null:
 		await ctx.wait_ms(500)
-		var was_processing := water.is_processing()
 		var was_mode := reflection.render_target_update_mode
-		water.set_process(false)
 		reflection.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		legs["reflhardoff"] = await _measure("reflhardoff", 3000)
 		reflection.render_target_update_mode = was_mode
-		water.set_process(was_processing)
 	# Particle fixed-tick A/B (advance_fixed_tick runs per 62 Hz tick - 8-9x per
 	# frame at low FPS).
 	world.set_perf_probe_skip_effect_tick(true)

@@ -216,7 +216,6 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 		assert_gt(alignment, 0.999,
 				"%s minigun forward follows its own authored userpoint (dot %.6f)" % [
 						wanted["label"], alignment])
-	sim.free()
 
 
 func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
@@ -325,7 +324,6 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 				(actual_basis * Vector3.UP).dot(expected_basis * Vector3.UP),
 				0.9998,
 				"%s up follows the converted retail frame" % wanted["label"])
-	sim.free()
 
 
 func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:

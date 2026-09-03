@@ -46,7 +46,7 @@ protected:
 
 public:
 	void clear();
-	void set_occlusion_provider(Simulation *provider);
+	void set_occlusion_provider(const Ref<Simulation> &provider);
 	void set_occlusion_override(const Callable &override);
 
 	// One placed marker: `slot_keys` maps region 0..3 to an index into `sets`
