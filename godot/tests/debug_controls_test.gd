@@ -1,7 +1,7 @@
 extends GutTest
 
 # DebugControls is the typed debug-control table (ADR 0042 d5) shared by the
-# MCP game_debug plane. These tests drive the real table over stub seams with
+# MCP game_debug plane. These tests drive the real table over a stub shell with
 # REAL Simulation instances: rows resolve their owners live per call, typed
 # argument checks refuse bad input before any engine call, and nothing
 # replays across an owner swap (a fresh mission gets fresh debug state).
@@ -75,6 +75,20 @@ class RuntimeStub:
 		return stub_sim
 
 
+# The in-world shell the table reads: a GameShell answering the stub runtime
+# (rule 11's sanctioned fake: public verbs of a GDScript shell class).
+class RuntimeShell:
+	extends GameShell
+
+	var runtime: MissionPresentation = null
+
+	func get_runtime() -> MissionPresentation:
+		return runtime
+
+	func shell_state_name() -> String:
+		return "world"
+
+
 class AuthorityAdapter:
 	extends GameDebugAdapter
 
@@ -94,17 +108,10 @@ func before_each() -> void:
 	_sim = autofree(Simulation.new())
 	_runtime = autofree(RuntimeStub.new())
 	_runtime.stub_sim = _sim
-	var seams := GameShellSeams.new()
-	seams.runtime_source = func(): return _runtime
-	seams.world_source = func(): return null
-	seams.presenter_source = func(): return null
-	seams.shell_state_source = func(): return "world"
-	seams.world_loading_source = func(): return false
-	seams.dev_tools_open_source = func(): return false
-	seams.resume_action = func(): pass
-	seams.quit_action = func(): pass
+	var shell: RuntimeShell = autofree(RuntimeShell.new())
+	shell.runtime = _runtime
 	_adapter = add_child_autofree(AuthorityAdapter.new())
-	_adapter.configure(seams)
+	_adapter.configure(shell)
 	_controls = _adapter.get_debug_controls()
 
 
@@ -143,7 +150,7 @@ func test_release_breaks_every_row_callable_cycle() -> void:
 	assert_true(retained_row.read.is_valid())
 	assert_true(retained_row.write.is_valid())
 
-	_adapter.release_shell_seams()
+	_adapter.release_shell()
 
 	assert_null(_adapter.get_debug_controls())
 	assert_true(retained_controls.row_ids().is_empty())

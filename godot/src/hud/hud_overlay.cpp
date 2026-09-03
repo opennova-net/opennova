@@ -222,6 +222,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_showhud_flags);
 	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
+	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
+			&HudOverlay::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
 			"altitude_wu", "heading_bam", "zoom_q16", "big_zoom_q16",
 			"map_mode", "flip_180", "snapshot"),
@@ -1108,6 +1110,10 @@ void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
 	state_.speaking_level255 = p_speaking_level255;
+}
+
+Ref<Texture2D> HudOverlay::get_minimap_water_mask() const {
+	return textures_[opennova::hud::kHudTexMapWater];
 }
 
 void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,

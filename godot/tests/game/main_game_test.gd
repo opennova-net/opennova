@@ -23,13 +23,7 @@ var _temp_dir := ""
 var _shell: Node = null
 
 
-class FakeGameHud:
-	extends RefCounted
-	var crosshair_style := -1
-	var visible := true
-
-	func set_crosshair_style(style: int) -> void:
-		crosshair_style = style
+var _hud_fixture_dir := ""
 
 
 class HudHiddenPresenterHarness:
@@ -66,6 +60,9 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	if not _hud_fixture_dir.is_empty():
+		TestFs.remove_dir_recursive(_hud_fixture_dir)
+		_hud_fixture_dir = ""
 	if is_instance_valid(_shell):
 		var world = _shell.get_node_or_null("World")
 		if world != null:
@@ -514,10 +511,12 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 	assert_eq(presenter.crosshair_style(), 13,
 			"a pre-HUD choice is cached for the lazy build")
 
-	var hud := FakeGameHud.new()
-	presenter._game_hud = hud
-	presenter.set_crosshair_style(17)
-	assert_eq(hud.crosshair_style, 17,
+	# A REAL overlay over the staged HUD root (HudFixture): the presenter above
+	# stays HUD-less, this one carries the built HudOverlay.
+	_hud_fixture_dir = HudFixture.stage_root(true)
+	var live := HudFixture.booted_presenter(self, _hud_fixture_dir)
+	live.set_crosshair_style(17)
+	assert_eq(live.get_game_hud().get_crosshair_style(), 17,
 			"a paused game's existing HUD adopts the menu selection immediately")
 	presenter.set_crosshair_style(99)
 	assert_eq(presenter.crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE,

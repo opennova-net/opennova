@@ -11,27 +11,25 @@ extends GameMcpAdapter
 const MCP_ENTITY_LIMIT_MAX := 128
 
 var _service: GameMcpService = null
-# The one typed record of shell seams (GameShellSeams): suppliers, state
-# reads, action legs, and capture presentation, all resolved live per call.
-var _seams: GameShellSeams = null
+# The game shell (GameShell: suppliers, state reads, action legs, capture
+# presentation), every supplier resolved live per call.
+var _shell: GameShell = null
 # The typed debug-control table (ADR 0042 d5), built once over the adopted
-# seams; every row re-resolves its live owner per call.
+# shell; every row re-resolves its live owner per call.
 var _controls: DebugControls = null
 
 
-func configure(seams: GameShellSeams) -> void:
-	_seams = seams
-	_controls = DebugControls.new(seams, self)
+func configure(shell: GameShell) -> void:
+	_shell = shell
+	_controls = DebugControls.new(shell, self)
 
 
-## Release the shell-capturing Callable graph before its script teardown.
-func release_shell_seams() -> void:
+## Drop the shell reference and the row closures before its script teardown.
+func release_shell() -> void:
 	if _controls != null:
 		_controls.clear()
-	if _seams != null:
-		_seams.clear()
 	_controls = null
-	_seams = null
+	_shell = null
 
 
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
@@ -53,10 +51,10 @@ func get_debug_controls() -> DebugControls:
 	return _controls
 
 
-## The same record configure() adopted; the probe runner drives its suppliers
-## and mission verbs (ADR 0041).
-func get_shell_seams() -> GameShellSeams:
-	return _seams
+## The shell configure() adopted; the probe runner drives its suppliers and
+## mission verbs (ADR 0041).
+func get_shell() -> GameShell:
+	return _shell
 
 
 ## Curated transport snapshot. Dictionaries begin here because this is the
@@ -84,12 +82,12 @@ func get_mcp_game_state() -> Variant:
 		player["weapon_state"] = sim.get_local_player_weapon_state().to_json_value()
 	return {
 		"shell": {
-			"state": String(_seams.shell_state_source.call()),
-			"world_loading": bool(_seams.world_loading_source.call()),
+			"state": _shell.shell_state_name() if _shell != null else "",
+			"world_loading": _is_world_loading(),
 			"world_loaded": world != null and world.is_loaded(),
 			"mission_file": world.get_loaded_mission_file() \
 					if world != null else "",
-			"dev_tools_open": bool(_seams.dev_tools_open_source.call()),
+			"dev_tools_open": _shell != null and _shell.is_dev_tools_open(),
 		},
 		"session": _session_facts(sim),
 		"runtime": runtime_state,
@@ -146,7 +144,7 @@ func get_mcp_render_diagnostics() -> Variant:
 	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
 	var value := snapshot.to_json_value()
 	value["shell"] = {
-		"state": String(_seams.shell_state_source.call()),
+		"state": _shell.shell_state_name() if _shell != null else "",
 		"world_loading": _is_world_loading(),
 		"gameplay_camera_available": camera != null and camera.is_current(),
 	}
@@ -187,12 +185,12 @@ func capture_mcp_render_bundle(
 	var diagnostics_source := get_mcp_render_diagnostics
 	match presentation_mode:
 		"world_only":
-			presentation_begin = _seams.render_capture_begin_action
-			presentation_finish = _seams.render_capture_end_action
+			presentation_begin = _shell.mcp_begin_world_only_capture
+			presentation_finish = _shell.mcp_end_world_only_capture
 		"hud_hidden":
-			presentation_begin = _seams.hud_hidden_capture_begin_action
-			presentation_finish = _seams.hud_hidden_capture_end_action
-			if not _seams.hud_hidden_capture_witness_source.is_valid():
+			presentation_begin = _shell.begin_hud_hidden_capture
+			presentation_finish = _shell.finish_hud_hidden_capture
+			if _shell == null:
 				return {"error": "HUD-hidden render capture witness is unavailable in this game shell."}
 			diagnostics_source = func() -> Variant:
 				var diagnostics_value: Variant = get_mcp_render_diagnostics()
@@ -269,7 +267,7 @@ func get_mcp_game_entity(index: int) -> Variant:
 
 
 func _hud_hidden_capture_witness_json() -> Dictionary:
-	var value: Variant = _seams.hud_hidden_capture_witness_source.call()
+	var value: Variant = _shell.hud_hidden_capture_witness() if _shell != null else null
 	if not (value is HudHiddenCaptureWitness):
 		return {}
 	var witness := value as HudHiddenCaptureWitness
@@ -286,9 +284,7 @@ func _hud_hidden_capture_witness_json() -> Dictionary:
 
 
 func _menu_shell() -> MenuShell:
-	if _seams == null or _seams.menu_shell_source.is_null():
-		return null
-	return _seams.menu_shell_source.call() as MenuShell
+	return _shell.get_menu_shell() if _shell != null else null
 
 
 func mcp_game_menu(args: Dictionary) -> Variant:
@@ -362,32 +358,32 @@ func mcp_game_control(action: String) -> Error:
 				return ERR_UNAVAILABLE
 			runtime.play()
 			# The armory rides the same resume leg as the pause overlay
-			# (_on_resume closes whichever is up and hands play back).
-			if String(_seams.shell_state_source.call()) in ["paused", "armory"]:
-				_seams.resume_action.call()
+			# (resume closes whichever is up and hands play back).
+			if _shell != null and _shell.shell_state_name() in ["paused", "armory"]:
+				_shell.resume()
 		"step":
 			# Same engine verdict as "pause": a net-role session declines the
 			# manual step natively.
 			if runtime == null or not runtime.step_once():
 				return ERR_UNAVAILABLE
 		"open_ingame_menu":
-			if not _seams.open_ingame_menu_action.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var menu_err: Error = _seams.open_ingame_menu_action.call()
+			var menu_err: Error = _shell.mcp_open_ingame_menu()
 			if menu_err != OK:
 				return menu_err
 		"open_armory":
-			if not _seams.open_armory_action.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var armory_err: Error = _seams.open_armory_action.call()
+			var armory_err: Error = _shell.mcp_open_armory()
 			if armory_err != OK:
 				return armory_err
 		"return_to_menu":
 			# The shell's one gated return leg (MainGame.return_to_menu: busy
 			# while a load is pending, unavailable without a loaded world).
-			if not _seams.return_to_menu.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var menu_err: Error = _seams.return_to_menu.call()
+			var menu_err: Error = _shell.return_to_menu()
 			if menu_err != OK:
 				return menu_err
 		"quit":
@@ -525,22 +521,20 @@ func _audio_bus_state() -> Array:
 
 
 func _current_world() -> GameWorld:
-	var value: Variant = _seams.world_source.call()
-	return value as GameWorld
+	return _shell.get_world() if _shell != null else null
 
 
 func _current_runtime() -> MissionPresentation:
-	if _seams == null or not _seams.runtime_source.is_valid():
+	if _shell == null:
 		return null
-	var value: Variant = _seams.runtime_source.call()
-	if value is MissionPresentation and is_instance_valid(value):
+	var value := _shell.get_runtime()
+	if value != null and is_instance_valid(value):
 		return value
 	return null
 
 
 func _is_world_loading() -> bool:
-	return _seams != null and _seams.world_loading_source.is_valid() \
-			and bool(_seams.world_loading_source.call())
+	return _shell != null and _shell.is_world_loading()
 
 
 func _current_viewport() -> Viewport:
@@ -548,4 +542,5 @@ func _current_viewport() -> Viewport:
 
 
 func _deferred_quit() -> void:
-	_seams.quit_action.call()
+	if _shell != null:
+		_shell.request_quit()

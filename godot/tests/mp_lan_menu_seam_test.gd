@@ -11,11 +11,10 @@ extends GutTest
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
-# A REAL LanSession (typed seam) whose discovery feed is driven by hand:
-# publish() emits the native servers_changed signal without touching sockets.
-class _LanSessionFeed extends LanSession:
-	func publish(servers: Array) -> void:
-		emit_signal("servers_changed", servers)
+# A REAL LanSession (typed seam) whose discovery feed is driven by hand: the
+# test emits the native servers_changed signal itself, no sockets touched.
+static func _publish(session: LanSession, servers: Array) -> void:
+	session.emit_signal("servers_changed", servers)
 
 
 # One browse row with the counts the LAN list formats.
@@ -418,14 +417,14 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	watch_signals(mp)
 	var driver := _make_lan_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var session := _LanSessionFeed.new()
+	var session := LanSession.new()
 	autofree(session)
 	mp.set_lan_session(session)
-	session.publish([LanServerRow.make("old", "192.168.1.10", 32768)])
+	_publish(session, [LanServerRow.make("old", "192.168.1.10", 32768)])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.select_row(lan_list, 0)  # single click on the old row
 
-	session.publish([LanServerRow.make("replacement", "192.168.1.11", 32769)])
+	_publish(session, [LanServerRow.make("replacement", "192.168.1.11", 32769)])
 	assert_eq(driver.item_count(lan_list), 1,
 		"a servers_changed payload replaces the prior full snapshot instead of appending")
 	assert_eq(driver.item_text(lan_list, 0), "replacement (0/0)")
@@ -438,15 +437,15 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	var mp := MpMenuCompanion.new()
 	var driver := _make_lan_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var previous := _LanSessionFeed.new()
+	var previous := LanSession.new()
 	autofree(previous)
-	var current := _LanSessionFeed.new()
+	var current := LanSession.new()
 	autofree(current)
 	mp.set_lan_session(previous)
 	mp.set_lan_session(current)
 	# (pre-auth rows carry no map identity: LanServerRow has no mission field)
-	current.publish([_lan_row("current", 1, 4)])
-	previous.publish([_lan_row("stale", 4, 4)])
+	_publish(current, [_lan_row("current", 1, 4)])
+	_publish(previous, [_lan_row("stale", 4, 4)])
 
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	assert_eq(driver.item_count(lan_list), 1)

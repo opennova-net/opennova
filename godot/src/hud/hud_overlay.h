@@ -204,6 +204,9 @@ public:
 	// retained overlay buffer.
 	void set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>());
+	// The water mask the last set_minimap_terrain installed (a read seam the
+	// GUT presenter pins use; nothing else reads it).
+	Ref<Texture2D> get_minimap_water_mask() const;
 	void set_minimap_state(const Vector2 &p_mission_position,
 			float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
 			int p_big_zoom_q16, int p_map_mode, bool p_flip_180,

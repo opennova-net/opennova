@@ -2,7 +2,7 @@
 ## main_game.gd for the shipping-script size ratchet (the
 ## debug_controls_weather_rows.gd precedent): a method annex over MainGame's
 ## OWN state — every var stays on the shell and this object carries only the
-## bodies, so the input callbacks and the GameShellSeams-bound surface stay on
+## bodies, so the input callbacks and the GameShell surface stay on
 ## MainGame untouched.
 extends RefCounted
 
@@ -51,7 +51,7 @@ func wire_shell() -> void:
 	_shell._menu_shell.start_requested.connect(_shell._on_start_requested)
 	_shell._menu_shell.exit_to_desktop_requested.connect(_shell._on_exit_to_desktop)
 	_shell._menu_shell.return_to_menu_requested.connect(_shell._on_return_to_menu)
-	_shell._menu_shell.resume_requested.connect(_shell._on_resume)
+	_shell._menu_shell.resume_requested.connect(_shell.resume)
 	_shell._menu_shell.novaworld_requested.connect(_shell._net.open_novaworld_panel)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_shell._mp_companion = MpMenuCompanion.new()

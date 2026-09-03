@@ -1,5 +1,5 @@
 class_name MainGame
-extends Node3D
+extends GameShell
 
 # Runtime shell: boots into the game's menu front-end (MenuShell, driving the
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
@@ -192,7 +192,7 @@ func finish_runtime_shutdown() -> void:
 		_root.clear()
 	VegAssetsScript.clear_cache()
 	if _debug_adapter != null:
-		_debug_adapter.release_shell_seams()
+		_debug_adapter.release_shell()
 
 
 ## True from the menu-to-loading handoff until the world reports success or
@@ -253,7 +253,7 @@ func _ready() -> void:
 	add_child(_armory_presenter)
 	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
-	_armory_presenter.closed.connect(_on_resume)
+	_armory_presenter.closed.connect(resume)
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
 	_deploy_presenter = DeployScreenPresenter.install(self, _world,
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
@@ -333,7 +333,7 @@ func _input(event: InputEvent) -> void:
 		return
 	var key := event as InputEventKey
 	if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-		_on_resume()
+		resume()
 		get_viewport().set_input_as_handled()
 
 
@@ -462,24 +462,39 @@ func _toggle_fullscreen() -> void:
 
 func get_dev_tools() -> DevTools:
 	return _dev_tools
+
+
+# --- The GameShell suppliers (ADR 0043 rule 11): the tooling reads the shell's
+# presenters through these typed getters, never through its privates. ---
+
+func get_world() -> GameWorld:
+	return _world
+
+
+func get_player_presenter() -> LocalPlayerPresenter:
+	return _player_presenter
+
+
+func get_hud_presenter() -> GameHudPresenter:
+	return _hud_presenter
+
+
+func get_menu_shell() -> MenuShell:
+	return _menu_shell
+
+
+func get_armory_presenter() -> ArmoryPresenter:
+	return _armory_presenter
+
+
+func get_deploy_presenter() -> DeployScreenPresenter:
+	return _deploy_presenter
 func get_game_debug_adapter() -> GameDebugAdapter:
 	if _debug_adapter == null:
 		_debug_adapter = GameDebugAdapterScript.new()
-		# ONE typed seams record (GameShellSeams): the factory binds the shell's
-		# public methods by name; the private presenters/state legs are supplied
-		# here. The adapter adopts it in configure() and the probe runner reads
-		# the same record through get_shell_seams() (ADR 0041).
-		var seams := GameShellSeams.for_shell(self,
-				func() -> GameWorld: return _world, _current_runtime,
-				func() -> LocalPlayerPresenter: return _player_presenter,
-				func() -> GameHudPresenter: return _hud_presenter,
-				func() -> MenuShell: return _menu_shell,
-				func() -> ArmoryPresenter: return _armory_presenter,
-				func() -> DeployScreenPresenter: return _deploy_presenter)
-		seams.shell_state_source = _shell_state_name
-		seams.world_loading_source = func() -> bool: return _world_load_pending
-		seams.resume_action = _on_resume
-		_debug_adapter.configure(seams)
+		# The adapter depends on the GameShell surface this class overrides;
+		# the probe runner reads the same shell through get_shell() (ADR 0041).
+		_debug_adapter.configure(self)
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats
@@ -518,11 +533,11 @@ func _on_end_screen_exit() -> void:
 	_teardown_world_to_menu()
 
 
-func _current_runtime() -> MissionPresentation:
+func get_runtime() -> MissionPresentation:
 	return _world.get_runtime() if _world != null else null
 
 
-func _shell_state_name() -> String:
+func shell_state_name() -> String:
 	match _state:
 		State.WORLD:
 			return "world"
@@ -592,7 +607,7 @@ func _try_open_armory() -> bool:
 # vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
 # [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
 func _try_toggle_mount() -> bool:
-	var runtime := _current_runtime()
+	var runtime := get_runtime()
 	if runtime == null:
 		return false
 	var sim: Simulation = runtime.get_sim()
@@ -635,7 +650,7 @@ func start_loose_mission(bms_name: String) -> void:
 		_world.load_loose_mission.bind(bms_name))
 
 
-## The probe runner's mission verbs (GameShellSeams, ADR 0041): the menu's
+## The probe runner's mission verbs (GameShell, ADR 0041): the menu's
 ## Start path, the saved-BMS path parity captures stage, and the return leg.
 func start_mission(bms_name: String) -> Error:
 	var gate := _mission_start_gate()
@@ -903,7 +918,7 @@ func _on_camera_escape() -> void:
 		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
-		_on_resume()
+		resume()
 
 
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
@@ -919,7 +934,7 @@ func _pause() -> void:
 	_menu_shell.show_menu()
 
 
-func _on_resume() -> void:
+func resume() -> void:
 	if _state != State.PAUSED and _state != State.ARMORY:
 		return
 	if _armory_presenter != null and _armory_presenter.is_open():

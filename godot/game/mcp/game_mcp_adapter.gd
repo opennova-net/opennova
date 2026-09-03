@@ -43,7 +43,7 @@ func get_debug_controls() -> DebugControls:
 	return null
 
 
-## The shell seams the probe runner drives (GameShellSeams); null in a
+## The game shell the probe runner drives (GameShell); null in a
 ## shell that runs no probes.
-func get_shell_seams() -> GameShellSeams:
+func get_shell() -> GameShell:
 	return null

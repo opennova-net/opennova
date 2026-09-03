@@ -36,9 +36,9 @@ var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 # than it can ever present (net spectators may never acquire a local-player HUD).
 const MAX_PENDING_HUD_MESSAGES := 40
 
-# HudOverlay, built on the first frame a mission has a local player; Variant
-# because the GUT files inject duck doubles for it (ADR 0018's open seam).
-var _game_hud: Variant = null
+# HudOverlay, built on the first frame a mission has a local player
+# (ensure_game_hud(); the GUT files build the real one over a staged root).
+var _game_hud: HudOverlay = null
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
@@ -188,10 +188,6 @@ func teardown() -> void:
 	_warned_no_player = false
 
 
-func get_hud() -> Variant:
-	return _game_hud
-
-
 ## The layer every HUD element hangs under (hiding it hides the whole HUD,
 ## siblings of the GameHud control included; the perf probe's canvas A/B).
 func get_ui_parent() -> Node:
@@ -236,7 +232,9 @@ func set_crosshair_spread_enabled(enabled: bool) -> void:
 # PlayerViewEffects post stack mount as behind-parent children of the overlay,
 # exactly the child-control stack the ported shell HUD carried.
 # [orig: HUD_RenderAllOverlays @0x5a8070]
-func _ensure_game_hud() -> void:
+## Build the overlay if the mission has none yet (update() does it on the first
+## frame with a local player; the GUT files build it over a staged root).
+func ensure_game_hud() -> void:
 	if _game_hud != null:
 		return
 	_game_hud = HudOverlay.new()
@@ -361,7 +359,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_warned_no_player = true
 			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
 		return
-	_ensure_game_hud()
+	ensure_game_hud()
 	if _game_hud == null:
 		return
 	if stats_on:
@@ -920,6 +918,16 @@ func set_hud_detail_level(level: int) -> void:
 
 func hud_detail_level() -> int:
 	return _hud_detail_level
+
+
+## The persisted HUD color-scheme index (the token cycle_hud_color writes).
+func hud_color_index() -> int:
+	return _hud_color_index
+
+
+## The process-lifetime friendly-tags mode (cycle_friendly_tags advances it).
+func friendly_tag_mode() -> int:
+	return _friendly_tag_mode
 
 
 ## Temporarily apply retail's blank HUD declutter level without writing the

@@ -8,34 +8,60 @@ class LoadedWorldHarness:
 		_world_ready = true
 
 
-func _adapter(
-		world: GameWorld,
-		loading_source: Callable) -> GameDebugAdapter:
+# The in-world shell the adapter captures through: a GameShell over the test's
+# world whose capture presentation legs count their calls.
+class CaptureShell:
+	extends GameShell
+
+	var world: GameWorld = null
+	var world_loading := false
+	var world_only_begins := 0
+	var hud_hidden_begins := 0
+	var hud_hidden_finishes := 0
+	var witness: HudHiddenCaptureWitness = null
+
+	func get_world() -> GameWorld:
+		return world
+
+	func shell_state_name() -> String:
+		return "world"
+
+	func is_world_loading() -> bool:
+		return world_loading
+
+	func mcp_begin_world_only_capture() -> Error:
+		world_only_begins += 1
+		return OK
+
+	func mcp_end_world_only_capture() -> void:
+		pass
+
+	func begin_hud_hidden_capture() -> Error:
+		hud_hidden_begins += 1
+		return OK
+
+	func finish_hud_hidden_capture() -> void:
+		hud_hidden_finishes += 1
+
+	func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
+		return witness
+
+
+func _adapter(world: GameWorld, world_loading: bool) -> GameDebugAdapter:
 	var adapter := GameDebugAdapter.new()
 	add_child_autofree(adapter)
-	var seams := GameShellSeams.new()
-	seams.runtime_source = func(): return null
-	seams.world_source = func(): return world
-	seams.presenter_source = func(): return null
-	seams.shell_state_source = func(): return "world"
-	seams.world_loading_source = loading_source
-	seams.dev_tools_open_source = func(): return false
-	seams.resume_action = func(): pass
-	seams.quit_action = func(): pass
-	adapter.configure(seams)
+	var shell: CaptureShell = autofree(CaptureShell.new())
+	shell.world = world
+	shell.world_loading = world_loading
+	adapter.configure(shell)
 	return adapter
 
 
 func test_capture_rejects_loading_or_start_splash_before_touching_viewport() -> void:
 	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
 	world.mark_loaded()
-	var adapter := _adapter(world, func(): return true)
-	var began := [false]
-	var capture_seams := adapter.get_shell_seams()
-	capture_seams.render_capture_begin_action = func() -> Error:
-		began[0] = true
-		return OK
-	capture_seams.render_capture_end_action = func(): pass
+	var adapter := _adapter(world, true)
+	var shell := adapter.get_shell() as CaptureShell
 
 	var result: Dictionary = await adapter.capture_mcp_render_bundle({
 		"settle_frames": 0,
@@ -44,13 +70,13 @@ func test_capture_rejects_loading_or_start_splash_before_touching_viewport() -> 
 
 	assert_true(result.has("error"))
 	assert_true(String(result["error"]).contains("still loading"))
-	assert_false(bool(began[0]), "the splash/loading gate runs before UI mutation")
+	assert_eq(shell.world_only_begins, 0, "the splash/loading gate runs before UI mutation")
 
 
 func test_capture_rejects_a_loaded_world_without_a_current_gameplay_camera() -> void:
 	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
 	world.mark_loaded()
-	var adapter := _adapter(world, func(): return false)
+	var adapter := _adapter(world, false)
 
 	var result: Dictionary = await adapter.capture_mcp_render_bundle({
 		"settle_frames": 0,
@@ -63,7 +89,7 @@ func test_capture_rejects_a_loaded_world_without_a_current_gameplay_camera() -> 
 
 func test_render_diagnostics_reports_no_world_while_permanent_world_is_unloaded() -> void:
 	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
-	var adapter := _adapter(world, func(): return false)
+	var adapter := _adapter(world, false)
 
 	assert_true((adapter.get_mcp_render_diagnostics() as Dictionary).is_empty())
 
@@ -75,22 +101,13 @@ func test_hud_hidden_bundle_scopes_presentation_to_its_target_capture() -> void:
 	add_child_autofree(camera)
 	camera.current = true
 	await get_tree().process_frame
-	var adapter := _adapter(world, func(): return false)
-	var begin_calls := [0]
-	var finish_calls := [0]
-	var hud_seams := adapter.get_shell_seams()
-	hud_seams.hud_hidden_capture_begin_action = func() -> Error:
-		begin_calls[0] += 1
-		return OK
-	hud_seams.hud_hidden_capture_end_action = func() -> void:
-		finish_calls[0] += 1
-	hud_seams.hud_hidden_capture_witness_source = func() -> HudHiddenCaptureWitness:
-		var witness := HudHiddenCaptureWitness.new()
-		witness.hud_detail_level = 3
-		witness.gameplay_hud_visible = false
-		witness.player_view_effects_active = true
-		witness.hud_canvas_layer_active = true
-		return witness
+	var adapter := _adapter(world, false)
+	var shell := adapter.get_shell() as CaptureShell
+	shell.witness = HudHiddenCaptureWitness.new()
+	shell.witness.hud_detail_level = 3
+	shell.witness.gameplay_hud_visible = false
+	shell.witness.player_view_effects_active = true
+	shell.witness.hud_canvas_layer_active = true
 
 	var result: Dictionary = await adapter.capture_mcp_render_bundle({
 		"settle_frames": 1,
@@ -100,6 +117,6 @@ func test_hud_hidden_bundle_scopes_presentation_to_its_target_capture() -> void:
 
 	assert_true(result.has("error"),
 			"headless screenshot readback deterministically fails after presentation begins")
-	assert_eq(begin_calls[0], 1)
-	assert_eq(finish_calls[0], 1,
+	assert_eq(shell.hud_hidden_begins, 1)
+	assert_eq(shell.hud_hidden_finishes, 1,
 			"the adapter restores HUD/FPS after the individual failed bundle")
