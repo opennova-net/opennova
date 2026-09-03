@@ -88,6 +88,7 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <runtime/inmatch/session.h>
+#include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/ai.h>
 #include <runtime/world/inspect.h> // the typed entity inspection API (ADR 0042 d5)
 #include <runtime/world/tick_accumulator.h>

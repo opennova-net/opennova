@@ -191,9 +191,13 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    their `_process` forwards. Visibility is two bits on `ObjectModel`; the
    shared Dictionaries die. The nine Callable slots become direct typed
    references, one signal (`wire_node_spawned`) and the `TickSink`. The
-   present-row enrichment in the binding moves to
-   `runtime/replication/client_replica_present_projection`. (Amends ADR 0042
-   d2: there is no sanctioned untyped seam; the pipeline is C++.)
+   present-row collectors in the binding moved to
+   `runtime/inmatch/present_rows` (G3: both the host pool walk and the
+   joiner's decoded-replica walk, over the canonical
+   `client_replica_present_projection` that already lived there; the
+   binding copies the rows and consumes the animation pulses after the
+   build). (Amends ADR 0042 d2: there is no sanctioned untyped seam; the
+   pipeline is C++.)
 
 10. **Carriers: two mechanisms.** A record crosses to GDScript as a value
     wrapper over the engine struct (`hud/feed_row.h`: `engine::X value_` plus

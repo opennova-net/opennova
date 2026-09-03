@@ -2336,6 +2336,13 @@ target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test P
 add_test(NAME netsim_client_replica_pipeline_world_page_atomicity
     COMMAND netsim_client_replica_pipeline_world_page_atomicity_test)
 
+# The engine's PF_* present-row collectors (runtime/inmatch/present_rows.h,
+# ADR 0043 G3): the host pool walk and the joiner's decoded-replica walk over a
+# bare kernel.
+add_executable(netsim_present_rows_test netsim/present_rows_test.cpp)
+target_link_libraries(netsim_present_rows_test PRIVATE opennova_runtime)
+add_test(NAME netsim_present_rows COMMAND netsim_present_rows_test)
+
 add_executable(netsim_client_replica_pipeline_recoil_test
     netsim/client_replica_pipeline_recoil_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_runtime)

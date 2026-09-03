@@ -222,22 +222,11 @@ private:
 	// entity's authored display name (D-HUD-20) from its BMS name_index here
 	// (engine: runtime/mission/promote.cpp).
 	std::unordered_map<int32_t, std::string> mission_people_names_;
-	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()):
-	// the joiner's view of the host's stream.
-	PackedFloat32Array present_snapshot_from_client_replicas() const;
-	// Build the PF_* present buffer from the host's own pools: retail's listen
-	// host/SP local client reads process memory and its loopback 0x0A carries no
-	// entity records (engine: runtime/replication/connection_fan.cpp).
-	PackedFloat32Array present_snapshot_from_world() const;
-	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
-	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
-	struct PoolPresentLifecycle {
-		uint64_t registry_spawn_id = 0;
-		uint32_t respawn_revision = 0;
-		bool dead_known = false;
-		bool dead = false;
-	};
-	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
+	// The PF_* present rows are built by the engine (runtime/inmatch/present_rows.h,
+	// both roles); this owns the host path's respawn-revision mirror and the
+	// scratch the PackedFloat32Array copies from.
+	mutable opennova::inmatch::PoolPresentLifecycleMap pool_present_lifecycle_;
+	mutable std::vector<float> present_rows_scratch_;
 
 	// --- co-op LAN joiner: a pure non-authority inmatch::ClientRuntime (Joiner role, built in enable_join /
 	// the boot's role hook; runtime_ is in the P7 block below). The joiner role drives the connect legs +
