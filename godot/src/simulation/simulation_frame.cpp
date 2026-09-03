@@ -223,15 +223,15 @@ bool Simulation::step() {
 	// deterministic tick. Preserve that public seam without adding a second tick
 	// path: snapshot the concrete target's held/edge latches into the same typed
 	// frame value inmatch::Session consumes. Direct look input has already updated
-	// kernel_->input's composed heading/pitch, so it must not be replayed as a
+	// kernel_->local.input's composed heading/pitch, so it must not be replayed as a
 	// second pixel delta here.
 	opennova::inmatch::FrameInput input;
-	input.player.movement = kernel_->input;
-	input.player.held_action_bits = kernel_->weapon.fire_held
+	input.player.movement = kernel_->local.input;
+	input.player.held_action_bits = kernel_->local.weapon.fire_held
 			? MissionFrameInput::HELD_FIRE : 0u;
 	input.player.pressed_action_bits =
-			(kernel_->weapon.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
-			(kernel_->weapon.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
+			(kernel_->local.weapon.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
+			(kernel_->local.weapon.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
 	return session_.drive_one(input).ticks_run() == 1;
 }
 

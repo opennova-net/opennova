@@ -100,11 +100,11 @@ int main() {
 	CHECK(kernel.events.events().size() == 1);
 	CHECK(kernel.wac_loaded);
 	CHECK(kernel.wac.vm().loaded());
-	CHECK(kernel.has_local_player());
-	CHECK(kernel.player() != nullptr);
-	CHECK(kernel.player_ai() != nullptr);
-	CHECK(near_equal(kernel.player_position().x, 0.0f, 0.001f));
-	CHECK(near_equal(kernel.player_position().y, 0.0f, 0.001f));
+	CHECK(kernel.local.has_local_player());
+	CHECK(kernel.local.player() != nullptr);
+	CHECK(kernel.local.player_ai() != nullptr);
+	CHECK(near_equal(kernel.local.player_position().x, 0.0f, 0.001f));
+	CHECK(near_equal(kernel.local.player_position().y, 0.0f, 0.001f));
 	CHECK(kernel.have_baseline);
 	CHECK(!kernel.has_terrain()); // no terrain documents were supplied
 	CHECK(kernel.text_source == ms::MissionTextSource::kNone);
@@ -120,56 +120,56 @@ int main() {
 	// (never per frame), while every composed frame advances the IIR filters
 	// again from the same PRNG word — two frames between ticks differ
 	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d].
-	kernel.view.shake.counter = 10;
+	kernel.local.view.shake.counter = 10;
 	kernel.tick_no_net();
-	CHECK(kernel.view.shake.counter == 8);
+	CHECK(kernel.local.view.shake.counter == 8);
 	{
-		const w::LocalPlayerViewFrame frame_a = kernel.view_frame();
-		const w::LocalPlayerViewFrame frame_b = kernel.view_frame();
-		CHECK(kernel.view.shake.counter == 8);
+		const w::LocalPlayerViewFrame frame_a = kernel.local.view_frame();
+		const w::LocalPlayerViewFrame frame_b = kernel.local.view_frame();
+		CHECK(kernel.local.view.shake.counter == 8);
 		CHECK(frame_a.camera.yaw_deg != frame_b.camera.yaw_deg ||
 		      frame_a.camera.pitch_deg != frame_b.camera.pitch_deg ||
 		      frame_a.camera.roll_deg != frame_b.camera.roll_deg);
 	}
 	kernel.tick_no_net();
-	CHECK(kernel.view.shake.counter == 6);
-	kernel.view.shake.counter = 0;
+	CHECK(kernel.local.view.shake.counter == 6);
+	kernel.local.view.shake.counter = 0;
 
 	// Teleport writes BOTH stores: the registry position and the AI 16.16
 	// mirror, with the input-owned view seeded to the new facing.
-	const w::EntityHandle player_h = kernel.player()->handle;
-	kernel.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
-	CHECK(near_equal(kernel.player_position().x, 100.0f, 0.001f));
-	CHECK(near_equal(kernel.player_position().y, 200.0f, 0.001f));
-	CHECK(near_equal(kernel.player_position().z, 5.0f, 0.001f));
-	if (const w::AiEntity *body = kernel.player_ai()) {
+	const w::EntityHandle player_h = kernel.local.player()->handle;
+	kernel.local.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
+	CHECK(near_equal(kernel.local.player_position().x, 100.0f, 0.001f));
+	CHECK(near_equal(kernel.local.player_position().y, 200.0f, 0.001f));
+	CHECK(near_equal(kernel.local.player_position().z, 5.0f, 0.001f));
+	if (const w::AiEntity *body = kernel.local.player_ai()) {
 		CHECK(body->pos[0] == 100 << 16);
 		CHECK(body->pos[1] == 200 << 16);
 		CHECK(body->pos[2] == 5 << 16);
-		CHECK(kernel.input.look_heading == body->heading);
+		CHECK(kernel.local.input.look_heading == body->heading);
 	}
 
 	// set_entity_position / set_entity_health round-trip the same dual store.
 	kernel.world.commands.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
-	CHECK(near_equal(kernel.player_position().x, 50.0f, 0.001f));
-	if (const w::AiEntity *body = kernel.player_ai()) CHECK(body->pos[1] == 60 << 16);
+	CHECK(near_equal(kernel.local.player_position().x, 50.0f, 0.001f));
+	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[1] == 60 << 16);
 	kernel.world.commands.set_entity_health(player_h, 37);
-	CHECK(kernel.player_health() == 37);
-	CHECK(kernel.player()->alive);
-	if (const w::AiEntity *body = kernel.player_ai()) CHECK(body->health == 37);
+	CHECK(kernel.local.player_health() == 37);
+	CHECK(kernel.local.player()->alive);
+	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->health == 37);
 	kernel.world.commands.set_entity_health(player_h, 0);
-	CHECK(kernel.player_health() == 0);
-	CHECK(!kernel.player()->alive);
+	CHECK(kernel.local.player_health() == 0);
+	CHECK(!kernel.local.player()->alive);
 	kernel.world.commands.set_entity_health(player_h, 100);
 
 	// The CanFire verdict on the spawned player: no weapon table was loaded
 	// (no weapon.def in the source), so the local weapon is inactive and the
 	// verdict is a hard no — the same gate the pre-tick stamps onto
 	// inf.aimed_shot_available.
-	CHECK(!kernel.weapon.active);
-	CHECK(!kernel.local_player_can_fire(kernel.player_ai()));
+	CHECK(!kernel.local.weapon.active);
+	CHECK(!kernel.local.local_player_can_fire(kernel.local.player_ai()));
 	kernel.tick_no_net();
-	if (const w::AiEntity *body = kernel.player_ai()) CHECK(!body->inf.aimed_shot_available);
+	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(!body->inf.aimed_shot_available);
 
 	// The baseline restores the post-PreMission world.
 	CHECK(kernel.restore_baseline());

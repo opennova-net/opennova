@@ -219,25 +219,25 @@ void test_cp01_standing_player_is_vertically_stable() {
 	}
 	opennova::testrig::BootOptions options;
 	CHECK(rig.boot(options, error), "CP01 boots for the standing leg");
-	if (!rig.has_local_player() || !rig.has_terrain()) {
+	if (!rig.local.has_local_player() || !rig.has_terrain()) {
 		CHECK(false, "CP01 spawned the player over its terrain");
 		return;
 	}
 	rig.install_weapon("WPN_M4AUTO");
-	rig.input = PlayerInput{};
+	rig.local.input = PlayerInput{};
 	rig.tick(opennova::testrig::ticks_for_seconds(5.0));
-	const float z0 = rig.player_position().z;
-	std::string last_anim = rig.player_anim_key();
+	const float z0 = rig.local.player_position().z;
+	std::string last_anim = rig.local.player_anim_key();
 	std::printf("stand: settled z=%.4f anim=%s — watching 12 mission-s\n", z0, last_anim.c_str());
 	float min_z = z0, max_z = z0;
 	int anim_changes = 0;
 	const int samples = opennova::testrig::ticks_for_seconds(12.0);
 	for (int i = 0; i < samples; ++i) {
 		rig.tick();
-		const float z = rig.player_position().z;
+		const float z = rig.local.player_position().z;
 		min_z = std::min(min_z, z);
 		max_z = std::max(max_z, z);
-		const std::string anim = rig.player_anim_key();
+		const std::string anim = rig.local.player_anim_key();
 		if (anim != last_anim) {
 			++anim_changes;
 			std::printf("stand: anim change #%d: %s -> %s (sample %d)\n", anim_changes, last_anim.c_str(),

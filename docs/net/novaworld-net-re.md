@@ -12480,7 +12480,7 @@ SM state 22 + the 22→16 hand-back) are PORTED — `AiSystem::vehicle_ai_drive`
 the SM's kinematic `apply_locomotion` retires for `physics != 0` vehicles (the motor is
 the only integrator, matching the original split). Pinned by ctest `vehicle_mount`.
 2026-08-06 update (the 00TRg host-defense slice, vehicle-client-movers-re §1.12): the
-**watercraft AUTHORITY mover is PORTED** — `world::tick_watercraft_motor` (the
+**watercraft AUTHORITY mover is PORTED** — `VehicleSystem::tick_watercraft_motor` (the
 `@ 0x48DF8C` input gate, capsize drain `@ 0x48DE84` |Roll/Pitch| > 0x471C7180 →
 −200 hp/tick, player leg via the shared staging, parked hold `@ 0x48E7EE`) +
 `AiSystem::watercraft_ai_drive` (the cbot AI-driver leg `@ 0x48E247..0x48E756`:

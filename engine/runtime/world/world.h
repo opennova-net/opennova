@@ -493,6 +493,11 @@ struct SessionRules {
     // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
     // tracked D-AI-1 residual; defaults clear (SP).
     bool ai_rules_skip_local_player = false;
+    // The retail is_in_session fact: a net session (listen or dedicated) has
+    // been brought up over this world's kernel. The net bring-ups set it; the
+    // bare no-net kernel keeps false. Gates the UseGun null-slot rejection
+    // [orig: Entity_AttachToUseGunSlot @0x546c07].
+    bool session_open = false;
 };
 
 // What the sim produced this tick for someone else to drain: the wire (entity

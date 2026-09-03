@@ -123,12 +123,12 @@ void Simulation::reset_world() {
 	if (kernel_ != nullptr) {
 		kept_seat_specs = std::move(kernel_->seat_specs);
 		kept_mounted_graphics = std::move(kernel_->mounted_graphics);
-		kept_look_settings = kernel_->look_settings;
+		kept_look_settings = kernel_->local.look_settings;
 	}
 	kernel_ = std::make_unique<opennova::mission::MissionKernel>();
 	kernel_->seat_specs = std::move(kept_seat_specs);
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
-	kernel_->look_settings = kept_look_settings;
+	kernel_->local.look_settings = kept_look_settings;
 	kernel_->set_asset_index(
 			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
@@ -359,7 +359,7 @@ bool Simulation::native_environment_snapshot(
 	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
 	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
 	out.fov_degrees = static_cast<int32_t>(
-			opennova::world::player_view_fov_h_deg(kernel_->view, 0, 1.0f));
+			opennova::world::player_view_fov_h_deg(kernel_->local.view, 0, 1.0f));
 	out.sky_height_metres = w.sky_height_q16() >> 16;
 	out.sky_speed = w.cloud_scroll_rate() >> 10;
 	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
@@ -570,7 +570,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 			runtime_->set_world_ready(true);
 			joiner_bridge_.reset_for_load(runtime_->deployment_release_revision());
 			joiner_applied_loadout_revision_ = 0;
-			kernel_->loadout.pending_player_class = -1; // the shell re-applies the kit after each load
+			kernel_->local.loadout.pending_player_class = -1; // the shell re-applies the kit after each load
 			deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
 			// Re-arm the 0x2F submission seam from the carried sim state. The fresh
 			// kernel holds an EMPTY weapon catalog, so this is a deliberate no-op
@@ -829,9 +829,9 @@ bool Simulation::advance_world_tick() {
 	// new-soldier .adm ground), plus the binding's medic-cooldown leg. The
 	// view arbiter's session inputs refresh first (the local-dead bit lives
 	// on the world even without a session).
-	kernel_->view_session_inputs = local_view_session_inputs();
+	kernel_->local.view_session_inputs = local_view_session_inputs();
 	kernel_->tick_no_net(); // its world phases land on the kernel's profile
-	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
+	kernel_->local.tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	if (runtime_profiling_enabled_)
 		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 	return true;
@@ -1145,12 +1145,12 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	if (!kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
-	if (kernel_->player() == nullptr || kernel_->player_ai() == nullptr) {
+	if (kernel_->local.player() == nullptr || kernel_->local.player_ai() == nullptr) {
 		return ERR_UNAVAILABLE;
 	}
 	// The engine owns the full teleport transaction (both position stores, the
 	// input-owned view mirrors, the ladder-latch drop, the resolver reset).
-	kernel_->teleport_local_player(
+	kernel_->local.teleport_local_player(
 			opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y, p_mission_pos.z},
 			p_yaw_deg, p_pitch_deg);
 	return OK;

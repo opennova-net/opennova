@@ -206,13 +206,13 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the local player spawned at the start")) return 1;
+	if (!expect(rig.local.has_local_player(), "the local player spawned at the start")) return 1;
 	if (!expect(rig.collision_attached > 0, "collision instances attached")) return 1;
 	const int ammo_index = rig.world.tables.ammo.index_of(kAmmo);
 	if (!expect(ammo_index >= 0, "ammo.def carries AMMO_M16_556MM")) return 1;
 
-	const w::AiEntity *pai = rig.player_ai();
-	const V player_pos = rig.player_position();
+	const w::AiEntity *pai = rig.local.player_ai();
+	const V player_pos = rig.local.player_position();
 	const double yaw_deg = w::mission_yaw_deg_from_bam_heading(pai->heading);
 	const V eye{player_pos.x, player_pos.y, player_pos.z + kEyeHeight};
 	const double yaw_rad = yaw_deg * 3.14159265358979323846 / 180.0;

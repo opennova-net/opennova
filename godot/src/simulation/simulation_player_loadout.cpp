@@ -218,7 +218,7 @@ bool Simulation::local_player_toggle_mount() {
 	}
 	// The authority's toggle is the kernel's one body (the out-of-session
 	// UseGun rejection, the seat transition, the view/weapon folds).
-	const bool changed = kernel_->toggle_mount();
+	const bool changed = kernel_->local.toggle_mount();
 	if (changed) refresh_local_player_view_effects();
 	return changed;
 }
@@ -227,7 +227,7 @@ TypedArray<AttachLabelRow> Simulation::get_attach_labels() const {
 	TypedArray<AttachLabelRow> out;
 	if (!kernel_) return out;
 	std::vector<opennova::world::AttachLabel> labels;
-	kernel_->collect_attach_labels(labels);
+	kernel_->local.collect_attach_labels(labels);
 	for (const opennova::world::AttachLabel &l : labels) {
 		Ref<AttachLabelRow> row;
 		row.instantiate();
@@ -318,7 +318,7 @@ void Simulation::set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit,
                                        bool p_filter_by_availability) {
 	if (!kernel_) return;
 	std::vector<opennova::world::WeaponKitEntry> kit = kit_rows_from(p_kit);
-	opennova::world::local_loadout_set_spawn_kit(kernel_->world, kernel_->loadout,
+	opennova::world::local_loadout_set_spawn_kit(kernel_->world, kernel_->local.loadout,
 			std::move(kit), p_filter_by_availability);
 	// A promoted kit changes what the joiner's 0x2F pair should carry; re-arm the
 	// seam (no-op for hosts and before the weapon catalog exists).
@@ -330,7 +330,7 @@ int Simulation::get_weapon_availability(const String &p_weapon_name) const {
 	if (!kernel_) return opennova::world::weapon_availability_value::kAllowed;
 	const int idx = kernel_->world.tables.weapons.index_of(p_weapon_name.utf8().get_data());
 	if (idx < 0) return opennova::world::weapon_availability_value::kAllowed;
-	return kernel_->loadout.availability.value_for(idx);
+	return kernel_->local.loadout.availability.value_for(idx);
 }
 
 bool Simulation::set_local_player_class(int p_player_class) {
@@ -343,7 +343,7 @@ bool Simulation::set_local_player_class(int p_player_class) {
 	if (e == nullptr) {
 		// A joiner's shell applies the profile class before L has spawned
 		// (name-match). Latch it; the joiner spawn block stamps the entity.
-		kernel_->loadout.pending_player_class = p_player_class;
+		kernel_->local.loadout.pending_player_class = p_player_class;
 		push_joiner_loadout_kit();
 		return true;
 	}
@@ -377,8 +377,8 @@ bool Simulation::apply_local_player_loadout_rows(
 		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
 		bool p_submit_joiner_request) {
 	if (!kernel_) return false;
-	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->loadout,
-				kernel_->weapon, kernel_->inventory, kernel_->inventory_valid, p_kit,
+	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
+				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
 				p_player_class, /*validate_banned=*/p_submit_joiner_request))
 		return false;
 	// Always re-arm the 0x2F seam after a rebuild settles the equipped combo —
@@ -415,8 +415,8 @@ void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
 	if (!kernel_) return;
-	opennova::world::local_loadout_rebuild(kernel_->world, kernel_->loadout,
-			kernel_->weapon, kernel_->inventory, kernel_->inventory_valid,
+	opennova::world::local_loadout_rebuild(kernel_->world, kernel_->local.loadout,
+			kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid,
 			p_select_spawn_default);
 	push_joiner_loadout_kit();
 }
@@ -432,7 +432,7 @@ bool Simulation::seed_session_kit_from_profile() {
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
 	return opennova::inmatch::seed_session_kit_from_profile(kernel_->world,
-			weapon_profile_, assigned, kernel_->loadout,
+			weapon_profile_, assigned, kernel_->local.loadout,
 			weapon_profile_seeded_side_);
 }
 
@@ -442,7 +442,7 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
 	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
-			weapon_profile_, assigned, kernel_->loadout,
+			weapon_profile_, assigned, kernel_->local.loadout,
 			weapon_profile_seeded_side_))
 		return false;
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
@@ -468,9 +468,9 @@ void Simulation::push_joiner_loadout_kit() {
 	pushing_joiner_loadout_kit_ = true;
 	opennova::inmatch::JoinerConnection::LoadoutKit wire_kit;
 	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, weapon_profile_,
-			runtime_->assigned_team(), kernel_->loadout,
-			kernel_->inventory_valid ? kernel_->inventory.equipped_combo : -1,
-			kernel_->inventory_valid ? &kernel_->inventory : nullptr,
+			runtime_->assigned_team(), kernel_->local.loadout,
+			kernel_->local.inventory_valid ? kernel_->local.inventory.equipped_combo : -1,
+			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
 			wire_kit);
 	runtime_->set_loadout_kit(std::move(wire_kit));
 	pushing_joiner_loadout_kit_ = false;
@@ -669,16 +669,16 @@ void Simulation::apply_joiner_authoritative_loadout() {
 Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 	Ref<PlayerInventory> out;
 	out.instantiate();
-	out->set_valid(kernel_->inventory_valid);
-	out->set_equipped_combo(kernel_->inventory.equipped_combo);
-	out->set_carry_flags(static_cast<int>(kernel_->inventory.carry_flags));
+	out->set_valid(kernel_->local.inventory_valid);
+	out->set_equipped_combo(kernel_->local.inventory.equipped_combo);
+	out->set_carry_flags(static_cast<int>(kernel_->local.inventory.carry_flags));
 	String equipped_name;
 	Dictionary pools;
 	if (kernel_ != nullptr) {
 		const opennova::world::WeaponTable &table = kernel_->world.tables.weapons;
 		for (int32_t combo = 0; combo < opennova::world::weapon_combo::kSlotCount;
 		     ++combo) {
-			const opennova::world::WeaponInventorySlot *s = kernel_->inventory.slot(combo);
+			const opennova::world::WeaponInventorySlot *s = kernel_->local.inventory.slot(combo);
 			if (s == nullptr || s->adm_index < 0) continue;
 			const opennova::world::WeaponTableEntry *def =
 					table.by_index(static_cast<uint8_t>(s->adm_index));
@@ -687,15 +687,15 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 			row.instantiate();
 			row->assign(combo, String::utf8(def->name.c_str()), s->clip);
 			out->add_slot(row);
-			if (combo == kernel_->inventory.equipped_combo)
+			if (combo == kernel_->local.inventory.equipped_combo)
 				equipped_name = String::utf8(def->name.c_str());
 		}
 		for (size_t i = 0; i < table.ammo_class_names.size() &&
-		                   i < kernel_->inventory.pools.size();
+		                   i < kernel_->local.inventory.pools.size();
 		     ++i) {
 			if (table.ammo_class_names[i].empty()) continue;
 			pools[String::utf8(table.ammo_class_names[i].c_str())] =
-					kernel_->inventory.pools[i];
+					kernel_->local.inventory.pools[i];
 		}
 	}
 	out->set_equipped_name(equipped_name);
@@ -706,7 +706,7 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 	TypedArray<WeaponKitEntry> out;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
-			kernel_->loadout.spawn_kit_set ? kernel_->loadout.spawn_kit : opennova::world::weapon_kit_default();
+			kernel_->local.loadout.spawn_kit_set ? kernel_->local.loadout.spawn_kit : opennova::world::weapon_kit_default();
 	for (const opennova::world::WeaponKitEntry &entry : kit) {
 		Ref<WeaponKitEntry> row;
 		row.instantiate();

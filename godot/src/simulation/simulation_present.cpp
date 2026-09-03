@@ -1269,7 +1269,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 	// The per-row tail below adds the live EquippedSlot/Def tests.
 	// [orig: @0x4407f6..0x44084c; sole submit @0x440918]
 	const bool local_first_person_usegun =
-			!kernel_->view.third_person && local_player != nullptr &&
+			!kernel_->local.view.third_person && local_player != nullptr &&
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
@@ -1381,12 +1381,12 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
 			//  Def+0x0c & 0x800 @0x44083f]
 			const bool equipped_parent_slot = mount_row != nullptr &&
-					kernel_->weapon.usegun_slot_active && kernel_->weapon.usegun_mount == h &&
-					kernel_->weapon.usegun_weapon_adm ==
+					kernel_->local.weapon.usegun_slot_active && kernel_->local.weapon.usegun_mount == h &&
+					kernel_->local.weapon.usegun_weapon_adm ==
 							mount_row->primary_weapon_slot_adm;
 			if (mount_def != nullptr &&
 					((mount_def->has_first_person_model_reference &&
-					  kernel_->weapon.first_person_model_adm ==
+					  kernel_->local.weapon.first_person_model_adm ==
 							  mount_row->primary_weapon_slot_adm &&
 					  equipped_parent_slot) ||
 					 (mount_def->flags2 &
@@ -1574,7 +1574,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	// [orig: Entity_RenderVehicleModel @0x4407f6..0x44084c, sole submit @0x440918;
 	//  see docs/world/world-wac-ai-re.md]
 	const bool local_first_person_usegun =
-			!kernel_->view.third_person && local_player != nullptr &&
+			!kernel_->local.view.third_person && local_player != nullptr &&
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	// One row per live pool slot, in registry order — the set the host's own
@@ -1675,11 +1675,11 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
 			//  Def+0x0c & 0x800 @0x44083f; see docs/world/world-wac-ai-re.md]
 			const bool equipped_parent_slot =
-					kernel_->weapon.usegun_slot_active && kernel_->weapon.usegun_mount == h &&
-					kernel_->weapon.usegun_weapon_adm == e.primary_weapon_slot_adm;
+					kernel_->local.weapon.usegun_slot_active && kernel_->local.weapon.usegun_mount == h &&
+					kernel_->local.weapon.usegun_weapon_adm == e.primary_weapon_slot_adm;
 			if (mount_def != nullptr &&
 					((mount_def->has_first_person_model_reference &&
-					  kernel_->weapon.first_person_model_adm == e.primary_weapon_slot_adm &&
+					  kernel_->local.weapon.first_person_model_adm == e.primary_weapon_slot_adm &&
 					  equipped_parent_slot) ||
 					 (mount_def->flags2 &
 					  opennova::world::weapon_flag2::kInvisible) != 0))

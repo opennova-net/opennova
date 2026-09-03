@@ -70,7 +70,7 @@ int Simulation::get_local_player_wire_handle() const {
 // device booleans.
 void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
                                       bool p_lean_left, bool p_lean_right, bool p_jump) {
-	kernel_->set_movement_keys(p_forward, p_back, p_left, p_right,
+	kernel_->local.set_movement_keys(p_forward, p_back, p_left, p_right,
 			p_lean_left, p_lean_right, p_jump);
 }
 
@@ -78,7 +78,7 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 // (the center-lock accumulator, the scoped sensitivity reduction, the prone
 // up-limit) [orig: Input_ProcessMouseAxisBindings @ 0x499680].
 void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
-	kernel_->look(p_dx_px, p_dy_px);
+	kernel_->local.look(p_dx_px, p_dy_px);
 }
 
 void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
@@ -86,14 +86,14 @@ void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 	int s = p_sensitivity;
 	if (s < opennova::world::kMouseSensitivityMin) s = opennova::world::kMouseSensitivityMin;
 	if (s > opennova::world::kMouseSensitivityMax) s = opennova::world::kMouseSensitivityMax;
-	kernel_->look_settings.sensitivity = s;
-	kernel_->look_settings.invert_y = p_invert_y;
+	kernel_->local.look_settings.sensitivity = s;
+	kernel_->local.look_settings.invert_y = p_invert_y;
 }
 
 bool Simulation::request_local_player_stance(Stance p_stance) {
 	// The SELECT gates and the mutual-exclusion latch are the kernel's
 	// [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60].
-	if (!kernel_->request_stance(p_stance)) return false;
+	if (!kernel_->local.request_stance(p_stance)) return false;
 	// A joiner also SENDS the select — the witnessed key handlers emit one C2S
 	// 0x1D with the action id immediately; without it a retail host (and every
 	// other client) never sees this player crouch or go prone.

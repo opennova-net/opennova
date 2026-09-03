@@ -62,9 +62,9 @@ void RetailMissionRig::tick(int count) {
 // --- inmatch::TickTarget ----------------------------------------------------
 
 inmatch::TickOutcome RetailMissionRig::advance_mission_tick(const inmatch::TickInput &in) {
-	input = in.player.movement;
+	local.input = in.player.movement;
 	if (in.player.look_delta_x != 0.0f || in.player.look_delta_y != 0.0f)
-		look(in.player.look_delta_x, in.player.look_delta_y);
+		local.look(in.player.look_delta_x, in.player.look_delta_y);
 	tick();
 	inmatch::TickOutcome out;
 	out.status = inmatch::TickStatus::Ran;

@@ -40,28 +40,28 @@ static_assert(opennova::world::weapon_flag2::kInset ==
 		"kInset drifted from def.h");
 
 void Simulation::request_local_player_weapon_category(WeaponCategory p_category) {
-	if (kernel_->view.binoculars_view_active) return;
+	if (kernel_->local.view.binoculars_view_active) return;
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
 	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
 	//  sim mechanics yet — record note.]
-	if (kernel_->weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
-	if (!kernel_->inventory_valid) return;
+	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
+	if (!kernel_->local.inventory_valid) return;
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
 		return;
 	handle_weapon_switch_outcome(opennova::world::weapon_switch_to_handle(
-			kernel_->world.tables.weapons, kernel_->inventory,
+			kernel_->world.tables.weapons, kernel_->local.inventory,
 			p_category * opennova::world::weapon_combo::kRanksPerCategory,
 			local_weapon_switch_gates()));
 }
 
 void Simulation::request_local_player_weapon_cycle(int p_direction) {
-	if (kernel_->view.binoculars_view_active) return;
+	if (kernel_->local.view.binoculars_view_active) return;
 	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
 	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
-	if (kernel_->weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
-	if (!kernel_->inventory_valid) return;
+	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
+	if (!kernel_->local.inventory_valid) return;
 	handle_weapon_switch_outcome(opennova::world::weapon_cycle_slot(
-			kernel_->world.tables.weapons, kernel_->inventory, p_direction,
+			kernel_->world.tables.weapons, kernel_->local.inventory, p_direction,
 			local_weapon_switch_gates()));
 }
 
@@ -137,7 +137,7 @@ bool Simulation::local_held_weapon_visible(
 		const opennova::world::Entity &p_entity) const {
 	if (!kernel_) return false;
 	return opennova::world::local_held_weapon_visible(kernel_->world, p_entity,
-			kernel_->weapon, kernel_->inventory, kernel_->view.third_person);
+			kernel_->local.weapon, kernel_->local.inventory, kernel_->local.view.third_person);
 }
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
@@ -196,23 +196,23 @@ void Simulation::install_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
 		bool p_allow_same_weapon_rebake) {
 	if (!kernel_ || p_def.is_null()) return;
-	opennova::world::local_weapon_install(kernel_->world, kernel_->weapon,
+	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon,
 			install_data_from_def(p_def->value(), p_clip_seconds),
 			p_preserve_slot_state, p_allow_same_weapon_rebake,
-			kernel_->inventory_valid ? &kernel_->inventory : nullptr, kernel_->view);
+			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, kernel_->local.view);
 }
 
 void Simulation::clear_local_player_weapon() {
-	opennova::world::local_weapon_clear(kernel_->weapon, kernel_->view);
+	opennova::world::local_weapon_clear(kernel_->local.weapon, kernel_->local.view);
 }
 
 void Simulation::set_local_player_first_person_model_available(bool p_available) {
-	kernel_->weapon.first_person_model_adm = 0xFF;
+	kernel_->local.weapon.first_person_model_adm = 0xFF;
 	if (!p_available || !kernel_) return;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player != nullptr)
-		kernel_->weapon.first_person_model_adm = player->equipped_adm_index;
+		kernel_->local.weapon.first_person_model_adm = player->equipped_adm_index;
 }
 
 void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -220,7 +220,7 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 	// This is the ONE funnel both roles feed (apply_frame_input, once per tick),
 	// so the F3 Weapon window's hold is OR'd in here rather than raced against
 	// the shell's own per-frame write.
-	opennova::world::local_weapon_set_input(kernel_->weapon, kernel_->view,
+	opennova::world::local_weapon_set_input(kernel_->local.weapon, kernel_->local.view,
 			p_fire_held || debug_weapon_fire_held_, p_fire_pressed, p_reload_pressed);
 }
 
@@ -230,8 +230,8 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 void Simulation::tick_local_player_weapon() {
 	if (!kernel_) return;
 	opennova::world::LocalWeaponPumpIO io;
-	io.view = &kernel_->view;
-	io.inventory = kernel_->inventory_valid ? &kernel_->inventory : nullptr;
+	io.view = &kernel_->local.view;
+	io.inventory = kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr;
 	io.is_authority = !joiner_;
 	io.self_wire_handle = joiner_bridge_.self_wire_handle();
 	if (joiner_ && runtime_ != nullptr) {
@@ -244,7 +244,7 @@ void Simulation::tick_local_player_weapon() {
 					joiner_bridge_.self_wire_handle(), kernel_->seat_specs);
 		};
 	}
-	opennova::world::local_weapon_pump_tick(kernel_->world, kernel_->weapon, io);
+	opennova::world::local_weapon_pump_tick(kernel_->world, kernel_->local.weapon, io);
 	if (io.fired.valid && joiner_ && runtime_ != nullptr) {
 		// The client-side half of Entity_FireWeaponAndSendPacket: the pump
 		// predicted the round; queue the fixed C2S 0x06 descriptor. The pose
@@ -330,7 +330,7 @@ void Simulation::tick_local_player_weapon() {
 Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 	Ref<PlayerWeaponView> out;
 	out.instantiate();
-	const opennova::world::LocalPlayerWeapon &w = kernel_->weapon;
+	const opennova::world::LocalPlayerWeapon &w = kernel_->local.weapon;
 	out->set_active(w.active);
 	if (!w.active) return out;
 	const opennova::world::WeaponSlotState &active_slot =
@@ -340,7 +340,7 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 	out->set_phase(static_cast<int>(active_slot.phase));
 	out->set_switch_deferred_action(w.switch_deferred_action);
 	out->set_switch_in_flight(w.switch_in_flight);
-	out->set_pending_combo(kernel_->inventory.pending_combo);
+	out->set_pending_combo(kernel_->local.inventory.pending_combo);
 	out->set_anim_key(String::utf8(w.anim_key.c_str()));
 	out->set_anim_variant(w.anim_variant);
 	// The FP clip channel position: gated per-tick advances since the play, not
@@ -563,13 +563,13 @@ TypedArray<PlayerWeaponEvent> Simulation::drain_local_player_weapon_events() {
 	TypedArray<PlayerWeaponEvent> out;
 	const uint32_t now = kernel_ ? kernel_->world.logic_tick : 0;
 	for (const opennova::world::WeaponPresentationEvent &event :
-			kernel_->weapon.events) {
+			kernel_->local.weapon.events) {
 		Ref<PlayerWeaponEvent> row;
 		row.instantiate();
 		row->assign(event, now);
 		out.push_back(row);
 	}
-	kernel_->weapon.events.clear();
+	kernel_->local.weapon.events.clear();
 	return out;
 }
 
@@ -613,8 +613,8 @@ DefWeaponAction *find_action_row(DefWeaponDef *row, int action_id) {
 }  // namespace
 
 const opennova::world::LocalPlayerWeapon *Simulation::native_local_player_weapon() const {
-	if (!kernel_ || !kernel_->weapon.active) return nullptr;
-	return &kernel_->weapon;
+	if (!kernel_ || !kernel_->local.weapon.active) return nullptr;
+	return &kernel_->local.weapon;
 }
 
 const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
@@ -622,30 +622,30 @@ const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
 	// The const_cast is confined here: the finder is shared with the mutating
 	// edits below, and the retained parse is this object's own member.
 	return find_weapon_row(const_cast<DefWeaponsFile &>(kernel_->weapon_defs),
-			kernel_->weapon.def_name);
+			kernel_->local.weapon.def_name);
 }
 
 int Simulation::native_equipped_weapon_adm_index() const {
-	if (!kernel_ || kernel_->weapon.def_name.empty()) return -1;
-	return kernel_->world.tables.weapons.index_of(kernel_->weapon.def_name.c_str());
+	if (!kernel_ || kernel_->local.weapon.def_name.empty()) return -1;
+	return kernel_->world.tables.weapons.index_of(kernel_->local.weapon.def_name.c_str());
 }
 
 const opennova::world::WeaponSlotState *Simulation::native_active_weapon_slot() const {
-	if (!kernel_ || !kernel_->weapon.active) return nullptr;
-	return opennova::world::active_local_weapon_slot(kernel_->world, kernel_->weapon);
+	if (!kernel_ || !kernel_->local.weapon.active) return nullptr;
+	return opennova::world::active_local_weapon_slot(kernel_->world, kernel_->local.weapon);
 }
 
 const char *Simulation::native_weapon_input_block() const {
 	if (!kernel_) return "no world";
 	return opennova::world::local_weapon_input_block_name(
-			opennova::world::local_weapon_input_block(kernel_->world, kernel_->weapon));
+			opennova::world::local_weapon_input_block(kernel_->world, kernel_->local.weapon));
 }
 
 std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 	std::vector<std::string> out;
 	if (!kernel_) return out;
-	out.reserve(kernel_->weapon.clip_rings.size());
-	for (const auto &entry : kernel_->weapon.clip_rings) {
+	out.reserve(kernel_->local.weapon.clip_rings.size());
+	for (const auto &entry : kernel_->local.weapon.clip_rings) {
 		out.push_back(entry.first);
 	}
 	return out;
@@ -654,7 +654,7 @@ std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_start,
 		int p_delay_end, bool p_rebake) {
 	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	if (!weapon.active) return false;
 
 	// Mirror into the retained row AS AUTHORED, so a re-install (an armory
@@ -688,7 +688,7 @@ bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_sta
 bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 		const String &p_text) {
 	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	if (!weapon.active) return false;
 	const CharString utf8 = p_text.utf8();
 	const char *value = utf8.get_data() != nullptr ? utf8.get_data() : "";
@@ -735,7 +735,7 @@ bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 
 bool Simulation::debug_weapon_trigger(int p_trigger) {
 	if (!kernel_) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	// The pump's own gate: input it would zero is refused here instead.
 	if (opennova::world::local_weapon_input_block(kernel_->world, weapon) !=
 			opennova::world::LocalWeaponInputBlock::kNone) {
@@ -747,11 +747,11 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	// p_trigger is devtools::WeaponRequest::Trigger, paired at the drain.
 	switch (p_trigger) {
 		case 0:  // Fire: the press edge, latched until the pump consumes it.
-			kernel_->set_weapon_input(weapon.fire_held, true, false);
+			kernel_->local.set_weapon_input(weapon.fire_held, true, false);
 			return true;
 		case 1:  // Reload: refused exactly where the input dispatcher refuses it.
 			if (!opennova::world::weapon_fsm_reload_allowed(weapon.def, *slot)) return false;
-			kernel_->set_weapon_input(weapon.fire_held, false, true);
+			kernel_->local.set_weapon_input(weapon.fire_held, false, true);
 			return true;
 		case 2:  // The ADS toggle request — the same seam the right button uses.
 			request_local_player_scope_toggle();
@@ -766,10 +766,10 @@ void Simulation::debug_weapon_set_fire_held(bool p_held) { debug_weapon_fire_hel
 
 void Simulation::debug_weapon_arm_trace(bool p_armed) {
 	if (!kernel_) return;
-	opennova::world::weapon_trace_arm(kernel_->weapon, p_armed);
+	opennova::world::weapon_trace_arm(kernel_->local.weapon, p_armed);
 }
 
 void Simulation::debug_weapon_clear_trace() {
 	if (!kernel_) return;
-	opennova::world::weapon_trace_clear(kernel_->weapon);
+	opennova::world::weapon_trace_clear(kernel_->local.weapon);
 }

@@ -4540,7 +4540,7 @@ missions).
 Port notes (`vehicle_attach.cpp`): `VehicleSystem::player_toggle_mount` +
 `find_nearest_free_seat` + `attach_to_seat_index` over our seat model; the
 witnessed constants verbatim; deviations ledgered as D-AI-11. The engine owner
-is `MissionKernel::toggle_mount` (the weapon gate reads the ported weapon
+is `LocalPlayer::toggle_mount` (the weapon gate reads the ported weapon
 FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`
 fact), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
 main_game.gd's USE-ITEM handler

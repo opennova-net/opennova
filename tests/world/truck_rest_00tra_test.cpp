@@ -57,7 +57,7 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.has_terrain(), "the mission terrain loaded (the ground solve needs it)")) return 1;
 
 	while (rig.world.logic_tick < static_cast<uint32_t>(kSettleTick)) rig.tick();

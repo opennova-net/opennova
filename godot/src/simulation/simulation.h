@@ -684,7 +684,7 @@ public:
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
 	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
-	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->stance_latch()); }
+	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->local.stance_latch()); }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
@@ -906,7 +906,7 @@ public:
 	void set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit, bool p_filter_by_availability);
 	// True only after a mission/profile explicitly supplied a spawn kit; the
 	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
-	bool has_explicit_spawn_loadout() const { return kernel_->loadout.spawn_kit_set; }
+	bool has_explicit_spawn_loadout() const { return kernel_->local.loadout.spawn_kit_set; }
 	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
 	// (engine: runtime/world/weapon_inventory.h).
