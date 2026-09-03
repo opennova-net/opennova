@@ -6,7 +6,7 @@
 // getters (get_entity_debug / get_world_entity_debug) assembled. The Godot
 // binding forwards these into typed records and converts to JSON only at the
 // MCP boundary; a joiner's decoded replica section is NET level and lives in
-// net/npruntime/client_replica_card.h.
+// runtime/session/client_replica_card.h.
 #ifndef OPENNOVA_WORLD_INSPECT_H
 #define OPENNOVA_WORLD_INSPECT_H
 

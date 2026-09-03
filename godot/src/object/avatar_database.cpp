@@ -9,7 +9,7 @@
 #include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
-#include <net/npruntime/join_character_profile.h>
+#include <runtime/session/join_character_profile.h>
 #include <net/npwire/character_id.h>
 
 #include <algorithm>

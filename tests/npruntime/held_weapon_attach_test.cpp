@@ -15,7 +15,7 @@
 #include <base/vfs/vfs.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
-#include <net/npruntime/client_replica_present.h>
+#include <runtime/session/client_replica_present.h>
 #include <runtime/anim/aim_overlay.h>
 #include <runtime/simassets/adm_skeletal_clips.h>
 #include <runtime/simassets/collision_resolve.h>

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include <net/npruntime/stat_screen_feed.h>
+#include <runtime/session/stat_screen_feed.h>
 
 using namespace opennova;
 using namespace opennova::np;

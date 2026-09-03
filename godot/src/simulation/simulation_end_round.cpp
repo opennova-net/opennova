@@ -13,8 +13,8 @@
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/end_round_statistics.h>
 #include <runtime/hud/feed_format.h>
-#include <net/npruntime/stat_screen_feed.h>
-#include <runtime/world/game_type.h>
+#include <runtime/session/stat_screen_feed.h>
+#include <base/gameprofile/game_type.h>
 
 #include <algorithm>
 #include <functional>
@@ -80,7 +80,7 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 		v.death_screen = local_death_screen_active();
 		v.local_team = static_cast<int>(runtime_->assigned_team());
 		// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
-		// 0x10000 bit, world/game_type.h; the show callback's witness is
+		// 0x10000 bit, base/gameprofile/game_type.h; the show callback's witness is
 		// stat_screen_feed.h's).
 		v.team_mode = opennova::game_type::is_team(runtime_->game_type());
 		// The round-cycle handoff's session half: the host's post-round linger

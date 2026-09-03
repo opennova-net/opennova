@@ -69,7 +69,7 @@ session. There is no callback lattice and no second legacy frame sequence.
 
 ### Portable session
 
-`engine/net/inmatch/session.*` owns:
+`engine/runtime/session/session.*` owns:
 
 - `inmatch::State` and the allowed transitions;
 - role policy for single player, listen host, joiner, and dedicated host;
@@ -216,9 +216,12 @@ its own pools (its loopback 0x0A is retail's header-only frame, D-NET-140):
 authored rows through the placed present pass, runtime-spawned rows through
 `WirePresentPass`.
 
-`npwire` is the retail compatibility boundary. `npruntime` and `netsim` are
-implementation directories used inside the concrete tick targets, not
-additional public lifecycle layers. The exact end-round exchange pushes
+`npwire` is the retail compatibility boundary and `net/` is wire only (ADR
+0043 d4). The in-match runtime lives above it in `runtime/session` (the
+session, the listen-host frame, the server/client state machines and frame
+loops, the transports) and `runtime/replication` (the world<->wire seam and
+the client replica state); neither is an additional public lifecycle layer.
+The exact end-round exchange pushes
 `0x61` then recipient-specific `0x1D`, followed by requester-only
 `0x2B`/`0x56` pulls in at most 200-byte chunks. The client connection owns the
 pull loop and folds the immutable board into client state.

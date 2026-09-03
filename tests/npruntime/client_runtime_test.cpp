@@ -19,23 +19,23 @@
 //      (NOT the dvxi5 fallback), and a HostClient ClientRuntime folds it off the loopback. Guards that
 //      the host's own local view is no longer starved and anchors correctly.
 
-#include <net/npruntime/charattr_challenge.h>
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/session/charattr_challenge.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/host_session.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_protocol.h>
+#include <runtime/session/server_spawn.h>
+#include <runtime/session/server_tick.h>
 
 #include "host_test_setup.h"
 
-#include <net/netsim/connection.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/idatagram_socket.h>
+#include <runtime/replication/connection.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <net/npwire/idatagram_socket.h>
 #include "common/null_datagram_socket.h"
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

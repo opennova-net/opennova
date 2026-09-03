@@ -6,15 +6,15 @@
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
 // post-round respawn hold [orig: the g_spawn_success_gate check @0x519af6].
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/server_tick.h>
-#include <net/npruntime/end_round_protocol.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_message_dispatch.h>
+#include <runtime/session/server_tick.h>
+#include <runtime/session/end_round_protocol.h>
 
 #include <runtime/mission/event_runtime.h>
 
-#include <net/netsim/loopback_channel.h>
+#include <runtime/session/loopback_channel.h>
 
 #include <net/npwire/replication_model.h>
 #include <net/npwire/ingame_decode.h>
@@ -23,7 +23,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/world/zone_chain.h>

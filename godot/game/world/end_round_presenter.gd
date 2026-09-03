@@ -209,7 +209,7 @@ func _open_stat_screen(sim: Simulation) -> void:
 # The STAT show callback [orig: StatScreen_ShowCallback @0x562840 (ex
 # sub_562840)]: fill the RESULTLIST, then hide the three tab radios for
 # non-team modes (team modes select OVERALL). The team-mode arm is the sim
-# state's `team_mode` (world/game_type.h).
+# state's `team_mode` (base/gameprofile/game_type.h).
 func _populate(sim: Simulation) -> void:
 	var list_id := _driver.widget_id(RESULT_LIST)
 	if list_id < 0:

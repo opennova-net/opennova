@@ -9,7 +9,7 @@
 // deferred promotion (loop wrap / one-shot end via the armed end-notify,
 // @0x40b7db/@0x40b7ad -> @0x40b1ae/@0x40b18f -> @0x40b795/@0x40b7c3).
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

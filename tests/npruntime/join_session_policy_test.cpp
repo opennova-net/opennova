@@ -5,7 +5,7 @@
 // expansion reconcile decision. This locks the admission-frame ORDERING
 // (loss > abort > settle > window > edges) and the edge latches.
 
-#include <net/npruntime/join_session_policy.h>
+#include <runtime/session/join_session_policy.h>
 
 #include <cstdio>
 #include <string>

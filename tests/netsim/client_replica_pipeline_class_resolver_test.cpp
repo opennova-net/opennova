@@ -24,7 +24,7 @@
 //   5. Objective masks likewise commit only after the complete off-wire-gated
 //      16-byte phase-3 body decodes.
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/ingame_decode.h> // FrameUpdate / EntityClass / network_decompress_fixedpoint
 #include <net/npwire/ingame_encode.h> // encode_frame_update / encode_pool_spawn_batch / compress

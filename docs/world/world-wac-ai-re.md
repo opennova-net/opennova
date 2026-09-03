@@ -3795,7 +3795,7 @@ at round end, and what the SP player then SEES. Port surfaces:
 `engine/runtime/wac/vm.cpp` (win/lose + the outcome builtins),
 `engine/runtime/mission/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
 `engine/runtime/world/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
-`engine/net/npruntime/server_tick.cpp` (kill tallies, `humans`, the win-condition
+`engine/runtime/session/server_tick.cpp` (kill tallies, `humans`, the win-condition
 check, the respawn hold), `godot/game/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
@@ -5175,7 +5175,7 @@ pools: `Entity_UpdateAllEntities @ 0x4c2100` drains `DeathPiece_TickAll`
 UNCONDITIONALLY on every peer, so the death chain's kz blasts detonate and
 the pieces fly on a pure client too. Ported: JoinerConnection surfaces both
 tags, `ClientReplicaPipeline::apply_entity_death` folds them (row Health=0 +
-a once-drained record), the joiner world bridge (`engine/net/npruntime/joiner_world_bridge.cpp`) runs
+a once-drained record), the joiner world bridge (`engine/runtime/session/joiner_world_bridge.cpp`) runs
 `destruction_notify_item_damage(world, twin, 4)` on the materialized world
 row, `World::run_logic_tick` runs the explosion/dead-settle/piece drains
 under the MP visual-client predicate, and `mission_presentation.gd` builds the
@@ -6698,7 +6698,7 @@ raw per the partially-witnessed rule): dismount scrub `~0xA000`
 
 The two mover blocks the replica-infantry tails needed, witnessed end to end
 in both org movers. Ported for DECODED rows in
-`engine/net/netsim/client_replica_pipeline.cpp` (`row_water_channel`,
+`engine/runtime/replication/client_replica_pipeline.cpp` (`row_water_channel`,
 `row_deck_ride`, the root suppressions and gravity gate in
 `row_root_motion_tick`) with the resolver-side flags channel in
 `engine/runtime/world/collision_resolve.cpp` (`resolve_replica` `entity_flags`).

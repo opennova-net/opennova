@@ -22,17 +22,17 @@
 // spawn health without a second respawn implementation.
 
 #include <runtime/world/ammo_table_build.h>
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_message_dispatch.h>
+#include <runtime/session/server_tick.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/replication_model.h>

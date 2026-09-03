@@ -15,7 +15,7 @@
 // Deliberately NOTHING net: the no-net tick has headless consumers that must
 // not link the wire stack (the group order — runtime never includes net). The
 // net half — the SP listen bring-up, the local C2S drain, the per-tick
-// session frame — is inmatch::listen_host (engine/net/inmatch/listen_host.h),
+// session frame — is inmatch::listen_host (engine/runtime/session/listen_host.h),
 // which drives this kernel through the public per-tick legs below and
 // interposes at boot through the bringup_net_session hook.
 

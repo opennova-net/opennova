@@ -6,7 +6,7 @@ namespace opennova {
 
 // Classify a ClientHello.pn into the session protocol family the host routes it as. "NOVAWORLDUDP" =
 // the matchmaking lobby container; "JointOperations"/"JOINTOPERATIONS" = the in-match game protocol.
-// The in-match reply dispatch itself lives in engine/net/npruntime (dispatch_session_replies over a
+// The in-match reply dispatch itself lives in engine/runtime/session (dispatch_session_replies over a
 // NapiNPConnection) since P8 retired GameServerRuntime; this stays here as the shared PN classifier
 // used by both the npruntime legs and the standalone server's lobby router.
 enum class SessionProtocolKind {

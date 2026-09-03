@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/npruntime/join_session_policy.h>
+#include <runtime/session/join_session_policy.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -16,7 +16,7 @@ namespace godot {
 // the drive reads simulation state, forwards it here, and executes exactly
 // what the returned flags say (signal emission, the settle call, the mount
 // switch). Every decision, window, latch, and reason text lives in
-// engine/net/npruntime/join_session_policy.cpp.
+// engine/runtime/session/join_session_policy.cpp.
 class NetSessionPolicy : public RefCounted {
 	GDCLASS(NetSessionPolicy, RefCounted)
 

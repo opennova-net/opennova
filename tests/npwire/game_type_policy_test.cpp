@@ -7,8 +7,8 @@
 //  @ 0x57AD40; Config_SetDefaults; dfx2med sub_402770]
 
 #include <formats/mission/bms.h>
-#include <net/npruntime/game_config.h>
-#include <net/npwire/game_type.h>
+#include <runtime/session/game_config.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/session_hello.h>
 
 #include <cstdio>

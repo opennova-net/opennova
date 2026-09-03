@@ -20,14 +20,20 @@
     every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
     the release GDExtension flavour; ImGui headers never leave the group, the
     shell hands the context over as plain pointers via `devtools/imgui_abi.h`).
-  - `net/` — the retail wire/protocol stack and portable in-match control
-    (ADRs 0009–0012, 0019, 0036; Model-B-only): novacrypto, napi, npwire,
-    novaworld, inmatch, plus internal netsim/npruntime implementation
-    directories. `inmatch/session.*` owns lifecycle, role policy, fixed-tick
-    banking, and input consumption over an `inmatch::TickTarget`; Godot orders
-    its own presentation/device pipeline. `world::Match` owns gameplay rules,
-    scoring, clocks, winner evaluation, and the frozen result. Wire code only
-    serializes that result.
+  - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
+    wire): novacrypto, napi, npwire (the in-game codec, the NWU session
+    framing, capture decode, the LAN discovery codec, the datagram-socket
+    seam) and novaworld (the session/gate legs + the service). Nothing under
+    `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
+  - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/session`
+    (ex net/inmatch + net/npruntime: `session.*` owns lifecycle, role policy,
+    fixed-tick banking and input consumption over a `TickTarget`; the
+    listen-host frame; the IDA-faithful server/client state machines and
+    frame loops; the transports) and `runtime/replication` (ex net/netsim:
+    the world<->wire seam, the client replica state and its folds). Godot
+    orders its own presentation/device pipeline. `world::Match` owns gameplay
+    rules, scoring, clocks, winner evaluation, and the frozen result; wire
+    code only serializes that result.
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
@@ -51,20 +57,21 @@
   leaf directly) — `opennova_formats`
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
-  pcapio), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
-  napi, npwire, inmatch, netsim, npruntime + novaworld session/gate), and
-  `opennova_novaworld_service` (the service alone — the ONLY target linking
-  `opennova_sqlite`; the Godot layer (`godot/src`) links `opennova_net`, never the
-  service).
-  `opennova_io` stays header-only INTERFACE. PUBLIC chain: formats
+  pcapio), `opennova_net` (novacrypto, napi, npwire + novaworld session/gate — the
+  wire), `opennova_runtime` (the rest of runtime/, including `session` and
+  `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
+  target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
+  `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
+  `opennova_io` stays header-only INTERFACE. PUBLIC chain (ADR 0043 d4): formats
   links io, base links formats (base deliberately sits ABOVE formats because vfs
-  parses pff/scr/bfc1),
-  runtime links base, net links runtime, the service links net. The ADR 0024 family
-  groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
-  (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
-  `runtime/terrain/` prefix is fully forbidden; the seam is terrain_query's
-  `<runtime/terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
-  containment.
+  parses pff/scr/bfc1), net links base, runtime links net, the service links net;
+  `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the
+  sqlite containment. The ADR 0024 family groups are deleted as subsumed; ADR
+  0020's terrain seam is include-level (`scripts/lint/include_graph_check.py` —
+  for session/replication/wac/mission/world the `runtime/terrain/` prefix is fully
+  forbidden; the seam is terrain_query's `<runtime/terrain_query/...>` headers),
+  and every runtime lib but session/replication is NET-AGNOSTIC (no `net/`,
+  `runtime/session/` or `runtime/replication/` include — the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every
@@ -111,7 +118,8 @@
   turn a parity test green (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
   The full writer-parity gate is writer from scratch + roundtrip test + retail-corpus
   byte sweep where a corpus exists + a ledgered D-entry when output legitimately differs.
-- The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`, `engine/net/netsim`) are
+- The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`) and the
+  replication seam (`engine/runtime/replication`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.

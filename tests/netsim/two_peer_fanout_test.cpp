@@ -13,13 +13,13 @@
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
-#include <net/netsim/connection.h>
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
 

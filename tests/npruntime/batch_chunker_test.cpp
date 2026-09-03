@@ -2,7 +2,7 @@
 // factored out of server_initial_state.cpp's emit_paged_pool. Verifies conventional pre-write paging,
 // retail's per-pool post-write guard, exact tile pages, lone oversized records, budget, and cursor resume.
 
-#include <net/npruntime/batch_chunker.h>
+#include <runtime/session/batch_chunker.h>
 
 #include <cstddef>
 #include <cstdint>

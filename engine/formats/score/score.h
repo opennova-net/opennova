@@ -19,7 +19,7 @@
 //     9   | AAS   | 65552       10 | CAC   | 327696   11 | DM  | g_GameType == 0
 //
 // The index-2 predicate is literally `game_type::is_waypoint_family(g) &&
-// game_type::is_objective(g)` (engine/net/npwire/game_type.h). Index 12 exists in
+// game_type::is_objective(g)` (engine/base/gameprofile/game_type.h). Index 12 exists in
 // the ladder (g_GameType == 8) but the loader's own `score_type_index <= 11`
 // guard drops it, and the shipped file carries only 12 blocks — so it can never
 // resolve. Retail's two COOP blocks (0 and 2) are byte-identical in the shipped

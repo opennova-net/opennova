@@ -13,7 +13,7 @@
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/protocol_message.h>
-#include <net/npruntime/host_session.h>
+#include <runtime/session/host_session.h>
 
 namespace opennova {
 class ConnectionManager;

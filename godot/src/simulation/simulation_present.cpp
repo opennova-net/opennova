@@ -12,18 +12,18 @@
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
 #include "simulation/entity_row.h"  // one typed entity-directory row
 
-#include <net/npruntime/client_replica_card.h> // the joiner's decoded replica section
-#include <net/npruntime/minimap_markers.h> // the retained marker rows (bank walk + local restore)
+#include <runtime/session/client_replica_card.h> // the joiner's decoded replica section
+#include <runtime/session/minimap_markers.h> // the retained marker rows (bank walk + local restore)
 #include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
-#include <net/npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
+#include <runtime/session/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
 
-#include <net/netsim/client_state.h> // minimap_team_argb (the ONE palette home)
-#include <net/netsim/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
+#include <runtime/replication/client_state.h> // minimap_team_argb (the ONE palette home)
+#include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <runtime/world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
@@ -737,7 +737,7 @@ Ref<TracerRibbonFrame> Simulation::compile_tracer_ribbons(const PackedFloat32Arr
 // The typed entity inspection API (ADR 0042 d5): the directory join and the
 // per-entity card are engine facts (world/inspect.h); this binding forwards
 // and converts into the typed records. The joiner's decoded replica section
-// is the npruntime card (net/npruntime/client_replica_card.h).
+// is the npruntime card (runtime/session/client_replica_card.h).
 TypedArray<EntityRow> Simulation::entity_directory() const {
 	TypedArray<EntityRow> out;
 	if (!kernel_) return out;

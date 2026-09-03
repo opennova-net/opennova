@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <runtime/hud/feed_format.h>
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_message_id.h>
 
 using namespace opennova;

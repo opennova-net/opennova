@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <net/npruntime/client_replica_card.h>
+#include <runtime/session/client_replica_card.h>
 #include <runtime/world/inspect.h>
 
 namespace godot {

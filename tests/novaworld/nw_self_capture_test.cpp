@@ -32,11 +32,11 @@
 // the same commit (the newly implemented tag, or its D-NET entry) — never
 // regenerate to make an unexplained diff pass.
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
 
-#include <net/netsim/idatagram_socket.h>
-#include <net/netsim/loopback_channel.h>
+#include <net/npwire/idatagram_socket.h>
+#include <runtime/session/loopback_channel.h>
 
 #include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
 #include <net/npwire/ingame_message_catalog.h> // ingame_message_name

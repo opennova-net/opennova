@@ -18,8 +18,8 @@
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/joiner_connection.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/joiner_connection.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>

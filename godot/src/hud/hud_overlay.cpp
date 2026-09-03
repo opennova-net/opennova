@@ -10,7 +10,7 @@
 #include "terrain/terrain_data.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
-#include <net/npwire/game_type.h> // the conquest arm of the zone panel
+#include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
 #include <godot_cpp/classes/image.hpp>
 #include <base/io/fixed.h>

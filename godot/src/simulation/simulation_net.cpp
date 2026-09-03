@@ -11,16 +11,16 @@
 #include <cmath>
 #include <cstring>
 
-#include <net/npruntime/server_initial_state.h> // install_mission_location_names
-#include <net/npruntime/server_spawn.h> // Server_SetPlayerSpectator
-#include <net/npruntime/session_status.h>
+#include <runtime/session/server_initial_state.h> // install_mission_location_names
+#include <runtime/session/server_spawn.h> // Server_SetPlayerSpectator
+#include <runtime/session/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
-#include <net/netsim/client_scoreboard_view.h> // the Tab board's draw-time projection
+#include <runtime/replication/client_scoreboard_view.h> // the Tab board's draw-time projection
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
@@ -186,7 +186,7 @@ private:
 } // namespace
 
 // P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
-// (engine/net/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
+// (engine/runtime/session) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
 // longer drift. Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
@@ -258,7 +258,7 @@ void Simulation::host_pump() {
 	}
 }
 
-// host_pump's dispatch_event + admit_peer were promoted into engine/net/npruntime (np::dispatch_event /
+// host_pump's dispatch_event + admit_peer were promoted into engine/runtime/session (np::dispatch_event /
 // np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
 // the Godot binding and the headless server can no longer drift.
 

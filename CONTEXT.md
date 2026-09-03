@@ -160,7 +160,7 @@ The two stable in-match boundaries and the gameplay model (ADR 0036). The **wire
 codec** (`engine/net/npwire`, ADR 0019) is the retail compatibility contract and
 encodes/decodes the byte stream; its message catalog is the single source of
 truth (ADR 0013). The **in-match session**
-(`opennova::inmatch::Session`, `engine/net/inmatch`) owns lifecycle, role,
+(`opennova::inmatch::Session`, `engine/runtime/session`) owns lifecycle, role,
 fixed cadence, retained input, and tick outcomes. The authoritative **Match**
 (`world::Match`) owns rules, player/team statistics, clock, winner evaluation,
 and the frozen end-round result. `npruntime` and `netsim` are implementation

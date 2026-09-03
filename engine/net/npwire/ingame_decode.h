@@ -11,7 +11,7 @@
 // Single decoder shared between:
 //   - tests/novaworld (the inline-pcap and fixture replays)
 //   - apps/nw_pp                                   (pretty-printer)
-//   - engine/net/npruntime + engine/net/netsim                 (the in-match runtime's fold paths)
+//   - engine/runtime/session + engine/runtime/replication                 (the in-match runtime's fold paths)
 //   - any future replay tool                       (re-emit captured C2S)
 //
 // Convention: every conditional field is left default-constructed when its

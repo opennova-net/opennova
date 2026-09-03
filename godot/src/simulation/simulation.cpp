@@ -12,7 +12,7 @@
 #include <base/io/fixed.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
+#include <runtime/session/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 

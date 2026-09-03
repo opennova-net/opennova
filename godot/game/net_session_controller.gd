@@ -254,7 +254,7 @@ func _cancel_spectator_probe() -> void:
 # Retail exposes this decision after enumeration whenever P2 bit 0x2000 is
 # set. The password control appears only with P2 bit 0x4000; Player never sends
 # JSPP. The witnessed BuildFlags bits live engine-side
-# (engine/net/npruntime/server_initial_state.cpp; docs/net/novaworld-net-re.md
+# (engine/runtime/session/server_initial_state.cpp; docs/net/novaworld-net-re.md
 # section 5.0e).
 func _show_join_role_prompt(target: JoinTarget) -> void:
 	_dismiss_join_role_prompt()

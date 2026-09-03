@@ -1,4 +1,4 @@
-#include <net/npruntime/client_runtime.h>
+#include <runtime/session/client_runtime.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>

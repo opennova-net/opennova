@@ -8,7 +8,7 @@
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
-#include <net/npruntime/napi_np_server_ctx.h>
+#include <runtime/session/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include "rtxt/rtxt_string_file.h"

@@ -34,7 +34,7 @@ path) LANDED — and R1 was then superseded by
 ladder state records it): PR #465 first rearchitected the lifecycle and
 frame pipeline. [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) then
 completed the no-compat cutover to portable `opennova::inmatch::Session` in
-`engine/net/inmatch`, made `world::Match` the shared all-retail-mode/co-op gameplay
+`engine/runtime/session`, made `world::Match` the shared all-retail-mode/co-op gameplay
 owner, and demoted `npruntime`/`netsim` from public layers to implementation
 directories. Flag-family gameplay now consumes the collision owner's exact
 MoveCB/non-Powerup contact stream; the former gameplay radius scan is deleted
@@ -76,7 +76,7 @@ the campaign is finished when both hold only documented seam contracts.
 closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
 CLOSED), and its campaign LANDED (PR #587): the mission kernel
 (`engine/runtime/mission/mission_kernel`) + listen-host frame
-(`engine/net/inmatch/listen_host`) promoted from the retail-mission rig with
+(`engine/runtime/session/listen_host`) promoted from the retail-mission rig with
 `Simulation`, `nw_server` and the ctests as the three embedders, the
 `world::inspect` typed records + the typed debug-control table behind MCP and
 F3, and the F3 Entities window as the records-in/requests-out template. The
@@ -126,7 +126,7 @@ Each domain's next step is named in its own record, not centrally:
 | Domain | Open rows live in | The record that names the next step |
 |---|---|---|
 | World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§32); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
-| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/net/npruntime/ROADMAP.md` |
+| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/runtime/session/ROADMAP.md` |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
 | Render (materials, order, lighting, occlusion) | ledger § Render — draw order + § Render — occlusion (the materials/state and lighting tables hold no open rows) | [render/README.md](render/README.md) |
 | Terrain / foliage / tiles | ledger § Terrain, Foliage (§ Tiles holds no open rows: D-TIL-1..4 FIXED) | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
@@ -136,7 +136,7 @@ Each domain's next step is named in its own record, not centrally:
 Work that is **not** a parity divergence — ONED and OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
-(the NovaWorld-integration era), `engine/net/npruntime/ROADMAP.md`,
+(the NovaWorld-integration era), `engine/runtime/session/ROADMAP.md`,
 [oned/editor-layer-program.md](oned/editor-layer-program.md),
 [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md),
 [oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), and

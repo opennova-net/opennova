@@ -2,13 +2,13 @@
 // retail S2C lifecycle seam. The conversion tick broadcasts 0x59 to every
 // in-match remote (never the host loopback); the removal tick broadcasts 0x12.
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_tick.h>
 
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>

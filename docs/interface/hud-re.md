@@ -2042,7 +2042,7 @@ the system ring — behind ONE shared gate: the CHAT declutter mask bit
   WITHOUT advancing the row]`) shows only a wrapped message's last line. The
   timers of all 40 slots of the four buffers decrement (floor 0) once per tick
   `[orig: Input_DecrementCooldownTimers @0x498440 from Game_ProcessMainFrame
-  @0x5267a6]`. The sink is the S2C 0x14 fold (`engine/net/netsim/
+  @0x5267a6]`. The sink is the S2C 0x14 fold (`engine/runtime/replication/
   client_replica_feed.cpp` → `ClientChatLine{channel, sender_slot, text}`)
   routed by `[orig: Chat_DispatchToChannel @0x42b910]` — NO local-team colour
   term: 0 and ≥ 15 → the SYSTEM ring white; 1/4/5 → CHAT `g_hudColorTable[3]`;

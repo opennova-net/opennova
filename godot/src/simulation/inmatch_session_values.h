@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <net/inmatch/session.h>
+#include <runtime/session/session.h>
 
 namespace godot {
 

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <net/npruntime/lan_discovery.h>
+#include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>

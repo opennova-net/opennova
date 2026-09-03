@@ -5,21 +5,21 @@
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::entity_flags (the §1 wiring), the F3 self-match field.
 
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/napi_np_protocol.h>
+#include <runtime/session/server_session.h>
+#include <runtime/session/server_spawn.h>
+#include <runtime/session/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/loopback_channel.h>
 
 #include <net/npwire/ingame_decode.h> // OrganicSpawnRecord / OrganicSpawnBatch
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
-#include <runtime/world/game_type.h>
-#include <net/npwire/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
+#include <base/gameprofile/game_type.h>
+#include <base/gameprofile/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>

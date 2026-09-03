@@ -5,7 +5,7 @@
 #ifndef OPENNOVA_TEST_NULL_DATAGRAM_SOCKET_H
 #define OPENNOVA_TEST_NULL_DATAGRAM_SOCKET_H
 
-#include <net/netsim/idatagram_socket.h>
+#include <net/npwire/idatagram_socket.h>
 
 #include <cstddef>
 #include <cstdint>

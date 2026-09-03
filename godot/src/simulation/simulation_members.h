@@ -193,7 +193,7 @@ private:
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
 	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
 	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
-	// start_host_session's gating (engine: net/inmatch/listen_host.cpp).
+	// start_host_session's gating (engine: runtime/session/listen_host.cpp).
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell (which owns the resource
@@ -219,7 +219,7 @@ private:
 	PackedFloat32Array present_snapshot_from_client_replicas() const;
 	// Build the PF_* present buffer from the host's own pools: retail's listen
 	// host/SP local client reads process memory and its loopback 0x0A carries no
-	// entity records (engine: net/netsim/connection_fan.cpp).
+	// entity records (engine: runtime/replication/connection_fan.cpp).
 	PackedFloat32Array present_snapshot_from_world() const;
 	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
 	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
@@ -234,7 +234,7 @@ private:
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
 	// the boot's role hook; runtime_ is in the P7 block below). joiner_pump drives the connect legs +
 	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
-	// runs run_logic_tick(false), remotes render wire-direct. (engine: net/npruntime/joiner_connection.h)
+	// runs run_logic_tick(false), remotes render wire-direct. (engine: runtime/session/joiner_connection.h)
 	bool joiner_ = false;
 	// The F3 Weapon window's held-trigger latch (OR'd into per-tick weapon input).
 	bool debug_weapon_fire_held_ = false;
@@ -243,7 +243,7 @@ private:
 	std::string join_spectator_password_;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): frame sequence, latches
 	// (started/spawned/redeploy/tripwire), wire-header materializer, and per-replica resolver
-	// state live in engine/net/npruntime; this binding supplies the shell legs as PumpHooks.
+	// state live in engine/runtime/session; this binding supplies the shell legs as PumpHooks.
 	opennova::np::JoinerWorldBridge joiner_bridge_;
 	// The shell-asset leg of the bridge's materialize phase: rebuild the
 	// collision/occlusion/trait/seat caches for the changed streamed rows.
@@ -299,7 +299,7 @@ private:
 	// latch lives on the world-typed loadout aggregate
 	// (kernel_->loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
-	// spawn performs. (engine: net/npruntime/host_session.h)
+	// spawn performs. (engine: runtime/session/host_session.h)
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 
@@ -308,7 +308,7 @@ private:
 	// request_stance / look_settings); this binding only converts device
 	// input and routes the joiner's wire edges.
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
-	// iff the soldier may fire it. (engine: net/npruntime/client_replica_present.h)
+	// iff the soldier may fire it. (engine: runtime/session/client_replica_present.h)
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
 	// The M-cycle map mode + the two radar zooms — the engine-side state
 	// machine carries the retail lifecycle (cycle, zoom routing, spawn
@@ -396,16 +396,16 @@ private:
 				kernel_->world, kernel_->weapon,
 				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
 	}
-	// Player_InitPlayer's weapon leg (engine: net/npruntime/host_session.h); shared by table load,
+	// Player_InitPlayer's weapon leg (engine: runtime/session/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: net/npruntime/loadout_submit.h). False when
+	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/session/loadout_submit.h). False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
-	// a later S2C 0x50 reassignment (engine: net/npruntime/joiner_connection.cpp).
+	// a later S2C 0x50 reassignment (engine: runtime/session/joiner_connection.cpp).
 	bool reseed_session_kit_on_side_change();
 	// Which side the resident kit buffer was last copied from (-1 = never seeded).
 	int weapon_profile_seeded_side_ = -1;
@@ -447,7 +447,7 @@ private:
 	// hud::HudMapControl::on_local_player_dead).
 	void tick_hud_map_death_gate();
 
-	// --- P7: the in-match runtime as a THIN ADAPTER over engine/net/npruntime ----------------
+	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/session ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
 	// listen server (NapiNPServerCtx ctx_ + its own loopback client over host_loop_, driven by
 	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
@@ -460,7 +460,7 @@ private:
 	// loopback + the np host owner the ONE listen frame
 	// (inmatch::listen_host::frame) drives — ctx + per-peer transports +
 	// now_tick + serve_and_play, shared with host_session_pump
-	// (engine/net/npruntime). MUST be declared before the aliases and before
+	// (engine/runtime/session). MUST be declared before the aliases and before
 	// runtime_ (the HostClient runtime references host_state_.host_loop). The
 	// HostClient/Joiner ClientRuntime stays a binding member (runtime_ below,
 	// ADR 0042 d3: no headless joiner consumer; the binding also folds the
@@ -495,7 +495,7 @@ private:
 	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
 	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
 	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump (engine: net/npruntime/charattr_challenge.cpp).
+	// after each net pump (engine: runtime/session/charattr_challenge.cpp).
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();

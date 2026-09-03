@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/npruntime/lan_discovery.h>
+#include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
 
 #include <godot_cpp/classes/node.hpp>

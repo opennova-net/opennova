@@ -10,14 +10,14 @@
 // are the broadcast path); a pre-spawn connection receives nothing; a malformed short 0x25 is
 // dropped without any send.
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_message_dispatch.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

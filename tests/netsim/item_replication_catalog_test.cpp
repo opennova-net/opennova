@@ -1,4 +1,4 @@
-#include <net/netsim/item_replication_catalog.h>
+#include <runtime/replication/item_replication_catalog.h>
 
 #include <formats/def/def.h>
 

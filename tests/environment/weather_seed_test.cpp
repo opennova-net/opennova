@@ -6,7 +6,7 @@
 
 #include "netsim/conn_fan_test_util.h"
 
-#include <net/netsim/loopback_channel.h>
+#include <runtime/session/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/world/world.h>

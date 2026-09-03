@@ -1,10 +1,10 @@
-// Pins the character registry (net/npruntime/character_registry.h) — the
+// Pins the character registry (runtime/session/character_registry.h) — the
 // packed-id decode with its alignment gate, the per-side default walk — and
 // the joiner's profile-to-wire projection (join_character_profile.h): the
 // fresh-profile defaults, a persisted side selection, the class-byte rule.
 
-#include <net/npruntime/character_registry.h>
-#include <net/npruntime/join_character_profile.h>
+#include <runtime/session/character_registry.h>
+#include <runtime/session/join_character_profile.h>
 
 #include <formats/avatars/avatars.h>
 

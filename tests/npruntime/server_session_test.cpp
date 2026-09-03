@@ -2,18 +2,18 @@
 // table and the socketless transport mode. The IDA-faithful in-process listen-server bring-up
 // state writes [orig: SinglePlayer_StartMission @0x561af0].
 
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/joiner_connection.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/session_status.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/session/server_session.h>
+#include <runtime/session/host_session.h>
+#include <runtime/session/joiner_connection.h>
+#include <runtime/session/server_message_dispatch.h>
+#include <runtime/session/server_spawn.h>
+#include <runtime/session/session_status.h>
+#include <runtime/session/server_tick.h>
 
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/idatagram_socket.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/session/loopback_channel.h>
+#include <net/npwire/idatagram_socket.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/entity_class.h>
@@ -26,7 +26,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/vehicle_attach.h>

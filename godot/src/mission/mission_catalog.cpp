@@ -1,7 +1,7 @@
 #include "mission/mission_catalog.h"
 
 #include <runtime/mission/mission_catalog.h>
-#include <net/npwire/game_type.h>
+#include <base/gameprofile/game_type.h>
 
 #include "resource_index/resource_root.h"
 

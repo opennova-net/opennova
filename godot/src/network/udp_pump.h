@@ -27,7 +27,7 @@ class UdpDatagram;
 // A HOST binds a listen port (bind_listen) and learns each joiner's address from the source of
 // its first datagram; a JOINER dials the host (dial). Simulation owns the pump and drives
 // poll() before its receive step and the sends after its emit, routing each datagram to the
-// right engine/net/netsim UdpSessionTransport by source address (a later increment). This is a
+// right engine/runtime/replication UdpSessionTransport by source address (a later increment). This is a
 // RefCounted, not a Node — it never self-processes; its owner drives the cadence (the witnessed
 // poll-before-logic / send-after order, [orig: Game_ProcessMainFrame @0x5263f0, see docs/net/novaworld-net-re.md]).
 class UdpPump : public RefCounted {

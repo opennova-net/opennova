@@ -19,7 +19,7 @@
 // the hull away and through a heading change. The gun must recompose onto the
 // live hull every tick — rigid carrier-local offset, rotating with the hull.
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>

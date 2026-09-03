@@ -3,7 +3,7 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <net/npruntime/wire_present.h>
+#include <runtime/session/wire_present.h>
 #include <runtime/world/present_rows.h>
 #include <runtime/world/tick_accumulator.h>
 
