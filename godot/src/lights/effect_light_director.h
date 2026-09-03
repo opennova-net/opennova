@@ -32,6 +32,7 @@ namespace godot {
 class Camera3D;
 class EnvLightValues;
 class MissionEnvironment;
+class MissionRoot;
 class Simulation;
 class Weather;
 
@@ -180,7 +181,7 @@ private:
 	};
 
 	Node *_world() const;
-	Object *_runtime() const;
+	MissionRoot *_runtime() const;
 	Ref<Simulation> _sim() const;
 	MissionEnvironment *_environment() const;
 	Weather *_weather() const;

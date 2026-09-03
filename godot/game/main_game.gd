@@ -534,7 +534,7 @@ func _on_end_screen_exit() -> void:
 	_teardown_world_to_menu()
 
 
-func get_runtime() -> MissionPresentation:
+func get_runtime() -> MissionRoot:
 	return _world.get_runtime() if _world != null else null
 
 

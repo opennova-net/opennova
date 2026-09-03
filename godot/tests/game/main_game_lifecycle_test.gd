@@ -6,35 +6,34 @@ extends GutTest
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 # The packed shell recipe (the retail-shaped archive layout, the baked Tmap
 # terrain, the lifecycle-only weapon.def) lives on WorldFixture.boot_shell.
 
 
 # The shell the entity-discovery adapter reads: a GameShell answering one real
-# MissionPresentation (rule 11's sanctioned fake: public verbs only).
+# MissionRoot (rule 11's sanctioned fake: public verbs only).
 class EntityRuntimeShell:
 	extends GameShell
 
-	var runtime: MissionPresentation = null
+	var runtime: MissionRoot = null
 
-	func get_runtime() -> MissionPresentation:
+	func get_runtime() -> MissionRoot:
 		return runtime
 
 
-# A real MissionPresentation over an in-memory mission: two authored organics
+# A real MissionRoot over an in-memory mission: two authored organics
 # plus the auto-spawned host player supply the AI/registry rows the discovery
 # pages walk (the sim-double era ended when discovery became the engine's typed
 # Simulation.entity_directory()).
-func _entity_runtime(parent: Node) -> MissionPresentation:
+func _entity_runtime(parent: Node) -> MissionRoot:
 	var mission := MissionData.new()
 	assert(mission.create_default() == OK)
 	mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
 	mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
 	var container := Node3D.new()
 	parent.add_child(container)
-	var runtime := MissionPresentation.new()
+	var runtime := MissionRoot.new()
 	parent.add_child(runtime)
 	runtime.setup(mission, container)
 	return runtime
@@ -1115,7 +1114,8 @@ func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_true(world.visible, "the loaded world is presented")
 	assert_false(menu_shell.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
-	assert_not_null(world.get_node_or_null("MissionObjects"))
+	assert_not_null(world.get_node_or_null("MissionRoot/MissionObjects"),
+			"the placed container is the mission root's child")
 	assert_gt(terrain.get_visible_patch_count(), 0,
 			"the loaded mission made raw RenderingServer terrain patches visible")
 
@@ -1131,7 +1131,7 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"raw terrain RIDs obey the hidden GameWorld ancestor")
 	assert_true(world.get_current_frame_clear_color().is_equal_approx(boot_clear),
 			"the mission sky clear is restored to the boot/menu frame clear")
-	assert_null(world.get_node_or_null("MissionObjects"),
+	assert_null(world.get_node_or_null("MissionRoot"),
 			"no mission presentation subtree remains")
 
 

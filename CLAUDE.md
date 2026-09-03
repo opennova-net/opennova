@@ -184,7 +184,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   before engine work.
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
-  it plus the ADRs before touching `mission_presentation.gd`,
+  it plus the ADRs before touching `godot/src/mission/mission_root.cpp`,
   `game_frame_pipeline.gd`, the native present appliers
   (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — ONED,

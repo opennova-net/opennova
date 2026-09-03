@@ -27,6 +27,7 @@ class HostSessionOptions : public RefCounted {
 	int bind_port_ = 64220;
 	int max_players_ = 16;
 	bool serve_and_play_ = true;
+	bool game_type_auto_ = false;
 	String game_root_;
 
 protected:
@@ -113,6 +114,12 @@ public:
 	void set_max_players(int p_value) { max_players_ = p_value; }
 	bool get_serve_and_play() const { return serve_and_play_; }
 	void set_serve_and_play(bool p_value) { serve_and_play_ = p_value; }
+	// Derive g_GameType from the loaded mission's attrib mode at load
+	// (HostSessionConfig.game_type_auto): the mission root resolves it through
+	// NetProtocol.game_type_for_mission_mode before configure_host_session,
+	// which never reads it.
+	bool get_game_type_auto() const { return game_type_auto_; }
+	void set_game_type_auto(bool p_value) { game_type_auto_ = p_value; }
 	String get_game_root() const { return game_root_; }
 	void set_game_root(const String &p_root) { game_root_ = p_root; }
 

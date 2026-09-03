@@ -25,16 +25,16 @@ func test_joiner_network_diagnostics_are_explicitly_opt_in() -> void:
 class RuntimeShell:
 	extends GameShell
 
-	var runtime: MissionPresentation = null
+	var runtime: MissionRoot = null
 
-	func get_runtime() -> MissionPresentation:
+	func get_runtime() -> MissionRoot:
 		return runtime
 
 
 func test_the_debug_control_table_exposes_the_switch_as_a_net_check() -> void:
-	# A real MissionPresentation over an in-memory default mission owns the
+	# A real MissionRoot over an in-memory default mission owns the
 	# Simulation the row writes through.
-	var runtime: MissionPresentation = WorldFixture.boot_mission_data(
+	var runtime: MissionRoot = WorldFixture.boot_mission_data(
 			self, WorldFixture.default_mission(0))
 	var sim: Simulation = runtime.get_sim()
 	assert_not_null(sim, "the runtime owns a live Simulation")

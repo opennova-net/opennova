@@ -357,7 +357,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	assert_not_null(mission_objects)
 	if mission_objects == null:
 		return
-	var rt = preload("res://game/world/mission_presentation.gd").new()
+	var rt = MissionRoot.new()
 	add_child_autofree(rt)
 	var model_options := MissionSetupOptions.new()
 	model_options.resource_root = root
@@ -366,7 +366,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	model_options.playable = true
 	assert_gt(int(rt.setup(mission, mission_objects, model_options)), 0)
 	assert_true(rt.tick())
-	var carrier_model := rt.get_registry().resolve(
+	var carrier_model := rt.get_entity_index().resolve(
 			int(placed.get("bms_id", 0)),
 			MissionData.KIND_ITEM,
 			int(placed.get("index", 0))) as ObjectModel
@@ -467,7 +467,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if mission_objects == null:
 		return
 
-	var rt = preload("res://game/world/mission_presentation.gd").new()
+	var rt = MissionRoot.new()
 	add_child_autofree(rt)
 	var node_options := MissionSetupOptions.new()
 	node_options.resource_root = root
@@ -476,7 +476,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	node_options.playable = true
 	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
 	assert_true(rt.tick())
-	var carrier_node := rt.get_registry().resolve(
+	var carrier_node := rt.get_entity_index().resolve(
 			int(placed.get("bms_id", 0)),
 			MissionData.KIND_ITEM,
 			int(placed.get("index", 0))) as Node3D

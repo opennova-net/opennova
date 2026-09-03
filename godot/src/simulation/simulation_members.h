@@ -42,7 +42,9 @@ private:
 	opennova::inmatch::LocalRole local_role_;
 	opennova::inmatch::HostRole host_role_;
 	opennova::inmatch::JoinerRole joiner_role_;
-	Callable session_tick_sink_;
+	// The C++ TickSink (simulation/tick_sink.h) the presentation owner
+	// installs around its own frame call (MissionRoot); null outside one.
+	TickSink *session_tick_sink_ = nullptr;
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
@@ -248,9 +250,6 @@ private:
 	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
 	// Empty on a host or before the world stream's static pools completed.
 	Array get_streamed_placement_records() const;
-	// Placed identities retired since the last take (the slot vanished or was
-	// re-typed): the shell hides their placed representation.
-	PackedInt32Array take_retired_placement_ids();
 	// The env-gated ~1 Hz tripwire print (the role owns the sampled state and
 	// raises the one-shot the observer's after_tick consumes).
 	void print_joiner_net_diagnostic_sample();

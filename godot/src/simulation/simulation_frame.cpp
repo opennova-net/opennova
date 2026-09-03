@@ -3,6 +3,7 @@
 // engine/runtime/inmatch. Godot supplies one synchronous typed tick sink so its
 // presentation devices consume a tick before the next catch-up tick runs.
 #include "simulation/simulation_internal.h"
+#include "simulation/tick_sink.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -149,21 +150,17 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 		frame_sim_us_ += p_tick.tick_us;
 		frame_net_us_ += p_tick.net_us;
 	}
-	if (!session_tick_sink_.is_valid()) return true;
-	Ref<MissionTickOutcome> value;
-	value.instantiate();
-	value->assign(p_tick);
+	if (session_tick_sink_ == nullptr) return true;
 	const int64_t sink_start =
 			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
-	const Variant accepted = session_tick_sink_.call(value);
+	const bool accepted = session_tick_sink_->on_session_tick(p_tick);
 	if (profiling)
 		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
-	return !(accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted));
+	return accepted;
 }
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
-		const Ref<MissionFrameInput> &p_input,
-		const Callable &p_tick_sink) {
+		const Ref<MissionFrameInput> &p_input) {
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
@@ -175,16 +172,13 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 				input.camera.position[1], input.camera.position[2]));
 	}
 	input.viewport_height = renderer_viewport_height();
-	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
-	session_tick_sink_ = Callable();
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
 
 Ref<MissionFrameOutcome> Simulation::step_session_frame(
-		const Ref<MissionFrameInput> &p_input,
-		const Callable &p_tick_sink) {
+		const Ref<MissionFrameInput> &p_input) {
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
@@ -196,9 +190,7 @@ Ref<MissionFrameOutcome> Simulation::step_session_frame(
 				input.camera.position[1], input.camera.position[2]));
 	}
 	input.viewport_height = renderer_viewport_height();
-	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.step_once(input);
-	session_tick_sink_ = Callable();
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }

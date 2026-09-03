@@ -119,6 +119,7 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["send_holdoff_ticks"] = get_send_holdoff_ticks();
 	out["max_players"] = max_players_;
 	out["serve_and_play"] = serve_and_play_;
+	out["game_type_auto"] = game_type_auto_;
 	out["fat_bullets"] = config_.fat_bullets;
 	out["one_shot_kill"] = config_.one_shot_kill;
 	out["spawn_x"] = get_spawn_x();
@@ -176,6 +177,7 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::INT, bind_port)
 	HOST_SESSION_PROPERTY(Variant::INT, max_players)
 	HOST_SESSION_PROPERTY(Variant::BOOL, serve_and_play)
+	HOST_SESSION_PROPERTY(Variant::BOOL, game_type_auto)
 	HOST_SESSION_PROPERTY(Variant::STRING, game_root)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);

@@ -6,7 +6,6 @@ extends GutTest
 # names to stable 1-based handles (case-insensitive); SpawnEmitterAtPosition
 # @ 0x5f6df0 spawns by handle or name.
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 var _root_dir := ""
 

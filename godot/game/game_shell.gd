@@ -16,8 +16,8 @@ func get_world() -> GameWorld:
 	return null
 
 
-## The loaded world's runtime (its MissionPresentation), null between missions.
-func get_runtime() -> MissionPresentation:
+## The loaded world's runtime (its MissionRoot), null between missions.
+func get_runtime() -> MissionRoot:
 	return null
 
 

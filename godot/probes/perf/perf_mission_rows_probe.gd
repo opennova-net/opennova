@@ -507,7 +507,7 @@ static func _counter_per_frame(delta: Dictionary, frame_count: int) -> Dictionar
 	return per_frame
 
 
-static func _build_fingerprint(world: GameWorld, runtime: MissionPresentation, bms: String) -> Dictionary:
+static func _build_fingerprint(world: GameWorld, runtime: MissionRoot, bms: String) -> Dictionary:
 	var signatures := PackedStringArray()
 	var model_count := 0
 	var hidden_count := 0

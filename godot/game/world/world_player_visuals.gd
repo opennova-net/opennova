@@ -110,7 +110,7 @@ func prewarm_loaded_model_challenge_definitions() -> PackedStringArray:
 					_world._placer.object_data_for(wire_graphic)
 					resolved.append(wire_graphic)
 		# The header-only join learned its entity types from the stream after
-		# MissionPresentation's ordinary mission-body setup. Resolve the model-derived
+		# MissionRoot's ordinary mission-body setup. Resolve the model-derived
 		# seat/emplacement table and world collision/trait consumers now, before
 		# admission and before the loaded-model challenge page freezes.
 		if _world._loaded_mission != null and _world._loaded_mission.is_wire_header_only():

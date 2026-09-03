@@ -1,7 +1,6 @@
 class_name OcclusionFramePass
 extends RefCounted
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # The render-occlusion frame (docs/render/render-occlusion-re.md §3/§4/§5),
 # extracted from GameWorld: the blink letter gates, the per-render-frame
@@ -76,7 +75,7 @@ func set_frame_stats(board: FrameStats) -> void:
 ## GameWorld._mission_forces_indoors, passed per call — the mission attribute
 ## is mission state and stays (test-pinned) on the world.
 func apply_blink_gates(forces_indoors: bool) -> void:
-	var runtime: MissionPresentation = _world.get_runtime()
+	var runtime: MissionRoot = _world.get_runtime()
 	if runtime == null:
 		return
 	var sim: Simulation = runtime.get_sim()
@@ -129,13 +128,13 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 # (The marched iris-exposure weather feed that renders alongside stays on
 # GameWorld — _stamp_iris_samples.)
 func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
-	var runtime: MissionPresentation = _world.get_runtime()
+	var runtime: MissionRoot = _world.get_runtime()
 	if runtime == null:
 		return
 	var sim: Simulation = runtime.get_sim()
 	if sim == null:
 		return
-	var registry: EntityIndex = runtime.get_registry()
+	var registry: EntityIndex = runtime.get_entity_index()
 	if registry == null:
 		return
 	var fov_y := 70.0
@@ -327,7 +326,7 @@ func _occlusion_node(registry: EntityIndex, bms_id: int) -> ObjectModel:
 # The live sim for the occlusion apply paths (null before a mission runtime
 # exists — a real state on the unload/A-B seams).
 func _occlusion_sim() -> Simulation:
-	var runtime: MissionPresentation = _world.get_runtime()
+	var runtime: MissionRoot = _world.get_runtime()
 	return runtime.get_sim() if runtime != null else null
 
 
@@ -363,7 +362,7 @@ func rebind_placed_nodes() -> void:
 # The wire walk's applied render-gate verdicts pair with the sim's baseline:
 # both forget together, so the next frame's full re-emit lands on a clean set.
 func _clear_wire_render_culled() -> void:
-	var runtime: MissionPresentation = _world.get_runtime()
+	var runtime: MissionRoot = _world.get_runtime()
 	var presenter: EntityPresenter = runtime.get_entity_presenter() \
 			if runtime != null else null
 	if presenter != null:

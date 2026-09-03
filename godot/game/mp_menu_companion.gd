@@ -303,7 +303,7 @@ func _on_host_start() -> void:
 
 
 # Read the host request off the loaded document by control name. Unread controls
-# (rules tab, weapon restrictions, server location) still render. MissionPresentation
+# (rules tab, weapon restrictions, server location) still render. MissionRoot
 # derives the wire game type from the selected mission; the record's Co-op value
 # remains the fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:

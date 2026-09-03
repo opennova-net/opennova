@@ -152,7 +152,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 # --- the attribution legs -----------------------------------------------------------
 
-func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentation) -> Dictionary:
+func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionRoot) -> Dictionary:
 	var ctx := _ctx
 	var legs := {}
 	# HUD-canvas A/B: hide the WHOLE HUD layer. Ticks still run - this
@@ -310,8 +310,8 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 	if runtime != null:
 		var rc := runtime.get_perf_counters()
 		rt = "sim=%.2f present=%.2f fx=%.2f ticks=%d" % [
-				float(rc.get("sim_us", 0)) / 1000.0, float(rc.get("present_us", 0)) / 1000.0,
-				float(rc.get("effects_us", 0)) / 1000.0, int(rc.get("ticks", 0))]
+				float(rc.sim_us) / 1000.0, float(rc.present_us) / 1000.0,
+				float(rc.effects_us) / 1000.0, rc.ticks]
 	var parts := "-"
 	var effect_world := _ctx.effect_world()
 	if effect_world != null:

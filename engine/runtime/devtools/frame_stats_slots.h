@@ -76,7 +76,7 @@
     X(OCCL_LIGHT_QUERY, "native per-drawn-entity sun-visibility queries") \
     X(OCCL_LIGHT_APPLY, "placed/wire lighting-context writes") \
     X(OCCL_WATER_APPLY, "final blink-water visibility write") \
-    /* MissionPresentation legs */ \
+    /* MissionRoot legs */ \
     X(SIM_STEP, "sim.step() total, summed over the frame's logic ticks") \
     X(SIM_NET, "native wire leg of step: joiner recv/uplink pump, or the") \
     /* host's local ClientState decode/fold */ \

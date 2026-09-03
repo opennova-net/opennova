@@ -14,7 +14,7 @@ const COUNTER_SOURCES := {
 	"audio": ["world", "audio_us"],
 	# the mission-audio tick inside the audio leg
 	"audio_tick": ["audio", "tick_us"],
-	# the session frame (MissionPresentation.get_perf_counters)
+	# the session frame (MissionRoot.get_perf_counters)
 	"sim": ["runtime", "sim_us"],
 	"present": ["runtime", "present_us"],
 	"effects": ["runtime", "effects_us"],
@@ -94,7 +94,7 @@ func _on_frame() -> void:
 		return
 	var world_counters: Dictionary = world.get_runtime_perf_counters()
 	var audio_counters: Dictionary = world_counters.get("audio", {})
-	var runtime_counters: Dictionary = runtime.get_perf_counters()
+	var runtime_counters: Dictionary = runtime.get_perf_counters().to_json_value()
 	for key in _samples:
 		var source: Array = COUNTER_SOURCES[key]
 		var table: Dictionary

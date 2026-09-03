@@ -1028,7 +1028,7 @@ func _register_automation_actions() -> void:
 # --- live owner resolution (per call, never retained) ------------------------
 
 
-func _runtime() -> MissionPresentation:
+func _runtime() -> MissionRoot:
 	if _shell == null:
 		return null
 	var value := _shell.get_runtime()

@@ -56,7 +56,7 @@ void Simulation::bringup_host_runtime() {
 	// admitted peers mid-match. serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
 	// fold it into ClientState (runtime_) to render the host's own view.
 	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
-	// host's own player); isolated test/tooling MissionPresentation instantiations keep that default too.
+	// host's own player); isolated test/tooling MissionRoot instantiations keep that default too.
 	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission runtime
 	// (ADR 0025). A LAN host honors the UI server-type (host_serve_and_play_, from
 	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +

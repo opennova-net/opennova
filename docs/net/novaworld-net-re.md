@@ -4659,7 +4659,7 @@ serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is 
 (`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
 parsed into `DefItemDef.attrib` (`engine/formats/def`), surfaced as `ItemDatabase::is_ai_capable`, and stamped onto
 every live entity by the host's `Simulation::resolve_item_traits` post-load pass (called from
-`MissionPresentation` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
+`MissionRoot` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
 decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
 in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI-capable) AND crash-safe. The
 earlier dc90f64f stopgap (force `0x0800` on EVERY pool-1 record) is removed — no remaining divergence on the
@@ -7842,7 +7842,7 @@ and ordinary other-player kills arm +368 to 120 seconds; all decrement at the re
 the respawn holds retain the exact floor-3 / recent-spawn-force-3
 rule; early C2S 0x0E picks drop silently; all successful immediate, wave, and listen-host
 fallback deployments enter one `Server_ReleasePlayerDeployment` transaction) → engine feed `Simulation::load_ammo_table`
-(mission_presentation.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
+(godot/src/mission/mission_root.cpp, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
 spawn velocity/frame, 3-hit kill at 60/60/30, exact 0x13→0x52→0x1E→0x54 bytes and recipient
 sets, decoded client folds, both hold branches and
 their exact pick boundary, no-auto-respawn for clients, shared host respawn snap). The
@@ -9426,7 +9426,7 @@ loads — the expansion setting must name it (config, not code).
 Reimpl: `engine/runtime/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
 `weapon_inventory`), `Simulation` (`rebuild_local_player_loadout` + the switch/commit
 seams), `local_player_presenter.gd` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
-(availability filter + multi-slot ACCEPT), `mission_presentation.gd` (the .bms promote), GUT
+(availability filter + multi-slot ACCEPT), `godot/src/mission/mission_root.cpp` (the .bms promote), GUT
 `simulation_test.gd` / `armory_presenter_test.gd`.
 
 **The spawn-kit buffer.** `restrictionData @ 0x24D4E00` (IDB comment proposes

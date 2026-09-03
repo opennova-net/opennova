@@ -1,14 +1,13 @@
 extends GutTest
 
-# MissionPresentation is GameWorld's live mission driver: it owns a real
+# MissionRoot is GameWorld's live mission root: it owns a real
 # Simulation, present pass, and entity index and ticks them in one order.
 # These focused presentation tests instantiate it over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
-func _advance_ticks(runtime: MissionPresentation, delta: float) -> int:
+func _advance_ticks(runtime: MissionRoot, delta: float) -> int:
 	var input := MissionFrameInput.new()
 	input.delta_seconds = delta
 	var outcome: MissionFrameOutcome = runtime.advance_session_frame(input)
@@ -197,7 +196,7 @@ func _make_world(authored: Transform3D) -> Dictionary:
 
 func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	var count := int(rt.setup(w.mission, w.container, _options_with_placer(w.placer)))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
@@ -228,12 +227,12 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	placer.register_static_instance(bms_id, "Caster", 0,
 			Transform3D(Basis.IDENTITY, Vector3(-20, -20, -20)), true)
 	var revision := placer.get_static_terrain_shadow_source_revision()
-	var runtime := MissionPresentation.new()
+	var runtime := MissionRoot.new()
 	add_child_autofree(runtime)
 	assert_gt(int(runtime.setup(mission, container, _options_with_placer(placer))), 0)
 	assert_true(runtime.tick())
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
-			"production MissionPresentation passes its placer into the EntityPresenter")
+			"production MissionRoot passes its placer into the EntityPresenter")
 	var rows := placer.get_static_terrain_shadow_source_diagnostics()
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
@@ -244,7 +243,7 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var board := FrameStats.new()
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.set_frame_stats(board)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
@@ -295,7 +294,7 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	var lock_options := _options_with_placer(w.placer)
 	lock_options.simulation = joiner
@@ -315,7 +314,7 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 
 func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, _options_with_placer(w.placer))), 0)
 	# A directly instantiated runtime has no bound socket or peers, so it is not
@@ -333,7 +332,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		pending(RetailData.fixture_pending_text("def/weapon.def"))
 		return
 	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
-	# and may carry a flying throwable TrcrID. MissionPresentation must own both
+	# and may carry a flying throwable TrcrID. MissionRoot must own both
 	# consumers on the joiner just as it does on the host. A pre-connected sim
 	# pins the real production setup branch without requiring a live peer.
 	var w := _make_world(Transform3D.IDENTITY)
@@ -347,7 +346,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# rule 11; its recent-fires ring is the read seam).
 	var audio := MissionAudio.create(null, null)
 	autofree(audio)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	var join_options := _options_with_placer(w.placer)
 	join_options.simulation = joiner
@@ -385,7 +384,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 
 
 func test_mission_present_stats_are_a_typed_record() -> void:
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	var stats: MissionPresentStats = rt.get_mission_present_stats()
 	assert_not_null(stats)
@@ -400,7 +399,7 @@ func test_mission_present_stats_are_a_typed_record() -> void:
 
 func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	var presenter := rt.get_entity_presenter()
@@ -413,7 +412,7 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 
 func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.set_presentation_time_ms(0x1ffffffff)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
@@ -426,7 +425,7 @@ func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 
 func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	var identity_options := _options_with_placer(w.placer)
 	identity_options.mission_file = "C:\\missions\\00TRe.bms"
@@ -441,7 +440,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	# The node is authored far from the entity's spawn; after a tick the present pass moves it onto the
 	# sim's computed position (the consolidated path the old game path never did).
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.step_once()
@@ -452,7 +451,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 		"node left its authored position while playing")
 
 
-# (Historical transform-restore test deleted: MissionPresentation.stop() still
+# (Historical transform-restore test deleted: MissionRoot.stop() still
 # rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
 # runtime whose Stop must restore authored editor nodes.)
 
@@ -463,7 +462,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 	# (the engine's own dividers — WAC every 62nd tick, BMS quarter-pass every 16th — gate inside
 	# the systems), so direct fixture tick() and Step must both advance + present.
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	assert_true(rt.tick(), "tick() advances one logic tick")
@@ -483,7 +482,7 @@ func test_effects_drained_signal_fires() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(md, container)
 	# GDScript lambdas capture locals by value; mutate the array by reference (append) rather than
@@ -502,7 +501,7 @@ func test_effects_drained_signal_fires() -> void:
 
 func test_session_frame_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
@@ -515,7 +514,7 @@ func test_session_frame_accumulates_fixed_quanta() -> void:
 
 func test_session_frame_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
@@ -528,7 +527,7 @@ func test_session_frame_clamps_catchup() -> void:
 
 func test_session_frame_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
@@ -539,7 +538,7 @@ func test_session_frame_ignored_when_not_playing() -> void:
 
 func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
@@ -555,7 +554,7 @@ func test_session_frame_presents_latest_state_once() -> void:
 	# The node is authored far from spawn; after a catch-up batch the single present puts it on the
 	# sim's LATEST position (decoupled render = present once per render frame, no inter-tick interpolation).
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
@@ -570,7 +569,7 @@ func test_session_frame_presents_latest_state_once() -> void:
 func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() -> void:
 	var authored := Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
 	var w := _make_world(authored)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	var entity_ref := EntityRef.make(3, 0, 0)
@@ -618,7 +617,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# The production owner-pose wiring (ItemEffectDirector.on_effect_world_started):
 	# the anchor registry resolves the owned group's live pose each fixed tick.
 	effect_world.set_owner_position_provider(anchor_mount.resolve_owner_transform)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.setup_passes(null, effect_world, null, null, anchor_mount)
@@ -704,7 +703,7 @@ func test_session_frame_drains_effects_per_tick() -> void:
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(md, container)
 	rt.play()
@@ -730,11 +729,11 @@ func test_distance_per_real_second_is_frame_rate_independent() -> void:
 	assert_true(hi.pos.is_equal_approx(lo.pos), "the deterministic sim lands the entity at one position")
 
 
-# Drive a fresh MissionPresentation with `count` frames of `step` seconds each and report total ticks +
+# Drive a fresh MissionRoot with `count` frames of `step` seconds each and report total ticks +
 # the entity position. Fixed iteration count (not a while-elapsed loop) keeps the fed wall-clock exact.
 func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()

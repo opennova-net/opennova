@@ -468,7 +468,7 @@ void Simulation::push_joiner_loadout_kit() {
 	// their witnesses). This binding keeps the seam wiring: the role gate,
 	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
 	if (!joiner_ || !runtime_ || !kernel_) return;
-	// The role hook runs before the shell loads weapon.def (MissionPresentation orders
+	// The role hook runs before the shell loads weapon.def (MissionRoot orders
 	// load_from_mission_data ahead of load_weapon_table), and a kit resolved against an
 	// EMPTY catalog would skip every row — latching that would submit a zero-entry 0x2F
 	// pair AND disarm the runtime's capture-default fallback. Leave the seam unarmed
