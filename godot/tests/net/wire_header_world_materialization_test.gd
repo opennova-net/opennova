@@ -296,8 +296,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_eq(header.size(), 616,
 			"the test consumes the host's real S2C 0x0B BMS header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 
 	var wire_mission := MissionData.new()
@@ -326,8 +324,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_true(streamed,
 			"wire pools materialized before deploy/vehicle consumers run")
 	if not streamed:
-		joiner.free()
-		host.free()
 		return
 	assert_eq(joiner.get_join_terrain_til_state(),
 			Simulation.JOIN_TERRAIN_TIL_ABSENT,
@@ -354,8 +350,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_true(joiner.is_joined_in_match(),
 			"the joiner completes admission while the host keeps the pick hold")
 	pending("the streamed-zone deploy + mount tail awaits the pick-based initial-deploy client trigger (D-NET-156)")
-	joiner.free()
-	host.free()
 
 
 func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
@@ -402,8 +396,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(header.size(), 616,
 			"joiner consumes the authority's real body-empty 0x0B header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 
 	var wire_mission := MissionData.new()
@@ -428,8 +420,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(streamed,
 			"0x0D materialized the exact parent and synthetic child handles")
 	if not streamed:
-		joiner.free()
-		host.free()
 		return
 
 	# Model/seat resolution commonly completes after the stock 0x0D rows. First
@@ -442,8 +432,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var ambiguous_db := _item_db("ambiguous")
 	assert_not_null(ambiguous_db)
 	if ambiguous_db == null:
-		joiner.free()
-		host.free()
 		return
 	assert_true(host.install_seat_specs_for_type_ids(
 			ambiguous_db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
@@ -528,8 +516,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		OS.delay_msec(2)
 	assert_true(deployed)
 	if not deployed:
-		joiner.free()
-		host.free()
 		return
 	# Give the 17-tick retail proximity slice a full post-deploy refresh before
 	# pressing USE. The short weapon-idle loop below can otherwise break at tick 1.
@@ -586,8 +572,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(mounted_echoed,
 			"authority echoes the exact decoded child carrier")
 	if not mounted_echoed:
-		joiner.free()
-		host.free()
 		return
 
 	for _settle in range(100):
@@ -670,8 +654,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var host_parent_after: EntityCard = host.entity_card_by_net_id(parent_bms_id)
 	assert_eq(host_parent_after.get_primary_weapon_clip(), 7)
 	assert_eq(host_parent_after.get_primary_weapon_reserve(), 19)
-	joiner.free()
-	host.free()
 
 
 func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
@@ -714,5 +696,3 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 			"full-BMS joiners retain authored spawn_origin semantics")
 	assert_eq(after.get_source_index(), 0)
 	assert_eq(after.get_bms_id(), int(fixture["vehicle_bms_id"]))
-	joiner.free()
-	host.free()

@@ -131,4 +131,3 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_lt(basis_error_deg, 0.51,
 			"mounted avatar body must follow E50triB's live yaw frame (error %.6f deg)" % \
 					basis_error_deg)
-	sim.free()

@@ -75,7 +75,7 @@ void Water::_bind_methods() {
 			&Water::get_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_reflection_camera"),
 			&Water::get_reflection_camera);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Water::advance_frame);
@@ -191,7 +191,6 @@ void Water::set_world_rendering_enabled(bool p_value) {
 }
 
 void Water::release_runtime_renderer_resources() {
-	set_process(false);
 	world_rendering_enabled_ = false;
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server != nullptr) {
@@ -393,7 +392,6 @@ void Water::_exit_tree() {
 }
 
 void Water::_ready() {
-	set_process(true);
 	if (water_core_.is_null()) {
 		water_core_.instantiate();
 	}
@@ -560,10 +558,6 @@ void Water::build() {
 	water_material_->set_shader_parameter("u_reflection", rtt);
 	water_material_->set_shader_parameter("u_has_reflection", false);
 	_sync_render_activity();
-}
-
-void Water::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void Water::advance_frame(double p_delta) {

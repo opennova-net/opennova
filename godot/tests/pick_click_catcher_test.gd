@@ -108,7 +108,6 @@ func test_picker_stamps_provenance_and_replayable_ray() -> void:
 	# even a worldless miss keeps the stable card shape plus the provenance
 	# fields the snapshot writer replays.
 	var sim := Simulation.new()
-	add_child_autofree(sim)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.current = true

@@ -35,12 +35,11 @@ public:
 	ProjectionMode get_projection_mode() const { return projection_mode_; }
 	void set_environment_node(MissionEnvironment *p_environment);
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
-	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();

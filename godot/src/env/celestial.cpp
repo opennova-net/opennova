@@ -64,7 +64,7 @@ void Celestial::_bind_methods() {
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Celestial::advance_frame);
@@ -130,7 +130,6 @@ Ref<EnvFile> Celestial::_env_data() {
 }
 
 void Celestial::_ready() {
-	set_process(true);
 	if (glare_occlusion_.is_null()) {
 		glare_occlusion_.instantiate();
 	}
@@ -397,10 +396,6 @@ void Celestial::_stamp_environment_capture_layer(Node3D *p_model) {
 		mesh->set_layer_mask(mesh->get_layer_mask() |
 				environment_capture_layer_mask_);
 	}
-}
-
-void Celestial::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 Camera3D *Celestial::_resolve_camera() {

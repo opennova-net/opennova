@@ -62,7 +62,7 @@ public:
 	// shader text is inspected.
 	static bool source_material_uses_additive(const Ref<Material> &p_source);
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
@@ -92,7 +92,6 @@ public:
 	int get_sun_veil_stopdown() const;
 
 	void _ready() override;
-	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();

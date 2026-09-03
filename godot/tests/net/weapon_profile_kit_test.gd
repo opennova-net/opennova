@@ -110,7 +110,6 @@ func test_profile_page_offsets_read_back_through_the_sim() -> void:
 	assert_eq(Array(red.kit), RED_PAGE,
 			"the red summary must be the class-%d page (a different side AND a different page index)"
 					% RED_CLASS)
-	sim.free()
 
 
 func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
@@ -132,7 +131,6 @@ func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
 			"the shipped default class is rifleman on both sides [orig: @0x54bbe0]")
 	assert_eq(Array(blue.kit), ["WPN_M4AUTO"],
 			"the shipped blue class-8 page is the single WPN_M4AUTO literal [orig: @0x54bdbb]")
-	sim.free()
 
 
 func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> void:
@@ -242,4 +240,3 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	var summary := sim.get_weapon_profile_summary()
 	assert_true(summary.loaded,
 			"deferring the page copy must not discard the parsed profile")
-	sim.free()

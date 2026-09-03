@@ -117,12 +117,11 @@ public:
 	SubViewport *get_reflection_viewport() const { return reflection_viewport_; }
 	Camera3D *get_reflection_camera() const { return reflection_camera_; }
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
-	void _process(double p_delta) override;
 	void _exit_tree() override;
 
 protected:

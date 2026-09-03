@@ -434,4 +434,3 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	var fresh_draw := fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
 	assert_eq(fresh_draw.batch_owner.size(), 0,
 			"an unbooted simulation lists no scars, never crashes")
-	fresh.free()

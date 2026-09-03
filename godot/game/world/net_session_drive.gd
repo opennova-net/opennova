@@ -53,7 +53,7 @@ var _nw_host: NovaWorldHost = null
 # JoinTarget — stamped onto MissionSetupOptions as host_session/join_target.
 var _pending_host: HostSessionConfig = null
 var _pending_join: JoinTarget = null
-# A retail LAN join authenticates before the wire-header world load. This off-tree
+# A retail LAN join authenticates before the wire-header world load. This preload
 # simulation owns that one live socket/session while S2C 0x7B supplies map_file;
 # stage_runtime_options surrenders it so the connection is never restarted.
 var _join_preload_sim: Simulation
@@ -157,7 +157,6 @@ func load_as_joiner(target: JoinTarget) -> int:
 					resource_root, _spawn_loadout_cb.call()))
 	if not target.integrity_profile.is_empty() and not \
 			_join_preload_sim.set_join_integrity_profile(target.integrity_profile):
-		_join_preload_sim.free()
 		_join_preload_sim = null
 		_clear_pending_session()
 		_world.load_failed.emit("join: unknown integrity profile '%s'" % \
@@ -171,7 +170,6 @@ func load_as_joiner(target: JoinTarget) -> int:
 	if not _join_preload_sim.enable_join(
 			target.host_ip, target.port, target.player_name,
 			target.join_role, target.spectator_password):
-		_join_preload_sim.free()
 		_join_preload_sim = null
 		_clear_pending_session()
 		_world.load_failed.emit("join: could not open the LAN session socket")
@@ -455,8 +453,6 @@ func _fail_join_preload(reason: String) -> void:
 func _cancel_join_preload() -> void:
 	set_process(false)
 	_policy.disarm_preload()
-	if _join_preload_sim != null:
-		_join_preload_sim.free()
 	_join_preload_sim = null
 	_join_preload_root = null
 
@@ -501,9 +497,9 @@ func stage_runtime_options(opts: MissionSetupOptions) -> void:
 				opts.resource_root, _spawn_loadout_cb.call())
 	_pending_host = null
 	_pending_join = null
-	# Consume the already-authenticated joiner. MissionPresentation adopts and frees
-	# this off-tree Node like its usual freshly-created simulation; clearing our
-	# reference before setup makes ownership singular even on a setup failure.
+	# Consume the already-authenticated joiner. MissionPresentation adopts this
+	# simulation like its usual freshly-created one; clearing our reference
+	# before setup makes ownership singular even on a setup failure.
 	if _join_preload_sim != null:
 		opts.simulation = _join_preload_sim
 		_join_preload_sim = null

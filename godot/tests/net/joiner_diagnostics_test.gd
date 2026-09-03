@@ -18,7 +18,6 @@ func test_joiner_network_diagnostics_are_explicitly_opt_in() -> void:
 	sim.set_joiner_network_diagnostics_enabled(false)
 	assert_false(sim.is_joiner_network_diagnostics_enabled(),
 			"switching it back off is immediate")
-	sim.free()
 
 
 # The in-world shell the table reads: a GameShell answering one real runtime

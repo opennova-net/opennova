@@ -751,7 +751,8 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	var world := packed.instantiate()
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root carries the GameWorld script")
-	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial"]:
+	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
+			"SunShadow", "SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	assert_not_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
 	assert_null(world.get_node_or_null("Terrain/TileOverlay"),
@@ -1755,7 +1756,6 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
 	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
 	world.unload()
-	host.free()
 
 
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
@@ -2346,7 +2346,6 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
 		"the authoritative basename is normalized for mission/text-table naming")
 	world.unload()
-	host.free()
 	# The admission watchdog used to be a coroutine owned by NetSessionDrive.
 	# Freeing its sole GameWorld owner while it awaited process_frame made Godot
 	# resume a method whose class instance was already gone on the next frame.

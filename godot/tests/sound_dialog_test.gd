@@ -70,6 +70,5 @@ func test_00trg_mission_dialog_resolves() -> void:
 				if (e as MissionEffect).kind == "dialog":
 					fired += 1
 		gut.p("dialog effects fired across one 64-tick event cycle: %d" % fired)
-	sim.free()
 
 	audio.teardown()

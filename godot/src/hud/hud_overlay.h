@@ -120,7 +120,7 @@ public:
 	// Typed cross-class args on the bound API follow the set_minimap_terrain
 	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-			const Dictionary &p_strings, Simulation *p_sim);
+			const Dictionary &p_strings, const Ref<Simulation> &p_sim);
 	// The end-of-round overlay (net-re §5.68): the resolved Impact38 text
 	// ladder (hud/end_round_overlay.h lines the presenter formatted) and the
 	// overlay safe-area top/bottom in design px.
@@ -132,7 +132,7 @@ public:
 	// (Simulation::fill_vehicle_panel). The block's `interface` silhouette is
 	// loaded per sid (the set_weapon reload idiom). Pass null when hiding.
 	void set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
-			Simulation *p_sim);
+			const Ref<Simulation> &p_sim);
 	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
 	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
@@ -150,7 +150,7 @@ public:
 	// ({under_attack, ready}), and the Simulation the zone rows are pulled
 	// from natively (Simulation::fill_lfp_zones). Pass null when hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-			int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim);
+			int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);

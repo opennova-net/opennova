@@ -36,7 +36,6 @@ const EXPECTED_TYPES := {
 
 func test_worldless_pick_returns_the_full_typed_shape() -> void:
 	var sim := Simulation.new()
-	add_child_autofree(sim)
 	var pick := sim.debug_pick_entity(Vector3.ZERO, Vector3.FORWARD, 100.0)
 	assert_not_null(pick, "the card is always answered")
 	assert_false(pick.hit, "no world - never a hit")
@@ -49,7 +48,6 @@ func test_worldless_pick_returns_the_full_typed_shape() -> void:
 
 func test_zero_direction_is_a_clean_miss() -> void:
 	var sim := Simulation.new()
-	add_child_autofree(sim)
 	var pick := sim.debug_pick_entity(Vector3(1, 2, 3), Vector3.ZERO, 500.0)
 	assert_false(pick.hit)
 	assert_eq(pick.hit_class, "", "no class without a hit")

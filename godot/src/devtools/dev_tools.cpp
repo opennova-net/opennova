@@ -308,15 +308,15 @@ Simulation *DevTools::simulation() const {
 			: nullptr;
 }
 
-void DevTools::set_simulation(Simulation *p_simulation) {
-	const ObjectID id = p_simulation != nullptr ? ObjectID(p_simulation->get_instance_id()) : ObjectID();
+void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
+	const ObjectID id = p_simulation.is_valid() ? ObjectID(p_simulation->get_instance_id()) : ObjectID();
 	if (simulation_id_ == id) {
 		return;
 	}
 	// The outgoing world takes nothing of the Weapon window's with it: the
 	// hold latch and the trace ring are released on the Simulation being
 	// dropped, whatever the window's own state.
-	if (Simulation *outgoing = simulation(); outgoing != nullptr && outgoing != p_simulation) {
+	if (Simulation *outgoing = simulation(); outgoing != nullptr && outgoing != p_simulation.ptr()) {
 		outgoing->debug_weapon_set_fire_held(false);
 		outgoing->debug_weapon_arm_trace(false);
 	}
@@ -334,7 +334,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
-	if (p_simulation == nullptr) {
+	if (p_simulation.is_null()) {
 		// The unload edge: invalid records clear the pushed state so a window
 		// left open never shows a dead world's rows or card.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
@@ -992,7 +992,7 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	frame_stats_ = p_stats;
 }
 
-void DevTools::set_simulation(Simulation *p_simulation) {
+void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	(void)p_simulation;
 }
 

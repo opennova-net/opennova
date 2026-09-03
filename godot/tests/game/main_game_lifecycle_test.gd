@@ -664,7 +664,6 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			"host-only pools reach native materialization and wire presentation from the load/live stream")
 	assert_gt(wire_stats.spawned + wire_stats.unresolved, 0,
 			"the renderer attempted every streamed row even when this minimal fixture lacks its .3di")
-	host.free()
 
 
 func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
@@ -730,7 +729,6 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	assert_false(revealed,
 			"a Receiving terrain stream cannot reveal the admitted world")
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
-	host.free()
 
 
 # An in-match session loss must tear the world down to the menu through the SAME

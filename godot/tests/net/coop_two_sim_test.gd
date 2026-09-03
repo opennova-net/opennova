@@ -529,8 +529,6 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_eq(host.get_host_peer_count(), 1, "resume did not reconnect")
 	assert_eq(joiner.get_class_allow_mask(), 0x0155,
 			"the joiner consumed the host's S2C 0x76 class policy over real UDP")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
@@ -570,8 +568,6 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_eq(received.precipitation_kind, 1)
 	assert_gt(received.quake_ticks, 0,
 			"the host's quake countdown reaches the joiner")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
@@ -959,8 +955,6 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(uplink_resumed,
 			"after revival local L resumes 0x0C heading uplinks to the same authority H")
 
-	host.free()
-	joiner.free()
 
 
 func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -> void:
@@ -1043,8 +1037,6 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		OS.delay_msec(2)
 	assert_true(reached, "joiner reached the in-match client view")
 	if not reached:
-		host.free()
-		joiner.free()
 		return
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"join handshake does not detach the host player")
@@ -1087,8 +1079,6 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	var ambiguous_position := _present_position_for_type(joiner, 1419)
 	assert_lt(ambiguous_position.distance_to(joiner_before), 0.01,
 			"ambiguous same-type children retain the rigid decoded fallback")
-	host.free()
-	joiner.free()
 
 
 func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
@@ -1147,8 +1137,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	var host_joiner_index := -1
 	for ai_index in range(host.get_entity_count()):
@@ -1196,8 +1184,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_true(mounted_echoed,
 			"host validated H's seat and 0x0A attached local L with active gun controls")
 	if not mounted_echoed:
-		joiner.free()
-		host.free()
 		return
 
 	# Make the phase-8 witness deliberately non-default after both peers have
@@ -1242,8 +1228,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_false(visual_before_record.is_empty(),
 			"the joined client presents the real emplaced item type 1419")
 	if not visual_parts.has(yaw_part) or visual_before_record.is_empty():
-		joiner.free()
-		host.free()
 		return
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
@@ -1322,8 +1306,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		OS.delay_msec(2)
 	assert_true(detached_echoed,
 			"host echo retires both the local mount and parent gun controls")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
@@ -1344,8 +1326,6 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_eq(joiner.get_join_assigned_team(), 1,
@@ -1428,8 +1408,6 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_eq(reloaded.clip, 30,
 			"only the echoed reload notification refills the joiner's clip")
 
-	joiner.free()
-	host.free()
 
 
 # Kill the joiner's player entity on the AUTHORITY through the real death
@@ -1479,8 +1457,6 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	assert_false(joiner.is_local_player_dead(), "the joiner deploys alive")
 	assert_false(joiner.request_local_player_medic(),
@@ -1493,8 +1469,6 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's rounds killed the joiner's entity")
 	if not joiner.is_local_player_dead():
-		joiner.free()
-		host.free()
 		return
 	joiner.step()
 	assert_true(joiner.request_local_player_medic(),
@@ -1513,8 +1487,6 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 			"the cooldown counts one per 62.5 Hz tick")
 	assert_eq(joiner.local_medic_request_serial(), 1,
 			"no second call rode the cooldown")
-	joiner.free()
-	host.free()
 
 
 # The camera arbiter enters the death lerp camera (mode 4) on the joiner's
@@ -1538,16 +1510,12 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive on foot: first person")
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	if not joiner.is_local_player_dead():
-		joiner.free()
-		host.free()
 		return
 	joiner.step()
 	var view := joiner.get_local_player_view()
@@ -1576,8 +1544,6 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 	joiner.step()
 	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive again: the arbiter returns to first person")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
@@ -1616,8 +1582,6 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(_drive_pair_to_match(host, joiner),
 			"vehicle observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var joiner_player: EntityCard = null
@@ -1744,8 +1708,6 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				"the mounted watercraft produced enough predicted moving frames")
 		joiner.set_player_input(false, false, false, false, false, false, false)
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> void:
@@ -1766,8 +1728,6 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(_drive_pair_to_match(host, joiner),
 			"animation-isolation joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
@@ -1782,8 +1742,6 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_false(remote_before.is_empty(),
 			"the joiner presents the listen host as a remote player")
 	if remote_before.is_empty():
-		joiner.free()
-		host.free()
 		return
 	var before_snap: PackedFloat32Array = remote_before["snapshot"]
 	var before_base := int(remote_before["base"])
@@ -1900,8 +1858,6 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		assert_true((predicted_joiner_events[0] as FirePresentationEvent).is_local_player,
 				"wire attribution H resolves back to the joiner's local L")
 
-	joiner.free()
-	host.free()
 
 
 func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> void:
@@ -1922,8 +1878,6 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var smoke := _retail_smoke_grenade()
@@ -1955,8 +1909,6 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	assert_gte(first_seen, 0,
 			"the host's production smoke round crossed tag-2 into joiner flight")
 	if first_seen < 0:
-		joiner.free()
-		host.free()
 		return
 
 	var host_arm_sounds := 0
@@ -2028,8 +1980,6 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 			"joiner releases the replicated smoke grenade on the same fuse")
 	assert_eq(host_fuse_sounds, 1, "authority presents one actual fuse event")
 	assert_eq(joiner_fuse_sounds, 1, "joiner presents one actual fuse event")
-	joiner.free()
-	host.free()
 
 
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
@@ -2050,8 +2000,6 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var m4 := _retail_m4()
@@ -2114,8 +2062,6 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 			expected_reload_combo,
 			"the relay carries the retail category*65+rank slot combo")
 
-	joiner.free()
-	host.free()
 
 
 func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
@@ -2136,8 +2082,6 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(joiner.apply_local_player_loadout([
@@ -2224,8 +2168,6 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the currently equipped secondary is not refilled by the M4 echo")
 
-	joiner.free()
-	host.free()
 
 
 func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
@@ -2249,8 +2191,6 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
@@ -2317,8 +2257,6 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	assert_eq(after_echo.clip, 30,
 			"the payload-addressed magazine was refilled once")
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> void:
@@ -2339,8 +2277,6 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	assert_true(_drive_pair_to_match(host, joiner),
 			"peer shooter reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
@@ -2384,8 +2320,6 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
 				"the visual impact lands on the host, never a self-H/local-L alias")
 
-	joiner.free()
-	host.free()
 
 
 # Moving decoded non-player infantry collide at their DECODED wire pose. This is
@@ -2428,8 +2362,6 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"ghost-pose shooter reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
@@ -2470,8 +2402,6 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 				ghost_health_before,
 				"the complete-BMS fixture AI never takes client damage")
 
-	joiner.free()
-	host.free()
 
 
 func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
@@ -2494,8 +2424,6 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var host_target := _organic_index_at_x(host, 20.0)
@@ -2526,8 +2454,6 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_eq(joiner_impacts.size(), 1,
 			"decoded S2C 0x0A tag-2 fire re-simulates one visual impact")
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_off_by_default() -> void:
@@ -2537,7 +2463,6 @@ func test_joiner_off_by_default() -> void:
 	assert_eq(sim.get_joiner_phase(), -1, "no joiner phase when not joining")
 	assert_false(sim.is_joined_in_match(), "not in a match")
 	assert_eq(sim.get_joiner_self_handle(), 0, "no wire handle when not joining")
-	sim.free()
 
 
 # The REAL shell ordering (game_world runtime start -> the spawn-loadout apply):
@@ -2579,8 +2504,6 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	for _settle in range(3):
 		joiner.step()
@@ -2622,8 +2545,6 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 			"the echoed S2C 0x49 refilled the pre-spawn-kit joiner")
 	assert_eq(reloaded.clip, 30, "the clip refilled to capacity")
 
-	joiner.free()
-	host.free()
 
 
 func _subrate_walk_mission() -> MissionData:
@@ -2674,8 +2595,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	assert_true(_drive_pair_to_match(host, joiner),
 			"glide observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	# Move the host player authoritatively at run speed (the GUT anim fixtures
@@ -2706,8 +2625,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 		OS.delay_msec(2)
 
 	if samples.size() < 32:
-		joiner.free()
-		host.free()
 		return
 	var total := 0.0
 	var max_step := 0.0
@@ -2734,8 +2651,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	assert_lt(lag_end, 2.0,
 			"the presented pose tracks within the snap threshold of truth")
 
-	joiner.free()
-	host.free()
 
 
 func _present_pose_for_type(sim: Simulation, type_id: int) -> Dictionary:
@@ -2823,8 +2738,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq(header.size(), 616,
 			"the joiner received the host's S2C 0x0B mission header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(header), OK)
@@ -2841,8 +2754,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	# The event fired on the host's 16th tick, long before admission completed;
@@ -2867,8 +2778,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_true(host_mounted,
 			"the BMS AttachToEmplaced event seated the AI on the emplacement")
 	if not host_mounted:
-		joiner.free()
-		host.free()
 		return
 
 	# Let the mounted pose ride a few full wire records before judging.
@@ -2966,5 +2875,3 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_lt(worst_joiner_body_step, 25.0,
 			"joiner's rendered gunner BODY holds its facing (no spin)")
 
-	joiner.free()
-	host.free()

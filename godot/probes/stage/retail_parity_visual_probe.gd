@@ -127,7 +127,6 @@ end
 			PackedInt32Array([1294])) \
 			or not sim.load_from_mission_data(md) \
 			or not sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1):
-		sim.free()
 		return _fail("could not start attach simulation")
 	var weapon := WeaponDef.new()
 	weapon.name = "WPN_LABEL_SCOPE"
@@ -143,14 +142,12 @@ end
 	sim.step()
 	var blocked: Array = sim.get_attach_labels()
 	if not sim.request_local_player_scope_toggle():
-		sim.free()
 		return _fail("could not raise attach probe scope")
 	for _tick in range(16):
 		sim.step()
 	var aimed: Array = sim.get_attach_labels()
 	sim.set_local_player_debug_third_person(true)
 	var third_person: Array = sim.get_attach_labels()
-	sim.free()
 	if blocked.size() != 2 or aimed.size() != 1 or third_person.size() != 2:
 		return _fail("unexpected attach counts %s/%s/%s" % [
 				blocked.size(), aimed.size(), third_person.size()])

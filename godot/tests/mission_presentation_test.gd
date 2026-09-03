@@ -45,7 +45,6 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	assert_eq(int(kit[0]["ammo_primary"]), 3, "the chunk string reaches the kit as an int")
 	assert_eq(int(kit[0]["ammo_secondary"]), 0)
 	assert_eq(int(kit[0]["flags"]), 2, "the damage class rides the flags field")
-	sim.free()
 
 
 # Seat-spec EXTRACTION rules (name-prefix typing incl. embedded-token

@@ -56,8 +56,6 @@ func test_spectator_role_reaches_in_match_and_latches_from_tag_75() -> void:
 			"S2C 0x75 assigns the spectator's retail team 0")
 	assert_false(joiner.set_local_spectator(false),
 			"a joiner cannot overwrite host-owned spectator state through F3")
-	host.free()
-	joiner.free()
 
 
 func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
@@ -92,5 +90,3 @@ func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
 		OS.delay_msec(2)
 	assert_eq(peers, 0,
 			"the rejected spectator's punted connection is reaped")
-	host.free()
-	joiner.free()

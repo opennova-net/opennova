@@ -310,7 +310,6 @@ func test_host_projectile_options_roundtrip() -> void:
 	var options := sim.get_host_session_config()
 	assert_true(options.fat_bullets)
 	assert_true(options.one_shot_kill)
-	sim.free()
 
 
 func test_host_spectator_options_and_live_f3_transition() -> void:
@@ -346,7 +345,6 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 	assert_false(sim.is_local_spectator())
 	assert_true(sim.has_local_player(),
 			"leaving spectator mode respawns the same playable slot")
-	sim.free()
 
 
 func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
@@ -361,7 +359,6 @@ func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 			"the configured writer source survives the Godot session adapter")
 	assert_eq(sim.get_class_allow_mask(), 0x0155,
 			"the armory-facing seam exposes the same configured host mask")
-	sim.free()
 
 
 func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
@@ -389,7 +386,6 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 	assert_eq(options.spawn_wave_time_zone, 12)
 	assert_eq(options.default_spawn_requires_no_team_zone, 1)
 	assert_eq(options.num_teams, 4)
-	sim.free()
 
 
 func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
@@ -402,7 +398,6 @@ func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 	assert_eq(sim.get_host_session_config().integrity_profile,
 			"retail-revx02-024f56f2-2d087374",
 			"the independently witnessed corpus is an explicit host-session input")
-	sim.free()
 
 
 func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
@@ -496,7 +491,6 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_brain_count(), 2, "two AI brains attached")
 	assert_eq(sim.get_spawned_count(), 6, "one building + three markers + two organics spawned into pools")
 	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
-	sim.free()
 
 
 func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
@@ -596,7 +590,6 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	for slot in WORLD_PHASE_SLOTS:
 		assert_eq(samples[slot], 0,
 				"'%s' is not sampled while F3/native profiling is closed" % FrameStats.slot_name(slot))
-	sim.free()
 
 
 func _assert_native_runtime_timings_zero(counters: Dictionary) -> void:
@@ -648,7 +641,6 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 	assert_true(view.nvg_active)
 	assert_false(view.nvg_visible,
 			"third person suppresses treatment without clearing NVG")
-	sim.free()
 
 
 func test_start_with_nvg_reseeds_on_player_init() -> void:
@@ -670,7 +662,6 @@ func test_start_with_nvg_reseeds_on_player_init() -> void:
 	assert_true(view.nvg_active,
 			"Player_InitPlayer reseeds the mission's StartWithNVGOn bit")
 	assert_eq(view.nvg_gain, 0)
-	sim.free()
 
 
 func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
@@ -711,7 +702,6 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_false(sim.get_local_player_view().scope_engaged,
 			"a real weapon mount invalidates the stale scope restore latch")
-	sim.free()
 
 
 # The HUD waypoint track: the demo mission's BLUE route becomes the player track;
@@ -743,7 +733,6 @@ func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 	sim.step()
 	wp = sim.get_waypoint_hud_view()
 	assert_eq(wp.current, 1, "proximity advance onto waypoint 1")
-	sim.free()
 
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
@@ -902,7 +891,6 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 			sim, MissionData.KIND_ITEM, index,
 			Simulation.PF_VEHICLE_WHEELS), 0,
 			"the snapshot carries the live wheel-phase high word once driven")
-	sim.free()
 
 
 func test_physicsless_air_definitions_install_direct_traits_without_enabling_ground() -> void:
@@ -952,7 +940,6 @@ func test_physicsless_air_definitions_install_direct_traits_without_enabling_gro
 			"zero remains the no-motor selector for the ground cveh family")
 	assert_eq(plane_card.get_vehicle_family(), 3,
 			"physicsless cpln installs the Plane prediction family")
-	sim.free()
 
 
 func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
@@ -1002,7 +989,6 @@ end
 	var verdict := _present_field_for_origin(
 			sim, MissionData.KIND_ORGANIC, int(npc["index"]),
 			Simulation.PF_RIGHT_HAND_COLLAPSED)
-	sim.free()
 	return verdict
 
 
@@ -1034,7 +1020,6 @@ func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
 	assert_gt(absf(authored_pitch), 0.5, "look input produced a signed pitch witness")
 	assert_almost_eq(arm_pitch, authored_pitch, 0.01,
 		"overlay pitch stays in authored sign for MissionObjectPlacer")
-	sim.free()
 
 
 func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
@@ -1103,7 +1088,6 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	sim.step()
 	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 0,
 			"third person clears aimed-shot availability without changing stance")
-	sim.free()
 
 
 func test_aimed_shot_verdict_uses_both_promoted_optic_predicates() -> void:
@@ -1132,7 +1116,6 @@ func test_aimed_shot_verdict_uses_both_promoted_optic_predicates() -> void:
 			sim.step()
 			assert_true(_aimed_shot_available(sim),
 					"promoted Sighted bypasses the movement/water checks")
-		sim.free()
 
 
 func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
@@ -1151,7 +1134,6 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 	sim.step()
 	assert_true(_aimed_shot_available(sim), "leaving water restores aimed fire")
 
-	sim.free()
 
 	# The normal Scoped move path also requests an unscope, but its public result
 	# pins Player_CanFireWeapon's MoveOrder&8 rejection end-to-end.
@@ -1165,7 +1147,6 @@ func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
 	sim.step()
 	assert_false(_aimed_shot_available(sim),
 			"MoveOrder moving rejects an ordinary aimed shot")
-	sim.free()
 
 
 func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> void:
@@ -1207,7 +1188,6 @@ func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> v
 	assert_true(reload_seen, "fixture entered the card-switch reload action")
 	assert_false(_aimed_shot_available(sim),
 			"ForceScoped cannot bypass the earlier card-switch reload rejection")
-	sim.free()
 
 
 func test_decoded_round_stance_uses_retail_animation_flags() -> void:
@@ -1280,7 +1260,6 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	assert_almost_eq(recoil_view.fp_pitch_recoil_deg,
 			float(recoil_pitch) * 2.0 * 360.0 / 4294967296.0, 0.0001,
 			"the bridge exports retail's wrapped 2*recoil camera pitch")
-	sim.free()
 
 
 func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> void:
@@ -1320,7 +1299,6 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 	sim.step()
 	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
 		"a replacement local entity observes the current AnimMap as new")
-	sim.free()
 
 func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	# Multi-clip .adm variant rings, end to end through the public binding: clip
@@ -1393,7 +1371,6 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 			reload_variant = state.anim_variant
 			break
 	assert_eq(reload_variant, 0, "the second reload wraps the ring back to variant 0")
-	sim.free()
 
 
 func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
@@ -1467,7 +1444,6 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 		assert_eq((events[1] as PlayerWeaponEvent).effect_particle_userpoint,
 				"bcasing")
 	assert_true(sim.drain_local_player_weapon_events().is_empty(), "the drain is destructive")
-	sim.free()
 
 
 func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
@@ -1509,7 +1485,6 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 				"the earlier catch-up tick still shows its muzzle")
 		assert_true((fire_events[1] as PlayerWeaponEvent).scope_settled,
 				"the 15/15 tick alone suppresses its muzzle")
-	sim.free()
 
 
 func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void:
@@ -1543,7 +1518,6 @@ func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void
 			"the ADS ease settled before checking the card switch")
 		assert_eq(view.scope_card_active, bool(case["expected_card"]),
 			"Scoped/Sighted and NoCardSwitch select the card for %s" % case["name"])
-		sim.free()
 
 
 func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void:
@@ -1578,7 +1552,6 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 		sim.step()
 	assert_eq(sim.get_local_player_weapon_state().unscope_serial, before)
 	assert_true(sim.get_local_player_view().scope_engaged)
-	sim.free()
 
 
 func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
@@ -1674,7 +1647,6 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_eq(weapon_state.round_ring_count, 2)
 	assert_eq(weapon_state.last_round_seq, 2,
 			"weapon remount does not reset the shooter-lifetime sequence")
-	sim.free()
 
 
 func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
@@ -1771,7 +1743,6 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_gte(rotated_row_base, 0,
 			"the rotated gunner reached the decoded presentation")
 	if reference_row_base < 0 or rotated_row_base < 0:
-		sim.free()
 		return
 	assert_eq(int(snapshot[reference_row_base +
 			Simulation.PF_AIM_OVERLAY_VALID]), 1)
@@ -1843,7 +1814,6 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	var rotated_after: EntityCard = sim.entity_card_by_ai_index(1)
 	assert_lt(rotated_after.get_health(), health_before,
 			"the local round damages the rotated mounted enemy organic")
-	sim.free()
 
 
 func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot() -> void:
@@ -1931,7 +1901,6 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			break
 	assert_gte(row_base, 0, "the mounted placed enemy reached the decoded present")
 	if row_base < 0:
-		sim.free()
 		return
 	assert_eq(int(snapshot[row_base + Simulation.PF_AIM_OVERLAY_VALID]), 1)
 	assert_eq(int(snapshot[row_base + Simulation.PF_RIGHT_HAND_COLLAPSED]), 1,
@@ -2046,7 +2015,6 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 				"the incoming shot direction remains authoritative for reactions")
 	assert_lt(sim.entity_card_by_ai_index(enemy_idx).get_health(),
 			health_before, "the posed head shot damages the mounted enemy")
-	sim.free()
 
 
 func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
@@ -2098,7 +2066,6 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	sim.reset_session()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"restart cannot age a pre-rewind event across the logic-tick reset")
-	sim.free()
 
 
 func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
@@ -2141,7 +2108,6 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	var settled := sim.get_local_player_weapon_state()
 	assert_eq(settled.fired_serial, fired_before)
 	assert_eq(settled.round_ring_count, rounds_before)
-	sim.free()
 
 
 func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
@@ -2189,7 +2155,6 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
 	assert_true(sim.get_local_player_loadout().is_empty(),
 		"an explicit all-NONE kit remains empty instead of falling back to M4")
-	sim.free()
 
 
 func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
@@ -2237,7 +2202,6 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	assert_eq(mounted.next_action, 0)
 	assert_false(mounted.windup_active)
 	assert_false(sim.get_local_player_view().scope_engaged)
-	sim.free()
 
 
 func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
@@ -2275,7 +2239,6 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45",
 		"switching to a secondary in the accepted loadout changes the equipped weapon")
-	sim.free()
 
 
 func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -> void:
@@ -2324,7 +2287,6 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
 		"a switch requested during draw does not require a second press")
-	sim.free()
 
 
 func test_entities_walk_their_route() -> void:
@@ -2348,7 +2310,6 @@ func test_entities_walk_their_route() -> void:
 	# (mission (100,0,0) -> Godot +x).
 	assert_gt(start.distance_to(moved), 1.0, "entity walked away from its spawn")
 	assert_gt(moved.x, start.x + 1.0, "walked toward the first route marker (+x)")
-	sim.free()
 
 func test_infantry_anim_map_failure_paths() -> void:
 	var sim := Simulation.new()
@@ -2366,7 +2327,6 @@ func test_infantry_anim_map_failure_paths() -> void:
 			"a retained per-entity resolver cannot replace a failed default with US01")
 	assert_eq(sim.get_infantry_clip_count(), 0,
 			"a failed registry rebuild remains empty after per-entity resolution")
-	sim.free()
 
 
 func test_restart_rebinds_baseline_player_to_own_adm() -> void:
@@ -2406,7 +2366,6 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 	sim.step()
 	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
 			"restart repopulates US01 instead of silently retaining default soldier.adm")
-	sim.free()
 
 
 func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
@@ -2454,7 +2413,6 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	sim.step()
 	assert_eq(sim.get_local_player_anim_key(), "anim_emplaced_5",
 			"a late-spawn player receives US01 before phrase_set 4 selects its pose")
-	sim.free()
 
 
 func test_load_from_editor_mission_data() -> void:
@@ -2468,7 +2426,6 @@ func test_load_from_editor_mission_data() -> void:
 	assert_true(sim.load_from_mission_data(md), "promoted the editor's live mission")
 	assert_eq(sim.get_brain_count(), 2, "both organics got AI brains")
 	assert_eq(sim.get_entity_kind(0), 3, "entity 0 maps back to KIND_ORGANIC")
-	sim.free()
 
 func test_item_seat_specs_mount_command_125_spawn() -> void:
 	# carrier authors one ctrlx13 point plus four sitexNN points: the native
@@ -2566,7 +2523,6 @@ end
 	assert_not_null(idle,
 			"an NPC control-seat occupant keeps the truck idle emitter alive without a local player")
 	if idle == null:
-		sim.free()
 		return
 	assert_gt(idle.source_spawn_id, 0,
 			"the emitter key carries the registry-lifetime identity")
@@ -2657,7 +2613,6 @@ end
 	assert_lt(sim.get_entity_position(rider_idx).distance_to(expected_rider), 0.001)
 	assert_eq(rider_card.get_anim_state(), 76)
 	assert_eq(rider_card.get_anim_key(), "anim_sit")
-	sim.free()
 
 
 
@@ -2704,7 +2659,6 @@ end
 		assert_eq(l.attach_text_key, "")
 	assert_eq(nearest_count, 1, "exactly the scan winner is highlighted")
 	assert_true(seat_types.has(1) and seat_types.has(3), "sit + UseGun seats both reported")
-	sim.free()
 
 
 func test_attach_labels_share_complete_can_fire_verdict() -> void:
@@ -2763,7 +2717,6 @@ end
 	assert_false(_aimed_shot_available(sim))
 	assert_eq(sim.get_attach_labels().size(), 2,
 			"an underwater ordinary scope exposes every attach candidate")
-	sim.free()
 
 
 func test_attach_labels_hide_occupied_and_out_of_range() -> void:
@@ -2806,7 +2759,6 @@ end
 	var labels: Array = sim.get_attach_labels()
 	assert_eq(labels.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
 	assert_eq((labels[0] as AttachLabelRow).seat_type, 1, "the free sitex remains")
-	sim.free()
 
 
 func test_attach_labels_empty_out_of_range() -> void:
@@ -2830,7 +2782,6 @@ end
 	assert_true(sim.spawn_local_player(Vector3(40, 0, 0), 0.0, 1), "spawned far away")
 	assert_eq(sim.get_attach_labels().size(), 0,
 		"outside the 4.0 u gate the nearest scan fails and no labels emit [orig: @0x5a32e2]")
-	sim.free()
 
 
 # Drivable items (control-seat specs) attach AI brains at promote since the vehicle
@@ -2897,7 +2848,6 @@ end
 			Vector3(10, 0, 0), Vector3(0, -90, 0)) * ctrl_point
 	assert_lt(pos.distance_to(expected), 0.001,
 		"mounted seat local follows the same rotated side as the selected model userpoint")
-	sim.free()
 
 
 # The USE-ITEM toggle's weapon-busy gate at the sim binding [orig: @0x436958-0x436977]:
@@ -2950,7 +2900,6 @@ end
 	var seats: Array = card.get_seats()
 	assert_true(seats.size() == 1 and (seats[0] as EntityCardSeat).is_occupied(),
 		"the scan took the truck's one sitex seat")
-	sim.free()
 
 
 # Local UseGun follows Player_MountWeaponSlot rather than the nonlocal direct slot
@@ -3038,7 +2987,6 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"detach restores the world model immediately, before the holster commit")
-	sim.free()
 
 
 func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
@@ -3111,7 +3059,6 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
-		sim.free()
 		return
 	var before: PackedVector3Array = (before_rows[0] as HitboxDebugEntity).tris
 
@@ -3152,7 +3099,6 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var after_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_rows.size(), 1)
 	if after_rows.size() != 1:
-		sim.free()
 		return
 	var after: PackedVector3Array = (after_rows[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
@@ -3162,7 +3108,6 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 			moved += 1
 	assert_gt(moved, 0,
 			"headless collision consumes the same authoritative HEAT_GLOW frame")
-	sim.free()
 
 
 func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
@@ -3289,7 +3234,6 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			pitch_moved += 1
 	assert_gt(pitch_moved, 0,
 			"EWEAP_GUNPITCH moves the authored mount barrel with local look")
-	sim.free()
 
 
 func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
@@ -3462,7 +3406,6 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"restart installs a fresh personal slot epoch")
 	assert_false(sim.get_local_player_weapon_state().active,
 			"the mounted definition cannot pump the restored personal slot")
-	sim.free()
 
 
 func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
@@ -3594,7 +3537,6 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			third_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the same resolved Def model immediately suppresses the newly live parent")
-	sim.free()
 
 
 func test_death_during_usegun_draw_restores_personal_weapon() -> void:
@@ -3652,7 +3594,6 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			fired_before, "a dead local gunner cannot fire the emplacement")
 	sim.set_local_player_weapon(personal_def, {}, true)
 	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
-	sim.free()
 
 
 func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
@@ -3671,7 +3612,6 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	sim.clear_local_player_weapon()
 	assert_false(sim.local_player_toggle_mount(),
 			"retail rejects offline player UseGun attach without EquippedSlot")
-	sim.free()
 
 
 func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
@@ -3698,7 +3638,6 @@ end
 	sim.clear_local_player_weapon()
 	assert_true(sim.local_player_toggle_mount(),
 			"the null EquippedSlot gate is UseGun-only, not a generic seat gate")
-	sim.free()
 
 
 func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
@@ -3740,7 +3679,6 @@ end
 	assert_eq(card.get_mount_target_config(), 3)
 	assert_eq(card.get_anim_state(), 67)
 	assert_eq(card.get_anim_key(), "anim_emplaced")
-	sim.free()
 
 
 # (P7: the 3 no-net AI-pool present-snapshot tests were deleted — the present is now the listen-
@@ -3784,7 +3722,6 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	sim.step()
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing back up empties the anchor list")
-	sim.free()
 
 
 func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
@@ -3800,7 +3737,6 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 		sim.step()
 	assert_eq(sim.get_foliage_mask_anchor_positions().size(), 0,
 		"standing NPCs never anchor the hide-in-grass tier")
-	sim.free()
 
 
 func test_transport_uses_session_state() -> void:
@@ -3809,7 +3745,6 @@ func test_transport_uses_session_state() -> void:
 	assert_false(sim.is_playing(), "starts paused")
 	assert_true(sim.resume_session())
 	assert_true(sim.is_playing(), "resume enters the Running session state")
-	sim.free()
 
 func test_bms_event_fires_through_binding() -> void:
 	# The capability consolidation adds: a BMS event evaluates through the SAME binding that
@@ -3835,7 +3770,6 @@ func test_bms_event_fires_through_binding() -> void:
 	assert_eq((effects[0] as MissionEffect).a, 77, "carries the string id")
 	assert_true(sim.has_event_fired(0), "the event is marked fired")
 	assert_true(sim.drain_effects().is_empty(), "drain cleared the log")
-	sim.free()
 
 
 # --- Read-only introspection (C8: the debug overlay's data feeds) ---
@@ -3853,7 +3787,6 @@ func test_logic_tick_advances_per_step_and_rewinds_on_restart() -> void:
 	assert_eq(sim.get_logic_tick(), t0 + 3)
 	sim.reset_session()
 	assert_eq(sim.get_logic_tick(), t0, "Stop rewinds the clock to the play-start baseline")
-	sim.free()
 
 
 func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
@@ -3871,7 +3804,6 @@ func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
 	assert_eq(sim.get_mission_variables_snapshot()[5], 42, "snapshot reflects V writes")
 	assert_eq(sim.get_global_variables_snapshot()[3], -7, "snapshot reflects G writes")
 	assert_eq(sim.get_global_variable(3), -7, "the scalar G getter agrees")
-	sim.free()
 
 
 func test_fired_events_snapshot_matches_scalar() -> void:
@@ -3891,7 +3823,6 @@ func test_fired_events_snapshot_matches_scalar() -> void:
 	var after: PackedByteArray = sim.get_fired_events_snapshot()
 	assert_eq(int(after[0]), 1, "the fired flag sets")
 	assert_eq(int(after[0]) == 1, sim.has_event_fired(0), "bulk and scalar reads agree")
-	sim.free()
 
 
 func test_entity_debug_card_carries_named_scalars() -> void:
@@ -3914,7 +3845,6 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 
 	assert_null(sim.entity_card_by_ai_index(-1), "invalid index reads no card")
 	assert_null(sim.entity_card_by_ai_index(999))
-	sim.free()
 
 
 func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
@@ -3989,7 +3919,6 @@ func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
 			0.001, "the successful teleport mutates the authoritative player position")
 	assert_almost_eq(sim.get_local_player_yaw_deg(), 123.0, 0.01)
 	assert_almost_eq(sim.get_local_player_pitch_deg(), -17.0, 0.01)
-	sim.free()
 
 
 func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
@@ -4016,7 +3945,6 @@ func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
 	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),
 			"out-of-range SSNs must not wrap onto a different registry entity")
-	sim.free()
 
 
 func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> void:
@@ -4050,7 +3978,6 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		assert_eq(Simulation.building_visibility_mask(packed), 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
 		assert_true(Simulation.building_visibility_visible(packed), "the in-frustum building is visible")
-	sim.free()
 
 
 func test_occlusion_delta_calls_emit_changes_only() -> void:
@@ -4092,7 +4019,6 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 			"a live placed building reads as present-visible")
 	assert_true(bool(sim.entity_present_visible(424242)),
 			"an unknown bms id defaults visible (never blocks a show)")
-	sim.free()
 
 
 func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
@@ -4168,7 +4094,6 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	for point_index in range(mini(actual.size(), expected.size())):
 		assert_eq(actual[point_index], expected[point_index],
 				"KZ point %d preserves retail mission-local axes" % point_index)
-	sim.free()
 
 	# The sibling unitType-11 callback mines exact case-insensitive DEAD points
 	# from this same first husk. Prove the native collision sweep retains that
@@ -4199,7 +4124,6 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var actual_dead: PackedVector3Array = dead_debug.bridge_dead_points
 	assert_eq(actual_dead, expected_dead,
 			"the first-husk DEAD bank preserves retail mission-local axes")
-	dead_sim.free()
 
 	# Retail reads entity+52 huskModel for this walk. A final-only definition may
 	# use huskFinal for pieces (and our legacy collision fallback), but it must not
@@ -4248,7 +4172,6 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 			"a successfully opened final-only husk also supplies the retail gate")
 	assert_eq(final_only_debug.kz_point_count, 0,
 			"huskFinal alone does not replace retail's first-stage KZ source")
-	final_only_sim.free()
 
 	# Authored names do not stand in for the live retail pointer. A placer that
 	# resolves the main graphic but neither husk leaves the callback gate clear.
@@ -4265,7 +4188,6 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 			"items.def still records the authored husk name")
 	assert_false(missing_debug.husk_model_loaded,
 			"missing/corrupt husk assets leave the retail live-model gate clear")
-	missing_sim.free()
 
 
 func test_retail_glass_model_maps_exact_userpoint_into_death_traits() -> void:
@@ -4318,7 +4240,6 @@ end
 			"the GLASS1/GLASS mapping preserves mission-local point axes")
 	assert_eq(directions, PackedVector3Array([expected_dir]),
 			"the shatter orientation preserves the authored userpoint direction")
-	sim.free()
 
 	# A near-name is not in retail's static table, even with the same userpoint.
 	var wrong_dir := _native_fixture_dir()
@@ -4343,7 +4264,6 @@ end
 			int(wrong_placed.get("bms_id", 0)))
 	assert_eq(wrong_debug.glass_point_count, 0,
 			"retail's model table is an exact case-insensitive match")
-	wrong_sim.free()
 
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
@@ -4375,7 +4295,6 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true(sim.get_hitbox_debug().entities.is_empty(),
 		"the heavier non-organic mesh view retains its local 80-unit range")
-	sim.free()
 
 
 func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
@@ -4449,7 +4368,6 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	sim.debug_set_panm_time_ms(640)
 	var after: PackedVector3Array = (sim.get_hitbox_debug().entities[0] as HitboxDebugEntity).tris
 	assert_eq(after, before, "LOD1 PANM never transforms model-level COBJ")
-	sim.free()
 
 
 func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
@@ -4489,7 +4407,6 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	assert_eq(_present_phase_for_origin(
 			sim, MissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
 			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
-	sim.free()
 
 
 func test_present_part_anim_phase_transport_preserves_every_dword_bit() -> void:
@@ -4571,7 +4488,6 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 			sim, MissionData.KIND_ITEM, int(placed["index"]), 2), 65536)
 	assert_false(sim.get_entity_part_anim_active(0, 1))
 	assert_true(sim.get_entity_part_anim_active(0, 2))
-	sim.free()
 
 
 func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
@@ -4727,7 +4643,6 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 		live_child = live_child or type_id == 1419
 	assert_true(live_carrier and live_child,
 			"post-restart 0x0A keeps carrier and attachment class widths aligned")
-	sim.free()
 
 
 func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int) -> int:
@@ -4768,7 +4683,6 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	var before_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
-		sim.free()
 		return 0
 	var before: PackedVector3Array = (before_rows[0] as HitboxDebugEntity).tris
 	for _tick in range(80):
@@ -4776,7 +4690,6 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	var after_rows: Array = sim.get_hitbox_debug().entities
 	assert_eq(after_rows.size(), 1)
 	if after_rows.size() != 1:
-		sim.free()
 		return 0
 	var after: PackedVector3Array = (after_rows[0] as HitboxDebugEntity).tris
 	assert_eq(after.size(), before.size())
@@ -4784,7 +4697,6 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	for i in before.size():
 		if before[i].distance_to(after[i]) > 3.99:
 			moved += 1
-	sim.free()
 	return moved
 
 
@@ -4862,7 +4774,6 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	assert_eq(moved, 24, "only ordinal 1 moves")
 	assert_eq(stayed, 48)
 	assert_eq(partial, 0)
-	sim.free()
 
 
 func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
@@ -4952,7 +4863,6 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 			moved_sections += 1
 	assert_gt(moved_sections, 0,
 			"current BAD pose, not bind/entity-only matrices, drives collision")
-	sim.free()
 
 
 func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
@@ -4986,7 +4896,6 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
 			"the hidden local avatar was nevertheless attached on demand")
-	sim.free()
 
 
 func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
@@ -5015,7 +4924,6 @@ func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
 	var rows: Array = sim.get_hitbox_debug().organics
 	assert_true(rows.is_empty(),
 			"F3 omits the 200-unit target while still excluding local handle 1")
-	sim.free()
 
 
 func test_f3_hides_unresolved_local_player_fallback() -> void:
@@ -5026,7 +4934,6 @@ func test_f3_hides_unresolved_local_player_fallback() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true((sim.get_hitbox_debug().organics as Array).is_empty(),
 			"an unresolved local avatar never leaks through the fallback path")
-	sim.free()
 
 
 func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> void:
@@ -5045,7 +4952,6 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	probe.free()
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(
 			0, {"action_type": 22, "param1": old_ssn}).is_empty())
@@ -5076,7 +4982,6 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
 			"the old negative attempt cannot suppress the new slot identity")
-	sim.free()
 
 
 func test_restart_re_resolves_the_restored_collision_identity() -> void:
@@ -5094,7 +4999,6 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	probe.free()
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(
 			0, {"action_type": 22, "param1": old_ssn}).is_empty())
@@ -5134,7 +5038,6 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 		var row: HitboxDebugOrganic = value
 		assert_eq(row.entity_handle, 0)
 		assert_false(row.fallback)
-	sim.free()
 
 
 func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
@@ -5163,7 +5066,6 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 		handles[row.entity_handle] = true
 	assert_false(handles.has(0), "the 200-unit actor is outside the local F3 range")
 	assert_true(handles.has(1), "a zero-health corpse retains its bullet fallback")
-	sim.free()
 
 
 func test_time_driven_collision_advances_without_an_ai_brain() -> void:
@@ -5234,7 +5136,6 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 			moved += 1
 	assert_gt(moved, 0,
 		'free-running PANM uses retail milliseconds with zero controls')
-	sim.free()
 
 
 func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
@@ -5247,7 +5148,6 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var ssn := probe.get_entity_net_id(0)
-	probe.free()
 
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
@@ -5268,7 +5168,6 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_eq(card.get_net_id(), ssn, "the AI half still reports its scalars")
 	assert_true(sim.get_entity_effect_state_for_ssn(ssn).is_empty(),
 			"attached effects detach as soon as VaporizeSingle removes the registry slot")
-	sim.free()
 
 
 func test_ai_state_name_static_lookup() -> void:

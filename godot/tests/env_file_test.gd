@@ -437,10 +437,9 @@ func test_weather_releases_a_freed_simulation_before_the_environment_reads_it() 
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.weather_state_bound())
 	weather.bind_simulation(sim)
-	# GameWorld.unload frees the runtime and the off-tree sim with it: the
+	# GameWorld.unload frees the runtime and drops its sim with it: the
 	# environment must stop viewing the dead World's WeatherState before its
 	# next reload reads the view (the mission-lifecycle segfault).
-	sim.free()
 	env_node.environment_data = _load_full_00()
 	env_node.set_time_of_day(12.0)
 	# GameWorld re-prepares the standalone home on the world-only load.

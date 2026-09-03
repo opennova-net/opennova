@@ -829,7 +829,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-		const Dictionary &p_strings, Simulation *p_sim) {
+		const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
@@ -845,7 +845,7 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_c
 	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
 	// Rows come straight from the netsim projection — no script-side
 	// Dictionary round-trip to drop fields or lose the score sign.
-	if (p_shown && p_sim != nullptr) {
+	if (p_shown && p_sim.is_valid()) {
 		p_sim->fill_scoreboard_rows(sb.rows);
 		sb.team_count = p_sim->scoreboard_team_count();
 	} else {
@@ -891,7 +891,7 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 }
 
 void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
-		Simulation *p_sim) {
+		const Ref<Simulation> &p_sim) {
 	opennova::hud::HudVehiclePanelState &vp = state_.vehicle_panel;
 	if (!p_shown || p_block.is_null()) {
 		vp = opennova::hud::HudVehiclePanelState{};
@@ -928,7 +928,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 	// included [orig: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
 	// texture's w/h, see docs/interface/hud-re.md].
 	bool riding = true;
-	if (p_sim != nullptr) {
+	if (p_sim.is_valid()) {
 		riding = p_sim->fill_vehicle_panel(block, vp);
 	} else {
 		vp.seats.clear();
@@ -957,7 +957,7 @@ void HudOverlay::set_message_log_title(const String &p_title) {
 }
 
 void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-		int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim) {
+		int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
 	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
@@ -973,7 +973,7 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	lp.under_attack_text =
 			String(p_strings.get("under_attack", "")).utf8().get_data();
 	lp.ready_text = String(p_strings.get("ready", "")).utf8().get_data();
-	if (p_shown && p_sim != nullptr) {
+	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
 	} else {
 		lp.shown = false;

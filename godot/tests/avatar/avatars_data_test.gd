@@ -93,7 +93,6 @@ func test_simulation_installs_every_avatar_character_sex_row() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.set_character_avatar_database(db), expected,
 			"the sim receives one packed sex row per retail avatar combo")
-	sim.free()
 
 
 func test_combo_parts_are_parse_time_snapshots() -> void:

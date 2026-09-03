@@ -114,22 +114,20 @@ void Simulation::close_session() {
 // and wraps against the current renderer viewport height [orig:
 // Server_SendRandomSeedSync @ 0x511360 -- CEffectWorld_GetViewportDimensions
 // @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render window
-// the way retail's CEffectWorld query does: the live window (the runtime
-// owns this node without parenting it into the tree, so get_viewport() alone
-// is null on every production host). A headless DisplayServer has no
+// the way retail's CEffectWorld query does: the live window (the scene
+// tree's root; the simulation is a RefCounted the runtime owns, not a node
+// in that tree). A headless DisplayServer has no
 // renderer (the dedicated-host analogue); a missing/non-drawable viewport
 // hands the host role 0 and npruntime suppresses 0x68 instead of inventing
 // a screen size (D-NET-206).
 int32_t Simulation::renderer_viewport_height() const {
-	Viewport *viewport = get_viewport();
-	if (viewport == nullptr) {
-		DisplayServer *display = DisplayServer::get_singleton();
-		if (display != nullptr && display->get_name() != "headless") {
-			SceneTree *tree = Object::cast_to<SceneTree>(
-					Engine::get_singleton()->get_main_loop());
-			if (tree != nullptr)
-				viewport = tree->get_root();
-		}
+	Viewport *viewport = nullptr;
+	DisplayServer *display = DisplayServer::get_singleton();
+	if (display != nullptr && display->get_name() != "headless") {
+		SceneTree *tree = Object::cast_to<SceneTree>(
+				Engine::get_singleton()->get_main_loop());
+		if (tree != nullptr)
+			viewport = tree->get_root();
 	}
 	return viewport != nullptr ? static_cast<int32_t>(viewport->get_visible_rect().size.y) : 0;
 }

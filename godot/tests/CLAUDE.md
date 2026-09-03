@@ -39,6 +39,11 @@
   freed loaded, or a leaked instance carrying a `Transform3D`-typed member, segfaults the
   whole run at process exit (Godot 4.6 teardown quirk, bisected 2026-08-09) while GUT
   still reports green totals, so the crash only shows as a nonzero exit code.
+- `Simulation` is a RefCounted (ADR 0043 slice G2): never `free()` it, and hold the Ref
+  for as long as a consumer reads it. The passes, `Weather`, `AmbientMixer` and `DevTools`
+  keep only its ObjectID, so a sim built as a temporary (`_wire_pass(_sim(), ...)`) is gone
+  before the first read; keep it on the test (`var _sims: Array[Simulation]`, cleared in
+  `after_each`) like `wire_present_pass_test.gd`.
 - A new `class_name` (a fixture, a production class) is invisible to a headless GUT run
   until `"$GODOT_BIN" --headless --path godot --import` refreshes the class cache; the
   symptom is "Could not find base class" and a silently dropped script.

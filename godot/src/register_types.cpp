@@ -49,8 +49,6 @@
 #include "lights/effect_light_report.h"
 #include "lights/light_scene.h"
 #include "lights/light_spawn.h"
-#include "lights/light_spawn.h"
-#include "lights/light_spawn.h"
 #include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
 #include "particle/effect_spawn_records.h"

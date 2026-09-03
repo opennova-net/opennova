@@ -22,7 +22,6 @@ water_path = NodePath("../Water")
 [node name="FoliageDispatcher" type="FoliageDispatcher" parent="Terrain"]
 
 [node name="MissionEnvironment" type="MissionEnvironment" parent="."]
-process_priority = -20
 
 [node name="SkyDome" type="SkyDome" parent="."]
 environment_path = NodePath("../MissionEnvironment")
@@ -30,7 +29,6 @@ weather_path = NodePath("../Weather")
 environment_capture_layer_mask = 1024
 
 [node name="Weather" type="Weather" parent="."]
-process_priority = -10
 environment_path = NodePath("../MissionEnvironment")
 
 [node name="Precipitation" type="Precipitation" parent="."]
@@ -45,3 +43,7 @@ weather_path = NodePath("../Weather")
 [node name="Celestial" type="Celestial" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 environment_capture_layer_mask = 1024
+
+[node name="SunShadow" type="SunShadow" parent="."]
+
+[node name="SlotShadow" type="SlotShadow" parent="."]
