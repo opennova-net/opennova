@@ -26,26 +26,85 @@ Ref<MissionFrameOutcome> godot_outcome(
 
 } // namespace
 
-// The engine role this sim's mode runs its ticks through (ADR 0043 d3): the
-// joiner's, the host's (the SP listen server keeps the SinglePlayer kind so
-// the session's pause/step/reset stay available; a LAN host is ListenHost or
-// DedicatedHost by serve_and_play), else the bare local role.
-opennova::inmatch::Role &Simulation::configured_session_role() {
-	using RoleKind = opennova::inmatch::RoleKind;
-	if (joiner_) return joiner_role_;
-	if (host_listen_) {
-		host_role_.set_kind(host_serve_and_play_ ? RoleKind::ListenHost : RoleKind::DedicatedHost);
-		return host_role_;
-	}
-	if (listen_server_) {
-		host_role_.set_kind(RoleKind::SinglePlayer);
-		return host_role_;
-	}
-	return local_role_;
+// The ONE engine role this session runs its ticks through (ADR 0043 d3):
+// installed per session by kind, never null after construction.
+opennova::inmatch::Role &Simulation::active_role() {
+	return *role_;
 }
 
-opennova::inmatch::Role &Simulation::active_role() {
-	return session_.role() != nullptr ? *session_.role() : configured_session_role();
+opennova::inmatch::ListenHostState *Simulation::host_state() {
+	return host_role_ != nullptr ? &host_role_->state : nullptr;
+}
+
+const opennova::inmatch::ListenHostState *Simulation::host_state() const {
+	return host_role_ != nullptr ? &host_role_->state : nullptr;
+}
+
+opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() {
+	return host_role_ != nullptr ? &host_role_->state.host_owner.ctx : nullptr;
+}
+
+const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
+	return host_role_ != nullptr ? &host_role_->state.host_owner.ctx : nullptr;
+}
+
+// The ONE writer of the kind-derived world rules: a joiner is never the
+// projectile authority; a LAN host or a joiner is an mp session (the SP
+// listen server keeps the SinglePlayer kind and stays offline). Runs on the
+// fresh kernel at reset_world and whenever a role installs.
+void Simulation::apply_session_rules() {
+	if (kernel_ == nullptr) return;
+	kernel_->world.rules.projectile_authority = !is_joiner();
+	kernel_->world.rules.mp_session = is_host_listening() || is_joiner();
+}
+
+bool Simulation::adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
+		opennova::inmatch::HostRole *p_host, opennova::inmatch::JoinerRole *p_joiner) {
+	const opennova::inmatch::TransitionResult out = session_.configure_role(*p_role);
+	if (out.code != opennova::inmatch::TransitionCode::Applied &&
+			out.code != opennova::inmatch::TransitionCode::NoOp) {
+		return false;
+	}
+	role_ = std::move(p_role);
+	host_role_ = p_host;
+	joiner_role_ = p_joiner;
+	if (kernel_ != nullptr) role_->bind(*kernel_);
+	// A fresh host/joiner has no runtime until its bring-up / dial builds one.
+	runtime_ = role_->client_runtime();
+	apply_session_rules();
+	return true;
+}
+
+// The SP listen server keeps the SinglePlayer kind so the session's
+// pause/step/reset stay available; a LAN host is ListenHost or DedicatedHost
+// by serve_and_play (enable_host_listen / ensure_session_role).
+bool Simulation::install_offline_role() {
+	if (listen_server_) {
+		return install_role(std::make_unique<opennova::inmatch::HostRole>(
+				opennova::inmatch::RoleKind::SinglePlayer, item_class_resolver()));
+	}
+	return install_role(std::make_unique<opennova::inmatch::LocalRole>());
+}
+
+// A joiner (enable_join) stays; a LAN host (enable_host_listen) stays and
+// re-kinds to the UI server type; otherwise the SP listen server or the bare
+// local role by listen_server_. Only while the session can switch roles.
+void Simulation::ensure_session_role() {
+	using State = opennova::inmatch::State;
+	using RoleKind = opennova::inmatch::RoleKind;
+	const State state = session_.state();
+	if (state != State::Unloaded && state != State::Failed) return;
+	if (joiner_role_ != nullptr) return;
+	if (host_role_ != nullptr && host_role_->kind() != RoleKind::SinglePlayer) {
+		const RoleKind kind = net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost;
+		if (host_role_->kind() != kind) {
+			host_role_->set_kind(kind);
+			(void)session_.configure_role(*role_);
+			apply_session_rules();
+		}
+		return;
+	}
+	if ((host_role_ != nullptr) != listen_server_) (void)install_offline_role();
 }
 
 bool Simulation::begin_session_load() {
@@ -58,8 +117,9 @@ bool Simulation::begin_session_load() {
 		(void)session_.close();
 	}
 	if (session_.state() != State::Connecting) {
+		ensure_session_role();
 		const opennova::inmatch::TransitionResult role =
-				session_.configure_role(configured_session_role());
+				session_.configure_role(*role_);
 		if (role.code != opennova::inmatch::TransitionCode::Applied &&
 				role.code != opennova::inmatch::TransitionCode::NoOp) {
 			return false;
@@ -139,7 +199,7 @@ void Simulation::after_tick() {
 	tick_hud_map_death_gate();
 	// The joiner's ~1 Hz frozen-session tripwire sampled this tick: the
 	// env-gated print is the shell's channel.
-	if (joiner_ && joiner_role_.take_diagnostic_sample())
+	if (joiner_role_ != nullptr && joiner_role_->take_diagnostic_sample())
 		print_joiner_net_diagnostic_sample();
 }
 

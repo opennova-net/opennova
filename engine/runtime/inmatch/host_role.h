@@ -46,6 +46,12 @@ struct HostBringup {
 class HostRole final : public Role {
 public:
 	HostRole();
+	// The embedder's form: the session kind it runs under and the item-class
+	// resolver every HostClient view it builds takes (empty = none yet; the
+	// embedder installs one through set_item_class_resolver once its catalog
+	// exists).
+	explicit HostRole(RoleKind kind,
+			replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver = {});
 	RoleKind kind() const override { return kind_; }
 	// The session kind this host runs under: a shell's SP listen server keeps
 	// SinglePlayer (pause/step/reset stay available); a LAN host is ListenHost
@@ -69,6 +75,11 @@ public:
 	// The shell's general bring-up (the LAN host or its SP listen server with
 	// the shell's mission text and terrain tiles).
 	void bring_up(const HostBringup &bringup);
+	// The embedder's bring-up record for the next boot-hook bring_up(): staged
+	// right before the kernel boots (the text, tiles and config are final by
+	// then), consumed by the hook.
+	void stage_bringup(HostBringup bringup) { staged_bringup_ = std::move(bringup); }
+	bool bring_up() override;
 
 	// The C2S drain the host's own client feeds before the server tick.
 	void drain_host_client_gameplay_requests();
@@ -85,6 +96,7 @@ private:
 	void make_client_runtime(uint32_t game_type);
 
 	RoleKind kind_ = RoleKind::ListenHost;
+	HostBringup staged_bringup_;
 	opennova::IDatagramSocket *socket_ = nullptr;
 	replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver_;
 	int64_t last_net_us_ = 0;

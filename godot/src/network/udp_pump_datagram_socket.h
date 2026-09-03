@@ -16,7 +16,7 @@ namespace godot {
 // UdpPump-backed opennova::IDatagramSocket — the Godot adapter the engine
 // roles pump (the host owner loop's drain and fan, the joiner frame's deposit
 // and send). A null/closed pump yields recv 0 / send no-op, so a role's socket
-// legs go inert exactly as the old host_listen_-gated code did. PeerAddr <->
+// legs go inert exactly as the old flag-gated code did. PeerAddr <->
 // "a.b.c.d" uses the LE octet packing PeerAddr documents (octet 0 in the low
 // byte; 127.0.0.1 -> 0x0100007F).
 class UdpPumpDatagramSocket : public opennova::IDatagramSocket {

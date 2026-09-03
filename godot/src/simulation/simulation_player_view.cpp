@@ -31,12 +31,13 @@ bool Simulation::request_local_player_scope_toggle() {
 	// client, a standalone/tool world applies the same validated transition.
 	opennova::world::MountSlotSelectRequest req;
 	if (opennova::world::local_player_mount_slot_select(kernel_->world, kernel_->local.weapon, req)) {
-		if (joiner_ && runtime_)
+		if (is_joiner() && runtime_)
 			return runtime_->queue_mounted_weapon_slot_selection(req.use_parent_slot);
-		if (host_owner_.serve_and_play) {
+		if (opennova::inmatch::ListenHostState *host = host_state();
+				host != nullptr && host->host_owner.serve_and_play) {
 			opennova::MountedWeaponSlotSelection selection;
 			selection.use_parent_slot = req.use_parent_slot;
-			host_loop_.client_send(
+			host->host_loop.client_send(
 					opennova::c2s::MOUNTED_WEAPON_SLOT_SELECT,
 					opennova::encode_mounted_weapon_slot_selection(selection));
 			return true;

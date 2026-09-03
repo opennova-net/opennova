@@ -25,7 +25,7 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 	const int default_clip_count = kernel_->install_infantry_anim(
 			std::string(p_adm_name.utf8().get_data()),
 			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
-	if (runtime_ != nullptr && joiner_) {
+	if (runtime_ != nullptr && is_joiner()) {
 		for (opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
 			if (es.rm_adm_id != -2) {
@@ -46,8 +46,8 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_root,
 		const Ref<ItemDatabase> &p_item_db) {
 	if (p_resource_root.is_null() || p_item_db.is_null()) return;
-	infantry_adm_resource_root_ = p_resource_root;
-	infantry_adm_item_db_ = p_item_db;
+	assets_.infantry_adm_resource_root = p_resource_root;
+	assets_.infantry_adm_item_db = p_item_db;
 	kernel_->set_items_table(&p_item_db->native_items());
 	kernel_->rearm_infantry_adm(&p_resource_root->native_index());
 }
@@ -60,27 +60,27 @@ void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_ro
 // called after load and again after spawning the local player.
 void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	if (p_item_db.is_null()) return;
-	item_traits_db_ = p_item_db;
+	assets_.item_traits_db = p_item_db;
 	// The kernel's item legs (the collision demand sweep, the adm resolve)
 	// read the same rows; the Ref above pins their lifetime.
 	kernel_->set_items_table(&p_item_db->native_items());
-	if (!item_replication_catalog_ ||
-			item_replication_catalog_db_.ptr() != p_item_db.ptr() ||
-			item_replication_catalog_revision_ != p_item_db->get_revision()) {
+	if (!assets_.item_replication_catalog ||
+			assets_.item_replication_catalog_db.ptr() != p_item_db.ptr() ||
+			assets_.item_replication_catalog_revision != p_item_db->get_revision()) {
 		// Built straight off the retained parse: the per-row walk keeps
 		// duplicate definition ids so the catalog can classify them as
 		// ambiguous and fail closed.
-		item_replication_catalog_ =
+		assets_.item_replication_catalog =
 				std::make_shared<const opennova::replication::ItemReplicationCatalog>(
 						opennova::replication::ItemReplicationCatalog::from_items_def(
 								p_item_db->native_items()));
-		item_replication_catalog_db_ = p_item_db;
-		item_replication_catalog_revision_ = p_item_db->get_revision();
+		assets_.item_replication_catalog_db = p_item_db;
+		assets_.item_replication_catalog_revision = p_item_db->get_revision();
 	}
 	// The kernel runs the sweep over the table installed above and re-runs it
 	// inside every baseline restore (the baseline predates these traits).
 	kernel_->resolve_item_traits(
-			[catalog = item_replication_catalog_](int def_id) {
+			[catalog = assets_.item_replication_catalog](int def_id) {
 				// The same immutable profile supplies the host stamp and the
 				// client decode width. Missing/ambiguous definitions fail
 				// closed as Unknown.
@@ -94,22 +94,29 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	install_item_class_resolver();
 }
 
+opennova::replication::ClientReplicaPipeline::ItemClassResolver
+Simulation::item_class_resolver() const {
+	if (!assets_.item_replication_catalog) return {};
+	return [catalog = assets_.item_replication_catalog](uint16_t type_id) {
+		return catalog->resolve_wire_entity_class(type_id);
+	};
+}
+
 void Simulation::install_item_class_resolver() {
-	if (!item_replication_catalog_) return;
+	if (!assets_.item_replication_catalog) return;
 	opennova::replication::ClientReplicaPipeline::ItemClassResolver resolver =
-			[catalog = item_replication_catalog_](uint16_t type_id) {
-				return catalog->resolve_wire_entity_class(type_id);
-			};
-	// The host role retains it for every HostClient view it rebuilds (the
-	// baseline restore); the live runtime takes it now.
-	host_role_.set_item_class_resolver(resolver);
+			item_class_resolver();
+	// A host role is constructed with the resolver of its time and retains it
+	// for every HostClient view it rebuilds (the baseline restore); the catalog
+	// built after a role installed lands here. The live runtime takes it now.
+	if (host_role_ != nullptr) host_role_->set_item_class_resolver(resolver);
 	if (runtime_) runtime_->view().set_item_class_resolver(std::move(resolver));
 }
 
 void Simulation::install_charattr_challenge_table() {
 	if (runtime_) {
-		if (charattr_challenge_loaded_) {
-			runtime_->set_charattr_challenge_table(charattr_challenge_table_);
+		if (net_.charattr_challenge_loaded) {
+			runtime_->set_charattr_challenge_table(net_.charattr_challenge_table);
 		} else {
 			runtime_->clear_charattr_challenge_table();
 		}
@@ -127,51 +134,51 @@ void Simulation::sync_class_attribute_flags() {
 	const opennova::inmatch::CharAttrChallengeTable *live =
 			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
 	const opennova::inmatch::CharAttrChallengeTable &table =
-			live != nullptr ? *live : charattr_challenge_table_;
+			live != nullptr ? *live : net_.charattr_challenge_table;
 	kernel_->world.tables.class_attribute_flags =
 			opennova::inmatch::charattr_class_attribute_rows(table);
 }
 
 void Simulation::install_character_join_vars() {
-	if (!runtime_ || !join_character_vars_set_) return;
-	runtime_->set_character_join_vars(join_character_vars_);
+	if (!runtime_ || !net_.join_character_vars_set) return;
+	runtime_->set_character_join_vars(net_.join_character_vars);
 }
 
 void Simulation::install_join_integrity_profile() {
 	if (!runtime_) return;
-	if (join_integrity_profile_id_.empty()) {
+	if (net_.join_integrity_profile_id.empty()) {
 		runtime_->clear_integrity_challenge_profile();
 		return;
 	}
-	runtime_->set_integrity_challenge_profile(join_integrity_profile_id_);
+	runtime_->set_integrity_challenge_profile(net_.join_integrity_profile_id);
 }
 
 void Simulation::install_expansion_version_root() {
 	if (!runtime_) return;
-	runtime_->set_expansion_version_root(join_expansion_version_root_);
+	runtime_->set_expansion_version_root(net_.join_expansion_version_root);
 }
 
 void Simulation::install_app_id() {
 	if (!runtime_) return;
-	runtime_->set_app_id(app_id_);
+	runtime_->set_app_id(net_.app_id);
 }
 
 void Simulation::install_join_cd_cookie() {
 	if (!runtime_) return;
-	runtime_->set_join_cd_cookie(join_cd_cookie_);
+	runtime_->set_join_cd_cookie(net_.join_cd_cookie);
 }
 
 int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
-	character_sex_rows_.clear();
+	assets_.character_sex_rows.clear();
 	if (p_avatar_db.is_valid()) {
 		for (const AvatarDatabase::CharacterSexRow &row :
 				p_avatar_db->character_sex_rows())
-			character_sex_rows_.push_back(
+			assets_.character_sex_rows.push_back(
 					CharacterSexRow{row.character_id, row.female});
 	}
 	apply_character_traits_to_world();
-	return static_cast<int>(character_sex_rows_.size());
+	return static_cast<int>(assets_.character_sex_rows.size());
 }
 
 void Simulation::apply_collision_to_ai() {
@@ -186,7 +193,7 @@ int Simulation::get_mounted_graphic_source_count() const {
 
 
 void Simulation::set_asset_root(const Ref<ResourceRoot> &p_root) {
-	asset_root_ = p_root;
+	assets_.root = p_root;
 	kernel_->set_asset_index(
 			p_root.is_valid() ? &p_root->native_index() : nullptr);
 }
@@ -194,7 +201,7 @@ void Simulation::set_asset_root(const Ref<ResourceRoot> &p_root) {
 int Simulation::resolve_collision_instances(
 		const Ref<ItemDatabase> &p_item_db) {
 	if (p_item_db.is_null()) return 0;
-	collision_item_db_ = p_item_db;
+	assets_.collision_item_db = p_item_db;
 	// The kernel's demand sweep (ensure_collision_instance) reads the same
 	// rows; the Ref above pins their lifetime.
 	kernel_->set_items_table(&p_item_db->native_items());
@@ -219,7 +226,7 @@ void Simulation::refresh_item_seat_spec(
 		opennova::world::Entity &p_entity) {
 	if (!kernel_) return;
 	opennova::simassets::refresh_item_seat_spec(kernel_->world, kernel_->seat_specs,
-			p_entity, joiner_role_.wire_header_world());
+			p_entity, kernel_->wire_header_world);
 }
 
 // (set_ai_profile_speeds retired with S9b: the .aip resolve is native in
@@ -245,8 +252,8 @@ void Simulation::finalize_installed_seat_specs() {
 			if (entity.handle.pool() == 1) items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
-			opennova::world::Entity *entity = joiner_role_.wire_header_world()
-					? joiner_role_.materializer().owned(kernel_->world, handle)
+			opennova::world::Entity *entity = kernel_->wire_header_world && joiner_role_ != nullptr
+					? joiner_role_->materializer().owned(kernel_->world, handle)
 					: kernel_->world.registry.get(handle);
 			if (entity != nullptr)
 				refresh_item_seat_spec(*entity);
@@ -254,8 +261,8 @@ void Simulation::finalize_installed_seat_specs() {
 		// A header-only join may receive its model/seat table after the 0x0D
 		// row. Definitions were installed above; now apply the retained fixed
 		// mountHandles image without creating synthetic seats.
-		if (joiner_role_.wire_header_world() && runtime_ != nullptr)
-			(void)joiner_role_.materializer().sync(runtime_->state(), kernel_->world);
+		if (kernel_->wire_header_world && joiner_role_ != nullptr && runtime_ != nullptr)
+			(void)joiner_role_->materializer().sync(runtime_->state(), kernel_->world);
 	}
 }
 

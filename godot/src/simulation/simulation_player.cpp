@@ -59,7 +59,7 @@ int Simulation::get_local_player_wire_handle() const {
 	// own pool and collides with a host-side slot (e.g. the host player), so excluding L
 	// from the wire present would wrongly hide a remote entity. On the host, the local
 	// player's own pool-0 handle IS its wire handle.
-	if (joiner_) return static_cast<int>(joiner_role_.self_wire_handle());
+	if (joiner_role_ != nullptr) return static_cast<int>(joiner_role_->self_wire_handle());
 	return (kernel_ && kernel_->world.cached.local_player.valid())
 			? static_cast<int>(kernel_->world.cached.local_player.packed) : 0;
 }
@@ -98,9 +98,9 @@ bool Simulation::request_local_player_stance(Stance p_stance) {
 	// 0x1D with the action id immediately; without it a retail host (and every
 	// other client) never sees this player crouch or go prone.
 	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e]
-	if (joiner_ && runtime_) {
+	if (joiner_role_ != nullptr && runtime_) {
 		static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
-		joiner_role_.send_stance_change(
+		joiner_role_->send_stance_change(
 				kStanceActionIds[static_cast<size_t>(p_stance)]);
 	}
 	return true;
@@ -134,35 +134,35 @@ int Simulation::request_hud_radar_zoom(int p_direction) {
 	// The engine control routes the step to the big-map pair while a mode
 	// is up (witness at hud::HudMapControl::zoom_step).
 	const int step = p_direction < 0 ? -1 : (p_direction > 0 ? 1 : 0);
-	return hud_map_control_.zoom_step(step);
+	return player_.hud_map_control.zoom_step(step);
 }
 
 int Simulation::get_hud_radar_zoom_q16() const {
-	return hud_map_control_.zoom_q16;
+	return player_.hud_map_control.zoom_q16;
 }
 
 int Simulation::request_hud_map_cycle() {
 	// The map_toggle action's three-state cycle (witness at
 	// hud::HudMapControl::cycle).
-	return hud_map_control_.cycle();
+	return player_.hud_map_control.cycle();
 }
 
 int Simulation::get_hud_map_mode() const {
-	return hud_map_control_.mode;
+	return player_.hud_map_control.mode;
 }
 
 int Simulation::get_hud_big_zoom_q16() const {
-	return hud_map_control_.big_zoom_q16;
+	return player_.hud_map_control.big_zoom_q16;
 }
 
 void Simulation::tick_hud_map_death_gate() {
 	// The render gate zeroes the mode whenever the local player is dead;
 	// respawn re-opens nothing — only the M key does (witness at
 	// hud::HudMapControl::on_local_player_dead).
-	if (hud_map_control_.mode == 0) return;
+	if (player_.hud_map_control.mode == 0) return;
 	// The joiner reads its recipient-specific 0x0A health tail, the authority
 	// its entity flags — the one local_player_dead() seam.
-	if (local_player_dead()) hud_map_control_.on_local_player_dead();
+	if (local_player_dead()) player_.hud_map_control.on_local_player_dead();
 }
 
 bool Simulation::get_hud_map_flip_180() const {
@@ -297,7 +297,7 @@ int Simulation::get_local_player_character_id() const {
 	}
 	// A joiner that has learned its record but not yet materialized L (the
 	// deploy-screen hold, the challenge prewarm) reads the record itself.
-	if (joiner_ && runtime_ && runtime_->has_self_handle()) {
+	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
 		return static_cast<int>(runtime_->spawn_pose().net_id);
 	}
 	return 0;

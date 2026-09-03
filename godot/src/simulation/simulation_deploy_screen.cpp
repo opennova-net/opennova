@@ -23,7 +23,7 @@ using namespace godot;
 bool Simulation::local_player_dead() const {
 	// The one role-agnostic read of the local player's dead bit: the joiner's
 	// replica (inmatch::ClientRuntime), the authority's entity flags (the kernel).
-	if (joiner_) return runtime_ != nullptr && runtime_->local_player_dead();
+	if (is_joiner()) return runtime_ != nullptr && runtime_->local_player_dead();
 	return kernel_ != nullptr && kernel_->local.local_player_dead();
 }
 
@@ -46,7 +46,8 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
 	opennova::inmatch::ServerTextTable text;
 	text.medic_request_format = p_medic_request_format.utf8().get_data();
-	opennova::inmatch::set_server_text(ctx_, std::move(text));
+	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx())
+		opennova::inmatch::set_server_text(*ctx, std::move(text));
 }
 
 Ref<DeployStatus> Simulation::get_deploy_status() {
@@ -60,7 +61,7 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	int self_zone_index = -1;
 	bool self_zone_numbered = false;
 	int self_zone_countdown = 0;
-	if (joiner_ && runtime_) {
+	if (is_joiner() && runtime_) {
 		const opennova::replication::ClientState &cs = runtime_->state();
 		penalty = cs.respawn_penalty_seconds;
 		revive = cs.local_revive_seconds;
@@ -136,7 +137,7 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 	// loops over the zone rows this sim exposes (deploy_zone_rows), the team
 	// colour tag, and the embedder-resolved WPNames strings.
 	TypedArray<DeployListRow> out;
-	if (!kernel_ || !joiner_ || !runtime_) return out;
+	if (!kernel_ || !is_joiner() || !runtime_) return out;
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
