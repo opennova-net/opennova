@@ -81,26 +81,26 @@ func _mission_fixture() -> Dictionary:
 	# First row in each independent pool: exact authority handles 0x1000,
 	# 0x2000, and 0x3000. The joiner starts at x=0, deploys to x=12, then is
 	# within the retail four-unit seat scan of the vehicle at x=14.
-	var vehicle: Dictionary = mission.add_entity(
+	var vehicle: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_ITEM, VEHICLE_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: Dictionary = mission.add_entity(
+	var zone: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: Dictionary = mission.add_entity(
+	var marker: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
-	assert_false(vehicle.is_empty())
-	assert_false(zone.is_empty())
-	assert_false(marker.is_empty())
-	if not zone.is_empty():
+	assert_not_null(vehicle)
+	assert_not_null(zone)
+	assert_not_null(marker)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
 				MissionData.KIND_BUILDING,
-				int(zone.get("index", -1)), "team", 1))
+				zone.index, "team", 1))
 	return {
 		"mission": mission,
-		"vehicle_bms_id": int(vehicle.get("bms_id", 0)),
-		"zone_bms_id": int(zone.get("bms_id", 0)),
+		"vehicle_bms_id": vehicle.bms_id,
+		"zone_bms_id": zone.bms_id,
 	}
 
 
@@ -109,25 +109,25 @@ func _designated_g_mission_fixture() -> Dictionary:
 	assert_eq(mission.create_default(), OK)
 	# The body-empty joiner deploys beside a vehicle-EWeap parent. Promotion
 	# creates its designated-G B50 child at the next exact pool-1 handle.
-	var parent: Dictionary = mission.add_entity(
+	var parent: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_ITEM, DESIGNATED_G_PARENT_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: Dictionary = mission.add_entity(
+	var zone: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: Dictionary = mission.add_entity(
+	var marker: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
-	assert_false(parent.is_empty())
-	assert_false(zone.is_empty())
-	assert_false(marker.is_empty())
-	if not zone.is_empty():
+	assert_not_null(parent)
+	assert_not_null(zone)
+	assert_not_null(marker)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
 				MissionData.KIND_BUILDING,
-				int(zone.get("index", -1)), "team", 1))
+				zone.index, "team", 1))
 	return {
 		"mission": mission,
-		"parent_bms_id": int(parent.get("bms_id", 0)),
+		"parent_bms_id": parent.bms_id,
 	}
 
 
@@ -548,12 +548,15 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			joiner, DESIGNATED_G_CHILD_TYPE).distance_to(
 					joiner.get_local_player_position()), 4.0,
 			"the decoded child remains inside retail's seat-scan radius")
-	var attach_labels: Array = joiner.get_attach_labels()
-	assert_eq(attach_labels.size(), 1,
+	var attach_hud := HudOverlay.new()
+	autofree(attach_hud)
+	attach_hud.set_attach_labels(
+			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
+			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, joiner)
+	assert_eq(attach_hud.get_attach_label_count(), 1,
 			"the decoded child contributes one in-range UseGun label")
-	if attach_labels.size() == 1:
-		assert_eq((attach_labels[0] as AttachLabelRow).seat_type,
-				Simulation.SEAT_GUNNER)
+	assert_eq(attach_hud.get_attach_label_selected(), 0,
+			"the single in-range candidate is the full-bright nearest label")
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")
 	var host_player_index := _player_index(host)

@@ -797,7 +797,9 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
 				// The weather tick's thunder one-shots, placed around the
 				// listener (godot/src/audio/mission_audio.cpp carries the
 				// cites).
-				audio->play_weather_sounds(audio_sim->drain_weather_sounds(), frame_camera_xform_);
+				std::vector<opennova::world::WeatherSoundEvent> thunder;
+				audio_sim->drain_weather_sounds(thunder);
+				audio->play_weather_sounds(thunder, frame_camera_xform_);
 			}
 		}
 		audio->tick(frame_camera_pos_, frame_delta_);

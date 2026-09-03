@@ -46,4 +46,14 @@ constexpr const char *score_tone_set_name(ScoreTone tone) {
 	}
 }
 
+
+// One score-delta landing as the presenter reads it: the running score, the
+// delta and the tone the ladder above selected (score_tone_set_name names the
+// set). One value the embedder fills; its Godot record wraps it by value.
+struct ScoreFeedbackView {
+	int32_t score = 0;
+	int32_t delta = 0;
+	ScoreTone tone = ScoreTone::None;
+};
+
 } // namespace opennova::hud

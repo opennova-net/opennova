@@ -78,6 +78,18 @@ public:
     void skip_done();
 };
 
+
+// The current-waypoint slice of the per-frame HUD info rebuild plus the
+// scripted show gate, as one value the embedder fills from the track (the
+// fill carries the HUD_BuildEntityInfo witness). `current` -1 = no
+// selection yet; `entry` is the current entry (valid while current >= 0).
+struct WaypointHudView {
+    bool show = false;
+    int32_t count = 0;
+    int32_t current = -1;
+    WaypointEntry entry;
+};
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_WAYPOINT_TRACK_H

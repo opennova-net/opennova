@@ -22,6 +22,8 @@
 #include <vector>
 
 #include <runtime/audio/dialog_queue.h>
+#include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
+#include <runtime/world/weather_state.h> // WeatherSoundEvent
 
 #include "audio/ambient_layer.h"
 #include "audio/ambient_mixer.h"
@@ -35,7 +37,6 @@ class ItemDatabase;
 class MissionData;
 class ResourceRoot;
 class Simulation;
-class SoundEmitterRow;
 
 // Runtime mission audio orchestrator (the former mission_audio.gd, ADR 0043
 // d9) -- and the mission's audio root: setup() parents this node under the
@@ -112,13 +113,17 @@ public:
 	// [orig: SoundEmitter_RegisterSetLayers @0x528340;
 	// SoundEmitter_ClearByEntityAndSlot @0x527a50]
 	void apply_sound_emitters(const Array &p_events);
+	// The native leg the fire pass feeds (the bound form above unwraps the
+	// test-authored SoundEmitterRow records into the same rows).
+	void apply_sound_emitter_events(const std::vector<opennova::world::SoundEmitterEvent> &p_events);
 	// The weather tick's thunder: the THUNDER trigger set played at a distance
 	// from the listener along a bearing (a 0..255 turn; 128 = behind the camera)
 	// (retail Sound_PlayTriggerSetScaled @ 0x527b90 -- the 24-byte emitter
 	// {0x10000, bearing, g_SoundVolumeOption, 0, distance, 0} into
 	// SoundBank_PlayTriggerEntries @ 0x75ccd0 on dword_24E0914; sequencer A at
 	// 1 m centred @ 0x57ecfb, B at 10 m from behind @ 0x57edc4).
-	void play_weather_sounds(const Array &p_events, const Transform3D &p_camera_xform);
+	void play_weather_sounds(const std::vector<opennova::world::WeatherSoundEvent> &p_events,
+			const Transform3D &p_camera_xform);
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -249,7 +254,7 @@ private:
 	// registrations first, then the newest per-tick refresh lands at the current
 	// clock [orig: SoundEmitter_Register @0x529270 before the render-frame
 	// SoundEmitter_UpdateAndMixTop8 @0x5284a0].
-	Vector<Ref<SoundEmitterRow>> queued_sound_emitters_;
+	std::vector<opennova::world::SoundEmitterEvent> queued_sound_emitters_;
 	// "source_spawn_id:lane" -> DynamicEmitter. Candidate IDs remain stable across
 	// per-tick refreshes so an incumbent physical channel does not restart; a set
 	// change or explicit clear retires the old IDs.

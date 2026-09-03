@@ -186,8 +186,8 @@ func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -
 
 
 # The placed ObjectModel a mission record resolves to (the runtime's index).
-func _placed_node(world: GameWorld, placed: Dictionary) -> ObjectModel:
-	var bms_id := int(placed.get("bms_id", 0))
+func _placed_node(world: GameWorld, placed: MissionEntityRecord) -> ObjectModel:
+	var bms_id := placed.bms_id
 	assert_gt(bms_id, 0, "the authored entity carries a BMS id")
 	var node := world.get_runtime().get_entity_index().resolve_single(bms_id) as ObjectModel
 	assert_not_null(node, "the authored entity placed a real ObjectModel")
@@ -196,11 +196,9 @@ func _placed_node(world: GameWorld, placed: Dictionary) -> ObjectModel:
 
 # One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it,
 # addressed at a placed record (net id, BMS id, packed spawn origin).
-func _control_effect(kind: String, net_id: int, placed: Dictionary) -> MissionEffect:
-	return MissionEffect.make(kind, net_id, int(placed.get("bms_id", 0)),
-			int(Simulation.spawn_origin_pack(
-					int(placed.get("kind", MissionData.KIND_ITEM)),
-					int(placed.get("index", -1)))))
+func _control_effect(kind: String, net_id: int, placed: MissionEntityRecord) -> MissionEffect:
+	return MissionEffect.make(kind, net_id, placed.bms_id,
+			int(Simulation.spawn_origin_pack(placed.kind, placed.index)))
 
 
 # A wire-spawned presentation node the way the present pass's wire callback
@@ -679,13 +677,13 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	var root_dir := _stage_building_terrain_fixture("fx2ssn")
 	var world := WorldFixture.make_world(self)
-	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
+	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				assert_true(mission.set_header_string("terrain", "Tmap"))
-				placed.merge(mission.add_entity(
+				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO))), OK)
-	var ssn := int(placed.get("bms_id", 0))
+	var ssn := (placed[0] as MissionEntityRecord).bms_id
 	assert_gt(ssn, 0, "the authored building carries a WAC/BMS-addressable SSN")
 	var effects := world.get_effect_world()
 	assert_true(effects.get_debug_group_report().is_empty(),
@@ -2698,19 +2696,19 @@ func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
 	])
 	var world := WorldFixture.make_world(self)
 	world.set_particles_hidden(true)
-	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
+	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
-				placed.merge(mission.add_entity(
+				placed.append(mission.add_entity(
 						MissionData.KIND_ITEM, DBUGGY_ITEM, Vector3(10, 20, 0), Vector3.ZERO))), OK)
-	var node := _placed_node(world, placed)
+	var node := _placed_node(world, placed[0])
 	if node == null:
 		return
 	var director := world.get_item_effect_director()
 	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
 			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
-	var started := _control_effect("vehicle_control_started", 81, placed)
-	var stopped := _control_effect("vehicle_control_stopped", 81, placed)
+	var started := _control_effect("vehicle_control_started", 81, placed[0])
+	var stopped := _control_effect("vehicle_control_stopped", 81, placed[0])
 	# A start under the hidden switch defers the activation: the director's
 	# pending count reads the deferral, and the group that appears -- or not --
 	# when the switch lifts is its consequence.
@@ -2781,8 +2779,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 				"a synthetic emplacement attachment stays dormant until mounted")
 	assert_eq(director.get_stats().control_nodes, 2)
 
-	var start_first := MissionEffect.make("vehicle_control_started", 0, 0, -1)
-	start_first.wire_handle = 0x1004
+	var start_first := MissionEffect.make("vehicle_control_started", 0, 0, -1, "", 0, 0x1004)
 	world.get_runtime().effects_drained.emit([start_first])
 	var first_rows := _fx_rows_for_node(world, siblings[0])
 	assert_eq(first_rows.size(), 1,
@@ -2792,10 +2789,8 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 		assert_eq(String((first_rows[0] as EffectGroupReport).owner_key),
 				"itemfx:%d:%d" % [siblings[0].get_instance_id(), _fx_anchor_index()])
 
-	var stop_first := MissionEffect.make("vehicle_control_stopped", 0, 0, -1)
-	stop_first.wire_handle = 0x1004
-	var start_second := MissionEffect.make("vehicle_control_started", 0, 0, -1)
-	start_second.wire_handle = 0x1005
+	var stop_first := MissionEffect.make("vehicle_control_stopped", 0, 0, -1, "", 0, 0x1004)
+	var start_second := MissionEffect.make("vehicle_control_started", 0, 0, -1, "", 0, 0x1005)
 	world.get_runtime().effects_drained.emit([stop_first, start_second])
 	assert_true(_fx_rows_for_node(world, siblings[0]).is_empty(),
 			"the stop detaches exactly the mounted sibling's group")
@@ -2894,12 +2889,12 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)
-	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
+	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
-				placed.merge(mission.add_entity(
+				placed.append(mission.add_entity(
 						MissionData.KIND_ITEM, 108002, Vector3(6, 4, 5), Vector3.ZERO))), OK)
-	var node := _placed_node(world, placed)
+	var node := _placed_node(world, placed[0])
 	if node == null:
 		return
 	var effects := world.get_effect_world()
@@ -3022,12 +3017,12 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	# in simulation_test.gd.)
 	var root_dir := _stage_building_fixture("occl_frame")
 	var world := WorldFixture.make_world(self)
-	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
+	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
-				placed.merge(mission.add_entity(
+				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
-	var bms_id := int(placed.get("bms_id", 0))
+	var bms_id := (placed[0] as MissionEntityRecord).bms_id
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_entity_index().resolve_single(bms_id) as Node3D
 	assert_not_null(building, "the authored building placed a real ObjectModel")
@@ -3075,13 +3070,13 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 	# above for what the fixture world can witness.)
 	var root_dir := _stage_building_fixture("occl_probe_skip")
 	var world := WorldFixture.make_world(self)
-	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
+	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
-				placed.merge(mission.add_entity(
+				placed.append(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
 	var building := world.get_runtime().get_entity_index().resolve_single(
-			int(placed.get("bms_id", 0))) as Node3D
+			(placed[0] as MissionEntityRecord).bms_id) as Node3D
 	assert_not_null(building)
 	if building == null:
 		return

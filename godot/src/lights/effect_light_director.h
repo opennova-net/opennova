@@ -21,6 +21,9 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
+#include <vector>
+
+#include <runtime/world/present_drains.h>
 
 #include "lights/effect_light_report.h"
 #include "lights/light_scene.h"
@@ -153,10 +156,12 @@ public:
 	// The in-flight light_move glows, diffed against the sim's live rows
 	// [orig: RoundData_SpawnRound @ 0x4ec8da spawn (mode 1, radius/2 up,
 	// terrain disabled), the per-tick follow @ 0x4eaa9f, Projectile_ReleaseEffects
-	// clear]. Rows: RoundGlowRow from Simulation.get_round_glow_rows; the lift
+	// clear]. Rows: world::RoundGlowRow from Simulation::fill_round_glows; the lift
 	// law is the engine's (renderer/light_scene.h round_glow_spawn_lift /
 	// kRoundGlowFollowLift).
-	void sync_round_glows(const Array &p_rows);
+	void sync_round_glows(const std::vector<opennova::world::RoundGlowRow> &p_rows);
+	// The bound data leg: the same sync over test-authored RoundGlowRow records.
+	void sync_round_glow_records(const Array &p_rows);
 	Ref<EffectLightReport> get_report();
 
 	// The bound signal targets: a spawned wire node leaving the tree, and

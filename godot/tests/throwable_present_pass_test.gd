@@ -150,14 +150,7 @@ func _emitter_forward(row: EffectGroupReport) -> Vector3:
 # One visual row shaped like Simulation::get_throwable_visuals emits.
 func _row(key: int, item_id: int, pos: Vector3, rotation_deg: Vector3,
 		move_effect: String = "", move_effect_live: bool = true) -> ThrowableVisualRow:
-	var row := ThrowableVisualRow.new()
-	row.key = key
-	row.item_id = item_id
-	row.pos = pos
-	row.rotation_deg = rotation_deg
-	row.move_effect = move_effect
-	row.move_effect_live = move_effect_live
-	return row
+	return ThrowableVisualRow.make(key, item_id, pos, rotation_deg, move_effect, move_effect_live)
 
 
 func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
@@ -212,8 +205,7 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 
 	var next_pos := Vector3(-8, 6, 12)
 	var next_rot := Vector3(-20, 110, 32)
-	row.pos = next_pos
-	row.rotation_deg = next_rot
+	row = _row(7, 1883, next_pos, next_rot, MOVE_EFFECT)
 	presenter.present_throwable_visuals([row])
 	assert_eq(_owned_rows(fx, owner_key).size(), 1, "pose updates never respawn the move group")
 	var next_transform: Variant = anchors.resolve_owner_transform(owner_key)
@@ -259,8 +251,7 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	assert_not_null(first, "a live emitter spawns its group")
 	var first_id := int(first.id)
 
-	row.move_effect_live = false
-	row.pos = Vector3(3, -1, 2)
+	row = _row(3075, 1883, Vector3(3, -1, 2), Vector3.ZERO, MOVE_EFFECT, false)
 	presenter.present_throwable_visuals([row])
 	assert_true(_row_detached(fx, first_id),
 			"the released emitter stops its group while the round stays live")
@@ -271,8 +262,7 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	assert_eq(presenter.get_throwable_present_stats().move_effect_transforms, 0,
 			"a released round keeps no stale transform")
 
-	row.move_effect_live = true
-	row.pos = Vector3(3, 1.5, 2)
+	row = _row(3075, 1883, Vector3(3, 1.5, 2), Vector3.ZERO, MOVE_EFFECT, true)
 	presenter.present_throwable_visuals([row])
 	var resumed_row := _live_owned_row(fx, owner_key)
 	assert_not_null(resumed_row,
@@ -329,8 +319,8 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 
 	var next_a := Vector3(-3, 8, 14)
 	var next_b := Vector3(42, -2, 6)
-	rows[0].pos = next_a
-	rows[1].pos = next_b
+	rows[0] = _row(1027, 1883, next_a, Vector3(5, 15, 25), MOVE_EFFECT)
+	rows[1] = _row(2059, 1883, next_b, Vector3(-5, 70, -25), MOVE_EFFECT)
 	presenter.present_throwable_visuals(rows)
 	transform_a = anchors.resolve_owner_transform(owner_a)
 	transform_b = anchors.resolve_owner_transform(owner_b)

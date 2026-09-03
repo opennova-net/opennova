@@ -88,11 +88,6 @@ public:
 	// The retained static read-back rows behind the get_static_* seams; the
 	// getters mint fresh records from these so no consumer holds the
 	// placer's own row.
-	struct StaticUserPointGroup {
-		String graphic;
-		Ref<ObjectData> object_data;
-		Vector<Transform3D> transforms;
-	};
 	struct StaticEffectSourceRow {
 		int kind = -1;
 		int entity_index = -1;
@@ -162,14 +157,31 @@ public:
 	// ledger) and "skip_kinds"
 	// (the joiner places the mission minus organics). Returns the placement
 	// census as a MissionPlacementStats record (mission/mission_placement_stats.h).
-	// Place from entity dictionaries in MissionData.get_all_entities() shape
-	// (kind, index, bms_id, item_id, position, rotation_deg, team, group,
-	// ai_flags): the joiner's streamed statics take this entry with the
-	// records the sim stamped at the world-stream fence.
+	// One placement row: the BMS entity record's placement facts (the mission
+	// document's own entities read straight off its bms::File, or the joiner's
+	// streamed statics the sim stamped at the world-stream fence).
+	struct PlacementRow {
+		int kind = -1;
+		int index = -1;
+		int item_id = 0;
+		int bms_id = 0;
+		int group = -1;
+		int team = 0;
+		uint32_t ai_flags = 0;
+		Vector3 position;     // mission space
+		Vector3 rotation_deg; // (pitch, yaw, roll) as authored
+	};
+	// Place from entity dictionaries in the streamed-record shape (kind, index,
+	// bms_id, item_id, position, rotation_deg, team, group, ai_flags): the
+	// joiner's streamed statics take this entry.
 	Ref<MissionPlacementStats> place_entities(const Array &p_entities, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
+	// Place the mission document's entities, read natively off its bms::File in
+	// the placement order (markers, items, buildings, organics).
 	Ref<MissionPlacementStats> place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
+	Ref<MissionPlacementStats> place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
+			const Dictionary &p_options);
 
 	// Per-frame RLOD selection for every retained static instance, driven by
 	// GameWorld beside ObjectModel.update_authored_lods. Each instance's
@@ -231,7 +243,6 @@ public:
 	void set_placed_models(const TypedArray<ObjectModel> &p_models) {
 		placed_models_ = p_models;
 	}
-	TypedArray<StaticUserPointSource> get_static_user_point_sources();
 	TypedArray<StaticEffectSource> get_static_item_effect_sources();
 	// One row per retained static entity/ROBJ light draw. Row order is the
 	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
@@ -422,8 +433,6 @@ private:
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
 	Node3D *_ensure_container(Node3D *p_parent);
-	void _record_static_user_point_group(const String &p_graphic,
-			const Vector<Transform3D> &p_transforms);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
@@ -442,7 +451,6 @@ private:
 	Ref<PanmClock> panm_clock_;
 
 	TypedArray<ObjectModel> placed_models_;
-	Vector<StaticUserPointGroup> static_user_point_sources_;
 	Vector<StaticEffectSourceRow> static_item_effect_sources_;
 	Vector<StaticLightDrawRow> static_light_draw_sources_;
 	uint64_t static_light_draw_source_revision_ = 1;

@@ -443,15 +443,20 @@ PackedByteArray LwfData::to_bytes() const {
 
 // ----------------------------------------------------------------------- live refs
 
-Dictionary LwfData::set_ref(int p_si) const {
-	if (p_si < 0 || p_si >= sets_.size()) {
+namespace {
+
+// The live Dictionary refs into the edit tree (a set / layer / member row, or
+// an empty Dictionary out of range) — file-local: only the mutators below walk
+// them. The Dictionary tree itself is the document's own (lossless) form.
+Dictionary set_ref(const Array &p_sets, int p_si) {
+	if (p_si < 0 || p_si >= p_sets.size()) {
 		return Dictionary();
 	}
-	return sets_[p_si];
+	return p_sets[p_si];
 }
 
-Dictionary LwfData::layer_ref(int p_si, int p_li) const {
-	Dictionary set = set_ref(p_si);
+Dictionary layer_ref(const Array &p_sets, int p_si, int p_li) {
+	Dictionary set = set_ref(p_sets, p_si);
 	Array layers = set.get("layers", Array());
 	if (p_li < 0 || p_li >= layers.size()) {
 		return Dictionary();
@@ -459,14 +464,16 @@ Dictionary LwfData::layer_ref(int p_si, int p_li) const {
 	return layers[p_li];
 }
 
-Dictionary LwfData::member_ref(int p_si, int p_li, int p_mi) const {
-	Dictionary layer = layer_ref(p_si, p_li);
+Dictionary member_ref(const Array &p_sets, int p_si, int p_li, int p_mi) {
+	Dictionary layer = layer_ref(p_sets, p_si, p_li);
 	Array members = layer.get("members", Array());
 	if (p_mi < 0 || p_mi >= members.size()) {
 		return Dictionary();
 	}
 	return members[p_mi];
 }
+
+} // namespace
 
 // --------------------------------------------------------------------------- read
 
@@ -475,13 +482,13 @@ int LwfData::get_set_count() const {
 }
 
 Dictionary LwfData::get_set(int p_si) const {
-	return set_ref(p_si).duplicate(true);
+	return set_ref(sets_, p_si).duplicate(true);
 }
 
 // ------------------------------------------------------------------- scalar edits
 
 void LwfData::set_set_field(int p_si, const String &p_key, const Variant &p_value) {
-	Dictionary set = set_ref(p_si);
+	Dictionary set = set_ref(sets_, p_si);
 	if (set.is_empty() || p_key == "layers") {
 		return;
 	}
@@ -491,7 +498,7 @@ void LwfData::set_set_field(int p_si, const String &p_key, const Variant &p_valu
 }
 
 void LwfData::set_layer_field(int p_si, int p_li, const String &p_key, const Variant &p_value) {
-	Dictionary layer = layer_ref(p_si, p_li);
+	Dictionary layer = layer_ref(sets_, p_si, p_li);
 	if (layer.is_empty() || p_key == "members") {
 		return;
 	}
@@ -501,7 +508,7 @@ void LwfData::set_layer_field(int p_si, int p_li, const String &p_key, const Var
 }
 
 void LwfData::set_member_field(int p_si, int p_li, int p_mi, const String &p_key, const Variant &p_value) {
-	Dictionary member = member_ref(p_si, p_li, p_mi);
+	Dictionary member = member_ref(sets_, p_si, p_li, p_mi);
 	if (member.is_empty()) {
 		return;
 	}
@@ -520,7 +527,7 @@ int LwfData::add_set() {
 }
 
 int LwfData::add_layer(int p_si) {
-	Dictionary set = set_ref(p_si);
+	Dictionary set = set_ref(sets_, p_si);
 	if (set.is_empty()) {
 		return -1;
 	}
@@ -532,7 +539,7 @@ int LwfData::add_layer(int p_si) {
 }
 
 int LwfData::add_member(int p_si, int p_li) {
-	Dictionary layer = layer_ref(p_si, p_li);
+	Dictionary layer = layer_ref(sets_, p_si, p_li);
 	if (layer.is_empty()) {
 		return -1;
 	}

@@ -3,6 +3,7 @@
 #include "resource_index/resource_root.h"
 #include "env/mission_environment_overrides.h"
 #include "mission/mission_info.h"
+#include "mission/mission_records.h"
 
 #include <formats/env/env.h> // bms_env_overrides_from_header
 
@@ -44,6 +45,66 @@ mission::EntityKind to_native_kind(MissionData::EntityKind kind) {
 
 // Godot mission-space position + euler degrees -> the record transform. The format stores
 // orientation as integer degrees; round rather than truncate.
+Ref<MissionEntityRecord> entity_record(const bms::Entity &entity, mission::EntityKind kind, size_t index) {
+	Ref<MissionEntityRecord> out;
+	out.instantiate();
+	out->assign(entity, kind, index);
+	return out;
+}
+
+template <typename Record, typename Value>
+Ref<Record> make_record(const Value &value) {
+	Ref<Record> out;
+	out.instantiate();
+	out->assign(value);
+	return out;
+}
+
+// Build a trigger / action record from a typed edit, starting from `seed` so the
+// trigger's unmodeled condition_flags high bits + unknown7, and the action's
+// reserved words, survive an edit. The trigger's negated/logic_or/logic_xor
+// booleans compose condition_flags bits 0/1/2 (the canonical source
+// trigger_from_record serializes), and the bool mirrors are re-derived from it.
+mission::MissionTriggerRecord trigger_from_edit(const mission::MissionTriggerRecord &edit,
+		const mission::MissionTriggerRecord &seed) {
+	mission::MissionTriggerRecord record = seed;
+	record.main_type = edit.main_type;
+	record.sub_type = edit.sub_type;
+	record.param1 = edit.param1;
+	record.param2 = edit.param2;
+	record.param3 = edit.param3;
+	record.param4 = edit.param4;
+	using bms::Trigger;
+	constexpr int kConditionMask = Trigger::kConditionNegated | Trigger::kConditionOr | Trigger::kConditionXor;
+	int condition = seed.condition_flags & ~kConditionMask;
+	if (edit.negated) {
+		condition |= Trigger::kConditionNegated;
+	}
+	if (edit.logic_or) {
+		condition |= Trigger::kConditionOr;
+	}
+	if (edit.logic_xor) {
+		condition |= Trigger::kConditionXor;
+	}
+	record.condition_flags = condition;
+	record.negated = (condition & Trigger::kConditionNegated) != 0;
+	record.logic_or = (condition & Trigger::kConditionOr) != 0;
+	record.logic_xor = (condition & Trigger::kConditionXor) != 0;
+	return record;
+}
+
+mission::MissionActionRecord action_from_edit(const mission::MissionActionRecord &edit,
+		const mission::MissionActionRecord &seed) {
+	mission::MissionActionRecord record = seed;
+	record.action_type = edit.action_type;
+	record.action_sub_type = edit.action_sub_type;
+	record.param1 = edit.param1;
+	record.param2 = edit.param2;
+	record.param3 = edit.param3;
+	record.param4 = edit.param4;
+	return record; // reserved0/reserved1 ride on the `record = seed` copy
+}
+
 mission::EntityTransform transform_from(const Vector3 &position, const Vector3 &rotation_deg) {
 	mission::EntityTransform transform;
 	transform.x = position.x;
@@ -148,7 +209,6 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
-	ClassDB::bind_method(D_METHOD("structure_fingerprint"), &MissionData::structure_fingerprint);
 
 	BIND_ENUM_CONSTANT(KIND_MARKER);
 	BIND_ENUM_CONSTANT(KIND_ITEM);
@@ -389,78 +449,40 @@ Ref<MissionEnvironmentOverrides> MissionData::get_environment_overrides() const 
 	return out;
 }
 
-Dictionary MissionData::entity_to_dictionary(const bms::Entity &entity,
-		mission::EntityKind kind, size_t index) const {
-	const mission::EntityTransform transform = mission::entity_transform(entity);
-	Dictionary out;
-	out["kind"] = static_cast<int>(kind);
-	out["index"] = static_cast<int>(index);
-	// item_id is the items.def key (bms type_id + 100000); use it to look up the model.
-	out["item_id"] = mission::entity_item_id(entity);
-	out["type_id"] = entity.type_id;
-	out["bms_id"] = entity.id;
-	// Mission-space position (already converted from 16.16 fixed-point to float).
-	out["position"] = Vector3(transform.x, transform.y, transform.z);
-	// Euler degrees as authored; coordinate conversion to Godot space happens in
-	// the placement layer where terrain context is available.
-	out["rotation_deg"] = Vector3(transform.pitch, transform.yaw, transform.roll);
-	out["group"] = entity.group_id;
-	out["waypoint_id"] = entity.waypoint_id;
-	out["wp_number"] = entity.wp_number;
-	out["team"] = entity.team;
-	out["ai_flags"] = static_cast<int>(entity.bmsi_attributes);
-	out["perception"] = entity.perception2;
-	out["accuracy"] = entity.w_accuracy1;
-	out["alert_state"] = entity.alert_state;
-	out["min_engagement_distance"] = entity.min_engagement_distance;
-	out["max_engagement_distance"] = entity.max_engagement_distance;
-	out["max_attack_distance"] = entity.max_attack_distance;
-	out["spawn_count"] = entity.spawns;
-	out["max_simultaneous"] = entity.no_more_than;  // = no_more_than (byte 74)
-	out["no_less_than"] = entity.no_less_than;      // byte 75
-	out["map_symbol"] = entity.map_symbol;          // byte 81
-	out["name1"] = String(mission::entity_name1(entity).c_str()); // AI class (iai_name)
-	out["name2"] = String(mission::entity_name2(entity).c_str()); // AI script (ai_textfile)
-	return out;
-}
-
 int MissionData::get_entity_count(EntityKind kind) const {
 	if (!loaded_) return 0;
 	return static_cast<int>(mission::entity_count(file_, to_native_kind(kind)));
 }
 
-Array MissionData::get_entities(EntityKind kind) const {
-	Array out;
+TypedArray<MissionEntityRecord> MissionData::get_entities(EntityKind kind) const {
+	TypedArray<MissionEntityRecord> out;
 	if (!loaded_) return out;
 	const mission::EntityKind native_kind = to_native_kind(kind);
 	const std::vector<bms::Entity> *list = mission::entities(file_, native_kind);
 	if (list == nullptr) return out;
 	for (size_t i = 0; i < list->size(); ++i) {
-		out.push_back(entity_to_dictionary((*list)[i], native_kind, i));
+		out.push_back(entity_record((*list)[i], native_kind, i));
 	}
 	return out;
 }
 
-Dictionary MissionData::get_entity(EntityKind kind, int index) const {
+Ref<MissionEntityRecord> MissionData::get_entity(EntityKind kind, int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionEntityRecord>();
 	}
 	const mission::EntityKind native_kind = to_native_kind(kind);
 	const std::vector<bms::Entity> *list = mission::entities(file_, native_kind);
 	if (list == nullptr || static_cast<size_t>(index) >= list->size()) {
-		return Dictionary();
+		return Ref<MissionEntityRecord>();
 	}
-	return entity_to_dictionary((*list)[static_cast<size_t>(index)], native_kind, static_cast<size_t>(index));
+	return entity_record((*list)[static_cast<size_t>(index)], native_kind, static_cast<size_t>(index));
 }
 
-Array MissionData::get_all_entities() const {
-	Array out;
+TypedArray<MissionEntityRecord> MissionData::get_all_entities() const {
+	TypedArray<MissionEntityRecord> out;
 	const EntityKind kinds[] = { KIND_MARKER, KIND_ITEM, KIND_BUILDING, KIND_ORGANIC };
 	for (EntityKind kind : kinds) {
-		const Array entities = get_entities(kind);
-		for (int i = 0; i < entities.size(); ++i) {
-			out.push_back(entities[i]);
-		}
+		out.append_array(get_entities(kind));
 	}
 	return out;
 }
@@ -545,14 +567,14 @@ bool MissionData::set_header_float(const String &field, float value) {
 	return true;
 }
 
-Dictionary MissionData::add_entity(EntityKind kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
+Ref<MissionEntityRecord> MissionData::add_entity(EntityKind kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
 	if (!loaded_) {
-		return Dictionary();
+		return Ref<MissionEntityRecord>();
 	}
 	const mission::EntityKind native_kind = to_native_kind(kind);
 	const size_t index = mission::add_entity(file_, native_kind, item_id, transform_from(position, rotation_deg));
 	modified = true;
-	return entity_to_dictionary((*mission::entities(file_, native_kind))[index], native_kind, index);
+	return entity_record((*mission::entities(file_, native_kind))[index], native_kind, index);
 }
 
 bool MissionData::remove_entity(EntityKind kind, int index) {
@@ -567,42 +589,24 @@ bool MissionData::remove_entity(EntityKind kind, int index) {
 	return true;
 }
 
-Dictionary MissionData::waypoint_path_to_dictionary(const mission::WaypointPath &path) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(path.index);
-	out["flags"] = path.flags;
-	out["marker_count"] = static_cast<int>(path.marker_indices.size());
-	PackedInt32Array indices;
-	indices.resize(static_cast<int64_t>(path.marker_indices.size()));
-	for (size_t i = 0; i < path.marker_indices.size(); ++i) {
-		indices.set(static_cast<int64_t>(i), path.marker_indices[i]);
-	}
-	out["marker_indices"] = indices;
-	return out;
-}
-
-Array MissionData::get_waypoint_summaries() const {
-	Array out;
+TypedArray<MissionWaypointSummary> MissionData::get_waypoint_summaries() const {
+	TypedArray<MissionWaypointSummary> out;
 	if (!loaded_) return out;
 	for (const mission::WaypointSummary &summary : mission::waypoint_summaries(file_)) {
-		Dictionary d;
-		d["index"] = static_cast<int>(summary.index);
-		d["flags"] = summary.flags;
-		d["marker_count"] = summary.marker_count;
-		out.push_back(d);
+		out.push_back(make_record<MissionWaypointSummary>(summary));
 	}
 	return out;
 }
 
-Dictionary MissionData::get_waypoint_path(int index) const {
+Ref<MissionWaypointPath> MissionData::get_waypoint_path(int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionWaypointPath>();
 	}
 	mission::WaypointPath path;
 	if (!mission::waypoint_path(file_, static_cast<size_t>(index), path)) {
-		return Dictionary();
+		return Ref<MissionWaypointPath>();
 	}
-	return waypoint_path_to_dictionary(path);
+	return make_record<MissionWaypointPath>(path);
 }
 
 bool MissionData::set_waypoint_path(int index, const PackedInt32Array &marker_indices, int flags) {
@@ -634,36 +638,24 @@ bool MissionData::clear_waypoint_path(int index) {
 	return true;
 }
 
-Dictionary MissionData::add_waypoint_marker(int path_index, int marker_item_id, const Vector3 &position, const Vector3 &rotation_deg, int insert_index) {
+Ref<MissionWaypointMarker> MissionData::add_waypoint_marker(int path_index, int marker_item_id, const Vector3 &position, const Vector3 &rotation_deg, int insert_index) {
 	if (!loaded_ || path_index < 0) {
-		return Dictionary();
+		return Ref<MissionWaypointMarker>();
 	}
 	std::string error;
 	size_t marker_index = 0;
 	if (!mission::add_waypoint_marker(file_, static_cast<size_t>(path_index), marker_item_id,
 				transform_from(position, rotation_deg), insert_index, error, &marker_index)) {
 		edit_failed(error);
-		return Dictionary();
+		return Ref<MissionWaypointMarker>();
 	}
 	modified = true;
 	mission::WaypointPath path;
 	(void)mission::waypoint_path(file_, static_cast<size_t>(path_index), path);
-	Dictionary out;
-	out["marker"] = entity_to_dictionary(file_.markers[marker_index], mission::EntityKind::Marker, marker_index);
-	out["path"] = waypoint_path_to_dictionary(path);
-	return out;
-}
-
-Dictionary MissionData::area_trigger_to_dictionary(const mission::AreaTriggerRecord &record) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(record.index);
-	out["id"] = record.wp_number;  // off-0 dword (Phase-5 UNKNOWN; carried raw)
-	// Mission-space corners (16.16 already converted to float). The placement layer maps to Godot space.
-	out["min"] = Vector3(record.min_x, record.min_y, record.min_z);
-	out["max"] = Vector3(record.max_x, record.max_y, record.max_z);
-	out["active"] = record.active;
-	out["constrain_z"] = record.constrain_z;
-	out["raw_flags"] = record.reserved;
+	Ref<MissionWaypointMarker> out;
+	out.instantiate();
+	out->assign(entity_record(file_.markers[marker_index], mission::EntityKind::Marker, marker_index),
+			make_record<MissionWaypointPath>(path));
 	return out;
 }
 
@@ -671,24 +663,24 @@ int MissionData::get_area_trigger_count() const {
 	return loaded_ ? static_cast<int>(file_.area_triggers.size()) : 0;
 }
 
-Array MissionData::get_area_triggers() const {
-	Array out;
+TypedArray<MissionAreaTrigger> MissionData::get_area_triggers() const {
+	TypedArray<MissionAreaTrigger> out;
 	if (!loaded_) return out;
 	for (const mission::AreaTriggerRecord &record : mission::area_triggers(file_)) {
-		out.push_back(area_trigger_to_dictionary(record));
+		out.push_back(make_record<MissionAreaTrigger>(record));
 	}
 	return out;
 }
 
-Dictionary MissionData::get_area_trigger(int index) const {
+Ref<MissionAreaTrigger> MissionData::get_area_trigger(int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionAreaTrigger>();
 	}
 	mission::AreaTriggerRecord record;
 	if (!mission::area_trigger(file_, static_cast<size_t>(index), record)) {
-		return Dictionary();
+		return Ref<MissionAreaTrigger>();
 	}
-	return area_trigger_to_dictionary(record);
+	return make_record<MissionAreaTrigger>(record);
 }
 
 // Build a typed record from Godot-side corners, normalizing min<=max per axis (the engine does not
@@ -710,21 +702,21 @@ static mission::AreaTriggerRecord make_area_record(const Vector3 &min_bounds, co
 	return record;
 }
 
-Dictionary MissionData::add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
+Ref<MissionAreaTrigger> MissionData::add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
 	if (!loaded_) {
-		return Dictionary();
+		return Ref<MissionAreaTrigger>();
 	}
 	const size_t index = mission::add_area_trigger(file_,
 			make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id));
 	modified = true;
 	mission::AreaTriggerRecord out;
 	(void)mission::area_trigger(file_, index, out);
-	return area_trigger_to_dictionary(out);
+	return make_record<MissionAreaTrigger>(out);
 }
 
-Dictionary MissionData::set_area_trigger(int index, const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
+Ref<MissionAreaTrigger> MissionData::set_area_trigger(int index, const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionAreaTrigger>();
 	}
 	// Preserve unknown flag bits across an edit: seed reserved from the existing record, then overwrite
 	// only the two known bits below. A fresh make_area_record would otherwise zero them.
@@ -740,12 +732,12 @@ Dictionary MissionData::set_area_trigger(int index, const Vector3 &min_bounds, c
 	std::string error;
 	if (!mission::set_area_trigger(file_, static_cast<size_t>(index), record, error)) {
 		edit_failed(error);
-		return Dictionary();
+		return Ref<MissionAreaTrigger>();
 	}
 	modified = true;
 	mission::AreaTriggerRecord out;
 	(void)mission::area_trigger(file_, static_cast<size_t>(index), out);
-	return area_trigger_to_dictionary(out);
+	return make_record<MissionAreaTrigger>(out);
 }
 
 bool MissionData::remove_area_trigger(int index) {
@@ -760,40 +752,29 @@ bool MissionData::remove_area_trigger(int index) {
 	return true;
 }
 
-Dictionary MissionData::weapon_loadout_to_dictionary(const mission::WeaponLoadoutEntry &entry, int index) const {
-	Dictionary out;
-	out["index"] = index;
-	out["name"] = String::utf8(entry.name.c_str());
-	out["ammo_primary"] = String::utf8(entry.ammo_primary.c_str());
-	out["ammo_secondary"] = String::utf8(entry.ammo_secondary.c_str());
-	out["flags"] = String::utf8(entry.flags.c_str());
-	return out;
-}
-
-Array MissionData::get_weapon_loadout() const {
-	Array out;
+TypedArray<MissionWeaponLoadoutEntry> MissionData::get_weapon_loadout() const {
+	TypedArray<MissionWeaponLoadoutEntry> out;
 	if (!loaded_) return out;
 	const std::vector<mission::WeaponLoadoutEntry> entries = mission::weapon_loadout(file_);
 	for (size_t i = 0; i < entries.size(); ++i) {
-		out.push_back(weapon_loadout_to_dictionary(entries[i], static_cast<int>(i)));
+		Ref<MissionWeaponLoadoutEntry> record;
+		record.instantiate();
+		record->assign(entries[i], static_cast<int>(i));
+		out.push_back(record);
 	}
 	return out;
 }
 
-bool MissionData::set_weapon_loadout(const Array &entries) {
+bool MissionData::set_weapon_loadout(const TypedArray<MissionWeaponLoadoutEntry> &entries) {
 	if (!loaded_) return edit_failed("No mission loaded");
 	std::vector<mission::WeaponLoadoutEntry> records;
-	records.reserve(entries.size());
-	for (int i = 0; i < entries.size(); ++i) {
-		const Dictionary dict = entries[i];
-		mission::WeaponLoadoutEntry record;
-		record.name = String(dict.get("name", "")).utf8().get_data();
-		// All three numeric strings default to "-1" when a caller omits them. flags is the
-		// load-bearing per-ammo damage class used by the runtime loadout builder.
-		record.ammo_primary = String(dict.get("ammo_primary", "-1")).utf8().get_data();
-		record.ammo_secondary = String(dict.get("ammo_secondary", "-1")).utf8().get_data();
-		record.flags = String(dict.get("flags", "-1")).utf8().get_data();
-		records.push_back(std::move(record));
+	records.reserve(static_cast<size_t>(entries.size()));
+	for (int64_t i = 0; i < entries.size(); ++i) {
+		const Ref<MissionWeaponLoadoutEntry> entry = entries[i];
+		if (entry.is_null()) {
+			return edit_failed("Weapon loadout entry is null");
+		}
+		records.push_back(entry->value());
 	}
 	std::string error;
 	if (!mission::set_weapon_loadout(file_, records, error)) {
@@ -803,37 +784,28 @@ bool MissionData::set_weapon_loadout(const Array &entries) {
 	return true;
 }
 
-Dictionary MissionData::group_to_dictionary(const mission::GroupFields &fields) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(fields.index);
-	out["field0"] = fields.field0;
-	out["field8"] = fields.field8;
-	out["field12"] = fields.field12;
-	return out;
-}
-
 int MissionData::get_group_count() const {
 	return loaded_ ? static_cast<int>(file_.group_records.size()) : 0;
 }
 
-Array MissionData::get_groups() const {
-	Array out;
+TypedArray<MissionGroup> MissionData::get_groups() const {
+	TypedArray<MissionGroup> out;
 	if (!loaded_) return out;
 	for (const mission::GroupFields &fields : mission::groups(file_)) {
-		out.push_back(group_to_dictionary(fields));
+		out.push_back(make_record<MissionGroup>(fields));
 	}
 	return out;
 }
 
-Dictionary MissionData::get_group(int index) const {
+Ref<MissionGroup> MissionData::get_group(int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionGroup>();
 	}
 	mission::GroupFields fields;
 	if (!mission::group(file_, static_cast<size_t>(index), fields)) {
-		return Dictionary();
+		return Ref<MissionGroup>();
 	}
-	return group_to_dictionary(fields);
+	return make_record<MissionGroup>(fields);
 }
 
 bool MissionData::set_group(int index, int field0, int field8, int field12) {
@@ -850,199 +822,53 @@ bool MissionData::set_group(int index, int field0, int field8, int field12) {
 
 // --- Mission scripting (events / triggers / actions, Phase 4) ----------------
 
-Dictionary MissionData::event_to_dictionary(const mission::MissionEventRecord &record) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(record.index);
-	out["flags"] = record.flags;
-	out["trigger_index"] = record.trigger_index;
-	out["action_index"] = record.action_index;
-	out["trigger_count"] = record.trigger_count;
-	out["action_count"] = record.action_count;
-	out["reset_after"] = record.reset_after;
-	out["delay"] = record.delay;
-	out["unknown5"] = record.unknown5;
-	out["unknown6"] = record.unknown6;
-	return out;
-}
-
-Dictionary MissionData::trigger_to_dictionary(const mission::MissionTriggerRecord &record) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(record.index);
-	out["condition_flags"] = record.condition_flags;
-	out["main_type"] = record.main_type;
-	out["main_type_name"] = String::utf8(record.main_type_name.c_str());
-	out["sub_type"] = record.sub_type;
-	out["sub_type_name"] = String::utf8(record.sub_type_name.c_str());
-	out["param1"] = record.param1;
-	out["param2"] = record.param2;
-	out["param3"] = record.param3;
-	out["param4"] = record.param4;
-	out["unknown7"] = record.unknown7;
-	out["negated"] = record.negated;
-	out["logic_or"] = record.logic_or;
-	out["logic_xor"] = record.logic_xor;
-	out["logic_operator"] = String::utf8(record.logic_operator.c_str());
-	return out;
-}
-
-Dictionary MissionData::action_to_dictionary(const mission::MissionActionRecord &record) const {
-	Dictionary out;
-	out["index"] = static_cast<int>(record.index);
-	out["action_type"] = record.action_type;
-	out["action_type_name"] = String::utf8(record.action_type_name.c_str());
-	out["action_sub_type"] = record.action_sub_type;
-	out["action_sub_type_name"] = String::utf8(record.action_sub_type_name.c_str());
-	out["param1"] = record.param1;
-	out["param2"] = record.param2;
-	out["param3"] = record.param3;
-	out["param4"] = record.param4;
-	out["reserved0"] = record.reserved0;
-	out["reserved1"] = record.reserved1;
-	return out;
-}
-
-Dictionary MissionData::logic_reference_to_dictionary(const mission::MissionLogicReference &reference) const {
-	Dictionary out;
-	out["source_kind"] = String::utf8(reference.source_kind.c_str());
-	out["source_index"] = reference.source_index;
-	out["target_kind"] = String::utf8(reference.target_kind.c_str());
-	out["target_index"] = reference.target_index;
-	out["param_slot"] = reference.param_slot;
-	out["raw_value"] = reference.raw_value;
-	out["label"] = String::utf8(reference.label.c_str());
-	out["valid"] = reference.valid;
-	return out;
-}
-
-Dictionary MissionData::logic_diagnostic_to_dictionary(const mission::MissionLogicDiagnostic &diagnostic) const {
-	Dictionary out;
-	out["severity"] = String::utf8(diagnostic.severity.c_str());
-	out["code"] = String::utf8(diagnostic.code.c_str());
-	out["message"] = String::utf8(diagnostic.message.c_str());
-	out["subject_kind"] = String::utf8(diagnostic.subject_kind.c_str());
-	out["subject_index"] = diagnostic.subject_index;
-	return out;
-}
-
-Dictionary MissionData::event_chain_to_dictionary(const mission::MissionEventChain &chain) const {
-	Dictionary out;
-	out["event"] = event_to_dictionary(chain.event);
-	Array triggers;
-	for (const mission::MissionTriggerRecord &trigger : chain.triggers) {
-		triggers.push_back(trigger_to_dictionary(trigger));
+Ref<MissionEventChain> MissionData::event_chain_record(size_t event_index) const {
+	mission::MissionEventChain chain;
+	if (!mission::event_chain(file_, event_index, chain)) {
+		return Ref<MissionEventChain>();
 	}
-	out["triggers"] = triggers;
-	Array actions;
-	for (const mission::MissionActionRecord &action : chain.actions) {
-		actions.push_back(action_to_dictionary(action));
-	}
-	out["actions"] = actions;
-	Array references;
-	for (const mission::MissionLogicReference &reference : chain.references) {
-		references.push_back(logic_reference_to_dictionary(reference));
-	}
-	out["references"] = references;
-	Array diagnostics;
-	for (const mission::MissionLogicDiagnostic &diagnostic : chain.diagnostics) {
-		diagnostics.push_back(logic_diagnostic_to_dictionary(diagnostic));
-	}
-	out["diagnostics"] = diagnostics;
-	return out;
-}
-
-mission::MissionTriggerRecord MissionData::trigger_from_dictionary(const Dictionary &dict, const mission::MissionTriggerRecord &seed) const {
-	mission::MissionTriggerRecord record = seed;
-	record.main_type = static_cast<int>(dict.get("main_type", seed.main_type));
-	record.sub_type = static_cast<int>(dict.get("sub_type", seed.sub_type));
-	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
-	record.param2 = static_cast<int>(dict.get("param2", seed.param2));
-	record.param3 = static_cast<int>(dict.get("param3", seed.param3));
-	record.param4 = static_cast<int>(dict.get("param4", seed.param4));
-	// Compose condition_flags bits 0/1/2 from the editor booleans; keep the seed's unmodeled high bits so
-	// an edit never drops a flag the format carries but the editor does not surface. unknown7 rides on the
-	// `record = seed` copy. Defaults for omitted keys come from the condition_flags bits (the canonical
-	// source: condition_flags is what trigger_from_record serializes), not the seed's mirror bool fields,
-	// so an out-of-sync seed can never propagate. The bool mirrors are then re-derived to stay consistent.
-	using bms::Trigger;
-	constexpr int kConditionMask = Trigger::kConditionNegated | Trigger::kConditionOr | Trigger::kConditionXor;
-	int condition = seed.condition_flags & ~kConditionMask;
-	if (static_cast<bool>(dict.get("negated", (seed.condition_flags & Trigger::kConditionNegated) != 0))) {
-		condition |= Trigger::kConditionNegated;
-	}
-	if (static_cast<bool>(dict.get("logic_or", (seed.condition_flags & Trigger::kConditionOr) != 0))) {
-		condition |= Trigger::kConditionOr;
-	}
-	if (static_cast<bool>(dict.get("logic_xor", (seed.condition_flags & Trigger::kConditionXor) != 0))) {
-		condition |= Trigger::kConditionXor;
-	}
-	record.condition_flags = condition;
-	record.negated = (condition & Trigger::kConditionNegated) != 0;
-	record.logic_or = (condition & Trigger::kConditionOr) != 0;
-	record.logic_xor = (condition & Trigger::kConditionXor) != 0;
-	return record;
-}
-
-mission::MissionActionRecord MissionData::action_from_dictionary(const Dictionary &dict, const mission::MissionActionRecord &seed) const {
-	mission::MissionActionRecord record = seed;
-	record.action_type = static_cast<int>(dict.get("action_type", seed.action_type));
-	record.action_sub_type = static_cast<int>(dict.get("action_sub_type", seed.action_sub_type));
-	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
-	record.param2 = static_cast<int>(dict.get("param2", seed.param2));
-	record.param3 = static_cast<int>(dict.get("param3", seed.param3));
-	record.param4 = static_cast<int>(dict.get("param4", seed.param4));
-	return record;  // reserved0/reserved1 ride on the `record = seed` copy
+	return make_record<MissionEventChain>(chain);
 }
 
 int MissionData::get_event_count() const {
 	return loaded_ ? static_cast<int>(file_.events.size()) : 0;
 }
 
-Array MissionData::get_events() const {
-	Array out;
+TypedArray<MissionEvent> MissionData::get_events() const {
+	TypedArray<MissionEvent> out;
 	if (!loaded_) return out;
 	for (const mission::MissionEventRecord &record : mission::events(file_)) {
-		out.push_back(event_to_dictionary(record));
+		out.push_back(make_record<MissionEvent>(record));
 	}
 	return out;
 }
 
-Dictionary MissionData::get_event(int index) const {
+Ref<MissionEvent> MissionData::get_event(int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionEvent>();
 	}
 	mission::MissionEventRecord record;
 	if (!mission::event(file_, static_cast<size_t>(index), record)) {
-		return Dictionary();
+		return Ref<MissionEvent>();
 	}
-	return event_to_dictionary(record);
+	return make_record<MissionEvent>(record);
 }
 
-Dictionary MissionData::get_event_chain(int index) const {
+Ref<MissionEventChain> MissionData::get_event_chain(int index) const {
 	if (!loaded_ || index < 0) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
-	mission::MissionEventChain chain;
-	if (!mission::event_chain(file_, static_cast<size_t>(index), chain)) {
-		return Dictionary();
-	}
-	return event_chain_to_dictionary(chain);
+	return event_chain_record(static_cast<size_t>(index));
 }
 
-Dictionary MissionData::get_logic_summary() const {
-	const mission::MissionLogicSummary summary =
-			loaded_ ? mission::logic_summary(file_) : mission::MissionLogicSummary{};
-	Dictionary out;
-	out["events"] = static_cast<int>(summary.event_count);
-	out["triggers"] = static_cast<int>(summary.trigger_count);
-	out["actions"] = static_cast<int>(summary.action_count);
-	out["area_triggers"] = static_cast<int>(summary.area_trigger_count);
-	out["diagnostics"] = static_cast<int>(summary.diagnostic_count);
-	return out;
+Ref<MissionLogicSummary> MissionData::get_logic_summary() const {
+	return make_record<MissionLogicSummary>(
+			loaded_ ? mission::logic_summary(file_) : mission::MissionLogicSummary{});
 }
 
-Dictionary MissionData::add_event(int flags, int reset_after, int delay) {
+Ref<MissionEvent> MissionData::add_event(int flags, int reset_after, int delay) {
 	if (!loaded_) {
-		return Dictionary();
+		return Ref<MissionEvent>();
 	}
 	mission::MissionEventRecord seed;
 	seed.flags = flags;
@@ -1052,7 +878,7 @@ Dictionary MissionData::add_event(int flags, int reset_after, int delay) {
 	modified = true;
 	mission::MissionEventRecord out;
 	(void)mission::event(file_, index, out);
-	return event_to_dictionary(out);
+	return make_record<MissionEvent>(out);
 }
 
 bool MissionData::remove_event(int index) {
@@ -1091,56 +917,52 @@ bool MissionData::set_event(int index, int flags, int reset_after, int delay) {
 	return true;
 }
 
-Dictionary MissionData::add_event_trigger(int event_index, const Dictionary &trigger) {
-	if (!loaded_ || event_index < 0) {
-		return Dictionary();
+Ref<MissionEventChain> MissionData::add_event_trigger(int event_index, const Ref<MissionEventTrigger> &trigger) {
+	if (!loaded_ || event_index < 0 || trigger.is_null()) {
+		return Ref<MissionEventChain>();
 	}
 	mission::MissionEventRecord event;
 	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
-	// A fresh trigger defaults to a Group / Null condition (a valid, named pairing) before the dict edits.
+	// A fresh trigger seeds as a Group / Null condition (a valid, named pairing) before the edit lands.
 	mission::MissionTriggerRecord seed;
 	seed.main_type = static_cast<int>(bms::TriggerMainType::Group);
-	const mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, seed);
+	const mission::MissionTriggerRecord record = trigger_from_edit(trigger->value(), seed);
 	std::string error;
 	if (!mission::insert_event_trigger(file_, static_cast<size_t>(event_index),
 				static_cast<size_t>(event.trigger_count), record, error)) {
 		edit_failed(error);
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	modified = true;
-	mission::MissionEventChain chain;
-	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
-	return event_chain_to_dictionary(chain);
+	return event_chain_record(static_cast<size_t>(event_index));
 }
 
-Dictionary MissionData::set_event_trigger(int event_index, int local_index, const Dictionary &trigger) {
-	if (!loaded_ || event_index < 0 || local_index < 0) {
-		return Dictionary();
+Ref<MissionEventChain> MissionData::set_event_trigger(int event_index, int local_index, const Ref<MissionEventTrigger> &trigger) {
+	if (!loaded_ || event_index < 0 || local_index < 0 || trigger.is_null()) {
+		return Ref<MissionEventChain>();
 	}
 	mission::MissionEventRecord event;
 	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	if (local_index >= event.trigger_count) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	const size_t global = static_cast<size_t>(event.trigger_index) + static_cast<size_t>(local_index);
 	mission::MissionTriggerRecord existing;
 	if (!mission::trigger(file_, global, existing)) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
-	const mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, existing);
+	const mission::MissionTriggerRecord record = trigger_from_edit(trigger->value(), existing);
 	std::string error;
 	if (!mission::set_trigger(file_, global, record, error)) {
 		edit_failed(error);
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	modified = true;
-	mission::MissionEventChain chain;
-	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
-	return event_chain_to_dictionary(chain);
+	return event_chain_record(static_cast<size_t>(event_index));
 }
 
 bool MissionData::remove_event_trigger(int event_index, int local_index) {
@@ -1167,26 +989,24 @@ bool MissionData::move_event_trigger(int event_index, int local_index, int delta
 	return true;
 }
 
-Dictionary MissionData::add_event_action(int event_index, const Dictionary &action) {
-	if (!loaded_ || event_index < 0) {
-		return Dictionary();
+Ref<MissionEventChain> MissionData::add_event_action(int event_index, const Ref<MissionEventAction> &action) {
+	if (!loaded_ || event_index < 0 || action.is_null()) {
+		return Ref<MissionEventChain>();
 	}
 	mission::MissionEventRecord event;
 	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	mission::MissionActionRecord seed;  // defaults to a Null action
-	const mission::MissionActionRecord record = action_from_dictionary(action, seed);
+	const mission::MissionActionRecord record = action_from_edit(action->value(), seed);
 	std::string error;
 	if (!mission::insert_event_action(file_, static_cast<size_t>(event_index),
 				static_cast<size_t>(event.action_count), record, error)) {
 		edit_failed(error);
-		return Dictionary();
+		return Ref<MissionEventChain>();
 	}
 	modified = true;
-	mission::MissionEventChain chain;
-	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
-	return event_chain_to_dictionary(chain);
+	return event_chain_record(static_cast<size_t>(event_index));
 }
 
 bool MissionData::remove_event_action(int event_index, int local_index) {
@@ -1314,14 +1134,6 @@ int64_t MissionData::object_records_revision() const {
 	mix_entities(file.markers);
 	mix_entities(file.organics);
 	return static_cast<int64_t>(h);
-}
-
-Dictionary MissionData::structure_fingerprint() const {
-	Dictionary out;
-	out["events"] = get_event_count();
-	out["zones"] = get_area_trigger_count();
-	out["object_rev"] = object_records_revision();
-	return out;
 }
 
 // Game mode is a single-select among the 11 attrib_flags mode bits. The decode

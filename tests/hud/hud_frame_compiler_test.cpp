@@ -1165,6 +1165,12 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 							opennova::hud::half_bright_keep_alpha(downed_gray),
 			"dead without a slot rides table[8] gray");
 	CHECK(gray.glyphs.size() == 11, "no slot, no count");
+	// BRIEF without a count: the three tick lines and no text at all.
+	state.friendly_tag_mode = 3;
+	const HudDrawList &brief_plain = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief_plain.lines.size() == 3 && brief_plain.glyphs.empty(),
+			"BRIEF draws the three tick lines and no text");
+	state.friendly_tag_mode = 2;
 	// The BRIEF ticks draw the bare count one fontH above the point
 	// [orig: "%ld" @0x5a41f0 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
 	state.friendly_tags[0].has_slot = true;

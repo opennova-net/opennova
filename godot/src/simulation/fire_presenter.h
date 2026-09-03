@@ -73,7 +73,7 @@ class Simulation;
 // are tracked in docs/world/world-wac-ai-re.md §24.6 (D-AI-12a/b); the round's item
 // graphic (frndlyTrcrID/foeTrcrID + TRACER_SCALE/TRACER_WIDTH nodes) is
 // D-AI-12d; the light_move glow (round+0x1B4) rides the light pool now
-// (Simulation.get_round_glow_rows -> EffectLightDirector.sync_round_glows).
+// (Simulation::fill_round_glows -> EffectLightDirector::sync_round_glows).
 // The SP host shows tracers unconditionally (the MP NoTracers rules bit,
 // dword_24D1E34 & 1, is a net seam wired via RoundSim.no_tracers_rule).
 class FirePresenter {
@@ -100,13 +100,14 @@ public:
 	// Once per present (beside the other passes), after the sim advanced. The
 	// pending-sound countdown consumes logic ticks inside the sim now
 	// (world/fire_sound.h) — this pass only drains and plays. Each drain forwards
-	// into a public data leg (the present_snapshot precedent): tests feed the same
-	// rows without a live sim.
+	// into a public data leg over the engine rows (the present_snapshot
+	// precedent): EntityPresenter's bound legs feed the same rows from tests
+	// without a live sim.
 	void present();
-	void present_slot_sounds(const TypedArray<SlotSoundRow> &p_events);
-	void present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events);
-	void present_fires(const TypedArray<FirePresentationEvent> &p_events);
-	void present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds);
+	void present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events);
+	void present_sound_emitters(const std::vector<opennova::world::SoundEmitterEvent> &p_events);
+	void present_fires(const std::vector<opennova::world::FirePresentationRow> &p_events);
+	void present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds);
 	void draw_tracer_rows(const PackedFloat32Array &p_rows);
 
 	// Load-time pipeline warm: emit one invisible (alpha-0) strip on each ribbon

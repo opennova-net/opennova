@@ -442,9 +442,7 @@ func test_mission_end_screen_lose_form_and_exit() -> void:
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)
 	watch_signals(screen)
-	var lost := RoundOutcome.new()
-	lost.ended = true
-	lost.winner_team = 2
+	var lost := RoundOutcome.make(true, 2)
 	screen.setup(lost, "You shot a friendly unit!", null)
 	assert_true(_screen_has_label_containing(screen, "You shot a friendly unit!"),
 			"the lose form shows the stored banner line")
@@ -461,13 +459,7 @@ func test_mission_end_screen_win_form_counts() -> void:
 	# by-player + by-others, FRIENDLYUNITS likewise].
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)
-	var won := RoundOutcome.new()
-	won.ended = true
-	won.winner_team = 1
-	won.enemy_kills = 3
-	won.enemy_kills_by_others = 2
-	won.bluekills = 1
-	won.team_kills_by_others = 1
+	var won := RoundOutcome.make(true, 1, 3, 2, 1, 1)
 	screen.setup(won, "", null)
 	assert_true(_screen_has_label_containing(screen, "5"), "enemy units = 3 + 2")
 	assert_true(_screen_has_label_containing(screen, "2"), "team units = 1 + 1")

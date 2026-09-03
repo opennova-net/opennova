@@ -59,7 +59,7 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 	// completion.] Role-agnostic: every role's view folds both lanes.
 	Ref<EndRoundState> record;
 	record.instantiate();
-	EndRoundState::Value v;
+	opennova::inmatch::EndRoundSessionState v;
 	if (runtime_) {
 		const opennova::replication::ClientEndRoundStats &er = runtime_->state().end_round;
 		v.header_known = er.header_known;
@@ -128,24 +128,15 @@ Ref<EndRoundOverlay> Simulation::get_end_round_overlay(const Ref<RtxtStringFile>
 	// The resolved ladder: keys through the gametext Overlays table, the
 	// empty-resolve folds and the printf forms applied by the engine
 	// (hud::end_round_overlay_resolve), plus the design-space safe area.
+	opennova::hud::EndRoundOverlayLadder ladder;
+	if (runtime_ && runtime_->state().end_round.header_known) {
+		ladder.lines = opennova::hud::end_round_overlay_resolve(
+				opennova::hud::end_round_overlay_lines(end_round_overlay_input()),
+				overlays_lookup(p_gametext));
+	}
 	Ref<EndRoundOverlay> out;
 	out.instantiate();
-	PackedStringArray texts;
-	PackedInt32Array ys;
-	if (runtime_ && runtime_->state().end_round.header_known) {
-		const std::vector<opennova::hud::EndRoundResolvedLine> lines =
-				opennova::hud::end_round_overlay_resolve(
-						opennova::hud::end_round_overlay_lines(end_round_overlay_input()),
-						overlays_lookup(p_gametext));
-		for (const opennova::hud::EndRoundResolvedLine &l : lines) {
-			texts.push_back(String::utf8(l.text.c_str()));
-			ys.push_back(l.y);
-		}
-	}
-	out->set_texts(texts);
-	out->set_ys(ys);
-	out->set_top(opennova::hud::kEndRoundOverlayTop);
-	out->set_bottom(opennova::hud::kEndRoundOverlayBottom);
+	out->assign(ladder);
 	return out;
 }
 
@@ -164,16 +155,12 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	const opennova::replication::ClientEndRoundStats &er = runtime_->state().end_round;
 	if (!er.known) return out;
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
-	for (const opennova::inmatch::StatScreenColumn &c :
+	for (opennova::inmatch::StatScreenColumn c :
 			opennova::inmatch::stat_screen_columns(er.board, false, p_table_width)) {
+		c.header = resolve_column_header(lookup, c).utf8().get_data();
 		Ref<EndRoundColumn> column;
 		column.instantiate();
-		column->set_header(resolve_column_header(lookup, c));
-		column->set_header_key(String::utf8(c.header_key.c_str()));
-		column->set_header_fallback(String::utf8(c.header_fallback.c_str()));
-		column->set_literal(String::utf8(c.literal.c_str()));
-		column->set_width(c.width);
-		column->set_field_id(c.field_id);
+		column->assign(c);
 		out.push_back(column);
 	}
 	return out;
@@ -219,15 +206,7 @@ TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
 		if (!opennova::inmatch::stat_screen_row_visible(p_tab, r.team)) continue;
 		Ref<EndRoundRow> row;
 		row.instantiate();
-		row->set_slot(static_cast<int>(r.slot));
-		row->set_team(static_cast<int>(r.team));
-		row->set_name(String::utf8(r.name.c_str()));
-		row->set_squad(String::utf8(r.squad.c_str()));
-		PackedStringArray cells;
-		for (const std::string &c : r.cells) cells.push_back(String::utf8(c.c_str()));
-		row->set_cells(cells);
-		row->set_color(static_cast<int64_t>(r.color_argb));
-		row->set_selected(r.selected);
+		row->assign(r);
 		out.push_back(row);
 	}
 	return out;
@@ -257,17 +236,14 @@ Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	// The raised box: the between-rounds gate with a team-1 win
 	// [orig: g_spawn_success_gate && g_endround_winner_team == 1 @0x5b763b].
 	in.raised = w.match.outcome().ended && w.match.outcome().winner_team == 1;
-	Ref<EndRoundStatistics> out;
-	out.instantiate();
-	out->set_raised(in.raised);
-	PackedStringArray label_keys;
-	PackedStringArray values;
+	opennova::hud::EndRoundStatisticsPanel panel;
+	panel.raised = in.raised;
 	for (const opennova::hud::EndRoundStatisticsRow &row :
 			opennova::hud::end_round_statistics_rows(in)) {
-		label_keys.push_back(String::utf8(row.label_key));
-		values.push_back(String::utf8(row.value.c_str()));
+		panel.rows.push_back(row);
 	}
-	out->set_label_keys(label_keys);
-	out->set_values(values);
+	Ref<EndRoundStatistics> out;
+	out.instantiate();
+	out->assign(panel);
 	return out;
 }

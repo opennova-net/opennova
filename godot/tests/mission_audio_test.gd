@@ -472,7 +472,7 @@ end
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_lte(_players(container).size(), MissionAudio.MIX_CHANNELS)
 	assert_eq(int(audio.get_stats().physical_channels), _players(container).size())
-	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
+	assert_eq(provider.source_bms_ids, [env_building.bms_id],
 		"setup retains the authored emitter identity through the ambient LOS call")
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
@@ -653,15 +653,5 @@ func _reverb_count(bus_idx: int) -> int:
 # emits: the fixture truck's idle lane at `pos` with the given pitch/volume words.
 func _emitter_row(source_spawn_id: int, pos: Vector3, pitch_q16: int, volume_q8_8: int,
 		emitted_tick: int = 0) -> SoundEmitterRow:
-	var row := SoundEmitterRow.new()
-	row.source_spawn_id = source_spawn_id
-	row.handle = 0x10001
-	row.source_bms_id = 42
-	row.lane = 0
-	row.lifetime = 30
-	row.pitch_q16 = pitch_q16
-	row.volume_q8_8 = volume_q8_8
-	row.soundset = "V_TRUCK_ILP"
-	row.pos = pos
-	row.emitted_tick = emitted_tick
-	return row
+	return SoundEmitterRow.make(source_spawn_id, 0x10001, 42, pos, 0, 0, 30, emitted_tick,
+			pitch_q16, volume_q8_8, false, "V_TRUCK_ILP")

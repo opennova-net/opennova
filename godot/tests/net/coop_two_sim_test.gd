@@ -127,14 +127,14 @@ func _combat_mission() -> MissionData:
 	# Both yaw-zero players therefore
 	# have a Generic Soldier down their own +mission-y lane (host at nine
 	# metres, joiner at eight).
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(20, 9, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -145,12 +145,12 @@ func _peer_duel_mission() -> MissionData:
 	# joiner at (0, 0). Both
 	# yaw-zero players face +mission-y, putting the host directly in the
 	# joiner's fire lane without a debug teleport or invented aim override.
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(4, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -160,22 +160,22 @@ func _vehicle_peer_mission() -> MissionData:
 	# Keep the replicated vehicle well away from both deploy markers. The listen
 	# host presents its authoritative placed row while the joiner presents the
 	# decoded pool-1 wire row; their world poses must remain the same.
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101291,
-			Vector3(40, 30, 0), Vector3(10, 0, 20)).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101291,
+			Vector3(40, 30, 0), Vector3(10, 0, 20)))
 	# A synthetic cbot with non-zero authored attitude catches first-arm
 	# prediction accidentally replacing the retained spawn Euler with zero. It
 	# sits beside the joiner start so the same real-UDP case can also exercise a
 	# local control-seat body following the final predicted carrier pose.
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 105008,
-			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 105008,
+			Vector3(2, 0, 0), Vector3(13, 0, -17)))
 	# Slot order puts the host at (0, 8), then the joiner at (0, 0), within the
 	# retail four-unit seat scan of the boat.
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(4, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -402,10 +402,10 @@ func _two_organics_with_spawn_zone() -> MissionData:
 	var zone := md.add_entity(
 			MissionData.KIND_ITEM, SPAWN_ZONE_TYPE,
 			Vector3(40, 0, 0), Vector3.ZERO)
-	assert_false(zone.is_empty())
-	if not zone.is_empty():
+	assert_not_null(zone)
+	if zone != null:
 		assert_true(md.set_entity_property_int(
-				MissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
+				MissionData.KIND_ITEM, zone.index, "team", 1))
 	return md
 
 
@@ -550,21 +550,21 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "EnvironmentJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
-	var received: WeatherHomeState = null
+	var received: EnvironmentSnapshot = null
 	for _i in range(1200):
 		host.step()
 		joiner.step()
-		received = joiner.get_weather_state()
-		if received != null and received.fog_target_q16 == 291 << 16:
+		received = joiner.get_environment_snapshot()
+		if received != null and received.fog_target_metres == 291:
 			break
 		OS.delay_msec(2)
 
-	assert_not_null(received, "the joiner exposes its weather home")
+	assert_not_null(received, "the joiner exposes its environment record")
 	if received == null:
 		return
-	assert_eq(received.fog_target_q16, 291 << 16,
+	assert_eq(received.fog_target_metres, 291,
 			"the OpenNova joiner folds the host's scheduled phase-2 sample into its weather home")
-	assert_eq(received.cloud_scroll_rate_target, 170 << 10)
+	assert_eq(received.sky_speed_target, 170)
 	assert_eq(received.precipitation_kind, 1)
 	assert_gt(received.quake_ticks, 0,
 			"the host's quake countdown reaches the joiner")
@@ -987,9 +987,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, 105004,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(2, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))
@@ -1108,8 +1108,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	var mounted_item := mission.add_entity(
 			MissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(mounted_item.is_empty())
-	var mounted_bms_id := int(mounted_item.get("bms_id", 0))
+	assert_not_null(mounted_item)
+	var mounted_bms_id := mounted_item.bms_id
 	assert_gt(mounted_bms_id, 0)
 
 	var host := Simulation.new()
@@ -2331,20 +2331,20 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	var host_mission := MissionData.new()
 	assert_eq(host_mission.create_default(), OK)
-	assert_false(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	var joiner_mission := MissionData.new()
 	assert_eq(joiner_mission.create_default(), OK)
-	assert_false(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 12, 0), Vector3.ZERO))
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
@@ -2561,12 +2561,12 @@ func _subrate_walk_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(8):
-		assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+		assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -2680,23 +2680,23 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
 	# would hide any carrier-frame recomposition error on the joiner.
-	assert_false(mission.add_entity(MissionData.KIND_ITEM, 101419,
-			Vector3(2, 12, 0), Vector3(0, 0, 135)).is_empty())
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 101419,
+			Vector3(2, 12, 0), Vector3(0, 0, 135)))
 	var gunner := mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(2, 11, 0), Vector3.ZERO)
-	assert_false(gunner.is_empty())
-	var gunner_ssn := int(gunner.get("bms_id", 0))
+	assert_not_null(gunner)
+	var gunner_ssn := gunner.bms_id
 	assert_gt(gunner_ssn, 0)
 	# Deploy markers away from the emplacement so neither player spawns into it.
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(24, 0, 0), Vector3.ZERO))
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
-	assert_false(mission.add_event(0, 0, 0).is_empty())
-	assert_false(mission.add_event_action(0,
-			{"action_type": 37, "param1": gunner_ssn}).is_empty())
+	assert_not_null(mission.add_event(0, 0, 0))
+	assert_not_null(mission.add_event_action(0,
+			MissionEventAction.make(37, 0, gunner_ssn)))
 
 	var fixture_def_root := ResourceRoot.new()
 	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)

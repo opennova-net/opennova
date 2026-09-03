@@ -18,7 +18,7 @@ namespace godot {
 
 class EnvsMarkerRow;
 class ItemEmplacementAttachment;
-class ItemParticleFx;
+struct ItemParticleFx;
 class ItemSeatCard;
 class ResourceRoot;
 
@@ -180,7 +180,9 @@ public:
 	// emitter the runtime effect-attach pass consumes); null = unknown id, empty
 	// effect = key absent. The other authored slots (particlefxs, particlefxw1..4,
 	// the death/fire/other family) are read engine-side from the retained parse.
-	Ref<ItemParticleFx> get_particle_fx(int id) const;
+	// Slot A ("particlefx") as authored, the row the runtime effect-attach
+	// pass consumes natively; `valid` false for an unknown item.
+	ItemParticleFx get_particle_fx(int id) const;
 
 	// Every item id in a stable display order (natural, case-insensitive
 	// display_name, then id) — sorted_ids_, computed at load.

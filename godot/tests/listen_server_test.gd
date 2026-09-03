@@ -92,9 +92,9 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 	for config_value in [0, 6]:
 		var md := MissionData.new()
 		assert_eq(md.create_default(), OK)
-		assert_false(md.add_entity(
+		assert_not_null(md.add_entity(
 				MissionData.KIND_ITEM, 101294,
-				Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+				Vector3(2, 0, 0), Vector3.ZERO))
 
 		var sim := Simulation.new()
 		sim.enable_listen_server(true)
@@ -260,7 +260,7 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	var vehicle := md.add_entity(
 			MissionData.KIND_ITEM, 101291,
 			Vector3(10, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
+	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
@@ -289,7 +289,7 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	# The child has no 0x0A callback of its own. Its presented motion comes from
 	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
 	sim.debug_set_world_entity_position(
-			int(vehicle["bms_id"]), Vector3(30, 0, 0))
+			vehicle.bms_id, Vector3(30, 0, 0))
 	sim.step()
 	snapshot = sim.get_present_snapshot()
 	child_base = -1
@@ -417,9 +417,9 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ORGANIC, 5311,
-			Vector3(12, 4, -3), Vector3.ZERO).is_empty())
+			Vector3(12, 4, -3), Vector3.ZERO))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)

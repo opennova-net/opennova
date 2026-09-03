@@ -96,7 +96,7 @@
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
-#include "simulation/weather_home_state.h"
+#include "simulation/environment_snapshot.h"
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
@@ -111,6 +111,7 @@
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
+#include "mission/mission_records.h"
 #include "mission/mission_perf_counters.h"
 #include "mission/mission_root.h"
 #include "mission/mission_setup_options.h"
@@ -139,7 +140,7 @@
 #include "network/novaworld_server_browser.h"
 #include "network/host_session_options.h"
 #include "network/novaworld_server_row.h"
-#include "network/novaworld_server_totals.h"
+#include "network/novaworld_gate_info.h"
 #include "network/novaworld_host.h"
 #include "network/udp_datagram.h"
 #include "network/udp_pump.h"
@@ -217,7 +218,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
 	GDREGISTER_CLASS(StaticPopulationInstance);
-	GDREGISTER_CLASS(StaticUserPointSource);
 	GDREGISTER_CLASS(StaticEffectSource);
 	GDREGISTER_CLASS(StaticLightDrawSource);
 	GDREGISTER_CLASS(StaticTerrainShadowSourceRow);
@@ -231,6 +231,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvDayPhase);
 	GDREGISTER_CLASS(EnvSunGlare);
+	GDREGISTER_CLASS(EnvironmentSnapshot);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);
 	GDREGISTER_CLASS(EntityRef);
@@ -240,7 +241,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectShaderCache);
 	GDREGISTER_CLASS(ModelLight);
 	GDREGISTER_CLASS(ModelUserPoint);
-	GDREGISTER_CLASS(ItemParticleFx);
 	GDREGISTER_CLASS(ItemEmplacementAttachment);
 	GDREGISTER_CLASS(EnvsMarkerRow);
 	GDREGISTER_CLASS(ItemSeatAttachmentRow);
@@ -272,10 +272,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundColumn);
 	GDREGISTER_CLASS(EndRoundRow);
 	GDREGISTER_CLASS(RoundOutcome);
-	GDREGISTER_CLASS(AttachLabelRow);
-	GDREGISTER_CLASS(FriendlyTagRow);
 	GDREGISTER_CLASS(DeployStatus);
-	GDREGISTER_CLASS(DeployOccupantRow);
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);
 	GDREGISTER_CLASS(DestructionEffectEvent);
@@ -291,18 +288,14 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
-	GDREGISTER_CLASS(WeatherHomeState);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
 	GDREGISTER_CLASS(FireSoundRow);
 	GDREGISTER_CLASS(SlotSoundRow);
 	GDREGISTER_CLASS(SoundEmitterRow);
 	GDREGISTER_CLASS(RoundImpactRow);
-	GDREGISTER_CLASS(TerrainScorchRow);
-	GDREGISTER_CLASS(WeatherSoundRow);
 	GDREGISTER_CLASS(ChatLineRow);
 	GDREGISTER_CLASS(MissionEffect);
-	GDREGISTER_CLASS(ObjectiveRow);
 	GDREGISTER_CLASS(DeathPieceRow);
 	GDREGISTER_CLASS(RoundGlowRow);
 	GDREGISTER_CLASS(AvatarDatabase);
@@ -315,6 +308,20 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
+	GDREGISTER_CLASS(MissionEntityRecord);
+	GDREGISTER_CLASS(MissionWaypointSummary);
+	GDREGISTER_CLASS(MissionWaypointPath);
+	GDREGISTER_CLASS(MissionWaypointMarker);
+	GDREGISTER_CLASS(MissionAreaTrigger);
+	GDREGISTER_CLASS(MissionWeaponLoadoutEntry);
+	GDREGISTER_CLASS(MissionGroup);
+	GDREGISTER_CLASS(MissionEvent);
+	GDREGISTER_CLASS(MissionEventTrigger);
+	GDREGISTER_CLASS(MissionEventAction);
+	GDREGISTER_CLASS(MissionLogicReference);
+	GDREGISTER_CLASS(MissionLogicDiagnostic);
+	GDREGISTER_CLASS(MissionEventChain);
+	GDREGISTER_CLASS(MissionLogicSummary);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);
 	// The present passes EntityPresenter owns (ADR 0043 d9): two are
@@ -377,7 +384,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectSpawnRequest);
 	GDREGISTER_CLASS(EffectSpawnReceipt);
 	GDREGISTER_CLASS(EffectSpawnOptions);
-	GDREGISTER_CLASS(EffectOwnerPoseBatch);
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(EffectEmitterReport);
 	GDREGISTER_CLASS(EffectGroupReport);
@@ -447,7 +453,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HostSessionOptions);
 	GDREGISTER_CLASS(JoinTarget);
 	GDREGISTER_CLASS(NovaWorldServerRow);
-	GDREGISTER_CLASS(NovaWorldServerTotals);
+	GDREGISTER_CLASS(NovaWorldGateInfo);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);
 	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(UdpDatagram);

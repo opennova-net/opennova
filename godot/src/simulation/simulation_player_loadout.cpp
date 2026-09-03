@@ -16,8 +16,6 @@
 #include <runtime/replication/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <runtime/world/friendly_tags.h> // the D-HUD-20 tag gather
 
-#include "hud/friendly_tag_flags.h" // the HudOverlay flag word the feed packs
-
 #include <algorithm>
 #include <cstdio>
 
@@ -53,25 +51,6 @@ std::vector<opennova::world::WeaponKitEntry> kit_rows_from(const TypedArray<Weap
 } // namespace
 
 namespace {
-
-Ref<WeaponProfileSide> weapon_profile_side_summary(const opennova::playersav::Side &side,
-		bool include_kit) {
-	Ref<WeaponProfileSide> out;
-	out.instantiate();
-	out->set_player_class(int(side.player_class));
-	out->set_avatar_a(int(side.avatar_a));
-	out->set_avatar_b(int(side.avatar_b));
-	out->set_avatar_packed(int(side.avatar_packed));
-	if (include_kit) {
-		PackedStringArray names;
-		if (const opennova::playersav::KitPage *page = side.selected_page()) {
-			for (const opennova::playersav::KitEntry &entry : page->entries)
-				names.push_back(String::utf8(entry.name.c_str()));
-		}
-		out->set_kit(names);
-	}
-	return out;
-}
 
 Error read_weapon_profile_file(const String &path,
 		opennova::playersav::File &out, bool p_clamp_classes = false) {
@@ -223,34 +202,23 @@ bool Simulation::local_player_toggle_mount() {
 	return changed;
 }
 
-TypedArray<AttachLabelRow> Simulation::get_attach_labels() const {
-	TypedArray<AttachLabelRow> out;
-	if (!kernel_) return out;
-	std::vector<opennova::world::AttachLabel> labels;
-	kernel_->local.collect_attach_labels(labels);
-	for (const opennova::world::AttachLabel &l : labels) {
-		Ref<AttachLabelRow> row;
-		row.instantiate();
-		row->set_position(Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z));
-		row->set_seat_type(static_cast<int>(l.type));
-		row->set_armory(l.armory);
-		row->set_nearest(l.nearest);
-		row->set_attach_text_key(String::utf8(l.attach_text_key.c_str()));
-		out.push_back(row);
-	}
-	return out;
+bool Simulation::fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const {
+	r_labels.clear();
+	if (!kernel_) return false;
+	kernel_->local.collect_attach_labels(r_labels);
+	return true;
 }
 
-TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
+bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const {
 	// The friendly-tags gather (D-HUD-20): raw positions + per-entity facts; the
-	// presenter lifts, projects, and feeds the HUD compiler's element. The
+	// overlay lifts, projects, and feeds the HUD compiler's element. The
 	// witnessed pass is cited at the engine gather (world/friendly_tags.cpp).
-	TypedArray<FriendlyTagRow> out;
-	if (!kernel_) return out;
+	r_tags.clear();
+	if (!kernel_) return false;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (player == nullptr) return out;
-	std::vector<opennova::world::FriendlyTagSource> tags;
+	if (player == nullptr) return false;
+	std::vector<opennova::world::FriendlyTagSource> &tags = r_tags;
 	// The pass-level facts (retail g_death_screen_active / g_GameType): the
 	// death screen bit is the client's local latch, the game type every role's
 	// view carries.
@@ -284,31 +252,7 @@ TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
 				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
 				[player_hp](uint16_t) { return player_hp; });
 	}
-	for (const opennova::world::FriendlyTagSource &t : tags) {
-		Ref<FriendlyTagRow> row;
-		row.instantiate();
-		row->set_position(Vector3(t.position.x, t.position.y, t.position.z));
-		// The eye height above the entity origin in mission units (16.16 ->
-		// float); the anchor witness lives at the gather (friendly_tags.h).
-		row->set_eye_height(static_cast<float>(t.eye_offset_z) / 65536.0f);
-		row->set_name(String::utf8(t.name.c_str()));
-		row->set_entity_id(static_cast<int>(t.net_id));
-		row->set_health_ratio_fp16(t.health_ratio_fp16);
-		row->set_player(t.player);
-		row->set_medic(t.medic);
-		// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
-		row->set_dead(t.dead);
-		row->set_has_slot(t.has_slot);
-		row->set_revive_seconds(static_cast<int>(t.revive_seconds));
-		row->set_medic_request(t.medic_request);
-		// The HudOverlay flag word (hud/friendly_tag_flags.h), packed here so
-		// the presenter forwards one int per tag; the speaking pulse is the
-		// overlay's own env feed, not a sim fact.
-		row->set_flags(friendly_tag_flags::pack(t.medic, false, t.player, t.dead,
-				t.has_slot, t.medic_request, t.revive_seconds));
-		out.push_back(row);
-	}
-	return out;
+	return true;
 }
 
 // --- the local player's loadout: slot pool, spawn kit, map rules -----------------------
@@ -502,13 +446,10 @@ Ref<WeaponProfileSummary> Simulation::read_weapon_profile_summary(const String &
 	const Error error = read_weapon_profile_file(p_path, profile);
 	Ref<WeaponProfileSummary> out;
 	out.instantiate();
-	out->set_error(int(error));
-	out->set_loaded(error == OK);
 	// OpenNova's active profile is slot 0. Retail indexes the same five-record
 	// array by g_curProfileSlot @0x25506B8 (0x1080C stride) before reading or
 	// writing its record; see docs/playerinfo/avatars-re.md.
-	out->set_blue(weapon_profile_side_summary(profile.slots[0].blue, false));
-	out->set_red(weapon_profile_side_summary(profile.slots[0].red, false));
+	out->assign(profile.slots[0], int(error), error == OK);
 	return out;
 }
 
@@ -649,15 +590,6 @@ Error Simulation::load_weapon_profile(const String &p_path) {
 	return result;
 }
 
-Ref<WeaponProfileSummary> Simulation::get_weapon_profile_summary() const {
-	Ref<WeaponProfileSummary> out;
-	out.instantiate();
-	out->set_loaded(weapon_profile_loaded_);
-	out->set_blue(weapon_profile_side_summary(weapon_profile_.blue, true));
-	out->set_red(weapon_profile_side_summary(weapon_profile_.red, true));
-	return out;
-}
-
 void Simulation::apply_joiner_authoritative_loadout() {
 	if (!joiner_ || !runtime_ || !kernel_ || kernel_->world.tables.weapons.empty()) return;
 	const uint64_t revision = runtime_->authoritative_loadout_revision();
@@ -679,13 +611,10 @@ void Simulation::apply_joiner_authoritative_loadout() {
 }
 
 Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
-	Ref<PlayerInventory> out;
-	out.instantiate();
-	out->set_valid(kernel_->local.inventory_valid);
-	out->set_equipped_combo(kernel_->local.inventory.equipped_combo);
-	out->set_carry_flags(static_cast<int>(kernel_->local.inventory.carry_flags));
-	String equipped_name;
-	Dictionary pools;
+	opennova::world::LocalInventoryView v;
+	v.valid = kernel_->local.inventory_valid;
+	v.equipped_combo = kernel_->local.inventory.equipped_combo;
+	v.carry_flags = kernel_->local.inventory.carry_flags;
 	if (kernel_ != nullptr) {
 		const opennova::world::WeaponTable &table = kernel_->world.tables.weapons;
 		for (int32_t combo = 0; combo < opennova::world::weapon_combo::kSlotCount;
@@ -695,23 +624,18 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 			const opennova::world::WeaponTableEntry *def =
 					table.by_index(static_cast<uint8_t>(s->adm_index));
 			if (def == nullptr) continue;
-			Ref<PlayerInventorySlot> row;
-			row.instantiate();
-			row->assign(combo, String::utf8(def->name.c_str()), s->clip);
-			out->add_slot(row);
+			opennova::world::LocalInventoryView::Slot slot;
+			slot.combo = combo;
+			slot.name = def->name;
+			slot.clip = s->clip;
+			v.slots.push_back(std::move(slot));
 			if (combo == kernel_->local.inventory.equipped_combo)
-				equipped_name = String::utf8(def->name.c_str());
-		}
-		for (size_t i = 0; i < table.ammo_class_names.size() &&
-		                   i < kernel_->local.inventory.pools.size();
-		     ++i) {
-			if (table.ammo_class_names[i].empty()) continue;
-			pools[String::utf8(table.ammo_class_names[i].c_str())] =
-					kernel_->local.inventory.pools[i];
+				v.equipped_name = def->name;
 		}
 	}
-	out->set_equipped_name(equipped_name);
-	out->set_pools(pools);
+	Ref<PlayerInventory> out;
+	out.instantiate();
+	out->assign(v);
 	return out;
 }
 

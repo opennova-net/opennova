@@ -521,8 +521,7 @@ Ref<EnvDayPhase> EnvFile::get_day_phase(float p_time) const {
 	const opennova::env::DayPhase phase = opennova::env::compute_day_phase(p_time);
 	Ref<EnvDayPhase> result;
 	result.instantiate();
-	result->set_night(phase.is_night);
-	result->set_blend(phase.blend);
+	result->assign(phase);
 	return result;
 }
 
@@ -636,8 +635,7 @@ Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusio
 	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
 	Ref<EnvSunGlare> result;
 	result.instantiate();
-	result->set_glare(glare.glare);
-	result->set_fog_whiten(glare.fog_whiten);
+	result->assign(glare);
 	return result;
 }
 

@@ -127,17 +127,9 @@ func before_each() -> void:
 
 
 # One event shaped like Simulation::drain_fire_presentation_events emits.
-func _event(adm_arm: bool) -> FirePresentationEvent:
-	var event := FirePresentationEvent.new()
-	event.origin = WIRE_EYE
-	event.forward = Vector3(0.0, 0.0, -1.0)
-	event.shooter_handle = SHOOTER
-	event.adm_arm = adm_arm
-	event.adm_index = 24
-	event.effect = "AMMO_EFFECT"
-	event.action_effect = "EFFECT_M16MF"
-	event.action_userpoint = MUZZLE_USERPOINT
-	return event
+func _event(adm_arm: bool, action_effect: String = "EFFECT_M16MF") -> FirePresentationEvent:
+	return FirePresentationEvent.make(WIRE_EYE, 0, SHOOTER, false, 0, Vector3(0.0, 0.0, -1.0),
+			adm_arm, 24, "AMMO_EFFECT", action_effect, MUZZLE_USERPOINT)
 
 
 # The emitter position of one group report row (the spawn point of a transient).
@@ -215,8 +207,7 @@ func test_adm_arm_with_no_wire_body_keeps_the_wire_value() -> void:
 
 
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
-	var ev := _event(true)
-	ev.action_effect = ""
+	var ev := _event(true, "")
 	_fire.present_fires([ev])
 	assert_true(_fx.get_debug_group_report().is_empty(),
 			"an unauthored fire row spawns no effect")

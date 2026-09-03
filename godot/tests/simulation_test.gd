@@ -822,9 +822,9 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 	var placed := md.add_entity(
 			MissionData.KIND_ITEM, 105007,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	assert_true(md.set_entity_property_int(
-			MissionData.KIND_ITEM, int(placed["index"]), "team", 2))
+			MissionData.KIND_ITEM, placed.index, "team", 2))
 	var item_db := _vehicle_ctrl_item_db()
 	assert_not_null(item_db)
 	if item_db == null:
@@ -840,7 +840,7 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	sim.step()
-	var index := int(placed["index"])
+	var index := placed.index
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, index,
 			Simulation.PF_VEHICLE_MOTION_VALID), 1,
@@ -916,18 +916,18 @@ func test_physicsless_air_definitions_install_direct_traits_without_enabling_gro
 	var plane := md.add_entity(
 			MissionData.KIND_ITEM, 105011,
 			Vector3(15, 0, 4), Vector3.ZERO)
-	assert_false(air_a.is_empty())
-	assert_false(air_b.is_empty())
-	assert_false(ground.is_empty())
-	assert_false(plane.is_empty())
+	assert_not_null(air_a)
+	assert_not_null(air_b)
+	assert_not_null(ground)
+	assert_not_null(plane)
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	var air_a_card: EntityCard = sim.entity_card_by_net_id(int(air_a["bms_id"]))
-	var air_b_card: EntityCard = sim.entity_card_by_net_id(int(air_b["bms_id"]))
-	var ground_card: EntityCard = sim.entity_card_by_net_id(int(ground["bms_id"]))
-	var plane_card: EntityCard = sim.entity_card_by_net_id(int(plane["bms_id"]))
+	var air_a_card: EntityCard = sim.entity_card_by_net_id(air_a.bms_id)
+	var air_b_card: EntityCard = sim.entity_card_by_net_id(air_b.bms_id)
+	var ground_card: EntityCard = sim.entity_card_by_net_id(ground.bms_id)
+	var plane_card: EntityCard = sim.entity_card_by_net_id(plane.bms_id)
 	assert_eq(air_a_card.get_item_id(), 5008,
 			"the public pool-1 probe resolves the first parsed definition")
 	assert_eq(air_b_card.get_item_id(), 5009,
@@ -955,14 +955,14 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 	var npc := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
 			Vector3(0, 8, 0), Vector3.ZERO)
-	assert_false(mount.is_empty())
-	assert_false(npc.is_empty())
+	assert_not_null(mount)
+	assert_not_null(npc)
 	assert_true(md.set_entity_property_int(
-			MissionData.KIND_ORGANIC, int(npc["index"]),
+			MissionData.KIND_ORGANIC, npc.index,
 			"waypoint_id", 125))
 	assert_true(md.set_entity_property_int(
-			MissionData.KIND_ORGANIC, int(npc["index"]),
-			"wp_number", int(mount["bms_id"])))
+			MissionData.KIND_ORGANIC, npc.index,
+			"wp_number", mount.bms_id))
 	# One-seat carrier per retail prefix: mount's authored Usegun row (bone 6),
 	# byte-renamed for the sitex/ctrlx/drvrx variants.
 	var renames := {1: "sitex00", 2: "ctrlx00", 5: "drvrx00"}
@@ -991,7 +991,7 @@ end
 	for _board_tick in range(48):
 		sim.step()
 	var verdict := _present_field_for_origin(
-			sim, MissionData.KIND_ORGANIC, int(npc["index"]),
+			sim, MissionData.KIND_ORGANIC, npc.index,
 			Simulation.PF_RIGHT_HAND_COLLAPSED)
 	return verdict
 
@@ -1576,8 +1576,8 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
 	# then resolve traits through the same production seam as MissionRoot. Retail
 	# returns before projectile damage when the struck entity has no ItemDef.
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
@@ -1681,16 +1681,16 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 		[reference_enemy, reference_gun],
 		[rotated_enemy, rotated_gun],
 	]:
-		assert_false((pair[0] as Dictionary).is_empty())
-		assert_false((pair[1] as Dictionary).is_empty())
+		assert_not_null(pair[0] as MissionEntityRecord)
+		assert_not_null(pair[1] as MissionEntityRecord)
 		assert_true(md.set_entity_property_int(
 				MissionData.KIND_ORGANIC,
-				int((pair[0] as Dictionary)["index"]),
+				(pair[0] as MissionEntityRecord).index,
 				"waypoint_id", 125))
 		assert_true(md.set_entity_property_int(
 				MissionData.KIND_ORGANIC,
-				int((pair[0] as Dictionary)["index"]),
-				"wp_number", int((pair[1] as Dictionary)["bms_id"])))
+				(pair[0] as MissionEntityRecord).index,
+				"wp_number", (pair[1] as MissionEntityRecord).bms_id))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -1738,9 +1738,9 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 		if int(snapshot[base + Simulation.PF_KIND]) != MissionData.KIND_ORGANIC:
 			continue
 		var mission_index := int(snapshot[base + Simulation.PF_INDEX])
-		if mission_index == int(reference_enemy["index"]):
+		if mission_index == reference_enemy.index:
 			reference_row_base = base
-		elif mission_index == int(rotated_enemy["index"]):
+		elif mission_index == rotated_enemy.index:
 			rotated_row_base = base
 	assert_gte(reference_row_base, 0,
 			"the reference gunner reached the decoded presentation")
@@ -1839,14 +1839,14 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	var enemy := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
 			Vector3(0, 8, 0), Vector3.ZERO)
-	assert_false(gun.is_empty())
-	assert_false(enemy.is_empty())
+	assert_not_null(gun)
+	assert_not_null(enemy)
 	assert_true(md.set_entity_property_int(
-			MissionData.KIND_ORGANIC, int(enemy["index"]),
+			MissionData.KIND_ORGANIC, enemy.index,
 			"waypoint_id", 125))
 	assert_true(md.set_entity_property_int(
-			MissionData.KIND_ORGANIC, int(enemy["index"]),
-			"wp_number", int(gun["bms_id"])))
+			MissionData.KIND_ORGANIC, enemy.index,
+			"wp_number", gun.bms_id))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -1900,7 +1900,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
 		if int(snapshot[base + Simulation.PF_KIND]) == MissionData.KIND_ORGANIC \
-				and int(snapshot[base + Simulation.PF_INDEX]) == int(enemy["index"]):
+				and int(snapshot[base + Simulation.PF_INDEX]) == enemy.index:
 			row_base = base
 			break
 	assert_gte(row_base, 0, "the mounted placed enemy reached the decoded present")
@@ -2386,9 +2386,9 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	# emplaced pose, visibly placing the body beside the gun.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 			MissionData.KIND_ITEM, 101419,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(2, 0, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	# The fixture def row (101419) authors graphic mount, phrase_set 4, and
 	# primary_weapon WPN_EMPLCD50NA — the native install reads all three.
@@ -2485,12 +2485,12 @@ end
 	# first passenger row (sitex00d), whose authored direction faces backward —
 	# the yaw-offset carry witness.
 	var rider := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(9, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
-	assert_false(soldier.is_empty())
-	assert_false(rider.is_empty())
+	assert_not_null(vehicle)
+	assert_not_null(soldier)
+	assert_not_null(rider)
 	for organic in [soldier, rider]:
-		assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int((organic as Dictionary)["index"]), "waypoint_id", 125))
-		assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int((organic as Dictionary)["index"]), "wp_number", int(vehicle["bms_id"])))
+		assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, organic.index, "waypoint_id", 125))
+		assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, organic.index, "wp_number", vehicle.bms_id))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -2534,7 +2534,7 @@ end
 	assert_gt(idle.source_spawn_id, 0,
 			"the emitter key carries the registry-lifetime identity")
 	assert_eq(idle.handle, expected_vehicle_handle)
-	assert_eq(idle.source_bms_id, int(vehicle["bms_id"]))
+	assert_eq(idle.source_bms_id, vehicle.bms_id)
 	assert_eq(idle.lane, 0)
 	assert_eq(idle.lifetime, 30)
 	assert_eq(idle.emitted_tick, int(sim.get_logic_tick()),
@@ -2571,7 +2571,7 @@ end
 	# snapshot is the listen-server ClientState now (covered by listen_server_test).
 	var card: EntityCard = sim.entity_card_by_ai_index(soldier_idx)
 	assert_true(card.is_mounted(), "debug card marks mounted occupants")
-	assert_eq(card.get_mount_target_net_id(), int(vehicle["bms_id"]))
+	assert_eq(card.get_mount_target_net_id(), vehicle.bms_id)
 	assert_eq(card.get_mount_seat(), 0, "ctrlx seat was selected by original priority")
 	assert_eq(card.get_mount_type(), 2, "seat type is ctrlx/controller")
 	assert_eq(card.get_mount_seat_bone(), 1, "the 1-based USRP row of ctrlx13")
@@ -2631,7 +2631,7 @@ func test_attach_labels_seats() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
+	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	# mount byte-renamed: heat -> a sitex00 passenger beside the authored
 	# Usegun, BCasing -> an armory1 anchor behind the def's Armory attrib.
@@ -2652,20 +2652,14 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the labels mission")
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1), "spawned the local player")
-	var labels: Array = sim.get_attach_labels()
-	assert_eq(labels.size(), 2, "both free seats label inside 4.0 u (armory points stay out of seat mode)")
-	var nearest_count := 0
-	var seat_types: Array = []
-	for l: AttachLabelRow in labels:
-		seat_types.append(l.seat_type)
-		if l.nearest:
-			nearest_count += 1
-		assert_false(l.armory, "no armory labels out of the zone")
-		# WPN_EMPLCD50 is not in a loaded weapon table here -> the key stays absent
-		# and the HUD falls to the STROVER_USEGUN default.
-		assert_eq(l.attach_text_key, "")
-	assert_eq(nearest_count, 1, "exactly the scan winner is highlighted")
-	assert_true(seat_types.has(1) and seat_types.has(3), "sit + UseGun seats both reported")
+	var hud := _attach_overlay(sim)
+	assert_eq(hud.get_attach_label_count(), 2, "both free seats label inside 4.0 u (armory points stay out of seat mode)")
+	assert_gte(hud.get_attach_label_selected(), 0, "exactly the scan winner is highlighted")
+	var texts := _attach_label_texts(sim)
+	assert_false(texts.has("!UseArmory"), "no armory labels out of the zone")
+	# WPN_EMPLCD50 is not in a loaded weapon table here -> the key stays absent
+	# and the HUD falls to the STROVER_USEGUN default; sit + UseGun seats both report.
+	assert_true(texts.has("!sit") and texts.has("!UseGun"), "sit + UseGun seats both reported")
 
 
 func test_attach_labels_share_complete_can_fire_verdict() -> void:
@@ -2674,10 +2668,10 @@ func test_attach_labels_share_complete_can_fire_verdict() -> void:
 	# [orig: Player_CanFireWeapon @0x5cf780; label branch @0x5a32df]
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(10, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(14, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(10, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(14, 0, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
@@ -2705,24 +2699,24 @@ end
 	def_6.startrounds = 60
 	sim.set_local_player_weapon(def_6, {})
 	sim.step()
-	assert_eq(sim.get_attach_labels().size(), 2,
+	assert_eq(_attach_label_count(sim), 2,
 			"an unraised Scoped weapon cannot fire, so both candidates label")
 
 	assert_true(sim.request_local_player_scope_toggle())
 	for _i in range(16):
 		sim.step()
 	assert_true(_aimed_shot_available(sim))
-	assert_eq(sim.get_attach_labels().size(), 1,
+	assert_eq(_attach_label_count(sim), 1,
 			"settled first-person aim restricts labels to the nearest candidate")
 
 	sim.set_local_player_debug_third_person(true)
-	assert_eq(sim.get_attach_labels().size(), 2,
+	assert_eq(_attach_label_count(sim), 2,
 			"the live camera gate applies before another simulation tick")
 	sim.set_local_player_debug_third_person(false)
 	sim.set_water_z(1.0)
 	sim.step()
 	assert_false(_aimed_shot_available(sim))
-	assert_eq(sim.get_attach_labels().size(), 2,
+	assert_eq(_attach_label_count(sim), 2,
 			"an underwater ordinary scope exposes every attach candidate")
 
 
@@ -2731,14 +2725,14 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
-	assert_false(soldier.is_empty())
+	assert_not_null(vehicle)
+	assert_not_null(soldier)
 	# Command-125 mounts the soldier into the best seat at promote — that seat must not label.
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "wp_number", vehicle.bms_id))
 	# Same team as the local player: a live ENEMY occupant would reject the whole
 	# vehicle instead [orig: Vehicle_HasEnemyOccupant @0x4359f0].
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "team", 1))
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "team", 1))
 	var sim := Simulation.new()
 	# Two-seat carrier: mount renamed to one ctrlx00 (the command-125 target)
 	# plus one sitex00 passenger.
@@ -2763,16 +2757,16 @@ end
 	for _board_tick in range(48):
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
-	var labels: Array = sim.get_attach_labels()
-	assert_eq(labels.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
-	assert_eq((labels[0] as AttachLabelRow).seat_type, 1, "the free sitex remains")
+	var texts := _attach_label_texts(sim)
+	assert_eq(texts.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
+	assert_eq(texts[0] if texts.size() == 1 else "", "!sit", "the free sitex remains")
 
 
 func test_attach_labels_empty_out_of_range() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
+	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
@@ -2787,8 +2781,32 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3(40, 0, 0), 0.0, 1), "spawned far away")
-	assert_eq(sim.get_attach_labels().size(), 0,
+	assert_eq(_attach_label_count(sim), 0,
 		"outside the 4.0 u gate the nearest scan fails and no labels emit [orig: @0x5a32e2]")
+
+
+# The projected attach labels the overlay fills from the sim (HudOverlay's
+# read seams): a camera at the local player looking down +X keeps every
+# candidate in front of the near plane.
+func _attach_label_count(sim: Simulation) -> int:
+	return _attach_overlay(sim).get_attach_label_count()
+
+
+func _attach_label_texts(sim: Simulation) -> Array[String]:
+	var hud := _attach_overlay(sim)
+	var texts: Array[String] = []
+	for i in range(hud.get_attach_label_count()):
+		texts.append(hud.get_attach_label_text(i))
+	return texts
+
+
+func _attach_overlay(sim: Simulation) -> HudOverlay:
+	var hud := HudOverlay.new()
+	autofree(hud)
+	var camera := Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0))
+	hud.set_attach_labels(camera, Projection.create_perspective(70.0, 1.0, 0.05, 4000.0),
+			null, sim)
+	return hud
 
 
 # Drivable items (control-seat specs) attach AI brains at promote since the vehicle
@@ -2816,10 +2834,10 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3(0, -90, 0))
 	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
-	assert_false(soldier.is_empty())
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+	assert_not_null(vehicle)
+	assert_not_null(soldier)
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "wp_number", vehicle.bms_id))
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
@@ -2863,7 +2881,7 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
+	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
@@ -2903,7 +2921,7 @@ end
 	for _i in range(40):
 		sim.step()
 	assert_true(sim.local_player_toggle_mount(), "the idle toggle mounts")
-	var card: EntityCard = sim.entity_card_by_net_id(int(vehicle["bms_id"]))
+	var card: EntityCard = sim.entity_card_by_net_id(vehicle.bms_id)
 	var seats: Array = card.get_seats()
 	assert_true(seats.size() == 1 and (seats[0] as EntityCardSeat).is_occupied(),
 		"the scan took the truck's one sitex seat")
@@ -2927,7 +2945,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(MissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(gun.is_empty())
+	assert_not_null(gun)
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# This cull witness pairs the emplacement with WPN_EMPLCD50 (a def with an
@@ -2955,7 +2973,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step() # seed the decoded listen-client present rows
-	var gun_index := int(gun["index"])
+	var gun_index := gun.index
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"an unattached emplacement renders in the world pass")
@@ -3021,8 +3039,8 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(MissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(gun.is_empty())
-	var gun_index := int(gun["index"])
+	assert_not_null(gun)
+	var gun_index := gun.index
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -3124,9 +3142,9 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	# must pose those parts in authoritative model space, not only turn the camera.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 			MissionData.KIND_ITEM, 101419,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(2, 0, 0), Vector3.ZERO))
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth/mount.3di")), OK)
@@ -3249,7 +3267,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(
 			MissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(gun.is_empty())
+	assert_not_null(gun)
 	var sim := Simulation.new()
 	# The fixture def row already authors primary_weapon WPN_AVENGER (a finite
 	# clip makes parent-slot persistence observable across remounts); the
@@ -3425,9 +3443,9 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			Vector3(3, 0, 0), Vector3.ZERO)
 	var third_gun := md.add_entity(MissionData.KIND_ITEM, 101296,
 			Vector3(3.5, 0, 0), Vector3.ZERO)
-	assert_false(first_gun.is_empty())
-	assert_false(second_gun.is_empty())
-	assert_false(third_gun.is_empty())
+	assert_not_null(first_gun)
+	assert_not_null(second_gun)
+	assert_not_null(third_gun)
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# All three fixture emplacement rows keep their authored primaries
@@ -3464,9 +3482,9 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 		sim.step()
 		if sim.get_local_player_weapon_state().current_action < 2:
 			break
-	var first_gun_index := int(first_gun["index"])
-	var second_gun_index := int(second_gun["index"])
-	var third_gun_index := int(third_gun["index"])
+	var first_gun_index := first_gun.index
+	var second_gun_index := second_gun.index
+	var third_gun_index := third_gun.index
 
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
@@ -3550,8 +3568,8 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
@@ -3604,8 +3622,8 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
@@ -3622,8 +3640,8 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(2, 0, 0), Vector3.ZERO))
 	var sim := Simulation.new()
 	# A passenger-only carrier (no primary weapon): mount's Usegun row renamed
 	# to sitex00 in a minimal authored def.
@@ -3650,10 +3668,10 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(10, 0, 0), Vector3.ZERO)
-	assert_false(gun.is_empty())
-	assert_false(soldier.is_empty())
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
-	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(gun["bms_id"])))
+	assert_not_null(gun)
+	assert_not_null(soldier)
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "wp_number", gun.bms_id))
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
@@ -3758,8 +3776,8 @@ func test_bms_event_fires_through_binding() -> void:
 	# drains out of the shared World EffectLog.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {"action_type": 6, "param1": 77}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md), "loaded the scripted mission")
@@ -3814,8 +3832,8 @@ func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
 func test_fired_events_snapshot_matches_scalar() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {"action_type": 6, "param1": 77}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 
@@ -3931,8 +3949,8 @@ func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 			MissionData.KIND_BUILDING, 0, Vector3(3, 4, 5), Vector3(10, 20, 30))
-	assert_false(placed.is_empty())
-	var ssn := int(placed.get("bms_id", 0))
+	assert_not_null(placed)
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
 
 	var sim := Simulation.new()
@@ -3957,7 +3975,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 		MissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
@@ -3978,7 +3996,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 2, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 2:
-		assert_eq(int(visibility[0]), int(placed.get("bms_id", 0)))
+		assert_eq(int(visibility[0]), placed.bms_id)
 		var packed := int(visibility[1])
 		assert_eq(Simulation.building_visibility_mask(packed), 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
@@ -3994,7 +4012,7 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 		MissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
 	var sim := Simulation.new()
@@ -4020,7 +4038,7 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), first,
 			"a baseline reset re-arms the full emission")
-	assert_true(bool(sim.entity_present_visible(int(placed.get("bms_id", 0)))),
+	assert_true(bool(sim.entity_present_visible(placed.bms_id)),
 			"a live placed building reads as present-visible")
 	assert_true(bool(sim.entity_present_visible(424242)),
 			"an unknown bms id defaults visible (never blocks a show)")
@@ -4035,7 +4053,7 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 		MissionData.KIND_BUILDING, 102001, Vector3(0, 200, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
@@ -4111,9 +4129,9 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 		MissionData.KIND_BUILDING, 102001,
-		Vector3.ZERO, Vector3.ZERO).is_empty())
+		Vector3.ZERO, Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 		"res://../fixtures/def/items.def")), OK)
@@ -4135,17 +4153,10 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 			MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
-	var ssn := int(placed.get("bms_id", 0))
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {
-		"action_type": 21,
-		"action_sub_type": 34,
-		"param1": ssn,
-		"param2": 1,
-		"param3": 1,
-		"param4": 65536,
-	}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The crate's controller seat comes from the committed armory model with
@@ -4162,10 +4173,10 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	for _tick in range(80):
 		sim.step()
 	assert_gt(_present_field_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]),
+			sim, MissionData.KIND_ITEM, placed.index,
 			Simulation.PF_ACTIVE1), 0)
 	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
+			sim, MissionData.KIND_ITEM, placed.index, 1), 65536,
 			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
 
 
@@ -4208,18 +4219,11 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 			MissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
-	var ssn := int(placed.get("bms_id", 0))
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
 	for channel in [1, 2]:
-		assert_false(md.add_event_action(0, {
-			"action_type": 21,
-			"action_sub_type": 34,
-			"param1": ssn,
-			"param2": channel,
-			"param3": 1,
-			"param4": 65536,
-		}).is_empty())
+		assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, channel, 1, 65536)))
 
 	var item_db := _fast_rope_item_db()
 	assert_not_null(item_db)
@@ -4237,15 +4241,15 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	for _tick in range(80):
 		sim.step()
 	assert_eq(_present_field_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]),
+			sim, MissionData.KIND_ITEM, placed.index,
 			Simulation.PF_ACTIVE1), 0,
 			"FastRope releases VEHICLE_SPECIAL1 ownership")
 	assert_gt(_present_field_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]),
+			sim, MissionData.KIND_ITEM, placed.index,
 			Simulation.PF_ACTIVE2), 0,
 			"VEHICLE_SPECIAL2 remains unconditionally published")
 	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]), 2), 65536)
+			sim, MissionData.KIND_ITEM, placed.index, 2), 65536)
 	assert_false(sim.get_entity_part_anim_active(0, 1))
 	assert_true(sim.get_entity_part_anim_active(0, 2))
 
@@ -4285,28 +4289,13 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 			MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
-	var ssn := int(placed.get("bms_id", 0))
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {
-		"action_type": 21,
-		"action_sub_type": 34,
-		"param1": ssn,
-		"param2": 1,
-		"param3": 1,
-		"param4": 65536,
-	}).is_empty())
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_trigger(1, {
-		"main_type": 4,
-		"sub_type": 1,
-		"param1": 7,
-		"param2": 1,
-	}).is_empty())
-	assert_false(md.add_event_action(1, {
-		"action_type": 20,
-		"param1": ssn,
-	}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_trigger(1, MissionEventTrigger.make(4, 1, 7, 1)))
+	assert_not_null(md.add_event_action(1, MissionEventAction.make(20, 0, ssn)))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -4343,7 +4332,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	for _tick in range(79):
 		sim.step()
 	assert_eq(_present_phase_for_origin(
-			sim, MissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
+			sim, MissionData.KIND_ITEM, placed.index, 1), 65536,
 			"carrier reached the scripted live PANM endpoint")
 	snapshot = sim.get_present_snapshot()
 	var final_position := Vector3.INF
@@ -4411,14 +4400,10 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 			MissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
-	var ssn := int(placed.get("bms_id", 0))
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {
-		"action_type": 21, "action_sub_type": 34,
-		"param1": ssn, "param2": channel,
-		"param3": 1, "param4": 65536,
-	}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, channel, 1, 65536)))
 
 	var item_db := _fast_rope_item_db()
 	assert_not_null(item_db)
@@ -4475,14 +4460,10 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
 		MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO)
-	var ssn := int(placed.get('bms_id', 0))
+	var ssn := placed.bms_id
 	assert_gt(ssn, 0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {
-		'action_type': 21, 'action_sub_type': 34,
-		'param1': ssn, 'param2': 1,
-		'param3': 1, 'param4': 65536,
-	}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(21, 34, ssn, 1, 1, 65536)))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -4583,9 +4564,9 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3(10, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(10, 0, 0), Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -4666,9 +4647,9 @@ func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
 	# than 80 mission units away.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3(200, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(200, 0, 0), Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -4706,15 +4687,15 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	# authored person sections on demand.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3.ZERO, Vector3.ZERO).is_empty())
+			Vector3.ZERO, Vector3.ZERO))
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(
-			0, {"action_type": 22, "param1": old_ssn}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(
+			0, MissionEventAction.make(22, 0, old_ssn)))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -4754,14 +4735,14 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var placed := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
 			Vector3.ZERO, Vector3.ZERO)
-	assert_false(placed.is_empty())
-	var bms_id := int(placed.get("bms_id", 0))
+	assert_not_null(placed)
+	var bms_id := placed.bms_id
 	var probe := Simulation.new()
 	assert_true(probe.load_from_mission_data(md))
 	var old_ssn := probe.get_entity_net_id(0)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(
-			0, {"action_type": 22, "param1": old_ssn}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(
+			0, MissionEventAction.make(22, 0, old_ssn)))
 
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -4806,9 +4787,9 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 	assert_eq(md.create_default(), OK)
 	for i in range(101):
 		var pos := Vector3(200, 0, 0) if i == 0 else Vector3(i % 10, 0, i % 7)
-		assert_false(md.add_entity(
+		assert_not_null(md.add_entity(
 				MissionData.KIND_ORGANIC, 105311, pos,
-				Vector3.ZERO).is_empty())
+				Vector3.ZERO))
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
@@ -4829,9 +4810,9 @@ func test_f3_organic_fallbacks_match_live_filtering_bounds() -> void:
 func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_entity(
+	assert_not_null(md.add_entity(
 		MissionData.KIND_BUILDING, 102001,
-		Vector3.ZERO, Vector3.ZERO).is_empty())
+		Vector3.ZERO, Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 		'res://../fixtures/def/items.def')), OK)
@@ -4907,8 +4888,8 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	assert_true(probe.load_from_mission_data(md))
 	var ssn := probe.get_entity_net_id(0)
 
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(22, 0, ssn)))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_effect_state_for_ssn(ssn).size(), Simulation.EFFECT_STATE_COUNT,

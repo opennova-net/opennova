@@ -22,7 +22,7 @@ void EntityIndex::_bind_methods() {
 }
 
 void EntityIndex::build(const TypedArray<ObjectModel> &p_models,
-		const Array &p_area_triggers) {
+		const TypedArray<MissionAreaTrigger> &p_area_triggers) {
 	clear();
 	area_triggers_ = p_area_triggers;
 	for (int64_t i = 0; i < p_models.size(); ++i) {
@@ -63,7 +63,7 @@ void EntityIndex::clear() {
 	by_kind_index_.clear();
 	by_group_.clear();
 	records_.clear();
-	area_triggers_ = Array();
+	area_triggers_ = TypedArray<MissionAreaTrigger>();
 }
 
 ObjectModel *EntityIndex::resolve(int64_t p_bms_id, int64_t p_kind,
@@ -117,12 +117,15 @@ Array EntityIndex::resolve_zone(int64_t p_zone_index) const {
 	if (p_zone_index < 0 || p_zone_index >= area_triggers_.size()) {
 		return out;
 	}
-	const Dictionary trig = area_triggers_[p_zone_index];
-	const Vector3 amin = trig.get("min", Vector3());
-	const Vector3 amax = trig.get("max", Vector3());
+	const Ref<MissionAreaTrigger> trig = area_triggers_[p_zone_index];
+	if (trig.is_null()) {
+		return out;
+	}
+	const Vector3 amin = trig->get_min();
+	const Vector3 amax = trig->get_max();
 	const Vector3 lo(MIN(amin.x, amax.x), MIN(amin.y, amax.y), MIN(amin.z, amax.z));
 	const Vector3 hi(MAX(amin.x, amax.x), MAX(amin.y, amax.y), MAX(amin.z, amax.z));
-	const bool check_z = bool(trig.get("constrain_z", false));
+	const bool check_z = trig->get_constrain_z();
 	for (const EntityRecord &record : records_) {
 		ObjectModel *model = live_model(record.model_id);
 		if (model == nullptr) {

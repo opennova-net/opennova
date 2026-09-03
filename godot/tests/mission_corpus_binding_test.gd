@@ -61,14 +61,14 @@ func test_real_missions_open_and_are_sane_through_the_binding() -> void:
 
 		# Waypoint summaries are clamped to the editable 32-slot region (the CP19 over-count fix).
 		for s in m.get_waypoint_summaries():
-			var mc := int((s as Dictionary)["marker_count"])
+			var mc := s.marker_count
 			if mc < 0 or mc > MAX_WAYPOINT_SLOTS:
 				problems.append("%s: waypoint marker_count %d out of [0,%d]" % [name, mc, MAX_WAYPOINT_SLOTS])
 			# A full path fetch must never hand the editor more markers than there are slots.
-			var p: Dictionary = m.get_waypoint_path(int((s as Dictionary)["index"]))
-			var indices: PackedInt32Array = p.get("marker_indices", PackedInt32Array())
+			var p: MissionWaypointPath = m.get_waypoint_path(s.index)
+			var indices: PackedInt32Array = p.marker_indices
 			if indices.size() > MAX_WAYPOINT_SLOTS:
-				problems.append("%s: path %d has %d marker_indices" % [name, int(s["index"]), indices.size()])
+				problems.append("%s: path %d has %d marker_indices" % [name, s.index, indices.size()])
 
 		# Read accessors the inspector calls must not crash on any real mission.
 		m.get_area_triggers()
@@ -99,7 +99,7 @@ func test_cp19_over_count_waypoint_loads_and_is_clamped() -> void:
 	assert_eq(m.open_file(path), OK, "CP19.bms opens through the binding (no rejection)")
 	assert_true(m.is_loaded(), "CP19.bms is loaded")
 	for s in m.get_waypoint_summaries():
-		assert_lte(int((s as Dictionary)["marker_count"]), MAX_WAYPOINT_SLOTS,
+		assert_lte(s.marker_count, MAX_WAYPOINT_SLOTS,
 			"every CP19 waypoint summary is clamped to the 32-slot region")
 
 

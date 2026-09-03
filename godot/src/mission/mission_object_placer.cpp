@@ -1,4 +1,6 @@
 #include "mission/mission_object_placer.h"
+
+#include <formats/mission/mission.h> // the entity read the native place() walks
 #include "util/axes.h"
 #include "mission/static_population_instance.h"
 #include "render/frame_fx.h"
@@ -144,8 +146,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_models", PROPERTY_HINT_ARRAY_TYPE,
 						 "ObjectModel"),
 			"set_placed_models", "get_placed_models");
-	ClassDB::bind_method(D_METHOD("get_static_user_point_sources"),
-			&MissionObjectPlacer::get_static_user_point_sources);
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
 			&MissionObjectPlacer::get_static_item_effect_sources);
 	ClassDB::bind_method(D_METHOD("get_static_light_draw_sources"),
@@ -371,13 +371,65 @@ bool MissionObjectPlacer::_placement_is_mirror_reflected(
 
 Ref<MissionPlacementStats> MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		Node3D *p_parent, const Dictionary &p_options) {
+	std::vector<PlacementRow> rows;
 	if (p_mission.is_null()) {
-		return place_entities(Array(), nullptr, p_options);
+		return place_rows(rows, nullptr, p_options);
 	}
-	return place_entities(p_mission->get_all_entities(), p_parent, p_options);
+	// The document's own entities, straight off the bms::File in the
+	// placement order (markers, items, buildings, organics).
+	const opennova::bms::File &file = p_mission->native_file();
+	const opennova::mission::EntityKind kinds[] = {
+		opennova::mission::EntityKind::Marker, opennova::mission::EntityKind::Item,
+		opennova::mission::EntityKind::Building, opennova::mission::EntityKind::Organic
+	};
+	for (const opennova::mission::EntityKind kind : kinds) {
+		const std::vector<opennova::bms::Entity> *list = opennova::mission::entities(file, kind);
+		if (list == nullptr) {
+			continue;
+		}
+		for (size_t i = 0; i < list->size(); ++i) {
+			const opennova::bms::Entity &entity = (*list)[i];
+			const opennova::mission::EntityTransform transform =
+					opennova::mission::entity_transform(entity);
+			PlacementRow row;
+			row.kind = static_cast<int>(kind);
+			row.index = static_cast<int>(i);
+			// item_id is the items.def key (bms type_id + 100000).
+			row.item_id = opennova::mission::entity_item_id(entity);
+			row.bms_id = static_cast<int>(entity.id);
+			row.group = static_cast<int>(entity.group_id);
+			row.team = static_cast<int>(entity.team);
+			row.ai_flags = static_cast<uint32_t>(entity.bmsi_attributes);
+			row.position = Vector3(transform.x, transform.y, transform.z);
+			row.rotation_deg = Vector3(transform.pitch, transform.yaw, transform.roll);
+			rows.push_back(row);
+		}
+	}
+	return place_rows(rows, p_parent, p_options);
 }
 
 Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_entities,
+		Node3D *p_parent, const Dictionary &p_options) {
+	std::vector<PlacementRow> rows;
+	rows.reserve(static_cast<size_t>(p_entities.size()));
+	for (int64_t i = 0; i < p_entities.size(); ++i) {
+		const Dictionary entity = p_entities[i];
+		PlacementRow row;
+		row.kind = int(entity.get("kind", -1));
+		row.index = int(entity.get("index", -1));
+		row.item_id = int(entity.get("item_id", 0));
+		row.bms_id = int(entity.get("bms_id", 0));
+		row.group = int(entity.get("group", -1));
+		row.team = int(entity.get("team", 0));
+		row.ai_flags = uint32_t(entity.get("ai_flags", 0));
+		row.position = entity.get("position", Vector3());
+		row.rotation_deg = entity.get("rotation_deg", Vector3());
+		rows.push_back(row);
+	}
+	return place_rows(rows, p_parent, p_options);
+}
+
+Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<PlacementRow> &p_rows,
 		Node3D *p_parent, const Dictionary &p_options) {
 	_check_epoch();
 	Ref<MissionPlacementStats> stats;
@@ -390,7 +442,6 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
 	static_terrain_shadow_replacements_.clear();
-	static_user_point_sources_.clear();
 	static_item_effect_sources_.clear();
 	static_light_draw_sources_.clear();
 	++static_light_draw_source_revision_;
@@ -464,10 +515,8 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 	Array animated;
 	int markers = 0;
 	int unresolved = 0;
-	const Array &entities = p_entities;
-	for (int i = 0; i < entities.size(); ++i) {
-		const Dictionary entity = entities[i];
-		const int kind = int(entity.get("kind", -1));
+	for (const PlacementRow &entity : p_rows) {
+		const int kind = entity.kind;
 		if (!skip_kinds.is_empty() && skip_kinds.has(kind)) {
 			continue;
 		}
@@ -475,15 +524,14 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			++markers;
 			continue;
 		}
-		const int item_id = int(entity.get("item_id", 0));
+		const int item_id = entity.item_id;
 		const String graphic = _graphic_for(item_id);
 		if (graphic.is_empty()) {
 			++unresolved;
 			continue;
 		}
 		const Transform3D xform = _entity_transform_for_item(
-				entity.get("position", Vector3()),
-				entity.get("rotation_deg", Vector3()), item_id);
+				entity.position, entity.rotation_deg, item_id);
 		if (_needs_individual_node(item_id) ||
 				_graphic_needs_live_panm(graphic)) {
 			Dictionary a;
@@ -491,17 +539,17 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 			a["item_id"] = item_id;
 			a["xform"] = xform;
 			a["kind"] = kind;
-			a["index"] = int(entity.get("index", -1));
-			a["bms_id"] = int(entity.get("bms_id", 0));
-			a["group"] = int(entity.get("group", -1));
-			a["team"] = int(entity.get("team", -1));
-			a["ai_flags"] = int(entity.get("ai_flags", 0));
-			a["position"] = entity.get("position", Vector3());
+			a["index"] = entity.index;
+			a["bms_id"] = entity.bms_id;
+			a["group"] = entity.group;
+			a["team"] = entity.team;
+			a["ai_flags"] = static_cast<int>(entity.ai_flags);
+			a["position"] = entity.position;
 			animated.push_back(a);
 			continue;
 		}
 		const bool mirror_reflected = _placement_is_mirror_reflected(
-				uint32_t(entity.get("ai_flags", 0)), item_id);
+				entity.ai_flags, item_id);
 		const String group_key = static_group_key(graphic, mirror_reflected);
 		StaticGroup *group = static_groups.getptr(group_key);
 		if (group == nullptr) {
@@ -513,20 +561,19 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 		}
 		group->xforms.push_back(xform);
 		group->shadow_slots.push_back(item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
-				uint32_t(entity.get("ai_flags", 0)),
+				entity.ai_flags,
 				item_db_->get_attrib(item_id), item_db_->get_attrib2(item_id)));
-		group->bms_ids.push_back(int(entity.get("bms_id", 0)));
+		group->bms_ids.push_back(entity.bms_id);
 		group->item_ids.push_back(item_id);
 		group->kinds.push_back(kind);
-		group->entity_indices.push_back(int(entity.get("index", -1)));
-		group->teams.push_back(int(entity.get("team", 0)));
-		group->entity_attribs.push_back(
-				uint32_t(entity.get("ai_flags", 0)));
+		group->entity_indices.push_back(entity.index);
+		group->teams.push_back(entity.team);
+		group->entity_attribs.push_back(entity.ai_flags);
 		group->attrib2_values.push_back(item_db_->get_attrib2(item_id));
 		Dictionary source;
 		source["kind"] = kind;
-		source["entity_index"] = int(entity.get("index", -1));
-		source["bms_id"] = int(entity.get("bms_id", 0));
+		source["entity_index"] = entity.index;
+		source["bms_id"] = entity.bms_id;
 		source["item_id"] = item_id;
 		source["world_transform"] = xform;
 		group->effect_sources.push_back(source);
@@ -607,7 +654,6 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_en
 					i < group.item_ids.size() ? group.item_ids[i] : 0,
 					graphic, group.xforms[i], shadow_data);
 		}
-		_record_static_user_point_group(graphic, group.xforms);
 		Vector<int> effect_source_rows;
 		effect_source_rows.resize(instance_count);
 		for (int i = 0; i < effect_source_rows.size(); ++i) {

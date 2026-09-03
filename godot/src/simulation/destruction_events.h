@@ -10,128 +10,107 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 
 #include <cstdint>
 
 // The destruction presentation drain (runtime/world/destruction.h; the
-// world-wac-ai record §24): one typed row per engine husk swap / effect roll,
-// Godot-space positions, the sound and death-light legs as parallel packed
-// columns, plus the drain aggregate with its diagnostic counters. Read-write
-// with static make() factories so the present-pass tests author rows;
-// produced by Simulation::drain_destruction_events and consumed by
-// DestructionPresenter. Identity defaults follow the engine
-// (EntityHandle::kInvalid, kSpawnOriginNone) so an unattached row reads as one.
-
-#define DESTRUCTION_ACCESSORS(m_type, m_name, m_default)      \
-	m_type get_##m_name() const { return m_name##_; }        \
-	void set_##m_name(m_type p_value) { m_name##_ = p_value; }
-#define DESTRUCTION_MEMBER(m_type, m_name, m_default) m_type m_name##_ = m_default;
+// world-wac-ai record §24): value wrappers over the engine event rows and the
+// drain aggregate (ADR 0043 d10), Godot-space positions on read. The C++
+// DestructionPresenter reads the engine DestructionEvents directly; these
+// records exist for the pass's public data leg, which the present-pass tests
+// and the retail parity probe author through the static make() factories.
+// Identity defaults follow the engine (EntityHandle::kInvalid,
+// kSpawnOriginNone) so an unattached row reads as one.
 
 namespace godot {
 
 // One .ptl effect roll: transient (family 0) or one of the attached wreck
 // families (1 death, 2 fire, 3 other) keyed to its owner entity.
-#define DESTRUCTION_EFFECT_EVENT_FIELDS(X)                                            \
-	X(String, effect, String())                                                       \
-	X(Vector3, pos, Vector3())                                                        \
-	X(Vector3, dir, Vector3())                                                        \
-	X(int, family, 0)                                                                 \
-	X(int, attach_net_id, 0)                                                          \
-	X(int, attach_bms_id, 0)                                                          \
-	X(int, attach_wire_handle, opennova::world::EntityHandle::kInvalid)               \
-	X(int64_t, attach_spawn_origin, static_cast<int64_t>(opennova::world::kSpawnOriginNone))
-
 class DestructionEffectEvent : public RefCounted {
 	GDCLASS(DestructionEffectEvent, RefCounted)
 
+	opennova::world::DestructionEffectEvent value_;
+
+protected:
+	static void _bind_methods();
+
 public:
-	DESTRUCTION_EFFECT_EVENT_FIELDS(DESTRUCTION_ACCESSORS)
+	void assign(const opennova::world::DestructionEffectEvent &p_value) { value_ = p_value; }
+	const opennova::world::DestructionEffectEvent &value() const { return value_; }
 	static Ref<DestructionEffectEvent> make(const String &p_effect, const Vector3 &p_pos,
 			int p_family, const Vector3 &p_dir, int p_attach_net_id, int p_attach_bms_id,
 			int p_attach_wire_handle, int64_t p_attach_spawn_origin);
 
-protected:
-	static void _bind_methods();
-
-private:
-	DESTRUCTION_EFFECT_EVENT_FIELDS(DESTRUCTION_MEMBER)
+	String get_effect() const;
+	Vector3 get_pos() const;
+	Vector3 get_dir() const;
+	int get_family() const { return static_cast<int>(value_.family); }
+	int get_attach_net_id() const { return static_cast<int>(value_.attach_net_id); }
+	int get_attach_bms_id() const { return value_.attach_bms_id; }
+	int get_attach_wire_handle() const { return static_cast<int>(value_.attach_wire_handle); }
+	int64_t get_attach_spawn_origin() const {
+		return static_cast<int64_t>(value_.attach_spawn_origin);
+	}
 };
 
 // One husked entity: the present pass swaps its render model to the husk.
-#define HUSK_SWAP_EVENT_FIELDS(X)                                                 \
-	X(int, net_id, 0)                                                             \
-	X(int, wire_handle, opennova::world::EntityHandle::kInvalid)                  \
-	X(int, bms_id, 0)                                                             \
-	X(int64_t, spawn_origin, static_cast<int64_t>(opennova::world::kSpawnOriginNone)) \
-	X(int, item_id, 0)                                                            \
-	X(int64_t, spawned_piece_mask, 0)                                             \
-	X(Vector3, pos, Vector3())
-
 class HuskSwapEvent : public RefCounted {
 	GDCLASS(HuskSwapEvent, RefCounted)
 
+	opennova::world::HuskSwapEvent value_;
+
+protected:
+	static void _bind_methods();
+
 public:
-	HUSK_SWAP_EVENT_FIELDS(DESTRUCTION_ACCESSORS)
+	void assign(const opennova::world::HuskSwapEvent &p_value) { value_ = p_value; }
+	const opennova::world::HuskSwapEvent &value() const { return value_; }
 	static Ref<HuskSwapEvent> make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
 			int p_wire_handle);
 
-protected:
-	static void _bind_methods();
-
-private:
-	HUSK_SWAP_EVENT_FIELDS(DESTRUCTION_MEMBER)
+	int get_net_id() const { return static_cast<int>(value_.net_id); }
+	int get_wire_handle() const { return static_cast<int>(value_.wire_handle); }
+	int get_bms_id() const { return value_.bms_id; }
+	int64_t get_spawn_origin() const { return static_cast<int64_t>(value_.spawn_origin); }
+	int get_item_id() const { return value_.item_id; }
+	int64_t get_spawned_piece_mask() const { return static_cast<int64_t>(value_.spawned_piece_mask); }
+	Vector3 get_pos() const;
 };
 
 // One drain: every event since the last drain plus the diagnostic counters
-// (probes assert the legs actually ran). The destruction sound rolls
-// (sound_names / sound_positions) and the death explosion flashes for the
-// presenter's light pool (death_light_positions / death_light_radii; the
-// engine's world/destruction.h DeathLightEvent carries the witness) are
-// parallel columns: the presenter plays them straight into
+// (probes assert the legs actually ran), over the engine's DestructionEvents.
+// The destruction sound rolls and the death explosion flashes read as
+// parallel packed columns; the presenter plays them straight into
 // MissionAudio.fire_soundset and EffectLightDirector.on_death_light.
-#define DESTRUCTION_DRAIN_COUNTERS(X) \
-	X(int, explosions_processed, 0)   \
-	X(int, items_destroyed, 0)        \
-	X(int, crackles, 0)               \
-	X(int, debris_triangles, 0)       \
-	X(int, glass_points, 0)
-
-#define DESTRUCTION_DRAIN_COLUMNS(X)                                       \
-	X(PackedStringArray, sound_names, PackedStringArray())                 \
-	X(PackedVector3Array, sound_positions, PackedVector3Array())           \
-	X(PackedVector3Array, death_light_positions, PackedVector3Array())     \
-	X(PackedFloat32Array, death_light_radii, PackedFloat32Array())
-
 class DestructionDrain : public RefCounted {
 	GDCLASS(DestructionDrain, RefCounted)
 
-public:
-	DESTRUCTION_DRAIN_COUNTERS(DESTRUCTION_ACCESSORS)
-	DESTRUCTION_DRAIN_COLUMNS(DESTRUCTION_ACCESSORS)
-	TypedArray<DestructionEffectEvent> get_effects() const { return effects_; }
-	void set_effects(const TypedArray<DestructionEffectEvent> &p_value) { effects_ = p_value; }
-	TypedArray<HuskSwapEvent> get_husk_swaps() const { return husk_swaps_; }
-	void set_husk_swaps(const TypedArray<HuskSwapEvent> &p_value) { husk_swaps_ = p_value; }
-	void add_effect(const Ref<DestructionEffectEvent> &p_event) { effects_.push_back(p_event); }
-	void add_husk_swap(const Ref<HuskSwapEvent> &p_event) { husk_swaps_.push_back(p_event); }
-	void add_sound(const String &p_name, const Vector3 &p_pos);
-	void add_death_light(const Vector3 &p_pos, float p_radius);
-	static Ref<DestructionDrain> make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
-			const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
-			int p_glass_points, int p_crackles);
+	opennova::world::DestructionEvents value_;
 
 protected:
 	static void _bind_methods();
 
-private:
-	DESTRUCTION_DRAIN_COUNTERS(DESTRUCTION_MEMBER)
-	DESTRUCTION_DRAIN_COLUMNS(DESTRUCTION_MEMBER)
-	TypedArray<DestructionEffectEvent> effects_;
-	TypedArray<HuskSwapEvent> husk_swaps_;
+public:
+	void assign(const opennova::world::DestructionEvents &p_value);
+	const opennova::world::DestructionEvents &value() const { return value_; }
+	static Ref<DestructionDrain> make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
+			const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
+			int p_glass_points, int p_crackles, const PackedVector3Array &p_death_light_positions,
+			const PackedFloat32Array &p_death_light_radii);
+
+	int get_explosions_processed() const { return value_.explosions_processed; }
+	int get_items_destroyed() const { return value_.items_destroyed; }
+	int get_crackles() const { return value_.crackles; }
+	int get_debris_triangles() const { return value_.debris_triangles; }
+	int get_glass_points() const { return value_.glass_points; }
+	PackedStringArray get_sound_names() const;
+	PackedVector3Array get_sound_positions() const;
+	PackedVector3Array get_death_light_positions() const;
+	PackedFloat32Array get_death_light_radii() const;
+	TypedArray<DestructionEffectEvent> get_effects() const;
+	TypedArray<HuskSwapEvent> get_husk_swaps() const;
 };
 
 } // namespace godot
-
-#undef DESTRUCTION_ACCESSORS
-#undef DESTRUCTION_MEMBER

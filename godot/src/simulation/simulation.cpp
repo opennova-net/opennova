@@ -3,7 +3,9 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
-#include "simulation/weather_home_state.h" // the weather home's probe/test view
+#include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
+#include "simulation/hud_view_records.h" // RoundOutcome
+#include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 #include "util/axes.h"
 
 #include "env/weather.h"
@@ -265,51 +267,19 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 	return frame;
 }
 
-TypedArray<WeatherSoundRow> Simulation::drain_weather_sounds() {
-	TypedArray<WeatherSoundRow> out;
-	if (!world_installed_ || kernel_ == nullptr) return out;
-	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.out.weather_sounds) {
-		Ref<WeatherSoundRow> d;
-		d.instantiate();
-		d->set_distance(static_cast<float>(ev.distance_q16) / 65536.0f);
-		d->set_bearing(static_cast<int>(ev.bearing));
-		out.push_back(d);
-	}
+void Simulation::drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_ || kernel_ == nullptr) return;
+	r_events.swap(kernel_->world.out.weather_sounds);
 	kernel_->world.out.weather_sounds.clear();
-	return out;
 }
 
-Ref<WeatherHomeState> Simulation::get_weather_state() const {
-	const opennova::world::WeatherState *w = weather_state();
-	if (w == nullptr) return Ref<WeatherHomeState>();
-	Ref<WeatherHomeState> out;
+Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
+	opennova::devtools::EnvironmentSnapshot snapshot;
+	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();
+	Ref<EnvironmentSnapshot> out;
 	out.instantiate();
-	out->set_valid(w->valid);
-	out->set_generation(static_cast<int64_t>(w->generation));
-	out->set_command_generation(static_cast<int64_t>(w->command_generation));
-	out->set_fog_target_q16(static_cast<int64_t>(w->fog_target_q16()));
-	out->set_fog_current_q16(static_cast<int64_t>(w->fog_current_q16()));
-	out->set_fog_accel_clamp(static_cast<int64_t>(w->fog_accel_clamp()));
-	out->set_fog_type(w->fog_type);
-	out->set_tod_fixed24(static_cast<int64_t>(w->tod_fixed24));
-	out->set_tod_advance_per_tick(static_cast<int64_t>(w->tod_advance_per_tick));
-	out->set_quake_ticks(static_cast<int64_t>(w->quake_ticks));
-	out->set_cloud_scroll_rate_target(static_cast<int64_t>(w->cloud_scroll_rate_target));
-	out->set_cloud_scroll_rate(static_cast<int64_t>(w->cloud_scroll_rate()));
-	out->set_rain_pct_current_q16(static_cast<int64_t>(w->rain_pct_current_q16()));
-	out->set_rain_pct_target_q16(static_cast<int64_t>(w->rain_pct_target_q16()));
-	out->set_overcast_blend_q16(static_cast<int64_t>(w->overcast_blend_q16()));
-	out->set_overcast_target_q16(static_cast<int64_t>(w->overcast_target_q16()));
-	out->set_sun_dim_pct_q16(static_cast<int64_t>(w->sun_dim_pct_q16()));
-	out->set_sky_height_q16(static_cast<int64_t>(w->sky_height_q16()));
-	out->set_precipitation_kind(static_cast<int64_t>(w->precipitation_kind));
-	out->set_lightning_color(static_cast<int64_t>(w->lightning_color));
-	out->set_color_fade_ticks(static_cast<int64_t>(w->color_fade_ticks));
-	out->set_wind_scale(static_cast<int64_t>(w->wind_scale()));
-	out->set_lightning_timer_a(w->core.lightning.timer_a);
-	out->set_lightning_timer_b(w->core.lightning.timer_b);
-	out->set_lightning_level(w->core.lightning.level);
-	out->set_night(w->is_night_phase());
+	out->assign(snapshot);
 	return out;
 }
 
@@ -361,6 +331,7 @@ bool Simulation::native_environment_snapshot(
 			opennova::world::player_view_fov_h_deg(kernel_->local.view, 0, 1.0f));
 	out.sky_height_metres = w.sky_height_q16() >> 16;
 	out.sky_speed = w.cloud_scroll_rate() >> 10;
+	out.sky_speed_target = w.cloud_scroll_rate_target >> 10;
 	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
 	out.rain_target_pct = static_cast<int32_t>((100u * w.rain_pct_target_q16()) >> 16);
 	out.overcast_pct = static_cast<int32_t>((100u * w.overcast_blend_q16()) >> 16);
@@ -471,47 +442,32 @@ void Simulation::set_water_z(double p_water_y) {
 	}
 }
 
-TypedArray<SlotSoundRow> Simulation::drain_slot_sounds() {
-	TypedArray<SlotSoundRow> out;
-	if (!world_installed_) return out;
-	for (const opennova::world::SoundSlotEvent &ev : kernel_->world.out.slot_sounds) {
-		Ref<SlotSoundRow> d;
-		d.instantiate();
-		d->set_soundset(String(ev.set_name));
-		// Mission-frame 16.16 -> godot (x, z, -y), same mapping as the fire drain.
-		d->set_pos(Vector3(static_cast<float>(ev.pos[0]) / 65536.0f,
-				static_cast<float>(ev.pos[2]) / 65536.0f,
-				static_cast<float>(-ev.pos[1]) / 65536.0f));
-		d->set_handle(static_cast<int>(ev.source_handle));
-		d->set_slot(static_cast<int>(ev.slot));
-		out.push_back(d);
-	}
+void Simulation::drain_slot_sounds(std::vector<opennova::world::SoundSlotEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_) return;
+	// The rows cross in the mission frame (16.16); the fire pass axis-maps
+	// (x, z, -y) as it plays them, the same mapping as the fire drain.
+	r_events.swap(kernel_->world.out.slot_sounds);
 	kernel_->world.out.slot_sounds.clear();
-	return out;
+}
+
+void Simulation::drain_sound_emitter_events(
+		std::vector<opennova::world::SoundEmitterEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_) return;
+	// Mission coordinates on the rows; the audio layer axis-maps (x, z, -y)
+	// like every other positional presentation drain.
+	r_events = kernel_->world.out.sound_emitters.drain();
 }
 
 TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
 	TypedArray<SoundEmitterRow> out;
-	if (!world_installed_) return out;
-	const std::vector<opennova::world::SoundEmitterEvent> events =
-			kernel_->world.out.sound_emitters.drain();
+	std::vector<opennova::world::SoundEmitterEvent> events;
+	drain_sound_emitter_events(events);
 	for (const opennova::world::SoundEmitterEvent &ev : events) {
 		Ref<SoundEmitterRow> d;
 		d.instantiate();
-		d->set_source_spawn_id(static_cast<int64_t>(ev.source_spawn_id));
-		d->set_handle(static_cast<int>(ev.source_handle));
-		d->set_source_bms_id(static_cast<int>(ev.source_bms_id));
-		// Mission coordinates -> Godot (x, z, -y), matching every other
-		// positional presentation drain.
-		d->set_pos(mission_to_godot(ev.pos));
-		d->set_lane(static_cast<int>(ev.lane));
-		d->set_slot(static_cast<int>(ev.slot));
-		d->set_lifetime(static_cast<int>(ev.lifetime_ticks));
-		d->set_emitted_tick(static_cast<int64_t>(ev.emitted_tick));
-		d->set_pitch_q16(static_cast<int>(ev.pitch_q16));
-		d->set_volume_q8_8(static_cast<int>(ev.volume_q8_8));
-		d->set_source_only(ev.source_only);
-		d->set_soundset(String(ev.set_name.c_str()));
+		d->assign(ev);
 		out.push_back(d);
 	}
 	return out;
@@ -1114,18 +1070,20 @@ int Simulation::get_mission_variable(int index) const {
 
 Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
 	if (!kernel_) return Ref<RoundOutcome>();
+	opennova::world::RoundOutcomeView v;
+	v.ended = kernel_->world.match.outcome().ended;
+	v.winner_team = kernel_->world.match.outcome().winner_team;
+	v.bluekills = kernel_->world.kill_stats.bluekills_by_player;
+	v.greenkills = kernel_->world.kill_stats.greenkills_by_player;
+	v.enemy_kills = kernel_->world.kill_stats.enemy_kills_by_player;
+	v.team_kills_by_others = kernel_->world.kill_stats.team_kills_by_others;
+	v.friendly_kills_by_others = kernel_->world.kill_stats.friendly_kills_by_others;
+	v.enemy_kills_by_others = kernel_->world.kill_stats.enemy_kills_by_others;
+	v.humans = kernel_->world.cached.humans;
+	v.mp_session = kernel_->world.rules.mp_session;
 	Ref<RoundOutcome> out;
 	out.instantiate();
-	out->set_ended(kernel_->world.match.outcome().ended);
-	out->set_winner_team(kernel_->world.match.outcome().winner_team);
-	out->set_bluekills(kernel_->world.kill_stats.bluekills_by_player);
-	out->set_greenkills(kernel_->world.kill_stats.greenkills_by_player);
-	out->set_enemy_kills(kernel_->world.kill_stats.enemy_kills_by_player);
-	out->set_team_kills_by_others(kernel_->world.kill_stats.team_kills_by_others);
-	out->set_friendly_kills_by_others(kernel_->world.kill_stats.friendly_kills_by_others);
-	out->set_enemy_kills_by_others(kernel_->world.kill_stats.enemy_kills_by_others);
-	out->set_humans(kernel_->world.cached.humans);
-	out->set_mp_session(kernel_->world.rules.mp_session);
+	out->assign(v);
 	return out;
 }
 

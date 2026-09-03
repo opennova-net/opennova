@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "audio/mission_audio.h"
+#include "mission/mission_records.h"
 #include "env/mission_environment.h"
 #include "lights/effect_light_director.h"
 #include "network/net_protocol.h"
@@ -333,7 +334,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		placed_models = registry_placer->get_placed_models();
 	}
 	index_->build(placed_models,
-			p_mission.is_valid() ? p_mission->get_area_triggers() : Array());
+			p_mission.is_valid() ? p_mission->get_area_triggers() : TypedArray<MissionAreaTrigger>());
 	// The registry present drives whichever authored mission nodes actually exist. A
 	// production joiner owns only the 616-byte wire header, so its index is empty: the
 	// native sim separately materializes streamed pools 1-3 at exact packed handles for

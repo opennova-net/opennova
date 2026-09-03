@@ -3,11 +3,12 @@
 #include "hud/hud_draw_list_stats.h"
 #include "hud/vehicle_hud_block.h"
 
-#include "hud/friendly_tag_flags.h"
 #include "hud/hud_pos.h"
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain_data.h"
+#include "util/axes.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
@@ -17,9 +18,11 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
 #include <algorithm>
@@ -32,6 +35,8 @@
 using namespace godot;
 
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
+#include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
 namespace {
 
@@ -195,11 +200,18 @@ void HudOverlay::_bind_methods() {
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("clear_waypoint"), &HudOverlay::clear_waypoint);
-	ClassDB::bind_method(D_METHOD("set_objectives", "texts", "done"), &HudOverlay::set_objectives);
-	ClassDB::bind_method(D_METHOD("set_attach_labels", "screens", "texts", "nearest"),
+	ClassDB::bind_method(D_METHOD("set_objectives", "shown", "mission_text", "sim"),
+			&HudOverlay::set_objectives);
+	ClassDB::bind_method(D_METHOD("set_attach_labels", "camera_xform", "camera_projection",
+								  "gametext", "sim"),
 			&HudOverlay::set_attach_labels);
-	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_units",
-								  "names", "entity_ids", "health_ratios_fp16", "flags"),
+	ClassDB::bind_method(D_METHOD("get_attach_label_count"), &HudOverlay::get_attach_label_count);
+	ClassDB::bind_method(D_METHOD("get_attach_label_selected"),
+			&HudOverlay::get_attach_label_selected);
+	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
+			&HudOverlay::get_attach_label_text);
+	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
+								  "camera_projection", "fog_distance_units", "sim"),
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
@@ -998,63 +1010,180 @@ void HudOverlay::clear_waypoint() {
 	queue_redraw();
 }
 
-void HudOverlay::set_objectives(const PackedStringArray &p_texts,
-		const PackedByteArray &p_done) {
+namespace {
+
+// The play camera's projection of a world point to overlay pixels: false when
+// the point is behind the near plane (Camera3D::is_position_behind's test),
+// else Camera3D::unproject_position's math over the viewport's visible size.
+bool project_to_overlay(const Transform3D &p_camera, const Projection &p_projection,
+		const Vector2 &p_viewport_size, const Vector3 &p_world, Vector2 &r_screen) {
+	const Vector3 eyedir = -p_camera.basis.get_column(2).normalized();
+	if (eyedir.dot(p_world - p_camera.origin) < p_projection.get_z_near()) {
+		return false;
+	}
+	Plane p(p_camera.xform_inv(p_world), 1.0f);
+	p = p_projection.xform4(p);
+	if (p.d == 0.0f) {
+		return false;
+	}
+	p.normal /= p.d;
+	r_screen = Vector2((p.normal.x * 0.5f + 0.5f) * p_viewport_size.x,
+			(-p.normal.y * 0.5f + 0.5f) * p_viewport_size.y);
+	return true;
+}
+
+String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
+		const String &p_fallback) {
+	if (p_gametext.is_valid() &&
+			p_gametext->has_string_in_section("Overlays", StringName(p_key))) {
+		return p_gametext->get_string_in_section("Overlays", StringName(p_key));
+	}
+	return p_fallback;
+}
+
+// The label text per seat type, resolved in the gametext table's Overlays
+// section with the witnessed missing-string fallbacks. The Gunner label
+// prefers the weapon's attachtextid key: a PRESENT key resolves even to an
+// empty string (the original stores the parse-time GameText_GetString result,
+// "" on a miss, and draws it) — only an ABSENT key falls to the STROVER_USEGUN
+// default.
+// [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
+//  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
+//  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
+//  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
+//  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
+String attach_label_text(const Ref<RtxtStringFile> &p_gametext,
+		opennova::world::SeatType p_seat_type, const std::string &p_attach_text_key) {
+	using opennova::world::SeatType;
+	switch (p_seat_type) {
+		case SeatType::Passenger: // sitex [orig: dword_2723860]
+			return overlay_text(p_gametext, "STROVER_SIT", "!sit");
+		case SeatType::Controller:
+		case SeatType::Driver:
+			// ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
+			return overlay_text(p_gametext, "STROVER_CONTROL", "!Control");
+		case SeatType::Gunner: // UseGun [orig: def+0x3A0 else dword_2723868]
+			if (p_attach_text_key.empty()) {
+				return overlay_text(p_gametext, "STROVER_USEGUN", "!UseGun");
+			}
+			// the witnessed empty-label quirk (parse-miss stores "")
+			return overlay_text(p_gametext, String::utf8(p_attach_text_key.c_str()), "");
+		case SeatType::ArmoryPoint: // armory [orig: dword_272386C]
+			return overlay_text(p_gametext, "STROVER_USEARMORY", "!UseArmory");
+		default:
+			return String();
+	}
+}
+
+} // namespace
+
+void HudOverlay::set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
+		const Ref<Simulation> &p_sim) {
 	state_.objectives.clear();
-	state_.objectives.reserve(static_cast<size_t>(p_texts.size()));
-	for (int64_t i = 0; i < p_texts.size(); ++i) {
-		opennova::hud::HudObjectiveRow row;
-		row.text = p_texts[i].utf8().get_data();
-		row.done = i < p_done.size() && p_done[i] != 0;
-		state_.objectives.push_back(row);
+	if (p_shown && p_sim.is_valid()) {
+		p_sim->fill_objectives(p_mission_text, state_.objectives);
 	}
 	queue_redraw();
 }
 
-void HudOverlay::set_attach_labels(const PackedVector2Array &p_screens,
-		const PackedStringArray &p_texts, const PackedByteArray &p_nearest) {
+// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
+//  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
+void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
+		const Projection &p_camera_projection, const Ref<RtxtStringFile> &p_gametext,
+		const Ref<Simulation> &p_sim) {
 	state_.attach_labels.clear();
-	const int64_t count = std::min(p_screens.size(), p_texts.size());
-	state_.attach_labels.reserve(static_cast<size_t>(count));
-	for (int64_t i = 0; i < count; ++i) {
-		opennova::hud::HudAttachLabel label;
-		label.screen_x = p_screens[i].x;
-		label.screen_y = p_screens[i].y;
-		label.text = p_texts[i].utf8().get_data();
-		label.nearest = i < p_nearest.size() && p_nearest[i] != 0;
-		state_.attach_labels.push_back(label);
+	std::vector<opennova::world::AttachLabel> labels;
+	if (p_sim.is_valid() && p_sim->fill_attach_labels(labels) && !labels.empty()) {
+		const Viewport *viewport = get_viewport();
+		const Vector2 viewport_size =
+				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
+		state_.attach_labels.reserve(labels.size());
+		for (const opennova::world::AttachLabel &l : labels) {
+			const Vector3 world_pos = mission_to_godot(l.world_pos);
+			Vector2 screen;
+			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+						world_pos, screen)) {
+				continue; // [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
+			}
+			opennova::hud::HudAttachLabel label;
+			label.screen_x = screen.x;
+			label.screen_y = screen.y;
+			label.text = attach_label_text(p_gametext, l.type, l.attach_text_key).utf8().get_data();
+			label.nearest = l.nearest;
+			state_.attach_labels.push_back(label);
+		}
 	}
 	queue_redraw();
 }
 
-void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
-		const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
-		const PackedInt32Array &p_entity_ids,
-		const PackedInt32Array &p_health_ratios_fp16,
-		const PackedInt32Array &p_flags) {
+int HudOverlay::get_attach_label_count() const {
+	return static_cast<int>(state_.attach_labels.size());
+}
+
+int HudOverlay::get_attach_label_selected() const {
+	for (size_t i = 0; i < state_.attach_labels.size(); ++i) {
+		if (state_.attach_labels[i].nearest) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+String HudOverlay::get_attach_label_text(int p_index) const {
+	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
+		return String();
+	}
+	return String::utf8(state_.attach_labels[static_cast<size_t>(p_index)].text.c_str());
+}
+
+// [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
+//  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
+//  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
+//  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
+		const Projection &p_camera_projection, float p_fog_distance_units,
+		const Ref<Simulation> &p_sim) {
 	state_.friendly_tags.clear();
-	const int64_t count = std::min(p_screens.size(), p_dists_units.size());
-	state_.friendly_tags.reserve(static_cast<size_t>(count));
-	for (int64_t i = 0; i < count; ++i) {
-		opennova::hud::HudFriendlyTag tag;
-		tag.screen_x = p_screens[i].x;
-		tag.screen_y = p_screens[i].y;
-		tag.dist_q16 = opennova::io::float_to_fp16_16_sat(p_dists_units[i]);
-		if (i < p_names.size()) tag.name = p_names[i].utf8().get_data();
-		if (i < p_entity_ids.size())
-			tag.entity_id = static_cast<uint16_t>(p_entity_ids[i]);
-		if (i < p_health_ratios_fp16.size())
-			tag.health_ratio_fp16 = p_health_ratios_fp16[i];
-		const int32_t flags = i < p_flags.size() ? p_flags[i] : 0;
-		tag.medic = (flags & friendly_tag_flags::kMedic) != 0;
-		tag.speaking = (flags & friendly_tag_flags::kSpeaking) != 0;
-		tag.player = (flags & friendly_tag_flags::kPlayer) != 0;
-		tag.dead = (flags & friendly_tag_flags::kDead) != 0;
-		tag.has_slot = (flags & friendly_tag_flags::kHasSlot) != 0;
-		tag.medic_request = (flags & friendly_tag_flags::kMedicRequest) != 0;
-		tag.revive_seconds = static_cast<uint8_t>(
-				(flags >> friendly_tag_flags::kReviveShift) & friendly_tag_flags::kReviveMax);
-		state_.friendly_tags.push_back(tag);
+	set_friendly_tag_env(p_fog_distance_units, 0);
+	std::vector<opennova::world::FriendlyTagSource> tags;
+	if (p_shown && p_sim.is_valid() &&
+			state_.friendly_tag_mode != static_cast<int>(opennova::hud::FriendlyTagMode::kOff) &&
+			p_sim->fill_friendly_tags(tags) && !tags.empty()) {
+		const Viewport *viewport = get_viewport();
+		const Vector2 viewport_size =
+				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
+		state_.friendly_tags.reserve(tags.size());
+		for (const opennova::world::FriendlyTagSource &t : tags) {
+			// The anchor: the entity position + the eye height above its origin
+			// (16.16 -> float) + the tag lift; the anchor witness lives at the
+			// gather (friendly_tags.h).
+			Vector3 world_pos = mission_to_godot(t.position);
+			world_pos.y += static_cast<float>(t.eye_offset_z) / 65536.0f +
+					opennova::hud::kFriendlyTagLiftUnits;
+			Vector2 screen;
+			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+						world_pos, screen)) {
+				continue; // [orig: the nonzero-clip bail @0x5a3b80]
+			}
+			opennova::hud::HudFriendlyTag tag;
+			tag.screen_x = screen.x;
+			tag.screen_y = screen.y;
+			tag.dist_q16 = opennova::io::float_to_fp16_16_sat(
+					p_camera_xform.origin.distance_to(world_pos));
+			tag.name = t.name;
+			tag.entity_id = t.net_id;
+			tag.health_ratio_fp16 = t.health_ratio_fp16;
+			tag.medic = t.medic;
+			// The speaking pulse is the overlay's own env feed, not a sim fact.
+			tag.speaking = false;
+			tag.player = t.player;
+			// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
+			tag.dead = t.dead;
+			tag.has_slot = t.has_slot;
+			tag.medic_request = t.medic_request;
+			tag.revive_seconds = t.revive_seconds;
+			state_.friendly_tags.push_back(tag);
+		}
 	}
 	queue_redraw();
 }

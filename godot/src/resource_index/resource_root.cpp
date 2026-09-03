@@ -123,7 +123,11 @@ bool ResourceRoot::is_runtime_mount() const {
 	return mount_kind_ == MountKind::Runtime;
 }
 
-Dictionary ResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
+namespace {
+
+// One list_file_entries row (the resource-index enumeration edge the effect
+// and foliage loaders walk by key).
+Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
 	Dictionary out;
 	out["kind"] = String(entry.kind.c_str());
 	out["path"] = String(entry.path.c_str());
@@ -134,6 +138,8 @@ Dictionary ResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEn
 	out["archive_path"] = String(entry.archive_path.c_str());
 	return out;
 }
+
+} // namespace
 
 opennova::VfsLookupPolicy ResourceRoot::to_vfs_lookup_policy(LookupPolicy policy) {
 	switch (policy) {

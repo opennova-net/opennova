@@ -62,29 +62,30 @@ void ThrowablePresenter::present() {
 	if (s == nullptr) {
 		return;
 	}
-	present_visuals(s->get_throwable_visuals());
+	std::vector<opennova::world::ThrowableVisualRow> rows;
+	s->fill_throwable_visual_rows(rows);
+	present_visuals(rows);
 }
 
-void ThrowablePresenter::present_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
+// The rows cross in mission space; the position axis-maps to Godot (x, z, -y)
+// here and the rotation stays the placer euler (pitch, MISSION yaw, roll).
+void ThrowablePresenter::present_visuals(
+		const std::vector<opennova::world::ThrowableVisualRow> &p_visuals) {
 	sync_move_effects(p_visuals);
 	Node3D *container_node = container();
 	if (container_node == nullptr) {
 		return;
 	}
 	HashSet<int64_t> seen;
-	for (int64_t i = 0; i < p_visuals.size(); ++i) {
-		const Ref<ThrowableVisualRow> entry = p_visuals[i];
-		if (entry.is_null()) {
-			continue;
-		}
-		const int64_t key = entry->get_key();
+	for (const opennova::world::ThrowableVisualRow &entry : p_visuals) {
+		const int64_t key = entry.key;
 		if (key < 0) {
 			continue;
 		}
 		seen.insert(key);
-		const int item_id = entry->get_item_id();
-		const Vector3 pos = entry->get_pos();
-		const Vector3 rot = entry->get_rotation_deg();
+		const int item_id = entry.item_id;
+		const Vector3 pos = mission_to_godot(entry.pos);
+		const Vector3 rot(entry.pitch_deg, entry.yaw_deg, entry.roll_deg);
 		// The model and the continuously attached ammo "move" particle read the
 		// same authoritative round transform. [orig: tag-1 -> AmmoDef+0x70 at
 		// @0x409fc2; spawn/update @0x4e9f58/@0x4ea8ae/@0x5f7410.]
@@ -135,29 +136,31 @@ void ThrowablePresenter::sync_fixed_tick_effects() {
 	if (s == nullptr) {
 		return;
 	}
-	sync_move_effects(s->get_throwable_visuals());
+	std::vector<opennova::world::ThrowableVisualRow> rows;
+	s->fill_throwable_visual_rows(rows);
+	sync_move_effects(rows);
 }
 
-void ThrowablePresenter::sync_move_effects(const TypedArray<ThrowableVisualRow> &p_visuals) {
+void ThrowablePresenter::sync_move_effects(
+		const std::vector<opennova::world::ThrowableVisualRow> &p_visuals) {
 	HashSet<int64_t> seen;
-	for (int64_t i = 0; i < p_visuals.size(); ++i) {
-		const Ref<ThrowableVisualRow> entry = p_visuals[i];
-		if (entry.is_null()) {
-			continue;
-		}
-		const int64_t key = entry->get_key();
+	for (const opennova::world::ThrowableVisualRow &entry : p_visuals) {
+		const int64_t key = entry.key;
 		if (key < 0) {
 			continue;
 		}
 		seen.insert(key);
-		const Transform3D transform(bms_to_godot_basis(entry->get_rotation_deg()), entry->get_pos());
+		const Transform3D transform(
+				bms_to_godot_basis(Vector3(entry.pitch_deg, entry.yaw_deg, entry.roll_deg)),
+				mission_to_godot(entry.pos));
 		// The sim's emitter liveness (the round+0x1CC handle mirror): a row
 		// whose emitter is released — a ClipWaterFx round under the water
 		// plane — retires its group and forgets the handle, so the same round
 		// spawns a FRESH group on surfacing. The release is not latched.
 		// [orig: Projectile_UpdatePhysics @0x4ea019..0x4ea03e — the
 		//  ammoFlags & 0x20000000 release arm; the lazy spawn @0x4e9f58]
-		present_move_effect(key, entry->get_move_effect(), transform, entry->get_move_effect_live());
+		present_move_effect(key, String::utf8(entry.move_effect.c_str()), transform,
+				entry.move_effect_live);
 	}
 	Vector<int64_t> gone;
 	for (const KeyValue<int64_t, MoveEffect> &kv : move_effects_) {

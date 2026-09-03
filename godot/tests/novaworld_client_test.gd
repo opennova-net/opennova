@@ -146,6 +146,5 @@ func test_every_http_request_has_a_finite_timeout() -> void:
 
 func test_server_info_empty_before_connect() -> void:
 	var client := NovaWorldClient.new()
-	var info: Dictionary = client.get_server_info()
-	assert_eq(info.size(), 0, "no server info before a gate response")
+	assert_null(client.get_server_info(), "no server info before a gate response")
 	client.free()

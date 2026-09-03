@@ -31,17 +31,6 @@ using namespace godot;
 	ClassDB::bind_method(D_METHOD("set_active", "active"), &m_class::set_active);              \
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
 
-void StaticUserPointSource::_bind_methods() {
-	STATIC_SOURCE_BIND_GRAPHIC(StaticUserPointSource)
-	STATIC_SOURCE_BIND_OBJECT_DATA(StaticUserPointSource)
-	ClassDB::bind_method(D_METHOD("get_transforms"), &StaticUserPointSource::get_transforms);
-	ClassDB::bind_method(D_METHOD("set_transforms", "transforms"),
-			&StaticUserPointSource::set_transforms);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "transforms", PROPERTY_HINT_ARRAY_TYPE,
-						 "Transform3D"),
-			"set_transforms", "get_transforms");
-}
-
 void StaticEffectSource::_bind_methods() {
 #define STATIC_EFFECT_SOURCE_BIND(m_name, m_default) \
 	STATIC_SOURCE_BIND_INT(StaticEffectSource, m_name, m_default)

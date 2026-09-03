@@ -38,8 +38,10 @@ Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	const opennova::world::Entity *root =
 			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
 	if (root == nullptr) return out;
-	out->set_shown(true);
-	out->set_item_id(root->item_id);
+	opennova::world::VehiclePanelRoot v;
+	v.shown = true;
+	v.item_id = root->item_id;
+	out->assign(v);
 	return out;
 }
 
@@ -131,11 +133,13 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	score_feedback_updates_seen_ = cs.score_feedback.updates;
 	const opennova::hud::ScoreTone tone =
 			opennova::hud::score_delta_tone(cs.score_feedback.delta, cs.exp_fanfare);
+	opennova::hud::ScoreFeedbackView v;
+	v.score = cs.score_feedback.score;
+	v.delta = cs.score_feedback.delta;
+	v.tone = tone;
 	Ref<ScoreFeedback> out;
 	out.instantiate();
-	out->set_score(static_cast<int>(cs.score_feedback.score));
-	out->set_delta(static_cast<int>(cs.score_feedback.delta));
-	out->set_tone(String(opennova::hud::score_tone_set_name(tone)));
+	out->assign(v);
 	return out;
 }
 
@@ -150,12 +154,7 @@ TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
 			runtime_->view().drain_chat_lines()) {
 		Ref<ChatLineRow> d;
 		d.instantiate();
-		d->set_text(String::utf8(line.text.c_str()));
-		d->set_argb(static_cast<int64_t>(
-				opennova::hud::chat_channel_color(line.channel)));
-		d->set_sink(static_cast<int>(
-				opennova::hud::chat_channel_sink(line.channel)));
-		d->set_channel(static_cast<int>(line.channel));
+		d->assign(line);
 		out.push_back(d);
 	}
 	return out;

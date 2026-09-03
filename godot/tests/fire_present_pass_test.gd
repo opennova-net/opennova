@@ -54,28 +54,16 @@ func _voices(container: Node) -> Array[AudioStreamPlayer3D]:
 	return out
 
 
-func _event(pos: Vector3, source_bms_id: int) -> FirePresentationEvent:
-	var event := FirePresentationEvent.new()
-	event.origin = pos
-	event.source_bms_id = source_bms_id
-	return event
+func _event(pos: Vector3, source_bms_id: int, is_local_player: bool = false) -> FirePresentationEvent:
+	return FirePresentationEvent.make(pos, source_bms_id, -1, is_local_player)
 
 
 func _fire_sound(soundset: String, pos: Vector3, source_bms_id: int) -> FireSoundRow:
-	var row := FireSoundRow.new()
-	row.soundset = soundset
-	row.pos = pos
-	row.source_bms_id = source_bms_id
-	return row
+	return FireSoundRow.make(soundset, pos, source_bms_id)
 
 
 func _slot_sound(soundset: String, pos: Vector3, handle: int, slot: int) -> SlotSoundRow:
-	var row := SlotSoundRow.new()
-	row.soundset = soundset
-	row.pos = pos
-	row.handle = handle
-	row.slot = slot
-	return row
+	return SlotSoundRow.make(soundset, pos, handle, slot)
 
 
 # A REAL EntityPresenter with its fire pass wired over `audio` (the sound
@@ -144,8 +132,7 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	var audio := MissionAudio.create(null, null)
 	autofree(audio)
 	var presenter := _make_presenter(audio)
-	var local := _event(Vector3(1, 0, 0), 11)
-	local.is_local_player = true
+	var local := _event(Vector3(1, 0, 0), 11, true)
 	var remote := _event(Vector3(2, 0, 0), 22)
 
 	for _frame in range(128):
@@ -261,17 +248,8 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	add_child_autofree(container)
 	var audio := _staged_audio(container)
 	var presenter := _make_presenter(audio)
-	var idle := SoundEmitterRow.new()
-	idle.source_spawn_id = 77
-	idle.handle = 0x10001
-	idle.source_bms_id = 42
-	idle.emitted_tick = 12
-	idle.lane = 0
-	idle.lifetime = 30
-	idle.pitch_q16 = 0x10000
-	idle.volume_q8_8 = 0xFFFF
-	idle.soundset = "V_TRUCK_ILP"
-	idle.pos = Vector3(10, 0, 0)
+	var idle := SoundEmitterRow.make(77, 0x10001, 42, Vector3(10, 0, 0), 0, 0, 30, 12,
+			0x10000, 0xFFFF, false, "V_TRUCK_ILP")
 
 	presenter.present_sound_emitters([idle])
 

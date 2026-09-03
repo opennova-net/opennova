@@ -15,6 +15,7 @@
 #include "particle/effect_world.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
+#include "util/axes.h"
 
 namespace godot {
 
@@ -104,10 +105,18 @@ void FirePresenter::present() {
 	if (s == nullptr) {
 		return;
 	}
-	present_fires(s->drain_fire_presentation_events());
-	present_fire_sounds(s->drain_fire_sounds());
-	present_slot_sounds(s->drain_slot_sounds());
-	present_sound_emitters(s->drain_sound_emitters());
+	std::vector<opennova::world::FirePresentationRow> fires;
+	s->drain_fire_presentation_rows(fires);
+	present_fires(fires);
+	std::vector<opennova::world::ReadyFireSound> fire_sounds;
+	s->drain_fire_sounds(fire_sounds);
+	present_fire_sounds(fire_sounds);
+	std::vector<opennova::world::SoundSlotEvent> slot_sounds;
+	s->drain_slot_sounds(slot_sounds);
+	present_slot_sounds(slot_sounds);
+	std::vector<opennova::world::SoundEmitterEvent> emitters;
+	s->drain_sound_emitter_events(emitters);
+	present_sound_emitters(emitters);
 	draw_tracer_rows(s->get_tracer_trails());
 }
 
@@ -120,24 +129,29 @@ void FirePresenter::present() {
 // plays your own steps; only fire has an action-slot presentation to defer to).
 // Slots 43/44 (chute flap / freefall) refire every body tick by design; the
 // exclusive key folds the refires into one continuous voice (D-SND-10).
-void FirePresenter::present_slot_sounds(const TypedArray<SlotSoundRow> &p_events) {
-	if (p_events.is_empty()) {
+void FirePresenter::present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events) {
+	if (p_events.empty()) {
 		return;
 	}
 	MissionAudio *audio_node = audio();
 	if (audio_node == nullptr) {
 		return;
 	}
-	for (int64_t i = 0; i < p_events.size(); ++i) {
-		const Ref<SlotSoundRow> ev = p_events[i];
-		if (ev.is_null() || ev->get_soundset().is_empty()) {
+	for (const opennova::world::SoundSlotEvent &ev : p_events) {
+		if (ev.set_name[0] == '\0') {
 			continue;
 		}
+		const int slot = static_cast<int>(ev.slot);
+		const int handle = static_cast<int>(ev.source_handle);
 		String key;
-		if (ev->get_slot() == SLOT_CHUTE_FLAP || ev->get_slot() == SLOT_FREEFALL) {
-			key = vformat("%d:%d", ev->get_handle(), ev->get_slot());
+		if (slot == SLOT_CHUTE_FLAP || slot == SLOT_FREEFALL) {
+			key = vformat("%d:%d", handle, slot);
 		}
-		if (audio_node->slot_soundset(ev->get_soundset(), ev->get_pos(), key)) {
+		// Mission-frame 16.16 -> godot (x, z, -y), the fire drain's mapping.
+		const Vector3 pos(static_cast<float>(ev.pos[0]) / 65536.0f,
+				static_cast<float>(ev.pos[2]) / 65536.0f,
+				static_cast<float>(-ev.pos[1]) / 65536.0f);
+		if (audio_node->slot_soundset(String(ev.set_name), pos, key)) {
 			++stat_sounds_;
 		}
 	}
@@ -149,56 +163,53 @@ void FirePresenter::present_slot_sounds(const TypedArray<SlotSoundRow> &p_events
 // advancing to the end of a catch-up frame, preserving the 30-tick keep-alive.
 // [orig: SoundEmitter_RegisterSetLayers @0x528340;
 // SoundEmitter_UpdateAndMixTop8 @0x5284a0]
-void FirePresenter::present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events) {
-	if (p_events.is_empty()) {
+void FirePresenter::present_sound_emitters(
+		const std::vector<opennova::world::SoundEmitterEvent> &p_events) {
+	if (p_events.empty()) {
 		return;
 	}
 	MissionAudio *audio_node = audio();
 	if (audio_node == nullptr) {
 		return;
 	}
-	audio_node->apply_sound_emitters(p_events);
+	audio_node->apply_sound_emitter_events(p_events);
 }
 
-void FirePresenter::present_fires(const TypedArray<FirePresentationEvent> &p_events) {
-	if (p_events.is_empty()) {
+void FirePresenter::present_fires(const std::vector<opennova::world::FirePresentationRow> &p_events) {
+	if (p_events.empty()) {
 		return;
 	}
 	EffectWorld *fx_world = fx();
 	EffectLightDirector *light_director = lights();
-	for (int64_t i = 0; i < p_events.size(); ++i) {
-		const Ref<FirePresentationEvent> ev = p_events[i];
-		if (ev.is_null()) {
-			continue;
-		}
+	for (const opennova::world::FirePresentationRow &ev : p_events) {
 		// The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
 		// spawns it on both fire arms, the local player's included [orig:
 		// WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
 		// ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
 		// both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
 		// group gate scopes it to the shooter's own draws.
-		if (light_director != nullptr && ev->get_mf_light() != 0) {
-			Vector3 glow_pos = ev->get_origin();
-			if (ev->get_adm_arm()) {
+		if (light_director != nullptr && ev.mf_light != 0) {
+			Vector3 glow_pos = mission_to_godot(ev.origin);
+			if (ev.adm_arm) {
 				const Vector3 glow_anchor = owner_->muzzle_world_for(
-						ev->get_shooter_handle(), ev->get_action_userpoint());
+						ev.shooter_handle, String::utf8(ev.action_userpoint.c_str()));
 				if (glow_anchor.is_finite()) {
 					glow_pos = glow_anchor;
 				}
 			}
-			light_director->on_muzzle_fire(ev->get_shooter_handle(), glow_pos);
+			light_director->on_muzzle_fire(ev.shooter_handle, glow_pos);
 		}
 		// The local player's own fire is presented by the action-slot legs
 		// [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
 		// else's rides the ammo-def legs below. (The SOUND legs of every arm
 		// run in the sim now — world/fire_sound.h — and arrive through
 		// drain_fire_sounds; this drain owns the EFFECT legs.)
-		if (ev->get_is_local_player()) {
+		if (ev.is_local_player) {
 			continue;
 		}
 		++stat_fires_;
-		Vector3 origin = ev->get_origin();
-		String effect = ev->get_effect();
+		Vector3 origin = mission_to_godot(ev.origin);
+		String effect = String::utf8(ev.effect.c_str());
 		// THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
 		// arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
 		// no ammo-def effect: it executes the ADDRESSED def's FIRE action row
@@ -209,8 +220,8 @@ void FirePresenter::present_fires(const TypedArray<FirePresentationEvent> &p_eve
 		// the shooter's face, roughly a metre behind the barrel.
 		// [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
 		//  the fire row @0x42f777 / @0x42f98f]
-		if (ev->get_adm_arm()) {
-			effect = ev->get_action_effect();
+		if (ev.adm_arm) {
+			effect = String::utf8(ev.action_effect.c_str());
 			// The anchor: this shooter's held weapon, not the wire point — the
 			// rendered gun's own userpoint, which is what retail spawns at (the
 			// authority DECISION closing the S12a shadow seam: the rendered-node
@@ -220,7 +231,7 @@ void FirePresenter::present_fires(const TypedArray<FirePresentationEvent> &p_eve
 			// body-origin fallback — retail's deepest fallback is the entity
 			// origin [orig: @0x401867..0x401887].
 			const Vector3 anchored = owner_->muzzle_world_for(
-					ev->get_shooter_handle(), ev->get_action_userpoint());
+					ev.shooter_handle, String::utf8(ev.action_userpoint.c_str()));
 			if (anchored.is_finite()) {
 				origin = anchored;
 			}
@@ -229,7 +240,7 @@ void FirePresenter::present_fires(const TypedArray<FirePresentationEvent> &p_eve
 			// The muzzle effect at the fire origin along the fire direction
 			// [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
 			// @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
-			fx_world->spawn_effect(effect, origin, ev->get_forward());
+			fx_world->spawn_effect(effect, origin, mission_to_godot(ev.forward));
 			++stat_effects_;
 		}
 	}
@@ -241,20 +252,17 @@ void FirePresenter::present_fires(const TypedArray<FirePresentationEvent> &p_eve
 // max-range cull runs in the audio bank (D-AI-8).
 // [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / Sound_TickPendingSlots
 //  @ 0x529310]
-void FirePresenter::present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds) {
-	if (p_sounds.is_empty()) {
+void FirePresenter::present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds) {
+	if (p_sounds.empty()) {
 		return;
 	}
 	MissionAudio *audio_node = audio();
 	if (audio_node == nullptr) {
 		return;
 	}
-	for (int64_t i = 0; i < p_sounds.size(); ++i) {
-		const Ref<FireSoundRow> row = p_sounds[i];
-		if (row.is_null()) {
-			continue;
-		}
-		audio_node->fire_soundset(row->get_soundset(), row->get_pos(), row->get_source_bms_id());
+	for (const opennova::world::ReadyFireSound &row : p_sounds) {
+		audio_node->fire_soundset(String::utf8(row.set_name.c_str()), mission_to_godot(row.pos),
+				row.source_bms_id);
 		++stat_sounds_;
 	}
 }

@@ -558,68 +558,17 @@ func test_message_feed_draws_and_expires() -> void:
 	assert_true(is_instance_valid(hud), "A pushed triggered-text line draws safely.")
 
 
-# The friendly tags (D-HUD-20): the binding feeds projected tags through the
-# compiler's element — FULL mode lays out centered fallback-name glyphs, the
-# mode cycle clamps, BRIEF swaps to the tick lines, OFF draws nothing, and the
-# medic flag adds the three cross-plate quads.
-# [orig: HUD_DrawEntityLabel @0x5a39b0 via HUD_DrawFriendlyTagsPass @0x5a4480]
-func test_friendly_tags_draw_modes() -> void:
-	var fixture := _load_temp_layout(PackedStringArray([
-		"fonthud1_hi Gunpl22b.fnt",
-		"tagcolor_good 005,250,013",
-	]), PackedStringArray())
-	_copy_font_into(fixture["dir"])
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+# The friendly tags (D-HUD-20) draw modes — FULL glyphs, the medic plate, the
+# downed count, BRIEF ticks, OFF — are pinned by the hud_friendly_tags ctest
+# over the compiler; the overlay's mode setter clamps.
+func test_friendly_tag_mode_clamps() -> void:
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
 	assert_eq(hud.get_friendly_tag_mode(), 2, "the boot default mode is FULL")
-	var screens := PackedVector2Array([Vector2(300, 200)])
-	var dists := PackedFloat32Array([100.0])
-	var names := PackedStringArray([""])
-	var ids := PackedInt32Array([24]) # the fallback table's "SGT  Brown"
-	var ratios := PackedInt32Array([0x10000])
-	var flags := PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(hud.get_draw_list_stats().glyphs, 11,
-		"FULL lays out the 11 fallback-name glyphs ('^SGT  Brown)")
-	await get_tree().process_frame
-	flags = PackedInt32Array([1]) # medic
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(hud.get_draw_list_stats().quads_filled, 3,
-		"the medic plate adds the white square + two red cross bars")
-	await get_tree().process_frame
-	# The downed legs: dead (8) + slot (16) + a revive window (seconds << 8)
-	# appends ": 87" to the name [orig: "%s: %ld" @0x5a400e].
-	flags = PackedInt32Array([8 | 16 | (87 << 8)])
-	ratios = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(hud.get_draw_list_stats().glyphs, 15,
-		"a downed slot entry appends the revive count to the label")
-	await get_tree().process_frame
-	ratios = PackedInt32Array([0x10000])
-	hud.set_friendly_tag_mode(3)
-	flags = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	var brief := hud.get_draw_list_stats()
-	assert_eq(brief.glyphs, 0, "BRIEF draws no text")
-	assert_eq(brief.lines, 3, "BRIEF draws the three tick lines")
-	await get_tree().process_frame
-	# BRIEF draws the bare count above the ticks [orig: "%ld" @0x5a41f0].
-	flags = PackedInt32Array([8 | 16 | (7 << 8)])
-	ratios = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(hud.get_draw_list_stats().glyphs, 1,
-		"BRIEF draws the bare one-digit revive count")
-	ratios = PackedInt32Array([0x10000])
-	flags = PackedInt32Array([0])
-	await get_tree().process_frame
-	hud.set_friendly_tag_mode(0)
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(hud.get_draw_list_stats().glyphs, 0, "OFF draws nothing")
 	hud.set_friendly_tag_mode(99)
 	assert_eq(hud.get_friendly_tag_mode(), 3, "the mode setter clamps to 0..3")
-	assert_true(is_instance_valid(hud), "friendly tags draw safely")
+	hud.set_friendly_tag_mode(0)
+	hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY, 0.0, null)
+	assert_eq(hud.get_draw_list_stats().glyphs, 0, "OFF draws nothing")
 
 
 # The end-of-round overlay element: the resolved Impact38 ladder centred on x

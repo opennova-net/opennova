@@ -141,8 +141,8 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 
 	var record := mission.add_entity(
 			MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
-	assert_false(record.is_empty())
-	var index := int(record.get("index", -1))
+	assert_not_null(record)
+	var index := record.index
 	var stats := placer.place(mission, parent)
 	assert_eq(stats.placed, 1, "the static entity is placed")
 	assert_eq(stats.batched, 1, "via the static-batch branch")
@@ -194,7 +194,7 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 			"the draw row points at its exact static effect source")
 	assert_eq(light_draw.kind, MissionData.KIND_ITEM)
 	assert_eq(light_draw.entity_index, index)
-	assert_eq(light_draw.bms_id, int(record.get("bms_id", 0)))
+	assert_eq(light_draw.bms_id, record.bms_id)
 	assert_eq(light_draw.item_id, 105004)
 	assert_eq(light_draw.robj_index, 0)
 	assert_true(light_draw.active)
@@ -221,8 +221,8 @@ func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> 
 	var second := mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
 			Vector3(530, -10, 0), Vector3.ZERO)
-	assert_false(first.is_empty())
-	assert_false(second.is_empty())
+	assert_not_null(first)
+	assert_not_null(second)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
@@ -293,7 +293,7 @@ func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> 
 	bin_xs.sort()
 	assert_eq(bin_xs, [0, 1])
 
-	var first_bms_id := int(first.get("bms_id", 0))
+	var first_bms_id := first.bms_id
 	assert_ne(first_bms_id, 0)
 	assert_eq(placer.get_static_instance_binding_count(first_bms_id), 2,
 			"destruction owns the emitted bin slot and global blended slot")
@@ -328,9 +328,9 @@ func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 		"offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, 106002, Vector3(1, 2, 3),
-			Vector3.ZERO).is_empty())
+			Vector3.ZERO))
 	var stats := placer.place(mission, parent)
 	assert_eq(stats.placed, 1, "the static vehicle places")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
@@ -381,12 +381,12 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	# submesh while preserving the visible draw.
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
-			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(
+			Vector3(1, 2, 3), Vector3.ZERO))
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
-			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+			Vector3(4, 5, 6), Vector3.ZERO))
 	assert_true(mission.set_entity_property_int(
 			MissionData.KIND_BUILDING, 0, "team", 1))
 	assert_true(mission.set_entity_property_int(
@@ -423,8 +423,8 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 				"the visible batch supplies the static silhouette")
 		var expected_bms_ids: Array = []
 		for index in range(2):
-			expected_bms_ids.append(int(mission.get_entity(
-					MissionData.KIND_BUILDING, index).get("bms_id", 0)))
+			expected_bms_ids.append(mission.get_entity(
+					MissionData.KIND_BUILDING, index).bms_id)
 		assert_eq(Array(visible_batch.slot_bms_ids),
 				expected_bms_ids,
 				"scratch attribution retains exact slot identity without changing geometry")
@@ -445,12 +445,12 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	# needs a parallel MultiMesh with the ineligible slot zero-scaled.
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
-			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(
+			Vector3(1, 2, 3), Vector3.ZERO))
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
-			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+			Vector3(4, 5, 6), Vector3.ZERO))
 	assert_true(mission.set_entity_property_int(
 			MissionData.KIND_BUILDING, 1, "ai_flags", 0x01000000),
 			"the second building carries the witnessed BMS NoShadow gate")
@@ -514,13 +514,13 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	var item_entity := mission.add_entity(
 			MissionData.KIND_ITEM, 105004,
 			Vector3(4, 5, 6), Vector3.ZERO)
-	assert_false(building_entity.is_empty())
-	assert_false(item_entity.is_empty())
+	assert_not_null(building_entity)
+	assert_not_null(item_entity)
 	assert_true(mission.set_entity_property_int(
 			MissionData.KIND_BUILDING, 0, "ai_flags", 0x00800000),
 			"the building authors the witnessed BMS Reflective attribute")
-	var building_bms_id := int(building_entity.get("bms_id", 0))
-	var item_bms_id := int(item_entity.get("bms_id", 0))
+	var building_bms_id := building_entity.bms_id
+	var item_bms_id := item_entity.bms_id
 	assert_ne(building_bms_id, 0)
 	assert_ne(item_bms_id, 0)
 	var item_db := ItemDatabase.new()
@@ -751,9 +751,9 @@ func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
 	# attribute for every spawned pool]
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, 105004,
-			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+			Vector3(1, 2, 3), Vector3.ZERO))
 	assert_true(mission.set_entity_property_int(
 			MissionData.KIND_ITEM, 0, "ai_flags", 0x00800000))
 	var item_db := ItemDatabase.new()
@@ -789,9 +789,9 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	# asserted without shipping the retail GuardTwr asset.
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 102001,
-			Vector3(3, 4, 5), Vector3.ZERO).is_empty())
+			Vector3(3, 4, 5), Vector3.ZERO))
 	assert_true(mission.set_entity_property_int(
 			MissionData.KIND_BUILDING, 0, "ai_flags", 0x00800000),
 			"this building authors the BMS Reflective attribute")
@@ -858,9 +858,9 @@ func test_runtime_vehicle_without_anim_def_stays_in_static_batch() -> void:
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, 106002, Vector3.ZERO,
-			Vector3.ZERO).is_empty())
+			Vector3.ZERO))
 	var stats := placer.place(mission, parent)
 	assert_eq(stats.placed, 1, "the vehicle is placed")
 	assert_eq(stats.batched, 1,
@@ -921,8 +921,8 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 		return
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
-		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -953,8 +953,8 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 		return
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
-		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO))
 	# Seed batch geometry so the static branch can render without a resource-root .3di.
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", placer.object_data_for("StaticCrate1"), [{
@@ -982,8 +982,8 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 	placer.register_occlusion_verdict(105004, true)
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
-		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -1118,8 +1118,8 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 			MissionData.KIND_BUILDING, 105004, Vector3(10, -10, 0), Vector3.ZERO)
 	var second := mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3(10, -200, 0), Vector3.ZERO)
-	assert_false(first.is_empty())
-	assert_false(second.is_empty())
+	assert_not_null(first)
+	assert_not_null(second)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
@@ -1166,8 +1166,8 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 	assert_eq(level0.multimesh.instance_count, 2,
 			"every population of the bin holds the same slot list")
 	assert_eq(level1.multimesh.instance_count, 2)
-	var first_bms := int(first.get("bms_id", 0))
-	var second_bms := int(second.get("bms_id", 0))
+	var first_bms := first.bms_id
+	var second_bms := second.bms_id
 	assert_eq(placer.get_static_instance_binding_count(first_bms), 2,
 			"one slot per level population")
 	assert_eq(_live_populations(placer, first_bms), ["Batch_StaticCrate1_0"],
@@ -1246,8 +1246,8 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	var lod_count := data.get_lod_count()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
-			MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(
+			MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -1303,8 +1303,8 @@ func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
 	for y in [-10.0, -100.0, -200.0]:
 		var entity := mission.add_entity(
 				MissionData.KIND_BUILDING, 105004, Vector3(10, y, 0), Vector3.ZERO)
-		assert_false(entity.is_empty())
-		bms_ids.append(int(entity.get("bms_id", 0)))
+		assert_not_null(entity)
+		bms_ids.append(entity.bms_id)
 	if no_shadow_second:
 		assert_true(mission.set_entity_property_int(
 				MissionData.KIND_BUILDING, 1, "ai_flags", 0x01000000))

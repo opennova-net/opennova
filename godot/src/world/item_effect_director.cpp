@@ -448,9 +448,9 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 		}
 		return 0;
 	}
-	const Ref<ItemParticleFx> fx = item_db->get_particle_fx(p_item_id);
-	const String effect = fx.is_valid() ? fx->get_effect() : String();
-	const String userpoint = fx.is_valid() ? fx->get_userpoint() : String();
+	const ItemParticleFx fx = item_db->get_particle_fx(p_item_id);
+	const String effect = fx.effect;
+	const String userpoint = fx.userpoint;
 	if (effect.is_empty()) {
 		return 0;
 	}
@@ -549,9 +549,9 @@ int ItemEffectDirector::_attach_item_effect_to_static(const Ref<StaticEffectSour
 			!opennova::world::item_effect_pool_allows(kind, item_db->get_attrib(item_id))) {
 		return 0;
 	}
-	const Ref<ItemParticleFx> fx = item_db->get_particle_fx(item_id);
-	const String effect = fx.is_valid() ? fx->get_effect() : String();
-	const String userpoint = fx.is_valid() ? fx->get_userpoint() : String();
+	const ItemParticleFx fx = item_db->get_particle_fx(item_id);
+	const String effect = fx.effect;
+	const String userpoint = fx.userpoint;
 	const Ref<ObjectData> data = p_source->get_object_data();
 	if (effect.is_empty() || data.is_null()) {
 		return 0;

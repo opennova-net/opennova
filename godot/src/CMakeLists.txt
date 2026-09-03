@@ -31,7 +31,7 @@ add_library(${TARGET_NAME} SHARED
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
-    network/novaworld_server_totals.cpp
+    network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
     network/novaworld_host.cpp
@@ -142,7 +142,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_inventory.cpp
     simulation/weapon_profile_summary.cpp
     simulation/present_event_records.cpp
-    simulation/weather_home_state.cpp
+    simulation/environment_snapshot.cpp
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
@@ -156,6 +156,7 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
+    mission/mission_records.cpp
     mission/mission_info.cpp
     mission/mission_perf_counters.cpp
     mission/mission_root.cpp

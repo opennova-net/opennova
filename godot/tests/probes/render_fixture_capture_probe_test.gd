@@ -63,20 +63,13 @@ class ComparisonSim:
 		return not equipped_name.is_empty()
 
 	func get_local_player_inventory() -> PlayerInventory:
-		var inventory := PlayerInventory.new()
-		inventory.valid = true
-		inventory.equipped_name = equipped_name
-		return inventory
+		return PlayerInventory.make(equipped_name)
 
 	func get_local_player_weapon_name() -> String:
 		return equipped_name
 
 	func get_local_player_weapon_state() -> PlayerWeaponView:
-		var view := PlayerWeaponView.new()
-		view.active = true
-		view.clip = weapon_clip
-		view.reserve = weapon_reserve
-		return view
+		return PlayerWeaponView.make(true, weapon_clip, weapon_reserve)
 
 	func debug_teleport_local_player(
 			position_bms: Vector3, yaw_deg: float, pitch_deg: float) -> Error:

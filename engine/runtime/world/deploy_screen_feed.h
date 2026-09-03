@@ -125,4 +125,20 @@ struct DeployStaticsVisibility {
 };
 DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in);
 
+
+// The DEATH screen's STATIC facts for one client as one value the embedder
+// fills (its Godot record wraps it by value, ADR 0043 d10): the sub-block-0
+// timers, the queued status line, the psp/medic show gates and the medic-call
+// cooldown/serial. The witnesses live on the builders above and on the
+// embedder's fold of the 0x0A / 0x6E state.
+struct DeployScreenStatus {
+    int penalty_seconds = 0;
+    int revive_seconds = 0;
+    int hold_seconds = 0;
+    DeployStatusLine line;
+    DeployStaticsVisibility statics;
+    int medic_cooldown_ticks = 0;
+    int medic_request_serial = 0;
+};
+
 } // namespace opennova::world

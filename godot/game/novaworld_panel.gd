@@ -387,7 +387,7 @@ func _refresh_servers() -> void:
 	_exp_warning_armed = false
 	if _client != null:
 		_rows = _client.get_server_rows()
-		_pings = _client.get_server_pings()
+		_pings = _client_pings()
 	_rebuild_type_filter()
 	_rebuild_view()
 	_show_population_status()
@@ -398,9 +398,8 @@ func _refresh_servers() -> void:
 func _show_population_status() -> void:
 	if _client == null:
 		return
-	var totals := _client.get_server_totals()
-	var servers := totals.total_servers
-	var players := totals.total_players
+	var servers := _client.get_total_servers()
+	var players := _client.get_total_players()
 	if _population_label != null:
 		_population_label.text = "%d game%s • %d player%s online" % [
 			servers, "" if servers == 1 else "s",
@@ -512,7 +511,7 @@ func _on_refresh_pressed() -> void:
 func _on_server_pings_updated() -> void:
 	if _client == null:
 		return
-	_pings = _client.get_server_pings()
+	_pings = _client_pings()
 	if _sort_column == NovaWorldServerBrowser.COLUMN_PING:
 		_rebuild_view()
 		return
@@ -773,6 +772,17 @@ func set_rows_for_test(rows: Array[NovaWorldServerRow]) -> void:
 func set_pings_for_test(pings: Dictionary) -> void:
 	_pings = pings
 	_rebuild_view()
+
+
+# The client's sweep results (parallel rid / ping arrays) as the rid -> ping
+# map the view sorts and renders by.
+func _client_pings() -> Dictionary:
+	var pings := {}
+	var rids := _client.get_server_ping_rids()
+	var values := _client.get_server_ping_values()
+	for i in range(mini(rids.size(), values.size())):
+		pings[rids[i]] = values[i]
+	return pings
 
 
 ## The visible (filtered + sorted) rows, in table order.

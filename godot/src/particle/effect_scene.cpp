@@ -168,10 +168,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::effect_name);
 	ClassDB::bind_method(D_METHOD("spawn", "request"),
 			&EffectScene::spawn);
-	ClassDB::bind_method(D_METHOD("apply_owner_poses_in_place", "batch"),
-			&EffectScene::apply_owner_poses_in_place);
-	ClassDB::bind_method(D_METHOD("apply_owner_poses", "batch"),
-			&EffectScene::apply_owner_poses);
 	ClassDB::bind_method(D_METHOD("get_active_owner_tokens"),
 			&EffectScene::get_active_owner_tokens);
 	ClassDB::bind_method(D_METHOD("detach", "group_id"),
@@ -313,24 +309,12 @@ void EffectOwnerPoseBatch::add_absent(int64_t p_owner_token) {
 	updates_.push_back(update);
 }
 
-void EffectOwnerPoseBatch::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("clear"), &EffectOwnerPoseBatch::clear);
-	ClassDB::bind_method(D_METHOD("add", "owner_token", "transform"),
-			&EffectOwnerPoseBatch::add);
-	ClassDB::bind_method(D_METHOD("add_absent", "owner_token"),
-			&EffectOwnerPoseBatch::add_absent);
-	ClassDB::bind_method(D_METHOD("get_count"), &EffectOwnerPoseBatch::get_count);
-}
-
-void EffectScene::apply_owner_poses_in_place(const Ref<EffectOwnerPoseBatch> &p_batch) {
-	if (p_batch.is_null()) {
-		return;
-	}
-	scene_.apply_owner_poses(p_batch->updates());
+void EffectScene::apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch) {
+	scene_.apply_owner_poses(p_batch.updates());
 	snapshot_dirty_ = true;
 }
 
-void EffectScene::apply_owner_poses(const Ref<EffectOwnerPoseBatch> &p_batch) {
+void EffectScene::apply_owner_poses(const EffectOwnerPoseBatch &p_batch) {
 	apply_owner_poses_in_place(p_batch);
 	advance_in_place(0.0);
 }
