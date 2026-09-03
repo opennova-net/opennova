@@ -424,7 +424,7 @@ TypedArray<FirePresentationEvent> Simulation::drain_fire_presentation_events() {
 		d->set_action_userpoint(
 				fire_row ? String(fire_row->particle_userpoint) : String());
 		// The 3P adm-arm anchor is the SHELL's: the rendered held-weapon node's
-		// own userpoint (WirePresentPass.muzzle_world_for), which is what retail
+		// own userpoint (EntityPresenter.muzzle_world_for), which is what retail
 		// spawns at — the muzzle-authority decision that closed the S12a
 		// sim-posed shadow seam. The event carries the row's userpoint name; the
 		// presentation layer resolves it against the node it renders.

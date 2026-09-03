@@ -110,10 +110,9 @@
 #include "simulation/entity_card.h"
 #include "simulation/end_round_state.h"
 #include "simulation/entity_row.h"
-#include "simulation/present_applier.h"
+#include "simulation/entity_presenter.h"
 #include "simulation/present_stats.h"
 #include "simulation/inmatch_session_values.h"
-#include "simulation/wire_present_pass.h"
 #include "simulation/simulation.h"
 #include "wac/wac_program.h"
 #include "lwf/lwf_data.h"
@@ -317,7 +316,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);
-	GDREGISTER_CLASS(PresentApplier);
+	GDREGISTER_CLASS(EntityPresenter);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);
 	GDREGISTER_CLASS(EndRoundState);
@@ -329,7 +328,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WirePresentStats);
 	GDREGISTER_CLASS(ScarDrawList);
 	GDREGISTER_CLASS(ScarPresenterStats);
-	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(WacProgram);
 	GDREGISTER_CLASS(LwfData);

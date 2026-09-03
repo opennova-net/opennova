@@ -1,4 +1,4 @@
-#include "simulation/present_applier.h"
+#include "simulation/entity_presenter.h"
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -14,8 +14,11 @@
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_pose_provider.h>
 
-#include "simulation/present_stats.h"
 #include "simulation/simulation.h"
+
+// The PLACED walk, the per-row legs both walks share, the statics and the
+// bound surface. The wire walk (cold path, registry, hot rows) is
+// entity_presenter_wire.cpp.
 
 using namespace godot;
 
@@ -72,55 +75,99 @@ static_assert(AIM_PAYLOAD_FLOATS == 30,
 
 } // namespace
 
-void PresentApplier::_bind_methods() {
+void EntityPresenter::_bind_methods() {
+	// --- the placed walk ---
 	ClassDB::bind_method(D_METHOD("setup", "sim", "index", "placer"),
-			&PresentApplier::setup, DEFVAL(Ref<MissionObjectPlacer>()));
+			&EntityPresenter::setup, DEFVAL(Ref<MissionObjectPlacer>()));
 	ClassDB::bind_method(D_METHOD("set_output_channels", "channels"),
-			&PresentApplier::set_output_channels);
+			&EntityPresenter::set_output_channels);
 	ClassDB::bind_method(D_METHOD("get_output_channels"),
-			&PresentApplier::get_output_channels);
-	ClassDB::bind_method(
-			D_METHOD("set_shared_visibility_maps", "occlusion_hidden_ids",
-					"present_visibility"),
-			&PresentApplier::set_shared_visibility_maps);
+			&EntityPresenter::get_output_channels);
 	ClassDB::bind_method(
 			D_METHOD("present_snapshot", "snap", "stride", "layout_revision"),
-			&PresentApplier::present_snapshot);
+			&EntityPresenter::present_snapshot);
 	ClassDB::bind_method(
 			D_METHOD("profile_present_snapshot", "snap", "stride",
 					"layout_revision"),
-			&PresentApplier::profile_present_snapshot);
+			&EntityPresenter::profile_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
-			&PresentApplier::get_stats_record);
-	ClassDB::bind_method(D_METHOD("present"), &PresentApplier::present);
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::get_stats_record);
+	// --- the wire walk ---
+	ClassDB::bind_method(
+			D_METHOD("setup_wire", "sim", "placer", "container", "defer_index"),
+			&EntityPresenter::setup_wire, DEFVAL(Ref<EntityIndex>()));
+	ClassDB::bind_method(D_METHOD("set_synthetic_origin_only", "enabled"),
+			&EntityPresenter::set_synthetic_origin_only);
+	ClassDB::bind_method(D_METHOD("set_cold_spawn_budget", "budget"),
+			&EntityPresenter::set_cold_spawn_budget);
+	ClassDB::bind_method(D_METHOD("set_spectator_camera", "camera"),
+			&EntityPresenter::set_spectator_camera);
+	ClassDB::bind_method(
+			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
+			&EntityPresenter::present_wire_snapshot);
+	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
+			&EntityPresenter::set_render_culled);
+	ClassDB::bind_method(D_METHOD("clear_render_culled"),
+			&EntityPresenter::clear_render_culled);
+	ClassDB::bind_method(D_METHOD("pending_spawn_count"),
+			&EntityPresenter::pending_spawn_count);
+	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
+			&EntityPresenter::get_wire_stats_record);
+	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
+			&EntityPresenter::resolve_wire_handle);
+	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
+			&EntityPresenter::held_weapon_node);
+	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
+			"effect_scale", "interior_lerp", "light_transfer"),
+			&EntityPresenter::set_entity_lighting_context);
+	ClassDB::bind_method(D_METHOD("muzzle_world_for", "handle", "userpoint"),
+			&EntityPresenter::muzzle_world_for);
+	ClassDB::bind_method(D_METHOD("wire_entity_count"),
+			&EntityPresenter::wire_entity_count);
+	ClassDB::bind_method(D_METHOD("wire_nodes"), &EntityPresenter::wire_nodes);
+	ClassDB::bind_method(D_METHOD("register_wire_node", "handle", "node"),
+			&EntityPresenter::register_wire_node);
+	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
+			&EntityPresenter::reset_wire_runtime_state);
+	ClassDB::bind_method(D_METHOD("teardown"), &EntityPresenter::teardown);
+	// Emitted once per materialized wire body, after the wire rows are
+	// presented (identity + production transform applied); never re-emitted.
+	// A late subscriber replays wire_nodes() itself.
+	ADD_SIGNAL(MethodInfo("wire_node_spawned",
+			PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_NODE_TYPE,
+					"ObjectModel"),
+			PropertyInfo(Variant::INT, "kind"),
+			PropertyInfo(Variant::INT, "item_id")));
+	// --- the statics ---
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
 					"hand_frame"),
-			&PresentApplier::held_weapon_attach_transform, DEFVAL(false));
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::held_weapon_attach_transform, DEFVAL(false));
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_hand_frame_basis", "bone_model_to_world"),
-			&PresentApplier::held_weapon_hand_frame_basis);
-	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("find_skeleton", "root"), &PresentApplier::find_skeleton);
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::held_weapon_hand_frame_basis);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("find_skeleton", "root"), &EntityPresenter::find_skeleton);
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_attach_nudge"),
-			&PresentApplier::held_weapon_attach_nudge);
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::held_weapon_attach_nudge);
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_hand_frame_z_rad"),
-			&PresentApplier::held_weapon_hand_frame_z_rad);
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::held_weapon_hand_frame_z_rad);
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_hand_frame_y_rad"),
-			&PresentApplier::held_weapon_hand_frame_y_rad);
+			&EntityPresenter::held_weapon_hand_frame_y_rad);
 	BIND_CONSTANT(HELD_WEAPON_BONE_INDEX);
-	ClassDB::bind_static_method("PresentApplier",
+	BIND_CONSTANT(DEFAULT_COLD_SPAWN_BUDGET);
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("aim_root_basis", "snap", "base", "fallback"),
-			&PresentApplier::aim_root_basis);
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::aim_root_basis);
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("aim_apply", "node", "snap", "base", "drive_root_basis"),
-			&PresentApplier::aim_apply, DEFVAL(true));
-	ClassDB::bind_static_method("PresentApplier",
+			&EntityPresenter::aim_apply, DEFVAL(true));
+	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("emplaced_apply", "node", "snap", "base", "clear_when_invalid"),
-			&PresentApplier::emplaced_apply);
+			&EntityPresenter::emplaced_apply);
 	BIND_ENUM_CONSTANT(OUTPUT_TRANSFORM);
 	BIND_ENUM_CONSTANT(OUTPUT_PART_ANIM);
 	BIND_ENUM_CONSTANT(OUTPUT_VISIBILITY);
@@ -137,7 +184,13 @@ void PresentApplier::_bind_methods() {
 	BIND_ENUM_CONSTANT(MISSION_PROFILE_SLOT_COUNT);
 }
 
-void PresentApplier::setup(Object *sim, Object *index,
+Simulation *EntityPresenter::sim() const {
+	return sim_id_.is_valid()
+			? Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_))
+			: nullptr;
+}
+
+void EntityPresenter::setup(Object *sim, Object *index,
 		const Ref<MissionObjectPlacer> &placer) {
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
@@ -151,10 +204,16 @@ void PresentApplier::setup(Object *sim, Object *index,
 	release_planned_rows();
 }
 
+void EntityPresenter::teardown() {
+	reset_wire_runtime_state();
+	release_planned_rows();
+	plan_dirty_ = true;
+}
+
 // Retained rows stop being "planned" the moment the plan drops them, so a model
 // that later leaves the mission (a despawned row kept alive as a preview) no
 // longer moves the lifetime stamp on death.
-void PresentApplier::release_planned_rows() {
+void EntityPresenter::release_planned_rows() {
 	for (const Row &row : rows_) {
 		ObjectModel *model =
 				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
@@ -165,7 +224,7 @@ void PresentApplier::release_planned_rows() {
 	rows_.clear();
 }
 
-void PresentApplier::set_output_channels(int channels) {
+void EntityPresenter::set_output_channels(int channels) {
 	const int next = channels & OUTPUT_ALL;
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0 &&
 			(next & OUTPUT_PART_ANIM) == 0) {
@@ -191,13 +250,7 @@ void PresentApplier::set_output_channels(int channels) {
 	}
 }
 
-void PresentApplier::set_shared_visibility_maps(
-		const Dictionary &occlusion_hidden_ids, const Dictionary &present_visibility) {
-	occlusion_hidden_ids_ = occlusion_hidden_ids;
-	present_visibility_ = present_visibility;
-}
-
-Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
+Ref<MissionPresentStats> EntityPresenter::get_stats_record() const {
 	Ref<MissionPresentStats> stats;
 	stats.instantiate();
 	stats->moved = stat_moved_;
@@ -211,20 +264,6 @@ Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
 	stats->control_dispatches = stat_control_dispatches_;
 	stats->body_dispatches = stat_body_dispatches_;
 	return stats;
-}
-
-void PresentApplier::present() {
-	Simulation *native_sim =
-			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
-	if (native_sim == nullptr || index_.is_null()) {
-		return;
-	}
-	const int stride = native_sim->get_present_stride();
-	if (stride <= 0) {
-		return;
-	}
-	present_snapshot(native_sim->get_present_snapshot(), stride,
-			native_sim->get_present_layout_revision());
 }
 
 namespace {
@@ -244,7 +283,7 @@ constexpr double kHandFrameYRad = opennova::simassets::kHeldWeaponHandFrameYRad;
 
 } // namespace
 
-Basis PresentApplier::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
+Basis EntityPresenter::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
 	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
 	// form; signs as authored (two inversions cancel — the simassets ledger
 	// documents why).
@@ -252,7 +291,7 @@ Basis PresentApplier::held_weapon_hand_frame_basis(const Basis &bone_model_to_wo
 			Basis(Vector3(0, 1, 0), kHandFrameYRad);
 }
 
-Variant PresentApplier::held_weapon_attach_transform(Object *body,
+Variant EntityPresenter::held_weapon_attach_transform(Object *body,
 		const Vector3 &attach_angles_bms, bool hand_frame) {
 	Skeleton3D *skel = Object::cast_to<Skeleton3D>(find_skeleton(body));
 	if (skel == nullptr || skel->get_bone_count() <= kHeldWeaponBoneIndex) {
@@ -272,19 +311,42 @@ Variant PresentApplier::held_weapon_attach_transform(Object *body,
 			joint_world.origin + model_to_world.basis.xform(kHeldWeaponAttachNudge));
 }
 
-Vector3 PresentApplier::held_weapon_attach_nudge() {
+Vector3 EntityPresenter::held_weapon_attach_nudge() {
 	return kHeldWeaponAttachNudge;
 }
 
-double PresentApplier::held_weapon_hand_frame_z_rad() {
+double EntityPresenter::held_weapon_hand_frame_z_rad() {
 	return opennova::simassets::kHeldWeaponHandFrameZRad;
 }
 
-double PresentApplier::held_weapon_hand_frame_y_rad() {
+double EntityPresenter::held_weapon_hand_frame_y_rad() {
 	return opennova::simassets::kHeldWeaponHandFrameYRad;
 }
 
-Basis PresentApplier::aim_root_basis(const PackedFloat32Array &snap, int base,
+Object *EntityPresenter::find_skeleton(Object *root) {
+	// The recursive Skeleton3D walk the GDScript reference ran per call, native
+	// (ObjectModel.rebuild() frees children, so caching the result by
+	// ObjectID would go stale mid-play; the walk itself is now cheap).
+	if (root == nullptr) {
+		return nullptr;
+	}
+	if (Object::cast_to<Skeleton3D>(root) != nullptr) {
+		return root;
+	}
+	Node *node = Object::cast_to<Node>(root);
+	if (node == nullptr) {
+		return nullptr;
+	}
+	for (int i = 0; i < node->get_child_count(); ++i) {
+		Object *found = find_skeleton(node->get_child(i));
+		if (found != nullptr) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+Basis EntityPresenter::aim_root_basis(const PackedFloat32Array &snap, int base,
 		const Basis &fallback) {
 	const float *p = snap.ptr();
 	if (field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID) == 0) {
@@ -296,7 +358,7 @@ Basis PresentApplier::aim_root_basis(const PackedFloat32Array &snap, int base,
 					p[base + Simulation::PF_AIM_BODY_ROLL_DEG]));
 }
 
-void PresentApplier::aim_apply(Object *node, const PackedFloat32Array &snap,
+void EntityPresenter::aim_apply(Object *node, const PackedFloat32Array &snap,
 		int base, bool drive_root_basis) {
 	ObjectModel *model = Object::cast_to<ObjectModel>(node);
 	if (model == nullptr) {
@@ -314,7 +376,7 @@ void PresentApplier::aim_apply(Object *node, const PackedFloat32Array &snap,
 	aim_apply_valid(model, snap, base, drive_root_basis);
 }
 
-void PresentApplier::aim_apply_valid(Object *node,
+void EntityPresenter::aim_apply_valid(Object *node,
 		const PackedFloat32Array &snap, int base, bool drive_root_basis) {
 	ObjectModel *model = Object::cast_to<ObjectModel>(node);
 	if (model == nullptr) {
@@ -473,7 +535,7 @@ void world_heat_clear_typed(ObjectModel *model) {
 
 } // namespace
 
-int PresentApplier::wire_controls_apply(ObjectModel *model,
+int EntityPresenter::wire_controls_apply(ObjectModel *model,
 		const PackedFloat32Array &snap, int base) {
 	int writes = 0;
 	writes += emplaced_apply_typed(model, snap, base, true);
@@ -483,7 +545,7 @@ int PresentApplier::wire_controls_apply(ObjectModel *model,
 	return writes;
 }
 
-int PresentApplier::emplaced_apply(Object *node,
+int EntityPresenter::emplaced_apply(Object *node,
 		const PackedFloat32Array &snap, int base, bool clear_when_invalid) {
 	ObjectModel *model = Object::cast_to<ObjectModel>(node);
 	return model != nullptr
@@ -491,11 +553,75 @@ int PresentApplier::emplaced_apply(Object *node,
 			: 0;
 }
 
-int64_t PresentApplier::current_index_generation() {
+// --- The per-row legs both walks share ---------------------------------------
+
+void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
+		int base) {
+	model->set_match_terrain_enabled(
+			(field_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
+}
+
+bool EntityPresenter::stamp_right_hand_collapsed(ObjectModel *model,
+		const float *p, int base, int32_t &last_rhc) {
+	const int32_t rhc = field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED);
+	if (rhc == last_rhc) {
+		return false;
+	}
+	model->set_right_hand_collapsed(rhc != 0);
+	last_rhc = rhc;
+	return true;
+}
+
+bool EntityPresenter::aim_payload_changed(const float *p, int base,
+		std::array<float, kAimPayloadFloats> &cache, bool &cache_valid) {
+	static_assert(kAimPayloadFloats == AIM_PAYLOAD_FLOATS,
+			"the shared aim cache must span exactly aim_apply_valid's reads");
+	const float *payload = p + base + Simulation::PF_AIM_BODY_PITCH_DEG;
+	if (cache_valid) {
+		bool same = true;
+		for (int i = 0; i < kAimPayloadFloats; ++i) {
+			if (payload[i] != cache[static_cast<size_t>(i)]) {
+				same = false;
+				break;
+			}
+		}
+		if (same) {
+			return false;
+		}
+	}
+	std::copy_n(payload, kAimPayloadFloats, cache.begin());
+	cache_valid = true;
+	return true;
+}
+
+void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
+		int base, int64_t &last_mask) {
+	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
+		const uint32_t hidden_mask =
+				static_cast<uint32_t>(field_i(
+						p, base, Simulation::PF_SECTION_MASK_LO)) |
+				(static_cast<uint32_t>(field_i(
+						p, base, Simulation::PF_SECTION_MASK_HI))
+						<< 16);
+		const int64_t section_visibility_mask = static_cast<int64_t>(
+				hidden_mask ^ 0xffffffffu);
+		if (section_visibility_mask != last_mask) {
+			model->set_section_visibility_mask(section_visibility_mask);
+			last_mask = section_visibility_mask;
+		}
+	} else if (last_mask != -2 && last_mask != -1) {
+		model->set_section_visibility_mask(-1);
+		last_mask = -1;
+	}
+}
+
+// --- The placed walk ---------------------------------------------------------
+
+int64_t EntityPresenter::current_index_generation() {
 	return index_.is_valid() ? index_->get_generation() : 0;
 }
 
-bool PresentApplier::row_plan_is_current(int64_t size, int stride,
+bool EntityPresenter::row_plan_is_current(int64_t size, int stride,
 		int64_t layout_revision) {
 	if (plan_dirty_ || plan_revision_ != layout_revision ||
 			plan_stride_ != stride || plan_snapshot_size_ != size ||
@@ -507,14 +633,13 @@ bool PresentApplier::row_plan_is_current(int64_t size, int stride,
 	return true;
 }
 
-void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
+void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		int64_t layout_revision) {
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
 	}
 	++stat_plan_rebuilds_;
 	release_planned_rows();
-	present_visibility_.clear();
 	plan_revision_ = layout_revision;
 	plan_stride_ = stride;
 	plan_snapshot_size_ = size;
@@ -548,7 +673,7 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 	}
 }
 
-void PresentApplier::release_part_anim_outputs() {
+void EntityPresenter::release_part_anim_outputs() {
 	for (const Row &row : rows_) {
 		ObjectModel *model =
 				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
@@ -564,7 +689,7 @@ void PresentApplier::release_part_anim_outputs() {
 	}
 }
 
-const String &PresentApplier::infantry_key(int state) {
+const String &EntityPresenter::infantry_key(int state) {
 	auto it = infantry_keys_.find(state);
 	if (it == infantry_keys_.end()) {
 		it = infantry_keys_.emplace(state, Simulation::infantry_anim_key(state))
@@ -573,12 +698,12 @@ const String &PresentApplier::infantry_key(int state) {
 	return it->second;
 }
 
-void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
+void EntityPresenter::present_snapshot(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision) {
 	present_snapshot_impl(snap, stride, layout_revision, nullptr);
 }
 
-PackedInt64Array PresentApplier::profile_present_snapshot(
+PackedInt64Array EntityPresenter::profile_present_snapshot(
 		const PackedFloat32Array &snap, int stride, int64_t layout_revision) {
 	MissionFrameProfile profile;
 	present_snapshot_impl(snap, stride, layout_revision, &profile);
@@ -595,7 +720,7 @@ PackedInt64Array PresentApplier::profile_present_snapshot(
 	return result;
 }
 
-void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
+void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision, MissionFrameProfile *p_profile) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
@@ -605,14 +730,12 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
-	Simulation *native_sim =
-			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	for (Row &row : rows_) {
 		// Main-thread Node destruction advances this stamp in PREDELETE. Once
 		// a planned model was freed by a notification dispatched during this
 		// walk, no retained pointer is trusted for the rest of it: every later
-		// row resolves cold through ObjectDB (a freed row releases its
-		// visibility intent) and the plan rebinds on the next call, so one
+		// row resolves cold through ObjectDB (a freed row's visibility intent
+		// died with its node) and the plan rebinds on the next call, so one
 		// free never drops a frame of presentation for the surviving rows.
 		if (plan_model_lifetime_generation_ !=
 				ObjectModel::lifetime_generation()) {
@@ -623,8 +746,6 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 			model = Object::cast_to<ObjectModel>(
 					ObjectDB::get_instance(row.node_id));
 			if (model == nullptr) {
-				present_visibility_.erase(row.bms_id);
-				row.present_visible = -1;
 				continue;
 			}
 		}
@@ -635,8 +756,7 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 		if (p_profile != nullptr) {
 			++p_profile->rows;
 		}
-		model->set_match_terrain_enabled(
-				(field_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
+		stamp_match_terrain(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
@@ -703,7 +823,7 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 		// while the row was out (set legs are per-submission re-asserts;
 		// falling edges latched in the publish state still clear).
 		const bool submitted = present_visible &&
-				!occlusion_hidden_ids_.has(row.bms_id) &&
+				!model->is_occlusion_hidden() &&
 				model->is_on_screen();
 		if (p_profile != nullptr) {
 			const uint64_t now = Time::get_singleton()->get_ticks_usec();
@@ -717,41 +837,18 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).
 		bool body_dependency_changed = false;
-		if (submitted) {
-			const int32_t rhc =
-					field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED);
-			if (rhc != row.rhc) {
-				model->set_right_hand_collapsed(rhc != 0);
-				++stat_rhc_dispatches_;
-				row.rhc = rhc;
-				body_dependency_changed = true;
-			}
+		if (submitted && stamp_right_hand_collapsed(model, p, base, row.rhc)) {
+			++stat_rhc_dispatches_;
+			body_dependency_changed = true;
 		}
 		if (submitted) {
 			const int32_t aim_valid =
 					field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID);
 			if (aim_valid != 0) {
-				bool payload_changed =
-						row.aim_valid != 1 || !row.aim_payload_valid;
-				if (!payload_changed) {
-					for (int i = 0; i < AIM_PAYLOAD_FLOATS; ++i) {
-						if (row.aim_payload[static_cast<size_t>(i)] !=
-								p[base +
-										Simulation::PF_AIM_BODY_PITCH_DEG +
-										i]) {
-							payload_changed = true;
-							break;
-						}
-					}
-				}
-				if (payload_changed) {
+				if (aim_payload_changed(p, base, row.aim_payload,
+						row.aim_payload_valid)) {
 					aim_apply_valid(model, snap, base, false);
 					++stat_aim_dispatches_;
-					std::copy_n(
-							p + base +
-									Simulation::PF_AIM_BODY_PITCH_DEG,
-							AIM_PAYLOAD_FLOATS, row.aim_payload.begin());
-					row.aim_payload_valid = true;
 					body_dependency_changed = true;
 				}
 				row.aim_valid = 1;
@@ -919,50 +1016,25 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 			p_profile->controls_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
-		const int32_t present_visible_int = present_visible ? 1 : 0;
-		if (present_visible_int != row.present_visible) {
-			present_visibility_[row.bms_id] = present_visible;
-			row.present_visible = present_visible_int;
-		}
 		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
-			// The row owns the model's section-mask channel only while it
-			// publishes PF_SECTION_MASK_VALID. Rows that never publish must
-			// not touch the channel at all — the occlusion frame pass drives
-			// the same ObjectModel call for buildings, and an unconditional
-			// release here would stomp its applied mask after a plan rebuild.
-			if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-				const uint32_t hidden_mask =
-						static_cast<uint32_t>(field_i(
-								p, base, Simulation::PF_SECTION_MASK_LO)) |
-						(static_cast<uint32_t>(field_i(
-								p, base, Simulation::PF_SECTION_MASK_HI))
-								<< 16);
-				const int64_t section_visibility_mask = static_cast<int64_t>(
-						hidden_mask ^ 0xffffffffu);
-				if (section_visibility_mask != row.section_visibility_mask) {
-					model->set_section_visibility_mask(section_visibility_mask);
-					row.section_visibility_mask = section_visibility_mask;
-				}
-			} else if (row.section_visibility_mask != -2 &&
-					row.section_visibility_mask != -1) {
-				// One release when a previously owned row stops publishing.
-				model->set_section_visibility_mask(-1);
-				row.section_visibility_mask = -1;
-			}
+			stamp_section_mask(model, p, base, row.section_visibility_mask);
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed. Semantics and
 			// witnesses recorded at the GDScript origin (mission_present_pass.gd)
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
 			// Flags&4 husk pick @ 0x413086].
-			if (model->is_visible() != present_visible) {
-				// Two-bit visibility ownership: while the render-occlusion frame
-				// claims this node (the shared hidden set), a sim-wants-visible
-				// node stays hidden — occlusion releases through the same set.
-				if (!(present_visible &&
-							occlusion_hidden_ids_.has(row.bms_id))) {
-					model->set_visible(present_visible);
-				}
+			// Two-bit visibility ownership: this walk owns the model's
+			// present bit (the sim's intent), the render-occlusion frame owns
+			// its occlusion-hidden bit, and the node's visible flag is their
+			// product — a claimed node stays hidden through a sim show and
+			// releases onto the sim's intent. The node flag is reconciled live
+			// so a foreign write (a Stop restore, a preview) never outlives
+			// one frame.
+			if (model->is_present_visible() != present_visible ||
+					model->is_visible() !=
+							(present_visible && !model->is_occlusion_hidden())) {
+				model->set_present_visible(present_visible);
 			}
 			if (!present_visible) {
 				++stat_hidden_;

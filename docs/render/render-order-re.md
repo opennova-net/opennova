@@ -120,7 +120,7 @@ the mounted child `@ 0x4e3e34..0x4e3e51`), which is
 (the third-person held weapon follows the head part of a composed avatar, the
 body otherwise; the NVG/binocular overlays take the same owner when they are
 ported). Bounded residual (2026-08-30): the mounted child is NOT yet stamped
-— riders are presented as independent wire entities (`wire_present_pass.cpp`
+— riders are presented as independent wire entities (`entity_presenter_wire.cpp`
 carries no seat leg; the row's `PF_CARRIER_HANDLE` names the carrier) and
 walk their own thresholds from their own projected radius where retail
 indexes them with the vehicle's level `@ 0x4e3e34..0x4e3e51`; the stamp

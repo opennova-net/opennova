@@ -15,16 +15,13 @@ const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 #
 # Diff-applied: the sim emits verdict CHANGES (get_building_visibility_changes /
 # get_render_culled_changes) and only transitions touch nodes, so a steady frame
-# does no per-node work. Two ownership bits decide final visibility:
-# the present pass owns the sim's intent (PF_HIDDEN), this system owns the
-# occlusion hide — the present pass consults _occlusion_hidden_ids (shared by
-# reference) so it never fights an occlusion hide, and an occlusion release
-# lands on sim.entity_present_visible() so a sim-hidden entity never flashes.
-#
-# The two shared dictionaries below are created ONCE here and NEVER
-# reassigned: GameWorld._start_runtime hands these SAME instances by reference
-# on MissionSetupOptions (PresentApplier stores them; the shared-reference
-# contract is pinned by mission_present_pass_test). Unload clears IN PLACE.
+# does no per-node work. Two ownership bits on each ObjectModel decide final
+# visibility: the entity presenter's placed walk owns the sim's intent
+# (PF_HIDDEN -> set_present_visible), this system owns the occlusion hide
+# (set_occlusion_hidden), and the node's visible flag is their product — the
+# placed walk never fights an occlusion hide, and an occlusion release lands on
+# the sim's current intent so a sim-hidden entity never flashes (the bit
+# contract is pinned by mission_present_pass_test).
 
 # The GameWorld whose render nodes this pass drives — a direct reference,
 # stored once in setup(); per-frame reads go through its public getters as
@@ -38,16 +35,10 @@ var _world: GameWorld
 # clear-color pass reads it directly every frame (indoors clears BLACK).
 var blink_indoors := false
 var _blink_water_suppressed := false
-# bms_id -> true for every node occlusion currently hides (buildings whose
-# batch verdict culled them, entities the render gates culled).
-var _occlusion_hidden_ids: Dictionary = {}
-# Exact MissionPresentPass bms_id -> visibility intent, shared by reference.
-# Occlusion only layers hides on top of this value and never reconstructs the
-# present predicate independently.
-var _present_visibility: Dictionary = {}
-# bms_id -> resolved ObjectModel, so steady frames skip registry lookups.
-# Entries revalidate with is_instance_valid on use (LIVENESS, not typing);
-# reset on unload/A-B seams.
+# bms_id -> resolved ObjectModel, so steady frames skip registry lookups; every
+# node this pass hid or masked is in it, so the release walk (A/B seam, unload)
+# finds the bits it set. Entries revalidate with is_instance_valid on use
+# (LIVENESS, not typing); reset on unload/A-B seams.
 var _occlusion_node_cache: Dictionary = {}
 
 # The shared F3 frame-stats board (null outside the game shell), re-handed by
@@ -72,17 +63,6 @@ func setup(world: GameWorld) -> void:
 
 func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
-
-
-## The occlusion-claim set the present pass consults — shared BY REFERENCE
-## (never copied, never reassigned; see the header contract).
-func occlusion_hidden_ids() -> Dictionary:
-	return _occlusion_hidden_ids
-
-
-## The present pass's exact visibility intent — shared BY REFERENCE.
-func present_visibility() -> Dictionary:
-	return _present_visibility
 
 
 # --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------
@@ -209,7 +189,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 			continue
 		var packed := int(changes[i + 1])
 		node.set_section_visibility_mask(Simulation.building_visibility_mask(packed))
-		_set_occlusion_hidden(sim, node, bms_id, not Simulation.building_visibility_visible(packed))
+		node.set_occlusion_hidden(not Simulation.building_visibility_visible(packed))
 	if timing:
 		building_apply_us = Time.get_ticks_usec() - building_apply_start
 
@@ -225,24 +205,24 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		for i in range(1, 1 + added):
 			var node := _occlusion_node(registry, int(culled_changes[i]))
 			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), true)
+				node.set_occlusion_hidden(true)
 		for i in range(2 + added, culled_changes.size()):
 			var node := _occlusion_node(registry, int(culled_changes[i]))
 			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
-	# The same collector gate over the rows WirePresentPass draws (remote
-	# organics and runtime spawns with no placed identity), keyed by wire
-	# handle: retail's client walks its wire-built pools exactly like the host
-	# walks its own (the native gate carries the witness).
+				node.set_occlusion_hidden(false)
+	# The same collector gate over the rows the entity presenter's wire walk
+	# draws (remote organics and runtime spawns with no placed identity), keyed
+	# by wire handle: retail's client walks its wire-built pools exactly like
+	# the host walks its own (the native gate carries the witness).
 	var wire_culled_changes: PackedInt32Array = sim.get_wire_render_culled_changes()
 	if wire_culled_changes.size() >= 2:
-		var wire_present_for_cull := runtime.get_wire_presenter()
-		if wire_present_for_cull != null:
+		var presenter_for_cull := runtime.get_entity_presenter()
+		if presenter_for_cull != null:
 			var wire_added := int(wire_culled_changes[0])
 			for i in range(1, 1 + wire_added):
-				wire_present_for_cull.set_render_culled(int(wire_culled_changes[i]), true)
+				presenter_for_cull.set_render_culled(int(wire_culled_changes[i]), true)
 			for i in range(2 + wire_added, wire_culled_changes.size()):
-				wire_present_for_cull.set_render_culled(int(wire_culled_changes[i]), false)
+				presenter_for_cull.set_render_culled(int(wire_culled_changes[i]), false)
 	if timing:
 		cull_apply_us = Time.get_ticks_usec() - cull_apply_start
 
@@ -251,7 +231,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 	# directional term (engine/runtime/renderer/light_runtime.h
 	# sun_visibility_factor owns the witness). Placed and wire identities share
 	# this triple feed; wire rays use the separately keyed 17-tick candidate
-	# arena, and WirePresentPass retains the value for cold bodies/weapons.
+	# arena, and the entity presenter retains the value for cold bodies/weapons.
 	# [orig: setup_terrain_effect_for_entity @ 0x5c74a0, pushed per sector
 	# entity draw @ 0x5c7bff]
 	if env != null:
@@ -261,7 +241,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		if timing:
 			light_query_us = Time.get_ticks_usec() - light_query_start
 		var light_apply_start := Time.get_ticks_usec() if timing else 0
-		var wire_present := runtime.get_wire_presenter()
+		var presenter := runtime.get_entity_presenter()
 		for i in range(0, sun_changes.size(), 3):
 			var wire_handle := int(sun_changes[i])
 			var bms_id := int(sun_changes[i + 1])
@@ -269,8 +249,8 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 			# renderer::sun_visibility_factor via sun_quality_factor).
 			var effect_scale := sim.sun_quality_factor(int(sun_changes[i + 2]))
 			if wire_handle >= 0:
-				if wire_present != null:
-					wire_present.set_entity_lighting_context(
+				if presenter != null:
+					presenter.set_entity_lighting_context(
 							wire_handle, effect_scale, false, 0.0)
 				continue
 			var sun_node := _occlusion_node(registry, bms_id)
@@ -344,23 +324,6 @@ func _occlusion_node(registry: EntityIndex, bms_id: int) -> ObjectModel:
 	return node
 
 
-# The occlusion-hidden ownership bit. A hide claims the id (the present pass
-# consults the shared set and never fights it); a release clears the claim and
-# lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
-# entity never flashes for a frame.
-func _set_occlusion_hidden(sim: Simulation, node: ObjectModel, bms_id: int,
-		hidden: bool) -> void:
-	if hidden:
-		if not _occlusion_hidden_ids.has(bms_id):
-			_occlusion_hidden_ids[bms_id] = true
-			if node.visible:
-				node.visible = false
-	elif _occlusion_hidden_ids.erase(bms_id):
-		var present_visible := _entity_present_visible(sim, bms_id)
-		if present_visible and not node.visible:
-			node.visible = true
-
-
 # The live sim for the occlusion apply paths (null before a mission runtime
 # exists — a real state on the unload/A-B seams).
 func _occlusion_sim() -> Simulation:
@@ -368,36 +331,20 @@ func _occlusion_sim() -> Simulation:
 	return runtime.get_sim() if runtime != null else null
 
 
-func _entity_present_visible(sim: Simulation, bms_id: int) -> bool:
-	if _present_visibility.has(bms_id):
-		return bool(_present_visibility[bms_id])
-	# Sources without MissionPresentPass retain the native base predicate.
-	# Production placed nodes always publish the exact combined hidden +
-	# local-view-suppressed intent above.
-	if sim != null:
-		return bool(sim.entity_present_visible(bms_id))
-	return true
-
-
-# Release every occlusion override: restore claimed nodes to the sim's present
-# intent, clear section masks to fully-visible, drop the caches, and forget the
+# Release every occlusion override: clear the occlusion-hidden bit on every
+# node this pass touched (the node lands on the sim's CURRENT present intent —
+# the placed walk's own bit — so a WAC/sim-hidden entity never flashes for a
+# frame), clear section masks to fully-visible, drop the caches, and forget the
 # sim's delta baseline so a later re-enable re-emits full state. The A/B seam
 # keeps mission blink/indoors semantics (reset_semantics=false); reset_semantics
 # = true marks the unload-time release — the mission force-indoors attribute
 # itself stays on GameWorld (test-pinned by name) and unload clears it THERE,
 # so the flag carries no extra work here.
 func release_overrides(_reset_semantics: bool) -> void:
-	var sim := _occlusion_sim()
-	for bms_id in _occlusion_hidden_ids:
-		var node := _occlusion_hidden_release_node(int(bms_id))
-		if node != null:
-			var present_visible := _entity_present_visible(sim, int(bms_id))
-			if present_visible:
-				node.visible = true
-	_occlusion_hidden_ids.clear()
 	for bms_id in _occlusion_node_cache:
 		var node := _occlusion_hidden_release_node(int(bms_id))
 		if node != null:
+			node.set_occlusion_hidden(false)
 			node.set_section_visibility_mask(-1)
 	_occlusion_node_cache.clear()
 	_reset_apply_baseline()
@@ -413,14 +360,14 @@ func rebind_placed_nodes() -> void:
 	_reset_apply_baseline()
 
 
-# The wire pass's applied render-gate verdicts pair with the sim's baseline:
+# The wire walk's applied render-gate verdicts pair with the sim's baseline:
 # both forget together, so the next frame's full re-emit lands on a clean set.
 func _clear_wire_render_culled() -> void:
 	var runtime: MissionPresentation = _world.get_runtime()
-	var wire_present: WirePresentPass = runtime.get_wire_presenter() \
+	var presenter: EntityPresenter = runtime.get_entity_presenter() \
 			if runtime != null else null
-	if wire_present != null:
-		wire_present.clear_render_culled()
+	if presenter != null:
+		presenter.clear_render_culled()
 
 
 # The cache holds only ObjectModels; entries revalidate for LIVENESS on use.
@@ -439,16 +386,12 @@ func _reset_apply_baseline() -> void:
 
 
 ## Unload teardown. The ordering replicates the pre-extraction unload EXACTLY:
-## 1. the shared present-visibility intent clears first (GameWorld.unload
-##    cleared it well before its blink/occlusion resets), so step 3's release
-##    consult falls back to sim.entity_present_visible for every claimed node;
-## 2. the blink letter gates restore [orig: the letter-bit clear @ 0x525c45 at
+## 1. the blink letter gates restore [orig: the letter-bit clear @ 0x525c45 at
 ##    mission start] — an unload while indoors must not leave the next
 ##    mission's terrain/sky/water hidden;
-## 3. every occlusion override releases and the sim delta baseline resets.
-## Both shared dictionaries clear IN PLACE — their identity is pinned.
+## 2. every occlusion override releases (the hidden bits this pass set clear
+##    onto each node's own present intent) and the sim delta baseline resets.
 func reset() -> void:
-	_present_visibility.clear()
 	_reset_blink_frame_gates()
 	release_overrides(true)
 

@@ -4,7 +4,7 @@ extends GutTest
 # list is pure data through the public present_draw_list leg (production
 # present() pulls Simulation.get_scar_draw_list), the owner models are real
 # ObjectModels built from the armory fixture (their render-part nodes mount the
-# entity-ring meshes), the wire resolver is a real WirePresentPass with injected
+# entity-ring meshes), the wire resolver is a real EntityPresenter with injected
 # nodes, and the textures resolve through a real ResourceRoot over a temp dir.
 #
 # [orig: Scar_RenderAllCaches @0x5CDF70 -> Scar_RenderCache @0x5CD830; the
@@ -146,8 +146,9 @@ func _batch(draw: ScarDrawList, owner: int, texture: int, section: int,
 	draw.slots_live += quads
 
 
-func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
-	var presenter := WirePresentPass.new()
+func _wire_resolver(nodes: Dictionary = {}) -> EntityPresenter:
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
 	for handle in nodes:
 		presenter.register_wire_node(int(handle), nodes[handle])
 	return presenter

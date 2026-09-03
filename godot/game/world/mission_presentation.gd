@@ -38,8 +38,10 @@ const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
 # arithmetic itself is native.
 
 var _sim: Simulation
-var _present: PresentApplier          # placed nodes on every role or tooling/test preview
-var _wire_present: WirePresentPass    # un-placed network entities or SP attachment children
+# THE entity presenter (ADR 0043 d9), the "Entities" child: its placed walk drives the
+# authored nodes on every role (or a tooling/test preview); its wire walk, when set up,
+# materializes un-placed network entities or SP attachment children.
+var _entities: EntityPresenter
 var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers; else null
 var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
@@ -241,34 +243,34 @@ func setup(mission: MissionData, container: Node,
 	# The registry present drives whichever authored mission nodes actually exist. A
 	# production joiner owns only the 616-byte wire header, so its index is empty: the
 	# native sim separately materializes streamed pools 1-3 at exact packed handles for
-	# world-side consumers, while the wire pass below renders their decoded live state.
+	# world-side consumers, while the wire walk below renders their decoded live state.
 	# Complete-BMS/debug joins still retain authored nodes and the ordinary defer identity.
-	_present = PresentApplier.new()
-	_present.setup(_sim, _index, registry_placer)
-	# The shell's shared occlusion/visibility maps (shared BY REFERENCE: GameWorld
-	# mutates the hidden set in place; the release lands on the sim's current
-	# intent so neither visibility writer fights the other). Output channels keep
-	# the applier's native OUTPUT_ALL default.
-	_present.set_shared_visibility_maps(
-			options.occlusion_hidden_ids, options.present_visibility)
+	# ONE presenter node runs both walks over the same snapshot (ADR 0043 d9); output
+	# channels keep its native OUTPUT_ALL default. Visibility ownership is the two bits
+	# on each ObjectModel: the placed walk writes the sim's intent
+	# (set_present_visible), the occlusion frame its claim (set_occlusion_hidden), and
+	# the node's visible flag is their product, so neither writer fights the other.
+	_entities = EntityPresenter.new()
+	_entities.name = "Entities"
+	add_child(_entities)
+	_entities.setup(_sim, _index, registry_placer)
 	# Co-op renders decoded remote rows WIRE-DIRECT. On a host that principally covers
 	# dynamically admitted players; on a header-only joiner it covers every remote row,
 	# because none has an authored placed node. Complete-BMS/debug roles still defer any
-	# row resolved by _index so MissionPresentPass and WirePresentPass never double-render.
+	# row resolved by _index so the placed and wire walks never double-render.
 	var full_wire_present := is_joiner or _sim.is_host_listening()
 	var sp_attachment_present := (
 			not full_wire_present and options.placer != null)
 	if full_wire_present or sp_attachment_present:
-		_wire_present = WirePresentPass.new()
 		# A retail network join has no local BMS identity table at load: the
 		# index is empty until the host's world stream settles, when GameWorld
 		# places the streamed statics through the same placer and
 		# rebind_placed_entities() fills this SAME index. Rows carrying a placed
-		# identity defer with or without a resolvable node, so the wire pass
+		# identity defer with or without a resolvable node, so the wire walk
 		# keeps only organics and runtime spawns on every role.
-		_wire_present.setup(_sim, options.placer, container, _index)
-		_wire_present.set_synthetic_origin_only(sp_attachment_present)
-		simulation_restarted.connect(_wire_present.reset_runtime_state)
+		_entities.setup_wire(_sim, options.placer, container, _index)
+		_entities.set_synthetic_origin_only(sp_attachment_present)
+	simulation_restarted.connect(_entities.reset_wire_runtime_state)
 	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
 	# effect + tracer streaks off the sim's fired/tracer drains. A joiner re-runs
 	# decoded S2C tag-2 rounds through the same visual RoundSim, so it must drain
@@ -277,16 +279,15 @@ func setup(mission: MissionData, container: Node,
 	# [orig: remote tag-2 receive -> RoundData_SpawnRound; net-re §5.60]
 	if not options.fire_audio.is_null():
 		_fire_present = FirePresentPass.new()
-		# The muzzle anchor for retail's adm-arm fire effect. Bound to the WIRE pass
-		# (built just above) because that pass owns the per-handle held-weapon node the
-		# effect spawns at; an absent wire pass simply leaves the Callable invalid and
-		# the fire pass keeps the wire position, which is the pre-existing behaviour.
+		# The muzzle anchor for retail's adm-arm fire effect: the entity presenter
+		# owns the per-handle held-weapon node the effect spawns at; a shooter with
+		# no wire body resolves to a non-finite anchor and the fire pass keeps the
+		# wire position, which is the pre-existing behaviour.
 		_fire_present.setup(_sim, container,
 			options.fire_audio,
 			options.fire_fx,
 			options.fire_listener,
-			_wire_present.muzzle_world_for if _wire_present != null
-					else Callable(),
+			_entities.muzzle_world_for,
 			options.muzzle_light)
 		# The sim's fire-sound distance gate reads the camera listener at fire
 		# time on the logic clock (world/fire_sound.h); GameFramePipeline stamps
@@ -308,7 +309,7 @@ func setup(mission: MissionData, container: Node,
 			options.item_db, options.effect_anchors,
 			options.fire_audio,
 			options.fire_fx,
-			_wire_present,
+			_entities,
 			options.death_light)
 		simulation_restarted.connect(_destruction_present.reset_runtime_state)
 	# The throwable-presentation pass: item models for flying grenades/satchels
@@ -330,7 +331,7 @@ func setup(mission: MissionData, container: Node,
 	#  @0x5c91b7]. The camera + environment providers are the device inputs the
 	# renderer's cull and vertex colour read (fire_listener IS the camera).
 	_scar_present = ScarPresentPass.new()
-	_scar_present.setup(_sim, container, _index, _wire_present,
+	_scar_present.setup(_sim, container, _index, _entities,
 		options.resource_root,
 		options.fire_listener,
 		options.environment_node)
@@ -489,8 +490,8 @@ func _sync_runtime_profiling() -> void:
 
 # Mission-presentation counters (probe/diagnostic seam).
 func get_mission_present_stats() -> MissionPresentStats:
-	return _present.get_stats_record() \
-			if _present != null else MissionPresentStats.new()
+	return _entities.get_stats_record() \
+			if _entities != null else MissionPresentStats.new()
 
 
 func get_fire_present_stats() -> RefCounted:
@@ -499,16 +500,16 @@ func get_fire_present_stats() -> RefCounted:
 	return _fire_present.get_stats() if _fire_present != null else null
 
 
-# Wire-presentation counters (spawned/unresolved/live; empty when the pass is absent).
+# Wire-presentation counters (spawned/unresolved/live; empty before setup).
 func get_wire_present_stats() -> WirePresentStats:
-	return _wire_present.get_stats_record() \
-			if _wire_present != null else WirePresentStats.new()
+	return _entities.get_wire_stats_record() \
+			if _entities != null else WirePresentStats.new()
 
 
-## Cold wire rows the presentation budget still owes. Zero when there is no
-## wire presenter; NetSessionDrive keys the join-admission edge on this drain.
+## Cold wire rows the presentation budget still owes. Zero before setup;
+## NetSessionDrive keys the join-admission edge on this drain.
 func join_wire_present_pending() -> int:
-	return _wire_present.pending_spawn_count() if _wire_present != null else 0
+	return _entities.pending_spawn_count() if _entities != null else 0
 
 
 ## Load-time warm hook: compile the fire-presentation pipelines (the tracer
@@ -545,17 +546,13 @@ func get_registry() -> EntityIndex:
 	return _index
 
 
-## Register a render-side consumer for models materialized from the replicated
-## wire stream. The pass replays already-live nodes when the callback is set.
-func set_wire_node_spawned_callback(callback: Callable) -> void:
-	if _wire_present != null:
-		_wire_present.set_node_spawned_callback(callback)
-
-
-## The active wire-direct presenter, exposed for lifecycle integrations and
-## diagnostics. Null when this mission has no replicated/synthetic rows.
-func get_wire_presenter() -> WirePresentPass:
-	return _wire_present
+## The entity presenter (the "Entities" child): the render-occlusion frame's
+## wire render gates + lighting contexts, the wire-handle resolver the
+## destruction/scar passes read, the `wire_node_spawned` signal the world's
+## effect directors subscribe to, and the perf probes' output-channel A/B
+## seam. Null before setup.
+func get_entity_presenter() -> EntityPresenter:
+	return _entities
 
 
 ## Re-key the placed-node index after a late placement (a joiner's streamed
@@ -571,7 +568,7 @@ func rebind_placed_entities(placer: MissionObjectPlacer) -> void:
 
 ## A joiner's stamped slot vanished or was re-typed: its placed representation
 ## (an individual node or a batched static instance) must stop drawing, since
-## the wire pass now owns whatever occupies that slot.
+## the wire walk now owns whatever occupies that slot.
 func _retire_placed_rows() -> void:
 	if _sim == null or not _sim.is_joiner():
 		return
@@ -580,15 +577,9 @@ func _retire_placed_rows() -> void:
 		if _index != null:
 			var node: ObjectModel = _index.resolve_single(int(bms_id))
 			if node != null:
-				node.visible = false
+				node.set_present_visible(false)
 		if _registry_placer != null:
 			_registry_placer.hide_static_instance(int(bms_id))
-
-
-## The placed-node present applier (the perf probes toggle its output channels
-## for their A/B legs); null before setup.
-func get_present_applier() -> PresentApplier:
-	return _present
 
 
 func entity_count() -> int:
@@ -600,54 +591,53 @@ func is_playing() -> bool:
 
 
 func _present_entity_rows(stats_on := false) -> void:
-	if _sim == null or (_present == null and _wire_present == null):
+	if _sim == null or _entities == null:
 		return
 	var stride := int(_sim.get_present_stride())
 	if stride <= 0:
 		return
-	# Both entity presenters consume the same immutable row buffer. Fetching it
-	# once also makes their topology revision refer to exactly the same layout.
+	# Both walks consume the same immutable row buffer. Fetching it once also
+	# makes their topology revision refer to exactly the same layout.
 	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
 	if stats_on:
 		# The native buffer build the fetch above just paid for.
 		_frame_stats.add(FrameStats.PRESENT_SNAPSHOT,
 				int(_sim.get_last_present_snapshot_us()))
 	var layout_revision := int(_sim.get_present_layout_revision())
-	if _present != null:
-		var mission_start := Time.get_ticks_usec() if stats_on else 0
-		if stats_on:
-			var profile: PackedInt64Array = _present.profile_present_snapshot(
-					snapshot, stride, layout_revision)
-			if profile.size() >= PresentApplier.MISSION_PROFILE_SLOT_COUNT:
-				_frame_stats.add(FrameStats.PRESENT_MISSION_CORE,
-						profile[PresentApplier.MISSION_PROFILE_CORE_US])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_AIM,
-						profile[PresentApplier.MISSION_PROFILE_AIM_US])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_CONTROLS,
-						profile[PresentApplier.MISSION_PROFILE_CONTROLS_US])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_VISIBILITY,
-						profile[PresentApplier.MISSION_PROFILE_VISIBILITY_US])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_BODY,
-						profile[PresentApplier.MISSION_PROFILE_BODY_US])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_ROWS,
-						profile[PresentApplier.MISSION_PROFILE_ROWS])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_SUBMITTED_ROWS,
-						profile[PresentApplier.MISSION_PROFILE_SUBMITTED_ROWS])
-				_frame_stats.add(FrameStats.PRESENT_MISSION_BODY_ROWS,
-						profile[PresentApplier.MISSION_PROFILE_BODY_ROWS])
-			_frame_stats.add(FrameStats.PRESENT_MISSION,
-					Time.get_ticks_usec() - mission_start)
-		else:
-			_present.present_snapshot(snapshot, stride, layout_revision)
-	if _wire_present != null:
-		var wire_start := Time.get_ticks_usec() if stats_on else 0
-		_wire_present.present_snapshot(snapshot, stride, layout_revision)
-		if stats_on:
-			_frame_stats.add(FrameStats.PRESENT_WIRE,
-					Time.get_ticks_usec() - wire_start)
-			var wire_stats: WirePresentStats = _wire_present.get_stats_record()
-			_frame_stats.add(FrameStats.PRESENT_WIRE_LIVE, wire_stats.live)
-			_frame_stats.add(FrameStats.PRESENT_WIRE_PENDING, wire_stats.pending)
+	var mission_start := Time.get_ticks_usec() if stats_on else 0
+	if stats_on:
+		var profile: PackedInt64Array = _entities.profile_present_snapshot(
+				snapshot, stride, layout_revision)
+		if profile.size() >= EntityPresenter.MISSION_PROFILE_SLOT_COUNT:
+			_frame_stats.add(FrameStats.PRESENT_MISSION_CORE,
+					profile[EntityPresenter.MISSION_PROFILE_CORE_US])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_AIM,
+					profile[EntityPresenter.MISSION_PROFILE_AIM_US])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_CONTROLS,
+					profile[EntityPresenter.MISSION_PROFILE_CONTROLS_US])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_VISIBILITY,
+					profile[EntityPresenter.MISSION_PROFILE_VISIBILITY_US])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_BODY,
+					profile[EntityPresenter.MISSION_PROFILE_BODY_US])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_ROWS,
+					profile[EntityPresenter.MISSION_PROFILE_ROWS])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_SUBMITTED_ROWS,
+					profile[EntityPresenter.MISSION_PROFILE_SUBMITTED_ROWS])
+			_frame_stats.add(FrameStats.PRESENT_MISSION_BODY_ROWS,
+					profile[EntityPresenter.MISSION_PROFILE_BODY_ROWS])
+		_frame_stats.add(FrameStats.PRESENT_MISSION,
+				Time.get_ticks_usec() - mission_start)
+	else:
+		_entities.present_snapshot(snapshot, stride, layout_revision)
+	# The wire walk is a no-op until setup_wire ran (a placer-less preview).
+	var wire_start := Time.get_ticks_usec() if stats_on else 0
+	_entities.present_wire_snapshot(snapshot, stride, layout_revision)
+	if stats_on:
+		_frame_stats.add(FrameStats.PRESENT_WIRE,
+				Time.get_ticks_usec() - wire_start)
+		var wire_stats: WirePresentStats = _entities.get_wire_stats_record()
+		_frame_stats.add(FrameStats.PRESENT_WIRE_LIVE, wire_stats.live)
+		_frame_stats.add(FrameStats.PRESENT_WIRE_PENDING, wire_stats.pending)
 
 
 # One whole present frame: the entity rows plus the tick-driven passes, each
@@ -916,7 +906,7 @@ func _restore_transforms() -> void:
 	for node in _orig_transforms.keys():
 		if is_instance_valid(node):
 			node.transform = _orig_transforms[node]
-			node.visible = true  # undo any visibility the present pass changed
+			node.set_present_visible(true)  # undo any visibility intent the placed walk wrote
 	_orig_transforms.clear()
 
 
@@ -955,12 +945,12 @@ func _exit_tree() -> void:
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
-	if _wire_present != null:
-		var reset_wire := _wire_present.reset_runtime_state
+	if _entities != null:
+		var reset_wire := _entities.reset_wire_runtime_state
 		if simulation_restarted.is_connected(reset_wire):
 			simulation_restarted.disconnect(reset_wire)
-		_wire_present.teardown()
-		_wire_present = null
+		_entities.teardown()  # frees the wire bodies + held weapons under the container
+		_entities = null  # the "Entities" child itself dies with this node
 	if _destruction_present != null:
 		var reset_destruction := _destruction_present.reset_runtime_state
 		if simulation_restarted.is_connected(reset_destruction):

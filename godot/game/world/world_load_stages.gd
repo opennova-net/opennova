@@ -722,12 +722,6 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# remote-entity avatars (build_player_animated_model): every remote row on a
 	# joiner, and the admitted players' synthetic-origin rows on the host.
 	opts.placer = _world._placer
-	# The occlusion-claim set the present pass consults (two-bit visibility
-	# ownership; see OcclusionFramePass._set_occlusion_hidden). Shared by
-	# reference: the pass created these dictionaries once and mutates them in
-	# place across the mission's occlusion frames — hand the SAME instances.
-	opts.occlusion_hidden_ids = _world._occlusion.occlusion_hidden_ids()
-	opts.present_visibility = _world._occlusion.present_visibility()
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
@@ -946,11 +940,16 @@ func _start_effect_world() -> void:
 	_world._item_fx.on_effect_world_started()
 	if _world._light_director != null:
 		_world._light_director.reattach()
-	# One wire-spawn router for both directors: the runtime callback is
-	# single-subscriber, so the world owns the fan-out.
+	# One wire-spawn router for both directors, subscribed to the entity
+	# presenter's spawn signal. This stage runs inside the load, after
+	# _start_runtime and before the first session frame presents anything,
+	# so no wire body exists yet and nothing needs replaying (a subscriber
+	# that connects after the first present replays wire_nodes() itself).
 	var wire_runtime: MissionPresentation = _world.get_runtime()
-	if wire_runtime != null and _world._light_director != null:
-		wire_runtime.set_wire_node_spawned_callback(
+	var presenter: EntityPresenter = wire_runtime.get_entity_presenter() \
+			if wire_runtime != null else null
+	if presenter != null and _world._light_director != null:
+		presenter.wire_node_spawned.connect(
 				func(node: ObjectModel, kind: int, item_id: int) -> void:
 					_world._item_fx.on_wire_node_spawned(node, kind, item_id)
 					_world._light_director.on_wire_node_spawned(node, kind, item_id))

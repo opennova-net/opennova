@@ -15,7 +15,7 @@ namespace godot {
 // record's identity from MissionObjectPlacer.place (kind/index/bms_id,
 // group/team/position for EntityIndex, item/graphic/attrib2 for the effect
 // and shadow-attribution readers); a wire-spawned model gets the replica
-// identity from WirePresentPass (wire_handle, the header origin kind/index,
+// identity from the EntityPresenter wire walk (wire_handle, the header origin kind/index,
 // runtime type and packed character id). Absent ints read -1 (kind, origin
 // kind, index, group, team, wire handle) or 0 (bms_id, item_id, attrib2,
 // runtime type, character id). Read-write so a harness authors one.

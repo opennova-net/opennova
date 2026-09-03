@@ -9,7 +9,7 @@ const SLOT_FREEFALL := 44
 # host rounds or decoded visual-only joiner rounds — AI/remote-player fire sound,
 # muzzle effect, and in-flight tracers. The local player's own predicted fire keeps
 # its action-slot presentation (PlayerWeaponEffects._fire_action_effects) and is
-# self-filtered here, exactly like wire_present_pass filters the local avatar.
+# self-filtered here, exactly like the entity presenter's wire walk filters the local avatar.
 #
 # [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 — on the firing host every AI
 # anim-event fire plays the ammo-def 'ai_launch' sound set (+64) through

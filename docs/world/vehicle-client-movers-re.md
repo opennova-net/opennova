@@ -3564,7 +3564,7 @@ mover tail and, for the host's helicopters whose mover is the unported HELO
 movement physics, from the authority pass at the missing tail site;
 `vehicle_ctrl_registers` publishes rotor/tail_rotor/wheels beside
 steering/speed; `present_rows.h` `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
-`present_applier` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
+`entity_presenter` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
 VEHICLE_WHEELS, the ctrl leg 18 → 21 fields, append-only) →
 `ObjectModel::set_ctrl_override`; the seed in `entity_spawn.cpp`. Pinned by
 ctest `vehicle_part_anim` (the pure pins; a player-control buggy spins only

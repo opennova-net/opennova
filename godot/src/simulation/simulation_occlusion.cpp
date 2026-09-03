@@ -309,7 +309,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			return;
 		// Only authored placements have a MissionPresentPass node addressed by
 		// BMS id. Runtime-spawned rows can also carry a nonzero bms_id (players
-		// use their net id), but WirePresentPass owns their rendering.
+		// use their net id), but the EntityPresenter wire walk owns their rendering.
 		if (e.bms_id == 0 ||
 				e.spawn_origin == opennova::world::kSpawnOriginNone)
 			return;
@@ -330,7 +330,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 
 	// Every rendered role consumes ClientState. Placed rows above continue to
 	// address MissionPresentPass by BMS id; only rows without authored identity
-	// reach WirePresentPass and therefore need a wire-handle lighting update.
+	// reach the EntityPresenter wire walk and therefore need a wire-handle lighting update.
 	// On a joiner, pool-0 H must NEVER be cast to a local EntityHandle (H=0 and
 	// L=0 can coexist); streamed pool-1 twins are allowed only after the type
 	// check below. Host/SP rows use their authoritative exact-handle entity.
@@ -422,7 +422,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 						static_cast<uint16_t>(candidate->item_id) == es.type_id)
 					joiner_twin = candidate;
 			}
-			// WirePresentPass defers authored rows to their placed node (or
+			// The EntityPresenter wire walk defers authored rows to their placed node (or
 			// static batch). Do not repeat the same native ray query and cache an
 			// update for a wire node that deliberately does not exist.
 			const opennova::world::Entity *placed =

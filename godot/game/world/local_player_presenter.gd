@@ -596,7 +596,7 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	if overlay == null or not overlay.weapon_visible:
 		_held_weapon.visible = false
 		return
-	var attach: Variant = PresentApplier.held_weapon_attach_transform(
+	var attach: Variant = EntityPresenter.held_weapon_attach_transform(
 			_avatar, overlay.weapon_attach_angles, overlay.weapon_hand_frame) \
 			if _avatar != null and is_instance_valid(_avatar) else null
 	if attach == null:

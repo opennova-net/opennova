@@ -488,7 +488,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	for handle_v in before_rows:
 		var handle := int(handle_v)
 		var row: Dictionary = before_rows[handle]
-		var child_node := rt.get_wire_presenter().resolve_wire_handle(handle) as Node3D
+		var child_node := rt.get_entity_presenter().resolve_wire_handle(handle) as Node3D
 		assert_not_null(child_node, "attachment %04x has a live model" % handle)
 		if child_node != null and carrier_node != null:
 			var carrier_local := (
@@ -549,7 +549,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			"the real DBuggy model turned under steering input")
 	for handle_v in relative_before:
 		var handle := int(handle_v)
-		var child_node := rt.get_wire_presenter().resolve_wire_handle(handle) as Node3D
+		var child_node := rt.get_entity_presenter().resolve_wire_handle(handle) as Node3D
 		assert_not_null(child_node, "attachment %04x remains materialized" % handle)
 		if child_node != null and carrier_node != null:
 			var expected := carrier_after * (

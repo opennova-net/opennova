@@ -394,6 +394,12 @@ private:
 	Ref<EntityRef> entity_ref_;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
+	// Two-bit visibility ownership (ADR 0043 d9): the entity presenter's
+	// placed walk owns the sim's intent, the render-occlusion frame owns its
+	// claim, and Node3D::visible is their product (each setter recomputes
+	// it, so the visibility-changed notification fires on every edge).
+	bool present_visible_ = true;
+	bool occlusion_hidden_ = false;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
 	// The last MATCHTERRAIN page state the terrain-frame leg stamped
@@ -509,7 +515,7 @@ private:
 		int anim_frame = -1;
 	};
 	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
-	// Set by a PresentApplier row plan that retains this model by pointer and
+	// Set by an EntityPresenter row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
 	bool present_planned_ = false;
@@ -839,6 +845,12 @@ public:
 	void advance_runtime_frame(double p_delta);
 	void set_on_screen(bool p_value);
 	bool is_on_screen() const { return on_screen_; }
+	// The two visibility owners' bits: the sim's present intent (default
+	// visible) and the render-occlusion frame's claim (default released).
+	void set_present_visible(bool p_visible);
+	bool is_present_visible() const { return present_visible_; }
+	void set_occlusion_hidden(bool p_hidden);
+	bool is_occlusion_hidden() const { return occlusion_hidden_; }
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();

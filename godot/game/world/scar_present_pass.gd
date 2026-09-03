@@ -23,7 +23,7 @@ extends RefCounted
 var _sim: Simulation                 # live draw-list source; null in data-driven tests
 var _container: Node = null          # hosts the presenter node when this pass creates it
 var _index: EntityIndex = null       # authored-entity owners
-var _wire: WirePresentPass = null    # runtime-only (wire) owners
+var _wire: EntityPresenter = null    # runtime-only (wire) owners
 var _presenter: ScarPresenter = null
 var _owns_presenter := false
 var _camera_provider := Callable()   # -> Vector3 camera position (Godot space)
@@ -61,7 +61,7 @@ func get_presenter() -> ScarPresenter:
 ## ticks with (the camera IS the listener); the environment provider returns
 ## the live MissionEnvironment for the fog distance + terrain light.
 func setup(sim: Simulation, container: Node, index: EntityIndex,
-		wire: WirePresentPass, resource_root: ResourceRoot,
+		wire: EntityPresenter, resource_root: ResourceRoot,
 		camera_provider: Callable = Callable(),
 		environment_provider: Callable = Callable(),
 		presenter: ScarPresenter = null) -> void:
