@@ -3042,7 +3042,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 # only the deleted doubles could stage. The release-consult contract itself is
 # pinned on the real sim by simulation_test.gd's
 # test_occlusion_delta_calls_emit_changes_only (entity_present_visible) and the
-# shared present-visibility dictionary contract in mission_present_pass_test.)
+# ObjectModel present/occlusion visibility-bit contract in mission_present_pass_test.)
 
 
 func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> void:

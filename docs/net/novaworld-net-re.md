@@ -3493,7 +3493,7 @@ per-frame track; and the **S2C `0x0A` event loop appends per-frame motion for ev
 The same `ReplayTimeline` feeds the in-engine NovaWorld spectator straight from the wire — no JSON
 intermediary: `nw_replay` streams the captured packets to `NovaWorldClient` (godot/src/network),
 which decodes them and exposes the entity tracks (`sample_at`), the event stream (`get_events`), and
-the env stream (`env_at`) to the Godot render path (`WirePresentPass` + `NetEventView` + the spectator
+the env stream (`env_at`) to the Godot render path (`EntityPresenter` + `NetEventView` + the spectator
 kill-feed/env HUD). Walking `0x0A` needs items.def (the per-record width is class-dependent, §5.10b).
 
 Two facts worth recording, both observed on the dvxi5 probe + a 3-player capture:
@@ -4556,11 +4556,11 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
   never emits S2C, never registers `NetSystem`; after the name-match and applicable deployment release
   it `spawn_player`s **L** at the H-learned pose and per-frame builds the C2S `0x0C` uplink stamped
   with **H**.
-- **Remote entities render WIRE-DIRECT** (the native `WirePresentPass`, `godot/src/simulation/present_applier_wire.cpp`), the faithful client model (§5.23/§5.25).
+- **Remote entities render WIRE-DIRECT** (the native `EntityPresenter`, `godot/src/simulation/entity_presenter_wire.cpp`), the faithful client model (§5.23/§5.25).
   A production joiner has no authored placed-node identity table. Its native world separately materializes
   streamed pools 1-3 at the host's exact packed handles for deploy/mount/collision consumers, while remote
   pool-0 organics remain `ClientState`; visual pose for every remote row still comes from the decoded load
-  batches and live `0x0A`. `WirePresentPass` therefore builds one model per wire handle, keyed by `type_id`,
+  batches and live `0x0A`. `EntityPresenter` therefore builds one model per wire handle, keyed by `type_id`,
   instead of resolving a local BMS placement. The host keeps registry-resolved `MissionPresentPass` for its
   authored NPCs and adds the wire pass for unplaced spawned players. Each side excludes its own local player
   from the wire pass (drawn by `LocalPlayerPresenter`); the joiner keys that exclusion on **H**, not L (L can

@@ -100,7 +100,7 @@ dismount clears the occupant's mode-driving copy and validity.
 builds the authoritative `AimOverlayInputs`, and calls
 `opennova::anim::compute_aim_overlay_angles`. Local pose export/rendering and organic collision consume
 that same selector result. Entity presentation snapshots carry the final body frame plus all nine selected
-overlay angles; `MissionPresentPass` and `WirePresentPass` only adapt that result to
+overlay angles; `MissionPresentPass` and `EntityPresenter` only adapt that result to
 `ObjectModel.set_aim_overlay`, so placed and remote actors do not carry a second config switch or a
 collision-only heuristic. CXLT remains independent metadata: organic COBJ section `i` consumes final bone
 matrix `i`, with no CXLT selection or post-transform.

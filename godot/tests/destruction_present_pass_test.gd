@@ -3,7 +3,7 @@ extends GutTest
 # DestructionPresentPass on the typed surfaces (ADR 0034): event/piece rows are
 # pure data through the public present_drained data leg (production present()
 # drains the typed Simulation), the collaborators are a real
-# MissionObjectPlacer/WirePresentPass plus a REAL EffectWorld over an in-memory
+# MissionObjectPlacer/EntityPresenter plus a REAL EffectWorld over an in-memory
 # catalog and a REAL ItemEffectDirector (ADR 0043 rule 11: the group report,
 # the anchor registry and the owner-pose resolve are the read seams), the
 # entity index is a real EntityIndex over real ObjectModels, and the item
@@ -132,8 +132,9 @@ func _emitter_forward(row: Dictionary) -> Vector3:
 
 # A REAL wire presenter with injected per-handle avatars (native methods
 # cannot be intercepted from GDScript; register_wire_node is the seam).
-func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
-	var presenter := WirePresentPass.new()
+func _wire_resolver(nodes: Dictionary = {}) -> EntityPresenter:
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
 	for handle in nodes:
 		presenter.register_wire_node(int(handle), nodes[handle])
 	return presenter

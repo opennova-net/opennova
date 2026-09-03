@@ -186,7 +186,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
   it plus the ADRs before touching `mission_presentation.gd`,
   `game_frame_pipeline.gd`, the native present appliers
-  (`godot/src/simulation/present_applier*.cpp`), or `Simulation`.
+  (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — ONED,
   retail staging, and hidden release pack command.
 - [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,

@@ -87,7 +87,7 @@ the adapter's total):
 | `simulation_occlusion.cpp` | Stays: verified a binding over `world::occlusion` — camera marshalling in, `occlusion_world_` calls through, debug dictionaries out. Its cites document call order at the binding site. |
 | `simulation_player*.cpp` (player / view / weapon) | Stay: the local-player pumps delegating to `world::local_*` (the S6a/S7a/S22 close-outs); dict/device legs per the seam band. |
 | `simulation_present.cpp` | Stays: presentation reads — packed snapshot assembly plus role/world enrichment over the engine projection. |
-| `present_applier*.cpp` | Stay: presentation — packed rows onto `Node3D`/`Skeleton3D` via cached StringName dispatch. |
+| `entity_presenter*.cpp` | Stay: presentation — packed rows onto `Node3D`/`Skeleton3D` via cached StringName dispatch. |
 | `simulation_bind.cpp` | Stays: pure ClassDB registration. |
 | `simulation_internal.h` | Stays: the family's Godot-type packers and the using-declaration re-exports over moved engine helpers (the S4b/S10a house pattern). |
 

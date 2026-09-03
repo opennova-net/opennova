@@ -366,7 +366,7 @@ _Avoid_: showhud (that cycles the FP-weapon view flags, not the detail level)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes
-(the native `PresentApplier`). It runs once in the standalone game runtime (ADRs
+(the native `EntityPresenter`). It runs once in the standalone game runtime (ADRs
 0006 and 0025).
 _Avoid_: render pass, sync pass
 

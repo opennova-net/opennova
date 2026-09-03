@@ -69,7 +69,7 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
-	// The same render gate over the decoded rows WirePresentPass draws (no
+	// The same render gate over the decoded rows the EntityPresenter wire walk draws (no
 	// placed identity): culled wire handles this frame, the applied baseline,
 	// and each row's persistent three-ray latch.
 	std::vector<int32_t> occlusion_culled_wire_;

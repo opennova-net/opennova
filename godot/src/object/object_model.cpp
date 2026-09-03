@@ -1186,7 +1186,7 @@ void ObjectModel::_notification(int p_what) {
 		render_order_dirty_ = true;
 		refresh_render_order();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
-		// Only a model a PresentApplier row plan retains by pointer moves the
+		// Only a model an EntityPresenter row plan retains by pointer moves the
 		// stamp: a throwable, viewmodel, wire-body, or preview model freeing
 		// must not force every mission row back through a cold plan rebuild.
 		if (present_planned_) {
@@ -1503,6 +1503,23 @@ void ObjectModel::set_on_screen(bool p_value) {
 	}
 }
 
+// The two visibility owners: the entity presenter's placed walk writes the
+// sim's intent, the render-occlusion frame writes its claim, and the node's
+// visible flag is their product — a claimed node stays hidden through a sim
+// show, and a release lands on the sim's current intent, so neither writer
+// fights the other and a sim-hidden entity never flashes. Node3D::set_visible
+// no-ops on an unchanged flag, so the visibility-changed notification (light
+// draw parts dirty + the runtime wake) fires exactly on the product's edges.
+void ObjectModel::set_present_visible(bool p_visible) {
+	present_visible_ = p_visible;
+	set_visible(present_visible_ && !occlusion_hidden_);
+}
+
+void ObjectModel::set_occlusion_hidden(bool p_hidden) {
+	occlusion_hidden_ = p_hidden;
+	set_visible(present_visible_ && !occlusion_hidden_);
+}
+
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
 	sync_screen_notifier(p_bounds);
 	if (aabb_equal_approx(model_bounds_, p_bounds)) {
@@ -1795,6 +1812,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::advance_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
 	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
+	ClassDB::bind_method(D_METHOD("set_present_visible", "visible"),
+			&ObjectModel::set_present_visible);
+	ClassDB::bind_method(D_METHOD("is_present_visible"),
+			&ObjectModel::is_present_visible);
+	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
+			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_occlusion_hidden"),
+			&ObjectModel::is_occlusion_hidden);
 
 	ClassDB::bind_method(D_METHOD("begin_ctrl_update"), &ObjectModel::begin_ctrl_update);
 	ClassDB::bind_method(D_METHOD("end_ctrl_update"), &ObjectModel::end_ctrl_update);

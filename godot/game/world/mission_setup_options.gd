@@ -50,11 +50,6 @@ var placer: MissionObjectPlacer = null
 ## The owner-anchor registry the destruction/throwable passes anchor their
 ## wreck/piece/move effect groups through.
 var effect_anchors: ItemEffectDirector = null
-## The shell's shared occlusion/visibility maps, shared BY REFERENCE: the
-## occlusion pass created these dictionaries once and mutates them in place
-## across the mission's occlusion frames (see OcclusionFramePass).
-var occlusion_hidden_ids: Dictionary = {}
-var present_visibility: Dictionary = {}
 
 # --- Device providers. Genuinely device-Callable seams stay Callables: the
 #     named typed field is the contract (ADR 0034 d3 retired the Dictionary

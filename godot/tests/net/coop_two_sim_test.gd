@@ -1231,7 +1231,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		return
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
-	assert_eq(PresentApplier.emplaced_apply(
+	assert_eq(EntityPresenter.emplaced_apply(
 			visual, visual_before_snap, visual_before_base, false), 2,
 			"production presentation consumes both decoded B50 controls")
 	var visual_yaw_before: Basis = (
@@ -1271,7 +1271,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	if not visual_after_record.is_empty():
 		var visual_after_snap: PackedFloat32Array = visual_after_record["snapshot"]
 		var visual_after_base := int(visual_after_record["base"])
-		assert_eq(PresentApplier.emplaced_apply(
+		assert_eq(EntityPresenter.emplaced_apply(
 				visual, visual_after_snap, visual_after_base, false), 2)
 		var visual_yaw_after: Basis = (
 				visual_parts[yaw_part] as Node3D).transform.basis
@@ -2788,11 +2788,10 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 
 	# Lockstep sampling window. The host's seated gunner is the truth; the
 	# joiner's presented row must sit on it — not orbit it, not hover over it.
-	# The applier exposes the exact ROOT basis the wire walk gives an
-	# aim-capable body node (present_one_wire_row), so the NODE facing is
+	# The presenter's static exposes the exact ROOT basis the wire walk gives
+	# an aim-capable body node (present_one_wire_row), so the NODE facing is
 	# sampled too — PF_YAW alone stays sane while the aim-overlay body frame
 	# is what actually spins a rendered gunner.
-	var applier := PresentApplier.new()
 	var worst_distance := 0.0
 	var worst_vertical := 0.0
 	var worst_yaw_disagreement := 0.0
@@ -2825,10 +2824,10 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 		var host_record := _present_record_for_type(host, 5311)
 		var joiner_record := _present_record_for_type(joiner, 5311)
 		if not host_record.is_empty() and not joiner_record.is_empty():
-			var host_body: Basis = applier.aim_root_basis(
+			var host_body: Basis = EntityPresenter.aim_root_basis(
 					host_record["snapshot"], int(host_record["base"]),
 					Basis.IDENTITY)
-			var joiner_body: Basis = applier.aim_root_basis(
+			var joiner_body: Basis = EntityPresenter.aim_root_basis(
 					joiner_record["snapshot"], int(joiner_record["base"]),
 					Basis.IDENTITY)
 			worst_body_disagreement = maxf(worst_body_disagreement,

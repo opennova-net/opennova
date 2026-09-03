@@ -176,11 +176,11 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentati
 	# Existing presenter options provide state-safe A/Bs without a production
 	# probe branch: freeze transform/visibility/body submission independently
 	# while simulation, body posing and muzzle feedback continue normally.
-	var present := runtime.get_present_applier()
+	var present := runtime.get_entity_presenter()
 	if present != null:
 		var channels := present.get_output_channels()
-		for leg in [["xformoff", PresentApplier.OUTPUT_TRANSFORM], ["visoff", PresentApplier.OUTPUT_VISIBILITY],
-				["bodyoff", PresentApplier.OUTPUT_BODY_ANIM]]:
+		for leg in [["xformoff", EntityPresenter.OUTPUT_TRANSFORM], ["visoff", EntityPresenter.OUTPUT_VISIBILITY],
+				["bodyoff", EntityPresenter.OUTPUT_BODY_ANIM]]:
 			present.set_output_channels(channels & ~int(leg[1]))
 			await ctx.wait_ms(500)
 			legs[leg[0]] = await _measure(leg[0], 3000)

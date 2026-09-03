@@ -37,7 +37,7 @@ var _index: EntityIndex = null
 var _placer: MissionObjectPlacer  # husk model builds
 var _item_db: ItemDatabase        # husk graphic names
 var _anchors: ItemEffectDirector  # owner-anchor registry (GameWorld's), or null
-var _dynamic_node_resolver: WirePresentPass  # runtime-only packed handles
+var _dynamic_node_resolver: EntityPresenter  # runtime-only packed handles
 var _audio_provider := Callable() # -> MissionAudio (or null)
 var _fx_provider := Callable()    # -> EffectWorld (or null)
 # (world_pos: Vector3, radius: float) -> the death-flash light route
@@ -98,7 +98,7 @@ func setup(sim: Simulation, container: Node3D, index: EntityIndex,
 		placer: MissionObjectPlacer, item_db: ItemDatabase,
 		anchors: ItemEffectDirector,
 		audio_provider: Callable, fx_provider: Callable,
-		dynamic_node_resolver: WirePresentPass = null,
+		dynamic_node_resolver: EntityPresenter = null,
 		death_light := Callable()) -> void:
 	_sim = sim
 	_container = container

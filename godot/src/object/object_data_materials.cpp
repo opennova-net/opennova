@@ -166,7 +166,7 @@ String ObjectData::canonical_control_register_name(const String &p_name) {
 	// Memoized: the present pass resolves the same few names per row per
 	// frame, and the utf8 round trip + canonical String rebuild are the
 	// measured cost, not the ordinal lookup (the memoized infantry_keys_ in
-	// present_applier.cpp is the precedent).
+	// entity_presenter.cpp is the precedent).
 	if (g_register_name_cache == nullptr) {
 		g_register_name_cache = memnew(RegisterNameCache);
 	}

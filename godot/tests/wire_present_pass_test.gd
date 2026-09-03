@@ -1,12 +1,13 @@
 extends GutTest
 
-# The joiner/wire present pass, end to end on REAL components: a real
-# MissionObjectPlacer over a flat fixture root (assembled in before_all from
-# committed fixtures), real ObjectModel wire avatars (their CTRL store,
-# body clips, and Node3D state are the observables), a real EntityIndex
-# defer gate, and real Simulation instances (an empty one for the static
-# clock, a minimal-mission boot for logic-tick stepping). Snapshots are built
-# as pure data and fed through the public present_snapshot API.
+# The EntityPresenter's WIRE walk (the joiner/wire present pass), end to end on
+# REAL components: a real MissionObjectPlacer over a flat fixture root
+# (assembled in before_all from committed fixtures), real ObjectModel wire
+# avatars (their CTRL store, body clips, and Node3D state are the observables),
+# a real EntityIndex defer gate, and real Simulation instances (an empty one
+# for the static clock, a minimal-mission boot for logic-tick stepping).
+# Snapshots are built as pure data and fed through the public
+# present_wire_snapshot API.
 
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
@@ -267,9 +268,10 @@ func _assert_entity_light(model: ObjectModel, expected: Vector4,
 
 
 func _wire_pass(sim: Simulation, placer: MissionObjectPlacer, container: Node3D,
-		defer_index: EntityIndex = null, options: Dictionary = {}) -> WirePresentPass:
-	var presenter := WirePresentPass.new()
-	presenter.setup(sim, placer, container, defer_index)
+		defer_index: EntityIndex = null, options: Dictionary = {}) -> EntityPresenter:
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_wire(sim, placer, container, defer_index)
 	presenter.set_synthetic_origin_only(
 			bool(options.get("synthetic_origin_only", false)))
 	if options.has("cold_spawn_budget"):
@@ -279,8 +281,8 @@ func _wire_pass(sim: Simulation, placer: MissionObjectPlacer, container: Node3D,
 	return presenter
 
 
-func _present(p: Object, snap: Snapshot, revision: int = 1) -> void:
-	p.present_snapshot(snap.build(), Simulation.PF_STRIDE, revision)
+func _present(p: EntityPresenter, snap: Snapshot, revision: int = 1) -> void:
+	p.present_wire_snapshot(snap.build(), Simulation.PF_STRIDE, revision)
 
 
 func _ctrl(model: ObjectModel, name: String) -> int:
@@ -310,7 +312,7 @@ func test_present_snapshot_rejects_a_short_stride() -> void:
 	var short_stride := Simulation.PF_STRIDE - 1
 	var snapshot := PackedFloat32Array()
 	snapshot.resize(short_stride)
-	p.present_snapshot(snapshot, short_stride, 1)
+	p.present_wire_snapshot(snapshot, short_stride, 1)
 	assert_eq(container.get_child_count(), 0,
 			"a row that predates the blend tuple cannot be cross-read")
 
@@ -328,7 +330,7 @@ func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void
 				"index": 0xFFFFFF, "bms_id": 0 },
 	]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"ordinary SP rows stay with MissionPresentPass; synthetic children materialize")
 	var model: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_not_null(model)
@@ -367,7 +369,7 @@ func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0, "x": 3.0 }]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 1, "packed handle zero is a real remote pool-0 slot")
+	assert_eq(p.wire_entity_count(), 1, "packed handle zero is a real remote pool-0 slot")
 	var model: ObjectModel = p.resolve_wire_handle(0)
 	assert_not_null(model)
 	assert_almost_eq(model.position.x, 3.0, 0.001)
@@ -431,14 +433,14 @@ func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_UNRESOLVED, "handle": 0x1004 }]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 0)
-	assert_eq(int(p.get_stats_record().unresolved), 1)
+	assert_eq(p.wire_entity_count(), 0)
+	assert_eq(int(p.get_wire_stats_record().unresolved), 1)
 
 	snap.entities = []
 	_present(p, snap, 2)
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004 }]
 	_present(p, snap, 3)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"retired failure cache cannot poison slot reuse")
 
 
@@ -448,13 +450,13 @@ func test_unresolved_slot_retries_immediately_when_type_changes() -> void:
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_UNRESOLVED, "handle": 0x1004 }]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 0)
+	assert_eq(p.wire_entity_count(), 0)
 
 	# type_id is in the identity quintet the plan revision keys on, so the
 	# producer bumps the revision with the change.
 	snap.entities[0]["type_id"] = TYPE_PUMP
 	_present(p, snap, 2)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"a changed type retries immediately instead of holding the failure cache")
 
 
@@ -514,7 +516,7 @@ func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
 				"index": -1 },
 	]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"the batched-static row defers; only the identity-less row materializes")
 	assert_null(p.resolve_wire_handle(0x1004),
 			"no wire duplicate exists for the placed identity")
@@ -529,18 +531,18 @@ func test_stable_host_layout_keeps_placed_rows_deferred() -> void:
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004, "bms_id": 11,
 			"kind": 1, "index": 0 }]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 0,
+	assert_eq(p.wire_entity_count(), 0,
 			"the placed row remains owned by MissionPresentPass")
 
 	snap.entities[0]["x"] = 9.0
 	_present(p, snap)
-	assert_eq(p.entity_count(), 0,
+	assert_eq(p.wire_entity_count(), 0,
 			"stable topology with no wire nodes takes the empty fast path")
 
 	snap.entities[0] = { "type_id": TYPE_ARMORY, "handle": 0x1005, "bms_id": 12,
 			"kind": -1, "index": -1 }
 	_present(p, snap, 2)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"same-size placed-to-wire replacement rebuilds classification")
 
 
@@ -636,7 +638,7 @@ func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> v
 	_present(p, snap, 3)
 	assert_null(p.resolve_wire_handle(0x1004),
 			"despawn prunes the retired row plan and visual")
-	assert_eq(p.entity_count(), 1)
+	assert_eq(p.wire_entity_count(), 1)
 
 	snap.entities[0] = { "type_id": TYPE_RIFLEMAN, "handle": 0x1005, "x": 60.0 }
 	_present(p, snap, 4)
@@ -656,7 +658,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 		"cold_spawn_budget": 2,
 		"camera": camera,
 	})
-	p.set_node_spawned_callback(Callable(observer, "on_spawned"))
+	p.wire_node_spawned.connect(observer.on_spawned)
 	var snap := Snapshot.new()
 	snap.entities = [
 		{ "type_id": TYPE_PUMP, "handle": 0x1004, "x": 4.0 },
@@ -668,9 +670,9 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 				"bms_id": 11 },
 	]
 	_present(p, snap)
-	assert_eq(p.entity_count(), 2,
+	assert_eq(p.wire_entity_count(), 2,
 			"one presentation call cannot build beyond its cold-spawn budget")
-	assert_eq(int(p.get_stats_record().pending), 3)
+	assert_eq(int(p.get_wire_stats_record().pending), 3)
 	assert_eq(observer.calls.size(), 2)
 	assert_eq(camera.position, Vector3.ZERO,
 			"one-shot spectator framing waits for the complete cold cohort")
@@ -680,16 +682,16 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	var first: ObjectModel = p.resolve_wire_handle(0x1004)
 	snap.entities[0]["x"] = 40.0
 	_present(p, snap)
-	assert_eq(p.entity_count(), 4)
-	assert_eq(int(p.get_stats_record().pending), 1)
+	assert_eq(p.wire_entity_count(), 4)
+	assert_eq(int(p.get_wire_stats_record().pending), 1)
 	assert_almost_eq(first.position.x, 40.0, 0.001,
 			"already-live rows keep updating while later cold rows drain")
 	assert_eq(observer.calls.size(), 4)
 	assert_eq(camera.position, Vector3.ZERO)
 
 	_present(p, snap)
-	assert_eq(p.entity_count(), 5)
-	assert_eq(int(p.get_stats_record().pending), 0)
+	assert_eq(p.wire_entity_count(), 5)
+	assert_eq(int(p.get_wire_stats_record().pending), 0)
 	assert_eq(observer.calls.size(), 5,
 			"every materialized row is registered exactly once across batches")
 	assert_almost_eq(camera.position.x, 13.2, 0.001,
@@ -708,7 +710,7 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 	var p := _wire_pass(_sim(), _placer(), container, null, {
 		"cold_spawn_budget": 1,
 	})
-	p.set_node_spawned_callback(Callable(observer, "on_spawned"))
+	p.wire_node_spawned.connect(observer.on_spawned)
 	var snap := Snapshot.new()
 	snap.entities = [
 		{ "type_id": TYPE_PUMP, "handle": 0x1004, "x": 4.0 },
@@ -729,13 +731,13 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 	_present(p, snap, 2)
 	assert_null(p.resolve_wire_handle(0x1004),
 			"a now-mismatched live node is retired even after this frame spends its budget")
-	assert_eq(int(p.get_stats_record().pending), 2)
+	assert_eq(int(p.get_wire_stats_record().pending), 2)
 
 	_present(p, snap, 2)
 	_present(p, snap, 2)
 	assert_ne(p.resolve_wire_handle(0x1004), retired)
-	assert_eq(p.entity_count(), 3)
-	assert_eq(int(p.get_stats_record().pending), 0)
+	assert_eq(p.wire_entity_count(), 3)
+	assert_eq(int(p.get_wire_stats_record().pending), 0)
 	assert_eq(observer.calls.size(), 4,
 			"the retired incarnation and each replacement register only once")
 
@@ -751,14 +753,14 @@ func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> v
 		{ "type_id": TYPE_PUMP, "handle": 0x1005 },
 	]
 	_present(p, snap)
-	assert_eq(int(p.get_stats_record().unresolved), 1)
-	assert_eq(int(p.get_stats_record().pending), 1)
+	assert_eq(int(p.get_wire_stats_record().unresolved), 1)
+	assert_eq(int(p.get_wire_stats_record().pending), 1)
 	_present(p, snap)
-	assert_eq(p.entity_count(), 1,
+	assert_eq(p.wire_entity_count(), 1,
 			"a cached unresolved row does not consume every later batch")
-	assert_eq(int(p.get_stats_record().pending), 0)
+	assert_eq(int(p.get_wire_stats_record().pending), 0)
 	_present(p, snap)
-	assert_eq(int(p.get_stats_record().unresolved), 1,
+	assert_eq(int(p.get_wire_stats_record().unresolved), 1,
 			"a stable unresolved type is not retried once the plan converges")
 
 
@@ -770,8 +772,8 @@ func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
 	_present(p, snap)
 	var first: ObjectModel = p.resolve_wire_handle(0x1004)
 
-	p.reset_runtime_state()
-	assert_eq(p.entity_count(), 0)
+	p.reset_wire_runtime_state()
+	assert_eq(p.wire_entity_count(), 0)
 	assert_null(p.resolve_wire_handle(0x1004))
 	_present(p, snap)
 	var restored: ObjectModel = p.resolve_wire_handle(0x1004)
@@ -831,7 +833,7 @@ func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() ->
 	var container := _container()
 	var observer := SpawnObserver.new()
 	var p := _wire_pass(_sim(), _placer(), container)
-	p.set_node_spawned_callback(Callable(observer, "on_spawned"))
+	p.wire_node_spawned.connect(observer.on_spawned)
 	var snap := Snapshot.new()
 	snap.entities = [{
 		"type_id": TYPE_PUMP,
@@ -862,9 +864,20 @@ func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() ->
 
 	_present(p, snap)
 	assert_eq(observer.calls.size(), 1, "steady presentation never re-registers the model")
+	# A consumer that subscribes after the first present replays the live
+	# bodies itself: the signal is never re-emitted for them.
 	var late := SpawnObserver.new()
-	p.set_node_spawned_callback(Callable(late, "on_spawned"))
+	p.wire_node_spawned.connect(late.on_spawned)
+	assert_eq(late.calls.size(), 0, "connecting late fires nothing by itself")
+	var live: Array = p.wire_nodes()
+	assert_eq(live.size(), 1, "wire_nodes() lists every already-live wire body")
+	for live_node in live:
+		var live_ref: EntityRef = (live_node as ObjectModel).entity_ref
+		late.on_spawned(live_node, live_ref.kind, live_ref.item_id)
 	assert_eq(late.calls.size(), 1, "late consumers receive every already-live wire node")
+	assert_eq(int(late.calls[0].kind), MissionData.KIND_ITEM)
+	assert_eq(int(late.calls[0].item_id), 106100)
+	assert_eq(late.calls[0].node, node, "the replayed body is the one the signal announced")
 
 
 func test_wire_model_applies_the_same_packed_overlay_result() -> void:
@@ -1329,7 +1342,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	# The static pump has no rig of its own; the hand chain the attach math
 	# walks is scaffolded exactly as the placed body would carry it.
 	var skeleton := Skeleton3D.new()
-	for bone_index in range(PresentApplier.HELD_WEAPON_BONE_INDEX + 1):
+	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
 		skeleton.add_bone("Bone%d" % bone_index)
 	body.add_child(skeleton)
 	# Replica sun quality is cached by wire identity. It applies immediately to
@@ -1387,8 +1400,8 @@ func test_native_hand_frame_basis_matches_the_gdscript_origin() -> void:
 		Basis(Vector3(0, 0, -1), PI / 2.0) * Basis(Vector3(0, -1, 0), 0.3),
 	]
 	for b in bases:
-		var expected := PresentApplier.held_weapon_hand_frame_basis(b)
-		var got: Basis = PresentApplier.held_weapon_hand_frame_basis(b)
+		var expected := EntityPresenter.held_weapon_hand_frame_basis(b)
+		var got: Basis = EntityPresenter.held_weapon_hand_frame_basis(b)
 		assert_true(got.is_equal_approx(expected),
 				"hand-frame parity at %s: native %s vs gd %s" % [b, got, expected])
 
@@ -1403,7 +1416,7 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	var skeleton := Skeleton3D.new()
 	body.add_child(skeleton)
 	skeleton.position = Vector3(0.1, 0.9, 0.0)
-	for bone_index in range(PresentApplier.HELD_WEAPON_BONE_INDEX + 1):
+	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
 		skeleton.add_bone("Bone%d" % bone_index)
 		if bone_index > 0:
 			skeleton.set_bone_parent(bone_index, bone_index - 1)
@@ -1415,13 +1428,13 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	# Pose the hand chain away from rest so pose != rest.
 	skeleton.set_bone_pose_rotation(10,
 			Quaternion(Vector3(1, 0, 0).normalized(), 0.6))
-	skeleton.set_bone_pose_rotation(PresentApplier.HELD_WEAPON_BONE_INDEX,
+	skeleton.set_bone_pose_rotation(EntityPresenter.HELD_WEAPON_BONE_INDEX,
 			Quaternion(Vector3(0.3, -0.8, 0.52).normalized(), -1.1))
 	for angles: Vector3 in [Vector3.ZERO, Vector3(15, -120, 40), Vector3(-80, 270, -30)]:
 		for hand_frame in [false, true]:
-			var expected: Variant = PresentApplier.held_weapon_attach_transform(
+			var expected: Variant = EntityPresenter.held_weapon_attach_transform(
 					body, angles, hand_frame)
-			var got: Variant = PresentApplier.held_weapon_attach_transform(
+			var got: Variant = EntityPresenter.held_weapon_attach_transform(
 					skeleton, angles, hand_frame)
 			assert_not_null(expected, "the reference places a transform")
 			assert_true((got as Transform3D).is_equal_approx(expected as Transform3D),
@@ -1431,5 +1444,5 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	var short_skel := Skeleton3D.new()
 	add_child_autofree(short_skel)
 	short_skel.add_bone("only")
-	assert_null(PresentApplier.held_weapon_attach_transform(
+	assert_null(EntityPresenter.held_weapon_attach_transform(
 			short_skel, Vector3.ZERO, false))

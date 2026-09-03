@@ -214,10 +214,10 @@ inside the role's tick (`HostRole::run_tick`, `JoinerRole::run_tick` — the
 joiner frame owns its socket seam, the decoded-row asset resolution through
 the kernel and the local-player pumps; the shell keeps only the loadout
 profile seams, ADR 0043 d3). A joiner's decoded entities use the one
-`ClientReplicaPipeline` path and `WirePresentPass`. The listen host presents
+`ClientReplicaPipeline` path and `EntityPresenter`. The listen host presents
 its own pools (its loopback 0x0A is retail's header-only frame, D-NET-140):
 authored rows through the placed present pass, runtime-spawned rows through
-`WirePresentPass`.
+`EntityPresenter`.
 
 `npwire` is the retail compatibility boundary and `net/` is wire only (ADR
 0043 d4). The in-match runtime lives above it in `runtime/inmatch` (the

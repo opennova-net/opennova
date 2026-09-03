@@ -1,58 +1,62 @@
-#include "simulation/present_applier.h"
+#include "simulation/entity_presenter.h"
+#include "object/model_user_point.h"
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/core/object.hpp>
-#include <godot_cpp/variant/array.hpp>
-#include <godot_cpp/variant/basis.hpp>
-#include <godot_cpp/variant/string_name.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <runtime/inmatch/wire_present.h>
+#include <runtime/world/present_rows.h>
+#include <runtime/world/tick_accumulator.h>
 
 #include "simulation/simulation.h"
+#include "object/object_data.h"
 
-// The WIRE (joiner/MP) per-row hot walk — the native twin of the plan walk
-// the former wire_present_pass.gd carried (the native WirePresentPass,
-// wire_present_pass.cpp, keeps the COLD path: spawn/defer/unresolved
-// bookkeeping, the liveness prune, spawn callbacks and stats; per-leg
-// behavioral semantics and their [orig] witnesses moved here with the
-// code). The walk deliberately TRANSLITERATES the GDScript's dispatch
+// The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
+// bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
+// stats — the former WirePresentPass) followed by the per-row hot walk (the
+// native twin of the plan walk the former wire_present_pass.gd carried;
+// per-leg behavioral semantics and their [orig] witnesses moved here with
+// the code). The walk deliberately TRANSLITERATES the GDScript's dispatch
 // pattern — the same legs fire in the same order under the same conditions —
-// so the pass's behavioral contract (pinned by wire_present_pass_test.gd's 33
-// cases) is preserved by construction; further edge-gating of the
-// every-frame legs (aim payload, ctrl publish, weapon channel) is a measured
-// follow-up, not part of this move.
+// so the pass's behavioral contract (pinned by wire_present_pass_test.gd) is
+// preserved by construction; further edge-gating of the every-frame legs
+// (ctrl publish, weapon channel) is a measured follow-up, not part of this
+// move.
 
-using namespace godot;
+namespace godot {
+
+using opennova::world::PF_BMS_ID;
+using opennova::world::PF_CHARACTER_ID;
+using opennova::world::PF_INDEX;
+using opennova::world::PF_KIND;
+using opennova::world::PF_STRIDE;
+using opennova::world::PF_TYPE_ID;
+using opennova::world::PF_WIRE_HANDLE;
 
 namespace {
+
+ObjectModel *model_for_id(ObjectID p_id) {
+	return p_id.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(p_id))
+			: nullptr;
+}
 
 inline int32_t wfield_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
 }
 
-// state id -> "anim_<name>" String, memoized once per process (the same cache
-// the GDScript pass carried: the native key call allocates a fresh String per
-// invocation, which on a joiner ran twice per row per frame).
-const String &infantry_key_cached(int state) {
-	static HashMap<int, String> cache;
-	String *found = cache.getptr(state);
-	if (found != nullptr) {
-		return *found;
-	}
-	cache.insert(state, Simulation::infantry_anim_key(state));
-	return *cache.getptr(state);
-}
-
-// The exact PF fields each edge-gated leg consumes. A new field read inside a
-// gated leg MUST join its table, or the gate holds stale node output. Gating
-// is presentation memoization only: identical inputs re-dispatched to the same
-// node produce the same node state, so skipping the redundant dispatch cannot
-// change what renders — it removes the measured per-frame Variant/String/Array
-// churn (2026-08-04 joiner profile: ~21us/row over 876 mostly-static rows).
-// Mirrors of WireRow::kCtrlCacheCount / kAimCacheCount (the struct is class-
-// private); static_asserts in present_one_wire_row pin the mirror.
+// The exact PF fields the edge-gated CTRL leg consumes. A new field read
+// inside the gated leg MUST join its table, or the gate holds stale node
+// output. Gating is presentation memoization only: identical inputs
+// re-dispatched to the same node produce the same node state, so skipping the
+// redundant dispatch cannot change what renders — it removes the measured
+// per-frame Variant/String/Array churn (2026-08-04 joiner profile: ~21us/row
+// over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
+// is class-private); the static_assert in present_one_wire_row pins the
+// mirror.
 constexpr int kCtrlLegFieldCount = 21;
-constexpr int kAimLegFieldCount = 30;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
@@ -79,30 +83,6 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_VEHICLE_TAIL_ROTOR,
 	Simulation::PF_VEHICLE_WHEELS,
 };
-
-// The aim-overlay leg's inputs: the body triple plus all nine overlay-class
-// triples (aim_apply_valid's exact reads).
-struct AimLegFields {
-	int fields[kAimLegFieldCount];
-	AimLegFields() {
-		fields[0] = Simulation::PF_AIM_BODY_PITCH_DEG;
-		fields[1] = Simulation::PF_AIM_BODY_YAW_DEG;
-		fields[2] = Simulation::PF_AIM_BODY_ROLL_DEG;
-		int write = 3;
-		for (int overlay_class = 0; overlay_class < 9; ++overlay_class) {
-			const int offset = Simulation::PF_AIM_ANGLES +
-					overlay_class * Simulation::PF_AIM_CLASS_STRIDE;
-			fields[write++] = offset;
-			fields[write++] = offset + 1;
-			fields[write++] = offset + 2;
-		}
-	}
-};
-
-const int *aim_leg_fields() {
-	static AimLegFields table;
-	return table.fields;
-}
 
 // Compare-and-refresh one leg's input cache. Returns true when every field is
 // bit-identical to the last applied set (skip the leg); otherwise refreshes
@@ -131,14 +111,478 @@ bool leg_inputs_unchanged(const float *p, int base, const int *fields,
 
 } // namespace
 
-void PresentApplier::setup_wire(const Callable &rebuild_held_weapon) {
-	wire_rebuild_held_weapon_ = rebuild_held_weapon;
+// --- The cold path + registry ------------------------------------------------
+
+Node3D *EntityPresenter::container() const {
+	return container_id_.is_valid()
+			? Object::cast_to<Node3D>(ObjectDB::get_instance(container_id_))
+			: nullptr;
+}
+
+void EntityPresenter::setup_wire(Object *p_sim,
+		const Ref<MissionObjectPlacer> &p_placer, Node3D *p_container,
+		const Ref<EntityIndex> &p_defer_index) {
+	Simulation *native_sim = Object::cast_to<Simulation>(p_sim);
+	sim_id_ = native_sim != nullptr ? native_sim->get_instance_id() : ObjectID();
+	placer_ = p_placer;
+	container_id_ =
+			p_container != nullptr ? p_container->get_instance_id() : ObjectID();
+	defer_index_ = p_defer_index;
+	pending_spawn_count_ = 0;
+	camera_framed_ = false;
+	last_present_logic_tick_ = -1;
 	wire_plan_dirty_ = true;
 	wire_rows_.clear();
 	wire_deferred_ids_.clear();
 }
 
-void PresentApplier::begin_wire_plan(int64_t layout_revision, int stride,
+void EntityPresenter::set_synthetic_origin_only(bool p_enabled) {
+	synthetic_origin_only_ = p_enabled;
+}
+
+void EntityPresenter::set_render_culled(int p_handle, bool p_culled) {
+	if (p_culled) {
+		wire_render_culled_[p_handle] = true;
+	} else {
+		wire_render_culled_.erase(p_handle);
+	}
+}
+
+void EntityPresenter::set_cold_spawn_budget(int p_budget) {
+	cold_spawn_budget_ = MAX(1, p_budget);
+}
+
+void EntityPresenter::set_spectator_camera(Camera3D *p_camera) {
+	camera_id_ = p_camera != nullptr ? p_camera->get_instance_id() : ObjectID();
+	camera_framed_ = false;
+}
+
+Ref<WirePresentStats> EntityPresenter::get_wire_stats_record() const {
+	return WirePresentStats::create(stat_live_, stat_spawned_,
+			stat_unresolved_, pending_spawn_count_);
+}
+
+ObjectModel *EntityPresenter::resolve_wire_handle(int p_handle) const {
+	const ObjectID *id = nodes_.getptr(p_handle);
+	return id != nullptr ? model_for_id(*id) : nullptr;
+}
+
+ObjectModel *EntityPresenter::held_weapon_node(int p_handle) const {
+	const ObjectID *id = weapon_nodes_.getptr(p_handle);
+	return id != nullptr ? model_for_id(*id) : nullptr;
+}
+
+TypedArray<ObjectModel> EntityPresenter::wire_nodes() const {
+	TypedArray<ObjectModel> live;
+	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
+		ObjectModel *node = model_for_id(kv.value);
+		if (node != nullptr) {
+			live.push_back(node);
+		}
+	}
+	return live;
+}
+
+void EntityPresenter::set_entity_lighting_context(int p_handle,
+		float p_effect_scale, bool p_interior_lerp, float p_light_transfer) {
+	LightingContext context;
+	context.effect_scale = CLAMP(p_effect_scale, 0.0f, 1.0f);
+	context.interior_lerp = p_interior_lerp;
+	context.light_transfer = CLAMP(p_light_transfer, 0.0f, 1.0f);
+	lighting_contexts_[p_handle] = context;
+	apply_lighting_context(p_handle);
+}
+
+void EntityPresenter::apply_lighting_context(int p_handle) {
+	const LightingContext *context = lighting_contexts_.getptr(p_handle);
+	if (context == nullptr) return;
+	if (ObjectModel *body = resolve_wire_handle(p_handle)) {
+		body->set_entity_lighting_context(context->effect_scale,
+				context->interior_lerp, context->light_transfer);
+	}
+	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
+		weapon->set_entity_lighting_context(context->effect_scale,
+				context->interior_lerp, context->light_transfer);
+	}
+}
+
+void EntityPresenter::free_wire_node(int p_handle) {
+	if (ObjectModel *node = resolve_wire_handle(p_handle)) {
+		node->queue_free();
+	}
+	nodes_.erase(p_handle);
+	free_held_weapon(p_handle);
+	release_wire_handle(p_handle);
+	lighting_contexts_.erase(p_handle);
+}
+
+void EntityPresenter::free_held_weapon(int p_handle) {
+	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
+		weapon->queue_free();
+	}
+	weapon_nodes_.erase(p_handle);
+	weapon_graphics_.erase(p_handle);
+}
+
+void EntityPresenter::reset_wire_runtime_state() {
+	Vector<int32_t> handles;
+	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
+		handles.push_back(kv.key);
+	}
+	for (int32_t handle : handles) {
+		free_wire_node(handle);
+	}
+	handles.clear();
+	for (const KeyValue<int32_t, ObjectID> &kv : weapon_nodes_) {
+		handles.push_back(kv.key);
+	}
+	for (int32_t handle : handles) {
+		free_held_weapon(handle);
+	}
+	weapon_nodes_.clear();
+	weapon_graphics_.clear();
+	lighting_contexts_.clear();
+	nodes_.clear();
+	unresolved_.clear();
+	reset_wire_plan_state();
+	pending_spawn_count_ = 0;
+	last_present_logic_tick_ = -1;
+	camera_framed_ = false;
+	stat_live_ = 0;
+}
+
+void EntityPresenter::register_wire_node(int p_handle, ObjectModel *p_node) {
+	if (p_node == nullptr) {
+		nodes_.erase(p_handle);
+		lighting_contexts_.erase(p_handle);
+		return;
+	}
+	nodes_[p_handle] = ObjectID(p_node->get_instance_id());
+	apply_lighting_context(p_handle);
+}
+
+void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
+		int p_stride, int64_t p_layout_revision) {
+	Simulation *s = sim();
+	Node3D *parent = container();
+	if (s == nullptr || placer_.is_null() || parent == nullptr ||
+			p_stride < PF_STRIDE) {
+		return;
+	}
+	const int tick_delta = consume_present_logic_tick_delta();
+	// Packed handle zero is a valid pool-0 identity, so the numeric getter
+	// cannot also carry presence: fold the sim's validity seam into a -1
+	// sentinel so the row-plan key distinguishes "no local player yet" from a
+	// genuine slot-0 local handle.
+	const int local_handle =
+			s->has_local_player() ? s->get_local_player_wire_handle() : -1;
+	const int64_t index_generation =
+			defer_index_.is_valid() ? defer_index_->get_generation() : 0;
+	if (pending_spawn_count_ == 0 &&
+			wire_plan_is_current(p_snap.size(), p_stride,
+					p_layout_revision, index_generation, local_handle)) {
+		present_wire_rows(p_snap, p_stride, tick_delta);
+		frame_spectator_camera();
+		return;
+	}
+	begin_wire_plan(p_layout_revision, p_stride, p_snap.size(),
+			index_generation, local_handle);
+	const float *snap = p_snap.ptr();
+	const int count = int(p_snap.size() / p_stride);
+	HashMap<int32_t, bool> live;
+	// [node, runtime_kind, visual_item_id] per spawn; the signal fires after
+	// the production transform is applied, exactly as the inline cold walk
+	// ordered it.
+	LocalVector<ObjectID> spawned_nodes;
+	LocalVector<int32_t> spawned_kinds;
+	LocalVector<int32_t> spawned_items;
+	int spawn_attempts = 0;
+	int pending_spawns = 0;
+	for (int i = 0; i < count; ++i) {
+		const int base = i * p_stride;
+		const int type_id = int(snap[base + PF_TYPE_ID]);
+		const int handle = int(snap[base + PF_WIRE_HANDLE]);
+		const int character_id = int(snap[base + PF_CHARACTER_ID]) & 0xffff;
+		const int32_t visual_identity = int32_t(
+				(uint32_t(type_id) << 16) | uint32_t(character_id));
+		// A zero type row is the joiner's self-filtered echo (H) or an
+		// unresolved record; the local player handle is drawn by
+		// LocalPlayerPresenter.
+		if (type_id == 0 || handle == local_handle) {
+			continue;
+		}
+		// A wire-only row with no local BMS record carries the decoded halves
+		// of kSpawnOriginNone (world/entity.h names both sentinels).
+		if (synthetic_origin_only_ &&
+				!(int(snap[base + PF_KIND]) ==
+								opennova::world::kSpawnOriginKindNone &&
+						int(snap[base + PF_INDEX]) ==
+								opennova::world::kSpawnOriginIndexNone)) {
+			continue;
+		}
+		const int runtime_kind = opennova::npruntime::
+				mission_kind_for_wire_handle(uint16_t(handle));
+		const int visual_item_id =
+				placer_->resolve_player_visual_item_id(type_id);
+		// Defer any row that carries a PLACED .bms identity: the placed
+		// representation — an individual node or a static MultiMesh batch
+		// instance (deliberately node-less) — owns the rendering. The node
+		// resolve is bookkeeping for row-plan validity, not the defer
+		// condition; a batched static resolves to null and still defers.
+		// A row whose index is not installed yet (a joiner's streamed statics
+		// between the world-stream fence and the settle that places them)
+		// defers the same way: no wire node, ever.
+		{
+			const int d_kind = int(snap[base + PF_KIND]);
+			const int d_index = int(snap[base + PF_INDEX]);
+			if (d_kind >= 0 && d_kind <= 3 && d_index >= 0 &&
+					d_index != opennova::world::kSpawnOriginIndexNone) {
+				ObjectModel *placed = defer_index_.is_valid()
+						? defer_index_->resolve(
+								int(snap[base + PF_BMS_ID]), d_kind, d_index)
+						: nullptr;
+				if (placed != nullptr) {
+					append_wire_deferred(placed);
+				}
+				continue;
+			}
+		}
+		live[handle] = true;
+		if (const int32_t *failed_identity = unresolved_.getptr(handle)) {
+			if (*failed_identity == visual_identity) {
+				continue;
+			}
+			unresolved_.erase(handle);
+			lighting_contexts_.erase(handle);
+		}
+		ObjectModel *node = resolve_wire_handle(handle);
+		if (node != nullptr &&
+				!wire_node_matches_row(node, p_snap, base, type_id)) {
+			free_wire_node(handle);
+			node = nullptr;
+		}
+		bool spawned_now = false;
+		if (node == nullptr) {
+			// Continue the cheap scan after exhausting the budget: later live
+			// nodes still need this frame's transform, and mismatched/retired
+			// nodes still need prompt teardown. The omitted rows force
+			// another cold plan below.
+			if (spawn_attempts >= cold_spawn_budget_) {
+				++pending_spawns;
+				continue;
+			}
+			++spawn_attempts;
+			// build_player_animated_model maps the player runtime type to its
+			// visual item and passes other organics through — the SAME chain
+			// the host uses for the local avatar and placed NPCs.
+			node = placer_->build_player_animated_model(
+					type_id, parent, character_id);
+			if (node == nullptr) {
+				unresolved_[handle] = visual_identity;
+				++stat_unresolved_;
+				continue;
+			}
+			node->set_name(vformat("Wire_%04x", handle));
+			Ref<EntityRef> ref;
+			ref.instantiate();
+			ref->set_kind(runtime_kind);
+			ref->set_origin_kind(int(snap[base + PF_KIND]));
+			ref->set_index(int(snap[base + PF_INDEX]));
+			ref->set_bms_id(int(snap[base + PF_BMS_ID]));
+			ref->set_wire_handle(handle);
+			ref->set_item_id(visual_item_id);
+			ref->set_runtime_type_id(type_id);
+			ref->set_character_id(character_id);
+			node->set_entity_ref(ref);
+			nodes_[handle] = node->get_instance_id();
+			apply_lighting_context(handle);
+			++stat_spawned_;
+			spawned_now = true;
+		}
+		append_wire_row(node, base, handle, spawned_now);
+		if (spawned_now) {
+			spawned_nodes.push_back(ObjectID(node->get_instance_id()));
+			spawned_kinds.push_back(runtime_kind);
+			spawned_items.push_back(visual_item_id);
+		}
+	}
+	present_wire_rows(p_snap, p_stride, tick_delta);
+	pending_spawn_count_ = pending_spawns;
+	for (uint32_t i = 0; i < spawned_nodes.size(); ++i) {
+		if (ObjectModel *node = model_for_id(spawned_nodes[i])) {
+			emit_signal("wire_node_spawned", node, spawned_kinds[i],
+					spawned_items[i]);
+		}
+	}
+	stat_live_ = int64_t(live.size());
+	Vector<int32_t> retired;
+	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
+		if (!live.has(kv.key)) {
+			retired.push_back(kv.key);
+		}
+	}
+	for (int32_t handle : retired) {
+		free_wire_node(handle);
+	}
+	retired.clear();
+	for (const KeyValue<int32_t, int32_t> &kv : unresolved_) {
+		if (!live.has(kv.key)) {
+			retired.push_back(kv.key);
+		}
+	}
+	for (int32_t handle : retired) {
+		unresolved_.erase(handle);
+		lighting_contexts_.erase(handle);
+	}
+	frame_spectator_camera();
+}
+
+// Spectator-only one-shot overview.
+void EntityPresenter::frame_spectator_camera() {
+	Camera3D *camera = camera_id_.is_valid()
+			? Object::cast_to<Camera3D>(ObjectDB::get_instance(camera_id_))
+			: nullptr;
+	if (camera == nullptr || camera_framed_ || nodes_.is_empty() ||
+			pending_spawn_count_ > 0) {
+		return;
+	}
+	Vector3 centroid;
+	int count = 0;
+	for (const KeyValue<int32_t, ObjectID> &kv : nodes_) {
+		ObjectModel *node = model_for_id(kv.value);
+		if (node == nullptr) {
+			continue;
+		}
+		centroid += node->get_global_position();
+		++count;
+	}
+	if (count == 0) {
+		return;
+	}
+	camera_framed_ = true;
+	centroid /= real_t(count);
+	camera->set_global_position(centroid + Vector3(0.0f, 90.0f, 110.0f));
+	camera->look_at(centroid, Vector3(0, 1, 0));
+}
+
+// Remote primary-channel blends are fixed-tick state, while this walk also
+// runs on zero-tick render frames and once after a multi-tick catch-up batch.
+// Consume the sim clock once per presented snapshot so every row advances by
+// the exact logic-tick delta rather than by the number of render submissions.
+int EntityPresenter::consume_present_logic_tick_delta() {
+	Simulation *s = sim();
+	const int64_t now = s != nullptr ? s->get_logic_tick() : 0;
+	if (last_present_logic_tick_ < 0) {
+		last_present_logic_tick_ = now;
+		return 0;
+	}
+	if (now <= last_present_logic_tick_) {
+		// Equal means a render-only re-present; lower means the world was
+		// restarted under the same presenter. Rebase without fabricating
+		// ticks.
+		last_present_logic_tick_ = now;
+		return 0;
+	}
+	const int64_t delta = now - last_present_logic_tick_;
+	last_present_logic_tick_ = now;
+	return int(MIN(delta,
+			int64_t(opennova::world::TickAccumulator::kMaxCatchupTicks)));
+}
+
+bool EntityPresenter::wire_node_matches_row(ObjectModel *p_node,
+		const PackedFloat32Array &p_snap, int p_base, int p_type_id) const {
+	const float *snap = p_snap.ptr();
+	const Ref<EntityRef> ref = p_node->get_entity_ref();
+	if (ref.is_null()) {
+		return false;
+	}
+	return ref->get_runtime_type_id() == p_type_id &&
+			ref->get_character_id() ==
+					(int(snap[p_base + PF_CHARACTER_ID]) & 0xffff) &&
+			ref->get_origin_kind() == int(snap[p_base + PF_KIND]) &&
+			ref->get_index() == int(snap[p_base + PF_INDEX]) &&
+			ref->get_bms_id() == int(snap[p_base + PF_BMS_ID]);
+}
+
+Vector3 EntityPresenter::muzzle_world_for(int p_handle,
+		const String &p_userpoint) const {
+	ObjectModel *body = resolve_wire_handle(p_handle);
+	const Vector3 body_origin = body != nullptr
+			? body->get_global_transform().origin
+			: Vector3(INFINITY, INFINITY, INFINITY);
+	if (p_userpoint.is_empty()) {
+		return body_origin;
+	}
+	ObjectModel *weapon = held_weapon_node(p_handle);
+	if (weapon == nullptr || !weapon->is_visible()) {
+		return body_origin;
+	}
+	Ref<ObjectData> data = weapon->get_object_data();
+	if (data.is_null()) {
+		return body_origin;
+	}
+	const int point_count = data->get_user_point_count();
+	for (int i = 0; i < point_count; ++i) {
+		const Ref<ModelUserPoint> info = data->get_user_point_info(i);
+		if (info.is_valid() && info->get_name().nocasecmp_to(p_userpoint) == 0) {
+			return weapon->get_global_transform().xform(info->get_position());
+		}
+	}
+	return body_origin;
+}
+
+// Build (or free) this wire body's third-person gun model when its ADM
+// changes — the hot walk detects the edge and calls here so the placer build,
+// node naming, and the maps muzzle_world_for/tests consume stay on the cold
+// path; the per-frame rigid attach lives in the hot walk. Kept beside nodes_
+// rather than parented under the body: ObjectModel rebuild() frees all of its
+// children, so a child weapon would vanish on any body rebuild. (Witness:
+// npruntime/wire_present.h ledger — the model resolves off the equipped ADM;
+// the sim folds the draw gate in.)
+Node3D *EntityPresenter::rebuild_held_weapon(int p_handle, int p_adm) {
+	Simulation *s = sim();
+	String graphic;
+	if (p_adm > 0 && s != nullptr) {
+		graphic = s->get_weapon_third_person_model(p_adm);
+	}
+	const String *current = weapon_graphics_.getptr(p_handle);
+	if (current != nullptr && *current == graphic) {
+		return held_weapon_node(p_handle);
+	}
+	free_held_weapon(p_handle);
+	Node3D *parent = container();
+	if (!graphic.is_empty() && placer_.is_valid() && parent != nullptr) {
+		ObjectModel *built = placer_->build_model_from_graphic(graphic,
+				String(), parent, String(), String(), true);
+		if (built != nullptr) {
+			built->set_name(vformat("WireWeapon_%04x", p_handle));
+			built->set_shadow_caster_enabled(true);
+			// The 3P gun silhouettes inside the body's render slot, like
+			// retail's child walk [orig:
+			// RenderSlot_RenderEntityAndChildren @0x5d78ef, see
+			// docs/render/render-lighting-re.md] — never a slot of its own.
+			built->set_slot_shadow_capture_with(resolve_wire_handle(p_handle));
+			// The held weapon draws at its owner's selected RLOD clamped to its
+			// own LOD count and never walks its own thresholds
+			// (renderer::attachment_lod_index). Retail draws it inside the
+			// HEAD submit of a composed avatar (the flagged body submit skips
+			// it), so the head part owns the level when there is one. The
+			// weapon never outlives its body (free_wire_node frees both), so
+			// one stamp at build suffices.
+			ObjectModel *body = resolve_wire_handle(p_handle);
+			ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
+			built->set_authored_lod_owner(head != nullptr ? head : body);
+			weapon_nodes_[p_handle] = built->get_instance_id();
+			apply_lighting_context(p_handle);
+		}
+	}
+	weapon_graphics_[p_handle] = graphic;
+	return held_weapon_node(p_handle);
+}
+
+// --- The plan + the per-row hot walk -----------------------------------------
+
+void EntityPresenter::begin_wire_plan(int64_t layout_revision, int stride,
 		int64_t snapshot_size, int64_t index_generation, int local_handle) {
 	wire_rows_.clear();
 	wire_deferred_ids_.clear();
@@ -150,7 +594,7 @@ void PresentApplier::begin_wire_plan(int64_t layout_revision, int stride,
 	wire_plan_dirty_ = false;
 }
 
-void PresentApplier::append_wire_row(Object *node, int base, int handle,
+void EntityPresenter::append_wire_row(Object *node, int base, int handle,
 		bool spawned_now) {
 	WireRow row;
 	row.base = base;
@@ -170,13 +614,13 @@ void PresentApplier::append_wire_row(Object *node, int base, int handle,
 	wire_rows_.push_back(row);
 }
 
-void PresentApplier::append_wire_deferred(Object *node) {
+void EntityPresenter::append_wire_deferred(Object *node) {
 	if (node != nullptr) {
 		wire_deferred_ids_.push_back(ObjectID(node->get_instance_id()));
 	}
 }
 
-bool PresentApplier::wire_plan_is_current(int64_t snapshot_size, int stride,
+bool EntityPresenter::wire_plan_is_current(int64_t snapshot_size, int stride,
 		int64_t layout_revision, int64_t index_generation, int local_handle) {
 	// The revision keys on exactly the per-row identity quintet
 	// (wire_handle/type_id/bms_id/kind/index — simulation_present.cpp), so
@@ -205,19 +649,11 @@ bool PresentApplier::wire_plan_is_current(int64_t snapshot_size, int stride,
 	return true;
 }
 
-void PresentApplier::set_wire_render_culled(int handle, bool culled) {
-	if (culled) {
-		wire_render_culled_[handle] = true;
-	} else {
-		wire_render_culled_.erase(handle);
-	}
-}
-
 // The render-gate verdict is keyed by the sim's wire handle, not by the
 // node: a node swap (release + rebuild) keeps it, so the replacement body
 // draws gated exactly like the one it replaced. Only the baseline reset
-// (clear_wire_render_culled) forgets verdicts.
-void PresentApplier::release_wire_handle(int handle) {
+// (clear_render_culled) forgets verdicts.
+void EntityPresenter::release_wire_handle(int handle) {
 	wire_remote_body_.erase(handle);
 	wire_respawn_revisions_.erase(handle);
 	wire_held_weapon_adm_.erase(handle);
@@ -225,7 +661,7 @@ void PresentApplier::release_wire_handle(int handle) {
 	wire_plan_dirty_ = true;
 }
 
-void PresentApplier::reset_wire_runtime_state() {
+void EntityPresenter::reset_wire_plan_state() {
 	wire_rows_.clear();
 	wire_deferred_ids_.clear();
 	wire_render_culled_.clear();
@@ -241,7 +677,7 @@ void PresentApplier::reset_wire_runtime_state() {
 	wire_plan_dirty_ = true;
 }
 
-void PresentApplier::present_wire_rows(const PackedFloat32Array &snap,
+void EntityPresenter::present_wire_rows(const PackedFloat32Array &snap,
 		int stride, int tick_delta) {
 	const int64_t size = snap.size();
 	for (WireRow &row : wire_rows_) {
@@ -258,12 +694,10 @@ void PresentApplier::present_wire_rows(const PackedFloat32Array &snap,
 	}
 }
 
-void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
+void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		const PackedFloat32Array &snap, int tick_delta) {
 	static_assert(kCtrlLegFieldCount == WireRow::kCtrlCacheCount,
 			"ctrl leg field table must match the row cache size");
-	static_assert(kAimLegFieldCount == WireRow::kAimCacheCount,
-			"aim leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
 	// A row the occlusion frame's collector gate culled is not drawn: no
@@ -293,10 +727,7 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		present_wire_row_body_sounds(row, snap);
 		return;
 	}
-	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
-	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
-	model->set_match_terrain_enabled(
-			(wfield_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
+	stamp_match_terrain(model, p, base);
 	const int32_t respawn_revision =
 			wfield_i(p, base, Simulation::PF_RESPAWN_REVISION);
 	const int32_t *seen_revision = wire_respawn_revisions_.getptr(row.handle);
@@ -318,15 +749,8 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		model->set_transform(next_transform);
 	}
 	// The mounted right-hand collapse rides its own packed field; edge-gated to
-	// the value change like MissionPresentPass.
-	{
-		const int32_t rhc =
-				wfield_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED);
-		if (rhc != row.rhc) {
-			model->set_right_hand_collapsed(rhc != 0);
-		}
-		row.rhc = rhc;
-	}
+	// the value change like the placed walk.
+	stamp_right_hand_collapsed(model, p, base, row.rhc);
 	// Aim overlay: apply while valid, clear only on the valid->invalid edge.
 	// The apply itself is input-gated: identical overlay angles re-dispatch
 	// the identical delta set, so only changed inputs build the 9-basis Array.
@@ -335,8 +759,7 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		const int32_t aim_valid =
 				wfield_i(p, base, Simulation::PF_AIM_OVERLAY_VALID);
 		if (aim_valid != 0) {
-			if (!leg_inputs_unchanged(p, base, aim_leg_fields(),
-					kAimLegFieldCount, row.aim_cache,
+			if (aim_payload_changed(p, base, row.aim_cache,
 					row.aim_cache_valid)) {
 				aim_apply_valid(model, snap, base, false);
 			}
@@ -407,9 +830,9 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 				wpn_weight != row.wpn_weight || wpn_variant != row.wpn_variant ||
 				wpn_src_variant != row.wpn_src_variant) {
 			model->set_weapon_channel(
-					wpn_state >= 0 ? infantry_key_cached(wpn_state) : String(),
+					wpn_state >= 0 ? infantry_key(wpn_state) : String(),
 					wpn_phase,
-					wpn_src_state >= 0 ? infantry_key_cached(wpn_src_state) : String(),
+					wpn_src_state >= 0 ? infantry_key(wpn_src_state) : String(),
 					wpn_src_phase, wpn_weight, wpn_variant, wpn_src_variant);
 			row.wpn_state = wpn_state;
 			row.wpn_phase = wpn_phase;
@@ -424,28 +847,11 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const bool next_visible =
 			wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
-	// Owned-channel contract as in the placed applier: only a row publishing
+	// Owned-channel contract as in the placed walk: only a row publishing
 	// PF_SECTION_MASK_VALID drives the model's section mask; a VALID -> clear
 	// transition releases once, and never-publishing rows leave the channel to
 	// its other writer (the occlusion frame pass on buildings).
-	if (wfield_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-		const uint32_t hidden_mask =
-				static_cast<uint32_t>(wfield_i(
-						p, base, Simulation::PF_SECTION_MASK_LO)) |
-				(static_cast<uint32_t>(wfield_i(
-						p, base, Simulation::PF_SECTION_MASK_HI))
-						<< 16);
-		const int64_t section_visibility_mask = static_cast<int64_t>(
-				hidden_mask ^ 0xffffffffu);
-		if (section_visibility_mask != row.section_visibility_mask) {
-			model->set_section_visibility_mask(section_visibility_mask);
-			row.section_visibility_mask = section_visibility_mask;
-		}
-	} else if (row.section_visibility_mask != -2 &&
-			row.section_visibility_mask != -1) {
-		model->set_section_visibility_mask(-1);
-		row.section_visibility_mask = -1;
-	}
+	stamp_section_mask(model, p, base, row.section_visibility_mask);
 	update_wire_held_weapon(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	if (model->is_visible() != next_visible) {
@@ -463,7 +869,7 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 // rebuild) it is a mid-clip landing — seed at the playhead so the crossed
 // prefix never back-fires as a burst. Runs for culled rows too: the sounds
 // are entity-update work, not draw work.
-void PresentApplier::present_wire_row_body_sounds(WireRow &row,
+void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 		const PackedFloat32Array &snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
@@ -471,8 +877,7 @@ void PresentApplier::present_wire_row_body_sounds(WireRow &row,
 	// tick, so a fresh clip's first observed playhead is a few ticks in at
 	// most; anything past this is a mid-clip landing.
 	constexpr int32_t kFreshClipTicks = 3;
-	Simulation *sim =
-			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
+	Simulation *s = sim();
 	const int32_t foot_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
 	const int32_t foot_phase =
 			wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);
@@ -481,14 +886,14 @@ void PresentApplier::present_wire_row_body_sounds(WireRow &row,
 	// simulation playhead this consume walks.
 	const bool foot_armed =
 			wfield_i(p, base, Simulation::PF_ANIM_REMOTE_REQUEST) == 0;
-	if (sim != nullptr && foot_armed && foot_state >= 0 && foot_phase >= 0) {
+	if (s != nullptr && foot_armed && foot_state >= 0 && foot_phase >= 0) {
 		if (foot_state != row.foot_state) {
 			row.foot_state = foot_state;
 			row.foot_phase =
 					foot_phase <= kFreshClipTicks ? -1 : foot_phase;
 		}
 		if (foot_phase > row.foot_phase) {
-			sim->present_wire_body_sounds(
+			s->present_wire_body_sounds(
 					wfield_i(p, base, Simulation::PF_TYPE_ID),
 					wfield_i(p, base, Simulation::PF_CHARACTER_ID),
 					wfield_i(p, base, Simulation::PF_WIRE_HANDLE),
@@ -510,7 +915,7 @@ void PresentApplier::present_wire_row_body_sounds(WireRow &row,
 // Keep dynamically materialized items on the same PANM path as placed mission
 // objects. The ACTIVE fields are publication ownership, so an owned zero phase
 // must still be written and a suppressed channel must release its prior value.
-void PresentApplier::apply_wire_procedural_part(const WireRow &row,
+void EntityPresenter::apply_wire_procedural_part(const WireRow &row,
 		ObjectModel *model, const PackedFloat32Array &snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
@@ -529,10 +934,10 @@ void PresentApplier::apply_wire_procedural_part(const WireRow &row,
 }
 
 // The wire-driven skeletal primary pose, on the same projection path as the
-// mission walk. REMOTE-request rows skip re-dispatch entirely while the wire
+// placed walk. REMOTE-request rows skip re-dispatch entirely while the wire
 // state is unchanged; host-loopback rows (remote_request 0) keep per-tick
 // dispatch — their playhead rides play_body_clip_at's phase.
-void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
+void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 		const PackedFloat32Array &snap, int tick_delta) {
 	const float *p = snap.ptr();
 	const int base = row.base;
@@ -572,7 +977,7 @@ void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 	// dispatches FIRST so the model's arbitration sees retail's per-record
 	// order. [orig: per-record remote anim apply @ 0x4c1153]
 	if (remote_request && anim_pulse >= 0) {
-		const String &pulse_key = infantry_key_cached(anim_pulse);
+		const String &pulse_key = infantry_key(anim_pulse);
 		if (!pulse_key.is_empty()) {
 			remote_needs_tick = model->apply_remote_body_state(
 					anim_pulse, pulse_key,
@@ -581,7 +986,7 @@ void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 		}
 	}
 	if (anim_state >= 0) {
-		const String &key = infantry_key_cached(anim_state);
+		const String &key = infantry_key(anim_state);
 		if (!key.is_empty()) {
 			// ObjectModel owns current/pending acceptance because it also
 			// owns clip time and completion. Forward every raw wire request.
@@ -601,7 +1006,7 @@ void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 				const int32_t source_state =
 						wfield_i(p, base, Simulation::PF_ANIM_SOURCE_STATE);
 				const String source_key = source_state >= 0
-						? infantry_key_cached(source_state)
+						? infantry_key(source_state)
 						: String();
 				const float blend_weight =
 						p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
@@ -623,7 +1028,7 @@ void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 		const int32_t source_state =
 				wfield_i(p, base, Simulation::PF_ANIM_SOURCE_STATE);
 		if (source_state >= 0) {
-			const String &source_key = infantry_key_cached(source_state);
+			const String &source_key = infantry_key(source_state);
 			if (!source_key.is_empty()) {
 				model->play_body_clip_at(source_key,
 						wfield_i(p, base,
@@ -644,7 +1049,7 @@ void PresentApplier::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 	model->play_body_anim(body_anim_slot);
 }
 
-void PresentApplier::store_wire_remote_body_cache(const WireRow &row) {
+void EntityPresenter::store_wire_remote_body_cache(const WireRow &row) {
 	RemoteBodyCache cache;
 	cache.state = row.anim_state;
 	cache.request = row.anim_request;
@@ -657,11 +1062,11 @@ void PresentApplier::store_wire_remote_body_cache(const WireRow &row) {
 // entirely by bone 16's joint plus the weapon's own attach basis. The graphic
 // resolve is edged on the ADM (get_weapon_third_person_model is a pure table
 // lookup, so an unchanged ADM cannot change the graphic); the rebuild itself —
-// placer build, naming, the _weapon_nodes/_weapon_graphics maps consumers poke
-// — stays on the facade behind the rebuild Callable.
+// placer build, naming, the weapon-node maps consumers poke — is the cold
+// path's rebuild_held_weapon.
 // [orig: BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99; matrix
 //  @ 0x4b2180..0x4b22f8; gate Entity_CanFireWeapon @ 0x4dcb10]
-void PresentApplier::update_wire_held_weapon(WireRow &row, Node3D *node,
+void EntityPresenter::update_wire_held_weapon(WireRow &row, Node3D *node,
 		const PackedFloat32Array &snap, bool body_visible) {
 	const float *p = snap.ptr();
 	const int base = row.base;
@@ -670,11 +1075,7 @@ void PresentApplier::update_wire_held_weapon(WireRow &row, Node3D *node,
 	const int32_t *last_adm = wire_held_weapon_adm_.getptr(row.handle);
 	if (last_adm == nullptr || *last_adm != adm) {
 		wire_held_weapon_adm_.insert(row.handle, adm);
-		Object *weapon_obj = nullptr;
-		if (wire_rebuild_held_weapon_.is_valid()) {
-			weapon_obj = Object::cast_to<Object>(
-					wire_rebuild_held_weapon_.call(row.handle, adm));
-		}
+		Node3D *weapon_obj = rebuild_held_weapon(row.handle, adm);
 		wire_held_weapon_ids_.insert(row.handle,
 				weapon_obj != nullptr ? ObjectID(weapon_obj->get_instance_id())
 									  : ObjectID());
@@ -706,25 +1107,4 @@ void PresentApplier::update_wire_held_weapon(WireRow &row, Node3D *node,
 	weapon->set_visible(true);
 }
 
-Object *PresentApplier::find_skeleton(Object *root) {
-	// The recursive Skeleton3D walk the GDScript reference ran per call, native
-	// (ObjectModel.rebuild() frees children, so caching the result by
-	// ObjectID would go stale mid-play; the walk itself is now cheap).
-	if (root == nullptr) {
-		return nullptr;
-	}
-	if (Object::cast_to<Skeleton3D>(root) != nullptr) {
-		return root;
-	}
-	Node *node = Object::cast_to<Node>(root);
-	if (node == nullptr) {
-		return nullptr;
-	}
-	for (int i = 0; i < node->get_child_count(); ++i) {
-		Object *found = find_skeleton(node->get_child(i));
-		if (found != nullptr) {
-			return found;
-		}
-	}
-	return nullptr;
-}
+} // namespace godot

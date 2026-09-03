@@ -401,7 +401,7 @@ func _update_joiner_admission_signals() -> void:
 	if pre & NetSessionPolicy.SETTLE_REQUIRED:
 		settle_ok = _world.settle_join_wire_assets()
 	# The revealed world must not race the budgeted cold wire materialization
-	# (WirePresentPass.DEFAULT_COLD_SPAWN_BUDGET): the policy holds the no-pick
+	# (EntityPresenter.DEFAULT_COLD_SPAWN_BUDGET): the policy holds the no-pick
 	# reveal — with its watchdog deadline still armed — until the presenter's
 	# deferred-spawn queue drains behind the loading hold.
 	var post: int = _policy.finish_admission_frame(

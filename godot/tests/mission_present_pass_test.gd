@@ -1,12 +1,12 @@
 extends GutTest
 
-# The native PresentApplier (the mission present pass) applies each entity's
-# transform + PANM part channels + visibility onto its placed node every tick,
-# from ONE batched sim snapshot. Real native components end to end: ObjectModel nodes (their
-# CTRL store, body clips, and Node3D state are the observables), a real
-# EntityIndex, and PF-layout snapshots built as pure data and fed through
-# the public present_snapshot API. Change-gating claims read the applier's
-# stats counters — never instrumentation subclasses.
+# The native EntityPresenter's PLACED walk (the mission present pass) applies each
+# entity's transform + PANM part channels + visibility onto its placed node every
+# tick, from ONE batched sim snapshot. Real native components end to end: ObjectModel
+# nodes (their CTRL store, body clips, Node3D state and the two visibility-owner
+# bits are the observables), a real EntityIndex, and PF-layout snapshots built as
+# pure data and fed through the public present_snapshot API. Change-gating claims
+# read the presenter's stats counters — never instrumentation subclasses.
 #
 # The old aliased-register dismount cases are gone by design: production
 # ObjectModel maps PLAYPARTANIM channels 1/2 to fixed VEHICLE_SPECIAL1/2
@@ -199,15 +199,14 @@ func _index_of(by_bms_id: Dictionary) -> EntityIndex:
 
 
 func _make_pass(index: EntityIndex, sim: Simulation = null,
-		options: Dictionary = {}) -> PresentApplier:
-	var p := PresentApplier.new()
+		options: Dictionary = {}) -> EntityPresenter:
+	var p := EntityPresenter.new()
+	add_child_autofree(p)
 	p.setup(sim, index, options.get("placer"))
-	var channels := int(PresentApplier.OUTPUT_ALL)
+	var channels := int(EntityPresenter.OUTPUT_ALL)
 	if not bool(options.get("drive_part_anim", true)):
-		channels &= ~PresentApplier.OUTPUT_PART_ANIM
+		channels &= ~EntityPresenter.OUTPUT_PART_ANIM
 	p.set_output_channels(channels)
-	p.set_shared_visibility_maps(options.get("occlusion_hidden_ids", {}),
-			options.get("present_visibility", {}))
 	return p
 
 
@@ -697,7 +696,7 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 			"a right-hand mask change reposes the retained two-channel body")
 
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentApplier.OUTPUT_BODY_ANIM)
+	p.set_output_channels(channels & ~EntityPresenter.OUTPUT_BODY_ANIM)
 	snap.entities[0]["anim_source_phase"] = 19
 	snap.entities[0]["anim_blend_weight"] = 0.4
 	_present(p, snap)
@@ -1020,13 +1019,11 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 		"type_id": 101,
 		"pos_x": 12.0,
 	}]
-	var visibility_intent := {}
-	var p := _make_pass(index, null, {
-		"present_visibility": visibility_intent,
-	})
+	var p := _make_pass(index)
 	_present(p, snap)
 	assert_almost_eq(old_model.position.x, 12.0, 0.001)
-	assert_true(bool(visibility_intent.get(21, false)))
+	assert_true(old_model.is_present_visible(),
+			"the presented row's visibility intent lives on its node")
 
 	old_model.free()
 	var replacement := _model()
@@ -1037,13 +1034,20 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "plan_rebuilds"), 2,
 			"freeing any cached model invalidates the typed row plan immediately")
-	assert_false(visibility_intent.has(21),
-			"a freed cached node releases its visibility intent immediately")
 	replacement.entity_ref = EntityRef.make(1, 21, 21)
 	index.build([replacement], [])
 	_present(p, snap)
 	assert_almost_eq(replacement.position.x, 30.0, 0.001,
 			"the replacement receives the current row after the rebind")
+	# The intent died with the freed node: the replacement carries none of it
+	# and derives its own bit from the current row.
+	snap.entities[0]["hidden"] = 1
+	_present(p, snap)
+	assert_false(replacement.is_present_visible(),
+			"the rebound row writes its own visibility intent onto the replacement")
+	snap.entities[0]["hidden"] = 0
+	_present(p, snap)
+	assert_true(replacement.is_present_visible())
 
 
 func test_transform_ignores_body_clip_visual_offsets() -> void:
@@ -1188,9 +1192,9 @@ func test_reenabled_output_channels_catch_up_to_current_state() -> void:
 
 	var channels := int(p.get_output_channels())
 	var frozen := (
-			PresentApplier.OUTPUT_TRANSFORM
-			| PresentApplier.OUTPUT_PART_ANIM
-			| PresentApplier.OUTPUT_BODY_ANIM)
+			EntityPresenter.OUTPUT_TRANSFORM
+			| EntityPresenter.OUTPUT_PART_ANIM
+			| EntityPresenter.OUTPUT_BODY_ANIM)
 	p.set_output_channels(channels & ~frozen)
 	snap.entities[0]["pos_x"] = 8.0
 	snap.entities[0]["phase1"] = 200
@@ -1225,38 +1229,33 @@ func test_unresolved_target_does_not_crash() -> void:
 
 func test_occlusion_claim_blocks_the_show_but_never_the_hide() -> void:
 	# Two-bit visibility ownership: the render-occlusion apply owns hides
-	# through a claim set shared by reference (the occlusion_hidden_ids setup
-	# option). A sim-wants-visible write is withheld while the claim stands, a
-	# sim hide always lands, and clearing the claim (as the occlusion release
-	# does) returns sole ownership to this pass.
+	# through the model's occlusion-hidden bit (set_occlusion_hidden). A
+	# sim-wants-visible write is withheld while the claim stands, a sim hide
+	# always lands, and clearing the claim (as the occlusion release does)
+	# returns sole ownership to this walk.
 	var model := _model()
-	var claims := { 1001: true }
-	var visibility_intent := {}
-	var p := _make_pass(_index_of({ 1001: model }), null, {
-		"occlusion_hidden_ids": claims,
-		"present_visibility": visibility_intent,
-	})
+	var p := _make_pass(_index_of({ 1001: model }))
 	var snap := Snapshot.new()
 	snap.entities = [{ "bms_id": 1001 }]
 
-	model.visible = false  # occlusion hid it; the sim wants it visible
+	model.set_occlusion_hidden(true)  # occlusion hid it; the sim wants it visible
 	_present(p, snap)
 	assert_false(model.visible, "a claimed node is not re-shown by the present drive")
-	assert_true(bool(visibility_intent.get(1001, false)),
-			"the shared release intent records the complete present predicate")
+	assert_true(model.is_present_visible(),
+			"the release intent on the node records the complete present predicate")
 
 	snap.entities = [{ "bms_id": 1001, "hidden": 1 }]
 	_present(p, snap)
 	assert_false(model.visible, "a sim hide lands regardless of the claim")
-	assert_false(bool(visibility_intent.get(1001, true)))
+	assert_false(model.is_present_visible())
 
 	snap.entities = [{ "bms_id": 1001, "local_view_suppressed": 1 }]
 	_present(p, snap)
-	assert_false(bool(visibility_intent.get(1001, true)),
+	assert_false(model.is_present_visible(),
 			"first-person suppression is part of the same release predicate")
 
 	snap.entities = [{ "bms_id": 1001 }]
-	claims.clear()
+	model.set_occlusion_hidden(false)
 	_present(p, snap)
 	assert_true(model.visible,
 			"with the claim cleared the present drive owns visibility again")
@@ -1273,7 +1272,7 @@ func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1, "body anim dispatches by default")
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentApplier.OUTPUT_BODY_ANIM)
+	p.set_output_channels(channels & ~EntityPresenter.OUTPUT_BODY_ANIM)
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1, "the frozen seam dispatches nothing new")
 	p.set_output_channels(channels)
@@ -1304,6 +1303,6 @@ func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> voi
 	_present(p, snap)
 	assert_false(model.get_ctrl_values().is_empty())
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentApplier.OUTPUT_PART_ANIM)
+	p.set_output_channels(channels & ~EntityPresenter.OUTPUT_PART_ANIM)
 	assert_true(model.get_ctrl_values().is_empty(),
 			"freezing the output seam cannot retain its last CTRL frame")
