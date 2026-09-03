@@ -84,9 +84,9 @@ func _probe_mission_audio(install_dir: String, expansion: String) -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var audio = MissionAudio.new(root, item_db)
+	var audio = MissionAudio.create(root, item_db)
 	var stats := audio.setup(mission, mission_name, container)
-	gut.p("PFF install mission audio: %s" % str(stats.to_dict()))
+	gut.p("PFF install mission audio: %s" % str(stats.to_json_value()))
 	assert_gt(int(stats.banks_loaded), 0,
 		"sound banks load through the PFF mount")
 	if int(stats.markers_total) > 0:

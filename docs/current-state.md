@@ -69,7 +69,7 @@ screen, the character registry). The remainder is queued in
 queue's only home: the Godot-only witnessed half of Train B (the present
 rows, the sun feed, the scar gate, the joiner pump — on-touch after a grill;
 A3 and the rig-twinned half landed with ADR 0042), the Train C tail including
-the `mission_audio.gd` reverb, and Train D in full. The counters
+the `mission_audio.cpp` reverb, and Train D in full. The counters
 (read them from the baseline, not here) are not yet at a seam-contract floor;
 the campaign is finished when both hold only documented seam contracts.
 [ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28)

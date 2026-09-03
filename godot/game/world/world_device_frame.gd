@@ -359,7 +359,7 @@ func mix_audio_frame(ticks_run: int) -> void:
 			if audio_sim != null:
 				_world._mission_audio.advance_ticks(int(audio_sim.get_logic_tick()))
 				# The weather tick's thunder one-shots, placed around the
-				# listener (mission_audio.gd carries the cites).
+				# listener (godot/src/audio/mission_audio.cpp carries the cites).
 				_world._mission_audio.play_weather_sounds(
 						audio_sim.drain_weather_sounds(), _frame_camera_xform)
 		_world._mission_audio.tick(_frame_camera_pos, _frame_delta)
@@ -719,7 +719,7 @@ func get_runtime_perf_counters() -> Dictionary:
 		"mission_placement": (_world._mission_stats.to_json_value()
 				if _world._mission_stats != null else {}),
 		"static_live_populations": _world.get_static_live_population_count(),
-		"audio": _world._mission_audio.get_perf_counters() if _world._mission_audio != null else {},
+		"audio": _world._mission_audio.get_perf_counters().to_json_value() if _world._mission_audio != null else {},
 		"instance_uniform_geometry_estimate":
 				_instance_uniform_geometry_estimate(foliage_backend),
 	}

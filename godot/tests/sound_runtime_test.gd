@@ -36,7 +36,7 @@ func _real_root(files: Dictionary) -> ResourceRoot:
 
 
 # Occlusion recorder driven through the bank's typed Callable override seam
-# (occlusion_override) — the live path is the Simulation provider; the value-only
+# (set_occlusion_override) — the live path is the Simulation provider; the value-only
 # stand-in pins what the bank does with the returned retail occlusion distance
 # without fabricating collision internals.
 class OcclusionRecorder:
@@ -85,7 +85,7 @@ func test_menu_audio_routes_its_pooled_players_to_sfx() -> void:
 
 
 func test_bank_indexing_case_insensitive() -> void:
-	var bank = SoundBank.new(null)
+	var bank = SoundBank.create(null)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	assert_true(bank.has_set("Z00AMB1"), "exact name resolves")
 	assert_true(bank.has_set("z00amb1"), "lookup is case-insensitive")
@@ -94,7 +94,7 @@ func test_bank_indexing_case_insensitive() -> void:
 
 
 func test_spawn_unknown_or_unresolvable_returns_null() -> void:
-	var bank = SoundBank.new(null)  # no resource root -> no wav decode
+	var bank = SoundBank.create(null)  # no resource root -> no wav decode
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -112,7 +112,7 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)  # 16 mono 16-bit frames
 	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
-	var bank = SoundBank.new(root)
+	var bank = SoundBank.create(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -139,7 +139,7 @@ func test_ambient_description_defers_and_caches_wav_decode() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)
 	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
-	var bank = SoundBank.new(root)
+	var bank = SoundBank.create(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 
 	var descriptors: Array = bank.describe_ambient("Z00AMB1")
@@ -197,29 +197,38 @@ func test_emitter_layer_volume_two_radius_model() -> void:
 	assert_eq(S.emitter_layer_volume(0, 0, 0, 255, 255, 255), 0)
 
 
+# One layer descriptor (the layer's two radii + member 0's volume/clamp).
+func _ambient_layer(falloff: int, min_dist: int, volume: int, clamp_vol: int) -> AmbientLayer:
+	var layer := AmbientLayer.new()
+	layer.falloff_radius = falloff
+	layer.min_distance = min_dist
+	layer.volume = volume
+	layer.clamp_volume = clamp_vol
+	return layer
+
+
 func test_oneshot_distance_volume_is_not_rebased() -> void:
-	var bank = SoundBank.new(null)
-	var layer := {"falloff_radius": 200, "min_distance": 0}
-	var member := {"volume": 255, "clamp_volume": 255}
+	var bank = SoundBank.create(null)
+	var layer := _ambient_layer(200, 0, 255, 255)
 	# One-shots run the plain falloff over 0..r [orig: SoundBank_PlayTriggerEntries
 	# @ 0x75cf75]: half distance = quarter volume of the 254-scaled input.
-	assert_eq(bank.oneshot_distance_volume(100 << 16, layer, member), 63)
-	assert_eq(bank.oneshot_distance_volume(0, layer, member), 253)
-	assert_eq(bank.oneshot_distance_volume(200 << 16, layer, member), 0)
+	assert_eq(bank.oneshot_distance_volume(100 << 16, layer), 63)
+	assert_eq(bank.oneshot_distance_volume(0, layer), 253)
+	assert_eq(bank.oneshot_distance_volume(200 << 16, layer), 0)
 
 
 func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
-	var bank = SoundBank.new(null)
+	var bank = SoundBank.create(null)
 	# A layer with NO falloff radius plays at the RAW emitter volume — the
 	# member volume is not consulted [orig: SoundBank_PlayTriggerEntries
 	# @ 0x75cf88 stores emitter_info[2], reimpl emitter = full 255].
-	var quiet := {"volume": 100, "clamp_volume": 255}
-	assert_eq(bank.oneshot_distance_volume(500 << 16, {}, quiet), 255)
+	var quiet := _ambient_layer(0, 0, 100, 255)
+	assert_eq(bank.oneshot_distance_volume(500 << 16, quiet), 255)
 	# A min-only layer computes the proximity stage but the no-falloff branch
 	# DISCARDS it with the member volume [orig: @ 0x75cf88] (no JOX layer
 	# ships min-only; pinned for the witnessed form).
-	var min_only := {"falloff_radius": 0, "min_distance": 50}
-	assert_eq(bank.oneshot_distance_volume(25 << 16, min_only, quiet), 255)
+	var min_only := _ambient_layer(0, 50, 100, 255)
+	assert_eq(bank.oneshot_distance_volume(25 << 16, min_only), 255)
 
 
 func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
@@ -228,7 +237,7 @@ func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
 	var root := _real_root({"tone.wav": _build_wav(samples, 1, 22050, 16)})
 	var profile := _profile_with_set("POINT_ONLY", "tone.wav")
 	profile.set_set_field(0, "target_id", 0)
-	var bank = SoundBank.new(root)
+	var bank = SoundBank.create(root)
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -249,8 +258,8 @@ func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 	profile.set_set_field(0, "target_id", 200)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
 	var provider := OcclusionRecorder.new(100 << 16)
-	var bank = SoundBank.new(root)
-	bank.occlusion_override = provider.occlude
+	var bank = SoundBank.create(root)
+	bank.set_occlusion_override(provider.occlude)
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -276,8 +285,8 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 	profile.set_set_field(0, "target_id", 120)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
 	var provider := OcclusionRecorder.new(130 << 16)
-	var bank = SoundBank.new(root)
-	bank.occlusion_override = provider.occlude
+	var bank = SoundBank.create(root)
+	bank.set_occlusion_override(provider.occlude)
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)

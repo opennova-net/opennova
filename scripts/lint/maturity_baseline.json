@@ -19,11 +19,11 @@
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
-    "gd_dict_key_sites": 245,
-    "gd_foreign_private_accesses": 630,
+    "gd_dict_key_sites": 207,
+    "gd_foreign_private_accesses": 629,
     "gd_prints_outside_debug": 0,
     "gd_test_production_subclasses": 21,
-    "godot_orig_cites": 1071,
+    "godot_orig_cites": 1063,
     "godot_src_dictionary_returns": 65,
     "has_method_guards": 22,
     "oversize_cpp_files": 1,
@@ -58,7 +58,6 @@
     "probe_runner.gd|func cancel(",
     "game_world.gd|func get_perf_probe_spans(",
     "world_device_frame.gd|func get_runtime_perf_counters()",
-    "perf_probe_switches.gd|var spans: Dictionary",
-    "mission_audio.gd|func to_dict()"
+    "perf_probe_switches.gd|var spans: Dictionary"
   ]
 }

@@ -194,6 +194,10 @@ add_library(${TARGET_NAME} SHARED
     lwf/wav_loader.cpp
     audio/ambient_mixer.cpp
     audio/sound_selector.cpp
+    audio/ambient_layer.cpp
+    audio/sound_bank.cpp
+    audio/mission_audio_records.cpp
+    audio/mission_audio.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/engine_caches.cpp

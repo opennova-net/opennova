@@ -40,6 +40,11 @@ public:
 	String get_source_path() const { return source_path_; }
 	String get_last_error() const { return last_error_; }
 
+	// C++-side seam (not bound): the parsed dialog bank as the engine's
+	// formats/dbf structs, for the runtime dialog resolution
+	// (runtime/audio/dialog_queue.h).
+	const opennova::dbf::File &engine_file() const { return file_; }
+
 	int get_dialog_count() const;
 	bool has_dialog(const String &p_id) const;
 	// The ordered def_id_name(s) (LWF set names) a dialog group plays; empty if

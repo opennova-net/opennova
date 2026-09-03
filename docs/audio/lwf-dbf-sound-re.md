@@ -711,7 +711,7 @@ The mixer reads the row at `0x7bdd12..0x7bdd4e` (`lea ebx,[ebx+ebx*2]; lea ebx,[
 = index * 24, copied into the DSP state at `0x798898..0x7988A8`) inside a self-modifying
 MMX block (`0x7bdcf0` patches a jump opcode on a device-caps compare), so whether index 0
 bypasses the reverb or applies the same coefficients is unresolved until that DSP is
-decompiled. Reimpl: NONE of this is ported. `godot/game/world/mission_audio.gd`
+decompiled. Reimpl: NONE of this is ported. `godot/src/audio/mission_audio.cpp`
 `_apply_reverb` installs a Godot `AudioEffectReverb` whose room size scales with the
 mission header `reverb` id -- an invented stand-in that retail does not compute (retail's
 rows do not vary with the id at all in stock data). Disposition pending the maintainer:
