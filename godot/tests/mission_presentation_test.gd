@@ -112,24 +112,6 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	assert_eq(spec.mount_config, 4)
 
 
-class FireAudioStub:
-	extends RefCounted
-	var calls: Array = []
-
-	func fire_soundset(set_name: String, world_pos: Vector3,
-			source_bms_id: int = 0) -> bool:
-		calls.append({
-			"set": set_name,
-			"pos": world_pos,
-			"source_bms_id": source_bms_id,
-		})
-		return true
-
-	func slot_soundset(_set_name: String, _world_pos: Vector3,
-			_exclusive_key: String = "") -> bool:
-		return true
-
-
 # The flashbang's effects_table tag-1 "move" effect (retail ammo.def grenadefb):
 # the round-bound particle the pose-follow test below watches.
 const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
@@ -361,19 +343,22 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	target.host_ip = "127.0.0.1"
 	target.port = 9
 	target.player_name = "PresentJoiner"
-	var audio := FireAudioStub.new()
+	# A REAL bank-less MissionAudio as the fire pass's sound sink (ADR 0043
+	# rule 11; its recent-fires ring is the read seam).
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	var join_options := _options_with_placer(w.placer)
 	join_options.simulation = joiner
 	join_options.join_target = target
-	join_options.fire_audio = func(): return audio
 	assert_gt(int(rt.setup(w.mission, w.container, join_options)), 0)
+	rt.setup_passes(audio, null, null, null, null)
 
-	var fire_stats := rt.get_fire_present_stats()
+	var fire_stats: FirePresentStats = rt.get_fire_present_stats()
 	assert_not_null(fire_stats,
 			"the joiner constructs the fire queue consumer")
-	var throwable_stats := rt.get_throwable_present_stats()
+	var throwable_stats: ThrowablePresentStats = rt.get_throwable_present_stats()
 	assert_not_null(throwable_stats,
 			"the joiner constructs the flying-throwable snapshot consumer")
 	assert_eq(throwable_stats.live, 0)
@@ -393,8 +378,10 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# Each remote-style round reaches the joiner's fire presenter once. The
 	# SOUND leg is the sim's now (world/fire_sound.h; the fire_sound ctest pins
 	# the gate, and fire_present_pass_test pins the drain-to-audio play) — the
-	# fixture ammo authors no ai_launch set, so no audio call is expected here.
+	# fixture ammo authors no ai_launch set, so no audio fire is expected here.
 	assert_eq(int(rt.get_fire_present_stats().fires), 64)
+	assert_true(audio.recent_fired_soundsets().is_empty(),
+			"the fixture ammo authors no ai_launch set: the bank fired nothing")
 
 
 func test_mission_present_stats_are_a_typed_record() -> void:
@@ -621,8 +608,9 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# a short, production-authored lifetime.
 	var w := _make_world(Transform3D.IDENTITY)
 	# A REAL ItemEffectDirector and a REAL EffectWorld (ADR 0043 rule 11): the
-	# runtime anchors the round through options.effect_anchors and spawns into
-	# options.fire_fx; the world's public group report is the read seam.
+	# runtime anchors the round through the anchor registry and spawns into
+	# the effect world setup_passes binds; the world's public group report is
+	# the read seam.
 	var anchor_mount := ItemEffectDirector.new()
 	var effect_world := EffectWorld.new()
 	add_child_autofree(effect_world)
@@ -632,10 +620,8 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	effect_world.set_owner_position_provider(anchor_mount.resolve_owner_transform)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	var catchup_options := _options_with_placer(w.placer)
-	catchup_options.fire_fx = func() -> Variant: return effect_world
-	catchup_options.effect_anchors = anchor_mount
-	rt.setup(w.mission, w.container, catchup_options)
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
+	rt.setup_passes(null, effect_world, null, null, anchor_mount)
 	var def_root := ResourceRoot.new()
 	def_root.set_root_dir(RetailData.def_root())
 	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)

@@ -16,6 +16,12 @@ template <>
 constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
 template <>
 constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
+template <>
+constexpr Variant::Type variant_type_of<PackedStringArray>() { return Variant::PACKED_STRING_ARRAY; }
+template <>
+constexpr Variant::Type variant_type_of<PackedVector3Array>() { return Variant::PACKED_VECTOR3_ARRAY; }
+template <>
+constexpr Variant::Type variant_type_of<PackedFloat32Array>() { return Variant::PACKED_FLOAT32_ARRAY; }
 
 } // namespace
 
@@ -50,20 +56,6 @@ void DestructionEffectEvent::_bind_methods() {
 			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)));
 }
 
-Ref<DestructionSoundEvent> DestructionSoundEvent::make(const String &p_sound, const Vector3 &p_pos) {
-	Ref<DestructionSoundEvent> out;
-	out.instantiate();
-	out->sound_ = p_sound;
-	out->pos_ = p_pos;
-	return out;
-}
-
-void DestructionSoundEvent::_bind_methods() {
-	DESTRUCTION_SOUND_EVENT_FIELDS(DESTRUCTION_BIND_FIELD)
-	ClassDB::bind_static_method("DestructionSoundEvent", D_METHOD("make", "sound", "pos"),
-			&DestructionSoundEvent::make);
-}
-
 Ref<HuskSwapEvent> HuskSwapEvent::make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
 		int p_wire_handle) {
 	Ref<HuskSwapEvent> out;
@@ -83,31 +75,23 @@ void HuskSwapEvent::_bind_methods() {
 			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)));
 }
 
-Ref<DeathLightEvent> DeathLightEvent::make(const Vector3 &p_pos, float p_radius) {
-	Ref<DeathLightEvent> out;
-	out.instantiate();
-	out->pos_ = p_pos;
-	out->radius_ = p_radius;
-	return out;
+void DestructionDrain::add_sound(const String &p_name, const Vector3 &p_pos) {
+	sound_names_.push_back(p_name);
+	sound_positions_.push_back(p_pos);
 }
 
-void DeathLightEvent::_bind_methods() {
-	DEATH_LIGHT_EVENT_FIELDS(DESTRUCTION_BIND_FIELD)
-	ClassDB::bind_static_method("DeathLightEvent", D_METHOD("make", "pos", "radius"),
-			&DeathLightEvent::make);
+void DestructionDrain::add_death_light(const Vector3 &p_pos, float p_radius) {
+	death_light_positions_.push_back(p_pos);
+	death_light_radii_.push_back(p_radius);
 }
 
 Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
-		const TypedArray<DestructionEffectEvent> &p_effects,
-		const TypedArray<DestructionSoundEvent> &p_sounds,
-		const TypedArray<DeathLightEvent> &p_death_lights, int p_debris_triangles,
+		const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
 		int p_glass_points, int p_crackles) {
 	Ref<DestructionDrain> out;
 	out.instantiate();
 	out->husk_swaps_ = p_husk_swaps;
 	out->effects_ = p_effects;
-	out->sounds_ = p_sounds;
-	out->death_lights_ = p_death_lights;
 	out->debris_triangles_ = p_debris_triangles;
 	out->glass_points_ = p_glass_points;
 	out->crackles_ = p_crackles;
@@ -116,22 +100,22 @@ Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_
 
 void DestructionDrain::_bind_methods() {
 	DESTRUCTION_DRAIN_COUNTERS(DESTRUCTION_BIND_FIELD)
+	DESTRUCTION_DRAIN_COLUMNS(DESTRUCTION_BIND_FIELD)
 #define DESTRUCTION_DRAIN_ROWS(m_name, m_class)                                                    \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &DestructionDrain::get_##m_name);              \
 	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &DestructionDrain::set_##m_name);     \
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, #m_name, PROPERTY_HINT_ARRAY_TYPE, #m_class),       \
 			"set_" #m_name, "get_" #m_name);
 	DESTRUCTION_DRAIN_ROWS(effects, DestructionEffectEvent)
-	DESTRUCTION_DRAIN_ROWS(sounds, DestructionSoundEvent)
 	DESTRUCTION_DRAIN_ROWS(husk_swaps, HuskSwapEvent)
-	DESTRUCTION_DRAIN_ROWS(death_lights, DeathLightEvent)
 #undef DESTRUCTION_DRAIN_ROWS
+	ClassDB::bind_method(D_METHOD("add_sound", "name", "pos"), &DestructionDrain::add_sound);
+	ClassDB::bind_method(D_METHOD("add_death_light", "pos", "radius"),
+			&DestructionDrain::add_death_light);
 	ClassDB::bind_static_method("DestructionDrain",
-			D_METHOD("make", "husk_swaps", "effects", "sounds", "death_lights", "debris_triangles",
-					"glass_points", "crackles"),
-			&DestructionDrain::make, DEFVAL(TypedArray<DestructionEffectEvent>()),
-			DEFVAL(TypedArray<DestructionSoundEvent>()), DEFVAL(TypedArray<DeathLightEvent>()),
-			DEFVAL(0), DEFVAL(0), DEFVAL(0));
+			D_METHOD("make", "husk_swaps", "effects", "debris_triangles", "glass_points", "crackles"),
+			&DestructionDrain::make, DEFVAL(TypedArray<DestructionEffectEvent>()), DEFVAL(0),
+			DEFVAL(0), DEFVAL(0));
 }
 
 #undef DESTRUCTION_BIND_FIELD

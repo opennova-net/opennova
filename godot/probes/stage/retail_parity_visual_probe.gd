@@ -9,8 +9,6 @@ extends GameProbe
 ## Modes: attach (the attach-label gate), debris (collision-triangle section
 ## debris), glass (glass userpoint shatter). Needs a window.
 
-const DestructionPresentPass := preload(
-		"res://game/world/destruction_present_pass.gd")
 const STAGE_SIZE := Vector2i(960, 540)
 const TICK_DT := 1.0 / 62.5
 
@@ -211,10 +209,13 @@ func _build_debris_stage() -> bool:
 				Color("57e58c") if foliage else Color("ffb55e"))
 		_add_direction_line(point, point + direction * 1.25,
 				Color("8fffb0") if foliage else Color("ffd39a"))
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, null, null, null, null, null, Callable(),
-			func(): return _fx)
-	presenter.present_drained(DestructionDrain.make([], effects, [], [], effects.size()), [])
+	# The destruction pass's data leg (EntityPresenter's member) over the
+	# stage's effect world: the resolved rows spawn verbatim.
+	var presenter := EntityPresenter.new()
+	_scene.add_child(presenter)
+	presenter.setup_passes(null, null, null, null, _fx, null, null, null)
+	presenter.present_destruction_drained(
+			DestructionDrain.make([], effects, effects.size()), [])
 	_add_legend([
 		{"color": Color("57e58c"), "text": "material 17  →  Effect_TreeFoliageExp"},
 		{"color": Color("ffb55e"), "text": "all other materials  →  Effect_TreeWoodExp"},
@@ -239,10 +240,10 @@ func _build_glass_stage() -> bool:
 		DestructionEffectEvent.make("Effect_BldPaperExp", point, 0, direction),
 		DestructionEffectEvent.make("Effect_BldDustExp", point, 0, direction),
 	]
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, null, null, null, null, null, Callable(),
-			func(): return _fx)
-	presenter.present_drained(DestructionDrain.make([], effects, [], [], 0, 1), [])
+	var presenter := EntityPresenter.new()
+	_scene.add_child(presenter)
+	presenter.setup_passes(null, null, null, null, _fx, null, null, null)
+	presenter.present_destruction_drained(DestructionDrain.make([], effects, 0, 1), [])
 	_add_marker(point + Vector3(0, 0, 0.2), Color("66dcff"),
 			"eurhr2  →  GLASS\nBROKEN ONCE", 0.26)
 	_add_marker(Vector3(2.7, 2.7, -2.02), Color("94a9bd"),

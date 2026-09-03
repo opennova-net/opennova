@@ -12,6 +12,7 @@
 
 #include "simulation/simulation.h"
 #include "object/object_data.h"
+#include "world/scar_presenter.h"
 
 // The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
 // bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
@@ -249,6 +250,15 @@ void EntityPresenter::reset_wire_runtime_state() {
 	last_present_logic_tick_ = -1;
 	camera_framed_ = false;
 	stat_live_ = 0;
+	// The present passes' Stop -> Play boundary, in the drive order the
+	// restart signal fanned in: destruction (restore intact visuals, drop the
+	// husk grafts, retire the wreck/piece anchors), throwable (free the models,
+	// stop the move groups), scars (every scar mesh goes).
+	destruction_->reset_runtime_state();
+	throwable_->reset_runtime_state();
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->reset_runtime_state();
+	}
 }
 
 void EntityPresenter::register_wire_node(int p_handle, ObjectModel *p_node) {
@@ -258,6 +268,15 @@ void EntityPresenter::register_wire_node(int p_handle, ObjectModel *p_node) {
 		return;
 	}
 	nodes_[p_handle] = ObjectID(p_node->get_instance_id());
+	apply_lighting_context(p_handle);
+}
+
+void EntityPresenter::register_wire_held_weapon(int p_handle, ObjectModel *p_node) {
+	if (p_node == nullptr) {
+		weapon_nodes_.erase(p_handle);
+		return;
+	}
+	weapon_nodes_[p_handle] = ObjectID(p_node->get_instance_id());
 	apply_lighting_context(p_handle);
 }
 

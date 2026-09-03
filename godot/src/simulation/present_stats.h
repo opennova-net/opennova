@@ -70,6 +70,83 @@ protected:
 	static void _bind_methods();
 };
 
+// Typed diagnostic counters of the fire present pass (FirePresenter, ADR
+// 0017): fires presented (the local player's own excluded), sounds the bank
+// played, muzzle effects spawned, and the peak live tracer channel count —
+// probes assert the presentation legs actually ran.
+class FirePresentStats : public RefCounted {
+	GDCLASS(FirePresentStats, RefCounted)
+
+public:
+	STAT_FIELD(fires)
+	STAT_FIELD(sounds)
+	STAT_FIELD(effects)
+	STAT_FIELD(tracer_peak)
+
+protected:
+	static void _bind_methods();
+};
+
+// Typed diagnostic counters of the destruction present pass
+// (DestructionPresenter): husk swaps presented, swaps with no husk graft
+// (the intact graphic keeps standing), the peak live piece count, the
+// resolved debris triangles and glass points, effects and sounds played,
+// and the wreck-fire crackle rolls that fired.
+class DestructionPresentStats : public RefCounted {
+	GDCLASS(DestructionPresentStats, RefCounted)
+
+public:
+	STAT_FIELD(husk_swaps)
+	STAT_FIELD(no_husk)
+	STAT_FIELD(pieces_peak)
+	STAT_FIELD(debris_triangles)
+	STAT_FIELD(effects)
+	STAT_FIELD(sounds)
+	STAT_FIELD(glass_points)
+	STAT_FIELD(crackles)
+
+protected:
+	static void _bind_methods();
+};
+
+// Typed diagnostic snapshot of the throwable present pass
+// (ThrowablePresenter): the live item models, the live round-bound move
+// groups, and the transforms their anchors resolve.
+class ThrowablePresentStats : public RefCounted {
+	GDCLASS(ThrowablePresentStats, RefCounted)
+
+public:
+	STAT_FIELD(live)
+	STAT_FIELD(move_effects)
+	STAT_FIELD(move_effect_transforms)
+
+protected:
+	static void _bind_methods();
+};
+
+// Typed diagnostic counters of the scar present pass (ScarPresenter's
+// present_frame leg): the sim's slot census (live, fog-culled, rings
+// leased), the device's batch/surface/mesh counts, the strips whose TGA is
+// missing or whose mode word is neither shipped drawer state, and the
+// entity-ring owners the pass could not resolve to a live node.
+class ScarPresentStats : public RefCounted {
+	GDCLASS(ScarPresentStats, RefCounted)
+
+public:
+	STAT_FIELD(slots_live)
+	STAT_FIELD(slots_culled)
+	STAT_FIELD(rings_leased)
+	STAT_FIELD(batches)
+	STAT_FIELD(world_surfaces)
+	STAT_FIELD(entity_meshes)
+	STAT_FIELD(textures_missing)
+	STAT_FIELD(strips_unsupported)
+	STAT_FIELD(owners_unresolved)
+
+protected:
+	static void _bind_methods();
+};
+
 #undef STAT_FIELD
 
 } // namespace godot

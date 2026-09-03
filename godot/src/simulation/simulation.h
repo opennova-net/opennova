@@ -55,7 +55,6 @@ class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
-class TracerRibbonFrame;    // the compiled tracer strips (simulation/tracer_ribbon_frame.h)
 class WeatherHomeState;     // the weather home's probe view (simulation/weather_home_state.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
@@ -1137,16 +1136,6 @@ public:
 	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
 	// Projectile_ReleaseEffects clear — witness map on engine/runtime/renderer/light_scene.h].
 	TypedArray<RoundGlowRow> get_round_glow_rows() const;
-
-	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
-	// the witnessed style tables and the camera-facing build
-	// (engine: runtime/renderer/tracer_frame.cpp)). Static so the present
-	// pass and stub-sim tests share the one native seam: a TracerRibbonFrame
-	// (the additive and alpha TracerRibbonStrip runs plus the channel count),
-	// each family one triangle-strip vertex run (channels joined by degenerate
-	// pairs), ready for verbatim ImmediateMesh upload.
-	static Ref<TracerRibbonFrame> compile_tracer_ribbons(const PackedFloat32Array &rows,
-			const Vector3 &camera);
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
 	// §24) as one DestructionDrain record (simulation/destruction_events.h):

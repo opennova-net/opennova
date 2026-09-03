@@ -4,7 +4,6 @@
 #include "simulation/simulation_internal.h"
 #include "util/color_convert.h"
 #include "simulation/hud_view_records.h"
-#include "simulation/tracer_ribbon_frame.h" // the compiled tracer strips
 #include "simulation/destruction_events.h"
 #include "simulation/debug_cards.h"
 #include "util/axes.h"
@@ -491,7 +490,7 @@ Ref<DestructionDrain> Simulation::drain_destruction_events() {
 				static_cast<int64_t>(e.attach_spawn_origin)));
 	}
 	for (const opennova::world::DestructionSoundEvent &s : ev.sounds) {
-		out->add_sound(DestructionSoundEvent::make(String(s.sound.c_str()), mission_to_godot(s.pos)));
+		out->add_sound(String(s.sound.c_str()), mission_to_godot(s.pos));
 	}
 	for (const opennova::world::HuskSwapEvent &h : ev.husk_swaps) {
 		Ref<HuskSwapEvent> row = HuskSwapEvent::make(h.bms_id, h.item_id,
@@ -502,7 +501,7 @@ Ref<DestructionDrain> Simulation::drain_destruction_events() {
 		out->add_husk_swap(row);
 	}
 	for (const opennova::world::DeathLightEvent &l : ev.death_lights) {
-		out->add_death_light(DeathLightEvent::make(mission_to_godot(l.pos), l.radius));
+		out->add_death_light(mission_to_godot(l.pos), l.radius);
 	}
 	out->set_explosions_processed(ev.explosions_processed);
 	out->set_items_destroyed(ev.items_destroyed);
@@ -650,60 +649,6 @@ TypedArray<RoundGlowRow> Simulation::get_round_glow_rows() const {
 		d->set_color(opennova::color_from_rgb24(ammo->light_move_color));
 		out.push_back(d);
 	}
-	return out;
-}
-
-// The styled half of the trail split: rows in, per-family strip runs out.
-// Family packing (positions + colors arrays) is transport shape only; the
-// geometry/color math lives in renderer/tracer_frame.cpp with its citations.
-Ref<TracerRibbonFrame> Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
-		const Vector3 &camera) {
-	std::vector<opennova::renderer::TracerChannelInput> channels;
-	const float *r = rows.ptr();
-	const int64_t size = rows.size();
-	int64_t i = 0;
-	while (r != nullptr && i + 2 < size) {
-		opennova::renderer::TracerChannelInput c;
-		c.style_id = static_cast<int>(r[i]);
-		c.age = static_cast<int>(r[i + 1]);
-		c.count = static_cast<int>(r[i + 2]);
-		i += 3;
-		if (c.count <= 0 || i + static_cast<int64_t>(c.count) * 4 > size) {
-			break;
-		}
-		c.points = r + i;
-		i += static_cast<int64_t>(c.count) * 4;
-		channels.push_back(c);
-	}
-	opennova::renderer::TracerRibbonFrame frame;
-	opennova::renderer::compile_tracer_ribbons(channels.data(), channels.size(),
-			{static_cast<float>(camera.x), static_cast<float>(camera.y),
-					static_cast<float>(camera.z)},
-			frame);
-	auto pack_family = [](const std::vector<float> &run) {
-		Ref<TracerRibbonStrip> family;
-		family.instantiate();
-		const int64_t verts = static_cast<int64_t>(run.size() / 7);
-		PackedVector3Array positions;
-		PackedColorArray colors;
-		positions.resize(verts);
-		colors.resize(verts);
-		Vector3 *pw = positions.ptrw();
-		Color *cw = colors.ptrw();
-		for (int64_t v = 0; v < verts; ++v) {
-			const float *f = run.data() + v * 7;
-			pw[v] = Vector3(f[0], f[1], f[2]);
-			cw[v] = Color(f[3], f[4], f[5], f[6]);
-		}
-		family->set_positions(positions);
-		family->set_colors(colors);
-		return family;
-	};
-	Ref<TracerRibbonFrame> out;
-	out.instantiate();
-	out->set_additive(pack_family(frame.additive));
-	out->set_alpha(pack_family(frame.alpha));
-	out->set_channels(frame.channels);
 	return out;
 }
 

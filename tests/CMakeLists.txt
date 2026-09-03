@@ -906,6 +906,14 @@ target_link_libraries(item_effects_test PRIVATE opennova_runtime)
 target_include_directories(item_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME item_effects COMMAND item_effects_test)
 
+# The present passes' shared law (runtime/world/present_passes): the husk
+# RENDER pick (husk first, apart from the piece pick), the destroyed entity's
+# presentation identity + key, and the settling graft's tilt retention.
+add_executable(present_passes_test world/present_passes_test.cpp)
+target_link_libraries(present_passes_test PRIVATE opennova_runtime)
+target_include_directories(present_passes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME present_passes COMMAND present_passes_test)
+
 # The precipitation pool (runtime/environment/precipitation): seed, fall, wrap,
 # floor, and the drawer compile.
 add_executable(precipitation_test environment/precipitation_test.cpp)

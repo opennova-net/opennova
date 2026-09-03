@@ -14,7 +14,14 @@
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_pose_provider.h>
 
+#include "audio/mission_audio.h"
+#include "env/mission_environment.h"
+#include "lights/effect_light_director.h"
+#include "particle/effect_world.h"
 #include "simulation/simulation.h"
+#include "world/item_effect_director.h"
+#include "world/scar_draw_list.h"
+#include "world/scar_presenter.h"
 
 // The PLACED walk, the per-row legs both walks share, the statics and the
 // bound surface. The wire walk (cold path, registry, hot rows) is
@@ -127,9 +134,59 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("wire_nodes"), &EntityPresenter::wire_nodes);
 	ClassDB::bind_method(D_METHOD("register_wire_node", "handle", "node"),
 			&EntityPresenter::register_wire_node);
+	ClassDB::bind_method(D_METHOD("register_wire_held_weapon", "handle", "node"),
+			&EntityPresenter::register_wire_held_weapon);
 	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
 			&EntityPresenter::reset_wire_runtime_state);
 	ClassDB::bind_method(D_METHOD("teardown"), &EntityPresenter::teardown);
+	// --- the present passes ---
+	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
+			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
+			&EntityPresenter::setup_passes);
+	ClassDB::bind_method(D_METHOD("set_listener_position", "position"),
+			&EntityPresenter::set_listener_position);
+	ClassDB::bind_method(D_METHOD("listener_position"),
+			&EntityPresenter::listener_position);
+	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
+	ClassDB::bind_method(D_METHOD("profile_present_passes"),
+			&EntityPresenter::profile_present_passes);
+	ClassDB::bind_method(D_METHOD("sync_fixed_tick_effects"),
+			&EntityPresenter::sync_fixed_tick_effects);
+	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
+			&EntityPresenter::get_fire_present_stats);
+	ClassDB::bind_method(D_METHOD("get_destruction_present_stats"),
+			&EntityPresenter::get_destruction_present_stats);
+	ClassDB::bind_method(D_METHOD("get_throwable_present_stats"),
+			&EntityPresenter::get_throwable_present_stats);
+	ClassDB::bind_method(D_METHOD("get_scar_present_stats"),
+			&EntityPresenter::get_scar_present_stats);
+	ClassDB::bind_method(D_METHOD("has_active_wreck_fire", "owner_key"),
+			&EntityPresenter::has_active_wreck_fire);
+	ClassDB::bind_method(D_METHOD("warm_fire_pipelines", "position"),
+			&EntityPresenter::warm_fire_pipelines);
+	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("scar_presenter"), &EntityPresenter::scar_presenter);
+	ClassDB::bind_method(D_METHOD("present_fires", "events"),
+			&EntityPresenter::present_fires);
+	ClassDB::bind_method(D_METHOD("present_fire_sounds", "sounds"),
+			&EntityPresenter::present_fire_sounds);
+	ClassDB::bind_method(D_METHOD("present_slot_sounds", "events"),
+			&EntityPresenter::present_slot_sounds);
+	ClassDB::bind_method(D_METHOD("present_sound_emitters", "events"),
+			&EntityPresenter::present_sound_emitters);
+	ClassDB::bind_method(D_METHOD("draw_tracer_rows", "rows"),
+			&EntityPresenter::draw_tracer_rows);
+	ClassDB::bind_method(D_METHOD("present_destruction_drained", "events", "pieces"),
+			&EntityPresenter::present_destruction_drained);
+	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
+			&EntityPresenter::present_throwable_visuals);
+	ClassDB::bind_method(D_METHOD("present_scar_draw_list", "draw_list"),
+			&EntityPresenter::present_scar_draw_list);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_FIRE_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_DESTRUCTION_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_THROWABLE_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_SCARS_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_SLOT_COUNT);
 	// Emitted once per materialized wire body, after the wire rows are
 	// presented (identity + production transform applied); never re-emitted.
 	// A late subscriber replays wire_nodes() itself.
@@ -190,6 +247,18 @@ Simulation *EntityPresenter::sim() const {
 			: nullptr;
 }
 
+// The passes exist for the presenter's whole life (their stats read as empty
+// records before setup_passes); the "Scars" child is the scar device.
+EntityPresenter::EntityPresenter() :
+		fire_(std::make_unique<FirePresenter>(this)) {
+	destruction_.instantiate();
+	throwable_.instantiate();
+	ScarPresenter *scars_node = memnew(ScarPresenter);
+	scars_node->set_name("Scars");
+	add_child(scars_node);
+	scars_id_ = scars_node->get_instance_id();
+}
+
 void EntityPresenter::setup(Object *sim, Object *index,
 		const Ref<MissionObjectPlacer> &placer) {
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
@@ -206,8 +275,157 @@ void EntityPresenter::setup(Object *sim, Object *index,
 
 void EntityPresenter::teardown() {
 	reset_wire_runtime_state();
+	fire_->teardown(); // frees the tracer mesh instance under the container
 	release_planned_rows();
 	plan_dirty_ = true;
+}
+
+// --- The present passes ------------------------------------------------------
+
+ScarPresenter *EntityPresenter::scars() const {
+	return scars_id_.is_valid()
+			? Object::cast_to<ScarPresenter>(ObjectDB::get_instance(scars_id_))
+			: nullptr;
+}
+
+MissionEnvironment *EntityPresenter::environment() const {
+	return environment_id_.is_valid()
+			? Object::cast_to<MissionEnvironment>(ObjectDB::get_instance(environment_id_))
+			: nullptr;
+}
+
+void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
+		const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio, EffectWorld *p_fx,
+		EffectLightDirector *p_lights, MissionEnvironment *p_environment,
+		ItemEffectDirector *p_anchors) {
+	Simulation *s = sim();
+	const Ref<ItemEffectDirector> anchors(p_anchors);
+	fire_->setup(s, p_container, p_audio, p_fx, p_lights);
+	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
+			p_fx, p_lights);
+	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
+	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->set_resource_root(p_resource_root);
+	}
+}
+
+void EntityPresenter::set_listener_position(const Vector3 &p_position) {
+	listener_position_ = p_position;
+}
+
+void EntityPresenter::present_scars() {
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->present_frame(sim(), listener_position_, environment(), index_.ptr(), this);
+	}
+}
+
+void EntityPresenter::present_passes() {
+	fire_->present();
+	destruction_->present();
+	throwable_->present();
+	// After the entity rows and the other passes: the entity-ring meshes
+	// parent under section nodes the row walks may have just built.
+	present_scars();
+}
+
+PackedInt64Array EntityPresenter::profile_present_passes() {
+	PackedInt64Array spans;
+	spans.resize(PASS_PROFILE_SLOT_COUNT);
+	Time *clock = Time::get_singleton();
+	uint64_t start = clock->get_ticks_usec();
+	fire_->present();
+	uint64_t now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_FIRE_US, static_cast<int64_t>(now - start));
+	start = now;
+	destruction_->present();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_DESTRUCTION_US, static_cast<int64_t>(now - start));
+	start = now;
+	throwable_->present();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_THROWABLE_US, static_cast<int64_t>(now - start));
+	start = now;
+	present_scars();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_SCARS_US, static_cast<int64_t>(now - start));
+	return spans;
+}
+
+void EntityPresenter::sync_fixed_tick_effects() {
+	throwable_->sync_fixed_tick_effects();
+}
+
+Ref<FirePresentStats> EntityPresenter::get_fire_present_stats() const {
+	return fire_->get_stats();
+}
+
+Ref<DestructionPresentStats> EntityPresenter::get_destruction_present_stats() const {
+	return destruction_->get_stats();
+}
+
+Ref<ThrowablePresentStats> EntityPresenter::get_throwable_present_stats() const {
+	return throwable_->get_stats();
+}
+
+Ref<ScarPresentStats> EntityPresenter::get_scar_present_stats() const {
+	if (ScarPresenter *scars_node = scars()) {
+		return scars_node->get_present_stats();
+	}
+	Ref<ScarPresentStats> empty;
+	empty.instantiate();
+	return empty;
+}
+
+bool EntityPresenter::has_active_wreck_fire(const String &p_owner_key) const {
+	return destruction_->has_active_wreck_fire(p_owner_key);
+}
+
+void EntityPresenter::warm_fire_pipelines(const Vector3 &p_position) {
+	fire_->warm_pipelines(p_position);
+}
+
+Ref<ImmediateMesh> EntityPresenter::fire_ribbon_mesh() const {
+	return fire_->ribbon_mesh();
+}
+
+ScarPresenter *EntityPresenter::scar_presenter() const {
+	return scars();
+}
+
+void EntityPresenter::present_fires(const TypedArray<FirePresentationEvent> &p_events) {
+	fire_->present_fires(p_events);
+}
+
+void EntityPresenter::present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds) {
+	fire_->present_fire_sounds(p_sounds);
+}
+
+void EntityPresenter::present_slot_sounds(const TypedArray<SlotSoundRow> &p_events) {
+	fire_->present_slot_sounds(p_events);
+}
+
+void EntityPresenter::present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events) {
+	fire_->present_sound_emitters(p_events);
+}
+
+void EntityPresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
+	fire_->draw_tracer_rows(p_rows);
+}
+
+void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p_events,
+		const TypedArray<DeathPieceRow> &p_pieces) {
+	destruction_->present_drained(p_events, p_pieces);
+}
+
+void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
+	throwable_->present_visuals(p_visuals);
+}
+
+void EntityPresenter::present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list) {
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->present_draw_list(p_draw_list, index_.ptr(), this);
+	}
 }
 
 // Retained rows stop being "planned" the moment the plan drops them, so a model

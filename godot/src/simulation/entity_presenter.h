@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
@@ -9,21 +10,38 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include <runtime/simassets/sim_pose_provider.h>
 
 #include "object/entity_index.h"
+#include "object/item_database.h"
 #include "object/object_model.h"
 #include "mission/mission_object_placer.h"
+#include "resource_index/resource_root.h"
+#include "simulation/destruction_events.h"
+#include "simulation/destruction_presenter.h"
+#include "simulation/fire_presenter.h"
+#include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
+#include "simulation/throwable_presenter.h"
 
 namespace godot {
 
+class EffectLightDirector;
+class EffectWorld;
+class ItemEffectDirector;
+class MissionAudio;
+class MissionEnvironment;
+class ScarDrawList;
+class ScarPresenter;
 class Simulation;
 
 // THE entity presenter (ADR 0043 decision 9): the one node that renders a
@@ -58,10 +76,24 @@ class Simulation;
 // held-weapon builds, spawn signals and stats) and its per-row hot path live
 // in entity_presenter_wire.cpp; the pool->kind projection witness is at the
 // engine header (npruntime/wire_present.h).
+//
+// Beside the two row walks it OWNS the four tick-driven present passes (ADR
+// 0043 d9): FirePresenter (AI/remote fire sound + muzzle effect + tracers),
+// DestructionPresenter (husk swaps, death pieces, wreck effects) and
+// ThrowablePresenter (flying/placed throwable models + the round-bound move
+// groups) as members, and the "Scars" ScarPresenter child (the impact-scar
+// rings). The driver runs the row walks, then present_passes() — fire ->
+// destruction -> throwable -> scars, scars LAST: the entity-ring meshes
+// parent under section nodes the row walks built and the husk grafts onto the
+// placed/wire models. A zero-tick frame runs only the row walks. The
+// Stop -> Play boundary (reset_wire_runtime_state) resets the passes' runtime
+// state with the wire registry.
 class EntityPresenter : public Node3D {
 	GDCLASS(EntityPresenter, Node3D)
 
 public:
+	EntityPresenter();
+
 	enum OutputChannels {
 		OUTPUT_TRANSFORM = 1,
 		OUTPUT_PART_ANIM = 2,
@@ -173,12 +205,82 @@ public:
 	// presenter's wire avatar for `handle`, exactly as a cold build would
 	// have. The presenter does NOT take ownership.
 	void register_wire_node(int p_handle, ObjectModel *p_node);
+	// Injection seam (tests/tooling): adopt an existing model as the
+	// third-person gun of `handle` (what a wire ADM edge would have built), so
+	// muzzle_world_for resolves its userpoints. Not owned.
+	void register_wire_held_weapon(int p_handle, ObjectModel *p_node);
 
 	// Free every wire body/weapon and forget the wire plan, caches and
-	// verdicts (the Stop -> Play boundary; the sim's restart signal).
+	// verdicts, then reset the present passes' runtime state (the Stop ->
+	// Play boundary; the sim's restart signal).
 	void reset_wire_runtime_state();
-	// Wire teardown plus the placed plan's release (the node is going away).
+	// Wire teardown plus the placed plan's release and the passes' teardown
+	// (the node is going away).
 	void teardown();
+
+	// --- The present passes (ADR 0043 decision 9) ----------------------------
+
+	enum PassProfileSlot {
+		PASS_PROFILE_FIRE_US = 0,
+		PASS_PROFILE_DESTRUCTION_US,
+		PASS_PROFILE_THROWABLE_US,
+		PASS_PROFILE_SCARS_US,
+		PASS_PROFILE_SLOT_COUNT,
+	};
+
+	// Wire the passes over the typed collaborators (after setup()/setup_wire():
+	// the sim, index and placer are the ones those bound). `container` (the
+	// mission container, nullable) hosts the tracer geometry, the throwable
+	// models and the node-less husk grafts; `item_db` names the husk/round
+	// graphics; `resource_root` resolves the scar strips. `audio` (nullable)
+	// gates the fire/destruction sound legs — the dedicated-host tri-state: no
+	// audio, no sounds, the effect legs still run; `fx` (nullable) the effect
+	// legs; `lights` (nullable) the MF_Light muzzle glow and the death flash;
+	// `environment` (nullable) the scar fog cull + terrain light; `anchors`
+	// (nullable) the owner-anchor registry the wreck/piece/move effect groups
+	// anchor through.
+	void setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
+			const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio,
+			EffectWorld *p_fx, EffectLightDirector *p_lights,
+			MissionEnvironment *p_environment, ItemEffectDirector *p_anchors);
+	// The presenting shell's listener: the camera position the driver pushes
+	// once per present frame (MissionFrameInput.set_camera_sample carries the
+	// same sample to the sim's fire-sound distance gate, world/fire_sound.h);
+	// fire's ribbon camera and scar's fog-box cull both read it. A host with
+	// no camera (a dedicated serve) never pushes, which is the witnessed peer
+	// gate [orig: @ 0x528e57]. Non-finite until the first push.
+	void set_listener_position(const Vector3 &p_position);
+	Vector3 listener_position() const { return listener_position_; }
+	// The four passes in drive order, once per ticked present frame.
+	void present_passes();
+	// present_passes() timed per pass (PassProfileSlot, microseconds) for the
+	// stats board.
+	PackedInt64Array profile_present_passes();
+	// Throwable's fixed-tick half: the round-bound move groups reconcile at the
+	// tick sink BEFORE the effect world advances (the model reconcile stays in
+	// present_passes).
+	void sync_fixed_tick_effects();
+	Ref<FirePresentStats> get_fire_present_stats() const;
+	Ref<DestructionPresentStats> get_destruction_present_stats() const;
+	// Built per call (the live census).
+	Ref<ThrowablePresentStats> get_throwable_present_stats() const;
+	Ref<ScarPresentStats> get_scar_present_stats() const;
+	bool has_active_wreck_fire(const String &p_owner_key) const;
+	void warm_fire_pipelines(const Vector3 &p_position);
+	Ref<ImmediateMesh> fire_ribbon_mesh() const;
+	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
+	ScarPresenter *scar_presenter() const;
+	// The data legs (the present_snapshot precedent): production
+	// present_passes() drains the typed sim; tests feed the same rows.
+	void present_fires(const TypedArray<FirePresentationEvent> &p_events);
+	void present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds);
+	void present_slot_sounds(const TypedArray<SlotSoundRow> &p_events);
+	void present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events);
+	void draw_tracer_rows(const PackedFloat32Array &p_rows);
+	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
+			const TypedArray<DeathPieceRow> &p_pieces);
+	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
+	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
 
 	// --- Statics shared by both walks and their consumers --------------------
 
@@ -479,9 +581,21 @@ private:
 	int64_t stat_spawned_ = 0;
 	int64_t stat_unresolved_ = 0;
 	int64_t stat_live_ = 0;
+
+	// --- The present passes ---
+	void present_scars();
+	ScarPresenter *scars() const;
+	MissionEnvironment *environment() const;
+	std::unique_ptr<FirePresenter> fire_;
+	Ref<DestructionPresenter> destruction_;
+	Ref<ThrowablePresenter> throwable_;
+	ObjectID scars_id_;
+	ObjectID environment_id_;
+	Vector3 listener_position_ = Vector3(INFINITY, INFINITY, INFINITY);
 };
 
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::EntityPresenter::OutputChannels);
 VARIANT_ENUM_CAST(godot::EntityPresenter::MissionProfileSlot);
+VARIANT_ENUM_CAST(godot::EntityPresenter::PassProfileSlot);

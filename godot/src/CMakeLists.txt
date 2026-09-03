@@ -146,7 +146,6 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_weapon_view.cpp
     simulation/player_inventory.cpp
     simulation/weapon_profile_summary.cpp
-    simulation/tracer_ribbon_frame.cpp
     simulation/present_event_records.cpp
     simulation/weather_home_state.cpp
     simulation/weapon_kit_entry.cpp
@@ -164,6 +163,9 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_info.cpp
     simulation/entity_presenter.cpp
     simulation/entity_presenter_wire.cpp
+    simulation/fire_presenter.cpp
+    simulation/destruction_presenter.cpp
+    simulation/throwable_presenter.cpp
     simulation/present_stats.cpp
     simulation/entity_card.cpp
     simulation/entity_row.cpp
