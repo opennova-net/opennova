@@ -5,7 +5,6 @@
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
 #include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
-#include "simulation/tracer_ribbon_frame.h" // the compiled tracer strips
 #include "simulation/weather_home_state.h" // the weather home's probe view
 #include "simulation/present_event_records.h" // the per-tick present drain records
 #include "simulation/destruction_events.h" // the destruction drain record
@@ -334,9 +333,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),
 			&Simulation::get_round_glow_rows);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("compile_tracer_ribbons", "rows", "camera"),
-			&Simulation::compile_tracer_ribbons);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&Simulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &Simulation::get_death_pieces);

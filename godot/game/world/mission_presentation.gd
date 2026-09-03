@@ -24,11 +24,6 @@ signal fixed_tick_completed(logic_tick: int)
 ## presentation systems use this boundary to discard transient runtime state.
 signal simulation_restarted()
 
-const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
-const DestructionPresentPass := preload("res://game/world/destruction_present_pass.gd")
-const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
-const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
-
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
 # independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
@@ -40,12 +35,15 @@ const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
 var _sim: Simulation
 # THE entity presenter (ADR 0043 d9), the "Entities" child: its placed walk drives the
 # authored nodes on every role (or a tooling/test preview); its wire walk, when set up,
-# materializes un-placed network entities or SP attachment children.
+# materializes un-placed network entities or SP attachment children; it owns the four
+# tick-driven present passes (fire, destruction, throwable, scars) and its "Scars" child.
 var _entities: EntityPresenter
-var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers; else null
-var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
-var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
-var _scar_present: ScarPresentPass                # impact-scar rings as textured quads (every viewing peer)
+# The pass inputs captured at setup for setup_passes: the mission container the
+# passes graft into, the item database (husk/round graphics) and the resource
+# root (scar strips).
+var _container: Node = null
+var _item_db: ItemDatabase = null
+var _resource_root: ResourceRoot = null
 var _index: EntityIndex
 var _registry_placer: MissionObjectPlacer = null
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
@@ -270,72 +268,26 @@ func setup(mission: MissionData, container: Node,
 		# keeps only organics and runtime spawns on every role.
 		_entities.setup_wire(_sim, options.placer, container, _index)
 		_entities.set_synthetic_origin_only(sp_attachment_present)
+	# The Stop -> Play boundary: the one connect resets the wire registry AND
+	# the presenter's four passes (destruction, throwable, scars reset their
+	# runtime state inside reset_wire_runtime_state).
 	simulation_restarted.connect(_entities.reset_wire_runtime_state)
-	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
-	# effect + tracer streaks off the sim's fired/tracer drains. A joiner re-runs
-	# decoded S2C tag-2 rounds through the same visual RoundSim, so it must drain
-	# this queue too. FirePresentPass filters the locally predicted round by
-	# is_local_player; the first-person action slot remains its sole presenter.
-	# [orig: remote tag-2 receive -> RoundData_SpawnRound; net-re §5.60]
-	if not options.fire_audio.is_null():
-		_fire_present = FirePresentPass.new()
-		# The muzzle anchor for retail's adm-arm fire effect: the entity presenter
-		# owns the per-handle held-weapon node the effect spawns at; a shooter with
-		# no wire body resolves to a non-finite anchor and the fire pass keeps the
-		# wire position, which is the pre-existing behaviour.
-		_fire_present.setup(_sim, container,
-			options.fire_audio,
-			options.fire_fx,
-			options.fire_listener,
-			_entities.muzzle_world_for,
-			options.muzzle_light)
-		# The sim's fire-sound distance gate reads the camera listener at fire
-		# time on the logic clock (world/fire_sound.h); GameFramePipeline stamps
-		# it into each typed session frame (MissionFrameInput.set_camera_sample).
-		# A host with no fire presentation (dedicated) never stamps, which is the
-		# witnessed peer gate [orig: @ 0x528e57].
-	# The destruction-presentation pass: husk model swaps, death-piece debris,
-	# wreck fire/smoke, destruction sounds — off the sim's destruction drain
-	# (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
-	# audio/fx providers. Joiners run it too: their world raises the same
-	# events from the S2C 0x13-driven death chain and the client-side
-	# explosion/piece drains (retail's client runs the identical presentation
-	# from its own pools).
-	# [orig: NapiNPClientMsg_EntityDeath @0x42EB50 -> deathCallback(entity,4,0);
-	#  Entity_UpdateAllEntities @0x4c2100 drains unconditionally on every peer]
-	if not options.fire_audio.is_null():
-		_destruction_present = DestructionPresentPass.new()
-		_destruction_present.setup(_sim, container, _index, options.placer,
-			options.item_db, options.effect_anchors,
-			options.fire_audio,
-			options.fire_fx,
-			_entities,
-			options.death_light)
-		simulation_restarted.connect(_destruction_present.reset_runtime_state)
-	# The throwable-presentation pass: item models for flying grenades/satchels
-	# and placed devices, reconciled from the sim's visual snapshot. Joiners need
-	# the flying-round half because decoded S2C tag-2 descriptors run the visual
-	# throwable motor locally. Placed-device replication remains the separate
-	# unported 0x59/0x12 seam; enabling this read-only pass does not invent it.
-	# (world-wac-ai-re §27; the sim stays render-free).
-	_throwable_present = ThrowablePresentPass.new()
-	_throwable_present.setup(_sim, container, options.placer,
-		options.item_db,
-		options.fire_fx, options.effect_anchors)
-	simulation_restarted.connect(_throwable_present.reset_runtime_state)
-	# The impact-scar presentation pass (world-wac-ai-re §24.9): the sim's scar
-	# rings as textured quads — the shared ring as one world mesh, each entity
-	# ring under its carrier's struck section. Every viewing peer runs it: retail
-	# draws its own caches on every client from the same impact processor
-	# [orig: Scar_RenderAllCaches @0x5CDF70 from Terrain_CollectVisibleEntities
-	#  @0x5c91b7]. The camera + environment providers are the device inputs the
-	# renderer's cull and vertex colour read (fire_listener IS the camera).
-	_scar_present = ScarPresentPass.new()
-	_scar_present.setup(_sim, container, _index, _entities,
-		options.resource_root,
-		options.fire_listener,
-		options.environment_node)
-	simulation_restarted.connect(_scar_present.reset_runtime_state)
+	# The four tick-driven present passes are EntityPresenter's own (ADR 0043
+	# d9): the fire pass (AI/remote fire sound + muzzle effect + tracers off
+	# the sim's fired/tracer drains; a joiner re-runs decoded S2C tag-2 rounds
+	# through the same visual RoundSim, so it drains this queue too), the
+	# destruction pass (husk swaps, death-piece debris, wreck fire/smoke,
+	# destruction sounds off world/destruction.h; every viewing peer), the
+	# throwable pass (item models for flying grenades/satchels and placed
+	# devices; world-wac-ai-re §27) and the scar pass (world-wac-ai-re §24.9;
+	# every viewing peer). Their typed collaborators — the mission audio, the
+	# effect world, the light director, the environment node and the
+	# owner-anchor registry — exist only after the later load stages, so the
+	# load binds them through setup_passes; the pass inputs known now are
+	# captured here.
+	_container = container
+	_item_db = options.item_db
+	_resource_root = options.resource_root
 	# ADR 0035: the native session owns lifecycle/cadence and invokes one
 	# synchronous per-tick presentation sink. The camera remains a Godot device;
 	# a dedicated host has none.
@@ -494,10 +446,35 @@ func get_mission_present_stats() -> MissionPresentStats:
 			if _entities != null else MissionPresentStats.new()
 
 
-func get_fire_present_stats() -> RefCounted:
-	# FirePresentPass.Stats (typed counters, ADR 0017); null until the
-	# presentation pass exists.
-	return _fire_present.get_stats() if _fire_present != null else null
+## Bind the present passes' typed collaborators (ADR 0043 d9), after setup():
+## `audio` (nullable) gates the fire/destruction sound legs — a dedicated serve
+## presents no sounds while the effect legs still run; `fx` (nullable) the
+## effect legs; `lights` (nullable) the MF_Light muzzle glow + the death
+## flash; `environment` (nullable) the scar pass's fog distance + combined
+## terrain light; `anchors` (nullable) the owner-anchor registry the
+## wreck/piece/move effect groups anchor through. The load calls this once
+## the audio and effect stages have run; isolated tests pass what they have.
+func setup_passes(audio: MissionAudio, fx: EffectWorld, lights: EffectLightDirector,
+		environment: MissionEnvironment, anchors: ItemEffectDirector) -> void:
+	if _entities == null:
+		return
+	var container: Node3D = _container as Node3D \
+			if _container != null and is_instance_valid(_container) else null
+	_entities.setup_passes(container, _item_db, _resource_root, audio, fx, lights,
+			environment, anchors)
+
+
+# Fire-presentation counters (FirePresentStats, typed per ADR 0017; an empty
+# record before setup).
+func get_fire_present_stats() -> FirePresentStats:
+	return _entities.get_fire_present_stats() \
+			if _entities != null else FirePresentStats.new()
+
+
+# Destruction-presentation counters (DestructionPresentStats, typed per ADR 0017).
+func get_destruction_present_stats() -> DestructionPresentStats:
+	return _entities.get_destruction_present_stats() \
+			if _entities != null else DestructionPresentStats.new()
 
 
 # Wire-presentation counters (spawned/unresolved/live; empty before setup).
@@ -515,20 +492,22 @@ func join_wire_present_pending() -> int:
 ## Load-time warm hook: compile the fire-presentation pipelines (the tracer
 ## ribbon materials) behind the loading screen; see GameWorld's effect warm.
 func warm_present_pipelines(at_position: Vector3) -> void:
-	if _fire_present != null:
-		_fire_present.warm_pipelines(at_position)
+	if _entities != null:
+		_entities.warm_fire_pipelines(at_position)
 
 
-func get_throwable_present_stats() -> RefCounted:
-	# ThrowablePresentPass.Stats (typed counters, ADR 0017); null until the
-	# presentation pass exists.
-	return _throwable_present.get_stats() if _throwable_present != null else null
+# Throwable-presentation counters (ThrowablePresentStats, typed per ADR 0017;
+# built per call).
+func get_throwable_present_stats() -> ThrowablePresentStats:
+	return _entities.get_throwable_present_stats() \
+			if _entities != null else ThrowablePresentStats.new()
 
 
-func get_scar_present_stats() -> RefCounted:
-	# ScarPresentPass.Stats (typed counters, ADR 0017); null until the
-	# presentation pass exists.
-	return _scar_present.get_stats() if _scar_present != null else null
+# Scar-presentation counters (ScarPresentStats, typed per ADR 0017).
+func get_scar_present_stats() -> ScarPresentStats:
+	return _entities.get_scar_present_stats() \
+			if _entities != null else ScarPresentStats.new()
+
 
 func get_sim() -> Simulation:
 	return _sim
@@ -647,32 +626,23 @@ func _present_frame(stats_on: bool) -> void:
 	var present_start := Time.get_ticks_usec()
 	_retire_placed_rows()
 	_present_entity_rows(stats_on)
-	if _fire_present != null:
-		var fire_start := Time.get_ticks_usec() if stats_on else 0
-		_fire_present.present()
+	# After the entity rows, the presenter's four passes in drive order (fire ->
+	# destruction -> throwable -> scars: the entity-ring meshes parent under
+	# section nodes the row walks may have just built).
+	if _entities != null:
 		if stats_on:
-			_frame_stats.add(FrameStats.PRESENT_FIRE,
-					Time.get_ticks_usec() - fire_start)
-	if _destruction_present != null:
-		var destruction_start := Time.get_ticks_usec() if stats_on else 0
-		_destruction_present.present()
-		if stats_on:
-			_frame_stats.add(FrameStats.PRESENT_DESTRUCTION,
-					Time.get_ticks_usec() - destruction_start)
-	if _throwable_present != null:
-		var throwable_start := Time.get_ticks_usec() if stats_on else 0
-		_throwable_present.present()
-		if stats_on:
-			_frame_stats.add(FrameStats.PRESENT_THROWABLE,
-					Time.get_ticks_usec() - throwable_start)
-	# After the entity rows: the entity-ring meshes parent under section nodes
-	# the row passes may have just built.
-	if _scar_present != null:
-		var scar_start := Time.get_ticks_usec() if stats_on else 0
-		_scar_present.present()
-		if stats_on:
-			_frame_stats.add(FrameStats.PRESENT_SCARS,
-					Time.get_ticks_usec() - scar_start)
+			var spans: PackedInt64Array = _entities.profile_present_passes()
+			if spans.size() >= EntityPresenter.PASS_PROFILE_SLOT_COUNT:
+				_frame_stats.add(FrameStats.PRESENT_FIRE,
+						spans[EntityPresenter.PASS_PROFILE_FIRE_US])
+				_frame_stats.add(FrameStats.PRESENT_DESTRUCTION,
+						spans[EntityPresenter.PASS_PROFILE_DESTRUCTION_US])
+				_frame_stats.add(FrameStats.PRESENT_THROWABLE,
+						spans[EntityPresenter.PASS_PROFILE_THROWABLE_US])
+				_frame_stats.add(FrameStats.PRESENT_SCARS,
+						spans[EntityPresenter.PASS_PROFILE_SCARS_US])
+		else:
+			_entities.present_passes()
 	_perf_present_us = Time.get_ticks_usec() - present_start
 
 
@@ -707,8 +677,10 @@ func _consume_session_tick(outcome: MissionTickOutcome) -> bool:
 	if _sim == null or outcome == null or outcome.is_terminal():
 		return false
 	_begin_present_effect_tick(outcome.logic_tick)
-	if _throwable_present != null:
-		_throwable_present.sync_fixed_tick_effects()
+	# The throwable pass's fixed-tick half: the round-bound move groups
+	# reconcile BEFORE the effect world advances on this tick.
+	if _entities != null:
+		_entities.sync_fixed_tick_effects()
 	var effects_start := Time.get_ticks_usec()
 	var effects: Array = _sim.drain_effects()
 	_perf_effects_us += Time.get_ticks_usec() - effects_start
@@ -806,6 +778,13 @@ func advance_session_frame(input: MissionFrameInput) -> MissionFrameOutcome:
 	if _sim == null:
 		_ticks_last_frame = 0
 		return null
+	# The presenting shell's listener (the camera sample the pipeline stamped
+	# into this frame's input; the sim's fire-sound gate reads the same
+	# sample): the fire pass's ribbon camera and the scar pass's fog cull. A
+	# frame with no camera (a dedicated serve, an isolated test) pushes
+	# nothing and the passes keep their last listener.
+	if _entities != null and input != null and input.is_listener_valid():
+		_entities.set_listener_position(input.get_camera_position())
 	var outcome: MissionFrameOutcome = _sim.advance_session_frame(
 			input, _consume_session_tick)
 	_read_frame_perf(outcome)
@@ -942,31 +921,16 @@ func _exit_tree() -> void:
 		_sim.set_runtime_profiling_enabled(false)
 		_sim.close_session()
 	_clear_present_effect_poses()
-	if _fire_present != null:
-		_fire_present.teardown()  # frees the tracer mesh instance under the container
-		_fire_present = null
 	if _entities != null:
 		var reset_wire := _entities.reset_wire_runtime_state
 		if simulation_restarted.is_connected(reset_wire):
 			simulation_restarted.disconnect(reset_wire)
-		_entities.teardown()  # frees the wire bodies + held weapons under the container
+		# Frees the wire bodies + held weapons and the tracer mesh under the
+		# container, the husk models + effect anchors, the throwable models and
+		# the scar meshes under the owner models.
+		_entities.teardown()
 		_entities = null  # the "Entities" child itself dies with this node
-	if _destruction_present != null:
-		var reset_destruction := _destruction_present.reset_runtime_state
-		if simulation_restarted.is_connected(reset_destruction):
-			simulation_restarted.disconnect(reset_destruction)
-		_destruction_present.teardown()  # frees husk models + effect anchors
-		_destruction_present = null
-	if _throwable_present != null:
-		var reset_throwable := _throwable_present.reset_runtime_state
-		if simulation_restarted.is_connected(reset_throwable):
-			simulation_restarted.disconnect(reset_throwable)
-		_throwable_present.teardown()
-		_throwable_present = null
-	if _scar_present != null:
-		var reset_scars := _scar_present.reset_runtime_state
-		if simulation_restarted.is_connected(reset_scars):
-			simulation_restarted.disconnect(reset_scars)
-		_scar_present.teardown()  # frees the scar meshes under the owner models
-		_scar_present = null
+	_container = null
+	_item_db = null
+	_resource_root = null
 	_sim = null

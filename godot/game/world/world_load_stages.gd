@@ -722,27 +722,10 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	_world._net_drive.stage_runtime_options(opts)
 	# The placer + environment node let the wire present pass resolve + light its
 	# remote-entity avatars (build_player_animated_model): every remote row on a
-	# joiner, and the admitted players' synthetic-origin rows on the host.
+	# joiner, and the admitted players' synthetic-origin rows on the host. The
+	# present passes' other collaborators (audio, effect world, lights,
+	# environment, anchors) bind in _start_effect_world, once they exist.
 	opts.placer = _world._placer
-	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
-	# and effect world resolve lazily (mission audio is set up after the runtime), the
-	# listener is the same camera position the audio render pass ticks with.
-	opts.fire_audio = _world.get_mission_audio
-	opts.fire_fx = _world.get_effect_world
-	opts.fire_listener = _world._fire_listener_position
-	# The destruction/throwable present passes anchor their wreck/piece/move
-	# effect groups through the ItemEffectDirector's owner-anchor registry
-	# (the typed seam; GameWorld's register_effect_anchor delegates to the
-	# same instance).
-	opts.effect_anchors = _world._item_fx
-	# The scar present pass reads the fog distance + the combined terrain light
-	# off the live environment node each present frame (world-wac-ai-re §24.9).
-	opts.environment_node = _world.get_environment_node
-	# The dynamic light-pool routes (renderer/light_scene.h witness map): the
-	# MF_Light muzzle glow per presented fire, the death flash per husk death.
-	if _world._light_director != null:
-		opts.muzzle_light = _world._light_director.on_muzzle_fire
-		opts.death_light = _world._light_director.on_death_light
 	_world._runtime.setup(mission, container, opts)
 	if _world._runtime.get_sim() == null:
 		var setup_error := int(_world._runtime.get_setup_error())
@@ -955,3 +938,13 @@ func _start_effect_world() -> void:
 				func(node: ObjectModel, kind: int, item_id: int) -> void:
 					_world._item_fx.on_wire_node_spawned(node, kind, item_id)
 					_world._light_director.on_wire_node_spawned(node, kind, item_id))
+	# The present passes' typed collaborators (ADR 0043 d9): the mission audio
+	# (the stage before this one), this effect world, the light director, the
+	# environment node and the owner-anchor registry (GameWorld's
+	# register_effect_anchor delegates to the same ItemEffectDirector). Bound
+	# once here, inside the load and before the first session frame presents;
+	# the fire/destruction sound legs and the effect legs gate on the objects
+	# themselves (a dedicated serve binds no camera listener).
+	if wire_runtime != null:
+		wire_runtime.setup_passes(_world._mission_audio, _world._effect_world,
+				_world._light_director, _world._env, _world._item_fx)

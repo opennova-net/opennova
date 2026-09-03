@@ -64,7 +64,6 @@ func begin_device_frame(camera_pos: Vector3, camera_xform: Transform3D,
 	_frame_skip_occlusion = _frame_probe_enabled and _world._perf_probe_skip_occl
 	if _frame_probe_enabled:
 		_world._perf_probe_spans.clear()
-	_world._last_tick_camera_pos = camera_pos
 	_world._perf_foliage_us = 0
 	_world._perf_runtime_us = 0
 	_world._perf_audio_us = 0

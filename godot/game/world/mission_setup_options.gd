@@ -45,29 +45,12 @@ var terrain_til := PackedByteArray()
 var wac_basename := ""
 var infantry_adm := ""
 
-# --- Presentation composition. ---
+# --- Presentation composition. The present passes' other collaborators (the
+#     mission audio, the effect world, the light director, the environment
+#     node, the owner-anchor registry) are typed objects that exist only after
+#     the runtime stage: the load hands them to MissionPresentation.setup_passes
+#     once they do. ---
 var placer: MissionObjectPlacer = null
-## The owner-anchor registry the destruction/throwable passes anchor their
-## wreck/piece/move effect groups through.
-var effect_anchors: ItemEffectDirector = null
-
-# --- Device providers. Genuinely device-Callable seams stay Callables: the
-#     named typed field is the contract (ADR 0034 d3 retired the Dictionary
-#     bundle, not the Callable). An unset Callable reads "unavailable". ---
-## func() -> MissionAudio. Presence also gates the fire + destruction
-## presentation passes (a dedicated serve presents neither).
-var fire_audio := Callable()
-## func() -> EffectWorld
-var fire_fx := Callable()
-## func() -> Vector3: the camera listener position (also the scar pass's camera).
-var fire_listener := Callable()
-## The dynamic light-pool routes (renderer/light_scene.h witness map); unset
-## without a light director.
-var muzzle_light := Callable()
-var death_light := Callable()
-## func() -> Node: the live environment node the scar pass reads fog distance +
-## combined terrain light off each present frame.
-var environment_node := Callable()
 
 # --- Net staging read DOWNSTREAM of setup(): GameWorld's LAN bind-failure
 #     report and NetSessionDrive's NovaWorld gate registration. ---

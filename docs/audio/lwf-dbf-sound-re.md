@@ -230,7 +230,7 @@ The per-item slot-sound layer the footsteps/screams/foley ride. Port surfaces:
 `engine/runtime/audio/sound_profile.{h,cpp}` (`SoundProfileTable`), `engine/formats/def` (the two
 profile keys), `engine/runtime/world/infantry.cpp` (`AiSystem::infantry_anim_sound_pass`
 / `emit_slot_sound`), `Simulation::set_sound_profiles`/`drain_slot_sounds`,
-`fire_present_pass.gd` `_drain_slot_sounds`. Evidence ctests: `sound_profile`
+`fire_presenter.cpp` `_drain_slot_sounds`. Evidence ctests: `sound_profile`
 (parse + lookup + the asset-gated 49-profile retail sweep), `slot_sound`
 (emission semantics).
 

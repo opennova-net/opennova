@@ -86,6 +86,8 @@
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
 #include "simulation/destruction_events.h"
+#include "simulation/destruction_presenter.h"
+#include "simulation/throwable_presenter.h"
 #include "simulation/debug_cards.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
@@ -96,7 +98,6 @@
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
-#include "simulation/tracer_ribbon_frame.h"
 #include "simulation/weather_home_state.h"
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
@@ -278,9 +279,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);
 	GDREGISTER_CLASS(DestructionEffectEvent);
-	GDREGISTER_CLASS(DestructionSoundEvent);
 	GDREGISTER_CLASS(HuskSwapEvent);
-	GDREGISTER_CLASS(DeathLightEvent);
 	GDREGISTER_CLASS(DestructionDrain);
 	GDREGISTER_CLASS(HitboxDebugEntity);
 	GDREGISTER_CLASS(HitboxDebugOrganic);
@@ -297,8 +296,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
-	GDREGISTER_CLASS(TracerRibbonStrip);
-	GDREGISTER_CLASS(TracerRibbonFrame);
 	GDREGISTER_CLASS(WeatherHomeState);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
@@ -324,6 +321,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);
+	// The present passes EntityPresenter owns (ADR 0043 d9): two are
+	// RefCounted only so their anchor Callables have an Object target;
+	// registered internally, never script-visible.
+	GDREGISTER_INTERNAL_CLASS(DestructionPresenter);
+	GDREGISTER_INTERNAL_CLASS(ThrowablePresenter);
 	GDREGISTER_CLASS(EntityPresenter);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);
@@ -336,6 +338,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WirePresentStats);
 	GDREGISTER_CLASS(ScarDrawList);
 	GDREGISTER_CLASS(ScarPresenterStats);
+	GDREGISTER_CLASS(FirePresentStats);
+	GDREGISTER_CLASS(DestructionPresentStats);
+	GDREGISTER_CLASS(ThrowablePresentStats);
+	GDREGISTER_CLASS(ScarPresentStats);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(WacProgram);
 	GDREGISTER_CLASS(LwfData);

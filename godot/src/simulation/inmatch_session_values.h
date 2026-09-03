@@ -41,6 +41,10 @@ public:
 	double get_delta_seconds() const;
 	void set_camera_sample(const Vector3 &p_position,
 			const Vector3 &p_forward, bool p_listener_valid = true);
+	// The camera sample as stamped: the driver pushes it to the present
+	// passes' listener seam before it presents.
+	Vector3 get_camera_position() const;
+	bool is_listener_valid() const;
 	void set_movement(bool p_forward, bool p_back, bool p_left, bool p_right,
 			bool p_lean_left, bool p_lean_right, bool p_jump);
 	void set_look_delta(const Vector2 &p_delta);

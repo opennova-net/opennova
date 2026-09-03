@@ -11,7 +11,7 @@ namespace opennova::world {
 // simulation consults these predicates every flight tick and publishes the
 // result as `LiveRound::move_effect_live`; the shell's fire presentation owns
 // the emitter itself (spawn, re-pose, and the detach-on-death — the latter is
-// the live `throwable_present_pass.gd` leg: Projectile_ReleaseEffects
+// the live `throwable_presenter.cpp` leg: Projectile_ReleaseEffects
 // @0x4E8280 -> Entity_ReleaseEffectEmitter @0x5F75D0 stops emission and lets
 // the live particles drain).
 //

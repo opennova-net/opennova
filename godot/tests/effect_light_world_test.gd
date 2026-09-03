@@ -1,8 +1,5 @@
 extends GutTest
 
-const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
-const DestructionPresentPass := preload(
-		"res://game/world/destruction_present_pass.gd")
 const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
 # Authored light variants minted once from the retired edit surface
 # (fixtures/README.md); each test reads the authored record
@@ -253,9 +250,11 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
-	var presenter := FirePresentPass.new()
-	presenter.setup(null, null, Callable(), Callable(), Callable(), Callable(),
-			Callable(director, "on_muzzle_fire"))
+	# The fire pass (EntityPresenter's member) routes MF_Light straight into
+	# the director's on_muzzle_fire.
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_passes(null, null, null, null, null, director, null, null)
 	presenter.present_fires([_muzzle_fire(77, Vector3(1.0, 0.0, 0.0), 1)])
 	assert_eq(director.get_report().live, 1,
 			"the presented MF_Light event creates one muzzle glow")
@@ -296,11 +295,14 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	add_child_autofree(world)
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, null, null, null, null, null, Callable(), Callable(),
-			null, Callable(director, "on_death_light"))
-	presenter.present_drained(DestructionDrain.make([], [], [],
-			[DeathLightEvent.make(Vector3(2.0, 0.0, 0.0), 6.0)]), [])
+	# The destruction pass (EntityPresenter's member) routes the drain's
+	# death-light column straight into the director's on_death_light.
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_passes(null, null, null, null, null, director, null, null)
+	var drain := DestructionDrain.make([], [])
+	drain.add_death_light(Vector3(2.0, 0.0, 0.0), 6.0)
+	presenter.present_destruction_drained(drain, [])
 	assert_eq(director.get_report().live, 1,
 			"the destruction drain creates one death flash")
 	var camera := Camera3D.new()

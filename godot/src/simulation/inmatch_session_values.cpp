@@ -12,6 +12,10 @@ void MissionFrameInput::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_camera_sample", "position", "forward",
 			"listener_valid"), &MissionFrameInput::set_camera_sample,
 			DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("get_camera_position"),
+			&MissionFrameInput::get_camera_position);
+	ClassDB::bind_method(D_METHOD("is_listener_valid"),
+			&MissionFrameInput::is_listener_valid);
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
@@ -52,6 +56,15 @@ void MissionFrameInput::set_camera_sample(const Vector3 &p_position,
 	value_.camera.forward[1] = p_forward.y;
 	value_.camera.forward[2] = p_forward.z;
 	value_.camera.listener_valid = p_listener_valid && p_position.is_finite();
+}
+
+Vector3 MissionFrameInput::get_camera_position() const {
+	return Vector3(value_.camera.position[0], value_.camera.position[1],
+			value_.camera.position[2]);
+}
+
+bool MissionFrameInput::is_listener_valid() const {
+	return value_.camera.listener_valid;
 }
 
 void MissionFrameInput::set_movement(bool p_forward, bool p_back, bool p_left,

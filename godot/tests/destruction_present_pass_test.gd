@@ -1,14 +1,15 @@
 extends GutTest
 
-# DestructionPresentPass on the typed surfaces (ADR 0034): event/piece rows are
-# pure data through the public present_drained data leg (production present()
-# drains the typed Simulation), the collaborators are a real
-# MissionObjectPlacer/EntityPresenter plus a REAL EffectWorld over an in-memory
-# catalog and a REAL ItemEffectDirector (ADR 0043 rule 11: the group report,
-# the anchor registry and the owner-pose resolve are the read seams), the
-# entity index is a real EntityIndex over real ObjectModels, and the item
-# database is the real fixture items.def (item 1291 = the dune buggy with husk
-# Dbuggy1X).
+# The destruction present pass (EntityPresenter's DestructionPresenter member,
+# ADR 0043 d9) on the typed surfaces (ADR 0034): event/piece rows are pure
+# data through the public present_destruction_drained data leg (production
+# present_passes() drains the typed Simulation), the collaborators are a real
+# MissionObjectPlacer plus a REAL EffectWorld over an in-memory catalog and a
+# REAL ItemEffectDirector (ADR 0043 rule 11: the group report, the anchor
+# registry and the owner-pose resolve are the read seams), the entity index is
+# a real EntityIndex over real ObjectModels, the runtime-only resolver is the
+# presenter's own wire registry with injected nodes, and the item database is
+# the real fixture items.def (item 1291 = the dune buggy with husk Dbuggy1X).
 #
 # The live settling-pose follow (a REAL sim's present-effect state feeding the
 # node-less graft) is exercised by the real-sim test at the bottom; the
@@ -16,7 +17,6 @@ extends GutTest
 # equivalent without native pose injection and is covered there by the sim's
 # authoritative initial pose plus the yaw-only tilt-retention leg.
 
-const DestructionPresentPass := preload('res://game/world/destruction_present_pass.gd')
 const MissionPresentation := preload('res://game/world/mission_presentation.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
@@ -135,13 +135,21 @@ func _emitter_forward(row: EffectGroupReport) -> Vector3:
 	return (row.emitters[0] as EffectEmitterReport).forward
 
 
-# A REAL wire presenter with injected per-handle avatars (native methods
-# cannot be intercepted from GDScript; register_wire_node is the seam).
-func _wire_resolver(nodes: Dictionary = {}) -> EntityPresenter:
+# A REAL EntityPresenter with its destruction pass wired: `sim` (nullable) is
+# the live pose source, `container` hosts the node-less husk grafts, `index`
+# resolves authored entities, `placer`/`item_db` build the husk models,
+# `anchors` is the owner-anchor registry, `fx` the effect world; `wire_nodes`
+# are injected per-handle avatars for the runtime-only resolve (native
+# methods cannot be intercepted from GDScript; register_wire_node is the seam).
+func _make_presenter(sim: Simulation, container: Node3D, index: EntityIndex,
+		placer: MissionObjectPlacer, item_db: ItemDatabase, anchors: ItemEffectDirector,
+		fx: EffectWorld, wire_nodes: Dictionary = {}) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	for handle in nodes:
-		presenter.register_wire_node(int(handle), nodes[handle])
+	presenter.setup(sim, index, placer)
+	for handle in wire_nodes:
+		presenter.register_wire_node(int(handle), wire_nodes[handle])
+	presenter.setup_passes(container, item_db, null, null, fx, null, null, anchors)
 	return presenter
 
 
@@ -206,11 +214,8 @@ func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
 	return row
 
 
-func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> DestructionPresentPass:
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, null, null, null, null, anchors, Callable(),
-			func(): return fx)
-	return presenter
+func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter:
+	return _make_presenter(null, null, null, null, null, anchors, fx)
 
 
 # Ring-slot lifecycle regressions.
@@ -219,19 +224,19 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:7'
-	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
+	presenter.present_destruction_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
 	var first := _live_owned_row(fx, key)
 	assert_not_null(first, 'a new piece spawns its trail as one owned group')
 	assert_eq(_owned_rows(fx, key).size(), 1)
 	assert_eq(first.name, 'Effect_VexpM')
 	var first_id := int(first.id)
-	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
+	presenter.present_destruction_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
 	assert_eq(_owned_rows(fx, key).size(), 1, 'the same generation never respawns')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(4, 5, 6))
 	fx.advance_fixed_tick(0.0)
 	assert_almost_eq(_emitter_position(_live_owned_row(fx, key)), Vector3(4, 5, 6),
 			POSITION_EPS, 'the presented incarnation follows the live piece pose')
-	presenter.present_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
+	presenter.present_destruction_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
 	assert_eq(_owned_rows(fx, key).size(), 2, 'a new generation spawns a fresh incarnation')
 	var replacement := _live_owned_row(fx, key)
 	assert_not_null(replacement)
@@ -248,10 +253,10 @@ func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
 	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:3'
-	presenter.present_drained(null, [_piece(3, 30, 1, Vector3(2, 3, 4))])
+	presenter.present_destruction_drained(null, [_piece(3, 30, 1, Vector3(2, 3, 4))])
 	assert_eq(_owned_rows(fx, key).size(), 1)
 	assert_true(anchors.has_effect_anchor(key))
-	presenter.present_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
+	presenter.present_destruction_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
 	assert_eq(_owned_rows(fx, key).size(), 1, 'a no-trail type spawns nothing')
 	assert_false(anchors.has_effect_anchor(key), 'the outgoing owner retires its anchor')
 	# With no anchor left, the next fixed-tick owner sync resolves nothing for
@@ -270,16 +275,16 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:13'
-	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
+	presenter.present_destruction_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
 	assert_eq(_owned_rows(fx, key).size(), 1)
 	var first_id := int(_live_owned_row(fx, key).id)
-	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
+	presenter.present_destruction_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
 	assert_eq(_owned_rows(fx, key).size(), 1, 'settling never respawns the incarnation')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(1, 0, 2))
 	fx.advance_fixed_tick(0.0)
 	assert_almost_eq(_emitter_position(_live_owned_row(fx, key)), Vector3(1, 0, 2),
 			POSITION_EPS, 'the settled piece keeps presenting at its rest pose')
-	presenter.present_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
+	presenter.present_destruction_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
 	assert_eq(_owned_rows(fx, key).size(), 2)
 	var replacement := _live_owned_row(fx, key)
 	assert_not_null(replacement)
@@ -310,11 +315,9 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	var events := DestructionDrain.make(
 			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)],
 			[DestructionEffectEvent.make('Effect_VehExplode', Vector3(3, 4, 5), 2, Vector3.ZERO, 91, 41)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db, anchors, Callable(),
-			func(): return fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [_piece(5, 70, 1, Vector3(6, 7, 8))])
+	presenter.present_destruction_drained(events, [_piece(5, 70, 1, Vector3(6, 7, 8))])
 
 	assert_false(originally_visible.visible)
 	assert_false(originally_hidden.visible)
@@ -331,7 +334,7 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the individual husk replaces the intact static silhouette")
 
-	presenter.reset_runtime_state()
+	presenter.reset_wire_runtime_state()
 
 	assert_true(originally_visible.visible,
 			'the intact child returns to its authored visibility')
@@ -351,12 +354,41 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 			'the retired piece group no longer follows an owner')
 	# The old call-count ledger has no public read; the idempotence pin is that
 	# a second reset leaves the restored state exactly as it was.
-	presenter.reset_runtime_state()
+	presenter.reset_wire_runtime_state()
 	assert_true(originally_visible.visible, 'reset is public and idempotent')
 	assert_false(originally_hidden.visible)
 	assert_true(static_caster.visible)
 	assert_false(anchors.has_effect_anchor('wreck:91:2'))
 	assert_false(anchors.has_effect_anchor('piece:5'))
+
+
+func test_reset_wire_runtime_state_clears_the_wreck_fire_registry() -> void:
+	# The Stop -> Play boundary reaches the destruction pass through the
+	# presenter's one reset (the restart signal's single connect): the burning
+	# wreck registry the crackle updates read through has_active_wreck_fire
+	# empties with the anchors.
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var wreck := ObjectModel.new()
+	container.add_child(wreck)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx, { 0x1004: wreck })
+	var fire_key := 'wreck:wire:4100:2'
+	presenter.present_destruction_drained(DestructionDrain.make([], [
+			DestructionEffectEvent.make('Effect_Family2', Vector3(1, 1, 1),
+					2, Vector3.ZERO, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE)]), [])
+	assert_true(presenter.has_active_wreck_fire(fire_key),
+			'the presented fire family enters the wreck crackle set')
+	assert_true(anchors.has_effect_anchor(fire_key))
+
+	presenter.reset_wire_runtime_state()
+
+	assert_false(presenter.has_active_wreck_fire(fire_key),
+			'reset empties the wreck-fire registry')
+	assert_false(anchors.has_effect_anchor(fire_key), 'reset retires the wreck anchor')
+	presenter.teardown()
 
 
 func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
@@ -370,11 +402,9 @@ func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
 	container.add_child(intact)
 	var index := _index_of([_entry(intact, 41)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_eq(_husk_models(self).size(), 1)
 	if _husk_models(self).size() == 1:
@@ -413,16 +443,14 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	assert_eq(director.get_report().live, 1,
 			"the intact graphic contributes its one authored LGHT")
 
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, _index_of([_entry(intact, 41)]),
-			_husk_placer(), _item_db, ItemEffectDirector.new(), Callable(), Callable(),
-			null, Callable())
-	presenter.present_drained(DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
+	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
+			_husk_placer(), _item_db, ItemEffectDirector.new(), null)
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
 	assert_eq(_husk_models(world).size(), 1,
 			"the production destruction pass built the authored husk graft")
 	assert_eq(director.get_report().live, 1,
 			"a husk swap leaves the intact spawn-fixed LGHT and scans no husk LGHT")
-	presenter.reset_runtime_state()
+	presenter.reset_wire_runtime_state()
 	assert_eq(director.get_report().live, 1,
 			"restoring the intact graphic performs no authored-light respawn")
 	presenter.teardown()
@@ -443,11 +471,9 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	var placed := Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
 	placer.register_static_instance(77, 'StaticProp', 0, placed, true, true)
 	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, _index_of([]), placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_true(placer.is_static_instance_hidden(77))
 	assert_eq(_husk_models(self).size(), 1)
@@ -460,7 +486,7 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 			+ "never clears entity flag 0x400 [orig: Entity_SpawnFromBMSRecord "
 			+ "@ 0x40ed1d..0x40ed2b]")
 
-	presenter.reset_runtime_state()
+	presenter.reset_wire_runtime_state()
 
 	assert_false(placer.is_static_instance_hidden(77),
 			'the pass uses the placer public inverse to restore the static')
@@ -479,16 +505,14 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 	intact.add_child(visual)
 	var index := _index_of([_entry(intact, 41)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_true(visual.visible,
 			'a failed graft build must leave the retail intact-graphic fallback standing')
 	assert_eq(_husk_models(self).size(), 0)
-	assert_eq(presenter.get_stats().no_husk, 1)
+	assert_eq(presenter.get_destruction_present_stats().no_husk, 1)
 	presenter.teardown()
 
 
@@ -501,16 +525,15 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, _index_of([]), placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_false(placer.is_static_instance_hidden(77),
 			'a failed graft build must not carve a visible hole in a static batch')
-	assert_eq(container.get_child_count(), 0)
-	assert_eq(presenter.get_stats().no_husk, 1)
+	assert_true(_husk_models(container).is_empty(),
+			'no husk graft lands in the container (its only child is the fire pass geometry)')
+	assert_eq(presenter.get_destruction_present_stats().no_husk, 1)
 	presenter.teardown()
 
 
@@ -535,11 +558,9 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 			[
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, first_origin),
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, second_origin)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_eq(_husk_models(self).size(), 2,
 			'distinct zero-BMS entities own distinct husk cache entries')
@@ -569,7 +590,6 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	var second_visual := Node3D.new()
 	second.add_child(second_visual)
 	container.add_child(second)
-	var resolver := _wire_resolver({ 0x1004: first, 0x1005: second })
 	# Pre-fix fallback: both synthetic children collapse to this same authored
 	# identity because they have no BMS id and share the non-BMS origin sentinel.
 	var index := _index_of([_entry(first, 0, 255, 16777215)])
@@ -577,11 +597,10 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 			[
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004),
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1005)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db, anchors,
-			Callable(), func(): return fx, resolver)
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx,
+			{ 0x1004: first, 0x1005: second })
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_eq(_husk_models(self).size(), 2,
 			'distinct synthetic entities own distinct husk cache entries')
@@ -594,7 +613,6 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 
 
 func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> void:
-	var resolver := _wire_resolver()
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -606,17 +624,16 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	add_child_autofree(authored_zero)
 	var index := _index_of([_entry(authored_zero, 0, 255, 16777215)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, index, placer, _item_db,
-			ItemEffectDirector.new(), Callable(), Callable(), resolver)
+	var presenter := _make_presenter(null, container, index, placer, _item_db,
+			ItemEffectDirector.new(), null)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_false(placer.is_static_instance_hidden(0),
 			'a missing wire node cannot hide the authored static with BMS id zero')
 	assert_true(_husk_models(self).is_empty(),
 			'no unattached husk graft is built for a retired runtime row')
-	assert_eq(presenter.get_stats().no_husk, 1)
+	assert_eq(presenter.get_destruction_present_stats().no_husk, 1)
 
 
 func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
@@ -630,7 +647,6 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	container.add_child(second)
 	first.position = Vector3(1, 2, 3)
 	second.position = Vector3(7, 8, 9)
-	var resolver := _wire_resolver({ 0x1004: first, 0x1005: second })
 	var effects: Array = []
 	for wire_handle in [0x1004, 0x1005]:
 		for family in [1, 2, 3]:
@@ -642,11 +658,10 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	effects.append(DestructionEffectEvent.make(
 			'Effect_Transient', Vector3(20, 30, 40),
 			0, Vector3.ZERO, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE))
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, Callable(), func(): return fx, resolver)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx, { 0x1004: first, 0x1005: second })
 
-	presenter.present_drained(DestructionDrain.make([], effects), [])
+	presenter.present_destruction_drained(DestructionDrain.make([], effects), [])
 
 	var owned := 0
 	for row_v in fx.get_debug_group_report():
@@ -660,7 +675,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 		assert_eq((transients[0] as EffectGroupReport).name, 'Effect_Transient')
 		assert_almost_eq(_emitter_position(transients[0]), Vector3(20, 30, 40), POSITION_EPS)
 	for wire_handle in [0x1004, 0x1005]:
-		var node: Node3D = resolver.resolve_wire_handle(wire_handle)
+		var node: Node3D = presenter.resolve_wire_handle(wire_handle)
 		for family in [1, 2, 3]:
 			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
 			assert_true(anchors.has_effect_anchor(key),
@@ -736,11 +751,9 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 			[DestructionEffectEvent.make(
 					'Effect_VehExplode', Vector3(100, 100, 100),
 					2, Vector3.ZERO, 91, 0, WireHandle.INVALID, spawn_origin)])
-	var presenter := DestructionPresentPass.new()
-	presenter.setup(sim, container, _index_of([]), placer, _item_db, anchors,
-			Callable(), func(): return fx)
+	var presenter := _make_presenter(sim, container, _index_of([]), placer, _item_db, anchors, fx)
 
-	presenter.present_drained(events, [])
+	presenter.present_destruction_drained(events, [])
 
 	assert_true(placer.is_static_instance_hidden(0),
 			'the node-less husk carves the batch slot')
@@ -769,18 +782,16 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 
-	presenter.present_drained(DestructionDrain.make(
+	presenter.present_destruction_drained(DestructionDrain.make(
 			[],
 			[
 					DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO, 0, Vector3.RIGHT),
 					DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP)],
-			[],
-			[],
 			1,
 			1), [])
 
-	assert_eq(presenter.get_stats().debris_triangles, 1)
-	assert_eq(presenter.get_stats().glass_points, 1)
+	assert_eq(presenter.get_destruction_present_stats().debris_triangles, 1)
+	assert_eq(presenter.get_destruction_present_stats().glass_points, 1)
 	var transients := _transient_rows(fx)
 	assert_eq(transients.size(), 2)
 	assert_eq(fx.get_debug_group_report().size(), 2, 'both resolved rows spawn unowned transients')

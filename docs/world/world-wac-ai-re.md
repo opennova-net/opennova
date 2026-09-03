@@ -3328,7 +3328,7 @@ spawn, the original's fire-time moment; the shell stamps the camera listener via
 binding drains = `Simulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
 replaced by the witnessed trail channels, §24); the EFFECT presentation =
-`godot/game/world/fire_present_pass.gd` (muzzle effect + the §24 tracer
+`godot/src/simulation/fire_presenter.{h,cpp}` (muzzle effect + the §24 tracer
 ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`engine/runtime/world/collision_los.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
@@ -3458,7 +3458,7 @@ passes its active `WeaponSlotState::tracer_shot_counter` through
 switches; slot-less NPC fire keeps the shooter-entity byte, exactly one
 modeled weapon per NPC under D-AI-5); the trail pool =
 `world/tracer_trails.{h,cpp}`, the spawn-time style select + NoTracers gate =
-`RoundSim::spawn`, the ribbons = `fire_present_pass.gd` via
+`RoundSim::spawn`, the ribbons = `fire_presenter.cpp` via
 `get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
 D-AI-12.
 
@@ -4999,7 +4999,7 @@ blast), the destroyed/husk model swap, and the explosion/pieces/sounds at
 death. Witnessed on retail `Jointops.exe` (`Jointops.exe.kong.i64`, imagebase
 0x400000). Ported subset: `engine/runtime/world/destruction.{h,cpp}` + the round_sim
 item leg + the collision husk swap +
-`godot/game/world/destruction_present_pass.gd`. The native collision,
+`godot/src/simulation/destruction_presenter.{h,cpp}`. The native collision,
 damage, callback-routing, death-piece, and item-settle mechanics are pinned by
 the `destruction` ctest and the def-parse additions in
 `tests/def/def_parse_items_test.cpp` (ctest `def_parse_items`). The presenter
@@ -5437,7 +5437,7 @@ the same (`@ 0x4ae233`), the pool raycast walk substitutes +52
 graphic serving — the witnessed fallback. Ported: `CollisionWorld` husk
 instances (assign_entity_husk; every query resolves through the one
 `target_view` seam), the present-pass model swap
-(`destruction_present_pass.gd`), and dead non-organics now RENDER instead of
+(`destruction_presenter.cpp`), and dead non-organics now RENDER instead of
 hiding (the old D-AI-9 stand-in). items.def: `huskfinal` (+0x80),
 `husk_sub_parts` (+0x100), `husk_sub_part_types NN_NAME` (split at the FIRST
 underscore, slot NN-1 in 0..15, name matched by `DeathPieceType_FindByName
@@ -5694,7 +5694,7 @@ tangent, spin-then-texture on `World::next_prng16`), `clear_entity` at both
 death entries and on attach, `renderer::compile_scar_draws`
 (`engine/runtime/renderer/scar_draw_list.*` — the witnessed vertex order/UVs,
 per-strip batches, the fog-box cull, the owner-visibility gate), and the
-device `ScarPresenter` + `scar_present_pass.gd` (entity-ring batches parented
+device `ScarPresenter` + `scar_presenter.cpp` (entity-ring batches parented
 under the owner model's section node, shared-ring batches as a world mesh; the
 entity-ring batches are uploaded in the section-local frame the engine stores,
 the shared ring in world space). The device state is per strip from the
@@ -5730,7 +5730,7 @@ block (color ramp + width curve). The same pool renders rocket/AT4/grenade smoke
 trails and the NVG IR laser. All addresses retail `Jointops.exe` (imagebase
 0x400000, IDB `Jointops.exe.kong.i64`). Port (same session): the point rings =
 `engine/runtime/world` `tracer_trails.{h,cpp}` (`TracerTrailPool`, fed by `RoundSim`), the
-styles + ribbons = `fire_present_pass.gd`; pinned by the `npruntime_round_sim`
+styles + ribbons = `fire_presenter.cpp`; pinned by the `npruntime_round_sim`
 ctest section 7 and the `fire_present_pass_test.gd` ribbon tests.
 
 ### 25.1 The pool — `g_TracerEmitterPool @ 0x2BF5270`
@@ -5873,12 +5873,12 @@ FrameFX leg]`. The normal-pass geometry:
 | Trail channel lifecycle (alloc/append/drain/free) | MATCHING | `TracerTrailPool` [orig cites inline]; `npruntime_round_sim` section 7 |
 | Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
 | Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |
-| Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `fire_present_pass.gd _build_styles`; caps in `tracer_trails.h` |
+| Style tables (12 ids: colors/sizes/caps/base/flags) | MATCHING (data transcribed from the six static blocks + the builder) | `fire_presenter.cpp` (the transcribed style tables); caps in `tracer_trails.h` |
 | Ribbon geometry (pairs, facing, widths, ramp index) | MATCHING (structural; min-width proj divisor approximated 0.0012/u) | `_append_channel_ribbon`; `fire_present_pass_test.gd` |
-| Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_present_pass.gd` |
+| Blend/fog (additive fog-black vs alpha smoke) | MATCHING (family-level; Godot `disable_fog` stands in for fog-to-black — D-AI-12c) | materials in `fire_presenter.cpp` |
 | B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
 | Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
-| Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_present_pass.gd`; D-AI-12d |
+| Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_presenter.cpp`; D-AI-12d |
 | light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::get_round_glow_rows` → `EffectLightDirector.sync_round_glows`) | D-AI-12e (closed leg) |
 | NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
 
@@ -5886,7 +5886,7 @@ FrameFX leg]`. The normal-pass geometry:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_present_pass.gd`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
+| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_presenter.cpp`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
 
 ### 25.7 IDB write-backs (2026-07-18 session, saved)
 
@@ -5954,14 +5954,14 @@ was missing was WHEN it spawns and when the water plane releases it
 - Death detaches rather than destroys `[orig: Projectile_ReleaseEffects
   @0x4e8280 -> Entity_ReleaseEffectEmitter @0x4e82b1..0x4e82bf]` — stop
   emission and let the live particles drain (the live
-  `throwable_present_pass.gd` leg). "A zero max_age never times out" was
+  `throwable_presenter.cpp` leg). "A zero max_age never times out" was
   REFUTED in the tidy: the head `@0x4e9da7..0x4e9dae` retires `+0x2AC <= 0` on
   the first tick; "never times out" is the `noage` flag.
 - **Port**: `round_sim.cpp` evaluates each leg's own predicates each flight
   tick (the water term on the `useownmove` leg only) into
   `LiveRound::move_effect_live` (`round_move_effect.h` keeps the consumed
   predicates; `ammo_table.h` names `kAmmoFlagClipWater/ClipWaterFx`); the rows
-  carry the bool and `throwable_present_pass.gd` spawns only when live with
+  carry the bool and `throwable_presenter.cpp` spawns only when live with
   no handle, retires and forgets the handle when it drops, respawns fresh
   when it returns. Pinned by ctest `round_move_effect`, `projectile_combat`
   and GUT `throwable_present_pass_test`.
@@ -6276,7 +6276,7 @@ Reimpl: `engine/runtime/world/throwables.{h,cpp}` (motors + placed devices + thi
 the `RoundSim` spawn dispatches and witnessed throwable `useownmove` leg
 (`engine/runtime/world/round_sim.{h,cpp}`),
 the PowerThrow charge chain (`godot/src/simulation/simulation.cpp`), the
-class/trait feed (`resolve_item_traits`), and `godot/game/world/throwable_present_pass.gd`.
+class/trait feed (`resolve_item_traits`), and `godot/src/simulation/throwable_presenter.{h,cpp}`.
 Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 + the claymore rows in `def_parse_ammo`.
 
@@ -6292,7 +6292,7 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 | Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §27.6; test_owner_death_removes_devices |
 | items.def class binding (ai_function/move_function) | MATCHING | §27.2; the resolve_item_traits feed |
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
-| Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_present_pass.gd` |
+| Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_presenter.cpp` |
 | Landmine items (`lndm`) | witnessed, unported | D-THROW-6 |
 | MP round/device presentation (tag 2 + S2C 0x59/0x12) | MATCHING: tag-2 client flight plus reliable placed-device spawn/update/removal are live | D-THROW-7 fixed; net-re §5.36; `npruntime_placed_device_relay` |
 
@@ -6334,7 +6334,7 @@ drifts and only the fuse leg still runs.
 
 The sim keeps the selected item id on every bound round, but
 `Simulation::get_throwable_visuals` exposes it to
-`throwable_present_pass.gd` only when `round.tracer` is true. Thus class binding
+`throwable_presenter.cpp` only when `round.tracer` is true. Thus class binding
 remains independent of the per-shot tracer-rate decision while the flying
 model follows the separate `@0x4ec900` model-pointer clear. (JO's grenade,
 smoke, flashbang, satchel, and claymore ammo author `ForceTracer`, so their
@@ -6354,7 +6354,7 @@ water-plane release is the `useownmove` leg's alone; the ballistic leg's
 handle branch `@ 0x4ea963` only re-poses (the `move` emitter record above). `Projectile_ReleaseEffects
 @ 0x4e8280` releases +0x1CC when the round dies. The port mirrors this through
 `get_throwable_visuals().move_effect` and an owner-bound group in
-`throwable_present_pass.gd`: one spawn, full-transform follow, then immediate
+`throwable_presenter.cpp`: one spawn, full-transform follow, then immediate
 emission stop when the round disappears while emitted particles drain. In
 particular, `grenadesm` authors `move Effect_SmokeToss`; that trail is present
 before and after its five-second `arm_age`. The arm boundary only submits the

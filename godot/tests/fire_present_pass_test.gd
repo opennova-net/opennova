@@ -1,14 +1,13 @@
 extends GutTest
 
-# FirePresentPass on the typed surfaces (ADR 0034): the drained rows are pure
-# data fed through the public present_* data legs (the present_snapshot
-# precedent — production present() drains the typed Simulation and forwards the
-# same rows), and the audio sink is a REAL MissionAudio over a staged root whose
-# mission bank authors every set the rows name (ADR 0043 rule 11: no production
+# The fire present pass (EntityPresenter's FirePresenter member, ADR 0043 d9)
+# on the typed surfaces (ADR 0034): the drained rows are pure data fed through
+# the public present_* data legs (the present_snapshot precedent — production
+# present_passes() drains the typed Simulation and forwards the same rows),
+# and the audio sink is a REAL MissionAudio over a staged root whose mission
+# bank authors every set the rows name (ADR 0043 rule 11: no production
 # subclass). Its recent-fires ring, mixer channel census, and the spawned
 # AudioStreamPlayer3D voices under the container are the read seams.
-
-const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 
 # Every set the drained rows below name, authored into the staged mission bank
 # (one layer each, playing the fixture tone).
@@ -79,15 +78,13 @@ func _slot_sound(soundset: String, pos: Vector3, handle: int, slot: int) -> Slot
 	return row
 
 
-func _make_pass(audio: MissionAudio) -> FirePresentPass:
-	var presenter := FirePresentPass.new()
-	presenter.setup(
-		null,
-		null,
-		func(): return audio,
-		Callable(),
-		func(): return Vector3.ZERO,
-	)
+# A REAL EntityPresenter with its fire pass wired over `audio` (the sound
+# legs) and, when given, `container` (the tracer geometry's host); no effect
+# world, no sim — the data legs are the drive.
+func _make_presenter(audio: MissionAudio, container: Node3D = null) -> EntityPresenter:
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_passes(container, null, null, audio, null, null, null, null)
 	return presenter
 
 
@@ -97,7 +94,7 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio := _staged_audio(container)
-	var presenter := _make_pass(audio)
+	var presenter := _make_presenter(audio)
 
 	presenter.present_fire_sounds([
 		_fire_sound("AI_FIRE", Vector3(10, 0, 0), 77),
@@ -117,7 +114,23 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 		assert_eq(fired[1].source_bms_id, 0)
 		assert_true(fired[1].played)
 	assert_eq(_voices(container).size(), 2, "each drained row spawned one positional voice")
-	assert_eq(presenter.get_stats().sounds, 2)
+	assert_eq(presenter.get_fire_present_stats().sounds, 2)
+	presenter.teardown()
+
+
+func test_no_audio_skips_the_sound_legs_but_not_the_effect_legs() -> void:
+	# The dedicated-host tri-state: a presenter with no MissionAudio plays no
+	# fire or slot sound (nothing to play them on) while the fire drain's
+	# effect legs still run and count.
+	var presenter := _make_presenter(null)
+
+	presenter.present_fire_sounds([_fire_sound("AI_FIRE", Vector3(10, 0, 0), 77)])
+	presenter.present_slot_sounds([_slot_sound("FSP_DIRT_L", Vector3(1, 0, 0), 3, 17)])
+	presenter.present_fires([_event(Vector3(2, 0, 0), 22)])
+
+	var stats := presenter.get_fire_present_stats()
+	assert_eq(stats.sounds, 0, "no audio: the sound legs are skipped")
+	assert_eq(stats.fires, 1, "no audio: the effect legs still present the fire")
 	presenter.teardown()
 
 
@@ -130,7 +143,7 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	# native queue's contract, exercised by present() over the typed sim.)
 	var audio := MissionAudio.create(null, null)
 	autofree(audio)
-	var presenter := _make_pass(audio)
+	var presenter := _make_presenter(audio)
 	var local := _event(Vector3(1, 0, 0), 11)
 	local.is_local_player = true
 	var remote := _event(Vector3(2, 0, 0), 22)
@@ -138,7 +151,7 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	for _frame in range(128):
 		presenter.present_fires([local, remote])
 
-	assert_eq(presenter.get_stats().fires, 128,
+	assert_eq(presenter.get_fire_present_stats().fires, 128,
 			"only the decoded remote shot reaches the presentation legs")
 	assert_true(audio.recent_fired_soundsets().is_empty(),
 			"the effect drain plays no sound of its own")
@@ -153,9 +166,8 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 	autofree(audio)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var presenter := FirePresentPass.new()
-	presenter.setup(null, container, func(): return audio, Callable(),
-			func(): return Vector3(0, 5, 10))
+	var presenter := _make_presenter(audio, container)
+	presenter.set_listener_position(Vector3(0, 5, 10))
 
 	presenter.draw_tracer_rows(PackedFloat32Array([
 		1.0, 1.0, 4.0,  # style stdred, age 1, count 4
@@ -165,7 +177,10 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 		6.0, 1.0, 0.0, 1.0,
 	]))
 
-	var mesh: ImmediateMesh = presenter.ribbon_mesh()
+	var mesh: ImmediateMesh = presenter.fire_ribbon_mesh()
+	assert_not_null(mesh, "a container hosts the ribbon geometry")
+	if mesh == null:
+		return
 	assert_eq(mesh.get_surface_count(), 1, "one additive strip surface, no smoke surface")
 	if mesh.get_surface_count() == 1:
 		var arrays := mesh.surface_get_arrays(0)
@@ -174,7 +189,7 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 		var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
 		assert_almost_eq(cols[0].r, 0.0, 0.01, "oldest pair rides the base color (black)")
 		assert_gt(cols[4].r, 0.5, "newer pairs ride the red ramp")
-	assert_eq(presenter.get_stats().tracer_peak, 1)
+	assert_eq(presenter.get_fire_present_stats().tracer_peak, 1)
 	presenter.teardown()
 
 
@@ -185,9 +200,8 @@ func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 	autofree(audio)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var presenter := FirePresentPass.new()
-	presenter.setup(null, container, func(): return audio, Callable(),
-			func(): return Vector3(0, 5, 10))
+	var presenter := _make_presenter(audio, container)
+	presenter.set_listener_position(Vector3(0, 5, 10))
 
 	presenter.draw_tracer_rows(PackedFloat32Array([
 		3.0, 1.0, 3.0,
@@ -196,7 +210,10 @@ func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 		4.0, 1.0, 0.0, 0.98,
 	]))
 
-	var mesh: ImmediateMesh = presenter.ribbon_mesh()
+	var mesh: ImmediateMesh = presenter.fire_ribbon_mesh()
+	assert_not_null(mesh)
+	if mesh == null:
+		return
 	assert_eq(mesh.get_surface_count(), 1, "one smoke strip surface")
 	if mesh.get_surface_count() == 1:
 		var cols: PackedColorArray = mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
@@ -214,7 +231,7 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio := _staged_audio(container)
-	var presenter := _make_pass(audio)
+	var presenter := _make_presenter(audio)
 
 	presenter.present_slot_sounds([
 		_slot_sound("FSP_DIRT_L", Vector3(400, 0, 0), 3, 17),
@@ -234,7 +251,8 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 		assert_eq(fired[1].exclusive_key, "3:44")
 		assert_true(fired[1].played)
 	assert_eq(_voices(container).size(), 2, "each named slot row spawned one positional voice")
-	assert_eq(presenter.get_stats().sounds, 2, "the pass counts every slot row the bank played")
+	assert_eq(presenter.get_fire_present_stats().sounds, 2,
+			"the pass counts every slot row the bank played")
 	presenter.teardown()
 
 
@@ -242,7 +260,7 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio := _staged_audio(container)
-	var presenter := _make_pass(audio)
+	var presenter := _make_presenter(audio)
 	var idle := SoundEmitterRow.new()
 	idle.source_spawn_id = 77
 	idle.handle = 0x10001

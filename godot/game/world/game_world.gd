@@ -857,23 +857,14 @@ func get_runtime_perf_counters() -> Dictionary:
 	return _device_frame.get_runtime_perf_counters()
 
 
-# Listener position for the fire present pass — the same camera position the audio
-# render pass ticks with (INF until the first tick).
-var _last_tick_camera_pos := Vector3.INF
-
-
-func _fire_listener_position() -> Vector3:
-	return _last_tick_camera_pos
-
-
-# Fire-presentation counters (FirePresentPass.Stats, typed per ADR 0017;
+# Fire-presentation counters (FirePresentStats, typed per ADR 0017;
 # null until a mission runs).
-func get_fire_present_stats() -> RefCounted:
+func get_fire_present_stats() -> FirePresentStats:
 	return _runtime.get_fire_present_stats() if _runtime != null else null
 
 
-# Scar-presentation counters (ScarPresentPass.Stats, typed per ADR 0017).
-func get_scar_present_stats() -> RefCounted:
+# Scar-presentation counters (ScarPresentStats, typed per ADR 0017).
+func get_scar_present_stats() -> ScarPresentStats:
 	return _runtime.get_scar_present_stats() if _runtime != null else null
 
 
