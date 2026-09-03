@@ -192,7 +192,7 @@ wrong. Pinned by `mission_presentation_test.gd`
 Cleanup tail of §2a, no behavior change. `Simulation` carried a `TickMode` enum
 (`TICK_DIVIDED` / `TICK_EVERY_PROCESS`) selecting between `step()` and `advance_frame()` —
 but the two methods had **identical bodies** (same `loaded_` guard, same
-`host_pump`/`joiner_pump`/authoritative-tick branches), differing only in return type. The
+`HostRole`/`JoinerRole`/`LocalRole` ticks), differing only in return type. The
 enum therefore chose between two copies of one behavior, and its comment still deferred the
 62 Hz accumulator to "a future" that had already shipped in the presentation driver
 (§2a). Its stated reason for surviving — "API stability" — is the internal back-compat that

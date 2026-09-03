@@ -27,7 +27,7 @@
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (ex net/inmatch + net/npruntime: `session.*` owns lifecycle, role policy,
-    fixed-tick banking and input consumption over a `TickTarget`; the
+    fixed-tick banking and input consumption over a `Role`; the
     listen-host frame; the IDA-faithful server/client state machines and
     frame loops; the transports) and `runtime/replication` (ex net/netsim:
     the world<->wire seam, the client replica state and its folds). Godot

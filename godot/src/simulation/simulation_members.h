@@ -37,6 +37,11 @@ private:
 	// adapter holds a single typed tick sink so presentation consumes every
 	// catch-up tick before the next simulation tick.
 	opennova::inmatch::Session session_;
+	// The three engine roles (ADR 0043 d3), bound to the kernel at each load;
+	// configured_session_role picks the one the session runs its ticks through.
+	opennova::inmatch::LocalRole local_role_;
+	opennova::inmatch::HostRole host_role_;
+	opennova::inmatch::JoinerRole joiner_role_;
 	Callable session_tick_sink_;
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
@@ -48,16 +53,19 @@ private:
 	// inactive and no producer reads a clock.
 	Ref<FrameStats> frame_stats_;
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
-	opennova::inmatch::Role configured_session_role() const;
+	opennova::inmatch::Role &configured_session_role();
+	opennova::inmatch::Role &active_role();
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
-	bool advance_world_tick();
 	void restore_world_baseline();
-	opennova::inmatch::TickOutcome advance_mission_tick(
-			const opennova::inmatch::TickInput &p_input) override;
-	bool reset_mission_to_baseline(opennova::inmatch::SessionError &r_error) override;
-	void close_mission() override;
+	// The session's per-tick observer (inmatch::TickObserver): the HUD map death
+	// gate after every tick, then the Godot pipeline's tick sink.
+	void after_tick() override;
+	bool accept_tick(const opennova::inmatch::TickOutcome &p_tick) override;
+	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
+	// against (0 = headless / no drawable viewport, D-NET-206).
+	int32_t renderer_viewport_height() const;
 	// Wire-side collision initialization for decoded rows, sharing the exact
 	// typed engine result and by-graphic caches used by local entities.
 	std::unordered_map<uint16_t, opennova::world::ResolvedCollisionShape>
@@ -181,19 +189,23 @@ private:
 	PackedVector3Array present_effect_state_for_handle(uint16_t p_handle) const;
 
 	// --- co-op LAN host: a real UDP socket (UdpPump) over the npruntime runtime. enable_host_listen
-	// binds the socket (it implies the listen server); host_pump drives the owner loop, and
+	// binds the socket (it implies the listen server); the host role drives the owner loop, and
 	// dispatch_event/admit_peer admit joiners + stream the named dcb-bearing 0x0C. host_session_config_
 	// holds the GDScript-facing session options (the Dictionary getter + the §5.1 reactive-reply config
 	// consumed by create_session). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<UdpPump> pump_;
+	// The pump as the host role's opennova::IDatagramSocket (installed by
+	// enable_host_listen, so the SP/test host stays socketless: every datagram
+	// dropped, the role's socket legs inert).
+	std::unique_ptr<opennova::IDatagramSocket> host_socket_;
 	String capture_pcap_path_;
 	opennova::inmatch::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
 	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
 	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
-	// start_host_session's gating (engine: runtime/inmatch/listen_host.cpp).
+	// start_host_session's gating (engine: runtime/inmatch/host_role.cpp).
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell (which owns the resource
@@ -232,7 +244,7 @@ private:
 	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority inmatch::ClientRuntime (Joiner role, built in enable_join /
-	// the boot's role hook; runtime_ is in the P7 block below). joiner_pump drives the connect legs +
+	// the boot's role hook; runtime_ is in the P7 block below). The joiner role drives the connect legs +
 	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
 	// runs run_logic_tick(false), remotes render wire-direct. (engine: runtime/inmatch/joiner_connection.h)
 	bool joiner_ = false;
@@ -244,7 +256,7 @@ private:
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): frame sequence, latches
 	// (started/spawned/redeploy/tripwire), wire-header materializer, and per-replica resolver
 	// state live in engine/runtime/inmatch; this binding supplies the shell legs as PumpHooks.
-	opennova::inmatch::JoinerWorldBridge joiner_bridge_;
+	opennova::inmatch::JoinerWorldBridge &joiner_bridge_ = joiner_role_.bridge;
 	// The shell-asset leg of the bridge's materialize phase: rebuild the
 	// collision/occlusion/trait/seat caches for the changed streamed rows.
 	// The joiner's streamed pool-1..3 rows with a placed identity, as the
@@ -446,6 +458,7 @@ private:
 	// The dead-player map-mode clear, run once per advanced tick (witness at
 	// hud::HudMapControl::on_local_player_dead).
 	void tick_hud_map_death_gate();
+	void install_joiner_hooks();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/inmatch ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
@@ -458,18 +471,18 @@ private:
 	// the runtime.
 	// The SP/LAN listen session's net state (inmatch::ListenHostState): the
 	// loopback + the np host owner the ONE listen frame
-	// (inmatch::listen_host::frame) drives — ctx + per-peer transports +
+	// (inmatch::HostRole::run_tick) drives — ctx + per-peer transports +
 	// now_tick + serve_and_play, shared with host_session_pump
 	// (engine/runtime/inmatch). MUST be declared before the aliases and before
 	// runtime_ (the HostClient runtime references host_state_.host_loop). The
 	// HostClient/Joiner ClientRuntime stays a binding member (runtime_ below,
 	// ADR 0042 d3: no headless joiner consumer; the binding also folds the
 	// host's own view with its perf clocks), so state.client_runtime is unused.
-	opennova::inmatch::ListenHostState host_state_;
+	opennova::inmatch::ListenHostState &host_state_ = host_role_.state;
 	opennova::inmatch::HostOwner &host_owner_ = host_state_.host_owner;
 	opennova::inmatch::NapiNPServerCtx &ctx_ = host_state_.host_owner.ctx; // alias: host only (is_authority)
 	opennova::replication::LoopbackChannel &host_loop_ = host_state_.host_loop; // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
-	std::unique_ptr<opennova::inmatch::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
+	opennova::inmatch::ClientRuntime *runtime_ = nullptr; // the active role's HostClient (host/SP) OR Joiner runtime; the present-snapshot source
 	// Retail loads this process-scoped table from charattr.def before joining.
 	// Keep the byte image outside ClientRuntime so a direct mission load can
 	// reinstall it when a load rebuilds an as-yet-unstarted joiner.
@@ -512,17 +525,15 @@ private:
 	// world/mission. Mirrors apps/nw_server; the Godot-fed context installs (mission text,
 	// .til bytes, GameConfig from the UI host config) sit beside the shared core.
 	void bringup_host_runtime();
-	// The per-frame host owner loop: the ONE inmatch::listen_host::frame over the kernel
+	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
 	// binding supplying the viewport-height seam, the local ClientState fold + perf
 	// clocks, and the local reload relay.
-	void host_pump();
 	// The per-frame non-authority client loop, now the bridge's pump (S10a):
 	// this binding builds the PumpContext/PumpHooks and delegates. The
 	// pre-mission preload pump shares the bridge's hello latch + clock.
 	// Deposit received framed datagrams for this frame's recv pump.
 	void joiner_deposit_inbound();
-	void joiner_pump();
 	// Wire-side authored-shape resolution for one decoded runtime type id
 	// (items.def graphic -> the shared by-graphic collision model cache).
 	opennova::world::ResolvedCollisionShape wire_collision_shape_for_type(

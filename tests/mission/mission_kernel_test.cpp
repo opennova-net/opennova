@@ -3,9 +3,10 @@
 // open_document + boot run the S9 order end to end (entities promoted, the
 // layered WAC compiled and installed, the local player spawned at the origin
 // when no start marker exists, the post-PreMission baseline captured), a
-// tick_no_net advances the logic clock, the teleport/health seams round-trip
+// the local role's tick advances the logic clock, the teleport/health seams round-trip
 // through both stores, and the CanFire verdict answers over the spawned
 // player. The retail-path legs stay in tests/common/retail_mission_files.
+#include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <cmath>
@@ -69,6 +70,14 @@ bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= 
 
 } // namespace
 
+// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
+// kernel itself owns no tick).
+static void tick_no_net(opennova::mission::MissionKernel &kernel) {
+	opennova::inmatch::LocalRole role;
+	role.bind(kernel);
+	role.run_tick(opennova::inmatch::TickInput{});
+}
+
 int main() {
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
@@ -111,9 +120,9 @@ int main() {
 
 	// One no-net tick advances the authoritative logic clock.
 	const uint32_t tick0 = kernel.world.logic_tick;
-	kernel.tick_no_net();
+	tick_no_net(kernel);
 	CHECK(kernel.world.logic_tick == tick0 + 1);
-	kernel.tick_no_net();
+	tick_no_net(kernel);
 	CHECK(kernel.world.logic_tick == tick0 + 2);
 
 	// The camera shake: the counter decays ONCE per tick in the pre-tick pass
@@ -121,7 +130,7 @@ int main() {
 	// again from the same PRNG word — two frames between ticks differ
 	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d].
 	kernel.local.view.shake.counter = 10;
-	kernel.tick_no_net();
+	tick_no_net(kernel);
 	CHECK(kernel.local.view.shake.counter == 8);
 	{
 		const w::LocalPlayerViewFrame frame_a = kernel.local.view_frame();
@@ -131,7 +140,7 @@ int main() {
 		      frame_a.camera.pitch_deg != frame_b.camera.pitch_deg ||
 		      frame_a.camera.roll_deg != frame_b.camera.roll_deg);
 	}
-	kernel.tick_no_net();
+	tick_no_net(kernel);
 	CHECK(kernel.local.view.shake.counter == 6);
 	kernel.local.view.shake.counter = 0;
 
@@ -168,7 +177,7 @@ int main() {
 	// inf.aimed_shot_available.
 	CHECK(!kernel.local.weapon.active);
 	CHECK(!kernel.local.local_player_can_fire(kernel.local.player_ai()));
-	kernel.tick_no_net();
+	tick_no_net(kernel);
 	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(!body->inf.aimed_shot_available);
 
 	// The baseline restores the post-PreMission world.

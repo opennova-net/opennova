@@ -76,7 +76,7 @@ the campaign is finished when both hold only documented seam contracts.
 closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
 CLOSED), and its campaign LANDED (PR #587): the mission kernel
 (`engine/runtime/mission/mission_kernel`) + listen-host frame
-(`engine/runtime/inmatch/listen_host`) promoted from the retail-mission rig with
+(`engine/runtime/inmatch/host_role`, ex `listen_host`) promoted from the retail-mission rig with
 `Simulation`, `nw_server` and the ctests as the three embedders, the
 `world::inspect` typed records + the typed debug-control table behind MCP and
 F3, and the F3 Entities window as the records-in/requests-out template. The

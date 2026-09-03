@@ -1,5 +1,4 @@
 #include "common/retail_mission_files.h"
-#include "common/null_datagram_socket.h"
 
 #include <base/io/log.h>
 #include <base/gameprofile/game_type.h>
@@ -12,6 +11,9 @@
 namespace opennova::testrig {
 
 RetailMissionRig::RetailMissionRig() {
+	local_role.bind(*this);
+	host_role.bind(*this);
+	host_role.set_kind(inmatch::RoleKind::ListenHost);
 	// The kernel logs its boot/tick diagnostics through io/log.h and stays
 	// silent unless the embedder installs a sink; the ctest binaries want the
 	// warnings on stdout, exactly as the pre-promotion rig printed them.
@@ -42,42 +44,18 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 	kernel_options.infantry_adm = options.infantry_adm;
 	kernel_options.game_type = game_type::for_mission_attribs(mission.header.attrib_flags);
 	if (listen_server)
-		kernel_options.bringup_net_session = [this] { inmatch::listen_host::bringup(*this, host); };
+		kernel_options.bringup_net_session = [this] { host_role.bring_up_singleplayer(); };
 	return mission::MissionKernel::boot(kernel_options, error);
 }
 
 void RetailMissionRig::tick() {
-	if (listen_server) {
-		NullDatagramSocket sock;
-		inmatch::listen_host::frame(*this, host, sock, /*viewport_height=*/0);
-		return;
-	}
-	tick_no_net();
+	role().run_tick(inmatch::TickInput{});
 }
 
 void RetailMissionRig::tick(int count) {
 	for (int i = 0; i < count; ++i) tick();
 }
 
-// --- inmatch::TickTarget ----------------------------------------------------
 
-inmatch::TickOutcome RetailMissionRig::advance_mission_tick(const inmatch::TickInput &in) {
-	local.input = in.player.movement;
-	if (in.player.look_delta_x != 0.0f || in.player.look_delta_y != 0.0f)
-		local.look(in.player.look_delta_x, in.player.look_delta_y);
-	tick();
-	inmatch::TickOutcome out;
-	out.status = inmatch::TickStatus::Ran;
-	out.logic_tick = static_cast<int32_t>(world.logic_tick);
-	return out;
-}
-
-bool RetailMissionRig::reset_mission_to_baseline(inmatch::SessionError &error) {
-	if (restore_baseline()) return true;
-	error = {inmatch::SessionErrorCode::LoadFailed, "no baseline"};
-	return false;
-}
-
-void RetailMissionRig::close_mission() {}
 
 } // namespace opennova::testrig

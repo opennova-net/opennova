@@ -20,14 +20,14 @@ class MissionFrameInput : public RefCounted {
 
 public:
 	enum HeldAction {
-		HELD_FIRE = 1 << 0,
+		HELD_FIRE = opennova::inmatch::HELD_FIRE,
 	};
 	enum PressedAction {
-		PRESSED_FIRE = 1 << 0,
-		PRESSED_RELOAD = 1 << 1,
+		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
+		PRESSED_RELOAD = opennova::inmatch::PRESSED_RELOAD,
 		// The dead player's medic call edge (the MedicReq action row; retail
 		// Input_HandleActionBinding case 217 @0x49b4b4).
-		PRESSED_MEDIC_REQUEST = 1 << 2,
+		PRESSED_MEDIC_REQUEST = opennova::inmatch::PRESSED_MEDIC_REQUEST,
 	};
 
 private:

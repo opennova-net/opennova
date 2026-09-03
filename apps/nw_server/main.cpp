@@ -2,7 +2,7 @@
 // mission kernel (ADR 0042 d3). It mounts the resource root, boots the loose
 // mission through mission::MissionKernel (terrain, item/weapon/ammo tables,
 // collision, infantry .adm — the same boot every embedder drives), stands the
-// npruntime runtime up as a HostOnly session through inmatch::listen_host,
+// npruntime runtime up as a HostOnly session through inmatch::HostRole,
 // opens a real UDP socket, and asks inmatch::Session to drive the listen frame
 // at the original fixed cadence so retail-wire-compatible clients (opennova
 // or, as a follow-up, stock retail) can join -> spawn -> play. All protocol,
@@ -23,7 +23,7 @@
 #include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
 #include <formats/trn/trn.h>
 #include <formats/trn/trn_io.h>
-#include <runtime/inmatch/listen_host.h>
+#include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -224,39 +224,6 @@ bool load_terrain(opennova::mission::MissionKernel &kernel,
 			kernel.mission.get_terrain(), error, &til_bytes);
 }
 
-// The dedicated host's one adapter to inmatch::Session: the portable session
-// decides when a fixed tick is due; the tick itself is the ONE listen-host
-// frame over the kernel. viewport_height 0 is the headless seam — npruntime
-// then suppresses S2C 0x68 instead of inventing a screen size (D-NET-206).
-class DedicatedTickTarget final : public opennova::inmatch::TickTarget {
-public:
-	DedicatedTickTarget(opennova::mission::MissionKernel &kernel,
-			opennova::inmatch::ListenHostState &host,
-			opennova::IDatagramSocket &socket)
-			: kernel_(kernel), host_(host), socket_(socket) {}
-
-	opennova::inmatch::TickOutcome advance_mission_tick(
-			const opennova::inmatch::TickInput &) override {
-		opennova::inmatch::listen_host::frame(kernel_, host_, socket_,
-				/*viewport_height=*/0);
-		return {opennova::inmatch::TickStatus::Ran,
-				static_cast<int32_t>(kernel_.world.logic_tick), {}};
-	}
-
-	bool reset_mission_to_baseline(opennova::inmatch::SessionError &error) override {
-		error = {opennova::inmatch::SessionErrorCode::NetworkRoleLocked,
-				"dedicated hosts cannot reset a live mission"};
-		return false;
-	}
-
-	void close_mission() override {}
-
-private:
-	opennova::mission::MissionKernel &kernel_;
-	opennova::inmatch::ListenHostState &host_;
-	opennova::IDatagramSocket &socket_;
-};
-
 } // namespace
 
 int main(int argc, char **argv) {
@@ -454,13 +421,18 @@ int main(int argc, char **argv) {
 	//     fatal here — running a partial script is a known wire-parity
 	//     failure), and the HostOnly session bring-up at the witnessed spot
 	//     inside the load. A refused boot aborts before the UDP socket opens. ---
-	inmatch::ListenHostState host;
+	// The host role (ADR 0043 d3): the listen state, the bring-up, and the ONE
+	// dedicated frame every fixed tick; `host` aliases its state for the ctx feeds.
+	inmatch::HostRole role;
+	role.bind(kernel);
+	role.set_kind(inmatch::RoleKind::DedicatedHost);
+	inmatch::ListenHostState &host = role.state;
 	mission::KernelBootOptions boot_options;
 	boot_options.playable = false; // no synthetic loopback player; every roster row is a remote peer
 	boot_options.wac_strict_diagnostics = true;
 	boot_options.game_type = host_cfg.config.game_type;
 	boot_options.bringup_net_session = [&] {
-		inmatch::listen_host::bringup_dedicated(kernel, host, host_cfg);
+		role.bring_up_dedicated(host_cfg);
 	};
 	std::string boot_error;
 	if (!kernel.boot(boot_options, boot_error)) {
@@ -516,8 +488,8 @@ int main(int argc, char **argv) {
 	constexpr int64_t kPeriodNs =
 			static_cast<int64_t>(1000000000.0 * opennova::world::TickAccumulator::kTickDt);
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
-	DedicatedTickTarget target(kernel, host, dgram);
-	inmatch::Session session(target, inmatch::Role::DedicatedHost);
+	role.set_socket(&dgram);
+	inmatch::Session session(role);
 	if (!session.begin_load().applied() || !session.complete_load().applied()) {
 		std::fprintf(stderr, "nw-server: failed to start mission session\n");
 		net::shutdown();

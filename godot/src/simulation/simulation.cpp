@@ -85,7 +85,9 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
-Simulation::Simulation() : session_(*this) {
+Simulation::Simulation() {
+	session_.set_tick_observer(this);
+	install_joiner_hooks();
 	reset_world();
 	set_process(false);
 }
@@ -126,6 +128,9 @@ void Simulation::reset_world() {
 		kept_look_settings = kernel_->local.look_settings;
 	}
 	kernel_ = std::make_unique<opennova::mission::MissionKernel>();
+	local_role_.bind(*kernel_);
+	host_role_.bind(*kernel_);
+	joiner_role_.bind(*kernel_);
 	kernel_->seat_specs = std::move(kept_seat_specs);
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
 	kernel_->local.look_settings = kept_look_settings;
@@ -557,10 +562,8 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// discard the witnessed pre-load session. Direct-loaded callers have
 			// not started yet and retain the historical fresh-runtime reset.
 			if (!joiner_bridge_.started() || !runtime_) {
-				runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(joiner_player_name_);
-				runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-				runtime_->set_join_request(
-						join_role_, join_spectator_password_);
+				runtime_ = &joiner_role_.create_runtime(joiner_player_name_, join_role_,
+						join_spectator_password_);
 				joiner_bridge_.reset_for_runtime_rebuild();
 				install_charattr_challenge_table();
 				install_character_join_vars();
@@ -788,61 +791,16 @@ void Simulation::build_demo_mission() {
 	complete_session_load();
 }
 
-bool Simulation::advance_world_tick() {
-	if (!world_installed_) return false;
-	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates
-	// to every 62nd tick and the BMS evaluator quarter-passes every 16th,
-	// inside their systems — exactly where the original keeps those dividers.
-	// A render frame runs 0..N of these; the accumulator that decides N lives
-	// in inmatch::Session [orig: Game_MainLoop @ 0x52b630].
-	const uint64_t sim_start =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-	if (listen_server_) {
-		// The listen frame [orig: Game_ProcessMainFrame @0x5263f0] is the ONE
-		// inmatch::listen_host::frame over the kernel; host_pump wraps it with
-		// the Godot device legs (viewport seam, socket adapter, fold clocks).
-		host_pump();
-		if (runtime_profiling_enabled_)
-			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-		return true;
-	}
-	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
-		// The pump's phases, its wire leg and the local world tick's own
-		// breakdown all land on the kernel's profile (the same SIM_* rows the
-		// host/no-net ticks fill), once per tick.
-		joiner_pump();
-		if (runtime_profiling_enabled_)
-			kernel_->profile.add(opennova::devtools::Slot::SIM_NET,
-					static_cast<int64_t>(last_net_tick_us_));
-		const uint64_t adm_start =
-				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-		kernel_->resolve_new_infantry_adm_ids();
-		if (runtime_profiling_enabled_) {
-			kernel_->profile.add(opennova::devtools::Slot::SIM_ADM_RESOLVE,
-					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start));
-			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-		}
-		return true;
-	}
-	// No-net editor/unit path: the kernel's bare authoritative tick (pre-tick
-	// input apply, ONE run_logic_tick, the local view/weapon pumps, the
-	// new-soldier .adm ground), plus the binding's medic-cooldown leg. The
-	// view arbiter's session inputs refresh first (the local-dead bit lives
-	// on the world even without a session).
-	kernel_->local.view_session_inputs = local_view_session_inputs();
-	kernel_->tick_no_net(); // its world phases land on the kernel's profile
-	kernel_->local.tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
-	if (runtime_profiling_enabled_)
-		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-	return true;
-}
-
+// The Godot legs after the role's baseline restore (reset_session): the
+// engine half — the local weapon's epoch resets (the borrowed-UseGun
+// reinstall event), the world + WAC runtime rewind, the view reset, the
+// fresh-soldier .adm re-ground and the shell's item-trait re-stamp — is the
+// kernel's restore; the host role rebuilt its HostClient view from the
+// restored pools and re-armed the minimap scan; the joiner role re-armed its
+// rematerialization fold.
 void Simulation::restore_world_baseline() {
 	if (!world_installed_) return;
-	// The engine half — the local weapon's epoch resets (the borrowed-UseGun
-	// reinstall event), the world + WAC runtime rewind, the view reset, and
-	// the fresh-soldier .adm re-ground — is the kernel's restore.
-	if (!kernel_->restore_baseline()) return;
+	runtime_ = active_role().client_runtime();
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
 	minimap_snapshot_valid_ = false;
@@ -851,42 +809,7 @@ void Simulation::restore_world_baseline() {
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		joiner_bridge_.reset_materialization();
 		deploy_zone_registry_built_ = false;
-	}
-	// The baseline is captured during the kernel's finish_load, before the
-	// shell supplies items.def traits. Restore those authoritative callback/
-	// health traits first; the encoder and the client classifier must agree on
-	// every 0x0A record width.
-	if (item_traits_db_.is_valid()) resolve_item_traits(item_traits_db_);
-	if (listen_server_ && !joiner_ && runtime_) {
-		// Stop restores the authoritative registry, including NoNetworkCallback
-		// attachment children, but those children never have a live 0x0A body that
-		// could recreate a row erased from the host's decoded ClientState. Start a
-		// fresh HostClient view and replay the same production load batches, in the
-		// witnessed stream order, so restored runtime identities materialize now
-		// instead of inheriting a prior play epoch's rows and handle caches.
-		host_loop_.clear();
-		runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(host_loop_);
-		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-		install_item_class_resolver();
-		opennova::replication::ClientReplicaPipeline &view = runtime_->view();
-		view.apply(0x10, opennova::encode_static_entity_batch(
-				opennova::replication::build_pool2_static_batch(kernel_->world)));
-		view.apply(0x0D, opennova::encode_pool_spawn_batch(
-				opennova::replication::build_pool1_spawn_batch(kernel_->world)));
-		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				opennova::replication::build_pool0_organic_batch(
-						kernel_->world, kernel_->world.cached.local_player)));
-		view.apply(0x20, opennova::encode_pool3_sync_batch(
-				opennova::replication::build_pool3_marker_batch(kernel_->world)));
-		// The restart resets every client view to EMPTY retained map banks,
-		// but each connection's minimap initial scan is a one-shot latch the
-		// first epoch already consumed. Re-arm it so the producer re-sends
-		// the persistent pool-2 building/zone markers to every in-match
-		// connection (the loopback view above and remote joiners alike);
-		// SpawnPoint rows and the pool-1 phase walk re-cover the rest.
-		opennova::inmatch::Server_RearmMinimapInitialScan(ctx_);
 	}
 	if (collision_item_db_.is_valid())
 		resolve_collision_instances(collision_item_db_);

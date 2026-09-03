@@ -115,7 +115,9 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/devtools/rays_snapshot.h>
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
-#include <runtime/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
+#include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
+#include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
+#include <runtime/inmatch/local_role.h>               // LocalRole: the bare no-net tick
 #include <runtime/inmatch/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
 #include <runtime/replication/item_replication_catalog.h> // canonical items.def replication traits
 #include <runtime/replication/client_world_materializer.h> // header-only joiner pools 1..3
@@ -168,7 +170,7 @@ class ResourceRoot;
 // each tick. Runtime transport and fixture teardown share the
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
-                       private opennova::inmatch::TickTarget {
+                       private opennova::inmatch::TickObserver {
 	GDCLASS(Simulation, Node3D)
 
 public:
@@ -355,12 +357,12 @@ public:
 	// session_state() reports inmatch::State in the same values
 	// MissionFrameOutcome.STATE_* carries.
 	enum SessionRole {
-		ROLE_SINGLE_PLAYER = static_cast<int>(opennova::inmatch::Role::SinglePlayer),
-		ROLE_LISTEN_HOST = static_cast<int>(opennova::inmatch::Role::ListenHost),
-		ROLE_JOINER = static_cast<int>(opennova::inmatch::Role::Joiner),
-		ROLE_DEDICATED_HOST = static_cast<int>(opennova::inmatch::Role::DedicatedHost),
+		ROLE_SINGLE_PLAYER = static_cast<int>(opennova::inmatch::RoleKind::SinglePlayer),
+		ROLE_LISTEN_HOST = static_cast<int>(opennova::inmatch::RoleKind::ListenHost),
+		ROLE_JOINER = static_cast<int>(opennova::inmatch::RoleKind::Joiner),
+		ROLE_DEDICATED_HOST = static_cast<int>(opennova::inmatch::RoleKind::DedicatedHost),
 	};
-	int session_role() const { return static_cast<int>(session_.role()); }
+	int session_role() const { return static_cast<int>(session_.kind()); }
 	int session_state() const { return static_cast<int>(session_.state()); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
@@ -438,7 +440,6 @@ public:
 	// Ship the 0x46 ClientGoodBye burst now (idempotent; joiner-only no-op otherwise). The
 	// destructor calls this too, so explicit calls are only needed when the socket must close
 	// before the sim is freed.
-	void leave_net_session();
 	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed
 	// (S2C 0x7B identifies the mission earlier), then resume the same connection

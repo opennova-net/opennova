@@ -195,6 +195,9 @@ public:
 		// tick_weather: sim legs, thunder/shake events, the render owner's
 		// color legs) [orig: Game_ProcessMainFrame @ 0x526774].
 		std::function<void()> tick_weather;
+		// After the pump: the shell's same-frame follow-up (the charattr words
+		// an S2C 0x41 applied inside the pump changed). Optional.
+		std::function<void()> after_pump;
 	};
 
 	// The joiner's per-frame pump. Retail dispatches received messages before

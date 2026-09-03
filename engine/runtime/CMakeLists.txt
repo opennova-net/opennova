@@ -244,7 +244,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_world_bridge.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/listen_host.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp

@@ -78,9 +78,9 @@ session. There is no callback lattice and no second legacy frame sequence.
 - reset, close, terminal error propagation, and frame timing;
 - typed `FrameInput`, `TickInput`, `TickOutcome`, and `FrameOutcome` values.
 
-Its one internal seam is `inmatch::TickTarget`. Both targets — the Godot
+Its one internal seam is the `inmatch::Role` the session binds (ADR 0043 d3: `LocalRole`, `HostRole`, `JoinerRole`). Both embedders — the Godot
 `Simulation` binding and `apps/nw_server`'s dedicated host — embed the engine's
-`mission::MissionKernel` and drive `inmatch::listen_host::frame` (ADR 0042 d3,
+`mission::MissionKernel` and run `inmatch::HostRole::run_tick` (ADR 0042 d3,
 PR #587), so boot, state and the no-net tick have one implementation and the
 session interface provably does not depend on Godot. The target adds only
 resource resolution, Godot value conversion and the device pipeline; none of
@@ -92,7 +92,7 @@ null-slot rejection inside `toggle_mount`), the medic-call cooldown
 (`local_player_dead`; a joiner reads its replica through
 `inmatch::ClientRuntime::local_player_dead`), the water plane the occupant clamp
 reads (`sync_water_plane` from `World::env.water_z`), and the per-tick
-environment advance, which runs inside `listen_host::frame` and `tick_no_net`
+environment advance, which runs inside `HostRole::run_tick` and `LocalRole::run_tick`
 rather than in each embedder. The headless embedders load their terrain
 through the engine's one `terrain::terrain_field_store_load`.
 

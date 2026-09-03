@@ -138,6 +138,12 @@ void MissionKernel::set_asset_index(const ResourceIndex *asset_index_ptr) {
 	collision_pose.set_resource_index(asset_index());
 }
 
+void MissionKernel::resolve_item_traits(simassets::ItemWireClassFn wire_class) {
+	item_wire_class_ = std::move(wire_class);
+	if (items_table() != nullptr)
+		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+}
+
 void MissionKernel::set_items_table(const DefItemsFile *items_table_ptr) {
 	items_override_ = items_table_ptr;
 }
@@ -200,7 +206,7 @@ void MissionKernel::finish_load() {
 	world.tables.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
 	// The net half stands its session up here — between the world wiring and
 	// the system registration, exactly where the SP listen host's bring-up
-	// sits inside the load (inmatch::listen_host::bringup)
+	// sits inside the load (inmatch::HostRole::bring_up_singleplayer)
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
 	// The mission systems register in the faithful within-tick order, then
@@ -494,16 +500,6 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 
 // --- the tick ---------------------------------------------------------------
 
-void MissionKernel::tick_no_net() {
-	local.apply_player_input_pre_tick();
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
-	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
-	// @ 0x52674b -> @ 0x526774].
-	tick_weather();
-	local.run_local_player_post_tick();
-	resolve_new_infantry_adm_ids();
-}
-
 void MissionKernel::tick_weather() {
 	w::WeatherTickEvents events;
 	world.weather.tick_sim(&world, events);
@@ -630,6 +626,12 @@ bool MissionKernel::restore_baseline() {
 	// The FP channel position is a gated advance count, not a clock delta, so
 	// the restored world keeps the held clip pose with no epoch re-stamp.
 	w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
+	// The baseline predates the embedder's items.def traits. Re-stamp those
+	// authoritative callback/health traits now, before any client view is
+	// rebuilt from the restored rows: the encoder and the client classifier
+	// must agree on every 0x0A record width.
+	if (item_wire_class_ && items_table() != nullptr)
+		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
 	return true;
 }
 

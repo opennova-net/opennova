@@ -85,9 +85,12 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
 3. **One session with roles.** `inmatch::Session` (banking, state machine,
    input retention unchanged) owns a `Role` strategy —
    `LocalRole`, `HostRole` (listen and dedicated), `JoinerRole` — and the one
-   non-virtual `run_one_tick` whose six ordered hooks are each role's current
-   leg order line for line. `TickTarget`, `listen_host::frame`,
-   `MissionKernel::tick_no_net` and `JoinerWorldBridge::PumpHooks` die. The
+   non-virtual `run_one_tick`: the shared input prologue through the role (the
+   spectator gate and the medic send are the role's facts), then the role's
+   `run_tick`, each role's current leg order line for line, then the shell's
+   `TickObserver`. `TickTarget`, `listen_host::frame`,
+   `MissionKernel::tick_no_net` and `JoinerWorldBridge::PumpHooks` die (E8a
+   lands the roles and the frames; the hook split is E8b). The
    hook-split rule: a leg the sim reads before the frame ends is engine-side
    and synchronous; a leg that only mutates Godot nodes is a typed event on
    `TickOutcome` the shell drains. Only the three loadout profile seams stay

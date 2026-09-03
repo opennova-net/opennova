@@ -1,5 +1,8 @@
 #include <runtime/inmatch/session.h>
+
 #include <base/io/perf_clock.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/mission/mission_kernel.h>
 
 #include <utility>
 
@@ -17,8 +20,64 @@ SessionError invalid_transition(const char *message) {
 
 } // namespace
 
-Session::Session(TickTarget &target, Role role)
-		: target_(target), role_(role) {}
+Session::Session(Role &role) : role_(&role), kind_(role.kind()) {}
+
+void Role::apply_input(const TickInput &input) {
+	mission::MissionKernel &kernel = *kernel_;
+	const bool spectating = spectator();
+	const world::PlayerInput no_movement{};
+	const world::PlayerInput &movement = spectating ? no_movement : input.player.movement;
+	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
+			movement.right, movement.lean_left, movement.lean_right, movement.jump);
+	if (!spectating && (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f))
+		kernel.local.look(input.player.look_delta_x, input.player.look_delta_y);
+	kernel.local.set_weapon_input(
+			!spectating && (input.player.held_action_bits & HELD_FIRE) != 0,
+			!spectating && (input.player.pressed_action_bits & PRESSED_FIRE) != 0,
+			!spectating && (input.player.pressed_action_bits & PRESSED_RELOAD) != 0);
+	// The medic-call edge is an action binding, not weapon state: it fires its
+	// request immediately like retail's binding dispatch (the gates and the
+	// cooldown live in request_medic).
+	if (!spectating && (input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
+		request_medic();
+}
+
+bool Role::request_medic() {
+	mission::MissionKernel &kernel = *kernel_;
+	// The session/entity gates: a replica runtime and a local entity; the
+	// dead-bit and cooldown gates are the local player's.
+	if (client_runtime() == nullptr || !kernel.world.cached.local_player.valid()) return false;
+	const bool local_dead = kind() == RoleKind::Joiner
+			? client_runtime()->local_player_dead() : kernel.local.local_player_dead();
+	if (!kernel.local.medic_request_allowed(local_dead)) return false;
+	if (!send_medic_request()) return false;
+	kernel.local.stamp_medic_request();
+	return true;
+}
+
+world::LocalViewSessionInputs Role::view_session_inputs_for(
+		const ClientRuntime *runtime, bool joiner, bool local_dead) {
+	// What the arbiter reads from the session: the net layer sits above the
+	// world group, so its client state crosses as plain values.
+	world::LocalViewSessionInputs s;
+	s.in_session = runtime != nullptr;
+	s.joiner = joiner;
+	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
+	// role's view folds (the listen host's own loopback included)
+	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
+	s.death_screen_active = runtime != nullptr && runtime->state().death_screen_active;
+	s.death_screen_submode = runtime != nullptr ? runtime->state().death_screen_submode : 0;
+	s.end_round_known = runtime != nullptr && runtime->state().end_round.known;
+	s.local_dead = local_dead;
+	s.death_camera_target_known = runtime != nullptr;
+	if (runtime != nullptr) {
+		const replication::ClientDeathCameraTarget &t = runtime->state().death_camera;
+		s.death_camera_target[0] = t.x;
+		s.death_camera_target[1] = t.y;
+		s.death_camera_target[2] = t.z;
+	}
+	return s;
+}
 
 int64_t Session::now_us() {
 	return static_cast<int64_t>(io::perf_now_us());
@@ -47,19 +106,20 @@ TransitionResult Session::rejected(
 	return out;
 }
 
-TransitionResult Session::configure_role(Role role) {
+TransitionResult Session::configure_role(Role &role) {
 	if (state_ != State::Unloaded &&
 			state_ != State::Failed) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("role can change only while unloaded or failed"));
 	}
-	if (role_ == role) return rejected(TransitionCode::NoOp);
-	role_ = role;
+	if (role_ == &role && kind_ == role.kind()) return rejected(TransitionCode::NoOp);
+	role_ = &role;
+	kind_ = role.kind();
 	return {TransitionCode::Applied, state_, state_, {}};
 }
 
 TransitionResult Session::begin_connect() {
-	if (role_ != Role::Joiner) {
+	if (kind_ != RoleKind::Joiner) {
 		return rejected(TransitionCode::InvalidState,
 				invalid_transition("only a joiner can enter Connecting"));
 	}
@@ -115,9 +175,10 @@ void Session::latch_input(const FrameInput &input) {
 }
 
 TickInput Session::merged_tick_input(
-		const FrameInput &, bool consume_one_shots) {
+		const FrameInput &input, bool consume_one_shots) {
 	TickInput out;
 	out.camera = latest_camera_;
+	out.viewport_height = input.viewport_height;
 	out.player = pending_input_;
 	out.consume_one_shots = consume_one_shots;
 	if (!consume_one_shots) {
@@ -141,8 +202,7 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	const int64_t tick_start = now_us();
 	bool consume_one_shots = true;
 	for (int32_t i = 0; i < due; ++i) {
-		TickOutcome tick = target_.advance_mission_tick(
-				merged_tick_input(input, consume_one_shots));
+		TickOutcome tick = run_one_tick(merged_tick_input(input, consume_one_shots));
 		if (tick.terminal()) {
 			out.status = tick.status == TickStatus::SessionLost
 					? FrameStatus::SessionLost : FrameStatus::Fatal;
@@ -161,6 +221,36 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	}
 	out.perf.tick_us = now_us() - tick_start;
 	out.perf.ticks = out.ticks_run();
+	return out;
+}
+
+// One fixed tick: the shared input prologue through the role, the role's
+// tick, then the outcome and the shell's observer.
+TickOutcome Session::run_one_tick(const TickInput &input) {
+	TickOutcome out;
+	if (role_ == nullptr || role_->kernel() == nullptr) {
+		out.status = TickStatus::Fatal;
+		out.error = {SessionErrorCode::TickFailed, "no role is bound to the session"};
+		return out;
+	}
+	role_->apply_input(input);
+	const int64_t tick_start = now_us();
+	role_->run_tick(input);
+	out.tick_us = now_us() - tick_start;
+	out.net_us = role_->last_net_us();
+	out.logic_tick = static_cast<int32_t>(role_->kernel()->world.logic_tick);
+	if (observer_ != nullptr) observer_->after_tick();
+	SessionError lost;
+	if (role_->session_lost(lost)) {
+		out.status = TickStatus::SessionLost;
+		out.error = lost;
+		return out;
+	}
+	out.status = TickStatus::Ran;
+	if (observer_ != nullptr && !observer_->accept_tick(out)) {
+		out.status = TickStatus::SessionLost;
+		out.error = {SessionErrorCode::SessionLost, "the tick observer cancelled the batch"};
+	}
 	return out;
 }
 
@@ -186,7 +276,7 @@ FrameOutcome Session::step_once(const FrameInput &input) {
 	FrameOutcome out;
 	out.state = state_;
 	if (state_ != State::Paused ||
-			role_ != Role::SinglePlayer) {
+			kind_ != RoleKind::SinglePlayer) {
 		out.status = FrameStatus::NotRunning;
 		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
@@ -204,7 +294,7 @@ FrameOutcome Session::drive_one(const FrameInput &input) {
 	FrameOutcome out;
 	out.state = state_;
 	const bool local_paused = state_ == State::Paused &&
-			role_ == Role::SinglePlayer;
+			kind_ == RoleKind::SinglePlayer;
 	if (state_ != State::Running && !local_paused) {
 		out.status = FrameStatus::NotRunning;
 		out.perf.frame_us = now_us() - frame_start;
@@ -219,7 +309,7 @@ FrameOutcome Session::drive_one(const FrameInput &input) {
 }
 
 TransitionResult Session::pause() {
-	if (role_ != Role::SinglePlayer) {
+	if (kind_ != RoleKind::SinglePlayer) {
 		return rejected(TransitionCode::RejectedForNetworkRole,
 				{SessionErrorCode::NetworkRoleLocked,
 						"network sessions cannot pause"});
@@ -246,7 +336,7 @@ TransitionResult Session::resume() {
 }
 
 TransitionResult Session::reset_to_baseline() {
-	if (role_ != Role::SinglePlayer) {
+	if (kind_ != RoleKind::SinglePlayer) {
 		return rejected(TransitionCode::RejectedForNetworkRole,
 				{SessionErrorCode::NetworkRoleLocked,
 						"network sessions cannot reset"});
@@ -258,7 +348,7 @@ TransitionResult Session::reset_to_baseline() {
 	}
 	const State from = state_;
 	SessionError error;
-	if (!target_.reset_mission_to_baseline(error)) {
+	if (role_ == nullptr || !role_->reset_to_baseline(error)) {
 		if (!error) error = {SessionErrorCode::TickFailed,
 				"mission baseline reset failed"};
 		return fail(error);
@@ -274,7 +364,7 @@ TransitionResult Session::close() {
 		return rejected(TransitionCode::NoOp);
 	const State from = state_;
 	state_ = State::Stopping;
-	target_.close_mission();
+	if (role_ != nullptr) role_->close();
 	reset_bank();
 	last_error_ = {};
 	state_ = State::Unloaded;

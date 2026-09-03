@@ -112,7 +112,7 @@ int main() {
 		expect(rig.local.weapon.active, "the by-name install left an active weapon FSM");
 		expect(!rig.install_weapon("WPN_NOT_A_WEAPON"), "an unknown weapon name does not install");
 
-		inmatch::Session session(rig);
+		inmatch::Session session(rig.role());
 		if (!expect(session.begin_load().applied() && session.complete_load().applied(), "the session loads")) return 1;
 		inmatch::FrameInput frame;
 		frame.delta_seconds = 0.032;

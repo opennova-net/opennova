@@ -93,23 +93,7 @@ bool Simulation::local_death_screen_active() const {
 }
 
 opennova::world::LocalViewSessionInputs Simulation::local_view_session_inputs() const {
-	// What the arbiter reads from the session: the net layer sits above the
-	// world group, so its client state crosses as plain values.
-	opennova::world::LocalViewSessionInputs s;
-	s.in_session = runtime_ != nullptr;
-	s.joiner = joiner_;
-	s.death_screen_active = local_death_screen_active();
-	s.death_screen_submode = runtime_ != nullptr ? runtime_->state().death_screen_submode : 0;
-	s.end_round_known = runtime_ != nullptr && runtime_->state().end_round.known;
-	s.local_dead = local_player_dead();
-	s.death_camera_target_known = runtime_ != nullptr;
-	if (runtime_ != nullptr) {
-		const opennova::replication::ClientDeathCameraTarget &t = runtime_->state().death_camera;
-		s.death_camera_target[0] = t.x;
-		s.death_camera_target[1] = t.y;
-		s.death_camera_target[2] = t.z;
-	}
-	return s;
+	return opennova::inmatch::Role::view_session_inputs_for(runtime_, joiner_, local_player_dead());
 }
 
 // One 62.5 Hz tick of the view state, before the weapon pump (the order the

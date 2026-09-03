@@ -28,25 +28,8 @@ bool Simulation::local_player_dead() const {
 }
 
 bool Simulation::request_local_player_medic() {
-	// The session/entity gates are the binding's (a live runtime, a local
-	// entity); the dead-bit and cooldown gates are the kernel's.
-	if (!runtime_ || !kernel_->world.cached.local_player.valid()) return false;
-	if (!kernel_->local.medic_request_allowed(local_player_dead())) return false;
-	bool sent = false;
-	if (joiner_) {
-		sent = runtime_->queue_medic_request();
-	} else if (host_owner_.serve_and_play) {
-		// The listen host's own call rides its loopback client like the reload
-		// request (simulation_player_weapon.cpp): the server handler
-		// broadcasts the 0x1E line to everyone including this client.
-		opennova::MedicRequest request;
-		request.entity_index = kernel_->world.cached.local_player.packed;
-		host_loop_.client_send(opennova::c2s::MEDIC_REQUEST,
-				opennova::encode_medic_request(request));
-		sent = true;
-	}
-	if (sent) kernel_->local.stamp_medic_request();
-	return sent;
+	if (!kernel_) return false;
+	return active_role().request_medic();
 }
 
 int Simulation::local_medic_request_cooldown_ticks() const {
