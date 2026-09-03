@@ -3489,7 +3489,7 @@ sinks × pick dumped into the −Z tilt impulses), `vehicle_suspension_dt`,
 release arm = the oscillator, the per-family sink growth), `vehicle_suspension_clear`;
 the four `pad_z` sites of `vehicle_contact_solve.cpp` add `wheel_comp[k]` and
 the corner-lift feedback consumes the stepped compression; the role is
-`World::logic_authority` stamped in `run_logic_tick`; the def keys reach
+`World::rules.logic_authority` stamped in `run_logic_tick`; the def keys reach
 `VehicleTraits` (and both Python FFI mirrors + the native-stride pins, since
 `DefItemDef` crosses the C ABI). Pinned by ctest `ground_conform`,
 `vehicle_suspension` (a driven buggy settles ×0.99/tick with the

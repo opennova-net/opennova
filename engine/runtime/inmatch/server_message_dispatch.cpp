@@ -1070,8 +1070,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		player->position = player->spawn_position;
 	}
 	world::entity_reset_to_spawn_state(*player);
-	if (world.player_has_item_def && world.player_item_hp != 0)
-		player->health = world::retail_signed_i16(world.player_item_hp);
+	if (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
+		player->health = world::retail_signed_i16(world.tables.player.item_hp);
 	else if (player->health_max > 0)
 		player->health = player->health_max;
 	else
@@ -1109,8 +1109,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 					world, target_zone, player->handle, selected))
 			world::attach_to_vehicle_seat(world, player->handle, selected);
 	}
-	const world::WeaponTable *armory = !world.weapons.empty()
-			? &world.weapons
+	const world::WeaponTable *armory = !world.tables.weapons.empty()
+			? &world.tables.weapons
 			: nullptr;
 	replies.push_back(make_protocol_message(
 			0x5A, build_current_loadout_reply(
@@ -1134,8 +1134,8 @@ bool is_medic_recipient(const NapiNPConnection &candidate,
 	return medic != nullptr && medic->alive &&
 			(medic->flags & world::kEntityFlagDead) == 0u &&
 			medic->team == team &&
-			world.class_has_attribute(medic->player_class,
-					world::World::kCharAttrMedic);
+			world.tables.class_has_attribute(medic->player_class,
+					world::MissionTables::kCharAttrMedic);
 }
 
 namespace {
@@ -1385,7 +1385,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							local.pos[2] = world::to_fixed(requester->position.z);
 							local.slot = 0;
 							std::memcpy(local.set_name, set_name, sizeof(set_name));
-							world->slot_sounds.push_back(local);
+							world->out.slot_sounds.push_back(local);
 							continue;
 						}
 						candidate.link.transport->host_send(
@@ -1598,7 +1598,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the last valid grant.
 				if (!decode_loadout_submit(msg.payload.data(), msg.payload.size(), req)) break;
 				const world::WeaponTable *armory =
-						(world != nullptr && !world->weapons.empty()) ? &world->weapons : nullptr;
+						(world != nullptr && !world->tables.weapons.empty()) ? &world->tables.weapons : nullptr;
 				// The envelope is validated BEFORE anything is applied: a bad team or a
 				// nonzero out-of-range class aborts with a re-send of the player's CURRENT
 				// slot list and NO state write — no class stamp, no damage-class table, no
@@ -1629,7 +1629,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						// [ammoDef.index]. Weapon_CalcImpactDamage later interprets 1 as
 						// x0.9 and 2 as x1.1 for person targets.
 						if (armory != nullptr) {
-							pe->ammo_damage_class.assign(world->ammo.entries.size(), 0);
+							pe->ammo_damage_class.assign(world->tables.ammo.entries.size(), 0);
 							for (const auto &entry : grant.ammo_damage_classes) {
 								const size_t ammo_index = static_cast<size_t>(entry.first);
 								if (ammo_index < pe->ammo_damage_class.size())
@@ -1965,8 +1965,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
 				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
 				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
-				if (!world->weapons.empty() && !alt_fire) {
-					const world::WeaponTableEntry *adm = world->weapons.by_index(fr.adm_index);
+				if (!world->tables.weapons.empty() && !alt_fire) {
+					const world::WeaponTableEntry *adm = world->tables.weapons.by_index(fr.adm_index);
 					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
 					if (adm->clipsize != -1) {
 						world::WeaponSlotState *mounted_slot = nullptr;
@@ -2038,15 +2038,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
 				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
 				ev.adm_index = fr.adm_index;
-				world->rounds.add(ev);
+				world->out.rounds.add(ev);
 				// The authoritative round spawns SYNCHRONOUSLY with the ring append
 				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
 				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
 				// adm's load-time-resolved round_type (adm+84 pair in the original); an
 				// armory- or ammo-less host skips the sim (fire still echoes).
-				if (!world->ammo.empty()) {
+				if (!world->tables.ammo.empty()) {
 					const world::WeaponTableEntry *fire_adm =
-							world->weapons.by_index(fr.adm_index);
+							world->tables.weapons.by_index(fr.adm_index);
 					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {
 						world::RoundSpawnParams rp;
 						rp.owner = conn.link.owned_entity;
@@ -2126,7 +2126,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Refund + ammo-pool clamp deferred -> refill to capacity @0x541811]. The wire
 				// combo (the second u16) keys the same slot the 0x06 pipeline decrements
 				// [orig: slotIndex = HIWORD @0x514f03; slot = playerSlot+464+100*combo @0x54176d].
-				if (!world->weapons.empty() &&
+				if (!world->tables.weapons.empty() &&
 				    conn.link.mode != replication::TransportMode::Loopback) {
 					// EWeap reload ignores the wire combo and follows the same live
 					// child/groundEntity route as fire and phase-8 serialization.
@@ -2152,7 +2152,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								slot_adm = parent->primary_weapon_slot_adm;
 						}
 						const world::WeaponTableEntry *adm =
-								world->weapons.by_index(slot_adm);
+								world->tables.weapons.by_index(slot_adm);
 						if (slot != nullptr && adm != nullptr &&
 								adm->clipsize != -1)
 							slot->clip = adm->clipsize;
@@ -2170,7 +2170,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					auto slot_it = addressed_owner->weapon_slots.find(req.reload_param);
 					if (slot_it != addressed_owner->weapon_slots.end()) {
 						const world::WeaponTableEntry *adm =
-								world->weapons.by_index(slot_it->second.adm_index);
+								world->tables.weapons.by_index(slot_it->second.adm_index);
 						if (adm != nullptr && adm->clipsize != -1)
 							slot_it->second.clip = adm->clipsize; // [orig: slot+16 @0x541850]
 					}

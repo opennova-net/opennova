@@ -422,18 +422,18 @@ static int test_knife_is_selectable() {
 static int test_local_held_weapon_visible() {
 	Fixture f;
 	World world;
-	world.weapons = f.t;
+	world.tables.weapons = f.t;
 	// The m4 row draws in first person.
-	world.weapons.entries[static_cast<size_t>(f.m4)]
+	world.tables.weapons.entries[static_cast<size_t>(f.m4)]
 			.has_first_person_model_reference = true;
 
 	LocalPlayerWeapon weapon;
 	weapon.active = true;
 	WeaponInventory inv;
-	inv.reset(world.weapons);
-	weapon_inventory_load_from_display(world.weapons, {"WPN_M4AUTO"}, inv);
-	weapon_inventory_seed_pools(world.weapons, inv, 8);
-	weapon_inventory_recalc_clips(world.weapons, inv);
+	inv.reset(world.tables.weapons);
+	weapon_inventory_load_from_display(world.tables.weapons, {"WPN_M4AUTO"}, inv);
+	weapon_inventory_seed_pools(world.tables.weapons, inv, 8);
+	weapon_inventory_recalc_clips(world.tables.weapons, inv);
 	inv.equipped_combo = 3 * 65;
 
 	Entity player;
@@ -449,10 +449,10 @@ static int test_local_held_weapon_visible() {
 	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
 	weapon.active = true;
 	// No first-person model hides on your OWN body [orig: @0x4dcc32].
-	world.weapons.entries[static_cast<size_t>(f.m4)]
+	world.tables.weapons.entries[static_cast<size_t>(f.m4)]
 			.has_first_person_model_reference = false;
 	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
-	world.weapons.entries[static_cast<size_t>(f.m4)]
+	world.tables.weapons.entries[static_cast<size_t>(f.m4)]
 			.has_first_person_model_reference = true;
 	// Seat rule, LOCAL flavour [orig: @0x4dcc44..0x4dcc5d]: driver hides,
 	// gunner hides only in third person, passenger keeps its weapon.

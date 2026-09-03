@@ -535,7 +535,7 @@ private:
 	// The placed-tile surface override (D-SND-15): the mission .til entries
 	// plus the tileset's .TSD-fed tile-index -> surface table, both resolved
 	// engine-side (terrain_query surface_tiles.h — the witnesses live there).
-	// Owned here like the heightmap so world.surface_map's raw pointers
+	// Owned here like the heightmap so world.tables.surface_map's raw pointers
 	// survive reset_world; the zero table is retail's no-.TSD default.
 	std::vector<opennova::terrain::SurfaceTileEntry> surface_tiles_;
 	std::array<uint8_t, 256> tile_surface_table_{};

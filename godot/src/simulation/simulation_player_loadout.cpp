@@ -279,7 +279,7 @@ TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
 	if (is_joiner() && runtime_) {
 		// A joiner's players are decoded rows, not World twins: the roster walk
 		// over ClientState supplies them (netsim/client_roster_tags.h).
-		const int32_t player_hp = kernel_->world.player_item_hp;
+		const int32_t player_hp = kernel_->world.tables.player.item_hp;
 		opennova::replication::collect_roster_tags(runtime_->state(),
 				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
 				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
@@ -329,7 +329,7 @@ void Simulation::set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit,
 
 int Simulation::get_weapon_availability(const String &p_weapon_name) const {
 	if (!kernel_) return opennova::world::weapon_availability_value::kAllowed;
-	const int idx = kernel_->world.weapons.index_of(p_weapon_name.utf8().get_data());
+	const int idx = kernel_->world.tables.weapons.index_of(p_weapon_name.utf8().get_data());
 	if (idx < 0) return opennova::world::weapon_availability_value::kAllowed;
 	return kernel_->loadout.availability.value_for(idx);
 }
@@ -462,7 +462,7 @@ void Simulation::push_joiner_loadout_kit() {
 	// EMPTY catalog would skip every row — latching that would submit a zero-entry 0x2F
 	// pair AND disarm the runtime's capture-default fallback. Leave the seam unarmed
 	// until the catalog exists; load_weapon_table re-pushes from the carried state.
-	if (kernel_->world.weapons.empty()) return;
+	if (kernel_->world.tables.weapons.empty()) return;
 	// rebuild_local_player_loadout re-pushes once the equipped combo has settled; this
 	// latch keeps that one-way (a push must never drive a rebuild back into itself).
 	if (pushing_joiner_loadout_kit_) return;
@@ -648,7 +648,7 @@ Ref<WeaponProfileSummary> Simulation::get_weapon_profile_summary() const {
 }
 
 void Simulation::apply_joiner_authoritative_loadout() {
-	if (!joiner_ || !runtime_ || !kernel_ || kernel_->world.weapons.empty()) return;
+	if (!joiner_ || !runtime_ || !kernel_ || kernel_->world.tables.weapons.empty()) return;
 	const uint64_t revision = runtime_->authoritative_loadout_revision();
 	if (revision == 0 || revision <= joiner_applied_loadout_revision_) return;
 
@@ -656,7 +656,7 @@ void Simulation::apply_joiner_authoritative_loadout() {
 	// is inmatch::kit_from_authoritative_grant's.
 	const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
 	std::vector<opennova::world::WeaponKitEntry> kit;
-	opennova::inmatch::kit_from_authoritative_grant(kernel_->world.weapons, grant, kit);
+	opennova::inmatch::kit_from_authoritative_grant(kernel_->world.tables.weapons, grant, kit);
 	// Do not echo an authoritative grant back as a new C2S 0x2F request. The
 	// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
 	// inside still re-arms the seam, but its ROWS come from the profile page, never
@@ -676,7 +676,7 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 	String equipped_name;
 	Dictionary pools;
 	if (kernel_ != nullptr) {
-		const opennova::world::WeaponTable &table = kernel_->world.weapons;
+		const opennova::world::WeaponTable &table = kernel_->world.tables.weapons;
 		for (int32_t combo = 0; combo < opennova::world::weapon_combo::kSlotCount;
 		     ++combo) {
 			const opennova::world::WeaponInventorySlot *s = kernel_->inventory.slot(combo);
@@ -754,12 +754,12 @@ Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
 void Simulation::refresh_score_rules() {
 	if (!kernel_) return;
 	if (!score_config_loaded_) {
-		kernel_->world.score_rules = opennova::world::ScoreRules{};
+		kernel_->world.tables.score_rules = opennova::world::ScoreRules{};
 		return;
 	}
 	const uint32_t mode = opennova::bms::selected_game_mode(
-			static_cast<opennova::bms::AttribFlags>(kernel_->world.mission_attrib_flags));
-	kernel_->world.score_rules = opennova::world::build_score_rules(
+			static_cast<opennova::bms::AttribFlags>(kernel_->world.tables.mission_attrib_flags));
+	kernel_->world.tables.score_rules = opennova::world::build_score_rules(
 			score_config_, opennova::game_type::for_mission_mode(mode));
 }
 

@@ -84,7 +84,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
 	opennova::renderer::ScarDrawList list;
-	opennova::renderer::compile_scar_draws(kernel_->world.scars, ctx, list);
+	opennova::renderer::compile_scar_draws(kernel_->world.out.scars, ctx, list);
 
 	PackedVector3Array vertices;
 	PackedVector2Array uvs;
@@ -218,6 +218,6 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	out->set_strip_mode_words(strip_mode_words);
 	out->set_slots_live(static_cast<int>(list.slots_live));
 	out->set_slots_culled(static_cast<int>(list.slots_culled));
-	out->set_rings_leased(kernel_->world.scars.leased_count());
+	out->set_rings_leased(kernel_->world.out.scars.leased_count());
 	return out;
 }

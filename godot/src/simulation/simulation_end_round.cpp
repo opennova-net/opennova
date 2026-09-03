@@ -94,7 +94,7 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 }
 
 bool Simulation::is_mp_session() const {
-	return kernel_ != nullptr && kernel_->world.mp_session;
+	return kernel_ != nullptr && kernel_->world.rules.mp_session;
 }
 
 opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const {
@@ -244,7 +244,7 @@ Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	const opennova::world::World &w = kernel_->world;
 	opennova::hud::EndRoundStatisticsInput in;
 	int32_t won = 0;
-	for (uint32_t mask = w.subgoals.won; mask != 0; mask &= mask - 1) ++won;
+	for (uint32_t mask = w.script.subgoals.won; mask != 0; mask &= mask - 1) ++won;
 	in.subgoals_won = won; // [orig: 0xC846D0 — one per first SubGoalWon @0x4fd117]
 	in.subgoals_defined = opennova::world::count_defined_subgoals(w);
 	in.enemy_kills = w.kill_stats.enemy_kills_by_player +

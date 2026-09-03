@@ -528,9 +528,9 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
                            int32_t hit_zone, int32_t hit_bone, const Entity &target,
                            const Entity *shooter, int32_t ammo_index,
                            const World &world) {
-    if (world.mp_session) {
-        if (!world.projectile_authority) return 0;
-        if (world.one_shot_kill) return 2000;
+    if (world.rules.mp_session) {
+        if (!world.rules.projectile_authority) return 0;
+        if (world.rules.one_shot_kill) return 2000;
     }
     int32_t speed_scaled = arithmetic_shift_right_16(
         wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
@@ -730,11 +730,11 @@ void RoundSim::reset() noexcept {
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params,
                     RoundConsequenceMode mode) {
-    const AmmoTableEntry *ammo = world.ammo.by_index(params.ammo_index);
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(params.ammo_index);
     if (ammo == nullptr) return -1;
     const bool authoritative =
         mode == RoundConsequenceMode::Authoritative &&
-        (!world.mp_session || world.projectile_authority);
+        (!world.rules.mp_session || world.rules.projectile_authority);
     // The retail spawn dispatch order [orig: RoundData_SpawnRound @ 0x4ec1f3..
     // 0x4ec2a5]: instantkillzone -> Detonatesatchels -> designator -> claymore
     // fan -> shotgun -> the ballistic default.
@@ -785,7 +785,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
                     imp.ammo_index = params.ammo_index;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
                         const int32_t surface = terrain::surface_type_at_fixed(
-                            world.surface_map, hit.position_q16.x,
+                            world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
                         imp.effect_tag =
                             (surface >= 0 && surface + 4 < kImpactEffectTagCount)
@@ -852,7 +852,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         return spawn_burst(world, params, *ammo, mode);
     }
     const RoundSourceState source = resolve_round_source(world, params);
-    const WeaponTableEntry *weapon = world.weapons.by_index(params.adm_index);
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(params.adm_index);
     if ((ammo->flags & kAmmoFlagShotgun) != 0) {
         // Shotgun is a separate pellet-fan leaf: it never reads weapon ERROR or
         // the rules gate, but the ordinary ammo recoil is applied after the fan.
@@ -1157,7 +1157,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (!r.active) continue;
         const bool authoritative =
             r.consequence_mode == RoundConsequenceMode::Authoritative &&
-            (!world.mp_session || world.projectile_authority);
+            (!world.rules.mp_session || world.rules.projectile_authority);
 
         // The lifetime/armed-fuse head runs before the motor. Advance the
         // stored age before dispatch; the custom motor compensates so its
@@ -1166,7 +1166,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (r.det_at_expiry || r.age_ticks >= r.max_age_ticks) {
             // Only rounds the motor armed detonate at this head; an ordinary
             // ballistic lifetime expiry vanishes silently.
-            const AmmoTableEntry *fuze_ammo = world.ammo.by_index(r.ammo_index);
+            const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry) {
                 if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
                 if (impacts.size() < kMaxPendingImpacts) {
@@ -1201,7 +1201,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 
         if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
 
-        const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
+        const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
         // `ignore` rounds only age.
@@ -1369,8 +1369,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         LiveRound dud_replacement;
         bool has_dud_replacement = false;
         if (not_armed && !ammo->notarmmed_ammo.empty()) {
-            const int32_t dud = world.ammo.index_of(ammo->notarmmed_ammo.c_str());
-            const AmmoTableEntry *dud_ammo = world.ammo.by_index(dud);
+            const int32_t dud = world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            const AmmoTableEntry *dud_ammo = world.tables.ammo.by_index(dud);
             if (dud_ammo != nullptr) {
                 impact_ammo_index = dud;
                 dud_replacement = r;
@@ -1438,7 +1438,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // [orig: Weapon_CalcImpactDamage @0x4EC920;
             // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
             const bool critical_hit =
-                !(world.mp_session && world.one_shot_kill) &&
+                !(world.rules.mp_session && world.rules.one_shot_kill) &&
                 impact_is_critical(*target, collision.hit_zone,
                                    collision.bone_index);
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
@@ -1460,7 +1460,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     (target->flags & kEntityFlagDead) == 0 &&
                     (target->engine_flags & kEntityFlagDead) == 0;
                 if (shooter != nullptr) {
-                    auto &rel = world.relations;
+                    auto &rel = world.script.relations;
                     const int sg = shooter->group_id, ss = shooter->net_id;
                     const int vg = target->group_id, vs = target->net_id;
                     rel.set_group_group(TriggerRelations::kShot, sg, vg);
@@ -1510,7 +1510,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                             death_section, target->death_anim_state,
                             target_was_alive);
                     }
-                    world.relations.group(target->group_id).alert =
+                    world.script.relations.group(target->group_id).alert =
                         TriggerRelations::kAlertRed;
 
                     RoundDeath d;
@@ -1536,9 +1536,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
             // +0x74 and calls the standard scorch router @0x6060D0]
             const AmmoTableEntry *scorch_ammo =
-                    world.ammo.by_index(impact_ammo_index);
+                    world.tables.ammo.by_index(impact_ammo_index);
             if (scorch_ammo != nullptr) {
-                world.terrain_scorches.emit_standard(
+                world.out.terrain_scorches.emit_standard(
                         impact_q16.x, impact_q16.y,
                         scorch_ammo->scorch_id, world.logic_tick);
             }
@@ -1549,7 +1549,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // terrain leg of the @ 0x4ea6a7 hit switch in
             // Projectile_UpdatePhysics @ 0x4e9d70]
             const int32_t surface =
-                terrain::surface_type_at_fixed(world.surface_map, impact_q16.x, impact_q16.y);
+                terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
             imp.effect_tag =
                 (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
         } else if (collision.hit_class == ProjectileHitClass::Water) {
@@ -1637,7 +1637,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830;
         // the GLASS userpoint leg's residual is recorded in world/impact_scar.h].
         if (impact_target != nullptr) {
-            const AmmoTableEntry *scar_ammo = world.ammo.by_index(impact_ammo_index);
+            const AmmoTableEntry *scar_ammo = world.tables.ammo.by_index(impact_ammo_index);
             scar_add_entry(world, collision, *impact_target,
                            scar_ammo != nullptr ? scar_ammo->scar_type : 0);
         }

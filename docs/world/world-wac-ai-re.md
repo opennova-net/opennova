@@ -240,7 +240,7 @@ Everything below was decompiled and read this session (pseudocode dumps:
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
    (`dword_C6EAE4` is the writable named value `fallmps`, seeded 13 by
    `WacScript_FreeAll @ 0x4f638b` at every mission load; ported 2026-08-28 as
-   `World::wac_values.fallmps`, authority-gated and skipping Indestructible bodies;
+   `World::script.wac_values.fallmps`, authority-gated and skipping Indestructible bodies;
    retail has no zero test, so a script that writes `fallmps 0` makes every
    landing damage by `(-vel_z)>>4` — the port carries that);
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
@@ -2774,7 +2774,7 @@ internals = open item, §16.5).
   not the brain; the two structs were disambiguated this session.)
 - **Open follow-ups**: the brain[37] live producer (indexed-store sweep; check the
   WAC `ai` command family); the `dword_24C1930` bit `0x800` writer (an MP-rules
-  word — the reimpl seam `World::ai_rules_skip_local_player` defaults clear and the
+  word — the reimpl seam `World::rules.ai_rules_skip_local_player` defaults clear and the
   net wire into it is pending); variant A `AI_FindBestTarget @ 0x465a50` remains
   unwitnessed (§16.5 item 7).
 
@@ -3006,7 +3006,7 @@ after the ammo table loads) — the D-AI-5 stand-in.
 ### 17.4b The sound legs — footsteps, foley, landing, screams (witnessed + ported 2026-07-17)
 
 The trigger word's SOUND consumers, fully witnessed in both bodies and ported
-(`AiSystem::infantry_anim_sound_pass` / `emit_slot_sound` -> `World::slot_sounds`
+(`AiSystem::infantry_anim_sound_pass` / `emit_slot_sound` -> `World::out.slot_sounds`
 -> `Simulation::drain_slot_sounds` -> `fire_present_pass._drain_slot_sounds`;
 ctest `slot_sound`). The slot table and its SndProf.def source are the audio
 record's §sound-profile ([lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md),
@@ -3898,7 +3898,7 @@ WinVar/LoseVar`) read `World::kill_stats` / `cached.humans` /
 `World::match.outcome()`.
 The writable `accuracyspread` row is also ported: case-insensitive compilation
 resolves it as a named engine-value lvalue, VM reads/writes
-`World::wac_values.accuracy_spread`, and the infantry aim pass consumes that same
+`World::script.wac_values.accuracy_spread`, and the infantry aim pass consumes that same
 field in the witnessed formula. `event_runtime_bms` pins write/readback, no V0
 alias, and the resulting NPC aim heading.
 
@@ -3925,7 +3925,7 @@ Team space matches the round-end codes: 0 = green, 1 = blue, 2+ = enemy. The
 epilog count lines sum the pairs (TEAMUNITS = `0xC846F0 + 0xC846C0`, etc.).
 Port: `MissionKillStats` intentionally remains the count-only WAC/epilog view,
 tallied in `route_round_deaths` from `RoundDeath.victim/killer`; the SP gate is
-`!world.mp_session` because our SP-as-listen-server always runs
+`!world.rules.mp_session` because our SP-as-listen-server always runs
 `ctx.is_in_session = 1`. Independently, the same death enters `world::Match`'s
 42-field player/team records with the signed `score.ini` event values used by
 every competitive game type, co-op, and the end-round board. The SP epilog's difficulty-scaled
@@ -4033,7 +4033,7 @@ Two load/response-time resolutions the probe forced out:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, saved-game list, or end-music switch; (d) `sub_5280B0` music-park and the `@0x3245B08` end-track selector remain unported; (e) the SP gate reads `world.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
+| D-AI-10 | Multiplayer core is no longer a stand-in: `world::Match` owns TDM score/time and A&S all-owned/zone-count decisions while WAC/BMS drives co-op; one guarded result awards the round marker, freezes the retail scoreboard producer order, pushes 0x61 + recipient-specific 0x1D, serves requester-only 0x2B/0x56 chunks ≤200 bytes, moves peers to game state 11, closes ordinary replication through Match's sole outcome gate, and drains the phase-exact 2790 ticks `[orig: Server_CheckWinConditions @0x51ad40; Server_ProcessRoundEnd @0x5164f0; Server_BuildEndOfRoundScoreboard @0x508f30; Server_TickUpdate @0x51d7e0]`. The one semantic gate replaces retail's redundant slot-state 6→7 write without changing wire behavior. Default VAR/FIELD rows and VERSION 40 `score.ini` overlays are shared by gameplay, S2C 0x58, and the frozen board `[orig: GameType_CreateDefaultSettings @0x52dd00; ScoreConfig_LoadFile @0x52d8a0]`. Remaining stand-ins: (a) SP kill tallies are COUNTS only (no def+404 points, difficulty scaling, per-type split, or human bucket); (b) additional score events await their gameplay producers; (c) the SP end presentation is a shell overlay — no flyaway cine/`.cne`, count-up lines, saved-game list, or end-music switch; (d) `sub_5280B0` music-park and the `@0x3245B08` end-track selector remain unported; (e) the SP gate reads `world.rules.mp_session` (our listen server always has `ctx.is_in_session = 1`) | the full @0x5164f0 transaction + §20.6 cines | MP core CLOSED; SP scoring/presentation and additional gameplay score producers remain |
 
 **D-AI-10 update (2026-08-22, superseding the TDM/A&S-only wording above):**
 `world::Match` now implements every branch of `Server_CheckWinConditions
@@ -4108,7 +4108,7 @@ GameType_CreateDefaultSettings @0x52DD00]`
 `D-AI-6` update (2026-07-20): the aim-error global `@ 0xC6EAE8` is the WAC
 named variable **accuracyspread** — its config source is mission scripts (the
 table §20.3); the earlier `autogain` attribution came from the phase-shifted
-table read. This leg is now ported through `World::wac_values` and consumed
+table read. This leg is now ported through `World::script.wac_values` and consumed
 directly by `AiSystem::infantry_combat_think`. D-AI-6 remains open for only the
 bone-derived LOS/aim endpoints and prone-in-foliage concealment term.
 
@@ -4875,7 +4875,7 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   vehicle's SM never saw its new route.
 - **Arrivals reach BMS conditions (2026-07-22)**: the infantry channel mover and
   the shared SM/vehicle route mover apply the retail SetBitB(group) then
-  SetBitA(SSN) waypoint-visited pair to `World::relations`; the retained
+  SetBitA(SSN) waypoint-visited pair to `World::script.relations`; the retained
   `relmat_calls` vector is now a diagnostic trace of applied side effects
   [orig: AI_UpdateWaypointMovement @ 0x457c6d..0x457c88].
 - **The speed commands**: BMS ChangeGroup/SingleAI subs 29 COMBATSPEED /
@@ -7108,7 +7108,7 @@ declared + applied:
 Closed ledger rows whose full text previously lived only in the divergence
 ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
 
-- **D-AI-3** [FIXED 2026-07-16 (applied; matrix identity pinned by the ai ctest)] CLOSED 2026-07-16: the engagement relation ops APPLY — `apply_engage_relations` writes the sees+targeted quads into `world.relations` with the witnessed key orientation (group = `Entity::group_id` +0x11C, single = `net_id` +0x7C; GS transposed), at both the SM engage (`@ 0x4677b3..0x4678b2`) and the infantry scan-hit (`@ 0x4b0a6f..0x4b0ae2`) sites; `ai_set_target` ports `Entity_SetAITarget @ 0x45d760` incl. the target `+530` refcount. The `rel_ops` vector remains as a test-observability trace
+- **D-AI-3** [FIXED 2026-07-16 (applied; matrix identity pinned by the ai ctest)] CLOSED 2026-07-16: the engagement relation ops APPLY — `apply_engage_relations` writes the sees+targeted quads into `world.script.relations` with the witnessed key orientation (group = `Entity::group_id` +0x11C, single = `net_id` +0x7C; GS transposed), at both the SM engage (`@ 0x4677b3..0x4678b2`) and the infantry scan-hit (`@ 0x4b0a6f..0x4b0ae2`) sites; `ai_set_target` ports `Entity_SetAITarget @ 0x45d760` incl. the target `+530` refcount. The `rel_ops` vector remains as a test-observability trace
 - **D-INF-12** [FIXED 2026-07-16 (§22; mounted/parachute branches ride D-INF-2/-20)] Player (org2) chase sources — the org2 grill landed 2026-07-16 (world-wac-ai-re §22): the witnessed model has NO body chase — the legs chase the render yaw (¼-step, clamp ±0x3000000, twist ±0x30000000 vs the yaw, per-leg staggered 64-tick re-plant windows) and `bodyHeading` = the leg midpoint (`@0x4b4945-0x4b4ac1`); ported in `tick_infantry` (the org1 approximation deleted), and the org1 legs corrected the same session (midpoint re-plant value, staggered windows, walk half-snap `@0x4be969-0x4bea0b`)
 - **D-INF-21** [PERMANENT (dev/admin feature, decision recorded)] The "!Poof!" ghost mode deliberately unported: `g_localPlayerPoofMode @0xA82298` (net-toggled `@0x42d450`, debug-chat `!Poof!`) doubles the local player's horizontal root-motion integrate while set (`@0x4b7c8d`); normal play takes the same 1× integrate as org1 (`@0x4b7cbf`), which is what the port implements (world-wac-ai-re §22.3)
 - **D-THROW-3** [FIXED 2026-07-22 (`throwables` ctest `test_claymore_sector_los_blocks_trigger`)] Placed-device LOS now routes through the full terrain-plus-sector collision ray, excluding the device and candidate; claymores no longer see eligible targets through type-1 building solids (`Entity_FindEnemyInCone @0x43cba0 -> Physics_RaycastSegment @0x415550`; world-wac-ai-re §27.6/§27.8)

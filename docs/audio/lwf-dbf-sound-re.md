@@ -424,7 +424,7 @@ row jumps the playhead across several authored frames at once.) The decoded grou
 presentation as `PF_CARRIER_HANDLE`, so the on-entity slot is resolvable off a
 wire row. LEG LANDED 2026-08-19: the profile question is answered per DEF —
 `resolve_ai_weapons` resolves every items.def row's `sound_profile` /
-`sound_profile_female` pair into `world.organic_sound_profiles`, keyed by item
+`sound_profile_female` pair into `world.tables.organic_sound_profiles`, keyed by item
 type, so a joiner (whose world spawns no mission AI) still resolves every
 replicated type `[orig: ItemDef_ResolveAllResources @0x49e5f0 resolves the
 sound region for each def]`. `audio::organic_slot_set` then resolves a slot for

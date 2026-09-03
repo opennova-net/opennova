@@ -22,7 +22,7 @@ namespace opennova::world {
 
 void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]) {
     if (slot < 0 || slot >= audio::kSoundProfileSlotCount) return;
-    const auto &entries = world.sound_profiles.entries();
+    const auto &entries = world.tables.sound_profiles.entries();
     if (entries.empty()) return;
     // An unresolved binding falls back to the "default" profile, which itself
     // falls back to the first profile when no "default" exists — the alloc-time
@@ -35,12 +35,12 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
     // coincident minimap/net id. Unknown character ids keep the primary.
     // [orig: Entity_GetProfileSlotSound @0x528300, female byte @0x52831c]
     if (source != nullptr && source->player_class != 0 &&
-        world.character_traits.is_female(source->minimap_net_id))
+        world.tables.character_traits.is_female(source->minimap_net_id))
         profile_index = e.profile.sound_profile_female;
     const audio::SoundProfile *p =
         (profile_index >= 0 && static_cast<size_t>(profile_index) < entries.size())
             ? &entries[profile_index]
-            : world.sound_profiles.find("default");
+            : world.tables.sound_profiles.find("default");
     if (p == nullptr) return;
     const std::string &set = p->set_names[slot];
     if (set.empty()) return; // the resolved-id-0 no-op [orig: table[slot] == 0]
@@ -51,7 +51,7 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
     ev.pos[2] = pos[2];
     ev.slot = static_cast<uint8_t>(slot);
     std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
-    world.slot_sounds.push_back(ev);
+    world.out.slot_sounds.push_back(ev);
 }
 
 void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logic_tick,
@@ -92,7 +92,7 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
         const int slot = audio::footstep_slot(
                 pos[2], world.env.water_z,
                 went != nullptr && went->ground_target.valid(),
-                terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]),
+                terrain::surface_type_at_fixed(world.tables.surface_map, pos[0], pos[1]),
                 foot);
         emit_slot_sound(world, e, slot, pos);
     }

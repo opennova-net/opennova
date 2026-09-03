@@ -112,8 +112,8 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	world.registry.configure_pool(1, 16);
 	w::AiSystem &ai = world.ai;
 	FlatField flat;
-	world.terrain = &flat.field;
-	world.mp_session = true;
+	world.tables.terrain = &flat.field;
+	world.rules.mp_session = true;
 
 	const w::EntityHandle host =
 			w::spawn_player(world, player_spawn(0xFFF0, 1));
@@ -137,8 +137,8 @@ bool run_placed_device_spawn_and_remove_fanout() {
 		return false;
 	w::stamp_saved_live_pose(*world.registry.get(carrier));
 
-	world.ammo.entries.resize(1);
-	w::AmmoTableEntry &satchel = world.ammo.entries[0];
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &satchel = world.tables.ammo.entries[0];
 	satchel.name = "satchel";
 	satchel.valid = true;
 	satchel.flags = w::kAmmoFlagUseOwnMove | w::kAmmoFlagNoAge |

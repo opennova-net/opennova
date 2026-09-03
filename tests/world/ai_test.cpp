@@ -56,7 +56,7 @@ void test_vehicle_death_rows() {
         sys.row(21).enter(ctx);
         CHECK(e.brain.f[AiBrain::kAlert] == 2);            // the alert block ran
         CHECK(e.brain.f[AiBrain::kStep] == 16);            // [orig: ai_data[7] = 16]
-        CHECK(w.relations.group(3).alert == TriggerRelations::kAlertRed);
+        CHECK(w.script.relations.group(3).alert == TriggerRelations::kAlertRed);
         bool queued4 = false;
         for (int i = 0; i < sys.events.count(); ++i)
             if (sys.events.at(i).type() == 4) queued4 = true;
@@ -162,10 +162,10 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     seed.health = 100;
     EntityHandle h = w->registry.spawn(0, seed);
 
-    w->ammo.entries.resize(2);
-    w->ammo.entries[1].valid = true;
-    w->ammo.entries[1].velocity = 62; // 1 u/tick; pos is asserted at SPAWN (no tick runs)
-    w->ammo.entries[1].max_age_ticks = 100;
+    w->tables.ammo.entries.resize(2);
+    w->tables.ammo.entries[1].valid = true;
+    w->tables.ammo.entries[1].velocity = 62; // 1 u/tick; pos is asserted at SPAWN (no tick runs)
+    w->tables.ammo.entries[1].max_age_ticks = 100;
 
     AiSystem sys;
     int idx = sys.attach(h);
@@ -484,10 +484,10 @@ static void test_sm_turret_fire() {
         w = std::make_unique<World>();
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
-        w->ammo.entries.resize(2);
-        w->ammo.entries[1].valid = true;
-        w->ammo.entries[1].velocity = 620;
-        w->ammo.entries[1].max_age_ticks = 100;
+        w->tables.ammo.entries.resize(2);
+        w->tables.ammo.entries[1].valid = true;
+        w->tables.ammo.entries[1].velocity = 620;
+        w->tables.ammo.entries[1].max_age_ticks = 100;
         Entity shooter{};
         shooter.alive = true;
         shooter.health = 100;
@@ -528,10 +528,10 @@ static void test_sm_turret_fire() {
         setup(w, sys, e, tgt_h);
         AiThinkCtx ctx{&sys, e, w.get(), nullptr};
         sys.row(kAiGroundCombat).tick(ctx);
-        CHECK(w->rounds.count == 1);
-        if (w->rounds.count == 1) {
-            CHECK(w->rounds.records[0].origin_z == 0x20000);
-            CHECK(w->rounds.records[0].dir_yaw == 0); // bearing 0, no scatter
+        CHECK(w->out.rounds.count == 1);
+        if (w->out.rounds.count == 1) {
+            CHECK(w->out.rounds.records[0].origin_z == 0x20000);
+            CHECK(w->out.rounds.records[0].dir_yaw == 0); // bearing 0, no scatter
         }
         CHECK(e->brain.f[AiBrain::kLastWeapon] == 1);
         CHECK(e->brain.f[AiBrain::kAmmoA] == 4);
@@ -552,7 +552,7 @@ static void test_sm_turret_fire() {
         e->profile.fire_a.flags = 0x1 | 0x2; // WEAPON_TURRET | WEAPON_SLOW
         AiThinkCtx ctx{&sys, e, w.get(), nullptr};
         sys.row(kAiGroundCombat).tick(ctx);
-        CHECK(w->rounds.count == 0); // slewing, fire held
+        CHECK(w->out.rounds.count == 0); // slewing, fire held
         // active yaw advanced one slew step toward the staged mirror
         // [orig: @0x456EC3 +-0x2108421].
         CHECK(e->brain.f[AiBrain::kActiveYaw] != 0);
@@ -561,7 +561,7 @@ static void test_sm_turret_fire() {
         e->brain.f[AiBrain::kTickAccum] = 16;
         e->brain.f[AiBrain::kCooldownPair] = 0;
         sys.row(kAiGroundCombat).tick(ctx);
-        CHECK(w->rounds.count == 1);
+        CHECK(w->out.rounds.count == 1);
     }
 
     // RC_FIRE stationary + WEAPON_PITCHLOCKED_MINUS45: no target needed, but
@@ -577,7 +577,7 @@ static void test_sm_turret_fire() {
         e->profile.fire_a.flags = 0x10;       // WEAPON_PITCHLOCKED_MINUS45
         AiThinkCtx ctx{&sys, e, w.get(), nullptr};
         sys.row(kAiGroundCombat).tick(ctx);
-        CHECK(w->rounds.count == 0); // guard byte clear -> weapons hold
+        CHECK(w->out.rounds.count == 0); // guard byte clear -> weapons hold
         AiEventEntry cmd{};
         cmd.f[0] = 0x15;
         cmd.f[3] = 1;
@@ -586,10 +586,10 @@ static void test_sm_turret_fire() {
         e->brain.f[AiBrain::kTickAccum] = 16;
         e->brain.f[AiBrain::kCooldownPair] = 0x10001;
         sys.row(kAiGroundCombat).tick(ctx);
-        CHECK(w->rounds.count == 1);
-        if (w->rounds.count == 1) {
+        CHECK(w->out.rounds.count == 1);
+        if (w->out.rounds.count == 1) {
             // pitch = -0x1FFFFFE0 [orig: @0x457061 add 0xE0000020].
-            CHECK(w->rounds.records[0].dir_pitch == static_cast<int32_t>(0xE0000020u));
+            CHECK(w->out.rounds.records[0].dir_pitch == static_cast<int32_t>(0xE0000020u));
         }
     }
 }
@@ -612,13 +612,13 @@ struct AttackEventSource final : IRootMotionSource {
 };
 
 static void seed_test_rifle_ammo(World &w) {
-    w.ammo.entries.resize(2);
-    w.ammo.entries[1].velocity = 800;
-    w.ammo.entries[1].max_age_ticks = 124;
-    w.ammo.entries[1].weight_in_grains = 875;
-    w.ammo.entries[1].min_damage = 10;
-    w.ammo.entries[1].max_damage = 40;
-    w.ammo.entries[1].valid = true;
+    w.tables.ammo.entries.resize(2);
+    w.tables.ammo.entries[1].velocity = 800;
+    w.tables.ammo.entries[1].max_age_ticks = 124;
+    w.tables.ammo.entries[1].weight_in_grains = 875;
+    w.tables.ammo.entries[1].min_damage = 10;
+    w.tables.ammo.entries[1].max_damage = 40;
+    w.tables.ammo.entries[1].valid = true;
 }
 
 // Exact-symptom feedback loop for a lethal hit at the live -> death-animation edge.
@@ -794,7 +794,7 @@ static void test_world_feed_never_engages_same_team() {
     }
 
     CHECK(!npc.inf.combat_target.valid());
-    CHECK(w->rounds.count == 0);
+    CHECK(w->out.rounds.count == 0);
     CHECK(w->registry.get(ally_h)->health == 100);
 }
 
@@ -893,7 +893,7 @@ static void test_damage_hit_sets_retail_alert_state() {
     ai.tick(*w, ctx);
 
     CHECK(npc.slot.bytes()[AiSlot::kAlertByte] == 2);
-    CHECK(w->relations.group(1).alert == TriggerRelations::kAlertRed);
+    CHECK(w->script.relations.group(1).alert == TriggerRelations::kAlertRed);
     CHECK(npc.inf.damage_timer == 9); // +10 on hit, then the body tick decays once
     CHECK(npc.inf.was_hit);
     CHECK(npc.inf.last_attacker == shooter_h);
@@ -947,7 +947,7 @@ static void test_remote_player_hit_skips_npc_group_alert() {
     ai.tick(*w, ctx);
 
     CHECK(player.slot.bytes()[AiSlot::kAlertByte] == 0);
-    CHECK(w->relations.group(3).alert != TriggerRelations::kAlertRed);
+    CHECK(w->script.relations.group(3).alert != TriggerRelations::kAlertRed);
     CHECK(player.inf.was_hit);
     CHECK(player.inf.last_attacker == shooter_h);
 }
@@ -979,11 +979,11 @@ static void test_mounted_gunner_acquires_and_fires() {
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
     w->registry.spawn(1, gun);
-    w->weapons.entries.resize(2);
-    w->weapons.entries[1].name.assign(1, 'x');
-    w->weapons.entries[1].ammo_index = 1;
-    w->weapons.entries[1].valid = true;
-    configure_test_emplacement_weapon(w->weapons.entries[1]);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
@@ -1012,7 +1012,7 @@ static void test_mounted_gunner_acquires_and_fires() {
         //  @0x526786, Weapon_UpdateAllProjectiles @0x4ec020]
         w->run_logic_tick(true);
         acquired = acquired || npc.inf.combat_target == enemy_h;
-        fired = fired || w->rounds.count > 0;
+        fired = fired || w->out.rounds.count > 0;
     }
     CHECK(acquired);
     CHECK(fired);
@@ -1026,7 +1026,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 static void test_water_crossing_fires_once_on_entry() {
     World w;
     w.env.water_z = to_fixed(12.0);
-    WaterCrossQueue &q = w.water_crossings;
+    WaterCrossQueue &q = w.out.water_crossings;
     CHECK(q.events.empty());
 
     // Entering: below the plane with the latch clear -> exactly one record.
@@ -1074,24 +1074,24 @@ static void test_infantry_floats_and_splashes_once() {
     // is the assertion a naive `z < water` port fails.
     npc.pos[2] = w->env.water_z - to_fixed(0.3);
     ai.infantry_water_block(npc, *w, ent, 0, 1);
-    CHECK(w->water_crossings.events.empty());
+    CHECK(w->out.water_crossings.events.empty());
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Past the gap, walking (not airborne): one crossing, carrying the wade sound.
     npc.pos[2] = w->env.water_z - to_fixed(1.0);
     const int32_t sank_to = npc.pos[2];
     ai.infantry_water_block(npc, *w, ent, 0, 1);
-    CHECK(w->water_crossings.events.size() == 1);
-    CHECK(!w->water_crossings.events[0].airborne);
-    CHECK(w->water_crossings.events[0].water_z == w->env.water_z);
+    CHECK(w->out.water_crossings.events.size() == 1);
+    CHECK(!w->out.water_crossings.events[0].airborne);
+    CHECK(w->out.water_crossings.events[0].water_z == w->env.water_z);
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
     // He is being lifted toward the surface, not left on the riverbed.
     CHECK(npc.pos[2] > sank_to);
 
     // Still under, still latched: the host drained the queue and nothing refills it.
-    w->water_crossings.clear();
+    w->out.water_crossings.clear();
     for (int i = 0; i < 8; ++i) ai.infantry_water_block(npc, *w, ent, 0, 2 + i);
-    CHECK(w->water_crossings.events.empty());
+    CHECK(w->out.water_crossings.events.empty());
     // Eight quarter-steps land him at the plane, within the bob's own amplitude.
     const int32_t settled = npc.pos[2] - w->env.water_z;
     CHECK(settled < 0 && settled > -to_fixed(1.0));
@@ -1108,8 +1108,8 @@ static void test_infantry_floats_and_splashes_once() {
     ent->flags |= kEntityFlagInAir;
     npc.pos[2] = w->env.water_z - to_fixed(1.0);
     ai.infantry_water_block(npc, *w, ent, 0, 21);
-    CHECK(w->water_crossings.events.size() == 1);
-    CHECK(w->water_crossings.events[0].airborne);
+    CHECK(w->out.water_crossings.events.size() == 1);
+    CHECK(w->out.water_crossings.events[0].airborne);
     // Landing in water ends the fall: retail clears 0x2000 with the same store
     // that sets the float latch.
     CHECK((ent->flags & kEntityFlagInAir) == 0);
@@ -1140,11 +1140,11 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
     w->registry.spawn(1, gun);
-    w->weapons.entries.resize(2);
-    w->weapons.entries[1].name.assign(1, 'x');
-    w->weapons.entries[1].ammo_index = 1;
-    w->weapons.entries[1].valid = true;
-    configure_test_emplacement_weapon(w->weapons.entries[1]);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
@@ -1170,7 +1170,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     Entity *gun_live = w->registry.get(w->registry.find_by_net_id(0x31));
     CHECK(gun_live != nullptr);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
-    CHECK(w->rounds.count == 0);
+    CHECK(w->out.rounds.count == 0);
     // The emplacement's def authors weapon userpoints (attrib 0x20 + a resolved
     // slot-0 fire byte); the provider returns the posed point and the barrel
     // bone's euler, which the round leaves along.
@@ -1187,35 +1187,35 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     // may take ownership.
     w->cached.local_player = npc_h;
     ai.pump_mounted_weapon_slots(*w, 0);
-    CHECK(w->rounds.count == 1);
-    CHECK(w->rounds.records[0].shooter_handle == npc_h.packed);
-    CHECK(w->rounds.records[0].origin_x == 0x12345);
-    CHECK(w->rounds.records[0].origin_y == -0x23456);
-    CHECK(w->rounds.records[0].origin_z == 0x34567);
-    CHECK(w->rounds.records[0].dir_yaw == 0x40000000);
-    CHECK(w->rounds.records[0].dir_pitch == static_cast<int32_t>(0xFF000000u));
+    CHECK(w->out.rounds.count == 1);
+    CHECK(w->out.rounds.records[0].shooter_handle == npc_h.packed);
+    CHECK(w->out.rounds.records[0].origin_x == 0x12345);
+    CHECK(w->out.rounds.records[0].origin_y == -0x23456);
+    CHECK(w->out.rounds.records[0].origin_z == 0x34567);
+    CHECK(w->out.rounds.records[0].dir_yaw == 0x40000000);
+    CHECK(w->out.rounds.records[0].dir_pitch == static_cast<int32_t>(0xFF000000u));
     CHECK(gun_live->primary_weapon_slot.current == weapon_action::kFire);
     const int32_t busy_next = gun_live->primary_weapon_slot.next;
     ai.infantry_mounted_fire_pass(npc, *w, 4, 4);
     CHECK(gun_live->primary_weapon_slot.next == busy_next);
-    CHECK(w->rounds.count == 1);
+    CHECK(w->out.rounds.count == 1);
 
     // The four-tick gate is followed by a spatial stagger. Whole-unit positions
     // leave bit 0x40 to the stagger key here, so key 64 suppresses the request.
     // [orig: Entity_UpdateInfantryAI @0x4bf4e3..0x4bf4ee]
     w->registry.get(target_h)->position.z = 0.0f;
-    const int before = w->rounds.count;
+    const int before = w->out.rounds.count;
     gun_live->primary_weapon_slot = WeaponSlotState{};
     ai.infantry_mounted_fire_pass(npc, *w, 64, 64);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kIdle);
     ai.pump_mounted_weapon_slots(*w, 64);
-    CHECK(w->rounds.count == before);
+    CHECK(w->out.rounds.count == before);
 
     gun_live->primary_weapon_slot = WeaponSlotState{};
     gun_live->primary_weapon_slot.next = weapon_action::kFire;
-    w->external_local_mounted_weapon_pump = true;
+    w->rules.external_local_mounted_weapon_pump = true;
     ai.pump_mounted_weapon_slots(*w, 68);
-    CHECK(w->rounds.count == before);
+    CHECK(w->out.rounds.count == before);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
 }
 
@@ -1243,11 +1243,11 @@ static void test_mounted_look_traverses_before_fire_request() {
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
     const EntityHandle gun_h = w->registry.spawn(1, gun);
-    w->weapons.entries.resize(2);
-    w->weapons.entries[1].name.assign(1, 'x');
-    w->weapons.entries[1].ammo_index = 1;
-    w->weapons.entries[1].valid = true;
-    configure_test_emplacement_weapon(w->weapons.entries[1]);
+    w->tables.weapons.entries.resize(2);
+    w->tables.weapons.entries[1].name.assign(1, 'x');
+    w->tables.weapons.entries[1].ammo_index = 1;
+    w->tables.weapons.entries[1].valid = true;
+    configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
@@ -1399,7 +1399,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
             "begin \"SP_JoinerTruck\"\n"
             "  Soundloop_1 V_TRUCK_ILP .8 1.2\n"
             "end\n";
-    CHECK(w->sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1);
+    CHECK(w->tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1);
 
     Entity npc{};
     npc.kind = EntityKind::Organic;
@@ -1428,7 +1428,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     traits.player_speed = 94 * 293;
     traits.player_control = true;
     traits.sound_profile = "SP_JoinerTruck";
-    w->vehicle_traits.set(vehicle.item_id, traits);
+    w->tables.vehicle_traits.set(vehicle.item_id, traits);
 
     AiSystem &ai = w->ai;
     w->add_system(&ai);
@@ -1444,9 +1444,9 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     CHECK(after->position.z == before.z);
     CHECK(after->yaw == yaw_before);
 
-    CHECK(w->sound_emitters.size() == 1);
-    if (w->sound_emitters.size() == 1) {
-        const SoundEmitterEvent &idle = w->sound_emitters[0];
+    CHECK(w->out.sound_emitters.size() == 1);
+    if (w->out.sound_emitters.size() == 1) {
+        const SoundEmitterEvent &idle = w->out.sound_emitters[0];
         CHECK(idle.source_spawn_id == after->registry_spawn_id);
         CHECK(idle.source_handle == vehicle_h.packed);
         CHECK(idle.pos.x == before.x);
@@ -1464,18 +1464,18 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     // trusting a non-null replicated handle forever. A stale claimant may keep
     // moving a residual lane's source anchor during its original lifetime, but
     // it must not refresh the idle registration indefinitely.
-    w->sound_emitters.clear();
+    w->out.sound_emitters.clear();
     npc_live->mounted = false;
     w->run_logic_tick(false);
-    CHECK(w->sound_emitters.size() == 1);
-    if (w->sound_emitters.size() == 1) {
-        CHECK(w->sound_emitters[0].source_only);
+    CHECK(w->out.sound_emitters.size() == 1);
+    if (w->out.sound_emitters.size() == 1) {
+        CHECK(w->out.sound_emitters[0].source_only);
     }
     for (int i = 0; i < 30; ++i) {
-        w->sound_emitters.clear();
+        w->out.sound_emitters.clear();
         w->run_logic_tick(false);
     }
-    CHECK(w->sound_emitters.empty());
+    CHECK(w->out.sound_emitters.empty());
 }
 
 int main() {
@@ -1902,8 +1902,8 @@ int main() {
         CHECK(sys.relmat_calls[1].which == 0);                    // SetBitA second
         CHECK(sys.relmat_calls[1].key == 9);                      // SSN / SetBitA key
         CHECK(sys.relmat_calls[0].channel == 1 && sys.relmat_calls[0].node == 0);
-        CHECK(w.relations.group_visited(4, 1, 0));
-        CHECK(w.relations.single_visited(9, 1, 0));
+        CHECK(w.script.relations.group_visited(4, 1, 0));
+        CHECK(w.script.relations.single_visited(9, 1, 0));
         // working transform from the resolved node; out-speed halved (timeDelta<step*speed).
         CHECK(e.brain.f[AiBrain::kWorkPosX] == 500);
         CHECK(e.brain.f[AiBrain::kWorkPosY] == 600);
@@ -2335,7 +2335,7 @@ int main() {
             // The MP rules bit excludes the LOCAL player from that leg
             // [orig: dword_24C1930 & 0x800 @0x467155].
             w.cached.local_player = EntityHandle::make(0, 1);
-            w.ai_rules_skip_local_player = true;
+            w.rules.ai_rules_skip_local_player = true;
             AiTarget out2{};
             CHECK(sys.acquire_target(w, e, out2) == false);
         }
@@ -2569,8 +2569,8 @@ int main() {
         CHECK(e.brain.f[AiBrain::kOutSpeed] != 10);      // mover did NOT run (no walk)
         // D-AI-3 closed: the engage APPLIED the sees+targeted quads (keys: group/SSN).
         const Entity *self_e = w.registry.get(self_h);
-        CHECK(w.relations.single_single(TriggerRelations::kSees, self_e->net_id, 0x77));
-        CHECK(w.relations.single_single(TriggerRelations::kTargeted, self_e->net_id, 0x77));
+        CHECK(w.script.relations.single_single(TriggerRelations::kSees, self_e->net_id, 0x77));
+        CHECK(w.script.relations.single_single(TriggerRelations::kTargeted, self_e->net_id, 0x77));
         // Entity_SetAITarget maintained the target's +530 refcount.
         CHECK(w.registry.get(enemy_h)->ai_target_refcount == 1);
     }
@@ -2743,14 +2743,14 @@ int main() {
         w.registry.configure_pool(1, 8);
         // One rifle round in the ammo table (index 0 is the null entry by convention;
         // use index 1). Velocity 800 u/s, heavy enough to kill in a few hits.
-        w.ammo.entries.resize(2);
-        w.ammo.entries[1].name = "AMMO_TEST_556";
-        w.ammo.entries[1].velocity = 800;
-        w.ammo.entries[1].max_age_ticks = 124;
-        w.ammo.entries[1].weight_in_grains = 875; // damage = speed_scaled (clamped 1219)
-        w.ammo.entries[1].min_damage = 10;
-        w.ammo.entries[1].max_damage = 40;
-        w.ammo.entries[1].valid = true;
+        w.tables.ammo.entries.resize(2);
+        w.tables.ammo.entries[1].name = "AMMO_TEST_556";
+        w.tables.ammo.entries[1].velocity = 800;
+        w.tables.ammo.entries[1].max_age_ticks = 124;
+        w.tables.ammo.entries[1].weight_in_grains = 875; // damage = speed_scaled (clamped 1219)
+        w.tables.ammo.entries[1].min_damage = 10;
+        w.tables.ammo.entries[1].max_damage = 40;
+        w.tables.ammo.entries[1].valid = true;
 
         // The player: pool 0, team 2, 20 u east of the NPC, at ground height 0.
         Entity player_seed;
@@ -2794,7 +2794,7 @@ int main() {
         npc.team = 1;
         npc.net_id = 0x11;
         npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
-        npc.profile.ammo_primary = 1;          // -> w.ammo[1]
+        npc.profile.ammo_primary = 1;          // -> w.tables.ammo[1]
         npc.profile.clip_size = 30;
         npc.inf.magazine = 30;
         npc.slot.f[10] = 0;                    // perfect accuracy (w_accuracy 100)
@@ -2813,7 +2813,7 @@ int main() {
             sys.tick(w, tctx);
             w.round_sim.tick(w, nullptr, nullptr);
             if (npc.inf.combat_target == player_h) acquired = true;
-            if (w.rounds.count > 0) fired = true;
+            if (w.out.rounds.count > 0) fired = true;
             for (const RoundDeath &d : w.round_sim.deaths)
                 if (d.victim == player_h && d.killer == npc_h) killed = true;
         }
@@ -2824,9 +2824,9 @@ int main() {
         CHECK(w.registry.get(player_h)->health <= 0);
         // The engagement left the witnessed side effects: the sees+targeted quads
         // (group/SSN keys) and the shooter's priority mark from firing.
-        CHECK(w.relations.single_single(TriggerRelations::kSees, 0x11, 0x21));
-        CHECK(w.relations.single_single(TriggerRelations::kTargeted, 0x11, 0x21));
-        CHECK(w.relations.group_group(TriggerRelations::kSees, 1, 2));
+        CHECK(w.script.relations.single_single(TriggerRelations::kSees, 0x11, 0x21));
+        CHECK(w.script.relations.single_single(TriggerRelations::kTargeted, 0x11, 0x21));
+        CHECK(w.script.relations.group_group(TriggerRelations::kSees, 1, 2));
         CHECK((w.registry.get(npc_h)->engine_flags & 0x4000u) != 0);
         // The kill staged the bullet death-anim selection on the victim at damage
         // time: torso group (the bone stand-in, D-AI-9) = 184..187 by quadrant, and
@@ -2834,7 +2834,7 @@ int main() {
         // @0x407478/@0x4073ea; world-wac-ai-re §19]
         const int sel = w.registry.get(player_h)->death_anim_state;
         CHECK(sel >= 184 && sel <= 187);
-        CHECK(w.relations.group(2).alert == TriggerRelations::kAlertRed);
+        CHECK(w.script.relations.group(2).alert == TriggerRelations::kAlertRed);
     }
 
     test_vehicle_death_rows();

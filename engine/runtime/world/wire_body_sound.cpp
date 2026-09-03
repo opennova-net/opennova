@@ -21,10 +21,10 @@ void wire_body_slot_sounds(World &world, const uint32_t *words, int count,
     // primary profile. [orig: Entity_GetProfileSlotSound @0x528300, the
     // female byte @0x52831c — player-only, D-SND-12]
     const bool female =
-            character_id != 0 && world.character_traits.is_female(character_id);
+            character_id != 0 && world.tables.character_traits.is_female(character_id);
     const auto emit = [&](int slot, const int32_t pos[3]) {
         const std::string *set = audio::organic_slot_set(
-                world.sound_profiles, world.organic_sound_profiles,
+                world.tables.sound_profiles, world.tables.organic_sound_profiles,
                 item_id, female, slot);
         if (set == nullptr) return; // the resolved-id-0 no-op
         SoundSlotEvent sev;
@@ -34,7 +34,7 @@ void wire_body_slot_sounds(World &world, const uint32_t *words, int count,
         sev.pos[2] = pos[2];
         sev.slot = static_cast<uint8_t>(slot);
         std::snprintf(sev.set_name, sizeof(sev.set_name), "%s", set->c_str());
-        world.slot_sounds.push_back(sev);
+        world.out.slot_sounds.push_back(sev);
     };
     for (int i = 0; i < count; ++i) {
         const uint32_t ev = words[i];
@@ -54,7 +54,7 @@ void wire_body_slot_sounds(World &world, const uint32_t *words, int count,
             const int32_t pos[3] = {body[0], body[1], body[2] - capsule_bottom};
             const int slot = audio::footstep_slot(
                     pos[2], world.env.water_z, on_entity,
-                    terrain::surface_type_at_fixed(world.surface_map, pos[0],
+                    terrain::surface_type_at_fixed(world.tables.surface_map, pos[0],
                                                    pos[1]),
                     foot);
             emit(slot, pos);

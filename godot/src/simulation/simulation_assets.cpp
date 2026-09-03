@@ -125,7 +125,7 @@ void Simulation::sync_class_attribute_flags() {
 			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
 	const opennova::inmatch::CharAttrChallengeTable &table =
 			live != nullptr ? *live : charattr_challenge_table_;
-	kernel_->world.class_attribute_flags =
+	kernel_->world.tables.class_attribute_flags =
 			opennova::inmatch::charattr_class_attribute_rows(table);
 }
 

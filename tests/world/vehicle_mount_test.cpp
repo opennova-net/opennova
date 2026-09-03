@@ -921,10 +921,10 @@ void test_bms_mount_predicates() {
     gun.health = 500;
     gun.alive = true;
     gun.primary_weapon.assign(1, 'x');
-    r.w.weapons.entries.resize(2);
-    r.w.weapons.entries[1].name.assign(1, 'x');
-    r.w.weapons.entries[1].clipsize = -1;
-    r.w.weapons.entries[1].valid = true;
+    r.w.tables.weapons.entries.resize(2);
+    r.w.tables.weapons.entries[1].name.assign(1, 'x');
+    r.w.tables.weapons.entries[1].clipsize = -1;
+    r.w.tables.weapons.entries[1].valid = true;
     r.player().equipped_adm_index = 7;
     r.player().flags |= 0x100u;
     r.player().engine_flags |= 0x100u;
@@ -1029,8 +1029,8 @@ void test_mounted_ammo_slot_route() {
 
 void test_prepare_vehicle_weapon_slot_after_armory_load() {
     World w;
-    w.weapons.entries.resize(4);
-    WeaponTableEntry &weapon = w.weapons.entries[3];
+    w.tables.weapons.entries.resize(4);
+    WeaponTableEntry &weapon = w.tables.weapons.entries[3];
     weapon.name = "WPN_LATE_MOUNT";
     weapon.clipsize = 12;
     weapon.startrounds = 41;
@@ -1066,7 +1066,7 @@ void test_host_crewed_helicopter_rotor_turns() {
     VehicleTraits t = truck_traits();
     t.family = VehicleFamily::Helicopter;
     t.physics = 0; // a CHel def: no ground selector, no ground mover
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
     r.sys.at(ai_idx)->profile.type = 1; // the helo profile class
     CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
@@ -1092,7 +1092,7 @@ void test_host_crewed_helicopter_rotor_turns() {
 void test_ai_drive_leg() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
 
     // Brain for the truck with a live nav waypoint straight ahead (+x).
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -1185,7 +1185,7 @@ void test_ai_drive_leg() {
 void test_ai_drive_avoid_brake() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
     ve.pos[0] = 100 << 16;
@@ -1262,7 +1262,7 @@ void test_ai_drive_avoid_brake() {
 void test_stuck_check() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     r.sys.is_authority = true;
     r.sys.attach(r.veh_h);
     r.veh().spawn_position = Vec3{0.0f, 0.0f, 10.0f}; // 100+ u from the hull
@@ -1296,7 +1296,7 @@ void test_stuck_check() {
     // A hull still AT its spawn anchor is never written off, and a live body
     // nearby resets the count entirely.
     Rig r2(2.0f); // the player 2 u away: inside the reset reach
-    r2.w.vehicle_traits.set(r2.veh().item_id, t);
+    r2.w.tables.vehicle_traits.set(r2.veh().item_id, t);
     r2.sys.is_authority = true;
     r2.sys.attach(r2.veh_h);
     r2.player().has_item_def = true; // [orig: the walk's entity[7] gate]
@@ -1349,7 +1349,7 @@ void test_min_ai_crew_clamp() {
     VehicleTraits t = truck_traits();
     t.min_ai = 2;
     t.critical_hp = 300;
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     r.sys.attach(r.veh_h);
     r.veh().spawn_position = r.veh().position;
     Entity npc;
@@ -1416,7 +1416,7 @@ void test_handbrake_latch() {
     Rig r(2.0f);
     VehicleTraits t = truck_traits();
     t.hand_brake = 1;
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
     Entity &drv = r.player();
     drv.net_move_input = 0x08; // moving forward
@@ -1459,7 +1459,7 @@ void test_handbrake_latch() {
 void test_ground_waits_for_boarders() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
     r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.for_handle(r.veh_h);
     ve.brain.f[AiBrain::kOutSpeed] = 40 * 293;
@@ -1515,7 +1515,7 @@ struct HeloRig {
         field.layout.sector_grid = sector_grid.data();
         field.layout.origin_x = 0;
         field.layout.origin_y = 0;
-        r.w.terrain = &field;
+        r.w.tables.terrain = &field;
         t = truck_traits();
         t.family = VehicleFamily::Helicopter;
         t.physics = 0;
@@ -1525,7 +1525,7 @@ struct HeloRig {
         t.critical_hp = 300;
         t.critical_drain = 40;
         t.non_critical_regen = 10;
-        r.w.vehicle_traits.set(r.veh().item_id, t);
+        r.w.tables.vehicle_traits.set(r.veh().item_id, t);
         r.sys.is_authority = true;
         const int ai_idx = r.sys.attach(r.veh_h);
         ve = r.sys.at(ai_idx);
@@ -1734,7 +1734,7 @@ void test_redirect_and_speed_commands() {
 void test_local_player_drive_mirror() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
 
     // The local player as an infantry-active AI entity in the ctrl seat.
     const int ai_idx = r.sys.attach(r.player_h);
@@ -1967,7 +1967,7 @@ void test_vehicle_hull_stops_at_building() {
     Rig r(30.0f);
     VehicleTraits t = truck_traits();
     t.torque = 2; // sev-3 decay = speed - (speed >> 4) per contact tick
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
 
     CollisionWorld cw;
     r.sys.collision = &cw;

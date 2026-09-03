@@ -148,7 +148,7 @@ public:
 	// The retail weather tick after the logic tick [orig:
 	// Environment_UpdateWeatherTick @ 0x57e9b0 from Game_ProcessMainFrame
 	// @ 0x526774, after Entity_UpdateAllEntities @ 0x52674b]: the world's sim
-	// legs, the thunder one-shots into world.weather_sounds, the local quake
+	// legs, the thunder one-shots into world.out.weather_sounds, the local quake
 	// shake arm, then the installed render owner's color legs. Every embedder
 	// tick (the no-net tick, the listen frame, the joiner frame, the dedicated
 	// host) runs this once per 62.5 Hz quantum.
@@ -234,14 +234,14 @@ public:
 	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
 			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
-	// The armory table (weapon.def -> world.weapons + the retained rows), the
+	// The armory table (weapon.def -> world.tables.weapons + the retained rows), the
 	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
 	// load_weapon_table step over an explicit source so the embedder's
 	// table-feed seam shares the one body. `index` resolves texture/model
 	// references (null = the kernel's own asset index).
 	bool load_weapon_table(const BootFileSource &files, const ResourceIndex *index,
 			const std::string &name = "weapon.def");
-	// ammo.def -> world.ammo + the weapon round_type resolve.
+	// ammo.def -> world.tables.ammo + the weapon round_type resolve.
 	bool load_ammo_table(const BootFileSource &files,
 			const std::string &name = "ammo.def");
 	// The infantry clip set (.adm -> .bad root-motion tracks): clear + register

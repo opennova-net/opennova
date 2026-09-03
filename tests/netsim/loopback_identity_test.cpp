@@ -1241,7 +1241,7 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	FlatTerrain terrain;
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.terrain = &terrain.field;
+	world.tables.terrain = &terrain.field;
 	w::AiSystem &ai = world.ai;
 	ai.terrain = &terrain.field;
 	world.add_system(&ai);

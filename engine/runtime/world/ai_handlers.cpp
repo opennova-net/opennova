@@ -257,7 +257,7 @@ void h_enter_ground_combat(AiThinkCtx &ctx) {
     b.f[AiBrain::kPrevAlert] = 2;
     if (ctx.world != nullptr) {
         if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
     } else {
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
@@ -278,7 +278,7 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
     b.f[AiBrain::kPrevAlert] = 2;
     if (ctx.world != nullptr) {
         if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
     } else {
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
@@ -597,7 +597,7 @@ void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
     b.f[AiBrain::kPrevAlert] = 2;
     if (ctx.world != nullptr) {
         if (const Entity *se = ctx.world->registry.get(e.handle))
-            ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
+            ctx.world->script.relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
     } else {
         e.slot.bytes()[AiSlot::kAlertByte] = 2;

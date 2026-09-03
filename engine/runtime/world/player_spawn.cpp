@@ -27,8 +27,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // denominator reads the spawn value (full => tier 2 => the golden 0x28) even for a joiner
     // spawning AFTER the mission-load sweep. (D-NET-144)
     const int32_t hp = retail_signed_i16(
-        (world.player_has_item_def && world.player_item_hp != 0)
-            ? world.player_item_hp
+        (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
+            ? world.tables.player.item_hp
             : static_cast<int32_t>(spawn.health));
 
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
@@ -46,15 +46,15 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
-    seed.has_item_def = world.player_has_item_def;
-    seed.item_type = world.player_item_type;
-    seed.item_attrib = world.player_item_attrib;
-    seed.armor_impact = retail_signed_i16(world.player_armor_impact);
-    seed.armor_kz = retail_signed_i16(world.player_armor_kz);
-    seed.damage_reduc_pp = world.player_damage_reduc_pp;
-    seed.damage_reduc_max = world.player_damage_reduc_max;
-    seed.radar_sig = world.player_radar_sig; // AI engage caps [orig: @0x40e136]
-    seed.heat_sig = world.player_heat_sig;
+    seed.has_item_def = world.tables.player.has_item_def;
+    seed.item_type = world.tables.player.item_type;
+    seed.item_attrib = world.tables.player.item_attrib;
+    seed.armor_impact = retail_signed_i16(world.tables.player.armor_impact);
+    seed.armor_kz = retail_signed_i16(world.tables.player.armor_kz);
+    seed.damage_reduc_pp = world.tables.player.damage_reduc_pp;
+    seed.damage_reduc_max = world.tables.player.damage_reduc_max;
+    seed.radar_sig = world.tables.player.radar_sig; // AI engage caps [orig: @0x40e136]
+    seed.heat_sig = world.tables.player.heat_sig;
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;

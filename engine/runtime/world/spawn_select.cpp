@@ -307,7 +307,7 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world) {
             // key = typePriority<<16 | (unitType & 0xFF)<<8 | zone# & 0x1F
             // [orig: @0x43ec9b — ItemDef.type 1 (vehicle) -> 2, 32 -> 1, else 0]
             const int type_priority = e.item_type == 1 ? 2 : (e.item_type == 32 ? 1 : 0);
-            const ItemDeathTraits *traits = world.item_death_traits.get(e.item_id);
+            const ItemDeathTraits *traits = world.tables.item_death_traits.get(e.item_id);
             const uint8_t unit_type =
                     traits ? static_cast<uint8_t>(traits->unit_type) : 0;
             row.key = (type_priority << 16) | (unit_type << 8) | (e.zone_number & 0x1F);

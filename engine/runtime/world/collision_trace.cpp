@@ -787,7 +787,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     // second native representation. Pool-2 statics come from exact S2C 0x10
     // materialization. Remote pool-0 organics remain ClientState proxies; the
     // local player L is the one live native person.
-    const bool wire_projected = world.mp_session && !world.projectile_authority;
+    const bool wire_projected = world.rules.mp_session && !world.rules.projectile_authority;
 
     if (profile_trace) {
         const int64_t prof_n = prof_now();
@@ -941,7 +941,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     constexpr int32_t kOrganicCenterZQ16 = 58982;
     int32_t effective_radius = std::max(trace.radius_q16, 0);
     const bool authority_fat_bullet =
-        world.mp_session && world.projectile_authority && world.fat_bullets &&
+        world.rules.mp_session && world.rules.projectile_authority && world.rules.fat_bullets &&
         owner != nullptr && (owner->flags & kEntityFlagPlayer) != 0 &&
         trace.owner != world.cached.local_player;
     if (authority_fat_bullet)

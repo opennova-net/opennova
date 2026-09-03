@@ -18,7 +18,7 @@ std::vector<LoadoutSubmitEntry> resolve_side(const world::World &world,
 	const playersav::KitPage *p = s.page_for_class(klass);
 	if (p == nullptr) return rows;
 	for (const playersav::KitEntry &entry : p->entries) {
-		const int adm = world.weapons.index_of(entry.name.c_str());
+		const int adm = world.tables.weapons.index_of(entry.name.c_str());
 		if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
 		rows.push_back(LoadoutSubmitEntry{
 				static_cast<uint8_t>(adm),
@@ -40,7 +40,7 @@ uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team) {
 bool seed_session_kit_from_profile(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
-	if (world.weapons.empty()) return false;
+	if (world.tables.weapons.empty()) return false;
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	// An UNLATCHED team must not commit a page. The side selector is the S2C 0x04 tail
 	// byte [orig: byte_A85B48 @0x425499], and retail cannot reach this copy before it is
@@ -140,7 +140,7 @@ void build_joiner_loadout_kit(const world::World &world,
 	// [orig: Game_StartMission @0x525c2e; NetPacket_SendLoadoutSubmit
 	// @0x42ce2d..0x42ce8b].
 	out.equipped_combo = resolve_loadout_submit_combo(
-			world.weapons, inventory, team, equipped_combo);
+			world.tables.weapons, inventory, team, equipped_combo);
 	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
 	// page. Retail has exactly ONE buffer: Game_StartMission copies the profile page
 	// into restrictionData, Player_InitPlayer builds the local display list from that
@@ -156,7 +156,7 @@ void build_joiner_loadout_kit(const world::World &world,
 				loadout.spawn_kit_set ? loadout.spawn_kit
 				                      : world::weapon_kit_default();
 		for (const world::WeaponKitEntry &entry : resident) {
-			const int adm = world.weapons.index_of(entry.name.c_str());
+			const int adm = world.tables.weapons.index_of(entry.name.c_str());
 			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
 			out.rows.push_back(LoadoutSubmitEntry{
 					static_cast<uint8_t>(adm),

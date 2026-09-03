@@ -173,7 +173,7 @@ bool run_death_feed_classifier_matrix() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 
 	w::Entity attacker_seed;
 	attacker_seed.kind = w::EntityKind::Organic;
@@ -199,11 +199,11 @@ bool run_death_feed_classifier_matrix() {
 	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
 	if (!expect(flag.valid(), "death classifier fixture flag spawned")) return false;
 
-	world.ammo.entries.resize(2);
-	world.ammo.entries[0].valid = true;
-	world.ammo.entries[0].name = "AMMO_TEST_RIFLE";
-	world.ammo.entries[1].valid = true;
-	world.ammo.entries[1].name = "AMMO_60MM_MORTAR";
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].name = "AMMO_TEST_RIFLE";
+	world.tables.ammo.entries[1].valid = true;
+	world.tables.ammo.entries[1].name = "AMMO_60MM_MORTAR";
 
 	ns::LoopbackChannel host;
 	ns::UdpSessionTransport victim_wire(ns::UdpSessionTransport::Role::Host);
@@ -484,16 +484,16 @@ bool test_spawn_spread_then_recoil() {
 	            "spread/recoil integration player spawned"))
 		return false;
 
-	world.ammo.entries.resize(1);
-	w::AmmoTableEntry &ammo = world.ammo.entries[0];
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
 	ammo.valid = true;
 	ammo.velocity = 620;
 	ammo.max_age_ticks = 100;
 	ammo.recoil[0] = 1;
 	ammo.recoil[1] = 2;
 	ammo.recoil[2] = 3;
-	world.weapons.entries.resize(2);
-	w::WeaponTableEntry &weapon = world.weapons.entries[1];
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
 	weapon.valid = true;
 	weapon.error_fp16[2] = 0x10000;
 
@@ -612,7 +612,7 @@ struct DismembermentRig {
 
 	explicit DismembermentRig(size_t pool_capacity, uint32_t victim_attrib = 0) {
 		world.registry.configure_pool(0, pool_capacity);
-		world.projectile_authority = true;
+		world.rules.projectile_authority = true;
 
 		w::Entity shooter_seed;
 		shooter_seed.kind = w::EntityKind::Organic;
@@ -677,7 +677,7 @@ struct DismembermentRig {
 		ammo.max_damage = 10;
 		ammo.max_age_ticks = 8;
 		ammo.flags = w::kAmmoFlagNoGravity;
-		world.ammo.entries.push_back(ammo);
+		world.tables.ammo.entries.push_back(ammo);
 	}
 
 	void fire() {
@@ -828,7 +828,7 @@ int main() {
 	DeathAnimSource death_clips;
 	ai.is_authority = true;
 	ai.root_motion = &death_clips;
-	world.player_item_hp = 150; // items.def Player hp (D-NET-144)
+	world.tables.player.item_hp = 150; // items.def Player hp (D-NET-144)
 
 	// Host player down-range past the victim on the same +X line; shooter at the origin.
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0, 60.0f, 0.0f, 10.0f));
@@ -851,9 +851,9 @@ int main() {
 	// Armory: adm 5 = a rifle firing TEST_556. Ammo table via the real builder — entry 0
 	// is the file-order null, entry 1 the live round (854 u/s, 62 grains, 3 s, C4 kz —
 	// the real 5.56 shape).
-	world.weapons.entries.resize(8);
+	world.tables.weapons.entries.resize(8);
 	{
-		w::WeaponTableEntry &rifle = world.weapons.entries[5];
+		w::WeaponTableEntry &rifle = world.tables.weapons.entries[5];
 		rifle.name = "WPN_TESTRIFLE";
 		rifle.category = 3;
 		rifle.rank = 2;
@@ -901,17 +901,17 @@ int main() {
 		defs[1].effects_table_count = 4;
 		file.entries = defs;
 		file.count = 2;
-		world.ammo = world::build_ammo_table(file);
+		world.tables.ammo = world::build_ammo_table(file);
 		defs[1].effects_table = nullptr; // static rows; keep def_free-style cleanup moot
 		defs[1].effects_table_count = 0;
-		world::resolve_weapon_round_types(world.weapons, world.ammo);
+		world::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
 	}
-	if (!expect(world.weapons.entries[5].ammo_index == 1, "round_type resolved to ammo 1"))
+	if (!expect(world.tables.weapons.entries[5].ammo_index == 1, "round_type resolved to ammo 1"))
 		return 1;
 	{
 		// The baked rows land in the canonical tag slots [orig: g_AmmoEffectTagTable
 		// @ 0x813420 — player=2, dirt=5, zip=3].
-		const w::AmmoTableEntry *a = world.ammo.by_index(1);
+		const w::AmmoTableEntry *a = world.tables.ammo.by_index(1);
 		if (!expect(a != nullptr, "ammo 1 valid")) return 1;
 		if (!expect(a->drag_fp16 == 65536 && a->min_stable_velocity == 101 &&
 		                    a->tumble_error_fp16 == 655 && a->bullet_radius_fp16 == 182,
@@ -933,8 +933,8 @@ int main() {
 			return 1;
 		// This integration scenario isolates the existing fire/hit/death chain;
 		// aerodynamic drag itself is pinned by projectile_combat_test's exact vectors.
-		world.ammo.entries[1].drag = 0.0f;
-		world.ammo.entries[1].drag_fp16 = 0;
+		world.tables.ammo.entries[1].drag = 0.0f;
+		world.tables.ammo.entries[1].drag_fp16 = 0;
 	}
 
 	ns::LoopbackChannel loop;
@@ -954,7 +954,7 @@ int main() {
 	// This scenario is an MP session (three players over transports): stamp the
 	// world-side flag too, or the SP-only round-outcome legs (kill tallies + the
 	// death auto-lose in check_win_conditions) run and hold the respawn queue.
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
 	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
@@ -978,7 +978,7 @@ int main() {
 	world.registry.get(ha)->player_class = 7;
 	world.registry.get(hb)->player_class = 8;
 	world.registry.get(hc)->player_class = 7;
-	world.class_attribute_flags[(8u - 1u) & 0xFu] |= w::World::kCharAttrMedic;
+	world.tables.class_attribute_flags[(8u - 1u) & 0xFu] |= w::MissionTables::kCharAttrMedic;
 	// Both decoded views know the victim's roster binding before the live 0x54
 	// edge arrives, matching the retail join-time 0x46 roster walk.
 	PlayerReplicationState victim_rep;
@@ -1112,7 +1112,7 @@ int main() {
 		const w::Entity *sh = world.registry.get(hb);
 		const w::Entity *vic = world.registry.get(hc);
 		const bool in_range = sh->net_id < 128 && vic->net_id < 128;
-		if (!expect(world.relations.single_single(w::TriggerRelations::kShot,
+		if (!expect(world.script.relations.single_single(w::TriggerRelations::kShot,
 		            sh->net_id, vic->net_id) == in_range,
 		            "shot S->S written on processed damage iff rows pass the <0x80 guard"))
 			return 1;
@@ -1318,7 +1318,7 @@ int main() {
 		drain_all(udp_b);
 		drain_all(udp_c);
 		drain_all(loop);
-		world.slot_sounds.clear();
+		world.out.slot_sounds.clear();
 		const std::vector<ProtocolMessage> own = send_medic_request(roster[2]);
 		const Drained medic = drain_all(udp_b);
 		const Drained host_side = drain_all(loop);
@@ -1341,9 +1341,9 @@ int main() {
 		                            medic.tag(0x34)[0].data()) + 1) == "BM1_MEDIC_REQUEST",
 		            "alive players receive the positioned MEDIC_REQUEST composite (0x34)"))
 			return 1;
-		if (!expect(host_side.tag(0x34).empty() && world.slot_sounds.size() == 1 &&
-		                    std::string(world.slot_sounds[0].set_name) == "BM1_MEDIC_REQUEST" &&
-		                    world.slot_sounds[0].source_handle == hc.packed,
+		if (!expect(host_side.tag(0x34).empty() && world.out.slot_sounds.size() == 1 &&
+		                    std::string(world.out.slot_sounds[0].set_name) == "BM1_MEDIC_REQUEST" &&
+		                    world.out.slot_sounds[0].source_handle == hc.packed,
 		            "the listen host's own copy rides the local slot-sound route"))
 			return 1;
 		if (!expect(roster[2].link.medic_request_active, "the once-only latch closes"))
@@ -1353,7 +1353,7 @@ int main() {
 			return 1;
 
 		// A repeat call: chat + sound again, no 0x54 (the latch).
-		world.slot_sounds.clear();
+		world.out.slot_sounds.clear();
 		const std::vector<ProtocolMessage> again = send_medic_request(roster[2]);
 		const Drained medic_again = drain_all(udp_b);
 		if (!expect(medic_again.tag(0x54).empty() &&
@@ -1389,10 +1389,10 @@ int main() {
 
 		// An alive requester: nothing at all.
 		drain_all(udp_b);
-		world.slot_sounds.clear();
+		world.out.slot_sounds.clear();
 		const std::vector<ProtocolMessage> alive_call = send_medic_request(roster[1]);
 		if (!expect(alive_call.empty() && drain_all(udp_b).raw.empty() &&
-		                    drain_all(udp_c).tag(0x14).empty() && world.slot_sounds.empty() &&
+		                    drain_all(udp_c).tag(0x14).empty() && world.out.slot_sounds.empty() &&
 		                    !roster[1].link.medic_request_active,
 		            "an alive requester's medic call is ignored (slot+368 == 0)"))
 			return 1;
@@ -1401,7 +1401,7 @@ int main() {
 		ctx.server_text.medic_request_format.clear();
 		const std::vector<ProtocolMessage> silent = send_medic_request(roster[2]);
 		if (!expect(silent.empty() && drain_all(udp_b).raw.empty() &&
-		                    world.slot_sounds.empty(),
+		                    world.out.slot_sounds.empty(),
 		            "a null STRSRV_MEDREQ lookup no-ops the medic call"))
 			return 1;
 		ctx.server_text.medic_request_format = "%s needs a medic!";
@@ -1487,7 +1487,7 @@ int main() {
 		inputs.medic_request_format = &ctx.server_text.medic_request_format;
 		drain_all(udp_b);
 		drain_all(loop);
-		world.slot_sounds.clear();
+		world.out.slot_sounds.clear();
 		const std::vector<ProtocolMessage> host_call = inmatch::dispatch_session_replies(
 				ctx.config, roster[0],
 				{make_protocol_message(c2s::MEDIC_REQUEST,
@@ -1506,7 +1506,7 @@ int main() {
 		                    medic_side.tag(0x34).size() == 1,
 		            "the host's call reaches its medic as chat + help call, with no 0x54 in automatic mode"))
 			return 1;
-		if (!expect(world.slot_sounds.empty() && roster[0].link.medic_request_active,
+		if (!expect(world.out.slot_sounds.empty() && roster[0].link.medic_request_active,
 		            "a dead host gets no local copy (mask 128) and latches its request"))
 			return 1;
 	}
@@ -1648,8 +1648,8 @@ int main() {
 	// round; team is stamped from the shooter [orig: round+0x162 @0x4ec705]. Every
 	// spawn also records a FireEvent for the host present drain (§17.4).
 	{
-		world.ammo.entries[1].tracer_rate = 3;
-		world.ammo.entries[1].tracer_item_friendly = 1883;
+		world.tables.ammo.entries[1].tracer_rate = 3;
+		world.tables.ammo.entries[1].tracer_item_friendly = 1883;
 		w::Entity *shooter = world.registry.get(hb);
 		shooter->tracer_shot_counter = 0;
 		world.round_sim.fired.clear();
@@ -1676,7 +1676,7 @@ int main() {
 			            "tracer round carries the shooter team"))
 				return 1;
 		}
-		world.ammo.entries[1].tracer_rate = 0;
+		world.tables.ammo.entries[1].tracer_rate = 0;
 		int s0 = world.round_sim.spawn(world, rp);
 		if (!expect(s0 >= 0 && !world.round_sim.rounds[size_t(s0)].tracer,
 		            "tracer_rate 0 -> never a tracer"))
@@ -1687,7 +1687,7 @@ int main() {
 		                            world.round_sim.rounds[size_t(s0)]) == 0,
 		            "non-tracer cadence keeps the TrcrID bind but clears its visible model"))
 			return 1;
-		world.ammo.entries[1].flags |= 0x8000u; // forcetracer
+		world.tables.ammo.entries[1].flags |= 0x8000u; // forcetracer
 		int s1 = world.round_sim.spawn(world, rp);
 		if (!expect(s1 >= 0 && world.round_sim.rounds[size_t(s1)].tracer,
 		            "FORCETRACER overrides rate 0"))
@@ -1696,7 +1696,7 @@ int main() {
 		                    world.round_sim.rounds[size_t(s1)]) == 1883,
 		            "FORCETRACER keeps the selected TrcrID model visible"))
 			return 1;
-		world.ammo.entries[1].flags &= ~0x8000u;
+		world.tables.ammo.entries[1].flags &= ~0x8000u;
 
 		w::RoundSim lifetime_sim;
 		const int first_lifetime_slot = lifetime_sim.spawn(world, rp);
@@ -1716,7 +1716,7 @@ int main() {
 		            "same-slot reuse receives a new presentation lifetime identity"))
 			return 1;
 
-		world.ammo.entries[1].tracer_item_friendly = 0;
+		world.tables.ammo.entries[1].tracer_item_friendly = 0;
 		if (!expect(world.round_sim.fired.size() == 8 &&
 		                    world.round_sim.fired.back().ammo_index == 1 &&
 		                    world.round_sim.fired.back().shooter_handle == hb.packed,
@@ -1729,7 +1729,7 @@ int main() {
 		// keep independent phases across an interleaved switch, and the
 		// owner-entity stand-in byte stays untouched [orig: RoundData_SpawnRound
 		// @0x4ec199..0x4ec1bb on the passed weaponSlot].
-		world.ammo.entries[1].tracer_rate = 3;
+		world.tables.ammo.entries[1].tracer_rate = 3;
 		shooter->tracer_shot_counter = 0;
 		uint8_t slot_a = 0;
 		uint8_t slot_b = 0;
@@ -1767,7 +1767,7 @@ int main() {
 	// CEffectEmitterPool_Tick @ 0x5db830: cap-length grace, then one pop per tick)].
 	{
 		auto &sim = world.round_sim;
-		auto &ammo1 = world.ammo.entries[1];
+		auto &ammo1 = world.tables.ammo.entries[1];
 		ammo1.tracer_rate = 1; // every round a tracer
 		ammo1.tracer_type_friendly = 1;
 		ammo1.tracer_type_enemy = 2;

@@ -80,30 +80,30 @@ int main() {
     CHECK(w.commands.group_dead(7));
 
     // shared var store.
-    w.vars.set_mission(5, 42);
-    CHECK(w.vars.get_mission(5) == 42);
-    w.vars.set_global(3, -7);
-    CHECK(w.vars.get_global(3) == -7);
-    w.vars.clear_mission();
-    CHECK(w.vars.get_mission(5) == 0);
-    CHECK(w.vars.get_global(3) == -7); // globals survive mission clear
+    w.script.vars.set_mission(5, 42);
+    CHECK(w.script.vars.get_mission(5) == 42);
+    w.script.vars.set_global(3, -7);
+    CHECK(w.script.vars.get_global(3) == -7);
+    w.script.vars.clear_mission();
+    CHECK(w.script.vars.get_mission(5) == 0);
+    CHECK(w.script.vars.get_global(3) == -7); // globals survive mission clear
 
     // The music bank (M0..M15) + clear_all (the bank the snapshot bindings read).
-    w.vars.set_music(2, 11);
-    CHECK(w.vars.get_music(2) == 11);
-    w.vars.clear_all();
-    CHECK(w.vars.get_music(2) == 0);
-    CHECK(w.vars.get_global(3) == 0); // clear_all wipes globals too
+    w.script.vars.set_music(2, 11);
+    CHECK(w.script.vars.get_music(2) == 11);
+    w.script.vars.clear_all();
+    CHECK(w.script.vars.get_music(2) == 0);
+    CHECK(w.script.vars.get_global(3) == 0); // clear_all wipes globals too
 
     // Out-of-range safety: reads are 0, writes are ignored (the snapshot
     // bindings loop bank-sized and rely on these exact guards).
-    CHECK(w.vars.get_mission(-1) == 0);
-    CHECK(w.vars.get_mission(ScriptVarStore::kMissionVars) == 0);
-    w.vars.set_mission(ScriptVarStore::kMissionVars, 9);
-    CHECK(w.vars.get_mission(ScriptVarStore::kMissionVars) == 0);
-    w.vars.set_global(-1, 9); // must not crash or wrap
-    CHECK(w.vars.get_global(-1) == 0);
-    CHECK(w.vars.get_music(ScriptVarStore::kMusicVars) == 0);
+    CHECK(w.script.vars.get_mission(-1) == 0);
+    CHECK(w.script.vars.get_mission(ScriptVarStore::kMissionVars) == 0);
+    w.script.vars.set_mission(ScriptVarStore::kMissionVars, 9);
+    CHECK(w.script.vars.get_mission(ScriptVarStore::kMissionVars) == 0);
+    w.script.vars.set_global(-1, 9); // must not crash or wrap
+    CHECK(w.script.vars.get_global(-1) == 0);
+    CHECK(w.script.vars.get_music(ScriptVarStore::kMusicVars) == 0);
 
     // logic tick = the 62 Hz engine tick; one call advances it by one. (The 62-tick
     // WAC divider lives inside WacSystem, where the original keeps it — see
@@ -210,7 +210,7 @@ int main() {
     CHECK(emitter_mailbox.empty());
 
     // snapshot / restore (editor play).
-    w.vars.set_mission(1, 7);
+    w.script.vars.set_mission(1, 7);
     Entity blast_target;
     blast_target.kind = EntityKind::Organic;
     blast_target.health = 100;
@@ -225,7 +225,7 @@ int main() {
     w.cached.local_player = blast_victim;
     w.cached.local_health = 100;
     w.cached.humans = 1;
-    w.wac_values.accuracy_spread = 3;
+    w.script.wac_values.accuracy_spread = 3;
     w.weather.valid = true;
     w.weather.core.scalar_channels.fog_dist_target_fp = 380 << 16;
     w.weather.core.scalar_channels.fog_step_fp = 0x00123456;
@@ -247,7 +247,7 @@ int main() {
     CHECK(post_snapshot.valid());
     const uint64_t post_snapshot_spawn_id =
             w.registry.get(post_snapshot)->registry_spawn_id;
-    w.vars.set_mission(1, 99);
+    w.script.vars.set_mission(1, 99);
     w.commands.kill_ssn(201); // mutate after snapshot
     w.round_sim.rounds[0].active = true;
     w.round_sim.active_count = 1;
@@ -259,7 +259,7 @@ int main() {
     blast.kztype = ammo_kz::kStandard;
     blast.kz_damage = 25;
     blast.kz_maxradius = 4.0f;
-    w.ammo.entries.push_back(blast);
+    w.tables.ammo.entries.push_back(blast);
     ExplosionEntry queued;
     queued.pos = w.registry.get(blast_victim)->position;
     queued.type = ammo_kz::kStandard;
@@ -268,26 +268,26 @@ int main() {
     DeathPiece &piece = w.death_pieces.alloc();
     piece.active = true;
     piece.settled = true;
-    w.destruction.effects.push_back({});
-    w.destruction.sounds.push_back({});
-    w.destruction.husk_swaps.push_back({});
-    w.destruction.debris_triangles = 11;
-    w.destruction.glass_points = 5;
-    w.destruction.explosions_processed = 7;
-    w.destruction.items_destroyed = 3;
+    w.out.destruction.effects.push_back({});
+    w.out.destruction.sounds.push_back({});
+    w.out.destruction.husk_swaps.push_back({});
+    w.out.destruction.debris_triangles = 11;
+    w.out.destruction.glass_points = 5;
+    w.out.destruction.explosions_processed = 7;
+    w.out.destruction.items_destroyed = 3;
     // CachedFrameState is transient, not part of Snapshot. A local player
     // spawned after the baseline may reuse a baseline actor's packed slot;
     // restore must not keep treating that restored actor as the local avatar.
     w.cached.local_player = post_snapshot;
     w.cached.local_health = 77;
     w.cached.humans = 2;
-    w.wac_values.accuracy_spread = 9;
+    w.script.wac_values.accuracy_spread = 9;
     w.weather = WeatherState{};
     w.match.remove_player(w, blast_victim);
     w.process_round_end(2);
     w.restore(snap);
-    CHECK(w.vars.get_mission(1) == 7);
-    CHECK(w.wac_values.accuracy_spread == 3);
+    CHECK(w.script.vars.get_mission(1) == 7);
+    CHECK(w.script.wac_values.accuracy_spread == 3);
     CHECK(w.weather.valid);
     CHECK(w.weather.fog_target_q16() == (380 << 16));
     CHECK(w.weather.fog_accel_clamp() == 0x00123456u);
@@ -312,13 +312,13 @@ int main() {
     CHECK(w.death_pieces.cursor == 0);
     for (const DeathPiece &restored_piece : w.death_pieces.pieces)
         CHECK(!restored_piece.active && !restored_piece.settled);
-    CHECK(w.destruction.effects.empty());
-    CHECK(w.destruction.sounds.empty());
-    CHECK(w.destruction.husk_swaps.empty());
-    CHECK(w.destruction.debris_triangles == 0);
-    CHECK(w.destruction.glass_points == 0);
-    CHECK(w.destruction.explosions_processed == 0);
-    CHECK(w.destruction.items_destroyed == 0);
+    CHECK(w.out.destruction.effects.empty());
+    CHECK(w.out.destruction.sounds.empty());
+    CHECK(w.out.destruction.husk_swaps.empty());
+    CHECK(w.out.destruction.debris_triangles == 0);
+    CHECK(w.out.destruction.glass_points == 0);
+    CHECK(w.out.destruction.explosions_processed == 0);
+    CHECK(w.out.destruction.items_destroyed == 0);
     CHECK(w.cached.local_player == blast_victim);
     CHECK(w.cached.local_health == 0);
     CHECK(w.cached.humans == 0);
@@ -329,6 +329,72 @@ int main() {
     const int32_t restored_health = w.registry.get(blast_victim)->health;
     w.run_logic_tick(true);
     CHECK(w.registry.get(blast_victim)->health == restored_health);
+
+    // Snapshot completeness: every field World::Snapshot carries round-trips
+    // through snapshot()/restore(). A member added to Snapshot without its
+    // restore line, or moved out of the snapshot set by a regrouping, fails
+    // here field by field (ADR 0043 slice E5 pins the set world.cpp lists).
+    {
+        World sw;
+        sw.registry.configure_pool(0, 4);
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.alive = true;
+        seed.health = 40;
+        const EntityHandle kept = sw.registry.spawn(0, seed);
+        sw.script.vars.set_mission(2, 11);
+        sw.script.wac_values.accuracy_spread = 5;
+        sw.env.time_of_day = 9 << 16;
+        sw.weather.tod_fixed24 = 0x0ABCDEF0u;
+        MatchRules snap_rules;
+        snap_rules.game_type = 0x10001u;
+        snap_rules.score_limit = 3;
+        sw.match.configure(snap_rules);
+        ZoneCaptureState::Request req;
+        req.zone = kept;
+        req.team = 2;
+        sw.zone_capture_state.requests.push_back(req);
+        sw.spawn_cycle_counter = 6;
+        sw.logic_tick = 700;
+        sw.preround_delay_seconds = 4;
+        sw.prng16_state = 0x1234u;
+        sw.crt_rand.state = 77u;
+        sw.cached.local_player = kept;
+        const World::Snapshot sealed = sw.snapshot();
+
+        sw.registry.get(kept)->health = 1;
+        sw.script.vars.set_mission(2, 0);
+        sw.script.wac_values.accuracy_spread = 0;
+        sw.env.time_of_day = 0;
+        sw.weather.tod_fixed24 = 0;
+        MatchRules other_rules;
+        other_rules.game_type = 0x10020u;
+        sw.match.configure(other_rules);
+        sw.zone_capture_state.clear();
+        sw.spawn_cycle_counter = 0;
+        sw.logic_tick = 0;
+        sw.preround_delay_seconds = 0;
+        sw.prng16_state = 1u;
+        sw.crt_rand.state = 1u;
+        sw.cached.local_player = EntityHandle{};
+        sw.restore(sealed);
+
+        CHECK(sw.registry.get(kept) != nullptr && sw.registry.get(kept)->health == 40);
+        CHECK(sw.script.vars.get_mission(2) == 11);
+        CHECK(sw.script.wac_values.accuracy_spread == 5);
+        CHECK(sw.env.time_of_day == (9 << 16));
+        CHECK(sw.weather.tod_fixed24 == 0x0ABCDEF0u);
+        CHECK(sw.match.rules().game_type == 0x10001u);
+        CHECK(sw.match.rules().score_limit == 3);
+        CHECK(sw.zone_capture_state.requests.size() == 1 &&
+              sw.zone_capture_state.requests[0].team == 2);
+        CHECK(sw.spawn_cycle_counter == 6);
+        CHECK(sw.logic_tick == 700);
+        CHECK(sw.preround_delay_seconds == 4);
+        CHECK(sw.prng16_state == 0x1234u);
+        CHECK(sw.crt_rand.state == 77u);
+        CHECK(sw.cached.local_player == kept);
+    }
 
     // A SCRIPTED group kill has to reach the wire. Retail never fans deaths from
     // the damage pass: each motor's per-entity update carries the edge

@@ -721,10 +721,10 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// (unit paths — a live host always feeds weapon.def) accepts the byte verbatim, and an
 	// index with no table entry (including the 0xFF none sentinel) is NOT stored, mirroring
 	// the failed AdmDef_GetEntryByIndex leg. (D-NET-143)
-	if (world.weapons.empty()) {
+	if (world.tables.weapons.empty()) {
 		ent->equipped_adm_index = intent.equipped_adm_index;
 	} else if (const world::WeaponTableEntry *we =
-	                   world.weapons.by_index(intent.equipped_adm_index)) {
+	                   world.tables.weapons.by_index(intent.equipped_adm_index)) {
 		if (we->category < 11) ent->equipped_adm_index = intent.equipped_adm_index;
 	}
 
@@ -756,12 +756,12 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		// transitions remain authority-world state (D-INF-3), not C2S flags.
 		bool clear_airborne = grounded || ent->mounted;
 		bool set_airborne = false;
-		if (!clear_airborne && world.terrain != nullptr && world.terrain->valid()) {
+		if (!clear_airborne && world.tables.terrain != nullptr && world.tables.terrain->valid()) {
 			world::GroundClearance clearance = world.ai.ground_clearance;
 			clearance.has_physics = ae->has_physics;
 			clearance.use_dead = ent->health <= 0;
 			const int32_t ground = world::calc_average_ground_height(
-					*world.terrain, ae->pos, 0, clearance);
+					*world.tables.terrain, ae->pos, 0, clearance);
 			if (ground != INT32_MIN) {
 				ae->inf.ground_cache = ground;
 				ae->inf.ground_cache_valid = true;

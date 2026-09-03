@@ -93,8 +93,8 @@ bool local_usegun_switch_is_instant(const World &world,
 			 w.usegun_switch == LocalUseGunSwitch::kSwap)
 			? w.usegun_pending_weapon_adm
 			: w.usegun_saved_adm;
-	const WeaponTableEntry *from = world.weapons.by_index(from_adm);
-	const WeaponTableEntry *to = world.weapons.by_index(to_adm);
+	const WeaponTableEntry *from = world.tables.weapons.by_index(from_adm);
+	const WeaponTableEntry *to = world.tables.weapons.by_index(to_adm);
 	const int32_t flags = (from != nullptr ? from->flags : 0) |
 			(to != nullptr ? to->flags : 0);
 	return (flags & weapon_flag::kEmplaced) != 0;
@@ -174,7 +174,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 
 	player->equipped_adm_index = next_adm;
-	const WeaponTableEntry *next_def = world.weapons.by_index(next_adm);
+	const WeaponTableEntry *next_def = world.tables.weapons.by_index(next_adm);
 	// SWITCHFROM draws the committed target through TryQueueSwitchTo. SWITCHRANK
 	// swaps directly and must not disturb a persistent target slot's current
 	// action/phase/next fields. [orig: commits @0x543475 / @0x543539]
@@ -229,8 +229,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 			player->use_gun_slot_swapped && mounted_slot != nullptr &&
 			mounted_adm != 0xFF;
 	const auto same_category = [&](uint8_t p_from, uint8_t p_to) {
-		const WeaponTableEntry *from = world.weapons.by_index(p_from);
-		const WeaponTableEntry *to = world.weapons.by_index(p_to);
+		const WeaponTableEntry *from = world.tables.weapons.by_index(p_from);
+		const WeaponTableEntry *to = world.tables.weapons.by_index(p_to);
 		return from != nullptr && to != nullptr &&
 				from->category == to->category;
 	};
@@ -312,7 +312,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// one. Latch it instead and replay exactly one event at the joiner spawn block.
 	if (e != nullptr) e->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
 	const WeaponTableEntry *def =
-			world.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	w.start_in_switchto = true;
 	if (e == nullptr) {
 		w.presentation_pending = true;
@@ -516,7 +516,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 		if (inventory != nullptr) {
 			const WeaponInventorySlot *eq = inventory->slot(inventory->equipped_combo);
 			const WeaponTableEntry *def = (eq != nullptr && eq->adm_index >= 0)
-					? world.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+					? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 					: nullptr;
 			if (def != nullptr && strutil::iequals(data.name, def->name)) {
 				w.slot.clip = eq->clip;
@@ -608,7 +608,7 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	const WeaponInventorySlot *slot = inventory.slot(inventory.equipped_combo);
 	if (slot == nullptr || slot->adm_index < 0) return false;
 	const WeaponTableEntry *def =
-			world.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	if (def == nullptr) return false;             // no Def [orig: @0x4dcbda]
 	// The ammo leg, for defs that carry the flag: an empty pool hides the
 	// weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0,
@@ -972,7 +972,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		Entity *shooter = world.registry.get(world.cached.local_player);
 		if (shooter != nullptr && p != nullptr) {
 			const uint8_t adm_index = shooter->equipped_adm_index;
-			const WeaponTableEntry *adm = world.weapons.by_index(adm_index);
+			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
 				Vec3 origin = shooter->position;
 				if (w.eye_valid) {
@@ -1038,7 +1038,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
 				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
 				round_event.slot_byte = w.pending_throw_charge;
-				if (io.is_authority) world.rounds.add(round_event);
+				if (io.is_authority) world.out.rounds.add(round_event);
 
 				RoundSpawnParams round;
 				round.owner = world.cached.local_player;
@@ -1123,7 +1123,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				}
 			}
 			const WeaponTableEntry *mounted_def =
-					world.weapons.by_index(mounted_adm);
+					world.tables.weapons.by_index(mounted_adm);
 			if (mounted_slot != nullptr && slot_owner != nullptr &&
 					mounted_def != nullptr) {
 				io.reload.valid = true;
@@ -1155,7 +1155,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		WeaponInventory &inventory = *io.inventory;
 		WeaponInventorySlot *eq = inventory.slot(inventory.equipped_combo);
 		const WeaponTableEntry *eq_def = (eq != nullptr && eq->adm_index >= 0)
-				? world.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+				? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 				: nullptr;
 		if (eq != nullptr && eq_def != nullptr) {
 			if (ev.reload_applied) {
@@ -1164,7 +1164,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// §5.58] — overriding the FSM's single-class transfer (D-WPN-2).
 				// eq->clip still holds the pre-reload remaining rounds (mirrored on
 				// the previous tick); the refund below consumes it.
-				weapon_inventory_reload_slot(world.weapons, inventory,
+				weapon_inventory_reload_slot(world.tables.weapons, inventory,
 						inventory.equipped_combo);
 				active_slot.clip = eq->clip;
 			} else {
@@ -1178,7 +1178,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			if (ev.action_finished == weapon_action::kRecoil &&
 					eq_def->has_switchcategory) {
 				handle_weapon_switch_outcome(world, w, io.inventory,
-						weapon_switch_to_handle(world.weapons, inventory,
+						weapon_switch_to_handle(world.tables.weapons, inventory,
 								eq_def->switchcategory *
 										weapon_combo::kRanksPerCategory,
 								local_weapon_switch_gates(world, w,

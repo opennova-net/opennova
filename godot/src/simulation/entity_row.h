@@ -33,7 +33,7 @@ public:
 	int get_net_id() const { return value_.net_id; }
 	int get_wire_handle() const { return static_cast<int>(value_.wire_handle); }
 	String get_name() const;
-	// The items.def display name (world.item_names); empty without a def.
+	// The items.def display name (world.tables.item_names); empty without a def.
 	String get_item_name() const;
 	String get_state_name() const;
 	int get_health() const { return value_.health; }

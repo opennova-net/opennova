@@ -99,7 +99,7 @@ struct Rig {
 
     explicit Rig(bool local_player = false) {
         world.registry.configure_pool(0, 4);
-        world.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
+        world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
         ai.terrain = &field.field;
         ai.root_motion = &src;
         Entity seed;
@@ -112,7 +112,7 @@ struct Rig {
         e->inf.is_local_player = local_player;
         e->health = 100;
         e->profile.sound_profile =
-            static_cast<int16_t>(world.sound_profiles.index_of("SP_Test"));
+            static_cast<int16_t>(world.tables.sound_profiles.index_of("SP_Test"));
         e->pos[2] = fx(0.0);
         src.clips = {anim_state::kIdle, anim_state::kWalkForward};
         e->inf.anim_state = anim_state::kIdle;
@@ -130,8 +130,8 @@ struct Rig {
     }
 
     std::vector<SoundSlotEvent> take() {
-        std::vector<SoundSlotEvent> out = world.slot_sounds;
-        world.slot_sounds.clear();
+        std::vector<SoundSlotEvent> out = world.out.slot_sounds;
+        world.out.slot_sounds.clear();
         return out;
     }
 };
@@ -170,9 +170,9 @@ void test_player_female_profile_selection() {
     if (player == nullptr) return;
     player->player_class = 5;
     player->minimap_net_id = 0x8407;
-    rig.world.character_traits.set(0x8407, true);
+    rig.world.tables.character_traits.set(0x8407, true);
     rig.e->profile.sound_profile_female = static_cast<int16_t>(
-            rig.world.sound_profiles.index_of("SP_TestFemale"));
+            rig.world.tables.sound_profiles.index_of("SP_TestFemale"));
     rig.src.events = 0x1;
     rig.run(0, 1);
     auto evs = rig.take();
@@ -228,10 +228,10 @@ void test_foot_dip_water_and_surface_picks() {
     // Surface type 3 (snow) via a 4x4 charmap of 3s over sector slot 1.
     static const uint8_t snow[16] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
     static const int grid[256] = {1}; // cell (0,0) slot 1; rest empty (ocean)
-    rig.world.surface_map.data = snow;
-    rig.world.surface_map.width = 4;
-    rig.world.surface_map.height = 4;
-    rig.world.surface_map.sector_grid = grid;
+    rig.world.tables.surface_map.data = snow;
+    rig.world.tables.surface_map.width = 4;
+    rig.world.tables.surface_map.height = 4;
+    rig.world.tables.surface_map.sector_grid = grid;
     rig.e->pos[0] = fx(10.0);
     rig.e->pos[1] = -fx(10.0); // mission y negated in the sampler row math
     rig.run(5, 6);
@@ -302,10 +302,10 @@ void test_foot_obj_pick() {
     // The link outranks snow: surface 3 under the feet, link live -> still OBJ.
     static const uint8_t snow[16] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
     static const int grid[256] = {1};
-    rig.world.surface_map.data = snow;
-    rig.world.surface_map.width = 4;
-    rig.world.surface_map.height = 4;
-    rig.world.surface_map.sector_grid = grid;
+    rig.world.tables.surface_map.data = snow;
+    rig.world.tables.surface_map.width = 4;
+    rig.world.tables.surface_map.height = 4;
+    rig.world.tables.surface_map.sector_grid = grid;
     rig.e->pos[0] = fx(10.0);
     rig.e->pos[1] = -fx(10.0);
     rig.world.registry.get(rig.e->handle)->ground_target = ph;
@@ -395,7 +395,7 @@ void test_death_scream_day_and_night() {
     CHECK(saw);
 
     Rig rig2;
-    rig2.world.mission_attrib_flags = 0x100000; // EnableNVG = the night gate
+    rig2.world.tables.mission_attrib_flags = 0x100000; // EnableNVG = the night gate
     if (Entity *ent = rig2.world.registry.get(rig2.e->handle)) ent->health = 0;
     rig2.run(1, 2);
     auto evs2 = rig2.take();
@@ -442,7 +442,7 @@ void test_local_player_death_scream_composite() {
     // Night: the _K composite through the same EnableNVG gate; the default
     // anim-slot 0 resolves BM1 [orig: the null/zero -> type-1 default @0x5280F8].
     Rig rig2(true);
-    rig2.world.mission_attrib_flags = 0x100000;
+    rig2.world.tables.mission_attrib_flags = 0x100000;
     if (Entity *ent = rig2.world.registry.get(rig2.e->handle)) ent->health = 0;
     rig2.run(1, 2);
     auto evs2 = rig2.take();

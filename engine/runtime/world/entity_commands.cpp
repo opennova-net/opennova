@@ -897,7 +897,7 @@ bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
     scaled = (scaled * 256) / 60;
     // Declared residual: the group-record consumer (the AI motor's group
     // speed override) is unported, so this store has no reader yet.
-    world_.relations.group(group).move_speed_q16_per_sec =
+    world_.script.relations.group(group).move_speed_q16_per_sec =
             static_cast<int32_t>(scaled);
     return true;
 }
@@ -1458,7 +1458,7 @@ int EntityCommands::spawn_marker_particle_effects(int32_t wp_number) {
         if (e == nullptr) continue;
         if (e->item_id != kParticleEffectMarkerTypeId) continue; // def type 6088
         if (e->wp_number != wp_number) continue;
-        world_.effects.push({"particle_effect", static_cast<int32_t>(to_fixed(e->position.x)),
+        world_.out.effects.push({"particle_effect", static_cast<int32_t>(to_fixed(e->position.x)),
                              static_cast<int32_t>(to_fixed(e->position.y)),
                              static_cast<int32_t>(to_fixed(e->position.z)), wp_number,
                              std::string()});
@@ -1473,9 +1473,9 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
     // @ 0x43cff7 maps sub 5 -> red, 6 -> green, 22 -> yellow via
     // TriggerGroup_SetAlertRed/Green/Yellow @ 0x40d630/0x40d5f0/0x40d610].
     if (group > 0 && group < TriggerRelations::kGroups) {
-        if (sub_type == 5) world_.relations.group(group).alert = TriggerRelations::kAlertRed;
-        else if (sub_type == 6) world_.relations.group(group).alert = TriggerRelations::kAlertGreen;
-        else if (sub_type == 22) world_.relations.group(group).alert = TriggerRelations::kAlertYellow;
+        if (sub_type == 5) world_.script.relations.group(group).alert = TriggerRelations::kAlertRed;
+        else if (sub_type == 6) world_.script.relations.group(group).alert = TriggerRelations::kAlertGreen;
+        else if (sub_type == 22) world_.script.relations.group(group).alert = TriggerRelations::kAlertYellow;
     }
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);

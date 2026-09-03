@@ -88,7 +88,7 @@ int main_impl() {
 		w::WaypointEntry waypoint;
 		waypoint.node = 12;
 		waypoint.name_id = 0;
-		world.waypoints.entries.push_back(waypoint);
+		world.script.waypoints.entries.push_back(waypoint);
 	}
 	{
 		// A pool-2 building carrying the D-NET-147 wire fields (the golden ASH_I5A values):

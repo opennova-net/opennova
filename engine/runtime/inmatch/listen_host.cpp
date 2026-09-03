@@ -26,8 +26,8 @@ void reset_state(mission::MissionKernel &kernel, ListenHostState &state,
 	state.host_owner.ctx.world = &kernel.world;
 	state.host_owner.ctx.mission = &kernel.mission;
 	state.host_owner.ctx.mission_text_loaded = false;
-	kernel.world.fat_bullets = config.fat_bullets;
-	kernel.world.one_shot_kill = config.one_shot_kill;
+	kernel.world.rules.fat_bullets = config.fat_bullets;
+	kernel.world.rules.one_shot_kill = config.one_shot_kill;
 	kernel.session_open = true;
 }
 
@@ -59,7 +59,7 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(config.game_type);
-	state.client_runtime->view().set_mp_session(kernel.world.mp_session);
+	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
 	// Seed the look heading from the auto-spawned player's facing.
 	kernel.reset_local_player_input_to_player_facing();
 }

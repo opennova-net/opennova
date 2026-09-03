@@ -257,7 +257,7 @@ int main(void) {
 		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 900) == 900);
 
 		world::World submit_world;
-		submit_world.weapons = slots_table;
+		submit_world.tables.weapons = slots_table;
 		playersav::Record profile;
 		world::LocalPlayerLoadout loadout;
 		inmatch::JoinerConnection::LoadoutKit wire_kit;

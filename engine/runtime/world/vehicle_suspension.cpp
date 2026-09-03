@@ -33,7 +33,7 @@ int32_t wrap_mul(int32_t a, int32_t b) {
 // a row handed loose traits (tests, lib embedders) clamps the loose copy.
 int32_t &shock_field(World &world, const Entity &veh, const VehicleTraits &traits,
                      int32_t &loose) {
-	if (VehicleTraits *entry = world.vehicle_traits.get_mutable(veh.item_id))
+	if (VehicleTraits *entry = world.tables.vehicle_traits.get_mutable(veh.item_id))
 		if (entry->shock == traits.shock) return entry->shock;
 	loose = traits.shock;
 	return loose;
@@ -122,7 +122,7 @@ void vehicle_suspension_crash_tests(World &world, Entity &veh,
 		}
 		// (b) the authority's hard fall vs the client's replicated bit in the
 		// air [orig: tracked @0x47d771..0x47d7a8; tank @0x47778d..0x4777bf].
-		const bool fall = world.logic_authority
+		const bool fall = world.rules.logic_authority
 				? std::abs(m.slide_z) > kCrashFallVzAbove
 				: (airborne && bit);
 		if (fall) {
@@ -137,7 +137,7 @@ void vehicle_suspension_crash_tests(World &world, Entity &veh,
 	//  it went airborne and requests for the next ten ticks; past them the
 	//  stamp clears and the row counts as respawned.
 	const bool settle_term = family == SuspensionFamily::Tank && m.settle_2f0 != 0;
-	if (!world.logic_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
+	if (!world.rules.logic_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
 	    !settle_term) {
 		if (airborne && m.airborne_stamp_2f8 == 0) m.airborne_stamp_2f8 = world.logic_tick;
 		if (world.logic_tick - m.airborne_stamp_2f8 < kClientCrashWindowTicks) {
@@ -268,10 +268,10 @@ bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants) {
 	if (m.crash_request == 0 || m.crashed != 0) return false;
 	// The one-shot role pick [orig: @0x46b1c5..0x46b1db] — consumed by the
 	// (residual) impulse dump.
-	m.susp_rate_pick = world.logic_authority ? kSuspensionDisableRateAuthority
+	m.susp_rate_pick = world.rules.logic_authority ? kSuspensionDisableRateAuthority
 	                                           : kSuspensionDisableRateNonAuthority;
 	m.byte_2ef = 0; // [orig: @0x46b1db]
-	if (world.logic_authority) {
+	if (world.rules.logic_authority) {
 		veh.flags |= kEntityFlagSuspensionCrashed; // [orig: @0x46b1ed]
 	} else if ((veh.flags & kEntityFlagSuspensionCrashed) == 0) {
 		return false; // [orig: the `test Flags, 0x10` skip @0x46b1f3]

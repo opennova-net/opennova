@@ -791,7 +791,7 @@ Ref<HitboxDebugReport> Simulation::get_hitbox_debug() {
 int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
                                       const String &p_ammo_name) {
 	if (!kernel_) return -1;
-	const int ammo_index = kernel_->world.ammo.index_of(p_ammo_name.utf8().get_data());
+	const int ammo_index = kernel_->world.tables.ammo.index_of(p_ammo_name.utf8().get_data());
 	if (ammo_index < 0) return -1;
 	// Godot world (x, up, z) -> mission (x, -z, up); direction -> the spawn's
 	// yaw/pitch BAM (the §5.16 mission bearing: vel = (cos yaw, sin yaw, sin

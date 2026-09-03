@@ -126,7 +126,7 @@ int main() {
 		kernel.tick_no_net();
 		kernel.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
 		kernel.world.commands.set_entity_health(player_h, 37);
-		kernel.world.vars.set_mission(3, 99);
+		kernel.world.script.vars.set_mission(3, 99);
 		CHECK(kernel.world.logic_tick == sealed_tick + 2);
 		CHECK(kernel.player_health() == 37);
 		CHECK(near_equal(kernel.player_position().x, 100.0f, 0.001f));
@@ -144,7 +144,7 @@ int main() {
 			CHECK(near_equal(body->pos[0] / 65536.0f, spawn_pos.x, 0.01f));
 			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
 		}
-		CHECK(kernel.world.vars.get_mission(3) == 0);
+		CHECK(kernel.world.script.vars.get_mission(3) == 0);
 		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
 		CHECK(kernel.world.registry.by_net_id(31) != nullptr);
 		// The restored world ticks on from the sealed point.
@@ -209,7 +209,7 @@ int main() {
 		CHECK(kernel.boot(options, error));
 		CHECK(!kernel.has_terrain());
 		CHECK(!kernel.terrain_store.valid());
-		CHECK(kernel.world.terrain == nullptr);
+		CHECK(kernel.world.tables.terrain == nullptr);
 		CHECK(kernel.world.ai.terrain == nullptr);
 		CHECK(kernel.world.collision == nullptr);
 		CHECK(kernel.collision_attached == 0);

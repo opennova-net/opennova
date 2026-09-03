@@ -72,7 +72,7 @@ std::unique_ptr<World> make_world(bool authority) {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
-    w->logic_authority = authority;
+    w->rules.logic_authority = authority;
     return w;
 }
 
@@ -570,14 +570,14 @@ void test_shock_clamps_the_table_entry_in_place() {
 	Entity &veh = spawn_veh(w, h);
 	VehicleTraits t = sprung_traits();
 	t.shock = 25;
-	w.vehicle_traits.set(veh.item_id, t);
-	const VehicleTraits &live = *w.vehicle_traits.get(veh.item_id);
+	w.tables.vehicle_traits.set(veh.item_id, t);
+	const VehicleTraits &live = *w.tables.vehicle_traits.get(veh.item_id);
 	veh.veh.wheel_osc[0].amplitude = 1000; // a releasing wheel -> the oscillator runs
 	int32_t depth[4] = {0, 0, 0, 0};
 	const bool contact[4] = {false, false, false, false};
 	int32_t adj[4] = {0, 0, 0, 0};
 	vehicle_suspension_grounded_loop(w, veh, live, 4, depth, contact, 187, adj);
-	CHECK(w.vehicle_traits.get(veh.item_id)->shock == 10,
+	CHECK(w.tables.vehicle_traits.get(veh.item_id)->shock == 10,
 			"the table entry's shock is clamped to 10 in place");
 	CHECK(veh.veh.wheel_osc[0].phase > 0.0f, "the oscillator ran");
 }

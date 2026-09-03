@@ -224,9 +224,9 @@ void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
     }
     Entity *ent = w.registry.get(e->handle);
     ent->equipped_adm_index = adm;
-    if (w.weapons.entries.size() <= adm) w.weapons.entries.resize(adm + 1u);
-    w.weapons.entries[adm].valid = true;
-    w.weapons.entries[adm].special_hold = special_hold;
+    if (w.tables.weapons.entries.size() <= adm) w.tables.weapons.entries.resize(adm + 1u);
+    w.tables.weapons.entries[adm].valid = true;
+    w.tables.weapons.entries[adm].special_hold = special_hold;
 }
 
 void test_recoil_and_weapon_weight_kernels() {
@@ -1510,10 +1510,10 @@ void test_local_player_swims_on_the_plane() {
     CHECK((ent->flags & kEntityFlagInAir) == 0);
     CHECK((ent->flags & 0x200000u) != 0);
     CHECK(!e->inf.airborne);
-    CHECK(world.water_crossings.events.size() == 2);
-    if (!world.water_crossings.events.empty()) {
-        CHECK(world.water_crossings.events[0].water_z == fx(5.0));
-        CHECK(!world.water_crossings.events[0].airborne);
+    CHECK(world.out.water_crossings.events.size() == 2);
+    if (!world.out.water_crossings.events.empty()) {
+        CHECK(world.out.water_crossings.events[0].water_z == fx(5.0));
+        CHECK(!world.out.water_crossings.events[0].airborne);
     }
 
     // The buoyant rise from deep water: z climbs every tick by the witnessed
@@ -1532,7 +1532,7 @@ void test_local_player_swims_on_the_plane() {
         prev_z = e->pos[2];
     }
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
-    CHECK(world.water_crossings.events.size() == 2);
+    CHECK(world.out.water_crossings.events.size() == 2);
 
     // Near the surface: the line water + base/2 - eye/2 clamps from above and
     // clears the dive bit; the body rides UNDER the plane, not on the bed.
@@ -1918,7 +1918,7 @@ void test_player_weapon_hold_kinds() {
     give_held_weapon(w, e, /*adm=*/5, /*special_hold=*/0);
     uint32_t tick = 1;
     auto select = [&](int kind) {
-        w.weapons.entries[5].special_hold = kind;
+        w.tables.weapons.entries[5].special_hold = kind;
         tick = run_to_next_selection(ai, w, tick);
     };
 
@@ -2826,8 +2826,8 @@ void test_infantry_parity_pins_2026_08_28() {
     // Mission-load defaults: fall-damage tolerance 13, accuracy spread 10.
     {
         World w;
-        CHECK(w.wac_values.fallmps == 13);
-        CHECK(w.wac_values.accuracy_spread == 10);
+        CHECK(w.script.wac_values.fallmps == 13);
+        CHECK(w.script.wac_values.accuracy_spread == 10);
     }
     // Landing damage is authority-only: a joiner's own body lands unharmed.
     {
@@ -2836,7 +2836,7 @@ void test_infantry_parity_pins_2026_08_28() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true; // the motor runs locally for the joiner's own body
         e->pos[0] = fx(100);
@@ -2861,7 +2861,7 @@ void test_infantry_parity_pins_2026_08_28() {
         w.registry.configure_pool(0, 4);
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         Entity body{};
         body.alive = true;
         body.health = 30000;
@@ -3128,7 +3128,7 @@ int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weap
     if (!rig.install_weapon(weapon)) return -1;
     // The hold kind is re-read every selection pass from the entity's OWN
     // equipped index (the single wire byte at entity+0x2B0) [orig: @0x4b5dba].
-    const int idx = rig.world.weapons.index_of(weapon);
+    const int idx = rig.world.tables.weapons.index_of(weapon);
     if (idx >= 0)
         if (Entity *pe = rig.player()) pe->equipped_adm_index = static_cast<uint8_t>(idx);
     for (int t = 0; t < settle_ticks; ++t) rig.tick();
@@ -3477,8 +3477,8 @@ int main() {
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
         if (!ai.relmat_calls.empty())
             CHECK(ai.relmat_calls[0].channel == 1 && ai.relmat_calls[0].node == 0);
-        CHECK(w.relations.group_visited(4, 1, 0));
-        CHECK(w.relations.single_visited(8, 1, 0));
+        CHECK(w.script.relations.group_visited(4, 1, 0));
+        CHECK(w.script.relations.single_visited(8, 1, 0));
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
         CHECK(e->pos[0] == 241653);                 // walk->idle blend has settled
@@ -3490,8 +3490,8 @@ int main() {
         CHECK(e->slot.f[38] == 1);                  // one-shot end pins the last node
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 20);          // end-of-path cooldown
-        CHECK(w.relations.group_visited(4, 1, 1));
-        CHECK(w.relations.single_visited(8, 1, 1));
+        CHECK(w.script.relations.group_visited(4, 1, 1));
+        CHECK(w.script.relations.single_visited(8, 1, 1));
 
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 320, 1200); // parked: cooldown re-arms, never moves again
@@ -3614,7 +3614,7 @@ int main() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3642,7 +3642,7 @@ int main() {
         World w; // a hop (2 gravity steps, vel -832 > -1057) lands without damage
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3663,7 +3663,7 @@ int main() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 0;
+        w.script.wac_values.fallmps = 0;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);

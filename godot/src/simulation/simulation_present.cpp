@@ -99,7 +99,7 @@ TypedArray<ThrowableVisualRow> Simulation::get_throwable_visuals() const {
 				kernel_->world.round_sim.rounds[static_cast<size_t>(i)];
 		if (!r.active) continue;
 		const opennova::world::AmmoTableEntry *ammo =
-				kernel_->world.ammo.by_index(r.ammo_index);
+				kernel_->world.tables.ammo.by_index(r.ammo_index);
 		const char *move_effect = ammo != nullptr
 				? ammo->impact_effects[1].effect.c_str()
 				: "";
@@ -149,7 +149,7 @@ Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
 	Ref<WaypointHudView> out;
 	out.instantiate();
-	const opennova::world::WaypointTrack *track = kernel_ ? &kernel_->world.waypoints : nullptr;
+	const opennova::world::WaypointTrack *track = kernel_ ? &kernel_->world.script.waypoints : nullptr;
 	out->set_show(track != nullptr && track->show);
 	out->set_count(track ? static_cast<int>(track->entries.size()) : 0);
 	const opennova::world::WaypointEntry *cur = track ? track->current_entry() : nullptr;
@@ -172,9 +172,9 @@ Ref<HudMapGridOrigin> Simulation::get_hud_map_grid_origin() const {
 	// World::map_grid_origin_x / HudMinimapInput::grid_origin_x).
 	Ref<HudMapGridOrigin> out;
 	out.instantiate();
-	bool present = kernel_ != nullptr && kernel_->world.map_grid_origin_present;
-	int32_t x_q16 = present ? kernel_->world.map_grid_origin_x : 0;
-	int32_t y_q16 = present ? kernel_->world.map_grid_origin_y : 0;
+	bool present = kernel_ != nullptr && kernel_->world.tables.map_grid_origin_present;
+	int32_t x_q16 = present ? kernel_->world.tables.map_grid_origin_x : 0;
+	int32_t y_q16 = present ? kernel_->world.tables.map_grid_origin_y : 0;
 	if (!present && runtime_ != nullptr) {
 		present = opennova::replication::client_minimap_grid_origin(
 				runtime_->state(), x_q16, y_q16);
@@ -288,7 +288,7 @@ TypedArray<ObjectiveRow> Simulation::get_objectives_view() const {
 	//  row gate = show-win bit @0x5ba9ff; checkmark = won bit @0x5bab35]
 	TypedArray<ObjectiveRow> out;
 	if (!kernel_) return out;
-	const auto &sg = kernel_->world.subgoals;
+	const auto &sg = kernel_->world.script.subgoals;
 	for (int slot = 1; slot <= 8; ++slot) {
 		const uint8_t id = sg.win_text_ids[slot];
 		if (id == 0 || id == 255) break;
@@ -313,7 +313,7 @@ TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
 	if (!kernel_) return out;
 	const uint32_t now = kernel_->world.logic_tick;
 	for (const opennova::world::RoundImpact &imp : kernel_->world.round_sim.impacts) {
-		const opennova::world::AmmoTableEntry *ammo = kernel_->world.ammo.by_index(imp.ammo_index);
+		const opennova::world::AmmoTableEntry *ammo = kernel_->world.tables.ammo.by_index(imp.ammo_index);
 		if (ammo == nullptr) continue;
 		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
 			continue;
@@ -353,7 +353,7 @@ TypedArray<TerrainScorchRow> Simulation::drain_terrain_scorches() {
 	TypedArray<TerrainScorchRow> out;
 	if (!kernel_) return out;
 	for (const opennova::world::TerrainScorchEvent &event :
-			kernel_->world.terrain_scorches.pending()) {
+			kernel_->world.out.terrain_scorches.pending()) {
 		const opennova::terrain::TerrainScorchEntry &mission =
 				event.mission_bounds;
 		Ref<TerrainScorchRow> row;
@@ -369,14 +369,14 @@ TypedArray<TerrainScorchRow> Simulation::drain_terrain_scorches() {
 		row->set_source_order(static_cast<int64_t>(event.source_order));
 		out.push_back(row);
 	}
-	kernel_->world.terrain_scorches.clear_pending();
+	kernel_->world.out.terrain_scorches.clear_pending();
 	return out;
 }
 
 TypedArray<MissionEffect> Simulation::drain_effects() {
 	TypedArray<MissionEffect> out;
 	if (!world_installed_) return out;
-	for (const opennova::world::Effect &e : kernel_->world.effects.entries()) {
+	for (const opennova::world::Effect &e : kernel_->world.out.effects.entries()) {
 		Ref<MissionEffect> d = MissionEffect::make(String(e.kind.c_str()), e.a, e.b, e.c,
 				String(e.str.c_str()));
 		d->set_d(e.d);
@@ -385,7 +385,7 @@ TypedArray<MissionEffect> Simulation::drain_effects() {
 			d->set_wire_handle(e.d);
 		out.push_back(d);
 	}
-	kernel_->world.effects.clear();
+	kernel_->world.out.effects.clear();
 	return out;
 }
 
@@ -421,7 +421,7 @@ TypedArray<FirePresentationEvent> Simulation::drain_fire_presentation_events() {
 		d->set_source_bms_id(shooter != nullptr ? shooter->bms_id : 0);
 		d->set_is_local_player(have_local && fe.shooter == kernel_->world.cached.local_player);
 		d->set_ammo_index(fe.ammo_index);
-		const opennova::world::AmmoTableEntry *ammo = kernel_->world.ammo.by_index(fe.ammo_index);
+		const opennova::world::AmmoTableEntry *ammo = kernel_->world.tables.ammo.by_index(fe.ammo_index);
 		d->set_effect(ammo ? String(ammo->ai_launch_effect.c_str()) : String());
 		d->set_mf_light(ammo ? ammo->mf_light : 0);
 		// The SOUND legs of both arms moved onto the sim's logic clock with the
@@ -438,7 +438,7 @@ TypedArray<FirePresentationEvent> Simulation::drain_fire_presentation_events() {
 		//  g_weaponActionTable @0x830B90; the +684 call @0x42f777/@0x42f98f; the glow
 		//  gate @0x40205e/@0x402080 with the context stamped 2 @0x42f8a0]
 		const opennova::world::WeaponTableEntry *fired_def =
-				kernel_->world.weapons.by_index(fe.adm_index);
+				kernel_->world.tables.weapons.by_index(fe.adm_index);
 		const opennova::world::WeaponFsmAction *fire_row =
 				fired_def != nullptr
 						? &fired_def->action_fsm.actions[opennova::world::weapon_action::kFire]
@@ -477,7 +477,7 @@ static_assert(opennova::world::round_event_flag::kAdmIndexed ==
 // dedicated host, which is the witnessed peer gate.
 void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 	if (!world_installed_) return;
-	kernel_->world.fire_sounds.set_listener(opennova::world::Vec3{
+	kernel_->world.out.fire_sounds.set_listener(opennova::world::Vec3{
 			p_listener_godot.x, -p_listener_godot.z, p_listener_godot.y});
 }
 
@@ -491,7 +491,7 @@ TypedArray<FireSoundRow> Simulation::drain_fire_sounds() {
 	TypedArray<FireSoundRow> out;
 	if (!world_installed_) return out;
 	for (const opennova::world::ReadyFireSound &sound :
-			kernel_->world.fire_sounds.drain()) {
+			kernel_->world.out.fire_sounds.drain()) {
 		Ref<FireSoundRow> d;
 		d.instantiate();
 		d->set_soundset(String(sound.set_name.c_str()));
@@ -507,7 +507,7 @@ TypedArray<FireSoundRow> Simulation::drain_fire_sounds() {
 // (x, y, z-up) -> Godot (x, z, -y), the drain_fire_presentation_events rule.
 Ref<DestructionDrain> Simulation::drain_destruction_events() {
 	if (!world_installed_) return Ref<DestructionDrain>();
-	opennova::world::DestructionEvents &ev = kernel_->world.destruction;
+	opennova::world::DestructionEvents &ev = kernel_->world.out.destruction;
 	Ref<DestructionDrain> out;
 	out.instantiate();
 	for (const opennova::world::DestructionEffectEvent &e : ev.effects) {
@@ -595,7 +595,7 @@ Ref<DestructionDebugCard> Simulation::get_destruction_debug(int p_bms_id) const 
 	out->set_has_collision_instance(
 			kernel_->collision.has_instance(kernel_->world, found->handle));
 	const opennova::world::ItemDeathTraits *t =
-			kernel_->world.item_death_traits.get(found->item_id);
+			kernel_->world.tables.item_death_traits.get(found->item_id);
 	out->set_has_death_traits(t != nullptr);
 	if (t != nullptr) {
 		out->set_armor_impact(static_cast<int>(t->armor_impact));
@@ -664,7 +664,7 @@ TypedArray<RoundGlowRow> Simulation::get_round_glow_rows() const {
 	for (const opennova::world::LiveRound &r : kernel_->world.round_sim.rounds) {
 		if (!r.active || r.ammo_index < 0) continue;
 		const opennova::world::AmmoTableEntry *ammo =
-				kernel_->world.ammo.by_index(r.ammo_index);
+				kernel_->world.tables.ammo.by_index(r.ammo_index);
 		if (ammo == nullptr || ammo->light_move_radius <= 0.0f) continue;
 		Ref<RoundGlowRow> d;
 		d.instantiate();
@@ -1274,7 +1274,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	const opennova::inmatch::ClientReplicaPresentContext replica_present_context{
-			&kernel_->seat_specs, &kernel_->world.weapons, joiner_};
+			&kernel_->seat_specs, &kernel_->world.tables.weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
@@ -1372,7 +1372,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			const opennova::world::Entity *mount_row = kernel_->world.registry.get(h);
 			const opennova::world::WeaponTableEntry *mount_def =
 					mount_row != nullptr
-					? kernel_->world.weapons.by_index(mount_row->primary_weapon_slot_adm)
+					? kernel_->world.tables.weapons.by_index(mount_row->primary_weapon_slot_adm)
 					: nullptr;
 			// Primary retail leg: FP model exists and this exact embedded
 			// MountSlot is the live EquippedSlot. flags2 Invisible is the
@@ -1667,7 +1667,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		// docs/world/world-wac-ai-re.md].
 		if (local_first_person_usegun && local_player->mount_target == h) {
 			const opennova::world::WeaponTableEntry *mount_def =
-					w.weapons.by_index(e.primary_weapon_slot_adm);
+					w.tables.weapons.by_index(e.primary_weapon_slot_adm);
 			// Primary retail leg: FP model exists and this exact embedded
 			// MountSlot is the live EquippedSlot. flags2 Invisible is the
 			// witnessed alternate forced-cull leg and does not require the

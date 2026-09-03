@@ -457,13 +457,13 @@ bool run_equipped_adm_ingest_gate() {
 	            "table-less world stores the uplinked byte verbatim")) return false;
 
 	// Armory fed: category < 11 passes, the emplaced band (>= 11) and missing entries do not.
-	world.weapons.entries.resize(12);
-	world.weapons.entries[8].valid = true;
-	world.weapons.entries[8].name = "WPN_T";
-	world.weapons.entries[8].category = 3;
-	world.weapons.entries[11].valid = true;
-	world.weapons.entries[11].name = "WPN_EMPL";
-	world.weapons.entries[11].category = 11;
+	world.tables.weapons.entries.resize(12);
+	world.tables.weapons.entries[8].valid = true;
+	world.tables.weapons.entries[8].name = "WPN_T";
+	world.tables.weapons.entries[8].category = 3;
+	world.tables.weapons.entries[11].valid = true;
+	world.tables.weapons.entries[11].name = "WPN_EMPL";
+	world.tables.weapons.entries[11].category = 11;
 
 	intent.equipped_adm_index = 8;
 	ns::apply_player_intent(world, intent);

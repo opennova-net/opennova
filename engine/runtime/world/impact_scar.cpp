@@ -186,8 +186,8 @@ bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target
 	if (hit.section_index < 0 || hit.face_index < 0) return false;
 	if ((hit.material_flags & 0x400u) != 0u) return false;
 	ScarRing *ring = entity_local
-			? world.scars.ring_for(target.handle, target.registry_spawn_id)
-			: &world.scars.world_ring();
+			? world.out.scars.ring_for(target.handle, target.registry_spawn_id)
+			: &world.out.scars.world_ring();
 	if (ring == nullptr) return false;
 
 	// The id by surface, the radius by id [orig: @0x5CF295; Scar_RadiusForId

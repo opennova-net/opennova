@@ -502,7 +502,7 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	owner.ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
 	const opennova::world::EntityHandle player =
@@ -854,7 +854,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	ctx.np_protocol.host_run_duration_ms = 1234;
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
 	world.registry.configure_pool(3, 8);
@@ -963,7 +963,7 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
 	const opennova::world::EntityHandle player =

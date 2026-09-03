@@ -32,7 +32,7 @@ uint32_t Simulation::mission_game_type() const {
 	// The engine's one derivation (game_type::for_mission_attribs) over the
 	// world's retained mission attribs.
 	return opennova::game_type::for_mission_attribs(
-			kernel_ ? kernel_->world.mission_attrib_flags : 0u);
+			kernel_ ? kernel_->world.tables.mission_attrib_flags : 0u);
 }
 
 int Simulation::spawn_local_player_at_start() {
@@ -168,7 +168,7 @@ void Simulation::tick_hud_map_death_gate() {
 bool Simulation::get_hud_map_flip_180() const {
 	// AttribFlags::RotateMap180; the map-side witness is
 	// HudMinimapInput::flip_180 (hud/hud_minimap.h).
-	return kernel_ && (kernel_->world.mission_attrib_flags & 0x20u) != 0;
+	return kernel_ && (kernel_->world.tables.mission_attrib_flags & 0x20u) != 0;
 }
 
 float Simulation::get_local_player_yaw_deg() const {
@@ -314,7 +314,7 @@ String Simulation::get_local_player_weapon_name() const {
 	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (!e) return String();
 	const opennova::world::WeaponTableEntry *weapon =
-			kernel_->world.weapons.by_index(e->equipped_adm_index);
+			kernel_->world.tables.weapons.by_index(e->equipped_adm_index);
 	return weapon ? String(weapon->name.c_str()) : String();
 }
 

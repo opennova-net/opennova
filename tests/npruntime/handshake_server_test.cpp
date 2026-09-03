@@ -2232,7 +2232,7 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
-// Armory-fed loadout resolve (D-NET-141): with world.weapons built from the committed fixture,
+// Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the committed fixture,
 // the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
 // filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
 // (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
@@ -2255,13 +2255,13 @@ bool run_loadout_resolve_with_armory() {
 	DefWeaponsFile wf{};
 	if (!expect(def_parse_weapons(def_path.c_str(), &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
-	world.weapons = world::build_weapon_table(wf);
+	world.tables.weapons = world::build_weapon_table(wf);
 	def_free_weapons(&wf);
 	DefAmmoFile af{};
 	if (!expect(def_parse_ammo(ammo_path.c_str(), &af) == 0, "fixture ammo.def parses")) return false;
-	world.ammo = world::build_ammo_table(af);
+	world.tables.ammo = world::build_ammo_table(af);
 	def_free_ammo(&af);
-	world::resolve_weapon_round_types(world.weapons, world.ammo);
+	world::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30100};
@@ -2391,7 +2391,7 @@ bool run_loadout_resolve_with_armory() {
 		                    lo.slots[0].ammo_secondary == 0xFF &&
 		                    lo.slots[0].ammo_alt == 2,
 		            "explicit request -> clips plus the accepted damage-class byte")) return false;
-		const world::WeaponTableEntry *m4 = world.weapons.by_index(9);
+		const world::WeaponTableEntry *m4 = world.tables.weapons.by_index(9);
 		const inmatch::NapiNPConnection *connection = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) connection = &candidate;
@@ -2403,10 +2403,10 @@ bool run_loadout_resolve_with_armory() {
 				? 4 * m4->clipsize - m4->clipsize * m4->ammo_class_count
 				: 0;
 		if (m4 != nullptr && pool_id >= 0 &&
-		    pool_id < static_cast<int>(world.weapons.ammo_class_caps.size())) {
+		    pool_id < static_cast<int>(world.tables.weapons.ammo_class_caps.size())) {
 			expected_pool = std::min(
 					expected_pool,
-					world.weapons.ammo_class_caps[static_cast<size_t>(pool_id)]);
+					world.tables.weapons.ammo_class_caps[static_cast<size_t>(pool_id)]);
 		}
 		if (!expect(
 				connection != nullptr && pool_id >= 0 && pool_id < 128 &&
@@ -2417,13 +2417,13 @@ bool run_loadout_resolve_with_armory() {
 		}
 	}
 
-	const int m4_auto = world.weapons.index_of("WPN_M4AUTO");
-	const int m4_m203_auto = world.weapons.index_of("WPN_M4M203AUTO");
+	const int m4_auto = world.tables.weapons.index_of("WPN_M4AUTO");
+	const int m4_m203_auto = world.tables.weapons.index_of("WPN_M4M203AUTO");
 	if (!expect(m4_auto > 0 && m4_m203_auto > 0,
 	            "shared-ammo loadout fixtures resolve")) return false;
-	const int16_t m4_ammo = world.weapons.entries[static_cast<size_t>(m4_auto)].ammo_index;
+	const int16_t m4_ammo = world.tables.weapons.entries[static_cast<size_t>(m4_auto)].ammo_index;
 	if (!expect(m4_ammo >= 0 &&
-	                    world.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
+	                    world.tables.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
 	            "M4AUTO and M4M203AUTO share one resolved AmmoDef index")) return false;
 
 	// player+89688 is indexed by AmmoDef, not by granted weapon. The later accepted M4M203AUTO

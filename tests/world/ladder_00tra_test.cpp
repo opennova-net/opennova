@@ -179,7 +179,7 @@ int main() {
 	// death anim. That is a rig artifact, not the entry gate: raise the
 	// WAC-writable tolerance past any drop the probe makes. (0 is not "off":
 	// retail's landing check has no zero test, so 0 damages every landing.)
-	rig.world.wac_values.fallmps = 1000;
+	rig.world.script.wac_values.fallmps = 1000;
 	bool latched = false;
 	float hold_z = 0.0f;
 	for (const w::Vec3 &h : hovers) {
