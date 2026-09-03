@@ -138,10 +138,8 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
   and ADRs 0009–0012.
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
-  attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
-  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
-  (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
-  is exempt, so vocabulary in docs is honor-system).
+  front-ends are Shells, a lib's embedding app is its embedder. Vocabulary is a
+  review concern, not a lint (ADR 0043 retired `host_lint.py`).
 - ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
   state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),

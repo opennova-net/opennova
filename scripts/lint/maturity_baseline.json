@@ -16,18 +16,17 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 414,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
     "gd_dict_key_sites": 281,
-    "gd_orig_cites": 692,
+    "gd_foreign_private_accesses": 632,
     "gd_prints_outside_debug": 0,
+    "godot_orig_cites": 1106,
     "godot_src_dictionary_returns": 67,
     "has_method_guards": 22,
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
-    "oversize_gd_files": 0,
     "test_private_pokes": 4
   },
   "dict_contract_allowlist": [

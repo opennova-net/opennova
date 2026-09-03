@@ -28,6 +28,13 @@ struct ListenHostState {
 	netsim::LoopbackChannel host_loop; // the local dcb-2 client; declared before the runtime
 	np::HostOwner host_owner;
 	std::unique_ptr<np::ClientRuntime> client_runtime;
+	// Deterministic startup overrides for goldens and the tick digest (the
+	// same three HostConfig fields): zero asks bringup's production helper to
+	// mint the volatile retail values (the clock-mixed session seed also
+	// seeds the world's CRT rand stream, D-NET-115).
+	uint32_t host_key = 0;
+	uint32_t host_start_tick = 0;
+	uint32_t session_seed_id = 0;
 };
 
 namespace listen_host {

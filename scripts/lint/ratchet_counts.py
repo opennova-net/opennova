@@ -12,14 +12,21 @@ in maturity_baseline.json:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
-  adapter_cpp_orig_cites  "[orig:" citations across ALL of godot/src -- the
-                        one cite marker (ADR 0042 d7 retired the dual-marker
-                        convention; there is no "(retail:" form and no
-                        pushdown/device partition any more). Non-increasing:
-                        a decrease means witnessed code moved to its engine
-                        home or died as verified dead code -- bank it with
-                        --write-baseline. The marker-rewrite exit is gone;
-                        only code that moves banks the counter.
+  godot_orig_cites      "[orig:" citations across the whole Godot side --
+                        godot/src C++ plus the godot/game, godot/modtools and
+                        godot/probes GDScript -- as ONE count (ADR 0043 merged
+                        the former adapter_cpp_orig_cites / gd_orig_cites
+                        pair). A cite moves freely between the two Godot-side
+                        languages; the gauge falls only when witnessed code
+                        reaches its engine/ home or dies as verified dead
+                        code -- bank it with --write-baseline. The one cite
+                        marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
+  gd_foreign_private_accesses
+                        lines in the shipping GDScript (godot/game,
+                        godot/modtools) that access an _underscore member of
+                        ANOTHER object (self._ excluded) -- a "method annex"
+                        reaching into its owner's privates is not a class
+                        boundary (ADR 0043). Non-increasing; target zero.
   mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
                         the typed debug-control table
                         (godot/game/debug/debug_controls.gd, ADR 0042 d5). An
@@ -34,13 +41,6 @@ in maturity_baseline.json:
                         by string key is an untyped record nobody can find;
                         it belongs on the node class as a typed property, on
                         a RefCounted record, or in the owner's own table.
-  gd_orig_cites         "[orig:" citations in godot/game, godot/modtools and
-                        godot/probes GDScript -- witnessed engine behavior
-                        still living in the game-level scripts (ADR 0034 d6's
-                        C++ rewrite queue, measured; godot/probes joined the
-                        scope under ADR 0042 d7). The burn-down class for the
-                        push-down campaign; its floor is the device-leg
-                        justifications.
   oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
@@ -101,10 +101,13 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
-def count_test_private_pokes() -> int:
+def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
-    for sub in ("tests", "probes"):
+    for sub in subdirs:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -116,6 +119,19 @@ def count_test_private_pokes() -> int:
                 if PRIVATE_POKE.search(stripped):
                     count += 1
     return count
+
+
+def count_test_private_pokes() -> int:
+    return _count_private_pokes(("tests", "probes"))
+
+
+def count_gd_foreign_private_accesses() -> int:
+    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game,
+    godot/modtools): the annex pattern -- a RefCounted "method annex" split
+    off its owner for size and reaching back through `_owner._field` -- is
+    C++ `friend` without the keyword. A class owns its state; an object that
+    needs another's privates is a method of that other class (ADR 0043)."""
+    return _count_private_pokes(("game", "modtools"))
 
 
 def count_engine_uncited_src_files(allowlist: set[str]) -> int:
@@ -147,14 +163,13 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     return count
 
 
-# One cite marker, one count (ADR 0042 d7): a witness citation is
-# `[orig: Name @0xADDR]` everywhere — the adjudicated `(retail: ...)` note
-# form and the pushdown/device partition are retired. The count over all of
-# godot/src is non-increasing; a decrease means witnessed code moved to its
-# engine home (or died as verified dead code) and is banked with
-# --write-baseline. The marker rewrite that let citations leave the gauge is
-# no longer an exit: only code that moves banks the counter.
-def count_adapter_cpp_orig_cites() -> int:
+# One cite marker, one count (ADR 0042 d7 + ADR 0043): a witness citation is
+# `[orig: Name @0xADDR]` everywhere, and the whole Godot side -- the
+# godot/src C++ bindings and the game-level GDScript -- is ONE gauge. A cite
+# moving between GDScript and binding C++ leaves the count unchanged; the
+# count falls only when witnessed code reaches its engine/ home or dies as
+# verified dead code, and that decrease is banked with --write-baseline.
+def count_godot_orig_cites() -> int:
     count = 0
     adapter = REPO / "godot" / "src"
     for path in adapter.rglob("*"):
@@ -168,6 +183,16 @@ def count_adapter_cpp_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
+    for sub in ("game", "modtools", "probes"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            count += text.count("[orig:")
     return count
 
 
@@ -340,51 +365,6 @@ def count_oversize_cpp_headers() -> int:
     return count
 
 
-def count_gd_orig_cites() -> int:
-    """`[orig:` citations in the game-level GDScript (godot/game,
-    godot/modtools, and — since ADR 0042 d7 — godot/probes): witnessed engine
-    behavior that ADR 0033/0034 say belongs in engine/. The push-down campaign
-    banks this down; the floor is the device-leg justifications (a cite
-    explaining WHY a node write happens, not HOW a witnessed value is
-    derived)."""
-    count = 0
-    for sub in ("game", "modtools", "probes"):
-        for path in (REPO / "godot" / sub).rglob("*.gd"):
-            parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            count += text.count("[orig:")
-    return count
-
-
-OVERSIZE_GD_LINE_LIMIT = 1200
-
-
-def count_oversize_gd_files() -> int:
-    """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave a ratcheted residual set; no .gd under godot/src, godot/game,
-    godot/modtools or godot/probes may grow past 1200 lines without splitting
-    first. godot/tests is deliberately out of scope; test-suite file size is a
-    separate maintainability concern."""
-    count = 0
-    for root in ("godot/src", "godot/game", "godot/modtools", "godot/probes"):
-        for path in (REPO / root).rglob("*.gd"):
-            parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):  # vendored addons / build output, not source
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            if len(text.splitlines()) > OVERSIZE_GD_LINE_LIMIT:
-                count += 1
-    return count
-
-
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
@@ -501,16 +481,15 @@ def main() -> int:
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
+        "gd_foreign_private_accesses": count_gd_foreign_private_accesses(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
-        "adapter_cpp_orig_cites": count_adapter_cpp_orig_cites(),
+        "godot_orig_cites": count_godot_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),
         "oversize_cpp_headers": count_oversize_cpp_headers(),
-        "oversize_gd_files": count_oversize_gd_files(),
         "has_method_guards": count_has_method_guards(),
-        "gd_orig_cites": count_gd_orig_cites(),
         "gd_dict_key_sites": count_gd_dict_key_sites(),
         "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
     }

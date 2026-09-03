@@ -115,9 +115,10 @@
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.
-- Size ratchet: no `engine/`/`apps/`/`godot/src` `.cpp` past 2500 lines — split by leg
-  into a sibling TU first (precedent: `world/infantry.cpp` -> `infantry_ladder.cpp`),
-  never bump the baseline.
+- Size ratchet: no `engine/`/`apps/`/`godot/src` `.cpp` or `.h` past 2500 lines — split
+  by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
+  anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
+  under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
