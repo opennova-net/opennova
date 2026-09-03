@@ -55,7 +55,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# join names the host's stream and the mounted expansion so a live punt
 	# reads as "your install lacks X", not as a bad local file.
 	# The document's references are basenames from either header source (the
-	# wire 0x0B header's extension is dropped by MissionDocument).
+	# wire 0x0B header's extension is dropped by mission_info()).
 	var trn := mission.get_terrain_ref() + ".trn"
 	if not resource_root.has_file(trn):
 		_world.load_failed.emit(missing_mission_asset_reason(

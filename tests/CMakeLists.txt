@@ -215,7 +215,7 @@ target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
-# pools, zero-valued optional fields) authored through MissionDocument and
+# pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
 add_executable(minimal_bms_gen_test fixtures/minimal_bms_gen.cpp)
 target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)

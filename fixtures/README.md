@@ -150,7 +150,7 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   combos with both `skipdemo` flag levels, four good and four evil); the shipped
   table is the reference-tree leg of `avatars_parse` and `avatars_roundtrip`.
 - `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
-  authored through `MissionDocument` and written by `bms::write` (four populated
+  authored through the `bms_edit` free functions and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and
   environment in its header); the shipped ash_i5b is `mission_mis_idempotency`'s
   reference-tree leg and the whole shipped corpus is the gated `mission_corpus`.

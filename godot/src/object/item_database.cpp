@@ -390,7 +390,7 @@ TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 	if (p_mission.is_null()) return out;
 	const std::vector<opennova::audio::EnvsMarker> markers =
 			opennova::audio::resolve_envs_markers(
-					p_mission->native_document().bms_file(), native_items());
+					p_mission->native_file(), native_items());
 	for (const opennova::audio::EnvsMarker &marker : markers) {
 		Ref<EnvsMarkerRow> row;
 		row.instantiate();

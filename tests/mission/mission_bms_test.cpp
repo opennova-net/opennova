@@ -10,7 +10,9 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_mis.h>
 
 #include "common/file_io.h"
 
@@ -40,15 +42,32 @@ void write_u32_le(std::vector<uint8_t> &bytes, size_t offset, uint32_t value) {
 	bytes[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
+// The document legs the retired facade carried: parse bytes into a synced
+// file; sync + write a file to bytes.
+bool load_document(const std::vector<uint8_t> &bytes, opennova::bms::File &out) {
+	std::string error;
+	if (!opennova::bms::parse(bytes.data(), bytes.size(), out, error)) return false;
+	opennova::mission::sync_counts(out);
+	return true;
+}
+
+bool write_document(opennova::bms::File &file, std::vector<uint8_t> &out) {
+	std::string error;
+	opennova::mission::sync_counts(file);
+	return opennova::bms::write(file, out, error);
+}
+
 } // namespace
 
 int main() {
+	using namespace opennova::mission;
+	std::string error;
+
 	const std::vector<uint8_t> original = read_file(fixture_path());
 	TEST_EXPECT(!original.empty());
 	TEST_EXPECT(opennova::bms::is_bms(original.data(), original.size()));
 
 	opennova::bms::File bms_file;
-	std::string error;
 	TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), bms_file, error));
 	TEST_EXPECT(bms_file.items.size() == bms_file.header.num_items);
 	TEST_EXPECT(bms_file.buildings.size() == bms_file.header.num_buildings);
@@ -67,183 +86,189 @@ int main() {
 	TEST_EXPECT(opennova::bms::write(encoded_file, encoded2, error));
 	TEST_EXPECT(encoded2 == encoded);
 
-	opennova::mission::MissionDocument document;
-	TEST_EXPECT(document.load_bms_bytes(original.data(), original.size()));
-	TEST_EXPECT(document.is_loaded());
-	TEST_EXPECT(!document.info().mission_name.empty());
+	opennova::bms::File document;
+	TEST_EXPECT(load_document(original, document));
+	TEST_EXPECT(!mission_info(document).mission_name.empty());
 	const uint16_t original_loadout_len = read_u16_le(original, offsetof(opennova::bms::Header, weapon_loadout_chunk_len));
 	const uint16_t original_secondary_len = read_u16_le(original, offsetof(opennova::bms::Header, secondary_chunk_len));
 
-	const size_t original_item_count = document.entity_count(opennova::mission::EntityKind::Item);
+	const size_t original_item_count = entity_count(document, EntityKind::Item);
 	TEST_EXPECT(original_item_count > 0);
 
-	opennova::mission::EntityRecord first_item;
-	TEST_EXPECT(document.get_entity(opennova::mission::EntityKind::Item, 0, first_item));
-	opennova::mission::EntityTransform edited = first_item.transform;
+	const int first_item_bms_id = document.items[0].id;
+	const int first_item_item_id = entity_item_id(document.items[0]);
+	EntityTransform edited = entity_transform(document.items[0]);
 	edited.x += 12.5f;
 	edited.y -= 3.0f;
 	edited.z += 8.25f;
 	edited.pitch += 1;
 	edited.yaw += 2;
 	edited.roll += 3;
-	TEST_EXPECT(document.set_entity_transform(opennova::mission::EntityKind::Item, 0, edited));
+	TEST_EXPECT(set_entity_transform(document, EntityKind::Item, 0, edited, error));
 
-	opennova::mission::EntityRecord reread;
-	TEST_EXPECT(document.get_entity(opennova::mission::EntityKind::Item, 0, reread));
-	TEST_EXPECT(reread.transform.x == edited.x);
-	TEST_EXPECT(reread.transform.y == edited.y);
-	TEST_EXPECT(reread.transform.z == edited.z);
-	TEST_EXPECT(reread.transform.pitch == edited.pitch);
-	TEST_EXPECT(reread.transform.yaw == edited.yaw);
-	TEST_EXPECT(reread.transform.roll == edited.roll);
+	const EntityTransform reread = entity_transform(document.items[0]);
+	TEST_EXPECT(reread.x == edited.x);
+	TEST_EXPECT(reread.y == edited.y);
+	TEST_EXPECT(reread.z == edited.z);
+	TEST_EXPECT(reread.pitch == edited.pitch);
+	TEST_EXPECT(reread.yaw == edited.yaw);
+	TEST_EXPECT(reread.roll == edited.roll);
 
-	opennova::mission::EntityProperties properties;
-	properties.group_id = 7;
-	properties.waypoint_id = 3;
-	properties.wp_number = 12;
-	properties.team = 2;
-	properties.ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Blind) |
-	                      static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow);
-	properties.perception = 88;
-	properties.accuracy = 66;
-	properties.alert_state = 4;
-	properties.min_engagement_distance = 30;
-	properties.max_engagement_distance = 333;
-	properties.max_attack_distance = 444;
-	properties.spawn_count = 5;
-	properties.max_simultaneous = 2;
-	opennova::mission::EntityRecord property_updated;
-	TEST_EXPECT(document.set_entity_properties(opennova::mission::EntityKind::Item, 0, properties, &property_updated));
-	TEST_EXPECT(property_updated.bms_id == first_item.bms_id);
-	TEST_EXPECT(property_updated.item_id == first_item.item_id);
-	TEST_EXPECT(property_updated.transform.x == edited.x);
-	TEST_EXPECT(property_updated.transform.y == edited.y);
-	TEST_EXPECT(property_updated.transform.z == edited.z);
-	TEST_EXPECT(property_updated.group_id == properties.group_id);
-	TEST_EXPECT(property_updated.waypoint_id == properties.waypoint_id);
-	TEST_EXPECT(property_updated.wp_number == properties.wp_number);
-	TEST_EXPECT(property_updated.team == properties.team);
-	TEST_EXPECT(property_updated.ai_flags == properties.ai_flags);
-	TEST_EXPECT(property_updated.perception == properties.perception);
-	TEST_EXPECT(property_updated.accuracy == properties.accuracy);
-	TEST_EXPECT(property_updated.alert_state == properties.alert_state);
-	TEST_EXPECT(property_updated.min_engagement_distance == properties.min_engagement_distance);
-	TEST_EXPECT(property_updated.max_engagement_distance == properties.max_engagement_distance);
-	TEST_EXPECT(property_updated.max_attack_distance == properties.max_attack_distance);
-	TEST_EXPECT(property_updated.spawn_count == properties.spawn_count);
-	TEST_EXPECT(property_updated.max_simultaneous == properties.max_simultaneous);
+	// The editable properties, one named field at a time (the same clamp rules
+	// the retired bulk setter applied).
+	const int ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Blind) |
+	                     static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow);
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "group", 7, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "waypoint_id", 3, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "wp_number", 12, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "team", 2, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "ai_flags", ai_flags, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "perception", 88, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "accuracy", 66, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "alert_state", 4, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "min_engagement_distance", 30, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "max_engagement_distance", 333, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "max_attack_distance", 444, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "spawn_count", 5, error));
+	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "max_simultaneous", 2, error));
+	{
+		const opennova::bms::Entity &property_updated = document.items[0];
+		TEST_EXPECT(property_updated.id == first_item_bms_id);
+		TEST_EXPECT(entity_item_id(property_updated) == first_item_item_id);
+		const EntityTransform kept = entity_transform(property_updated);
+		TEST_EXPECT(kept.x == edited.x);
+		TEST_EXPECT(kept.y == edited.y);
+		TEST_EXPECT(kept.z == edited.z);
+		TEST_EXPECT(property_updated.group_id == 7);
+		TEST_EXPECT(property_updated.waypoint_id == 3);
+		TEST_EXPECT(property_updated.wp_number == 12);
+		TEST_EXPECT(property_updated.team == 2);
+		TEST_EXPECT(property_updated.bmsi_attributes == static_cast<uint32_t>(ai_flags));
+		TEST_EXPECT(property_updated.perception2 == 88);
+		TEST_EXPECT(property_updated.w_accuracy1 == 66);
+		TEST_EXPECT(property_updated.alert_state == 4);
+		TEST_EXPECT(property_updated.min_engagement_distance == 30);
+		TEST_EXPECT(property_updated.max_engagement_distance == 333);
+		TEST_EXPECT(property_updated.max_attack_distance == 444);
+		TEST_EXPECT(property_updated.spawns == 5);
+		TEST_EXPECT(property_updated.no_more_than == 2);
+	}
 
-	opennova::mission::EntityTransform placed;
+	EntityTransform placed;
 	placed.x = 1.0f;
 	placed.y = 2.0f;
 	placed.z = 3.0f;
 	placed.yaw = 90;
-	opennova::mission::EntityRecord added;
-	TEST_EXPECT(document.add_entity(opennova::mission::EntityKind::Item, 101291, placed, &added));
-	TEST_EXPECT(document.entity_count(opennova::mission::EntityKind::Item) == original_item_count + 1);
-	TEST_EXPECT(added.item_id == 101291);
-	TEST_EXPECT(added.bms_type_id == 1291);
+	const size_t added = add_entity(document, EntityKind::Item, 101291, placed);
+	TEST_EXPECT(entity_count(document, EntityKind::Item) == original_item_count + 1);
+	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
+	TEST_EXPECT(document.items[added].type_id == 1291);
 
 	std::vector<uint8_t> edited_bytes;
-	TEST_EXPECT(document.write_bms_bytes(edited_bytes));
-	opennova::mission::MissionDocument reparsed;
-	TEST_EXPECT(reparsed.load_bms_bytes(edited_bytes.data(), edited_bytes.size()));
-	TEST_EXPECT(reparsed.entity_count(opennova::mission::EntityKind::Item) == original_item_count + 1);
-	opennova::mission::EntityRecord reparsed_first_item;
-	TEST_EXPECT(reparsed.get_entity(opennova::mission::EntityKind::Item, 0, reparsed_first_item));
-	TEST_EXPECT(reparsed_first_item.group_id == properties.group_id);
-	TEST_EXPECT(reparsed_first_item.waypoint_id == properties.waypoint_id);
-	TEST_EXPECT(reparsed_first_item.wp_number == properties.wp_number);
-	TEST_EXPECT(reparsed_first_item.team == properties.team);
-	TEST_EXPECT(reparsed_first_item.ai_flags == properties.ai_flags);
-	TEST_EXPECT(reparsed_first_item.perception == properties.perception);
-	TEST_EXPECT(reparsed_first_item.accuracy == properties.accuracy);
-	TEST_EXPECT(reparsed_first_item.alert_state == properties.alert_state);
-	TEST_EXPECT(reparsed_first_item.min_engagement_distance == properties.min_engagement_distance);
-	TEST_EXPECT(reparsed_first_item.max_engagement_distance == properties.max_engagement_distance);
-	TEST_EXPECT(reparsed_first_item.max_attack_distance == properties.max_attack_distance);
-	TEST_EXPECT(reparsed_first_item.spawn_count == properties.spawn_count);
-	TEST_EXPECT(reparsed_first_item.max_simultaneous == properties.max_simultaneous);
-	const std::vector<opennova::mission::WaypointSummary> waypoint_summaries = reparsed.waypoint_summaries();
-	TEST_EXPECT(waypoint_summaries.size() == opennova::bms::kWaypointRecordCount);
-	TEST_EXPECT(std::any_of(waypoint_summaries.begin(), waypoint_summaries.end(), [](const opennova::mission::WaypointSummary &summary) {
+	TEST_EXPECT(write_document(document, edited_bytes));
+	opennova::bms::File reparsed;
+	TEST_EXPECT(load_document(edited_bytes, reparsed));
+	TEST_EXPECT(entity_count(reparsed, EntityKind::Item) == original_item_count + 1);
+	{
+		const opennova::bms::Entity &reparsed_first_item = reparsed.items[0];
+		TEST_EXPECT(reparsed_first_item.group_id == 7);
+		TEST_EXPECT(reparsed_first_item.waypoint_id == 3);
+		TEST_EXPECT(reparsed_first_item.wp_number == 12);
+		TEST_EXPECT(reparsed_first_item.team == 2);
+		TEST_EXPECT(reparsed_first_item.bmsi_attributes == static_cast<uint32_t>(ai_flags));
+		TEST_EXPECT(reparsed_first_item.perception2 == 88);
+		TEST_EXPECT(reparsed_first_item.w_accuracy1 == 66);
+		TEST_EXPECT(reparsed_first_item.alert_state == 4);
+		TEST_EXPECT(reparsed_first_item.min_engagement_distance == 30);
+		TEST_EXPECT(reparsed_first_item.max_engagement_distance == 333);
+		TEST_EXPECT(reparsed_first_item.max_attack_distance == 444);
+		TEST_EXPECT(reparsed_first_item.spawns == 5);
+		TEST_EXPECT(reparsed_first_item.no_more_than == 2);
+	}
+	const std::vector<WaypointSummary> summaries = waypoint_summaries(reparsed);
+	TEST_EXPECT(summaries.size() == opennova::bms::kWaypointRecordCount);
+	TEST_EXPECT(std::any_of(summaries.begin(), summaries.end(), [](const WaypointSummary &summary) {
 		return summary.marker_count > 0;
 	}));
-	TEST_EXPECT(reparsed.waypoint_path_count() == opennova::bms::kWaypointRecordCount);
-	opennova::mission::WaypointPath path_zero;
-	TEST_EXPECT(reparsed.get_waypoint_path(0, path_zero));
+	TEST_EXPECT(reparsed.waypoint_records.size() == opennova::bms::kWaypointRecordCount);
+	WaypointPath path_zero;
+	TEST_EXPECT(waypoint_path(reparsed, 0, path_zero));
 	TEST_EXPECT(path_zero.index == 0);
 
-	const size_t original_marker_count = reparsed.entity_count(opennova::mission::EntityKind::Marker);
-	opennova::mission::WaypointPath cleared_path;
-	TEST_EXPECT(reparsed.clear_waypoint_path(1, &cleared_path));
+	const size_t original_marker_count = entity_count(reparsed, EntityKind::Marker);
+	TEST_EXPECT(clear_waypoint_path(reparsed, 1, error));
+	WaypointPath cleared_path;
+	TEST_EXPECT(waypoint_path(reparsed, 1, cleared_path));
 	TEST_EXPECT(cleared_path.index == 1);
 	TEST_EXPECT(cleared_path.marker_indices.empty());
 
-	opennova::mission::EntityTransform waypoint_transform;
+	EntityTransform waypoint_transform;
 	waypoint_transform.x = 40.0f;
 	waypoint_transform.y = 41.0f;
 	waypoint_transform.z = 42.0f;
-	opennova::mission::EntityRecord first_waypoint_marker;
-	opennova::mission::WaypointPath edited_path;
-	TEST_EXPECT(reparsed.add_waypoint_marker(1, 100001, waypoint_transform, -1, &first_waypoint_marker, &edited_path));
-	TEST_EXPECT(reparsed.entity_count(opennova::mission::EntityKind::Marker) == original_marker_count + 1);
-	TEST_EXPECT(first_waypoint_marker.kind == opennova::mission::EntityKind::Marker);
+	size_t first_marker_index = 0;
+	WaypointPath edited_path;
+	TEST_EXPECT(add_waypoint_marker(reparsed, 1, 100001, waypoint_transform, -1, error, &first_marker_index));
+	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
+	TEST_EXPECT(entity_count(reparsed, EntityKind::Marker) == original_marker_count + 1);
+	TEST_EXPECT(reparsed.markers[first_marker_index].type == opennova::bms::ItemType::Marker);
 	TEST_EXPECT(edited_path.marker_indices.size() == 1);
-	TEST_EXPECT(edited_path.marker_indices[0] == static_cast<int>(first_waypoint_marker.index));
+	TEST_EXPECT(edited_path.marker_indices[0] == static_cast<int>(first_marker_index));
 
 	const int waypoint_flags = static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
 	                           static_cast<int>(opennova::bms::WaypointFlags::BlueTeam);
-	std::vector<int> marker_order = {static_cast<int>(first_waypoint_marker.index)};
-	TEST_EXPECT(reparsed.set_waypoint_path(1, marker_order, waypoint_flags, &edited_path));
+	std::vector<int> marker_order = {static_cast<int>(first_marker_index)};
+	TEST_EXPECT(set_waypoint_path(reparsed, 1, marker_order, waypoint_flags, error));
+	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
 	TEST_EXPECT(edited_path.flags == waypoint_flags);
 	TEST_EXPECT(edited_path.marker_indices == marker_order);
 
-	opennova::mission::EntityTransform inserted_transform;
+	EntityTransform inserted_transform;
 	inserted_transform.x = 50.0f;
 	inserted_transform.y = 51.0f;
 	inserted_transform.z = 52.0f;
-	opennova::mission::EntityRecord inserted_waypoint_marker;
-	TEST_EXPECT(reparsed.add_waypoint_marker(1, 100001, inserted_transform, 0, &inserted_waypoint_marker, &edited_path));
-	TEST_EXPECT(reparsed.entity_count(opennova::mission::EntityKind::Marker) == original_marker_count + 2);
+	size_t inserted_marker_index = 0;
+	TEST_EXPECT(add_waypoint_marker(reparsed, 1, 100001, inserted_transform, 0, error, &inserted_marker_index));
+	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
+	TEST_EXPECT(entity_count(reparsed, EntityKind::Marker) == original_marker_count + 2);
 	TEST_EXPECT(edited_path.marker_indices.size() == 2);
-	TEST_EXPECT(edited_path.marker_indices[0] == static_cast<int>(inserted_waypoint_marker.index));
-	TEST_EXPECT(edited_path.marker_indices[1] == static_cast<int>(first_waypoint_marker.index));
+	TEST_EXPECT(edited_path.marker_indices[0] == static_cast<int>(inserted_marker_index));
+	TEST_EXPECT(edited_path.marker_indices[1] == static_cast<int>(first_marker_index));
 
-	TEST_EXPECT(reparsed.remove_entity(opennova::mission::EntityKind::Marker, first_waypoint_marker.index));
-	opennova::mission::WaypointPath repaired_path;
-	TEST_EXPECT(reparsed.get_waypoint_path(1, repaired_path));
+	TEST_EXPECT(remove_entity(reparsed, EntityKind::Marker, first_marker_index, error));
+	WaypointPath repaired_path;
+	TEST_EXPECT(waypoint_path(reparsed, 1, repaired_path));
 	TEST_EXPECT(repaired_path.marker_indices.size() == 1);
-	TEST_EXPECT(repaired_path.marker_indices[0] == static_cast<int>(inserted_waypoint_marker.index - 1));
+	TEST_EXPECT(repaired_path.marker_indices[0] == static_cast<int>(inserted_marker_index - 1));
 
 	std::vector<uint8_t> waypoint_bytes;
-	TEST_EXPECT(reparsed.write_bms_bytes(waypoint_bytes));
-	opennova::mission::MissionDocument waypoint_roundtrip;
-	TEST_EXPECT(waypoint_roundtrip.load_bms_bytes(waypoint_bytes.data(), waypoint_bytes.size()));
-	opennova::mission::WaypointPath roundtrip_path;
-	TEST_EXPECT(waypoint_roundtrip.get_waypoint_path(1, roundtrip_path));
+	TEST_EXPECT(write_document(reparsed, waypoint_bytes));
+	opennova::bms::File waypoint_roundtrip;
+	TEST_EXPECT(load_document(waypoint_bytes, waypoint_roundtrip));
+	WaypointPath roundtrip_path;
+	TEST_EXPECT(waypoint_path(waypoint_roundtrip, 1, roundtrip_path));
 	TEST_EXPECT(roundtrip_path.flags == waypoint_flags);
 	TEST_EXPECT(roundtrip_path.marker_indices.size() == 1);
-	TEST_EXPECT(roundtrip_path.marker_indices[0] == static_cast<int>(inserted_waypoint_marker.index - 1));
+	TEST_EXPECT(roundtrip_path.marker_indices[0] == static_cast<int>(inserted_marker_index - 1));
 
-	TEST_EXPECT(waypoint_roundtrip.area_trigger_count() == bms_file.area_triggers.size());
-	TEST_EXPECT(waypoint_roundtrip.event_count() == bms_file.events.size());
-	TEST_EXPECT(waypoint_roundtrip.trigger_count() == bms_file.triggers.size());
-	TEST_EXPECT(waypoint_roundtrip.action_count() == bms_file.actions.size());
-	TEST_EXPECT(waypoint_roundtrip.event_count() > 0);
-	TEST_EXPECT(waypoint_roundtrip.trigger_count() > 0);
-	TEST_EXPECT(waypoint_roundtrip.action_count() > 0);
-	opennova::mission::MissionLogicSummary logic_summary = waypoint_roundtrip.logic_summary();
-	TEST_EXPECT(logic_summary.event_count == waypoint_roundtrip.event_count());
-	TEST_EXPECT(logic_summary.trigger_count == waypoint_roundtrip.trigger_count());
-	TEST_EXPECT(logic_summary.action_count == waypoint_roundtrip.action_count());
-	TEST_EXPECT(logic_summary.area_trigger_count == waypoint_roundtrip.area_trigger_count());
+	TEST_EXPECT(waypoint_roundtrip.area_triggers.size() == bms_file.area_triggers.size());
+	TEST_EXPECT(waypoint_roundtrip.events.size() == bms_file.events.size());
+	TEST_EXPECT(waypoint_roundtrip.triggers.size() == bms_file.triggers.size());
+	TEST_EXPECT(waypoint_roundtrip.actions.size() == bms_file.actions.size());
+	TEST_EXPECT(!waypoint_roundtrip.events.empty());
+	TEST_EXPECT(!waypoint_roundtrip.triggers.empty());
+	TEST_EXPECT(!waypoint_roundtrip.actions.empty());
+	const MissionLogicSummary summary = logic_summary(waypoint_roundtrip);
+	TEST_EXPECT(summary.event_count == waypoint_roundtrip.events.size());
+	TEST_EXPECT(summary.trigger_count == waypoint_roundtrip.triggers.size());
+	TEST_EXPECT(summary.action_count == waypoint_roundtrip.actions.size());
+	TEST_EXPECT(summary.area_trigger_count == waypoint_roundtrip.area_triggers.size());
 
-	opennova::mission::MissionEventRecord first_event;
-	TEST_EXPECT(waypoint_roundtrip.get_event(0, first_event));
+	MissionEventRecord first_event;
+	TEST_EXPECT(event(waypoint_roundtrip, 0, first_event));
 	TEST_EXPECT(first_event.index == 0);
-	opennova::mission::MissionEventChain first_chain;
-	TEST_EXPECT(waypoint_roundtrip.get_event_chain(0, first_chain));
+	MissionEventChain first_chain;
+	TEST_EXPECT(event_chain(waypoint_roundtrip, 0, first_chain));
 	TEST_EXPECT(first_chain.event.index == 0);
 	TEST_EXPECT(first_chain.triggers.size() == static_cast<size_t>(first_chain.event.trigger_count));
 	TEST_EXPECT(first_chain.actions.size() == static_cast<size_t>(first_chain.event.action_count));
@@ -258,10 +283,10 @@ int main() {
 	}
 
 	size_t mutable_event_index = 0;
-	opennova::mission::MissionEventChain mutable_chain;
+	MissionEventChain mutable_chain;
 	bool found_mutable_chain = false;
-	for (size_t i = 0; i < waypoint_roundtrip.event_count(); ++i) {
-		if (waypoint_roundtrip.get_event_chain(i, mutable_chain) &&
+	for (size_t i = 0; i < waypoint_roundtrip.events.size(); ++i) {
+		if (event_chain(waypoint_roundtrip, i, mutable_chain) &&
 		    mutable_chain.event.trigger_count < 20 &&
 		    mutable_chain.event.action_count < 20) {
 			mutable_event_index = i;
@@ -270,65 +295,73 @@ int main() {
 		}
 	}
 	TEST_EXPECT(found_mutable_chain);
-	opennova::mission::MissionEventRecord edited_event = mutable_chain.event;
+	MissionEventRecord edited_event = mutable_chain.event;
 	edited_event.flags |= static_cast<int>(opennova::bms::EventFlags::PreMission);
 	edited_event.delay += 7;
-	opennova::mission::MissionEventRecord reread_event;
-	TEST_EXPECT(waypoint_roundtrip.set_event(mutable_event_index, edited_event, &reread_event));
+	TEST_EXPECT(set_event(waypoint_roundtrip, mutable_event_index, edited_event, error));
+	MissionEventRecord reread_event;
+	TEST_EXPECT(event(waypoint_roundtrip, mutable_event_index, reread_event));
 	TEST_EXPECT((reread_event.flags & static_cast<int>(opennova::bms::EventFlags::PreMission)) != 0);
 	TEST_EXPECT(reread_event.delay == edited_event.delay);
 
-	const size_t before_trigger_count = waypoint_roundtrip.trigger_count();
-	opennova::mission::MissionTriggerRecord new_trigger;
+	const size_t before_trigger_count = waypoint_roundtrip.triggers.size();
+	MissionTriggerRecord new_trigger;
 	new_trigger.condition_flags = 0;
 	new_trigger.main_type = static_cast<int>(opennova::bms::TriggerMainType::MissionVariable);
 	new_trigger.sub_type = static_cast<int>(opennova::bms::MissionVariableTriggerType::MissionVariableIsGreaterThan);
 	new_trigger.param1 = 3;
 	new_trigger.param2 = 9;
 	const size_t trigger_insert_index = mutable_chain.triggers.size();
-	opennova::mission::MissionEventChain trigger_insert_chain;
-	TEST_EXPECT(waypoint_roundtrip.insert_event_trigger(mutable_event_index, trigger_insert_index, new_trigger, &trigger_insert_chain));
-	TEST_EXPECT(waypoint_roundtrip.trigger_count() == before_trigger_count + 1);
+	TEST_EXPECT(insert_event_trigger(waypoint_roundtrip, mutable_event_index, trigger_insert_index, new_trigger, error));
+	MissionEventChain trigger_insert_chain;
+	TEST_EXPECT(event_chain(waypoint_roundtrip, mutable_event_index, trigger_insert_chain));
+	TEST_EXPECT(waypoint_roundtrip.triggers.size() == before_trigger_count + 1);
 	TEST_EXPECT(trigger_insert_chain.triggers.size() == mutable_chain.triggers.size() + 1);
-	opennova::mission::MissionTriggerRecord edited_trigger = trigger_insert_chain.triggers.back();
+	MissionTriggerRecord edited_trigger = trigger_insert_chain.triggers.back();
 	edited_trigger.param2 = 11;
-	opennova::mission::MissionTriggerRecord reread_trigger;
-	TEST_EXPECT(waypoint_roundtrip.set_trigger(edited_trigger.index, edited_trigger, &reread_trigger));
+	TEST_EXPECT(set_trigger(waypoint_roundtrip, edited_trigger.index, edited_trigger, error));
+	MissionTriggerRecord reread_trigger;
+	TEST_EXPECT(trigger(waypoint_roundtrip, edited_trigger.index, reread_trigger));
 	TEST_EXPECT(reread_trigger.param2 == 11);
-	TEST_EXPECT(waypoint_roundtrip.remove_event_trigger(mutable_event_index, trigger_insert_index, &mutable_chain));
-	TEST_EXPECT(waypoint_roundtrip.trigger_count() == before_trigger_count);
+	TEST_EXPECT(remove_event_trigger(waypoint_roundtrip, mutable_event_index, trigger_insert_index, error));
+	TEST_EXPECT(event_chain(waypoint_roundtrip, mutable_event_index, mutable_chain));
+	TEST_EXPECT(waypoint_roundtrip.triggers.size() == before_trigger_count);
 
-	const size_t before_action_count = waypoint_roundtrip.action_count();
-	opennova::mission::MissionActionRecord new_action;
+	const size_t before_action_count = waypoint_roundtrip.actions.size();
+	MissionActionRecord new_action;
 	new_action.action_type = static_cast<int>(opennova::bms::ActionType::ResetEvent);
 	new_action.param1 = static_cast<int>(mutable_event_index);
 	const size_t action_insert_index = mutable_chain.actions.size();
-	opennova::mission::MissionEventChain action_insert_chain;
-	TEST_EXPECT(waypoint_roundtrip.insert_event_action(mutable_event_index, action_insert_index, new_action, &action_insert_chain));
-	TEST_EXPECT(waypoint_roundtrip.action_count() == before_action_count + 1);
+	TEST_EXPECT(insert_event_action(waypoint_roundtrip, mutable_event_index, action_insert_index, new_action, error));
+	MissionEventChain action_insert_chain;
+	TEST_EXPECT(event_chain(waypoint_roundtrip, mutable_event_index, action_insert_chain));
+	TEST_EXPECT(waypoint_roundtrip.actions.size() == before_action_count + 1);
 	TEST_EXPECT(action_insert_chain.actions.size() == mutable_chain.actions.size() + 1);
-	opennova::mission::MissionActionRecord edited_action = action_insert_chain.actions.back();
+	MissionActionRecord edited_action = action_insert_chain.actions.back();
 	edited_action.param1 = 0;
-	opennova::mission::MissionActionRecord reread_action;
-	TEST_EXPECT(waypoint_roundtrip.set_action(edited_action.index, edited_action, &reread_action));
+	TEST_EXPECT(set_action(waypoint_roundtrip, edited_action.index, edited_action, error));
+	MissionActionRecord reread_action;
+	TEST_EXPECT(action(waypoint_roundtrip, edited_action.index, reread_action));
 	TEST_EXPECT(reread_action.param1 == 0);
-	TEST_EXPECT(waypoint_roundtrip.remove_event_action(mutable_event_index, action_insert_index, &mutable_chain));
-	TEST_EXPECT(waypoint_roundtrip.action_count() == before_action_count);
+	TEST_EXPECT(remove_event_action(waypoint_roundtrip, mutable_event_index, action_insert_index, error));
+	TEST_EXPECT(event_chain(waypoint_roundtrip, mutable_event_index, mutable_chain));
+	TEST_EXPECT(waypoint_roundtrip.actions.size() == before_action_count);
 
 	opennova::bms::Event invalid_event = {};
-	invalid_event.trigger_index = static_cast<int32_t>(waypoint_roundtrip.trigger_count() + 10);
+	invalid_event.trigger_index = static_cast<int32_t>(waypoint_roundtrip.triggers.size() + 10);
 	invalid_event.trigger_count = 1;
-	waypoint_roundtrip.bms_file().events.push_back(invalid_event);
-	waypoint_roundtrip.sync_counts();
-	opennova::mission::MissionEventChain invalid_chain;
-	TEST_EXPECT(waypoint_roundtrip.get_event_chain(waypoint_roundtrip.event_count() - 1, invalid_chain));
+	waypoint_roundtrip.events.push_back(invalid_event);
+	sync_counts(waypoint_roundtrip);
+	MissionEventChain invalid_chain;
+	TEST_EXPECT(event_chain(waypoint_roundtrip, waypoint_roundtrip.events.size() - 1, invalid_chain));
 	TEST_EXPECT(!invalid_chain.diagnostics.empty());
 
-	TEST_EXPECT(reparsed.remove_entity(opennova::mission::EntityKind::Item, original_item_count));
-	TEST_EXPECT(reparsed.entity_count(opennova::mission::EntityKind::Item) == original_item_count);
+	TEST_EXPECT(remove_entity(reparsed, EntityKind::Item, original_item_count, error));
+	TEST_EXPECT(entity_count(reparsed, EntityKind::Item) == original_item_count);
 
 	std::string mis_text;
-	TEST_EXPECT(reparsed.write_mis_text(mis_text));
+	sync_counts(reparsed);
+	TEST_EXPECT(write_mis_text(reparsed, mis_text, error));
 	TEST_EXPECT(!mis_text.empty());
 	TEST_EXPECT(mis_text.find("\r\n") != std::string::npos);
 	for (size_t i = 0; i < mis_text.size(); ++i) {
@@ -387,12 +420,12 @@ int main() {
 	{
 		std::string group_error;
 		std::vector<uint8_t> group_bytes = original;
-		const size_t entity_count = bms_file.header.num_items + bms_file.header.num_buildings +
+		const size_t entity_total = bms_file.header.num_items + bms_file.header.num_buildings +
 		                            bms_file.header.num_markers + bms_file.header.num_people;
 		const size_t group_offset = opennova::bms::kHeaderSize +
 		                            original_loadout_len +
 		                            original_secondary_len +
-		                            entity_count * opennova::bms::kEntitySize +
+		                            entity_total * opennova::bms::kEntitySize +
 		                            opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize;
 		group_bytes[group_offset + 4] = 1;
 		opennova::bms::File rejected_group;
@@ -438,12 +471,12 @@ int main() {
 	// --- Modeling policy: event/trigger/action reserved slots and unsupported event flag bits
 	// fail load. They are not raw data carried for preservation. ---
 	{
-		const size_t entity_count = bms_file.header.num_items + bms_file.header.num_buildings +
+		const size_t entity_total = bms_file.header.num_items + bms_file.header.num_buildings +
 		                            bms_file.header.num_markers + bms_file.header.num_people;
 		const size_t event_block = opennova::bms::kHeaderSize +
 		                           original_loadout_len +
 		                           original_secondary_len +
-		                           entity_count * opennova::bms::kEntitySize +
+		                           entity_total * opennova::bms::kEntitySize +
 		                           opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize +
 		                           opennova::bms::kGroupRecordCount * opennova::bms::kGroupRecordSize +
 		                           opennova::bms::kLayerRecordCount * opennova::bms::kLayerRecordSize +
@@ -510,19 +543,21 @@ int main() {
 
 	// --- Phase 1: mission-header editing round-trips through save/reload ---
 	{
-		opennova::mission::MissionDocument hdr;
-		TEST_EXPECT(hdr.load_bms_bytes(original.data(), original.size()));
-		TEST_EXPECT(hdr.set_header_string("mission_name", "Grill Test"));
-		TEST_EXPECT(hdr.set_header_int("climate", 2));
-		TEST_EXPECT(hdr.set_header_int("minutes_per_day", 1234));
+		opennova::bms::File hdr;
+		TEST_EXPECT(load_document(original, hdr));
+		TEST_EXPECT(set_header_string(hdr, "mission_name", "Grill Test", error));
+		TEST_EXPECT(set_header_int(hdr, "climate", 2, error));
+		TEST_EXPECT(set_header_int(hdr, "minutes_per_day", 1234, error));
 		const int coop_bit = 0x1000000; // ATTRIB_COOP
-		TEST_EXPECT(hdr.set_header_flag(coop_bit, true));
-		TEST_EXPECT(!hdr.set_header_string("nonexistent_field", "x")); // unknown rejected
+		set_header_flag(hdr, coop_bit, true);
+		std::string unknown_error;
+		TEST_EXPECT(!set_header_string(hdr, "nonexistent_field", "x", unknown_error)); // unknown rejected
+		TEST_EXPECT(!unknown_error.empty());
 		std::vector<uint8_t> hdr_bytes;
-		TEST_EXPECT(hdr.write_bms_bytes(hdr_bytes));
-		opennova::mission::MissionDocument hdr_reload;
-		TEST_EXPECT(hdr_reload.load_bms_bytes(hdr_bytes.data(), hdr_bytes.size()));
-		const opennova::mission::MissionInfo reread_info = hdr_reload.info();
+		TEST_EXPECT(write_document(hdr, hdr_bytes));
+		opennova::bms::File hdr_reload;
+		TEST_EXPECT(load_document(hdr_bytes, hdr_reload));
+		const MissionInfo reread_info = mission_info(hdr_reload);
 		TEST_EXPECT(reread_info.mission_name == "Grill Test");
 		TEST_EXPECT(reread_info.climate == 2);
 		TEST_EXPECT(reread_info.minutes_per_day == 1234);
@@ -532,13 +567,13 @@ int main() {
 	// --- Regression (review): the terrain slot is a fixed 16-byte field (first of the three
 	// 16-byte slots in header.terrain[48]: terrain / cnv_file / tt_file). The old copy used to force a
 	// NUL into byte 15 and truncate a full 16-char terrain name on every edit; copy_fixed_field
-	// keeps all 16, and the info()/get_terrain reads are bounded to 16 so a full slot does not bleed
-	// into cnv_file. Editing terrain must also leave cnv_file / tt_file untouched. ---
+	// keeps all 16, and the mission_info()/get_terrain reads are bounded to 16 so a full slot does not
+	// bleed into cnv_file. Editing terrain must also leave cnv_file / tt_file untouched. ---
 	{
-		opennova::mission::MissionDocument doc;
-		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
 		// Seed cnv_file (@+16) and tt_file (@+32) so we can prove a terrain edit preserves them.
-		char *terrain_region = doc.bms_file().header.terrain;
+		char *terrain_region = doc.header.terrain;
 		std::memcpy(terrain_region + 16, "convert.cnv", 11);
 		terrain_region[16 + 11] = '\0';
 		std::memcpy(terrain_region + 32, "tiles.tt", 8);
@@ -546,25 +581,25 @@ int main() {
 
 		const std::string full16 = "sixteen_char_ter"; // exactly 16 chars, fills the slot
 		TEST_EXPECT(full16.size() == 16);
-		TEST_EXPECT(doc.set_header_string("terrain", full16));
+		TEST_EXPECT(set_header_string(doc, "terrain", full16, error));
 
 		std::vector<uint8_t> bytes;
-		TEST_EXPECT(doc.write_bms_bytes(bytes));
-		opennova::mission::MissionDocument reload;
-		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
+		TEST_EXPECT(write_document(doc, bytes));
+		opennova::bms::File reload;
+		TEST_EXPECT(load_document(bytes, reload));
 		// All 16 chars survive and do not run on into cnv_file.
-		TEST_EXPECT(reload.info().terrain == full16);
-		TEST_EXPECT(reload.bms_file().get_terrain() == full16);
+		TEST_EXPECT(mission_info(reload).terrain == full16);
+		TEST_EXPECT(reload.get_terrain() == full16);
 		// cnv_file / tt_file are untouched by the terrain edit.
-		const char *reload_region = reload.bms_file().header.terrain;
+		const char *reload_region = reload.header.terrain;
 		TEST_EXPECT(std::string(reload_region + 16) == "convert.cnv");
 		TEST_EXPECT(std::string(reload_region + 32) == "tiles.tt");
 
 		// A name longer than 16 is cut to the slot; a shorter name still round-trips.
-		TEST_EXPECT(doc.set_header_string("terrain", "way_too_long_terrain_name"));
-		TEST_EXPECT(doc.info().terrain == "way_too_long_ter"); // 16 chars
-		TEST_EXPECT(doc.set_header_string("terrain", "short"));
-		TEST_EXPECT(doc.info().terrain == "short");
+		TEST_EXPECT(set_header_string(doc, "terrain", "way_too_long_terrain_name", error));
+		TEST_EXPECT(mission_info(doc).terrain == "way_too_long_ter"); // 16 chars
+		TEST_EXPECT(set_header_string(doc, "terrain", "short", error));
+		TEST_EXPECT(mission_info(doc).terrain == "short");
 	}
 
 	// --- Wire S2C 0x0B header: retail's g_BmsHeaderBlock has its first 4 bytes
@@ -593,66 +628,43 @@ int main() {
 		std::string err2;
 		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), h2, err2));
 		TEST_EXPECT(std::string(h2.terrain) == "G11.trn");
-		// The document's info() hands consumers the BASENAME either way: the
-		// wire header's extension is dropped, so "G11.trn" and a file's "G11"
+		// The typed view hands consumers the BASENAME either way: the wire
+		// header's extension is dropped, so "G11.trn" and a file's "G11"
 		// resolve to the one on-disk name when the consumer appends ".trn".
 		blob[0] = 0; blob[1] = 0; blob[2] = 0; blob[3] = 0;
-		opennova::mission::MissionDocument wire_doc;
-		TEST_EXPECT(wire_doc.load_bms_header_bytes(blob.data(), blob.size()));
-		TEST_EXPECT(wire_doc.info().terrain == "G11");
-		TEST_EXPECT(wire_doc.info().environment == "FULL_07");
+		opennova::bms::File wire_doc;
+		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), wire_doc.header, err));
+		TEST_EXPECT(mission_info(wire_doc).terrain == "G11");
+		TEST_EXPECT(mission_info(wire_doc).environment == "FULL_07");
 	}
 
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
 	// and the names use the format's full 8-byte slot (a name longer than 8 is cut to 8). ---
 	{
-		opennova::mission::MissionDocument doc;
-		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
-		opennova::mission::EntityRecord rec;
-		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec));
-		opennova::mission::EntityProperties props; // seed from current record (overwrites all)
-		props.group_id = rec.group_id;
-		props.waypoint_id = rec.waypoint_id;
-		props.wp_number = rec.wp_number;
-		props.team = rec.team;
-		props.ai_flags = rec.ai_flags;
-		props.perception = rec.perception;
-		props.accuracy = rec.accuracy;
-		props.alert_state = rec.alert_state;
-		props.min_engagement_distance = rec.min_engagement_distance;
-		props.max_engagement_distance = rec.max_engagement_distance;
-		props.max_attack_distance = rec.max_attack_distance;
-		props.spawn_count = rec.spawn_count;
-		props.max_simultaneous = rec.max_simultaneous;
-		props.no_less_than = 9;
-		props.map_symbol = 17;
-		props.name1 = "rifle";
-		props.name2 = "patrol";
-		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
+		const uint8_t max_simultaneous_before = doc.items[0].no_more_than;
+		TEST_EXPECT(set_entity_property_int(doc, EntityKind::Item, 0, "no_less_than", 9, error));
+		TEST_EXPECT(set_entity_property_int(doc, EntityKind::Item, 0, "map_symbol", 17, error));
+		TEST_EXPECT(set_entity_property_string(doc, EntityKind::Item, 0, "name1", "rifle", error));
+		TEST_EXPECT(set_entity_property_string(doc, EntityKind::Item, 0, "name2", "patrol", error));
 		std::vector<uint8_t> bytes;
-		TEST_EXPECT(doc.write_bms_bytes(bytes));
-		opennova::mission::MissionDocument reload;
-		TEST_EXPECT(reload.load_bms_bytes(bytes.data(), bytes.size()));
-		opennova::mission::EntityRecord rec2;
-		TEST_EXPECT(reload.get_entity(opennova::mission::EntityKind::Item, 0, rec2));
+		TEST_EXPECT(write_document(doc, bytes));
+		opennova::bms::File reload;
+		TEST_EXPECT(load_document(bytes, reload));
+		const opennova::bms::Entity &rec2 = reload.items[0];
 		TEST_EXPECT(rec2.no_less_than == 9);
 		TEST_EXPECT(rec2.map_symbol == 17);
-		TEST_EXPECT(rec2.name1 == "rifle");
-		TEST_EXPECT(rec2.name2 == "patrol");
-		TEST_EXPECT(rec2.max_simultaneous == rec.max_simultaneous); // no_more_than preserved
+		TEST_EXPECT(entity_name1(rec2) == "rifle");
+		TEST_EXPECT(entity_name2(rec2) == "patrol");
+		TEST_EXPECT(rec2.no_more_than == max_simultaneous_before); // no_more_than preserved
 		// An exactly-8-char name keeps all 8 bytes: the old copy used to force a NUL into byte 7 and
 		// drop the 8th char, silently corrupting an unedited AI class name on every property edit.
-		props.name1 = "rifleman"; // 8 chars
-		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
-		opennova::mission::EntityRecord rec_full;
-		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec_full));
-		TEST_EXPECT(rec_full.name1 == "rifleman");
-		props.name1 = "verylongname"; // > 8 chars -> cut to the 8-byte slot
-		TEST_EXPECT(doc.set_entity_properties(opennova::mission::EntityKind::Item, 0, props, nullptr));
-		opennova::mission::EntityRecord rec3;
-		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, rec3));
-		TEST_EXPECT(rec3.name1 == "verylong");
-		TEST_EXPECT(rec3.name1.size() == 8);
+		TEST_EXPECT(set_entity_property_string(doc, EntityKind::Item, 0, "name1", "rifleman", error)); // 8 chars
+		TEST_EXPECT(entity_name1(doc.items[0]) == "rifleman");
+		TEST_EXPECT(set_entity_property_string(doc, EntityKind::Item, 0, "name1", "verylongname", error)); // > 8 chars -> cut to the 8-byte slot
+		TEST_EXPECT(entity_name1(doc.items[0]) == "verylong");
+		TEST_EXPECT(entity_name1(doc.items[0]).size() == 8);
 	}
 
 	// --- Modeling policy: gen_string is a 31-byte string plus named option bytes at offsets
@@ -669,12 +681,12 @@ int main() {
 		f.items[0].lfp_group = 7;
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(f, bytes, err));
-		opennova::bms::File reparsed;
-		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
-		TEST_EXPECT(std::string(reparsed.items[0].gen_string) == "generator");
-		TEST_EXPECT(reparsed.items[0].grenades == 4);
-		TEST_EXPECT(reparsed.items[0].mission_critical == 1);
-		TEST_EXPECT(reparsed.items[0].lfp_group == 7);
+		opennova::bms::File gen_reparsed;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), gen_reparsed, err));
+		TEST_EXPECT(std::string(gen_reparsed.items[0].gen_string) == "generator");
+		TEST_EXPECT(gen_reparsed.items[0].grenades == 4);
+		TEST_EXPECT(gen_reparsed.items[0].mission_critical == 1);
+		TEST_EXPECT(gen_reparsed.items[0].lfp_group == 7);
 
 		const size_t first_item_gen = opennova::bms::kHeaderSize +
 		                              original_loadout_len +
@@ -689,30 +701,31 @@ int main() {
 	// --- Regression (review): set_entity_property_int / _string edit one named field and leave the
 	// rest intact, the name->member mapping owning the field list in one place (mirrors set_header_*).
 	{
-		opennova::mission::MissionDocument doc;
-		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
-		opennova::mission::EntityRecord before;
-		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, before));
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
+		const opennova::bms::Entity before = doc.items[0];
 		// `group` is the one key whose member name differs (group_id).
-		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "group", 5));
-		TEST_EXPECT(doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "map_symbol", 22));
-		TEST_EXPECT(doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name1", "scout"));
-		opennova::mission::EntityRecord after;
-		TEST_EXPECT(doc.get_entity(opennova::mission::EntityKind::Item, 0, after));
+		TEST_EXPECT(set_entity_property_int(doc, EntityKind::Item, 0, "group", 5, error));
+		TEST_EXPECT(set_entity_property_int(doc, EntityKind::Item, 0, "map_symbol", 22, error));
+		TEST_EXPECT(set_entity_property_string(doc, EntityKind::Item, 0, "name1", "scout", error));
+		const opennova::bms::Entity &after = doc.items[0];
 		TEST_EXPECT(after.group_id == 5);
 		TEST_EXPECT(after.map_symbol == 22);
-		TEST_EXPECT(after.name1 == "scout");
+		TEST_EXPECT(entity_name1(after) == "scout");
 		// Untouched fields are preserved (only the requested members changed).
 		TEST_EXPECT(after.team == before.team);
-		TEST_EXPECT(after.accuracy == before.accuracy);
-		TEST_EXPECT(after.name2 == before.name2);
+		TEST_EXPECT(after.w_accuracy1 == before.w_accuracy1);
+		TEST_EXPECT(entity_name2(after) == entity_name2(before));
 		TEST_EXPECT(after.max_engagement_distance == before.max_engagement_distance);
-		// Unknown names are rejected (not silently ignored), with last_error set.
-		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 0, "bogus_field", 1));
-		TEST_EXPECT(!doc.last_error().empty());
-		TEST_EXPECT(!doc.set_entity_property_string(opennova::mission::EntityKind::Item, 0, "name3", "x"));
+		// Unknown names are rejected (not silently ignored), with the error set.
+		std::string bogus_error;
+		TEST_EXPECT(!set_entity_property_int(doc, EntityKind::Item, 0, "bogus_field", 1, bogus_error));
+		TEST_EXPECT(!bogus_error.empty());
+		TEST_EXPECT(!set_entity_property_string(doc, EntityKind::Item, 0, "name3", "x", bogus_error));
 		// Out-of-range index is rejected.
-		TEST_EXPECT(!doc.set_entity_property_int(opennova::mission::EntityKind::Item, 99999, "team", 1));
+		TEST_EXPECT(!set_entity_property_int(doc, EntityKind::Item, 99999, "team", 1, bogus_error));
+		// AI flags outside the known attribute mask are rejected.
+		TEST_EXPECT(!set_entity_property_int(doc, EntityKind::Item, 0, "ai_flags", 1 << 29, bogus_error));
 	}
 
 	// --- Regression (review): event reset_after/delay round-trip across the full 0..1023 range.
@@ -730,11 +743,11 @@ int main() {
 		f.events[0].delay = 600;
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(f, bytes, err));
-		opennova::bms::File reparsed;
-		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
-		TEST_EXPECT(!reparsed.events.empty());
-		TEST_EXPECT(reparsed.events[0].reset_after == 1023);
-		TEST_EXPECT(reparsed.events[0].delay == 600);
+		opennova::bms::File range_reparsed;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), range_reparsed, err));
+		TEST_EXPECT(!range_reparsed.events.empty());
+		TEST_EXPECT(range_reparsed.events[0].reset_after == 1023);
+		TEST_EXPECT(range_reparsed.events[0].delay == 600);
 	}
 
 	// --- Regression (review): a corrupt pool count fails the parse cleanly instead of crashing. A
@@ -779,43 +792,42 @@ int main() {
 	// as the chunk terminator, so a nameless weapon cannot be stored; silently skipping the row was itself
 	// data loss (blanking a mid-list weapon's name deleted that weapon with no warning). ---
 	{
-		opennova::mission::MissionDocument doc;
-		TEST_EXPECT(doc.load_bms_bytes(original.data(), original.size()));
+		opennova::bms::File doc;
+		TEST_EXPECT(load_document(original, doc));
 		// Establish a known-good two-weapon loadout first.
-		std::vector<opennova::mission::WeaponLoadoutEntry> good;
+		std::vector<WeaponLoadoutEntry> good;
 		good.push_back({"WPN_A", "-1", "-1", "1"});
 		good.push_back({"WPN_B", "-1", "-1", "2"});
-		TEST_EXPECT(doc.set_weapon_loadout(good));
-		TEST_EXPECT(doc.weapon_loadout().size() == 2);
+		TEST_EXPECT(set_weapon_loadout(doc, good, error));
+		TEST_EXPECT(weapon_loadout(doc).size() == 2);
 		// An edit that blanks a mid-list name is rejected; the loadout is left exactly as it was.
-		std::vector<opennova::mission::WeaponLoadoutEntry> with_blank;
+		std::vector<WeaponLoadoutEntry> with_blank;
 		with_blank.push_back({"WPN_A", "-1", "-1", "1"});
 		with_blank.push_back({"", "-1", "-1", "0"}); // blanked name -> reject the whole edit, no silent drop
 		with_blank.push_back({"WPN_B", "-1", "-1", "2"});
-		TEST_EXPECT(!doc.set_weapon_loadout(with_blank));
-		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
-		TEST_EXPECT(reread.size() == 2);
-		TEST_EXPECT(reread[0].name == "WPN_A");
-		TEST_EXPECT(reread[0].flags == "1");
-		TEST_EXPECT(reread[1].name == "WPN_B");
-		TEST_EXPECT(reread[1].flags == "2");
+		std::string blank_error;
+		TEST_EXPECT(!set_weapon_loadout(doc, with_blank, blank_error));
+		const std::vector<WeaponLoadoutEntry> reread_kit = weapon_loadout(doc);
+		TEST_EXPECT(reread_kit.size() == 2);
+		TEST_EXPECT(reread_kit[0].name == "WPN_A");
+		TEST_EXPECT(reread_kit[0].flags == "1");
+		TEST_EXPECT(reread_kit[1].name == "WPN_B");
+		TEST_EXPECT(reread_kit[1].flags == "2");
 		// Deleting every weapon (an empty list) is still valid: the chunk goes to length 0.
-		TEST_EXPECT(doc.set_weapon_loadout({}));
-		TEST_EXPECT(doc.weapon_loadout().empty());
+		TEST_EXPECT(set_weapon_loadout(doc, {}, error));
+		TEST_EXPECT(weapon_loadout(doc).empty());
 	}
 
-	// --- From-scratch: create_default() builds a valid, empty mission that round-trips. This is
+	// --- From-scratch: make_default() builds a valid, empty mission that round-trips. This is
 	// the first path that writes freshly-resized waypoint records, so it guards the sync_counts
 	// padding backfill (without it the writer emits 8-byte waypoint records that fail to reparse). ---
 	{
-		opennova::mission::MissionDocument fresh;
-		fresh.create_default();
-		TEST_EXPECT(fresh.is_loaded());
-		TEST_EXPECT(fresh.source_path().empty());
-		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Item) == 0);
-		TEST_EXPECT(fresh.entity_count(opennova::mission::EntityKind::Marker) == 0);
+		opennova::bms::File fresh;
+		make_default(fresh);
+		TEST_EXPECT(entity_count(fresh, EntityKind::Item) == 0);
+		TEST_EXPECT(entity_count(fresh, EntityKind::Marker) == 0);
 		std::vector<uint8_t> fresh_bytes;
-		TEST_EXPECT(fresh.write_bms_bytes(fresh_bytes));
+		TEST_EXPECT(write_document(fresh, fresh_bytes));
 		TEST_EXPECT(opennova::bms::is_bms(fresh_bytes.data(), fresh_bytes.size()));
 		opennova::bms::File fresh_parsed;
 		std::string fresh_err;
@@ -826,18 +838,18 @@ int main() {
 		TEST_EXPECT(fresh_parsed.header.num_items == 0);
 		TEST_EXPECT(fresh_parsed.events.empty());
 		// Reparse + rewrite is byte-stable (the snapshot/restore parity the editor relies on).
-		opennova::mission::MissionDocument fresh_round;
-		TEST_EXPECT(fresh_round.load_bms_bytes(fresh_bytes.data(), fresh_bytes.size()));
+		opennova::bms::File fresh_round;
+		TEST_EXPECT(load_document(fresh_bytes, fresh_round));
 		std::vector<uint8_t> rewritten;
-		TEST_EXPECT(fresh_round.write_bms_bytes(rewritten));
+		TEST_EXPECT(write_document(fresh_round, rewritten));
 		TEST_EXPECT(rewritten == fresh_bytes);
 		// A from-scratch mission can adopt a terrain ref and round-trip it.
-		TEST_EXPECT(fresh.set_header_string("terrain", "dvxi5"));
+		TEST_EXPECT(set_header_string(fresh, "terrain", "dvxi5", error));
 		std::vector<uint8_t> ref_bytes;
-		TEST_EXPECT(fresh.write_bms_bytes(ref_bytes));
-		opennova::mission::MissionDocument ref_reload;
-		TEST_EXPECT(ref_reload.load_bms_bytes(ref_bytes.data(), ref_bytes.size()));
-		TEST_EXPECT(ref_reload.info().terrain == "dvxi5");
+		TEST_EXPECT(write_document(fresh, ref_bytes));
+		opennova::bms::File ref_reload;
+		TEST_EXPECT(load_document(ref_bytes, ref_reload));
+		TEST_EXPECT(mission_info(ref_reload).terrain == "dvxi5");
 	}
 
 	// --- bms::equal: the editor's undo / dirty change-detection. Identity holds across a copy; a
@@ -872,34 +884,33 @@ int main() {
 		TEST_EXPECT(opennova::bms::write(grew, grew_bytes, err));
 		TEST_EXPECT((base_bytes == grew_bytes) == opennova::bms::equal(base, grew));
 		// Two independently-built defaults serialize identically, so they compare equal.
-		opennova::mission::MissionDocument d1;
-		opennova::mission::MissionDocument d2;
-		d1.create_default();
-		d2.create_default();
-		TEST_EXPECT(opennova::bms::equal(d1.bms_file(), d2.bms_file()));
+		opennova::bms::File d1;
+		opennova::bms::File d2;
+		make_default(d1);
+		make_default(d2);
+		TEST_EXPECT(opennova::bms::equal(d1, d2));
 	}
 
 	// --- Regression (review): a waypoint marker_count > 32 (the 32-slot capacity) survives a
-	// MissionDocument load/save. parse preserves a shipped over-count (CP19.bms ships 39) verbatim, but
+	// document load/save. parse preserves a shipped over-count (CP19.bms ships 39) verbatim, but
 	// sync_counts used to clobber it to the slot count on every load/save, breaking byte-exact round-trip.
 	{
-		opennova::mission::MissionDocument doc;
-		doc.create_default();
-		opennova::bms::File &f = doc.bms_file();
+		opennova::bms::File f;
+		make_default(f);
 		TEST_EXPECT(!f.waypoint_records.empty());
-		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 7u); // saturate the 32 slots
-		f.waypoint_records[0].marker_count = 39;                                                       // the shipped over-count
+		f.waypoint_records[0].waypoint_numbers.assign(kMaxWaypointPathMarkers, 7u); // saturate the 32 slots
+		f.waypoint_records[0].marker_count = 39;                                    // the shipped over-count
 		std::vector<uint8_t> bytes;
-		TEST_EXPECT(doc.write_bms_bytes(bytes)); // runs sync_counts -> must preserve the saturated over-count
-		opennova::bms::File reparsed;
+		TEST_EXPECT(write_document(f, bytes)); // runs sync_counts -> must preserve the saturated over-count
+		opennova::bms::File over_reparsed;
 		std::string err;
-		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
-		TEST_EXPECT(reparsed.waypoint_records[0].marker_count == 39);
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), over_reparsed, err));
+		TEST_EXPECT(over_reparsed.waypoint_records[0].marker_count == 39);
 		// But a count that drops below the cap is meaningless as an over-count, so it resyncs to the slots.
-		doc.bms_file().waypoint_records[0].waypoint_numbers.assign(5, 7u);
-		doc.bms_file().waypoint_records[0].marker_count = 39; // stale over-count, now only 5 slots
+		f.waypoint_records[0].waypoint_numbers.assign(5, 7u);
+		f.waypoint_records[0].marker_count = 39; // stale over-count, now only 5 slots
 		std::vector<uint8_t> bytes2;
-		TEST_EXPECT(doc.write_bms_bytes(bytes2));
+		TEST_EXPECT(write_document(f, bytes2));
 		opennova::bms::File reparsed2;
 		TEST_EXPECT(opennova::bms::parse(bytes2.data(), bytes2.size(), reparsed2, err));
 		TEST_EXPECT(reparsed2.waypoint_records[0].marker_count == 5);
@@ -911,41 +922,41 @@ int main() {
 	// no longer describes the data and the engine would walk 7 phantom waypoints. apply_waypoint_path_to_record
 	// passes preserve_over_count=false so the count tracks the authored list. ---
 	{
-		opennova::mission::MissionDocument doc;
-		doc.create_default();
-		opennova::bms::File &f = doc.bms_file();
+		opennova::bms::File f;
+		make_default(f);
 		TEST_EXPECT(!f.waypoint_records.empty());
 		// 32 real markers so a full 32-index path validates.
-		f.markers.assign(opennova::mission::kMaxWaypointPathMarkers, opennova::bms::Entity{});
+		f.markers.assign(kMaxWaypointPathMarkers, opennova::bms::Entity{});
 		// Saturate path 0 at 32 slots and stamp the shipped over-count.
-		f.waypoint_records[0].waypoint_numbers.assign(opennova::mission::kMaxWaypointPathMarkers, 0u);
+		f.waypoint_records[0].waypoint_numbers.assign(kMaxWaypointPathMarkers, 0u);
 		f.waypoint_records[0].marker_count = 39;
 		// An authored edit re-applies a (still 32-marker) list, e.g. a flag-only change.
 		std::vector<int> indices;
-		for (int i = 0; i < static_cast<int>(opennova::mission::kMaxWaypointPathMarkers); ++i) {
+		for (int i = 0; i < static_cast<int>(kMaxWaypointPathMarkers); ++i) {
 			indices.push_back(i);
 		}
-		TEST_EXPECT(doc.set_waypoint_path(0, indices, 1, nullptr));
+		TEST_EXPECT(set_waypoint_path(f, 0, indices, 1, error));
 		// Resynced in memory immediately, and it stays resynced through save/reparse (no over-count revival).
-		TEST_EXPECT(doc.bms_file().waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
+		TEST_EXPECT(f.waypoint_records[0].marker_count == kMaxWaypointPathMarkers);
 		std::vector<uint8_t> wbytes;
-		TEST_EXPECT(doc.write_bms_bytes(wbytes));
+		TEST_EXPECT(write_document(f, wbytes));
 		opennova::bms::File wreparsed;
 		std::string werr;
 		TEST_EXPECT(opennova::bms::parse(wbytes.data(), wbytes.size(), wreparsed, werr));
-		TEST_EXPECT(wreparsed.waypoint_records[0].marker_count == opennova::mission::kMaxWaypointPathMarkers);
+		TEST_EXPECT(wreparsed.waypoint_records[0].marker_count == kMaxWaypointPathMarkers);
 	}
 
 	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed
 	// 10-bit range) at the library boundary, so an out-of-range value can't wrap on serialize. ---
 	{
-		opennova::mission::MissionDocument doc;
-		doc.create_default();
-		opennova::mission::MissionEventRecord rec; // zero-initialized
+		opennova::bms::File doc;
+		make_default(doc);
+		MissionEventRecord rec; // zero-initialized
 		rec.delay = 2000;        // > 1023: would pack as (uint32)2000 << 22 (truncates) and reparse as 976
 		rec.reset_after = 5000;  // > 1023
-		opennova::mission::MissionEventRecord out;
-		TEST_EXPECT(doc.add_event(rec, &out));
+		const size_t index = add_event(doc, rec);
+		MissionEventRecord out;
+		TEST_EXPECT(event(doc, index, out));
 		TEST_EXPECT(out.delay == 1023);
 		TEST_EXPECT(out.reset_after == 1023);
 	}
@@ -956,8 +967,8 @@ int main() {
 		std::string err;
 		std::vector<uint8_t> bytes = original;
 		write_u16_le(bytes, offsetof(opennova::bms::Header, secondary_chunk_len), 0xFFFF);
-		opennova::bms::File reparsed;
-		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		opennova::bms::File chunk_reparsed;
+		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), chunk_reparsed, err));
 	}
 
 	// --- Modeling policy: the loader sanitizes the loadout chunk into canonical four-string
@@ -1016,32 +1027,28 @@ int main() {
 		const std::vector<uint8_t> wire_header(
 				original.begin(),
 				original.begin() + static_cast<std::ptrdiff_t>(opennova::bms::kHeaderSize));
-		opennova::mission::MissionDocument wire_document;
-		TEST_EXPECT(wire_document.load_bms_header_bytes(
-				wire_header.data(), wire_header.size()));
-		TEST_EXPECT(wire_document.is_loaded());
-		TEST_EXPECT(wire_document.is_header_only());
-		TEST_EXPECT(wire_document.info().mission_name == document.info().mission_name);
-		TEST_EXPECT(wire_document.info().terrain == document.info().terrain);
-		TEST_EXPECT(wire_document.info().environment == document.info().environment);
-		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Item) == 0);
-		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Building) == 0);
-		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Marker) == 0);
-		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Organic) == 0);
+		opennova::bms::File wire_document;
+		std::string wire_error;
+		TEST_EXPECT(opennova::bms::parse_header_blob(
+				wire_header.data(), wire_header.size(), wire_document.header, wire_error));
+		TEST_EXPECT(mission_info(wire_document).mission_name == mission_info(document).mission_name);
+		TEST_EXPECT(mission_info(wire_document).terrain == mission_info(document).terrain);
+		TEST_EXPECT(mission_info(wire_document).environment == mission_info(document).environment);
+		TEST_EXPECT(entity_count(wire_document, EntityKind::Item) == 0);
+		TEST_EXPECT(entity_count(wire_document, EntityKind::Building) == 0);
+		TEST_EXPECT(entity_count(wire_document, EntityKind::Marker) == 0);
+		TEST_EXPECT(entity_count(wire_document, EntityKind::Organic) == 0);
+		// (A wire-header view is intentionally not a synthesizable authoring document;
+		// the binding refuses to save one -- writing it would silently turn the host's
+		// non-empty map into an empty BMS.)
 
-		// A wire-header view is intentionally not a synthesizable authoring document:
-		// writing it would silently turn the host's non-empty map into an empty BMS.
-		std::vector<uint8_t> incomplete_write;
-		TEST_EXPECT(!wire_document.write_bms_bytes(incomplete_write));
-
-		TEST_EXPECT(!wire_document.load_bms_header_bytes(
-				wire_header.data(), wire_header.size() - 1));
-		TEST_EXPECT(!wire_document.is_loaded());
-		TEST_EXPECT(!wire_document.is_header_only());
+		opennova::bms::Header short_header;
+		TEST_EXPECT(!opennova::bms::parse_header_blob(
+				wire_header.data(), wire_header.size() - 1, short_header, wire_error));
 		std::vector<uint8_t> oversized_header = wire_header;
 		oversized_header.push_back(0);
-		TEST_EXPECT(!wire_document.load_bms_header_bytes(
-				oversized_header.data(), oversized_header.size()));
+		TEST_EXPECT(!opennova::bms::parse_header_blob(
+				oversized_header.data(), oversized_header.size(), short_header, wire_error));
 	}
 
 	return 0;

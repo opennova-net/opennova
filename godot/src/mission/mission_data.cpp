@@ -6,14 +6,18 @@
 
 #include <formats/env/env.h> // bms_env_overrides_from_header
 
-#include <formats/mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
-#include <formats/mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
+#include <formats/mission/bms.h>         // AttribFlags / AreaTrigger / Trigger bit names, parse / write
+#include <formats/mission/bms_edit.h>    // the document's edit operations + typed views (ADR 0043 E11)
+#include <formats/mission/mission.h>     // kItemIdOffset (pins ITEM_ID_OFFSET below)
+#include <formats/mission/mission_mis.h> // the .mis text form
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cmath>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -21,45 +25,61 @@ using namespace godot;
 
 namespace {
 
-opennova::mission::EntityKind to_native_kind(MissionData::EntityKind kind) {
+namespace mission = opennova::mission;
+namespace bms = opennova::bms;
+
+mission::EntityKind to_native_kind(MissionData::EntityKind kind) {
 	switch (kind) {
 		case MissionData::KIND_MARKER:
-			return opennova::mission::EntityKind::Marker;
+			return mission::EntityKind::Marker;
 		case MissionData::KIND_BUILDING:
-			return opennova::mission::EntityKind::Building;
+			return mission::EntityKind::Building;
 		case MissionData::KIND_ORGANIC:
-			return opennova::mission::EntityKind::Organic;
+			return mission::EntityKind::Organic;
 		case MissionData::KIND_ITEM:
 		default:
-			return opennova::mission::EntityKind::Item;
+			return mission::EntityKind::Item;
 	}
+}
+
+// Godot mission-space position + euler degrees -> the record transform. The format stores
+// orientation as integer degrees; round rather than truncate.
+mission::EntityTransform transform_from(const Vector3 &position, const Vector3 &rotation_deg) {
+	mission::EntityTransform transform;
+	transform.x = position.x;
+	transform.y = position.y;
+	transform.z = position.z;
+	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
+	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
+	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
+	return transform;
 }
 
 } // namespace
 
 int MissionData::load_progress_percent(int p_stage) {
-	return opennova::mission::mission_load_progress_percent(
-			static_cast<opennova::mission::MissionLoadStage>(p_stage));
+	return mission::mission_load_progress_percent(
+			static_cast<mission::MissionLoadStage>(p_stage));
 }
 
 static_assert(MissionData::LOAD_STAGE_ENVIRONMENT ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kEnvironment));
+		static_cast<int>(mission::MissionLoadStage::kEnvironment));
 static_assert(MissionData::LOAD_STAGE_TERRAIN ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kTerrain));
+		static_cast<int>(mission::MissionLoadStage::kTerrain));
 static_assert(MissionData::LOAD_STAGE_OBJECTS ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kObjects));
+		static_cast<int>(mission::MissionLoadStage::kObjects));
 static_assert(MissionData::LOAD_STAGE_RUNTIME ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kRuntime));
+		static_cast<int>(mission::MissionLoadStage::kRuntime));
 static_assert(MissionData::LOAD_STAGE_AUDIO ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kAudio));
+		static_cast<int>(mission::MissionLoadStage::kAudio));
 static_assert(MissionData::LOAD_STAGE_EFFECTS ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kEffects));
+		static_cast<int>(mission::MissionLoadStage::kEffects));
 static_assert(MissionData::LOAD_STAGE_FINISH ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kFinish));
+		static_cast<int>(mission::MissionLoadStage::kFinish));
 static_assert(MissionData::LOAD_STAGE_FINISH + 1 ==
-		static_cast<int>(opennova::mission::MissionLoadStage::kCount));
+		static_cast<int>(mission::MissionLoadStage::kCount));
 static_assert(MissionData::LOAD_PROGRESS_COMPLETE ==
-		opennova::mission::kMissionLoadProgressComplete);
+		mission::kMissionLoadProgressComplete);
 
 void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &MissionData::open_file);
@@ -163,56 +183,85 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ITEM_ID_OFFSET);
 }
 
-static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
+static_assert(MissionData::ITEM_ID_OFFSET == mission::kItemIdOffset);
 // Every ATTRIB_* mirror is pinned to its engine home (engine/formats/mission
 // bms.h AttribFlags) — a drifted copy here would silently mis-edit headers.
 static_assert(MissionData::ATTRIB_FORCE_INDOORS ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::ForceIndoors));
+              static_cast<uint32_t>(bms::AttribFlags::ForceIndoors));
 static_assert(MissionData::ATTRIB_ROTATE_MAP_180 ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::RotateMap180));
+              static_cast<uint32_t>(bms::AttribFlags::RotateMap180));
 static_assert(MissionData::ATTRIB_ENABLE_NVG ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::EnableNVG));
+              static_cast<uint32_t>(bms::AttribFlags::EnableNVG));
 static_assert(MissionData::ATTRIB_START_WITH_NVG_ON ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::StartWithNVGOn));
+              static_cast<uint32_t>(bms::AttribFlags::StartWithNVGOn));
 static_assert(MissionData::ATTRIB_ADVANCE_AND_SECURE ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::AdvanceAndSecure));
+              static_cast<uint32_t>(bms::AttribFlags::AdvanceAndSecure));
 static_assert(MissionData::ATTRIB_CONQUER_AND_CONTROL ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::ConquerAndControl));
+              static_cast<uint32_t>(bms::AttribFlags::ConquerAndControl));
 static_assert(MissionData::ATTRIB_ATTACK_AND_DEFEND ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::AttackAndDefend));
+              static_cast<uint32_t>(bms::AttribFlags::AttackAndDefend));
 static_assert(MissionData::ATTRIB_COOP ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::Coop));
+              static_cast<uint32_t>(bms::AttribFlags::Coop));
 static_assert(MissionData::ATTRIB_DEATHMATCH ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::Deathmatch));
+              static_cast<uint32_t>(bms::AttribFlags::Deathmatch));
 static_assert(MissionData::ATTRIB_KING_OF_THE_HILL ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::KingOfTheHill));
+              static_cast<uint32_t>(bms::AttribFlags::KingOfTheHill));
 static_assert(MissionData::ATTRIB_FLAGBALL ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::FlagBall));
+              static_cast<uint32_t>(bms::AttribFlags::FlagBall));
 static_assert(MissionData::ATTRIB_CAPTURE_THE_FLAG ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::CaptureTheFlag));
+              static_cast<uint32_t>(bms::AttribFlags::CaptureTheFlag));
 static_assert(MissionData::ATTRIB_TEAM_DEATHMATCH ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::TeamDeathmatch));
+              static_cast<uint32_t>(bms::AttribFlags::TeamDeathmatch));
 static_assert(MissionData::ATTRIB_TEAM_KING_OF_THE_HILL ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::TeamKingOfTheHill));
+              static_cast<uint32_t>(bms::AttribFlags::TeamKingOfTheHill));
 static_assert(MissionData::ATTRIB_SEARCH_AND_DESTROY ==
-              static_cast<uint32_t>(opennova::bms::AttribFlags::SearchAndDestroy));
-static_assert(MissionData::ATTRIB_GAME_MODE_MASK == opennova::bms::kGameModeMask);
+              static_cast<uint32_t>(bms::AttribFlags::SearchAndDestroy));
+static_assert(MissionData::ATTRIB_GAME_MODE_MASK == bms::kGameModeMask);
+
+bool MissionData::edit_failed(const std::string &error) {
+	last_error = String(error.c_str());
+	return false;
+}
+
 Error MissionData::open_file(const String &path) {
 	source_path = path;
 	last_error = String();
 	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
+	file_ = {};
+	loaded_ = false;
+	header_only_ = false;
 	const String ext = path.get_extension().to_lower();
-	// .mis loads pass the empty items.def-TYPE resolver: MissionData holds no
-	// ItemDatabase (the placer's is built after parse), so the pool kind is
-	// unknowable here and every record lands in the generic item pool
-	// (mission.h MisItemTypeResolver keeps that explicit).
-	const bool ok = ext == "mis"
-			? document.load_mis_file(path.utf8().get_data(), {})
-			: document.load_bms_file(path.utf8().get_data());
+	const std::string native_path(path.utf8().get_data());
+	std::string error;
+	bool ok = false;
+	if (ext == "mis") {
+		// .mis loads pass the empty items.def-TYPE resolver: MissionData holds no
+		// ItemDatabase (the placer's is built after parse), so the pool kind is
+		// unknowable here and every record lands in the generic item pool
+		// (mission.h MisItemTypeResolver keeps that explicit).
+		std::ifstream in(native_path, std::ios::binary);
+		if (!in.good()) {
+			error = "Cannot open MIS file: " + native_path;
+		} else {
+			const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			if (!in.good() && !in.eof()) {
+				error = "Failed reading MIS file: " + native_path;
+			} else if (text.empty()) {
+				error = "No MIS text provided";
+			} else {
+				ok = mission::parse_mis_text(text, {}, file_, error);
+			}
+		}
+	} else {
+		ok = bms::parse_file(native_path, file_, error);
+	}
 	if (!ok) {
-		last_error = String(document.last_error().c_str());
+		file_ = {};
+		last_error = String(error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	mission::sync_counts(file_);
+	loaded_ = true;
 	modified = false;
 	return OK;
 }
@@ -221,7 +270,9 @@ Error MissionData::create_default() {
 	source_path = String();
 	last_error = String();
 	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
-	document.create_default();
+	mission::make_default(file_);
+	loaded_ = true;
+	header_only_ = false;
 	modified = false;
 	return OK;
 }
@@ -230,12 +281,21 @@ Error MissionData::open_wire_header(const PackedByteArray &p_header_bytes) {
 	source_path = String();
 	last_error = String();
 	mis_base_heights = PackedInt32Array();
-	if (!document.load_bms_header_bytes(
-			p_header_bytes.ptr(), static_cast<size_t>(p_header_bytes.size()))) {
-		last_error = String(document.last_error().c_str());
+	file_ = {};
+	loaded_ = false;
+	header_only_ = false;
+	// Only the exact header carried by retail S2C 0x0B: a read-only metadata
+	// view for a network join, with no locally-authored entities, events, or
+	// other BMS body sections.
+	std::string error;
+	if (!bms::parse_header_blob(p_header_bytes.ptr(), static_cast<size_t>(p_header_bytes.size()),
+				file_.header, error)) {
+		last_error = String(error.c_str());
 		modified = false;
 		return ERR_PARSE_ERROR;
 	}
+	loaded_ = true;
+	header_only_ = true;
 	modified = false;
 	return OK;
 }
@@ -258,30 +318,37 @@ Error MissionData::open_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 		last_error = "Mission file not found in resource root: " + file;
 		return ERR_FILE_NOT_FOUND;
 	}
+	file_ = {};
+	loaded_ = false;
+	header_only_ = false;
 	const String ext = file.get_extension().to_lower();
+	std::string error;
 	bool ok = false;
 	if (ext == "mis") {
 		const std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
 		// Empty items.def-TYPE resolver: same rationale as open_file above.
-		ok = document.load_mis_text(text, {});
+		ok = mission::parse_mis_text(text, {}, file_, error);
 	} else {
-		ok = document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()));
+		ok = bms::parse(bytes.ptr(), static_cast<size_t>(bytes.size()), file_, error);
 	}
 	if (!ok) {
-		last_error = String(document.last_error().c_str());
+		file_ = {};
+		last_error = String(error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	mission::sync_counts(file_);
+	loaded_ = true;
 	source_path = file;
 	modified = false;
 	return OK;
 }
 
 bool MissionData::is_loaded() const {
-	return document.is_loaded();
+	return loaded_;
 }
 
 bool MissionData::is_wire_header_only() const {
-	return document.is_header_only();
+	return header_only_;
 }
 
 String MissionData::get_source_path() const {
@@ -293,26 +360,27 @@ String MissionData::get_last_error() const {
 }
 
 String MissionData::get_mission_name() const {
-	return String(document.info().mission_name.c_str());
+	return loaded_ ? String(mission::mission_info(file_).mission_name.c_str()) : String();
 }
 
 String MissionData::get_terrain_ref() const {
-	return String(document.info().terrain.c_str());
+	return loaded_ ? String(mission::mission_info(file_).terrain.c_str()) : String();
 }
 
 String MissionData::get_environment_ref() const {
-	return String(document.info().environment.c_str());
+	return loaded_ ? String(mission::mission_info(file_).environment.c_str()) : String();
 }
 
 Ref<MissionInfo> MissionData::get_info() const {
 	Ref<MissionInfo> out;
 	out.instantiate();
-	out->assign(document.info(), static_cast<int>(get_game_mode()));
+	out->assign(loaded_ ? mission::mission_info(file_) : mission::MissionInfo{},
+			static_cast<int>(get_game_mode()));
 	return out;
 }
 
 Ref<MissionEnvironmentOverrides> MissionData::get_environment_overrides() const {
-	const opennova::mission::MissionInfo info = document.info();
+	const mission::MissionInfo info = loaded_ ? mission::mission_info(file_) : mission::MissionInfo{};
 	Ref<MissionEnvironmentOverrides> out;
 	out.instantiate();
 	out->assign(opennova::env::bms_env_overrides_from_header(
@@ -321,65 +389,68 @@ Ref<MissionEnvironmentOverrides> MissionData::get_environment_overrides() const 
 	return out;
 }
 
-Dictionary MissionData::entity_to_dictionary(const opennova::mission::EntityRecord &record) const {
+Dictionary MissionData::entity_to_dictionary(const bms::Entity &entity,
+		mission::EntityKind kind, size_t index) const {
+	const mission::EntityTransform transform = mission::entity_transform(entity);
 	Dictionary out;
-	out["kind"] = static_cast<int>(record.kind);
-	out["index"] = static_cast<int>(record.index);
+	out["kind"] = static_cast<int>(kind);
+	out["index"] = static_cast<int>(index);
 	// item_id is the items.def key (bms type_id + 100000); use it to look up the model.
-	out["item_id"] = record.item_id;
-	out["type_id"] = record.bms_type_id;
-	out["bms_id"] = record.bms_id;
+	out["item_id"] = mission::entity_item_id(entity);
+	out["type_id"] = entity.type_id;
+	out["bms_id"] = entity.id;
 	// Mission-space position (already converted from 16.16 fixed-point to float).
-	out["position"] = Vector3(record.transform.x, record.transform.y, record.transform.z);
+	out["position"] = Vector3(transform.x, transform.y, transform.z);
 	// Euler degrees as authored; coordinate conversion to Godot space happens in
 	// the placement layer where terrain context is available.
-	out["rotation_deg"] = Vector3(record.transform.pitch, record.transform.yaw, record.transform.roll);
-	out["group"] = record.group_id;
-	out["waypoint_id"] = record.waypoint_id;
-	out["wp_number"] = record.wp_number;
-	out["team"] = record.team;
-	out["ai_flags"] = record.ai_flags;
-	out["perception"] = record.perception;
-	out["accuracy"] = record.accuracy;
-	out["alert_state"] = record.alert_state;
-	out["min_engagement_distance"] = record.min_engagement_distance;
-	out["max_engagement_distance"] = record.max_engagement_distance;
-	out["max_attack_distance"] = record.max_attack_distance;
-	out["spawn_count"] = record.spawn_count;
-	out["max_simultaneous"] = record.max_simultaneous;  // = no_more_than (byte 74)
-	out["no_less_than"] = record.no_less_than;          // byte 75
-	out["map_symbol"] = record.map_symbol;              // byte 81
-	out["name1"] = String(record.name1.c_str());        // AI class (iai_name)
-	out["name2"] = String(record.name2.c_str());        // AI script (ai_textfile)
+	out["rotation_deg"] = Vector3(transform.pitch, transform.yaw, transform.roll);
+	out["group"] = entity.group_id;
+	out["waypoint_id"] = entity.waypoint_id;
+	out["wp_number"] = entity.wp_number;
+	out["team"] = entity.team;
+	out["ai_flags"] = static_cast<int>(entity.bmsi_attributes);
+	out["perception"] = entity.perception2;
+	out["accuracy"] = entity.w_accuracy1;
+	out["alert_state"] = entity.alert_state;
+	out["min_engagement_distance"] = entity.min_engagement_distance;
+	out["max_engagement_distance"] = entity.max_engagement_distance;
+	out["max_attack_distance"] = entity.max_attack_distance;
+	out["spawn_count"] = entity.spawns;
+	out["max_simultaneous"] = entity.no_more_than;  // = no_more_than (byte 74)
+	out["no_less_than"] = entity.no_less_than;      // byte 75
+	out["map_symbol"] = entity.map_symbol;          // byte 81
+	out["name1"] = String(mission::entity_name1(entity).c_str()); // AI class (iai_name)
+	out["name2"] = String(mission::entity_name2(entity).c_str()); // AI script (ai_textfile)
 	return out;
 }
 
 int MissionData::get_entity_count(EntityKind kind) const {
-	return static_cast<int>(document.entity_count(to_native_kind(kind)));
+	if (!loaded_) return 0;
+	return static_cast<int>(mission::entity_count(file_, to_native_kind(kind)));
 }
 
 Array MissionData::get_entities(EntityKind kind) const {
 	Array out;
-	const opennova::mission::EntityKind native_kind = to_native_kind(kind);
-	const size_t count = document.entity_count(native_kind);
-	for (size_t i = 0; i < count; ++i) {
-		opennova::mission::EntityRecord record;
-		if (document.get_entity(native_kind, i, record)) {
-			out.push_back(entity_to_dictionary(record));
-		}
+	if (!loaded_) return out;
+	const mission::EntityKind native_kind = to_native_kind(kind);
+	const std::vector<bms::Entity> *list = mission::entities(file_, native_kind);
+	if (list == nullptr) return out;
+	for (size_t i = 0; i < list->size(); ++i) {
+		out.push_back(entity_to_dictionary((*list)[i], native_kind, i));
 	}
 	return out;
 }
 
 Dictionary MissionData::get_entity(EntityKind kind, int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::EntityRecord record;
-	if (!document.get_entity(to_native_kind(kind), static_cast<size_t>(index), record)) {
+	const mission::EntityKind native_kind = to_native_kind(kind);
+	const std::vector<bms::Entity> *list = mission::entities(file_, native_kind);
+	if (list == nullptr || static_cast<size_t>(index) >= list->size()) {
 		return Dictionary();
 	}
-	return entity_to_dictionary(record);
+	return entity_to_dictionary((*list)[static_cast<size_t>(index)], native_kind, static_cast<size_t>(index));
 }
 
 Array MissionData::get_all_entities() const {
@@ -395,116 +466,108 @@ Array MissionData::get_all_entities() const {
 }
 
 bool MissionData::set_entity_transform(EntityKind kind, int index, const Vector3 &position, const Vector3 &rotation_deg) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	opennova::mission::EntityTransform transform;
-	transform.x = position.x;
-	transform.y = position.y;
-	transform.z = position.z;
-	// The format stores orientation as integer degrees; round rather than truncate.
-	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
-	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
-	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
-	if (!document.set_entity_transform(to_native_kind(kind), static_cast<size_t>(index), transform)) {
-		return false;
+	std::string error;
+	if (!mission::set_entity_transform(file_, to_native_kind(kind), static_cast<size_t>(index),
+				transform_from(position, rotation_deg), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_entity_property_int(EntityKind kind, int index, const String &property, int value) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	// The name->member mapping (and the seed-from-record + clamp rules) lives in engine/runtime/mission, the
-	// same as the header setters; the wrapper just forwards the field name. Adding an AI/waypoint
-	// field is one edit there, not four parallel ones across this file and the inspector.
-	if (!document.set_entity_property_int(to_native_kind(kind), static_cast<size_t>(index),
-	            property.utf8().get_data(), value)) {
-		return false;
+	// The name->member mapping (and the clamp rules) lives in engine/formats/mission,
+	// the same as the header setters; the wrapper just forwards the field name.
+	// Adding an AI/waypoint field is one edit there, not four parallel ones across
+	// this file and the inspector.
+	std::string error;
+	if (!mission::set_entity_property_int(file_, to_native_kind(kind), static_cast<size_t>(index),
+	            property.utf8().get_data(), value, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_entity_property_string(EntityKind kind, int index, const String &property, const String &value) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.set_entity_property_string(to_native_kind(kind), static_cast<size_t>(index),
-	            property.utf8().get_data(), value.utf8().get_data())) {
-		return false;
+	std::string error;
+	if (!mission::set_entity_property_string(file_, to_native_kind(kind), static_cast<size_t>(index),
+	            property.utf8().get_data(), value.utf8().get_data(), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_header_string(const String &field, const String &value) {
-	if (!document.set_header_string(field.utf8().get_data(), value.utf8().get_data())) {
-		last_error = String(document.last_error().c_str());
-		return false;
+	if (!loaded_) return edit_failed("No mission loaded");
+	std::string error;
+	if (!mission::set_header_string(file_, field.utf8().get_data(), value.utf8().get_data(), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_header_int(const String &field, int value) {
-	if (!document.set_header_int(field.utf8().get_data(), value)) {
-		last_error = String(document.last_error().c_str());
-		return false;
+	if (!loaded_) return edit_failed("No mission loaded");
+	std::string error;
+	if (!mission::set_header_int(file_, field.utf8().get_data(), value, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_header_flag(int bit, bool on) {
-	if (!document.set_header_flag(bit, on)) {
-		last_error = String(document.last_error().c_str());
-		return false;
-	}
+	if (!loaded_) return edit_failed("No mission loaded");
+	mission::set_header_flag(file_, bit, on);
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_header_float(const String &field, float value) {
-	if (!document.set_header_float(field.utf8().get_data(), value)) {
-		last_error = String(document.last_error().c_str());
-		return false;
+	if (!loaded_) return edit_failed("No mission loaded");
+	std::string error;
+	if (!mission::set_header_float(file_, field.utf8().get_data(), value, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 Dictionary MissionData::add_entity(EntityKind kind, int item_id, const Vector3 &position, const Vector3 &rotation_deg) {
-	opennova::mission::EntityTransform transform;
-	transform.x = position.x;
-	transform.y = position.y;
-	transform.z = position.z;
-	// Same rounding contract as set_entity_transform: the format stores integer degrees.
-	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
-	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
-	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
-	opennova::mission::EntityRecord record;
-	if (!document.add_entity(to_native_kind(kind), item_id, transform, &record)) {
+	if (!loaded_) {
 		return Dictionary();
 	}
+	const mission::EntityKind native_kind = to_native_kind(kind);
+	const size_t index = mission::add_entity(file_, native_kind, item_id, transform_from(position, rotation_deg));
 	modified = true;
-	return entity_to_dictionary(record);
+	return entity_to_dictionary((*mission::entities(file_, native_kind))[index], native_kind, index);
 }
 
 bool MissionData::remove_entity(EntityKind kind, int index) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.remove_entity(to_native_kind(kind), static_cast<size_t>(index))) {
-		return false;
+	std::string error;
+	if (!mission::remove_entity(file_, to_native_kind(kind), static_cast<size_t>(index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
-Dictionary MissionData::waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const {
+Dictionary MissionData::waypoint_path_to_dictionary(const mission::WaypointPath &path) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(path.index);
 	out["flags"] = path.flags;
@@ -520,7 +583,8 @@ Dictionary MissionData::waypoint_path_to_dictionary(const opennova::mission::Way
 
 Array MissionData::get_waypoint_summaries() const {
 	Array out;
-	for (const opennova::mission::WaypointSummary &summary : document.waypoint_summaries()) {
+	if (!loaded_) return out;
+	for (const mission::WaypointSummary &summary : mission::waypoint_summaries(file_)) {
 		Dictionary d;
 		d["index"] = static_cast<int>(summary.index);
 		d["flags"] = summary.flags;
@@ -531,18 +595,18 @@ Array MissionData::get_waypoint_summaries() const {
 }
 
 Dictionary MissionData::get_waypoint_path(int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::WaypointPath path;
-	if (!document.get_waypoint_path(static_cast<size_t>(index), path)) {
+	mission::WaypointPath path;
+	if (!mission::waypoint_path(file_, static_cast<size_t>(index), path)) {
 		return Dictionary();
 	}
 	return waypoint_path_to_dictionary(path);
 }
 
 bool MissionData::set_waypoint_path(int index, const PackedInt32Array &marker_indices, int flags) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
 	std::vector<int> indices;
@@ -550,50 +614,47 @@ bool MissionData::set_waypoint_path(int index, const PackedInt32Array &marker_in
 	for (int64_t i = 0; i < marker_indices.size(); ++i) {
 		indices.push_back(marker_indices[i]);
 	}
-	if (!document.set_waypoint_path(static_cast<size_t>(index), indices, flags, nullptr)) {
-		return false;
+	std::string error;
+	if (!mission::set_waypoint_path(file_, static_cast<size_t>(index), indices, flags, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::clear_waypoint_path(int index) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.clear_waypoint_path(static_cast<size_t>(index), nullptr)) {
-		return false;
+	std::string error;
+	if (!mission::clear_waypoint_path(file_, static_cast<size_t>(index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 Dictionary MissionData::add_waypoint_marker(int path_index, int marker_item_id, const Vector3 &position, const Vector3 &rotation_deg, int insert_index) {
-	if (path_index < 0) {
+	if (!loaded_ || path_index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::EntityTransform transform;
-	transform.x = position.x;
-	transform.y = position.y;
-	transform.z = position.z;
-	// Same rounding contract as set_entity_transform / add_entity: integer degrees.
-	transform.pitch = static_cast<int>(std::lround(rotation_deg.x));
-	transform.yaw = static_cast<int>(std::lround(rotation_deg.y));
-	transform.roll = static_cast<int>(std::lround(rotation_deg.z));
-	opennova::mission::EntityRecord marker;
-	opennova::mission::WaypointPath path;
-	if (!document.add_waypoint_marker(static_cast<size_t>(path_index), marker_item_id, transform,
-				insert_index, &marker, &path)) {
+	std::string error;
+	size_t marker_index = 0;
+	if (!mission::add_waypoint_marker(file_, static_cast<size_t>(path_index), marker_item_id,
+				transform_from(position, rotation_deg), insert_index, error, &marker_index)) {
+		edit_failed(error);
 		return Dictionary();
 	}
 	modified = true;
+	mission::WaypointPath path;
+	(void)mission::waypoint_path(file_, static_cast<size_t>(path_index), path);
 	Dictionary out;
-	out["marker"] = entity_to_dictionary(marker);
+	out["marker"] = entity_to_dictionary(file_.markers[marker_index], mission::EntityKind::Marker, marker_index);
 	out["path"] = waypoint_path_to_dictionary(path);
 	return out;
 }
 
-Dictionary MissionData::area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const {
+Dictionary MissionData::area_trigger_to_dictionary(const mission::AreaTriggerRecord &record) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(record.index);
 	out["id"] = record.wp_number;  // off-0 dword (Phase-5 UNKNOWN; carried raw)
@@ -607,23 +668,24 @@ Dictionary MissionData::area_trigger_to_dictionary(const opennova::mission::Area
 }
 
 int MissionData::get_area_trigger_count() const {
-	return static_cast<int>(document.area_trigger_count());
+	return loaded_ ? static_cast<int>(file_.area_triggers.size()) : 0;
 }
 
 Array MissionData::get_area_triggers() const {
 	Array out;
-	for (const opennova::mission::AreaTriggerRecord &record : document.area_triggers()) {
+	if (!loaded_) return out;
+	for (const mission::AreaTriggerRecord &record : mission::area_triggers(file_)) {
 		out.push_back(area_trigger_to_dictionary(record));
 	}
 	return out;
 }
 
 Dictionary MissionData::get_area_trigger(int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::AreaTriggerRecord record;
-	if (!document.get_area_trigger(static_cast<size_t>(index), record)) {
+	mission::AreaTriggerRecord record;
+	if (!mission::area_trigger(file_, static_cast<size_t>(index), record)) {
 		return Dictionary();
 	}
 	return area_trigger_to_dictionary(record);
@@ -632,9 +694,9 @@ Dictionary MissionData::get_area_trigger(int index) const {
 // Build a typed record from Godot-side corners, normalizing min<=max per axis (the engine does not
 // auto-swap area triggers, so a crossed-corner drag must be fixed here). raw_flags is composed from
 // the two known bits; any other flag bits start clear for a freshly authored zone.
-static opennova::mission::AreaTriggerRecord make_area_record(const Vector3 &min_bounds, const Vector3 &max_bounds,
+static mission::AreaTriggerRecord make_area_record(const Vector3 &min_bounds, const Vector3 &max_bounds,
 		bool active, bool constrain_z, int zone_id) {
-	opennova::mission::AreaTriggerRecord record;
+	mission::AreaTriggerRecord record;
 	record.wp_number = zone_id;
 	record.min_x = MIN(min_bounds.x, max_bounds.x);
 	record.max_x = MAX(min_bounds.x, max_bounds.x);
@@ -649,49 +711,56 @@ static opennova::mission::AreaTriggerRecord make_area_record(const Vector3 &min_
 }
 
 Dictionary MissionData::add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
-	opennova::mission::AreaTriggerRecord out;
-	if (!document.add_area_trigger(make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id), &out)) {
+	if (!loaded_) {
 		return Dictionary();
 	}
+	const size_t index = mission::add_area_trigger(file_,
+			make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id));
 	modified = true;
+	mission::AreaTriggerRecord out;
+	(void)mission::area_trigger(file_, index, out);
 	return area_trigger_to_dictionary(out);
 }
 
 Dictionary MissionData::set_area_trigger(int index, const Vector3 &min_bounds, const Vector3 &max_bounds, bool active, bool constrain_z, int zone_id) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
 	// Preserve unknown flag bits across an edit: seed reserved from the existing record, then overwrite
 	// only the two known bits below. A fresh make_area_record would otherwise zero them.
-	opennova::mission::AreaTriggerRecord record = make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id);
-	opennova::mission::AreaTriggerRecord existing;
-	if (document.get_area_trigger(static_cast<size_t>(index), existing)) {
-		constexpr int kKnownBits = static_cast<int>(opennova::bms::AreaTrigger::kFlagMissionArea |
-		                                            opennova::bms::AreaTrigger::kFlagConstrainZ);
+	mission::AreaTriggerRecord record = make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id);
+	mission::AreaTriggerRecord existing;
+	if (mission::area_trigger(file_, static_cast<size_t>(index), existing)) {
+		constexpr int kKnownBits = static_cast<int>(bms::AreaTrigger::kFlagMissionArea |
+		                                            bms::AreaTrigger::kFlagConstrainZ);
 		record.reserved = (existing.reserved & ~kKnownBits) |
-		                  (active ? static_cast<int>(opennova::bms::AreaTrigger::kFlagMissionArea) : 0) |
-		                  (constrain_z ? static_cast<int>(opennova::bms::AreaTrigger::kFlagConstrainZ) : 0);
+		                  (active ? static_cast<int>(bms::AreaTrigger::kFlagMissionArea) : 0) |
+		                  (constrain_z ? static_cast<int>(bms::AreaTrigger::kFlagConstrainZ) : 0);
 	}
-	opennova::mission::AreaTriggerRecord out;
-	if (!document.set_area_trigger(static_cast<size_t>(index), record, &out)) {
+	std::string error;
+	if (!mission::set_area_trigger(file_, static_cast<size_t>(index), record, error)) {
+		edit_failed(error);
 		return Dictionary();
 	}
 	modified = true;
+	mission::AreaTriggerRecord out;
+	(void)mission::area_trigger(file_, static_cast<size_t>(index), out);
 	return area_trigger_to_dictionary(out);
 }
 
 bool MissionData::remove_area_trigger(int index) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.remove_area_trigger(static_cast<size_t>(index))) {
-		return false;
+	std::string error;
+	if (!mission::remove_area_trigger(file_, static_cast<size_t>(index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
-Dictionary MissionData::weapon_loadout_to_dictionary(const opennova::mission::WeaponLoadoutEntry &entry, int index) const {
+Dictionary MissionData::weapon_loadout_to_dictionary(const mission::WeaponLoadoutEntry &entry, int index) const {
 	Dictionary out;
 	out["index"] = index;
 	out["name"] = String::utf8(entry.name.c_str());
@@ -703,7 +772,8 @@ Dictionary MissionData::weapon_loadout_to_dictionary(const opennova::mission::We
 
 Array MissionData::get_weapon_loadout() const {
 	Array out;
-	const std::vector<opennova::mission::WeaponLoadoutEntry> entries = document.weapon_loadout();
+	if (!loaded_) return out;
+	const std::vector<mission::WeaponLoadoutEntry> entries = mission::weapon_loadout(file_);
 	for (size_t i = 0; i < entries.size(); ++i) {
 		out.push_back(weapon_loadout_to_dictionary(entries[i], static_cast<int>(i)));
 	}
@@ -711,11 +781,12 @@ Array MissionData::get_weapon_loadout() const {
 }
 
 bool MissionData::set_weapon_loadout(const Array &entries) {
-	std::vector<opennova::mission::WeaponLoadoutEntry> records;
+	if (!loaded_) return edit_failed("No mission loaded");
+	std::vector<mission::WeaponLoadoutEntry> records;
 	records.reserve(entries.size());
 	for (int i = 0; i < entries.size(); ++i) {
 		const Dictionary dict = entries[i];
-		opennova::mission::WeaponLoadoutEntry record;
+		mission::WeaponLoadoutEntry record;
 		record.name = String(dict.get("name", "")).utf8().get_data();
 		// All three numeric strings default to "-1" when a caller omits them. flags is the
 		// load-bearing per-ammo damage class used by the runtime loadout builder.
@@ -724,15 +795,15 @@ bool MissionData::set_weapon_loadout(const Array &entries) {
 		record.flags = String(dict.get("flags", "-1")).utf8().get_data();
 		records.push_back(std::move(record));
 	}
-	if (!document.set_weapon_loadout(records)) {
-		last_error = String(document.last_error().c_str());
-		return false;
+	std::string error;
+	if (!mission::set_weapon_loadout(file_, records, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
-Dictionary MissionData::group_to_dictionary(const opennova::mission::GroupFields &fields) const {
+Dictionary MissionData::group_to_dictionary(const mission::GroupFields &fields) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(fields.index);
 	out["field0"] = fields.field0;
@@ -742,34 +813,36 @@ Dictionary MissionData::group_to_dictionary(const opennova::mission::GroupFields
 }
 
 int MissionData::get_group_count() const {
-	return static_cast<int>(document.group_count());
+	return loaded_ ? static_cast<int>(file_.group_records.size()) : 0;
 }
 
 Array MissionData::get_groups() const {
 	Array out;
-	for (const opennova::mission::GroupFields &fields : document.groups()) {
+	if (!loaded_) return out;
+	for (const mission::GroupFields &fields : mission::groups(file_)) {
 		out.push_back(group_to_dictionary(fields));
 	}
 	return out;
 }
 
 Dictionary MissionData::get_group(int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::GroupFields fields;
-	if (!document.get_group(static_cast<size_t>(index), fields)) {
+	mission::GroupFields fields;
+	if (!mission::group(file_, static_cast<size_t>(index), fields)) {
 		return Dictionary();
 	}
 	return group_to_dictionary(fields);
 }
 
 bool MissionData::set_group(int index, int field0, int field8, int field12) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.set_group(static_cast<size_t>(index), field0, field8, field12)) {
-		return false;
+	std::string error;
+	if (!mission::set_group(file_, static_cast<size_t>(index), field0, field8, field12, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
@@ -777,7 +850,7 @@ bool MissionData::set_group(int index, int field0, int field8, int field12) {
 
 // --- Mission scripting (events / triggers / actions, Phase 4) ----------------
 
-Dictionary MissionData::event_to_dictionary(const opennova::mission::MissionEventRecord &record) const {
+Dictionary MissionData::event_to_dictionary(const mission::MissionEventRecord &record) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(record.index);
 	out["flags"] = record.flags;
@@ -792,7 +865,7 @@ Dictionary MissionData::event_to_dictionary(const opennova::mission::MissionEven
 	return out;
 }
 
-Dictionary MissionData::trigger_to_dictionary(const opennova::mission::MissionTriggerRecord &record) const {
+Dictionary MissionData::trigger_to_dictionary(const mission::MissionTriggerRecord &record) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(record.index);
 	out["condition_flags"] = record.condition_flags;
@@ -812,7 +885,7 @@ Dictionary MissionData::trigger_to_dictionary(const opennova::mission::MissionTr
 	return out;
 }
 
-Dictionary MissionData::action_to_dictionary(const opennova::mission::MissionActionRecord &record) const {
+Dictionary MissionData::action_to_dictionary(const mission::MissionActionRecord &record) const {
 	Dictionary out;
 	out["index"] = static_cast<int>(record.index);
 	out["action_type"] = record.action_type;
@@ -828,7 +901,7 @@ Dictionary MissionData::action_to_dictionary(const opennova::mission::MissionAct
 	return out;
 }
 
-Dictionary MissionData::logic_reference_to_dictionary(const opennova::mission::MissionLogicReference &reference) const {
+Dictionary MissionData::logic_reference_to_dictionary(const mission::MissionLogicReference &reference) const {
 	Dictionary out;
 	out["source_kind"] = String::utf8(reference.source_kind.c_str());
 	out["source_index"] = reference.source_index;
@@ -841,7 +914,7 @@ Dictionary MissionData::logic_reference_to_dictionary(const opennova::mission::M
 	return out;
 }
 
-Dictionary MissionData::logic_diagnostic_to_dictionary(const opennova::mission::MissionLogicDiagnostic &diagnostic) const {
+Dictionary MissionData::logic_diagnostic_to_dictionary(const mission::MissionLogicDiagnostic &diagnostic) const {
 	Dictionary out;
 	out["severity"] = String::utf8(diagnostic.severity.c_str());
 	out["code"] = String::utf8(diagnostic.code.c_str());
@@ -851,34 +924,34 @@ Dictionary MissionData::logic_diagnostic_to_dictionary(const opennova::mission::
 	return out;
 }
 
-Dictionary MissionData::event_chain_to_dictionary(const opennova::mission::MissionEventChain &chain) const {
+Dictionary MissionData::event_chain_to_dictionary(const mission::MissionEventChain &chain) const {
 	Dictionary out;
 	out["event"] = event_to_dictionary(chain.event);
 	Array triggers;
-	for (const opennova::mission::MissionTriggerRecord &trigger : chain.triggers) {
+	for (const mission::MissionTriggerRecord &trigger : chain.triggers) {
 		triggers.push_back(trigger_to_dictionary(trigger));
 	}
 	out["triggers"] = triggers;
 	Array actions;
-	for (const opennova::mission::MissionActionRecord &action : chain.actions) {
+	for (const mission::MissionActionRecord &action : chain.actions) {
 		actions.push_back(action_to_dictionary(action));
 	}
 	out["actions"] = actions;
 	Array references;
-	for (const opennova::mission::MissionLogicReference &reference : chain.references) {
+	for (const mission::MissionLogicReference &reference : chain.references) {
 		references.push_back(logic_reference_to_dictionary(reference));
 	}
 	out["references"] = references;
 	Array diagnostics;
-	for (const opennova::mission::MissionLogicDiagnostic &diagnostic : chain.diagnostics) {
+	for (const mission::MissionLogicDiagnostic &diagnostic : chain.diagnostics) {
 		diagnostics.push_back(logic_diagnostic_to_dictionary(diagnostic));
 	}
 	out["diagnostics"] = diagnostics;
 	return out;
 }
 
-opennova::mission::MissionTriggerRecord MissionData::trigger_from_dictionary(const Dictionary &dict, const opennova::mission::MissionTriggerRecord &seed) const {
-	opennova::mission::MissionTriggerRecord record = seed;
+mission::MissionTriggerRecord MissionData::trigger_from_dictionary(const Dictionary &dict, const mission::MissionTriggerRecord &seed) const {
+	mission::MissionTriggerRecord record = seed;
 	record.main_type = static_cast<int>(dict.get("main_type", seed.main_type));
 	record.sub_type = static_cast<int>(dict.get("sub_type", seed.sub_type));
 	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
@@ -890,7 +963,7 @@ opennova::mission::MissionTriggerRecord MissionData::trigger_from_dictionary(con
 	// `record = seed` copy. Defaults for omitted keys come from the condition_flags bits (the canonical
 	// source: condition_flags is what trigger_from_record serializes), not the seed's mirror bool fields,
 	// so an out-of-sync seed can never propagate. The bool mirrors are then re-derived to stay consistent.
-	using opennova::bms::Trigger;
+	using bms::Trigger;
 	constexpr int kConditionMask = Trigger::kConditionNegated | Trigger::kConditionOr | Trigger::kConditionXor;
 	int condition = seed.condition_flags & ~kConditionMask;
 	if (static_cast<bool>(dict.get("negated", (seed.condition_flags & Trigger::kConditionNegated) != 0))) {
@@ -909,8 +982,8 @@ opennova::mission::MissionTriggerRecord MissionData::trigger_from_dictionary(con
 	return record;
 }
 
-opennova::mission::MissionActionRecord MissionData::action_from_dictionary(const Dictionary &dict, const opennova::mission::MissionActionRecord &seed) const {
-	opennova::mission::MissionActionRecord record = seed;
+mission::MissionActionRecord MissionData::action_from_dictionary(const Dictionary &dict, const mission::MissionActionRecord &seed) const {
+	mission::MissionActionRecord record = seed;
 	record.action_type = static_cast<int>(dict.get("action_type", seed.action_type));
 	record.action_sub_type = static_cast<int>(dict.get("action_sub_type", seed.action_sub_type));
 	record.param1 = static_cast<int>(dict.get("param1", seed.param1));
@@ -921,41 +994,43 @@ opennova::mission::MissionActionRecord MissionData::action_from_dictionary(const
 }
 
 int MissionData::get_event_count() const {
-	return static_cast<int>(document.event_count());
+	return loaded_ ? static_cast<int>(file_.events.size()) : 0;
 }
 
 Array MissionData::get_events() const {
 	Array out;
-	for (const opennova::mission::MissionEventRecord &record : document.events()) {
+	if (!loaded_) return out;
+	for (const mission::MissionEventRecord &record : mission::events(file_)) {
 		out.push_back(event_to_dictionary(record));
 	}
 	return out;
 }
 
 Dictionary MissionData::get_event(int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::MissionEventRecord record;
-	if (!document.get_event(static_cast<size_t>(index), record)) {
+	mission::MissionEventRecord record;
+	if (!mission::event(file_, static_cast<size_t>(index), record)) {
 		return Dictionary();
 	}
 	return event_to_dictionary(record);
 }
 
 Dictionary MissionData::get_event_chain(int index) const {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::MissionEventChain chain;
-	if (!document.get_event_chain(static_cast<size_t>(index), chain)) {
+	mission::MissionEventChain chain;
+	if (!mission::event_chain(file_, static_cast<size_t>(index), chain)) {
 		return Dictionary();
 	}
 	return event_chain_to_dictionary(chain);
 }
 
 Dictionary MissionData::get_logic_summary() const {
-	const opennova::mission::MissionLogicSummary summary = document.logic_summary();
+	const mission::MissionLogicSummary summary =
+			loaded_ ? mission::logic_summary(file_) : mission::MissionLogicSummary{};
 	Dictionary out;
 	out["events"] = static_cast<int>(summary.event_count);
 	out["triggers"] = static_cast<int>(summary.trigger_count);
@@ -966,155 +1041,173 @@ Dictionary MissionData::get_logic_summary() const {
 }
 
 Dictionary MissionData::add_event(int flags, int reset_after, int delay) {
-	opennova::mission::MissionEventRecord seed;
+	if (!loaded_) {
+		return Dictionary();
+	}
+	mission::MissionEventRecord seed;
 	seed.flags = flags;
 	seed.reset_after = reset_after;
 	seed.delay = delay;
-	opennova::mission::MissionEventRecord out;
-	if (!document.add_event(seed, &out)) {
-		return Dictionary();
-	}
+	const size_t index = mission::add_event(file_, seed);
 	modified = true;
+	mission::MissionEventRecord out;
+	(void)mission::event(file_, index, out);
 	return event_to_dictionary(out);
 }
 
 bool MissionData::remove_event(int index) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
-	if (!document.remove_event(static_cast<size_t>(index))) {
-		return false;
+	std::string error;
+	if (!mission::remove_event(file_, static_cast<size_t>(index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::set_event(int index, int flags, int reset_after, int delay) {
-	if (index < 0) {
+	if (!loaded_ || index < 0) {
 		return false;
 	}
 	// Seed from the existing event so the read-only structural fields (trigger/action index + count) survive:
 	// set_event applies only the editable attributes below.
-	opennova::mission::MissionEventRecord record;
-	if (!document.get_event(static_cast<size_t>(index), record)) {
+	mission::MissionEventRecord record;
+	if (!mission::event(file_, static_cast<size_t>(index), record)) {
 		return false;
 	}
 	// Preserve internal bits outside the three author-facing event flags. `record.flags` is seeded from
 	// the existing on-disk event, so its complementary bits are exactly the ones to keep.
-	const int exposed = static_cast<int>(opennova::bms::kEventAuthorFlagMask);
+	const int exposed = static_cast<int>(bms::kEventAuthorFlagMask);
 	record.flags = (record.flags & ~exposed) | (flags & exposed);
 	record.reset_after = reset_after;
 	record.delay = delay;
-	if (!document.set_event(static_cast<size_t>(index), record)) {
-		return false;
+	std::string error;
+	if (!mission::set_event(file_, static_cast<size_t>(index), record, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 Dictionary MissionData::add_event_trigger(int event_index, const Dictionary &trigger) {
-	if (event_index < 0) {
+	if (!loaded_ || event_index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::MissionEventRecord event;
-	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+	mission::MissionEventRecord event;
+	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
 		return Dictionary();
 	}
 	// A fresh trigger defaults to a Group / Null condition (a valid, named pairing) before the dict edits.
-	opennova::mission::MissionTriggerRecord seed;
-	seed.main_type = static_cast<int>(opennova::bms::TriggerMainType::Group);
-	const opennova::mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, seed);
-	opennova::mission::MissionEventChain chain;
-	if (!document.insert_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(event.trigger_count), record, &chain)) {
+	mission::MissionTriggerRecord seed;
+	seed.main_type = static_cast<int>(bms::TriggerMainType::Group);
+	const mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, seed);
+	std::string error;
+	if (!mission::insert_event_trigger(file_, static_cast<size_t>(event_index),
+				static_cast<size_t>(event.trigger_count), record, error)) {
+		edit_failed(error);
 		return Dictionary();
 	}
 	modified = true;
+	mission::MissionEventChain chain;
+	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
 	return event_chain_to_dictionary(chain);
 }
 
 Dictionary MissionData::set_event_trigger(int event_index, int local_index, const Dictionary &trigger) {
-	if (event_index < 0 || local_index < 0) {
+	if (!loaded_ || event_index < 0 || local_index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::MissionEventRecord event;
-	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+	mission::MissionEventRecord event;
+	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
 		return Dictionary();
 	}
 	if (local_index >= event.trigger_count) {
 		return Dictionary();
 	}
 	const size_t global = static_cast<size_t>(event.trigger_index) + static_cast<size_t>(local_index);
-	opennova::mission::MissionTriggerRecord existing;
-	if (!document.get_trigger(global, existing)) {
+	mission::MissionTriggerRecord existing;
+	if (!mission::trigger(file_, global, existing)) {
 		return Dictionary();
 	}
-	const opennova::mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, existing);
-	if (!document.set_trigger(global, record)) {
+	const mission::MissionTriggerRecord record = trigger_from_dictionary(trigger, existing);
+	std::string error;
+	if (!mission::set_trigger(file_, global, record, error)) {
+		edit_failed(error);
 		return Dictionary();
 	}
 	modified = true;
-	opennova::mission::MissionEventChain chain;
-	document.get_event_chain(static_cast<size_t>(event_index), chain);
+	mission::MissionEventChain chain;
+	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
 	return event_chain_to_dictionary(chain);
 }
 
 bool MissionData::remove_event_trigger(int event_index, int local_index) {
-	if (event_index < 0 || local_index < 0) {
+	if (!loaded_ || event_index < 0 || local_index < 0) {
 		return false;
 	}
-	if (!document.remove_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(local_index))) {
-		return false;
+	std::string error;
+	if (!mission::remove_event_trigger(file_, static_cast<size_t>(event_index), static_cast<size_t>(local_index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::move_event_trigger(int event_index, int local_index, int delta) {
-	if (event_index < 0 || local_index < 0) {
+	if (!loaded_ || event_index < 0 || local_index < 0) {
 		return false;
 	}
-	if (!document.move_event_trigger(static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta)) {
-		return false;
+	std::string error;
+	if (!mission::move_event_trigger(file_, static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 Dictionary MissionData::add_event_action(int event_index, const Dictionary &action) {
-	if (event_index < 0) {
+	if (!loaded_ || event_index < 0) {
 		return Dictionary();
 	}
-	opennova::mission::MissionEventRecord event;
-	if (!document.get_event(static_cast<size_t>(event_index), event)) {
+	mission::MissionEventRecord event;
+	if (!mission::event(file_, static_cast<size_t>(event_index), event)) {
 		return Dictionary();
 	}
-	opennova::mission::MissionActionRecord seed;  // defaults to a Null action
-	const opennova::mission::MissionActionRecord record = action_from_dictionary(action, seed);
-	opennova::mission::MissionEventChain chain;
-	if (!document.insert_event_action(static_cast<size_t>(event_index), static_cast<size_t>(event.action_count), record, &chain)) {
+	mission::MissionActionRecord seed;  // defaults to a Null action
+	const mission::MissionActionRecord record = action_from_dictionary(action, seed);
+	std::string error;
+	if (!mission::insert_event_action(file_, static_cast<size_t>(event_index),
+				static_cast<size_t>(event.action_count), record, error)) {
+		edit_failed(error);
 		return Dictionary();
 	}
 	modified = true;
+	mission::MissionEventChain chain;
+	(void)mission::event_chain(file_, static_cast<size_t>(event_index), chain);
 	return event_chain_to_dictionary(chain);
 }
 
 bool MissionData::remove_event_action(int event_index, int local_index) {
-	if (event_index < 0 || local_index < 0) {
+	if (!loaded_ || event_index < 0 || local_index < 0) {
 		return false;
 	}
-	if (!document.remove_event_action(static_cast<size_t>(event_index), static_cast<size_t>(local_index))) {
-		return false;
+	std::string error;
+	if (!mission::remove_event_action(file_, static_cast<size_t>(event_index), static_cast<size_t>(local_index), error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
 }
 
 bool MissionData::move_event_action(int event_index, int local_index, int delta) {
-	if (event_index < 0 || local_index < 0) {
+	if (!loaded_ || event_index < 0 || local_index < 0) {
 		return false;
 	}
-	if (!document.move_event_action(static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta)) {
-		return false;
+	std::string error;
+	if (!mission::move_event_action(file_, static_cast<size_t>(event_index), static_cast<size_t>(local_index), delta, error)) {
+		return edit_failed(error);
 	}
 	modified = true;
 	return true;
@@ -1133,28 +1226,53 @@ Error MissionData::save_as(const String &path) {
 	if (path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
+	if (!loaded_) {
+		last_error = "No mission loaded";
+		return ERR_FILE_CANT_WRITE;
+	}
+	if (header_only_) {
+		last_error = "Wire BMS header is not a complete mission";
+		return ERR_FILE_CANT_WRITE;
+	}
 	// Consume (and always clear) any staged base heights: they describe THIS save's entity
 	// write order, so they must not survive onto a later save after the document changed.
 	const PackedInt32Array staged_heights = mis_base_heights;
 	mis_base_heights = PackedInt32Array();
+	const std::string native_path(path.utf8().get_data());
 	const String ext = path.get_extension().to_lower();
+	std::string error;
 	bool ok = false;
+	mission::sync_counts(file_);
 	if (ext == "mis") {
 		// The .mis writer takes the editor-sampled terrain heights (flat, write order) and emits
 		// them as each entity's extra_bheight next to the height_lock declaration; see
-		// MissionDocument::save_mis_file and docs/mission/mis-format-re.md (D-MIS-4).
+		// mission_mis.h write_mis_text and docs/mission/mis-format-re.md (D-MIS-4).
 		std::vector<int32_t> base_heights;
 		base_heights.reserve(static_cast<size_t>(staged_heights.size()));
 		for (int i = 0; i < staged_heights.size(); ++i) {
 			base_heights.push_back(staged_heights[i]);
 		}
-		ok = document.save_mis_file(path.utf8().get_data(),
+		std::string text;
+		ok = mission::write_mis_text(file_, text, error,
 				base_heights.empty() ? nullptr : &base_heights);
+		if (ok) {
+			std::ofstream out(native_path, std::ios::binary);
+			if (!out.good()) {
+				error = "Cannot create MIS file: " + native_path;
+				ok = false;
+			} else {
+				out.write(text.data(), static_cast<std::streamsize>(text.size()));
+				if (!out.good()) {
+					error = "Failed writing MIS file: " + native_path;
+					ok = false;
+				}
+			}
+		}
 	} else {
-		ok = document.save_bms_file(path.utf8().get_data());
+		ok = bms::write_file(file_, native_path, error);
 	}
 	if (!ok) {
-		last_error = String(document.last_error().c_str());
+		last_error = String(error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
 	source_path = path;
@@ -1175,7 +1293,7 @@ int64_t MissionData::object_records_revision() const {
 	// how bms::equal decides these vectors (memcmp via pod_vectors_equal), so two
 	// documents with byte-identical object records share a revision and any change moves
 	// it -- far cheaper than marshalling ~every entity into a Dictionary to hash it.
-	const opennova::bms::File &file = document.bms_file();
+	const bms::File &file = file_;
 	uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
 	const auto mix = [&h](const void *data, size_t size) {
 		const unsigned char *p = static_cast<const unsigned char *>(data);
@@ -1184,11 +1302,11 @@ int64_t MissionData::object_records_revision() const {
 			h *= 1099511628211ull; // FNV-1a 64-bit prime
 		}
 	};
-	const auto mix_entities = [&](const std::vector<opennova::bms::Entity> &v) {
+	const auto mix_entities = [&](const std::vector<bms::Entity> &v) {
 		const uint64_t count = v.size();
 		mix(&count, sizeof(count)); // a count change moves the revision even at a byte realignment
 		if (!v.empty()) {
-			mix(v.data(), v.size() * sizeof(opennova::bms::Entity));
+			mix(v.data(), v.size() * sizeof(bms::Entity));
 		}
 	};
 	mix_entities(file.items);
@@ -1211,19 +1329,17 @@ Dictionary MissionData::structure_fingerprint() const {
 // (engine/formats/mission bms.h selected_game_mode/set_game_mode — the
 // witness cites ride there); this binding only marshals.
 int64_t MissionData::get_game_mode() const {
-	if (!document.is_loaded()) {
+	if (!loaded_) {
 		return 0;
 	}
-	return static_cast<int64_t>(
-			opennova::bms::selected_game_mode(document.bms_file().header.attrib_flags));
+	return static_cast<int64_t>(bms::selected_game_mode(file_.header.attrib_flags));
 }
 
 bool MissionData::set_game_mode(int64_t bit) {
-	if (!document.is_loaded()) {
+	if (!loaded_) {
 		return false;
 	}
-	if (!opennova::bms::set_game_mode(
-				document.bms_file().header.attrib_flags,
+	if (!bms::set_game_mode(file_.header.attrib_flags,
 				static_cast<uint32_t>(static_cast<uint64_t>(bit)))) {
 		return false;
 	}
