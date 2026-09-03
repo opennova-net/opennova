@@ -541,8 +541,8 @@ void test_aas_round_wire() {
 	z1.zone_number = 1;
 	w::Entity z2 = z1;
 	z2.zone_number = 2;
-	world.zone_chain.zones.push_back(world.registry.spawn(1, z1));
-	world.zone_chain.zones.push_back(world.registry.spawn(1, z2));
+	world.zones.chain.zones.push_back(world.registry.spawn(1, z1));
+	world.zones.chain.zones.push_back(world.registry.spawn(1, z2));
 
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
@@ -674,8 +674,8 @@ void test_aas_events_use_spawn_registry_index() {
 	spawn_zone(1, 1, -100.0f);
 	const w::EntityHandle target = spawn_zone(2, 0, 100.0f);
 	spawn_zone(3, 2, 300.0f);
-	w::zone_chain_build_from_mission(world, world.zone_chain);
-	w::zone_chain_latch_control(world, world.zone_chain);
+	world.zones.build_chain_from_mission();
+	world.zones.latch_control();
 	const int32_t capture_model = collision.add_model(
 		contact_box(w::bvol_type::kChangeTeamCT));
 	collision.assign_entity(target, capture_model);

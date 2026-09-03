@@ -78,8 +78,7 @@ bool mount_on_test_emplacement(
 	emplacement.seats.push_back(gunner);
 	emplacement_out = world.registry.spawn(1, emplacement);
 	return emplacement_out.valid() &&
-	       world::entity_process_vehicle_attach(
-					world, player, emplacement_out, gunner.bone_index);
+	       world.vehicles.process_attach(player, emplacement_out, gunner.bone_index);
 }
 
 bool test_emplacement_is_owned_by(

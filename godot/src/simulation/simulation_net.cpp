@@ -1214,7 +1214,7 @@ const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 	// not membership). The joiner role hook resets the flag. [orig: Entity_BuildSpawnZoneList
 	// @0x43EAE0 — rebuilt at mission start]
 	if (!deploy_zone_registry_built_ && kernel_) {
-		deploy_zone_registry_ = opennova::world::build_spawn_zone_list(kernel_->world);
+		deploy_zone_registry_ = kernel_->world.zones.build_spawn_zone_list();
 		deploy_zone_registry_built_ = true;
 	}
 	return deploy_zone_registry_;

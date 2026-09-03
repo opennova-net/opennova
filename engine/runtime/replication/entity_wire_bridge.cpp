@@ -523,7 +523,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.action_byte = e.sub_type; // entity+532 [orig: @0x503e58]
 		rec.alert_byte = e.ref_num;   // entity+533 [orig: @0x503e3c]
 		if (e.zone_number != 0) {
-			rec.zone_number_rank = world::zone_chain_zone_info_byte(w.zone_chain, e);
+			rec.zone_number_rank = world::zone_chain_zone_info_byte(w.zones.chain, e);
 			rec.zone_radius = e.zone_radius;
 		} else if (e.is_spawn_point) {
 			rec.zone_radius = e.zone_radius; // 0x8000 path (radius-0 defs stay absent —

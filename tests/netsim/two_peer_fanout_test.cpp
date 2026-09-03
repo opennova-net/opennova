@@ -1370,7 +1370,7 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect(vh.valid(), "vehicle spawned")) return false;
 
 	// The 0x26 acceptance path (dispatch calls this after the word0 anti-spoof overwrite).
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+	if (!expect(world.vehicles.process_attach(ph, vh, 1), "attach accepted"))
 		return false;
 	if (!expect(player->mounted && player->mount_target == vh, "mount fields written"))
 		return false;
@@ -1379,7 +1379,7 @@ bool run_0x26_attach_mounted_echo() {
 	// A second occupant cannot take the held seat [orig: @0x435ba9].
 	const w::EntityHandle ph2 =
 			w::spawn_remote_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
-	if (!expect(!w::entity_process_vehicle_attach(world, ph2, vh, 1), "occupied seat rejects"))
+	if (!expect(!world.vehicles.process_attach(ph2, vh, 1), "occupied seat rejects"))
 		return false;
 
 	std::vector<ns::Connection> conns;
@@ -1422,7 +1422,7 @@ bool run_0x26_attach_mounted_echo() {
 		return false;
 
 	// Detach: seat freed, mount fields cleared, record back to free-standing.
-	if (!expect(w::entity_detach_from_vehicle(world, ph), "detach applies")) return false;
+	if (!expect(world.vehicles.detach(ph), "detach applies")) return false;
 	if (!expect(!player->mounted && player->mount_bone == 0, "mount fields cleared"))
 		return false;
 	w::Entity *veh = world.registry.get(vh);
@@ -1813,10 +1813,10 @@ bool run_vehicle_drive_authority() {
 		t.turn_rate = 65 * 192426;
 		t.turn_rate2 = 41 * 192426;
 		t.player_control = true;
-		world.tables.vehicle_traits.set(0x1004, t);
+		world.vehicles.traits.set(0x1004, t);
 	}
 
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+	if (!expect(world.vehicles.process_attach(ph, vh, 1), "attach accepted"))
 		return false;
 	// Land the remote driver's grounded 0x0C intent through the production read-apply:
 	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at

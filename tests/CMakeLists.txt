@@ -1483,6 +1483,13 @@ add_executable(collision_test world/collision_test.cpp)
 target_link_libraries(collision_test PRIVATE opennova_runtime)
 target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
+# Like infantry_test above, MSVC coalesces this file's many scoped World
+# fixtures into one Release stack frame (999 KB at ADR 0043 slice E6, when
+# World gained its vehicle and zone systems); give it the same headroom as
+# player_spawn_test and promote_test.
+if(MSVC)
+    target_link_options(collision_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME collision COMMAND collision_test)
 
 # Asset-gated (OPENNOVA_JO_DIR): the 00TRg transport-unload repro over the

@@ -261,8 +261,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	carrier_seed.seats.push_back(seat);
 	const w::EntityHandle source_carrier_h = source.registry.spawn(1, carrier_seed);
 	if (!expect(source_carrier_h.valid(), "source moving carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(
-				source, source_player_h, source_carrier_h, 3),
+	if (!expect(source.vehicles.process_attach(source_player_h, source_carrier_h, 3),
 	            "source player actually mounted")) return false;
 	source_body->heading = 0x61230000;
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
@@ -315,8 +314,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	if (!expect(host_player_h.packed == source_player_h.packed &&
 	                    host_carrier_h.packed == source_carrier_h.packed,
 	            "source and host carrier handles match")) return false;
-	if (!expect(w::entity_process_vehicle_attach(
-				host, host_player_h, host_carrier_h, 3),
+	if (!expect(host.vehicles.process_attach(host_player_h, host_carrier_h, 3),
 	            "host peer actually mounted")) return false;
 	if (!expect(drain_built_uplink(host, host_player_h, up),
 	            "mounted uplink encoded, decoded, and applied")) return false;

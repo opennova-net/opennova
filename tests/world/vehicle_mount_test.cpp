@@ -197,7 +197,7 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.target_heading = body.heading;
     body.inf.look_pitch = 0x12345678;
 
-    CHECK(entity_process_vehicle_attach(w, player_h, gun_h, 6));
+    CHECK(w.vehicles.process_attach(player_h, gun_h, 6));
     const int16_t expected_yaw = 23; // vehicle yaw 35 - UseGun offset 12
     const int32_t expected_heading =
             bam_heading_from_mission_yaw_deg(expected_yaw);
@@ -247,7 +247,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
         body.inf.active = true;
         body.net_is_remote_peer = true;
 
-        CHECK(entity_process_vehicle_attach(w, player_h, vehicle_h, 1));
+        CHECK(w.vehicles.process_attach(player_h, vehicle_h, 1));
 
         const int32_t look_heading = bam_heading_from_mission_yaw_deg(45.0);
         constexpr int32_t look_pitch = 0x06000000;
@@ -354,7 +354,7 @@ void test_live_pose_provider_and_static_fallback() {
         body->inf.active = true;
         body->inf.anim_state = anim_state::kIdleCrouch;
 
-        CHECK(entity_process_vehicle_attach(w, occupant_h, vehicle_h, 7));
+        CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
         check_pose(*w.registry.get(occupant_h), provider.pose);
 
         provider.pose = {{31.5f, 32.25f, 33.75f}, 44, 15, -19};
@@ -409,7 +409,7 @@ void test_live_pose_provider_and_static_fallback() {
         body->net_id = 100;
         body->inf.active = true;
 
-        CHECK(entity_process_vehicle_attach(w, occupant_h, vehicle_h, 7));
+        CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
         provider.clear();
         body->heading = 0;
         body->pitch = 0;
@@ -521,7 +521,7 @@ void test_live_pose_provider_and_static_fallback() {
         const MountedPose expected = {{12.726887f, 17.658988f, 34.010455f}, 100, 4, 5};
 
         Entity occupant;
-        pose_mounted_occupant(w, occupant, vehicle, seat);
+        w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
         check_pose(occupant, expected);
 
         FakeMountedPoseProvider provider;
@@ -529,7 +529,7 @@ void test_live_pose_provider_and_static_fallback() {
         provider.pose = {{999.0f, 999.0f, 999.0f}, -1, -2, -3};
         w.pose_provider = &provider;
         occupant = Entity{};
-        pose_mounted_occupant(w, occupant, vehicle, seat);
+        w.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
         check_pose(occupant, expected);
     }
 }
@@ -539,7 +539,7 @@ void test_live_pose_provider_and_static_fallback() {
 void test_toggle_nearest_seat() {
     {
         Rig r(2.0f);
-        CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+        CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
         CHECK(r.player().mounted);
         CHECK(r.player().mount_target == r.veh_h);
         CHECK((r.player().flags & 0x40u) != 0);
@@ -552,12 +552,12 @@ void test_toggle_nearest_seat() {
         // From -2.5x the SITEX (horiz 3.20) outscores the ctrl (3.35): the scan is
         // score-ranked, not seat-weighted (the deck weights never apply here).
         Rig r(-2.5f);
-        CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+        CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
         CHECK(r.player().mount_seat == 1);
     }
     {
         Rig r(30.0f); // far outside the 4 u gate
-        CHECK(!player_toggle_vehicle_mount(r.w, r.player_h));
+        CHECK(!r.w.vehicles.player_toggle_mount(r.player_h));
         CHECK(!r.player().mounted);
     }
 }
@@ -609,11 +609,11 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.vehicle == child_h);
     CHECK(selected.seat_index == 1);
     CHECK(selected.type == SeatType::Gunner);
-    CHECK(attach_to_vehicle_seat(w, player_h, selected));
+    CHECK(w.vehicles.attach_to_seat(player_h, selected));
     CHECK(w.registry.get(player_h)->mount_target == child_h);
     CHECK(w.registry.get(child_h)->seats[1].occupant == player_h);
 
-    CHECK(entity_detach_from_vehicle(w, player_h));
+    CHECK(w.vehicles.detach(player_h));
     Seat controller;
     controller.type = SeatType::Controller;
     controller.bone_index = 6;
@@ -644,7 +644,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         CollisionWorld cw;
         r.w.collision = &cw;
         VehicleSeatSelection hit;
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
     }
     {
@@ -659,7 +659,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         CHECK(cw.tick_tables_ready());
         CHECK(!cw.attach_candidate_slices_authoritative());
         VehicleSeatSelection hit;
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
     }
     {
@@ -676,13 +676,13 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         CHECK(cw.tick_tables_ready());
         CHECK(!cw.attach_candidate_slices_authoritative());
         VehicleSeatSelection hit;
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
         for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
         CHECK(cw.attach_candidate_slices_authoritative());
         CHECK(cw.candidate_count(r.player_h) == 1);
         hit = VehicleSeatSelection{};
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
         CHECK(provider.calls == 0);
     }
@@ -693,9 +693,9 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         r.veh().bound_radius = 3.0f;
         cw.build_tick_tables(r.w);
         VehicleSeatSelection hit;
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         for (int i = 1; i < 17; ++i) cw.build_tick_tables(r.w);
-        CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+        CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
         CHECK(hit.vehicle == r.veh_h);
     }
 }
@@ -736,7 +736,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     CHECK(player != nullptr);
     if (player != nullptr) {
         VehicleSeatSelection hit;
-        CHECK(find_nearest_free_seat(w, *player, hit, false));
+        CHECK(w.vehicles.find_nearest_free_seat(*player, hit, false));
         CHECK(hit.vehicle == vehicle_h);
     }
 }
@@ -770,12 +770,12 @@ void test_restore_refreshes_completed_candidate_epoch() {
     r.player().position = {202.0f, 200.0f, 10.0f};
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
     VehicleSeatSelection hit;
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(hit.vehicle == other_h);
 
     r.w.restore(baseline);
     hit = VehicleSeatSelection{};
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(hit.vehicle == r.veh_h);
 }
 
@@ -784,7 +784,7 @@ void test_restore_refreshes_completed_candidate_epoch() {
 void test_toggle_deck_best_seat() {
     Rig r(30.0f); // out of scan range: only the deck path can mount
     r.player().ground_target = r.veh_h;
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(r.player().mounted);
     CHECK(r.player().mount_type == SeatType::Controller);
 }
@@ -796,15 +796,15 @@ void test_toggle_deck_best_seat() {
 // [orig: @0x4369ac].
 void test_toggle_dismount_and_swap() {
     Rig r(2.0f);
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(r.player().mounted);
     // Second toggle: the own vehicle's other free seat does NOT swap — USE exits.
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(!r.player().mounted);
 
     // Remount, then park a SECOND vehicle with a free seat inside the 4 u gate of the
     // seated player: the fresh scan hit re-enters (the vehicle-to-vehicle swap).
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(r.player().mounted);
     Entity other;
     other.kind = EntityKind::Item;
@@ -821,7 +821,7 @@ void test_toggle_dismount_and_swap() {
     sit.seat_local = {0.0f, 0.5f, 1.0f};
     other.seats.push_back(sit);
     EntityHandle oh = r.w.registry.spawn(1, other);
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(r.player().mounted);
     CHECK(r.player().mount_target == oh); // swapped ACROSS vehicles, not out
 }
@@ -847,34 +847,34 @@ void test_enemy_occupant_blocks_scan() {
 
     auto label_count = [&]() {
         std::vector<AttachLabel> labels;
-        collect_attach_labels(r.w, r.player(), false, false, labels);
+        r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
         return labels.size();
     };
     VehicleSeatSelection hit;
-    CHECK(!player_toggle_vehicle_mount(r.w, r.player_h));
+    CHECK(!r.w.vehicles.player_toggle_mount(r.player_h));
     CHECK(!r.player().mounted);
-    CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 0);
-    CHECK(!entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 2));
+    CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
 
     // Same-team, dead, or detached riders do not block the vehicle. The occupied
     // seat itself remains hidden independently, leaving the passenger seat.
     ee->team = 1;
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
     ee->team = 2;
     ee->alive = false;
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
     ee->alive = true;
     ee->health = 0;
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
     ee->health = 150;
-    CHECK(!find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 0);
     ee->mounted = false;
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
 
     // Retail's hostile-parent scan is pool-0-only. A mounted lookalike in pool 1
@@ -883,7 +883,7 @@ void test_enemy_occupant_blocks_scan() {
     pool1_enemy.mounted = true;
     pool1_enemy.mount_target = r.veh_h;
     CHECK(r.w.registry.spawn(1, pool1_enemy).valid());
-    CHECK(find_nearest_free_seat(r.w, r.player(), hit, false));
+    CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
     CHECK(label_count() == 1);
 }
 
@@ -901,7 +901,7 @@ void test_bms_mount_predicates() {
     CHECK(!cmds.local_player_attached_to_ssn(11));
 
     // Mounted into the ctrl seat: 38 + 40 true, 41 false.
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h)); // deck path -> ctrl seat
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h)); // deck path -> ctrl seat
     CHECK(cmds.local_player_attached_to_ssn(11));
     CHECK(cmds.local_player_driving_ssn(11));
     CHECK(!cmds.local_player_on_gun_of_ssn(11));
@@ -935,8 +935,8 @@ void test_bms_mount_predicates() {
     gun.seats.push_back(gseat);
     EntityHandle gh = r.w.registry.spawn(1, gun);
     r.w.registry.get(gh)->ground_target = r.veh_h; // the gun rides the truck
-    entity_detach_from_vehicle(r.w, r.player_h);
-    CHECK(entity_process_vehicle_attach(r.w, r.player_h, gh, 1));
+    r.w.vehicles.detach(r.player_h);
+    CHECK(r.w.vehicles.process_attach(r.player_h, gh, 1));
     CHECK(r.w.registry.get(r.player_h)->mount_type == SeatType::Gunner);
     CHECK((r.player().flags & 0x40u) == 0);
     CHECK((r.player().engine_flags & 0x40u) == 0);
@@ -947,7 +947,7 @@ void test_bms_mount_predicates() {
     CHECK(r.player().pre_use_gun_equipped_adm_index == 7);
     CHECK(r.player().use_gun_slot_swapped);
     CHECK(r.w.registry.get(gh)->primary_weapon_owner == r.player_h);
-    CHECK(entity_detach_from_vehicle(r.w, r.player_h));
+    CHECK(r.w.vehicles.detach(r.player_h));
     CHECK(r.player().equipped_adm_index == 7);
     CHECK(!r.player().use_gun_slot_swapped);
     CHECK(!r.w.registry.get(gh)->primary_weapon_owner.valid());
@@ -966,7 +966,7 @@ void test_mounted_ammo_slot_route() {
     // the unredirected route [orig: @0x5460E0 / writer gate @0x4FFE0B].
     Entity ungated;
     ungated.primary_weapon_slot_adm = 3;
-    CHECK(resolve_mounted_ammo_slot(w, ungated) == nullptr);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(ungated) == nullptr);
 
     // With the witnessed gate satisfied, the unredirected route is the
     // entity's own embedded MountSlot; the cross-entity route remains closed
@@ -975,10 +975,10 @@ void test_mounted_ammo_slot_route() {
     direct_only.primary_weapon_slot_adm = 3;
     direct_only.has_item_def = true;
     direct_only.item_attrib = kItemAttribEweap;
-    CHECK(resolve_mounted_ammo_slot(w, direct_only) ==
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(direct_only) ==
           &direct_only.primary_weapon_slot);
     direct_only.primary_weapon_slot.redirect_to_parent_slot = true;
-    CHECK(resolve_mounted_ammo_slot(w, direct_only) == nullptr);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(direct_only) == nullptr);
 
     Entity parent;
     parent.kind = EntityKind::Item;
@@ -1003,20 +1003,20 @@ void test_mounted_ammo_slot_route() {
     const EntityHandle child_h = w.registry.spawn(1, child);
     Entity *live_child = w.registry.get(child_h);
 
-    CHECK(resolve_mounted_ammo_slot(w, *live_child) ==
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==
           &live_child->primary_weapon_slot);
     live_child->primary_weapon_slot.redirect_to_parent_slot = true;
-    CHECK(resolve_mounted_ammo_slot(w, *live_child) ==
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) ==
           &w.registry.get(parent_h)->primary_weapon_slot);
     const World &const_world = w;
     const Entity &const_child = *w.registry.get(child_h);
-    CHECK(resolve_mounted_ammo_slot(const_world, const_child) ==
+    CHECK(const_world.vehicles.resolve_mounted_ammo_slot(const_child) ==
           &w.registry.get(parent_h)->primary_weapon_slot);
 
     // The similarly named attachment pointer is not a substitute for retail's
     // groundEntity relationship.
     live_child->ground_target = EntityHandle{};
-    CHECK(resolve_mounted_ammo_slot(w, *live_child) == nullptr);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) == nullptr);
     live_child->ground_target = parent_h;
 
     // A packed handle may be reused. The child-side generation captured when
@@ -1024,7 +1024,7 @@ void test_mounted_ammo_slot_route() {
     w.registry.despawn(parent_h);
     Entity replacement = parent;
     CHECK(w.registry.spawn_at(parent_h, replacement) == parent_h);
-    CHECK(resolve_mounted_ammo_slot(w, *live_child) == nullptr);
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) == nullptr);
 }
 
 void test_prepare_vehicle_weapon_slot_after_armory_load() {
@@ -1038,7 +1038,7 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
 
     Entity mount;
     mount.primary_weapon = weapon.name;
-    CHECK(vehicle_prepare_weapon_slot(w, mount));
+    CHECK(w.vehicles.prepare_weapon_slot(mount));
     CHECK(mount.primary_weapon_slot_adm == 3);
     CHECK(mount.primary_weapon_slot.clip == 12);
     CHECK(mount.primary_weapon_slot.reserve == 29);
@@ -1048,7 +1048,7 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
     mount.primary_weapon_slot.clip = 7;
     mount.primary_weapon_slot.reserve = 23;
     mount.primary_weapon_slot.redirect_to_parent_slot = true;
-    CHECK(vehicle_prepare_weapon_slot(w, mount));
+    CHECK(w.vehicles.prepare_weapon_slot(mount));
     CHECK(mount.primary_weapon_slot.clip == 7);
     CHECK(mount.primary_weapon_slot.reserve == 23);
     CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
@@ -1066,17 +1066,17 @@ void test_host_crewed_helicopter_rotor_turns() {
     VehicleTraits t = truck_traits();
     t.family = VehicleFamily::Helicopter;
     t.physics = 0; // a CHel def: no ground selector, no ground mover
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
     r.sys.at(ai_idx)->profile.type = 1; // the helo profile class
-    CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
     CHECK(r.veh().primary_occupant == r.player_h);
     TickContext ctx{};
     ctx.is_authority = true;
     for (int i = 0; i < 3; ++i) r.sys.tick(r.w, ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull);
     CHECK(part_register(r.veh().veh.part_spin.angle) > 0);
-    CHECK(entity_detach_from_vehicle(r.w, r.player_h));
+    CHECK(r.w.vehicles.detach(r.player_h));
     r.sys.tick(r.w, ctx);
     CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo);
     // A joiner never runs the authority pass for it.
@@ -1092,7 +1092,7 @@ void test_host_crewed_helicopter_rotor_turns() {
 void test_ai_drive_leg() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
 
     // Brain for the truck with a live nav waypoint straight ahead (+x).
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -1123,7 +1123,7 @@ void test_ai_drive_leg() {
         // to the promoted pending 16 next tick (one state word in the original).
         CHECK(b.f[AiBrain::kPendState] == 22);
         const float x0 = r.veh().position.x;
-        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         CHECK(std::abs(r.veh().position.x - x0) < 0.05f);
     }
 
@@ -1135,9 +1135,9 @@ void test_ai_drive_leg() {
     npc.alive = true;
     npc.team = 1;
     EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
     CHECK(r.w.registry.get(nh)->mount_type == SeatType::Controller);
-    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    Entity *ctrl = r.w.vehicles.resolve_controller(r.veh());
     CHECK(ctrl != nullptr);
 
     const float x0 = r.veh().position.x;
@@ -1146,7 +1146,7 @@ void test_ai_drive_leg() {
         VehicleDriveCmd cmd;
         r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
         drove = drove || cmd.ai_drive;
-        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         AiEntity *ve2 = r.sys.for_handle(r.veh_h);
         ve2->pos[0] = static_cast<int32_t>(r.veh().position.x * 65536.0f);
         ve2->pos[1] = static_cast<int32_t>(r.veh().position.y * 65536.0f);
@@ -1173,7 +1173,7 @@ void test_ai_drive_leg() {
         r.sys.vehicle_ai_drive(r.w, r.veh(), nullptr, t, cmd);
         CHECK(!cmd.ai_drive);
         CHECK(b.f[AiBrain::kCurState] == 22);
-        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         CHECK(r.veh().veh.cmd_speed == 0); // the no-controller hold, not the stale drive
     }
 }
@@ -1185,7 +1185,7 @@ void test_ai_drive_leg() {
 void test_ai_drive_avoid_brake() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.at(ai_idx);
     ve.pos[0] = 100 << 16;
@@ -1216,8 +1216,8 @@ void test_ai_drive_avoid_brake() {
     npc.alive = true;
     npc.team = 1;
     const EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
-    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    Entity *ctrl = r.w.vehicles.resolve_controller(r.veh());
     CHECK(ctrl != nullptr);
 
     // Baseline: open road, undamped.
@@ -1262,7 +1262,7 @@ void test_ai_drive_avoid_brake() {
 void test_stuck_check() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.sys.is_authority = true;
     r.sys.attach(r.veh_h);
     r.veh().spawn_position = Vec3{0.0f, 0.0f, 10.0f}; // 100+ u from the hull
@@ -1296,7 +1296,7 @@ void test_stuck_check() {
     // A hull still AT its spawn anchor is never written off, and a live body
     // nearby resets the count entirely.
     Rig r2(2.0f); // the player 2 u away: inside the reset reach
-    r2.w.tables.vehicle_traits.set(r2.veh().item_id, t);
+    r2.w.vehicles.traits.set(r2.veh().item_id, t);
     r2.sys.is_authority = true;
     r2.sys.attach(r2.veh_h);
     r2.player().has_item_def = true; // [orig: the walk's entity[7] gate]
@@ -1326,9 +1326,9 @@ void test_stuck_check() {
     npc.alive = true;
     npc.team = 1;
     const EntityHandle nh = r2.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r2.w, nh, r2.veh_h, 1));
+    CHECK(r2.w.vehicles.process_attach(nh, r2.veh_h, 1));
     VehicleDriveCmd cmd;
-    tick_vehicle_motor(r2.w, r2.veh(), t, &cmd);
+    r2.w.vehicles.tick_motor(r2.veh(), t, &cmd);
     CHECK(r2.veh().veh.stuck_ticks == 0);
     // A joiner never runs the escalation (the count still climbs).
     r2.sys.is_authority = false;
@@ -1349,7 +1349,7 @@ void test_min_ai_crew_clamp() {
     VehicleTraits t = truck_traits();
     t.min_ai = 2;
     t.critical_hp = 300;
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.sys.attach(r.veh_h);
     r.veh().spawn_position = r.veh().position;
     Entity npc;
@@ -1360,8 +1360,8 @@ void test_min_ai_crew_clamp() {
     npc.team = 1;
     npc.has_item_def = true;
     const EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
-    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    Entity *ctrl = r.w.vehicles.resolve_controller(r.veh());
     CHECK(ctrl != nullptr);
     CHECK(count_mounted_entities(r.w, r.veh()) == 1);
 
@@ -1416,41 +1416,41 @@ void test_handbrake_latch() {
     Rig r(2.0f);
     VehicleTraits t = truck_traits();
     t.hand_brake = 1;
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
-    CHECK(entity_process_vehicle_attach(r.w, r.player_h, r.veh_h, 1));
+    r.w.vehicles.traits.set(r.veh().item_id, t);
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
     Entity &drv = r.player();
     drv.net_move_input = 0x08; // moving forward
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     CHECK(r.veh().veh.handbrake_latched == 0);
     drv.net_move_input = 0x08 | 0x80; // + lean right = handbrake
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK((r.veh().flags & 0x8u) != 0);
     CHECK(r.veh().veh.handbrake_latched == 1);
     CHECK(r.veh().veh.cmd_speed == 0);
     drv.net_move_input = 0x08;
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.handbrake_latched == 0);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     // A def without handBrake ignores the key.
     t.hand_brake = 0;
     drv.net_move_input = 0x08 | 0x80;
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.handbrake_latched == 0);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     // The crashed byte stops the command regardless.
     r.veh().veh.crashed = 1;
     drv.net_move_input = 0x08;
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.cmd_speed == 0);
     r.veh().veh.crashed = 0;
     // The MoveOrder merge: a nonzero direction with the move bit latches the
     // free-look bit on the occupant's own word [orig: @0x48b847..0x48b897].
     drv.net_move_input = 0x08 | 0x01;
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK((drv.net_move_input & 0x10u) != 0);
     drv.net_move_input = 0x08; // straight: no latch
-    tick_vehicle_motor(r.w, r.veh(), t, nullptr);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK((drv.net_move_input & 0x10u) == 0);
 }
 
@@ -1459,7 +1459,7 @@ void test_handbrake_latch() {
 void test_ground_waits_for_boarders() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.sys.attach(r.veh_h);
     AiEntity &ve = *r.sys.for_handle(r.veh_h);
     ve.brain.f[AiBrain::kOutSpeed] = 40 * 293;
@@ -1470,8 +1470,8 @@ void test_ground_waits_for_boarders() {
     npc.alive = true;
     npc.team = 1;
     const EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
-    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    Entity *ctrl = r.w.vehicles.resolve_controller(r.veh());
     CHECK(ctrl != nullptr);
     VehicleDriveCmd cmd0;
     r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd0);
@@ -1525,7 +1525,7 @@ struct HeloRig {
         t.critical_hp = 300;
         t.critical_drain = 40;
         t.non_critical_regen = 10;
-        r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+        r.w.vehicles.traits.set(r.veh().item_id, t);
         r.sys.is_authority = true;
         const int ai_idx = r.sys.attach(r.veh_h);
         ve = r.sys.at(ai_idx);
@@ -1544,8 +1544,8 @@ struct HeloRig {
         npc.team = 1;
         npc.has_item_def = true;
         const EntityHandle nh = r.w.registry.spawn(0, npc);
-        CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
-        ctrl = resolve_vehicle_controller(r.w, r.veh());
+        CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+        ctrl = r.w.vehicles.resolve_controller(r.veh());
         CHECK(ctrl != nullptr);
     }
     void route_to(int32_t x, int32_t y, int32_t z) {
@@ -1709,7 +1709,7 @@ void test_redirect_and_speed_commands() {
     npc.alive = true;
     npc.group_id = 3;
     EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
     CHECK(r.w.registry.get(nh)->mounted);
     r.w.commands.group_to_waypoint(3, 2);
     CHECK(!r.w.registry.get(nh)->mounted);
@@ -1734,7 +1734,7 @@ void test_redirect_and_speed_commands() {
 void test_local_player_drive_mirror() {
     Rig r(30.0f);
     const VehicleTraits t = truck_traits();
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
 
     // The local player as an infantry-active AI entity in the ctrl seat.
     const int ai_idx = r.sys.attach(r.player_h);
@@ -1743,7 +1743,7 @@ void test_local_player_drive_mirror() {
     pe.inf.is_local_player = true;
     pe.health = 150;
     r.player().ground_target = r.veh_h;
-    CHECK(player_toggle_vehicle_mount(r.w, r.player_h)); // deck path -> ctrl seat
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h)); // deck path -> ctrl seat
     CHECK(is_vehicle_control_seat(r.player().mount_type));
 
     // Live input: forward held, looking along +x (mission yaw 90).
@@ -1754,7 +1754,7 @@ void test_local_player_drive_mirror() {
     const float x0 = r.veh().position.x;
     for (int i = 0; i < 124; ++i) {
         CHECK(r.sys.pose_if_mounted(pe, r.w)); // the mirror + seat carry
-        tick_vehicle_motor(r.w, r.veh(), t);   // occupant leg reads the mirrored input
+        r.w.vehicles.tick_motor(r.veh(), t);   // occupant leg reads the mirrored input
     }
     CHECK((r.player().net_move_input & 0x08u) != 0); // moving bit mirrored
     CHECK(r.veh().position.x - x0 > 1.0f);           // the truck drove
@@ -1800,7 +1800,7 @@ void test_player_spawn_group() {
 void test_attach_labels_seats() {
     Rig r(2.0f);
     std::vector<AttachLabel> labels;
-    collect_attach_labels(r.w, r.player(), /*armory_mode=*/false, /*can_fire=*/false, labels);
+    r.w.vehicles.collect_attach_labels(r.player(), /*armory_mode=*/false, /*can_fire=*/false, labels);
     CHECK(labels.size() == 2); // both free seats are inside 4.0 u
     int nearest_count = 0;
     for (const AttachLabel &l : labels) {
@@ -1814,7 +1814,7 @@ void test_attach_labels_seats() {
     // Occupied seats never label [orig: mountHandles != 0xFFFF skip @0x5a348f].
     r.veh().seats[1].occupant = r.player_h;
     labels.clear();
-    collect_attach_labels(r.w, r.player(), false, false, labels);
+    r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
     CHECK(labels.size() == 1);
     CHECK(labels[0].seat_index == 0);
 
@@ -1822,7 +1822,7 @@ void test_attach_labels_seats() {
     // [orig: the Entity_FindNearestSeatOrArmory bracket @0x5a32e2].
     Rig far(30.0f);
     labels.clear();
-    collect_attach_labels(far.w, far.player(), false, false, labels);
+    far.w.vehicles.collect_attach_labels(far.player(), false, false, labels);
     CHECK(labels.empty());
 }
 
@@ -1847,14 +1847,14 @@ void test_attach_labels_can_fire_gate() {
     const EntityHandle veh2_h = r.w.registry.spawn(1, veh2);
 
     std::vector<AttachLabel> all;
-    collect_attach_labels(r.w, r.player(), false, /*can_fire=*/false, all);
+    r.w.vehicles.collect_attach_labels(r.player(), false, /*can_fire=*/false, all);
     bool saw_veh2 = false;
     for (const AttachLabel &l : all) saw_veh2 = saw_veh2 || l.entity == veh2_h;
     CHECK(all.size() >= 3); // both trucks' free seats
     CHECK(saw_veh2);
 
     std::vector<AttachLabel> armed;
-    collect_attach_labels(r.w, r.player(), false, /*can_fire=*/true, armed);
+    r.w.vehicles.collect_attach_labels(r.player(), false, /*can_fire=*/true, armed);
     CHECK(!armed.empty());
     EntityHandle only = armed[0].entity;
     for (const AttachLabel &l : armed) CHECK(l.entity == only); // one entity's labels
@@ -1877,7 +1877,7 @@ void test_attach_labels_armory_mode() {
     const EntityHandle crate_h = r.w.registry.spawn(1, crate);
 
     std::vector<AttachLabel> labels;
-    collect_attach_labels(r.w, r.player(), /*armory_mode=*/true, false, labels);
+    r.w.vehicles.collect_attach_labels(r.player(), /*armory_mode=*/true, false, labels);
     CHECK(labels.size() == 1); // the truck's seats do NOT label in armory mode
     CHECK(labels[0].entity == crate_h);
     CHECK(labels[0].armory);
@@ -1886,7 +1886,7 @@ void test_attach_labels_armory_mode() {
 
     // Seat mode ignores armory points.
     labels.clear();
-    collect_attach_labels(r.w, r.player(), false, false, labels);
+    r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
     for (const AttachLabel &l : labels) CHECK(!l.armory);
 }
 
@@ -1950,7 +1950,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
     if (player == nullptr) return;
     AttachLabelScanStats stats;
     std::vector<AttachLabel> labels;
-    collect_attach_labels(w, *player, false, false, labels, &stats);
+    w.vehicles.collect_attach_labels(*player, false, false, labels, &stats);
     CHECK(labels.size() == 31);
     for (const AttachLabel &label : labels)
         CHECK(label.entity != enemy_occupied_vehicle);
@@ -1967,7 +1967,7 @@ void test_vehicle_hull_stops_at_building() {
     Rig r(30.0f);
     VehicleTraits t = truck_traits();
     t.torque = 2; // sev-3 decay = speed - (speed >> 4) per contact tick
-    r.w.tables.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
 
     CollisionWorld cw;
     r.sys.collision = &cw;
@@ -2055,8 +2055,8 @@ void test_vehicle_hull_stops_at_building() {
     npc.alive = true;
     npc.team = 1;
     EntityHandle nh = r.w.registry.spawn(0, npc);
-    CHECK(entity_process_vehicle_attach(r.w, nh, r.veh_h, 1));
-    Entity *ctrl = resolve_vehicle_controller(r.w, r.veh());
+    CHECK(r.w.vehicles.process_attach(nh, r.veh_h, 1));
+    Entity *ctrl = r.w.vehicles.resolve_controller(r.veh());
     CHECK(ctrl != nullptr);
 
     // Unit probe: with tables built and the hull point INSIDE the wall face, the
@@ -2083,7 +2083,7 @@ void test_vehicle_hull_stops_at_building() {
         cw.build_tick_tables(r.w); // self-gated to the 17-tick cadence
         VehicleDriveCmd cmd;
         r.sys.vehicle_ai_drive(r.w, r.veh(), ctrl, t, cmd);
-        tick_vehicle_motor(r.w, r.veh(), t, &cmd);
+        r.w.vehicles.tick_motor(r.veh(), t, &cmd);
         AiEntity *ve2 = r.sys.for_handle(r.veh_h);
         ve2->pos[0] = static_cast<int32_t>(r.veh().position.x * 65536.0f);
         ve2->pos[1] = static_cast<int32_t>(r.veh().position.y * 65536.0f);

@@ -177,10 +177,10 @@ static void test_wire_mount_config_lifecycle() {
     const EntityHandle sh =
             w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-    CHECK(entity_process_vehicle_attach(w, sh, gh, 7));
+    CHECK(w.vehicles.process_attach(sh, gh, 7));
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 6);
-    CHECK(entity_detach_from_vehicle(w, sh));
+    CHECK(w.vehicles.detach(sh));
     CHECK(!w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
 }
@@ -200,7 +200,7 @@ static void test_wire_attach_rejects_unknown_model_bone() {
     const EntityHandle sh =
             w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-    CHECK(!entity_process_vehicle_attach(w, sh, gh, 9));
+    CHECK(!w.vehicles.process_attach(sh, gh, 9));
     CHECK(!w.registry.get(sh)->mounted);
     CHECK(!w.registry.get(gh)->seats[0].occupant.valid());
 }
@@ -231,7 +231,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     const int mounted_ai_index = ai.attach(mounted);
     AiEntity *mounted_ai = ai.at(mounted_ai_index);
 
-    CHECK(entity_process_vehicle_attach(w, mounted, target, 7));
+    CHECK(w.vehicles.process_attach(mounted, target, 7));
     CHECK(w.registry.get(mounted)->mounted_config_valid);
     w.registry.despawn(target);
     CHECK(!ai.pose_if_mounted(*mounted_ai, w));
@@ -245,7 +245,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     replacement.emplaced_config = 6;
     replacement.seats[0].bone_index = 7;
     const EntityHandle replacement_target = w.registry.spawn(1, replacement);
-    CHECK(entity_process_vehicle_attach(w, mounted, replacement_target, 7));
+    CHECK(w.vehicles.process_attach(mounted, replacement_target, 7));
     Entity *mounted_entity = w.registry.get(mounted);
     mounted_entity->health = 0;
     mounted_entity->deathtime_ticks = 120;
@@ -383,14 +383,14 @@ int main() {
         const EntityHandle vh = w.registry.spawn(1, vehicle);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        CHECK(entity_process_vehicle_attach(w, sh, vh, 7));
+        CHECK(w.vehicles.process_attach(sh, vh, 7));
         CHECK(w.out.effects.entries().size() == 1);
         if (w.out.effects.entries().size() == 1) {
             const auto &started = w.out.effects.entries()[0];
             CHECK(started.kind == "vehicle_control_started");
             CHECK(started.a == 200 && started.b == 77 && started.c == 0x01000003);
         }
-        CHECK(entity_detach_from_vehicle(w, sh));
+        CHECK(w.vehicles.detach(sh));
         CHECK(w.out.effects.entries().size() == 2);
         if (w.out.effects.entries().size() == 2) {
             const auto &stopped = w.out.effects.entries()[1];
@@ -409,17 +409,17 @@ int main() {
         const EntityHandle c0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
 
-        CHECK(entity_process_vehicle_attach(w, c0, vh, 7));
-        CHECK(entity_process_vehicle_attach(w, c1, vh, 9));
+        CHECK(w.vehicles.process_attach(c0, vh, 7));
+        CHECK(w.vehicles.process_attach(c1, vh, 9));
         CHECK(w.out.effects.entries().size() == 1);
         if (w.out.effects.entries().size() == 1)
             CHECK(w.out.effects.entries()[0].kind == "vehicle_control_started");
 
-        CHECK(entity_detach_from_vehicle(w, c0)); // the claimant departs -> stop
+        CHECK(w.vehicles.detach(c0)); // the claimant departs -> stop
         CHECK(w.out.effects.entries().size() == 2);
         if (w.out.effects.entries().size() == 2)
             CHECK(w.out.effects.entries()[1].kind == "vehicle_control_stopped");
-        CHECK(entity_detach_from_vehicle(w, c1)); // the non-claimant departure is silent
+        CHECK(w.vehicles.detach(c1)); // the non-claimant departure is silent
         CHECK(w.out.effects.entries().size() == 2);
     }
 

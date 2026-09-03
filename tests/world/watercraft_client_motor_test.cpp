@@ -113,7 +113,7 @@ w::Entity *mount_prediction_driver(Rig &r, bool is_local) {
 	body.alive = true;
 	const w::EntityHandle handle = r.world.registry.spawn(0, body);
 	if (is_local) r.world.cached.local_player = handle;
-	if (!expect(w::entity_process_vehicle_attach(r.world, handle, r.boat, 7),
+	if (!expect(r.world.vehicles.process_attach(handle, r.boat, 7),
 	            "prediction driver mounted")) return nullptr;
 	return r.world.registry.get(handle);
 }
@@ -153,7 +153,7 @@ bool run_fast_boat_glides() {
 			stage(*boat, x0 + step_fx * t, y0, z0, /*heading*/ 0,
 			      /*speed*/ step_fx, /*steer*/ 0);
 		}
-		w::watercraft_client_tick(r.world, *boat, r.traits);
+		r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 		presented.push_back(w::to_fixed(boat->position.x));
 	}
 
@@ -192,7 +192,7 @@ bool run_abandoned_boat_coasts_to_rest() {
 	float prev_x = boat->position.x;
 	float last_step = 0.0f;
 	for (int t = 0; t < 1200; ++t) {
-		w::watercraft_client_tick(r.world, *boat, r.traits);
+		r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 		last_step = boat->position.x - prev_x;
 		prev_x = boat->position.x;
 	}
@@ -227,7 +227,7 @@ bool run_steer_follows_received_register() {
 			      w::to_fixed(boat->position.y), w::to_fixed(10.0f), 0, 16384,
 			      steer_target);
 		}
-		w::watercraft_client_tick(r.world, *boat, r.traits);
+		r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 	}
 	const int32_t heading = boat->veh.yaw_bam;
 	std::fprintf(stderr, "[boat-steer] heading after 240 ticks = 0x%08x\n",
@@ -260,7 +260,7 @@ bool run_ground_vehicle_glides() {
 		if (t % kGap == 0) {
 			stage(*veh, x0 + step_fx * t, y0, z0, 0, step_fx, 0);
 		}
-		w::ground_client_tick(r.world, *veh, r.traits);
+		r.world.vehicles.ground_client_tick(*veh, r.traits);
 		presented.push_back(w::to_fixed(veh->position.x));
 	}
 	int32_t max_step = 0;
@@ -316,7 +316,7 @@ bool run_bike_family_deltas() {
 	const int32_t z0 = w::to_fixed(10.0f);
 	const int32_t steer = 0x20000000; // +45 deg
 	stage(*veh, x0, y0, z0, 0, 8192, steer);
-	w::ground_client_tick(r.world, *veh, r.traits); // arm; airborne over the flat
+	r.world.vehicles.ground_client_tick(*veh, r.traits); // arm; airborne over the flat
 	auto &m = veh->veh;
 	if (!expect(!m.grounded, "the flying bike is off-contact")) return false;
 	m.speed = 8192; // live speed the steer chain multiplies
@@ -324,7 +324,7 @@ bool run_bike_family_deltas() {
 	// subtract exactly the bike gravity 250 (never the ground 324).
 	m.slide_z = 0x5000;
 	const int32_t yaw_before = m.yaw_bam;
-	w::ground_client_tick(r.world, *veh, r.traits);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
 	bool ok = expect(m.slide_z == 0x4000 - 250,
 	                 "bike vertical = up-cap 0x4000 then gravity 250");
 	const int32_t air_yaw_step = opennova::io::bam_sub(m.yaw_bam, yaw_before);
@@ -332,7 +332,7 @@ bool run_bike_family_deltas() {
 	             "the airborne bike produces a non-zero wheel yaw rate");
 	ok &= expect(air_yaw_step == opennova::io::bam_sar(m.wheel_rate_bam, 2),
 	             "the off-contact bike applies exactly one quarter yaw rate");
-	for (int t = 0; t < 8; ++t) w::ground_client_tick(r.world, *veh, r.traits);
+	for (int t = 0; t < 8; ++t) r.world.vehicles.ground_client_tick(*veh, r.traits);
 	std::fprintf(stderr, "[bike-air] slide_z pin ok=%d yaw %d -> %d\n", int(ok),
 	             yaw_before, m.yaw_bam);
 	ok &= expect(m.yaw_bam != yaw_before,
@@ -349,15 +349,15 @@ bool run_bike_family_deltas() {
 	g.world.tables.terrain = &field;
 	w::Entity *gveh = g.world.registry.get(g.boat);
 	stage(*gveh, x0, y0, z0, 0, 8192, steer);
-	w::ground_client_tick(g.world, *gveh, g.traits);
+	g.world.vehicles.ground_client_tick(*gveh, g.traits);
 	if (!expect(!gveh->veh.grounded, "the flying buggy is off-contact")) return false;
 	gveh->veh.speed = 8192;
 	gveh->veh.slide_z = 0x5000;
 	const int32_t gyaw = gveh->veh.yaw_bam;
-	w::ground_client_tick(g.world, *gveh, g.traits);
+	g.world.vehicles.ground_client_tick(*gveh, g.traits);
 	ok &= expect(gveh->veh.slide_z == 0x5000 - 324,
 	             "ground vertical keeps 324 and no up-cap");
-	for (int t = 0; t < 8; ++t) w::ground_client_tick(g.world, *gveh, g.traits);
+	for (int t = 0; t < 8; ++t) g.world.vehicles.ground_client_tick(*gveh, g.traits);
 	ok &= expect(gveh->veh.yaw_bam == gyaw,
 	             "the airborne ground vehicle freezes its yaw");
 	return ok;
@@ -437,7 +437,7 @@ bool run_ground_parked_rests_at_wheel_clearance() {
 			if (t % 8 == 0)
 				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
 				      0, 0, 0);
-			w::ground_client_tick(r.world, *veh, r.traits);
+			r.world.vehicles.ground_client_tick(*veh, r.traits);
 		}
 		const int32_t z = w::to_fixed(veh->position.z);
 		std::fprintf(stderr,
@@ -521,7 +521,7 @@ bool run_tank_parked_rests_at_wheel_clearance() {
 			if (t % 8 == 0)
 				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
 				      0, 0, 0);
-			w::ground_client_tick(r.world, *veh, r.traits);
+			r.world.vehicles.ground_client_tick(*veh, r.traits);
 		}
 		const int32_t z = w::to_fixed(veh->position.z);
 		std::fprintf(stderr,
@@ -601,7 +601,7 @@ bool run_bike_parked_rests_at_wheel_clearance() {
 			if (t % 8 == 0)
 				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
 				      0, 0, 0);
-			w::ground_client_tick(r.world, *veh, r.traits);
+			r.world.vehicles.ground_client_tick(*veh, r.traits);
 		}
 		const int32_t z = w::to_fixed(veh->position.z);
 		std::fprintf(stderr,
@@ -655,14 +655,14 @@ bool run_tank_family_deltas() {
 	const int32_t z0 = w::to_fixed(10.0f);
 	const int32_t steer = 0x20000000; // +45 deg
 	stage(*veh, x0, y0, z0, 0, 8192, steer);
-	w::ground_client_tick(r.world, *veh, r.traits); // arm; airborne over the flat
+	r.world.vehicles.ground_client_tick(*veh, r.traits); // arm; airborne over the flat
 	auto &m = veh->veh;
 	if (!expect(!m.grounded, "the flying tank is off-contact")) return false;
 	m.speed = 8192;
 	const int32_t speed_before = 8192;
 	m.slide_z = 0x5000; // above the bike cap: the tank must NOT clamp it
 	const int32_t yaw_before = m.yaw_bam;
-	w::ground_client_tick(r.world, *veh, r.traits);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
 	bool ok = expect(m.slide_z == 0x5000 - 250,
 	                 "tank vertical = gravity 250 with no up-cap");
 	const int32_t air_yaw_step = opennova::io::bam_sub(m.yaw_bam, yaw_before);
@@ -696,7 +696,7 @@ bool run_platform_solve_settles_at_waterline() {
 		stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
 		      w::to_fixed(float(pr.start_z)), 0, 0, 0);
 		for (int t = 0; t < 900; ++t)
-			w::watercraft_client_tick(r.world, *boat, r.traits);
+			r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 		const double z = double(boat->position.z);
 		const double pitch_deg =
 			double(boat->veh.air_pitch_bam) * (360.0 / 4294967296.0);
@@ -749,9 +749,9 @@ bool run_afloat_latch_controls_drag() {
 	landed_boat->veh.plat_solve_valid = true;
 	// fallback has no model boxes and starts with the default false latch.
 
-	w::watercraft_client_tick(wet.world, *wet_boat, wet.traits);
-	w::watercraft_client_tick(landed.world, *landed_boat, landed.traits);
-	w::watercraft_client_tick(fallback.world, *fallback_boat, fallback.traits);
+	wet.world.vehicles.watercraft_client_tick(*wet_boat, wet.traits);
+	landed.world.vehicles.watercraft_client_tick(*landed_boat, landed.traits);
+	fallback.world.vehicles.watercraft_client_tick(*fallback_boat, fallback.traits);
 
 	bool ok = true;
 	ok &= expect(wet_boat->veh.vel_x == 6202,
@@ -782,8 +782,8 @@ bool run_first_prediction_seeds_platform_state() {
 	warm_boat->veh.plat_afloat = true;
 	warm_boat->veh.plat_solve_valid = true;
 
-	w::watercraft_client_tick(first.world, *first_boat, first.traits);
-	w::watercraft_client_tick(warm.world, *warm_boat, warm.traits);
+	first.world.vehicles.watercraft_client_tick(*first_boat, first.traits);
+	warm.world.vehicles.watercraft_client_tick(*warm_boat, warm.traits);
 	return expect(first_boat->veh.plat_solve_valid &&
 	                      first_boat->veh.plat_afloat &&
 	                      first_boat->veh.vel_x == warm_boat->veh.vel_x,
@@ -806,7 +806,7 @@ bool run_platform_basis_preserves_roll_sign() {
 	boat->veh.yaw_bam = w::bam_from_degrees_wrapped(37.0);
 	boat->veh.air_pitch_bam = w::bam_from_degrees_wrapped(11.0);
 	boat->veh.air_roll_bam = w::bam_from_degrees_wrapped(19.0);
-	w::watercraft_platform_solve(r.world, *boat, r.traits);
+	r.world.vehicles.watercraft_platform_solve(*boat, r.traits);
 	return expect(boat->veh.air_roll_bam > 0,
 	              "platform Q22 basis preserves positive roll sign");
 }
@@ -826,7 +826,7 @@ bool run_water_rudder_wraps_min_speed() {
 	r.traits.turn_rate = 0;
 	r.traits.turn_rate2 = 0;
 	r.traits.water_speed = 0;
-	w::watercraft_client_tick(r.world, *boat, r.traits);
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 	const int32_t expected = static_cast<int32_t>(
 			(static_cast<int64_t>(INT32_MIN) * (0x10000 >> 2) + 0x8000) >> 16);
 	return expect(expected < 0 && boat->veh.wheel_rate_bam < 0,
@@ -849,7 +849,7 @@ bool run_airborne_watercraft_preserves_yaw_rate() {
 	r.traits.turn_rate = 0x400000;
 	r.traits.turn_rate2 = 0x100000;
 
-	w::watercraft_client_tick(r.world, *boat, r.traits);
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 	int32_t expected = opennova::io::bam_sub(
 			initial_rate,
 			opennova::io::bam_sar(
@@ -894,14 +894,10 @@ bool run_prior_euler_drives_thrust_and_beach_stop() {
 	capsized.world.registry.get(capsized.boat)->veh.vel_x = 0;
 	upright.world.registry.get(upright.boat)->veh.vel_x = 0;
 
-	w::watercraft_client_tick(pitched.world,
-			*pitched.world.registry.get(pitched.boat), pitched.traits);
-	w::watercraft_client_tick(level.world,
-			*level.world.registry.get(level.boat), level.traits);
-	w::watercraft_client_tick(capsized.world,
-			*capsized.world.registry.get(capsized.boat), capsized.traits);
-	w::watercraft_client_tick(upright.world,
-			*upright.world.registry.get(upright.boat), upright.traits);
+	pitched.world.vehicles.watercraft_client_tick(*pitched.world.registry.get(pitched.boat), pitched.traits);
+	level.world.vehicles.watercraft_client_tick(*level.world.registry.get(level.boat), level.traits);
+	capsized.world.vehicles.watercraft_client_tick(*capsized.world.registry.get(capsized.boat), capsized.traits);
+	upright.world.vehicles.watercraft_client_tick(*upright.world.registry.get(upright.boat), upright.traits);
 
 	const auto &pitched_m = pitched.world.registry.get(pitched.boat)->veh;
 	const auto &level_m = level.world.registry.get(level.boat)->veh;
@@ -948,8 +944,7 @@ bool run_platform_solve_precedes_yaw() {
 	wrong.traits.max_slope = actual.traits.max_slope;
 	wrong.traits.slip_slope = actual.traits.slip_slope;
 
-	w::watercraft_client_tick(staged.world,
-			*staged.world.registry.get(staged.boat), staged.traits);
+	staged.world.vehicles.watercraft_client_tick(*staged.world.registry.get(staged.boat), staged.traits);
 	w::Entity *staged_boat = staged.world.registry.get(staged.boat);
 	const int32_t post_yaw = staged_boat->veh.yaw_bam;
 	const int32_t yaw_rate = staged_boat->veh.wheel_rate_bam;
@@ -961,13 +956,10 @@ bool run_platform_solve_precedes_yaw() {
 		boat->veh = staged_boat->veh;
 	}
 	expected.world.registry.get(expected.boat)->veh.yaw_bam = pre_solve_yaw;
-	w::watercraft_platform_solve(expected.world,
-			*expected.world.registry.get(expected.boat), expected.traits);
+	expected.world.vehicles.watercraft_platform_solve(*expected.world.registry.get(expected.boat), expected.traits);
 	// wrong deliberately keeps post_yaw while fitting.
-	w::watercraft_platform_solve(wrong.world,
-			*wrong.world.registry.get(wrong.boat), wrong.traits);
-	w::watercraft_client_tick(actual.world,
-			*actual.world.registry.get(actual.boat), actual.traits);
+	wrong.world.vehicles.watercraft_platform_solve(*wrong.world.registry.get(wrong.boat), wrong.traits);
+	actual.world.vehicles.watercraft_client_tick(*actual.world.registry.get(actual.boat), actual.traits);
 
 	const w::Entity *actual_boat = actual.world.registry.get(actual.boat);
 	const w::Entity *expected_boat = expected.world.registry.get(expected.boat);
@@ -1007,7 +999,7 @@ bool run_vehicle_chase_wraps_bam_seam() {
 	veh->veh.yaw_bam = start;
 	stage(*veh, w::to_fixed(veh->position.x), w::to_fixed(veh->position.y),
 	      w::to_fixed(veh->position.z), target, 0, start);
-	w::ground_client_tick(r.world, *veh, r.traits);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
 	const int32_t expected_step = opennova::io::bam_add(
 			opennova::io::bam_sub(target, start), 10) / 20;
 	const int32_t expected = opennova::io::bam_add(start, expected_step);
@@ -1035,7 +1027,7 @@ bool run_ground_rudder_wraps_bam_seam() {
 	m.speed = 1 << 16;
 	m.grounded = true;
 	const int32_t start = m.yaw_bam;
-	w::ground_client_tick(r.world, *veh, r.traits);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
 	return expect(m.steer_state < 0 && m.wheel_rate_bam > 0 &&
 	                      opennova::io::bam_sub(m.yaw_bam, start) > 0 &&
 	                      opennova::io::bam_sub(m.net_recv_steer_bam,
@@ -1062,7 +1054,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		prime_prediction_tick(*local_vehicle, -7000);
 		local_vehicle->veh.net_recv_steer_bam =
 				w::bam_from_degrees_wrapped(-71.0);
-		w::ground_client_tick(local.world, *local_vehicle, local.traits);
+		local.world.vehicles.ground_client_tick(*local_vehicle, local.traits);
 		// The controlling client stages its own command, then halves it
 		// against the received register: [136] = ([136] + [177]) >> 1
 		// [orig: ground @0x48bbef; bike @0x484dad].
@@ -1089,7 +1081,7 @@ bool run_ground_and_bike_local_driver_input_gate() {
 		const int32_t received_steer = w::bam_from_degrees_wrapped(-71.0);
 		prime_prediction_tick(*remote_vehicle, -7000);
 		remote_vehicle->veh.net_recv_steer_bam = received_steer;
-		w::ground_client_tick(remote.world, *remote_vehicle, remote.traits);
+		remote.world.vehicles.ground_client_tick(*remote_vehicle, remote.traits);
 		ok &= expect(remote_vehicle->veh.cmd_speed == -7000,
 		             "remote ground/bike occupant still uses received speed");
 		ok &= expect(remote_vehicle->veh.steer_target_bam == received_steer,
@@ -1113,7 +1105,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	local_driver->yaw = 53;
 	prime_prediction_tick(*local_boat, -2000);
 	local_boat->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-80.0);
-	w::watercraft_client_tick(local.world, *local_boat, local.traits);
+	local.world.vehicles.watercraft_client_tick(*local_boat, local.traits);
 	bool ok = true;
 	ok &= expect(local_boat->veh.cmd_speed == 5000,
 	             "local watercraft averages current and received speed commands");
@@ -1134,7 +1126,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	const int32_t received_steer = w::bam_from_degrees_wrapped(-80.0);
 	prime_prediction_tick(*remote_boat, -2000);
 	remote_boat->veh.net_recv_steer_bam = received_steer;
-	w::watercraft_client_tick(remote.world, *remote_boat, remote.traits);
+	remote.world.vehicles.watercraft_client_tick(*remote_boat, remote.traits);
 	ok &= expect(remote_boat->veh.cmd_speed == -2000,
 	             "remote watercraft occupant still uses received speed");
 	ok &= expect(remote_boat->veh.steer_target_bam == received_steer,
@@ -1150,7 +1142,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	            "wrapped watercraft prediction rig ready")) return false;
 	wrapped_driver->net_move_input = 0x08;
 	prime_prediction_tick(*wrapped_boat, std::numeric_limits<int32_t>::max());
-	w::watercraft_client_tick(wrapped.world, *wrapped_boat, wrapped.traits);
+	wrapped.world.vehicles.watercraft_client_tick(*wrapped_boat, wrapped.traits);
 	ok &= expect(wrapped_boat->veh.cmd_speed == -1,
 	             "watercraft reconciliation wraps ADD then arithmetic-shifts like x86");
 	return ok;
@@ -1177,7 +1169,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	heli->veh.net_recv_lat = 3000;
 	heli->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-66.0);
 	heli->veh.net_engine_on = true; // replicated Flags 0x80: engine spun up
-	w::aircraft_client_tick(local.world, *heli, local.traits);
+	local.world.vehicles.aircraft_client_tick(*heli, local.traits);
 	bool ok = true;
 	ok &= expect(heli->veh.cmd_speed ==
 	                     opennova::io::bam_sar(opennova::io::bam_add(
@@ -1205,7 +1197,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	rheli->veh.net_recv_lat = 3000;
 	rheli->veh.net_recv_steer_bam = received_steer;
 	rheli->veh.net_engine_on = true;
-	w::aircraft_client_tick(remote.world, *rheli, remote.traits);
+	remote.world.vehicles.aircraft_client_tick(*rheli, remote.traits);
 	ok &= expect(rheli->veh.cmd_speed == -7000,
 	             "a remote-piloted aircraft keeps the received forward mirror");
 	ok &= expect(rheli->veh.cmd_lateral_speed == 3000,
@@ -1238,7 +1230,7 @@ bool run_platform_roll_is_stable_and_gravity_witnessed() {
 	int sign_flips = 0;
 	int32_t prev = boat->veh.air_roll_bam;
 	for (int t = 0; t < 120; ++t) {
-		w::watercraft_client_tick(r.world, *boat, r.traits);
+		r.world.vehicles.watercraft_client_tick(*boat, r.traits);
 		const int32_t now = boat->veh.air_roll_bam;
 		if ((now ^ prev) < 0 && std::abs(now) > 0x01000000) ++sign_flips;
 		prev = now;
@@ -1266,9 +1258,9 @@ bool run_platform_roll_is_stable_and_gravity_witnessed() {
 	fly->position.z = 40.0f;
 	stage(*fly, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(40.0f),
 	      0, 0, 0);
-	w::watercraft_client_tick(g.world, *fly, g.traits); // latch not-afloat
+	g.world.vehicles.watercraft_client_tick(*fly, g.traits); // latch not-afloat
 	const int32_t s0 = fly->veh.slide_z;
-	w::watercraft_client_tick(g.world, *fly, g.traits);
+	g.world.vehicles.watercraft_client_tick(*fly, g.traits);
 	const int32_t s1 = fly->veh.slide_z;
 	std::fprintf(stderr, "[platform-grav] slide step=%d (want -167)\n", s1 - s0);
 	ok &= expect(s1 - s0 == -167,
@@ -1308,7 +1300,7 @@ bool run_aircraft_contact_lands_and_conforms() {
 	stage(*heli, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(6.0f),
 	      0, 0, 0);
 	heli->veh.net_engine_on = false;
-	w::aircraft_client_tick(r.world, *heli, r.traits);
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	if (!expect((heli->flags & w::kEntityFlagInAir) != 0,
 	            "the flying hull keeps the airborne flag")) return false;
 	// Drive it down: force a descent rate each tick until contact.
@@ -1316,7 +1308,7 @@ bool run_aircraft_contact_lands_and_conforms() {
 	for (int t = 0; t < 400 && !grounded; ++t) {
 		heli->veh.slide_z = -4000;
 		heli->veh.net_alt_target = w::to_fixed(-10.0f);
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 		grounded = (heli->flags & w::kEntityFlagInAir) == 0;
 	}
 	const double z = double(heli->position.z);
@@ -1361,7 +1353,7 @@ bool run_aircraft_contact_conforms_to_ramp() {
 	for (int t = 0; t < 400 && !grounded; ++t) {
 		heli->veh.slide_z = -4000;
 		heli->veh.net_alt_target = w::to_fixed(-10.0f);
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 		grounded = (heli->flags & w::kEntityFlagInAir) == 0;
 	}
 	// Let the parked conform settle: keep pressing down so the pad depths
@@ -1369,7 +1361,7 @@ bool run_aircraft_contact_conforms_to_ramp() {
 	for (int t = 0; t < 60; ++t) {
 		heli->veh.slide_z = -4000;
 		heli->veh.net_alt_target = w::to_fixed(-10.0f);
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	}
 	grounded = (heli->flags & w::kEntityFlagInAir) == 0;
 	const double z = double(heli->position.z);
@@ -1405,20 +1397,20 @@ bool run_aircraft_water_flag_hysteresis() {
 	stage(*heli, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(9.9f),
 	      0, 0, 0);
 	heli->veh.slide_z = -1000; // outside the sleep window
-	w::aircraft_client_tick(r.world, *heli, r.traits);
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	bool ok = expect((heli->flags & 0x8000u) != 0u,
 	                 "pads under the water plane set the in-water flag");
 	// INSIDE the band: above the plane but within r/2 - only the hysteresis
 	// keeps the flag held; a port without it clears here.
 	heli->position.z = 10.1f;
 	heli->veh.slide_z = -1000;
-	w::aircraft_client_tick(r.world, *heli, r.traits);
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	ok &= expect((heli->flags & 0x8000u) != 0u,
 	             "inside the r/2 band the flag holds (the hysteresis)");
 	// Past the band: the flag drops.
 	heli->position.z = 10.4f;
 	heli->veh.slide_z = -1000;
-	w::aircraft_client_tick(r.world, *heli, r.traits);
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	ok &= expect((heli->flags & 0x8000u) == 0u,
 	             "clear of the band the flag drops");
 	return ok;
@@ -1461,7 +1453,7 @@ bool run_aircraft_steep_slope_sheds_and_shoves() {
 	heli->veh.speed = 20000;
 	heli->veh.slide_z = -1000;
 	const float x0 = heli->position.x;
-	w::aircraft_client_tick(r.world, *heli, r.traits);
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	std::fprintf(stderr, "[air-steep] speed=%d dx=%.4f\n", heli->veh.speed,
 	             double(heli->position.x - x0));
 	bool ok = expect(heli->veh.speed < 20000 / 4 + 1,
@@ -1507,13 +1499,13 @@ bool run_aircraft_contact_conforms_to_side_slope() {
 	for (int t = 0; t < 400 && !grounded; ++t) {
 		heli->veh.slide_z = -4000;
 		heli->veh.net_alt_target = w::to_fixed(-10.0f);
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 		grounded = (heli->flags & w::kEntityFlagInAir) == 0;
 	}
 	for (int t = 0; t < 60; ++t) {
 		heli->veh.slide_z = -4000;
 		heli->veh.net_alt_target = w::to_fixed(-10.0f);
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	}
 	grounded = (heli->flags & w::kEntityFlagInAir) == 0;
 	double pitch_deg = double(heli->veh.air_pitch_bam) * (360.0 / 4294967296.0);
@@ -1568,7 +1560,7 @@ bool run_aircraft_sleep_fast_path() {
 	heli->veh.slide_z = -200;
 	const float z0 = heli->position.z;
 	for (int t = 0; t < 8; ++t)
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	std::fprintf(stderr, "[air-sleep] dz=%.4f slide=%d air=%d\n",
 	             double(heli->position.z - z0), heli->veh.slide_z,
 	             int((heli->flags & w::kEntityFlagInAir) != 0));
@@ -1621,7 +1613,7 @@ bool run_aircraft_glides_and_holds_altitude() {
 			m.net_interp_progress = 0;
 			m.net_predicted = true;
 		}
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 		presented.push_back(w::to_fixed(heli->position.x));
 	}
 	int32_t max_step = 0;
@@ -1646,7 +1638,7 @@ bool run_aircraft_glides_and_holds_altitude() {
 	// Abandonment: stop records entirely; the aircraft coasts planar but HOLDS
 	// altitude (the servo target never decays).
 	for (int t = 0; t < 600; ++t)
-		w::aircraft_client_tick(r.world, *heli, r.traits);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	std::fprintf(stderr, "[air-hover] final alt=%f  recv_speed=%d\n",
 	             double(heli->position.z), heli->veh.net_recv_speed);
 	ok &= expect(std::abs(heli->position.z - 60.0f) < 10.0f,
@@ -1685,12 +1677,12 @@ bool run_physicsless_air_dispatches_directly() {
 	air_traits.acceleration = 80;
 	air_traits.turn_rate = 0x600000;
 	air_traits.climb_speed = 10255;
-	world.tables.vehicle_traits.set(6001, air_traits);
+	world.vehicles.traits.set(6001, air_traits);
 	w::VehicleTraits ground_traits;
 	ground_traits.physics = 0;
 	ground_traits.family = w::VehicleFamily::Ground;
 	ground_traits.player_speed = 26214;
-	world.tables.vehicle_traits.set(6002, ground_traits);
+	world.vehicles.traits.set(6002, ground_traits);
 
 	w::Entity *air = world.registry.get(air_h);
 	w::Entity *ground = world.registry.get(ground_h);
@@ -1767,7 +1759,7 @@ bool run_client_family_sound_dispatch_scope() {
 		traits.turn_rate = 0x600000;
 		traits.climb_speed = 10255;
 		traits.sound_loops[0] = idle_set;
-		world.tables.vehicle_traits.set(item_id, traits);
+		world.vehicles.traits.set(item_id, traits);
 	};
 	install_traits(6101, w::VehicleFamily::Helicopter, 0, "AIR_HELI_IDLE");
 	install_traits(6102, w::VehicleFamily::Plane, 0, "AIR_PLANE_IDLE");
@@ -1831,7 +1823,7 @@ w::Entity *mount_ai_driver(Rig &r) {
 	body.health_max = 150;
 	body.alive = true;
 	const w::EntityHandle handle = r.world.registry.spawn(0, body);
-	if (!expect(w::entity_process_vehicle_attach(r.world, handle, r.boat, 7),
+	if (!expect(r.world.vehicles.process_attach(handle, r.boat, 7),
 	            "AI driver mounted")) return nullptr;
 	return r.world.registry.get(handle);
 }
@@ -1872,7 +1864,7 @@ bool run_authority_ai_boat_drives_afloat() {
 	w::Entity *drv = mount_ai_driver(r);
 	if (drv == nullptr) return false;
 	w::Entity *boat = r.world.registry.get(r.boat);
-	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	w::Entity *ctrl = r.world.vehicles.resolve_controller(*boat);
 	bool ok = expect(ctrl != nullptr, "AI controller resolves");
 
 	const float x0 = boat->position.x;
@@ -1882,7 +1874,7 @@ bool run_authority_ai_boat_drives_afloat() {
 		w::VehicleDriveCmd cmd;
 		sys.watercraft_ai_drive(r.world, *boat, ctrl, r.traits, cmd);
 		drove = drove || cmd.ai_drive;
-		w::tick_watercraft_motor(r.world, *boat, r.traits, &cmd);
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
 		w::AiEntity *ve = sys.for_handle(r.boat);
 		ve->pos[0] = static_cast<int32_t>(boat->position.x * 65536.0f);
 		ve->pos[1] = static_cast<int32_t>(boat->position.y * 65536.0f);
@@ -1919,7 +1911,7 @@ bool run_authority_boat_parks_without_controller() {
 	             "parked stamp 22 (+ the pend mirror)");
 	const float x0 = boat->position.x;
 	for (int i = 0; i < 60; ++i)
-		w::tick_watercraft_motor(r.world, *boat, r.traits, &cmd);
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
 	ok &= expect(boat->veh.cmd_speed == 0, "parked hold zeroes the command");
 	ok &= expect(std::abs(boat->position.x - x0) < 0.5f, "parked boat stays put");
 	return ok;
@@ -1936,21 +1928,21 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	w::Entity *boat = r.world.registry.get(r.boat);
 	boat->roll = 110; // seeds air_roll_bam = 110 * 11930464 > 0x471C7180
 	boat->health = 1000;
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	bool ok = expect(boat->health == 800, "capsized hull drained 200 hp");
 
 	boat->flags |= w::kEntityFlagDead;
 	const float x0 = boat->position.x;
 	const int hp0 = boat->health;
 	boat->veh.vel_x = 1 << 16; // would integrate if the dead skip failed
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	bool skipped = boat->health == hp0 && boat->position.x == x0;
 
 	// The real death path latches the dead bit on engine_flags (destruction.cpp
 	// Flags |= 6) — the skip reads the combined view, so it must hold there too.
 	boat->flags &= ~w::kEntityFlagDead;
 	boat->engine_flags |= w::kEntityFlagDead;
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	skipped = skipped && boat->health == hp0 && boat->position.x == x0;
 	ok &= expect(skipped, "dead hull skips input and integration (both flag fields)");
 	return ok;
@@ -1975,14 +1967,14 @@ bool run_authority_player_drive_uses_waterspeed() {
 	drv->yaw = 90; // mission yaw 90 = BAM heading 0 = +x, matching the hull
 	w::Entity *boat = r.world.registry.get(r.boat);
 	boat->yaw = 90;
-	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	w::Entity *ctrl = r.world.vehicles.resolve_controller(*boat);
 	bool ok = expect(ctrl != nullptr, "player controller resolves");
 
 	// Forward drive: dir 1 + the move bit.
 	drv->net_move_input = 0x08u | 0x01u;
 	const float x0 = boat->position.x;
 	for (int i = 0; i < 300; ++i)
-		w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 5000,
 	             "player move commands waterSpeed, not the absent player_speed");
 	ok &= expect(boat->position.x - x0 > 5.0f, "player-driven boat moves");
@@ -1991,13 +1983,13 @@ bool run_authority_player_drive_uses_waterspeed() {
 	// no ground lean flag may appear.
 	drv->net_move_input = 0x40u;
 	boat->flags &= ~0x28u;
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 5000, "bit6 throttles at waterSpeed");
 	ok &= expect((boat->flags & 0x20u) == 0, "bit6 writes no ground lean flag on a boat");
 
 	// bit7 forces cmd = waterSpeed with dir 7, skipping the move/analog split.
 	drv->net_move_input = 0x80u;
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 5000, "bit7 forces the waterSpeed command");
 	ok &= expect((boat->flags & 0x8u) == 0, "bit7 writes no ground lean flag on a boat");
 	return ok;
@@ -2028,13 +2020,13 @@ bool run_submerged_driver_hands_to_ai_leg() {
 	drv->eye_offset_z = 1 << 16;
 	drv->position.z = static_cast<float>(r.world.env.water_z) / 65536.0f;
 	ok &= expect(!w::watercraft_driver_submerged(r.world, *drv), "eye above the plane");
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 5000, "surfaced driver commands waterSpeed");
 	// Eye at/below the plane: the cut routes to the AI leg (none staged: hold).
 	boat->veh.cmd_speed = 0;
 	drv->position.z -= 1.0f;
 	ok &= expect(w::watercraft_driver_submerged(r.world, *drv), "eye at the plane is submerged");
-	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
 	ok &= expect(boat->veh.cmd_speed == 0, "submerged driver's input is cut");
 	// No derived eye height: never cut.
 	drv->eye_offset_z = 0;
@@ -2058,7 +2050,7 @@ bool run_authority_ai_leg_caps_at_waterspeed() {
 	w::Entity *boat = r.world.registry.get(r.boat);
 	boat->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(90.0);
 	boat->veh.yaw_seeded = true;
-	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	w::Entity *ctrl = r.world.vehicles.resolve_controller(*boat);
 	bool ok = expect(ctrl != nullptr, "controller resolves");
 	w::VehicleDriveCmd cmd;
 	sys.watercraft_ai_drive(r.world, *boat, ctrl, r.traits, cmd);

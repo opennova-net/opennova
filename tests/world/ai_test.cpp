@@ -1428,7 +1428,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     traits.player_speed = 94 * 293;
     traits.player_control = true;
     traits.sound_profile = "SP_JoinerTruck";
-    w->tables.vehicle_traits.set(vehicle.item_id, traits);
+    w->vehicles.traits.set(vehicle.item_id, traits);
 
     AiSystem &ai = w->ai;
     w->add_system(&ai);

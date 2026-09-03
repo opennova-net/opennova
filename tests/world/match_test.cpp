@@ -79,7 +79,7 @@ EntityHandle zone(World &world, uint8_t number, uint8_t team) {
     entity.is_capture_trigger = true;
     entity.alive = true;
     const EntityHandle handle = world.registry.spawn(1, entity);
-    world.zone_chain.zones.push_back(handle);
+    world.zones.chain.zones.push_back(handle);
     return handle;
 }
 

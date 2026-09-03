@@ -1440,7 +1440,7 @@ void test_proximity_tables_use_host_bound_radius() {
 
     VehicleTraits vehicle_traits;
     vehicle_traits.physics = 1;
-    world.tables.vehicle_traits.set(vehicle_seed.item_id, vehicle_traits);
+    world.vehicles.traits.set(vehicle_seed.item_id, vehicle_traits);
     cw.assign_entity(vehicle, tiny_model);
     cw.assign_entity(near_static, tiny_model);
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
@@ -2661,7 +2661,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     CHECK(vehicle.valid());
     VehicleTraits traits;
     traits.physics = 1;
-    world.tables.vehicle_traits.set(vehicle_seed.item_id, traits);
+    world.vehicles.traits.set(vehicle_seed.item_id, traits);
 
     auto spawn_static = [&](float y) {
         Entity seed;
@@ -2738,7 +2738,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     CHECK(hull.valid() && cannon.valid() && pintle.valid());
     VehicleTraits traits;
     traits.physics = 1;
-    world.tables.vehicle_traits.set(900, traits);
+    world.vehicles.traits.set(900, traits);
 
     // The cannon rides the hull (the 0x0D target -> groundEntity relation the
     // materializer lands); the pintle rides the cannon (a 2-hop chain).

@@ -50,7 +50,7 @@ int main() {
     viewer.alive = true;
     const EntityHandle vh = w.registry.spawn(0, viewer);
 
-    const SpawnZoneRegistry reg = build_spawn_zone_list(w);
+    const SpawnZoneRegistry reg = w.zones.build_spawn_zone_list();
     CHECK(reg.entries.size() == 2);
 
     // The timer lookup: A has an entry with contest bytes, B none.

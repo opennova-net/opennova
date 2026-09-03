@@ -124,7 +124,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
     if (mount == nullptr || !mount->has_item_def || mount->item_type == 1u ||
         (mount->item_attrib & kItemAttribEweap) == 0u ||
         (mount->emplacement_attachment_flags & 0x02u) == 0u ||
-        !vehicle_prepare_weapon_slot(world, *mount))
+        !world.vehicles.prepare_weapon_slot(*mount))
         return false;
     const bool use_parent_slot = !mount->primary_weapon_slot.redirect_to_parent_slot;
     Entity *parent = nullptr;
@@ -137,7 +137,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
                       parent->registry_spawn_id == mount->emplacement_parent_spawn_id &&
                       parent->has_item_def && parent->item_type == 1u &&
                       (parent->item_attrib & kItemAttribEweap) != 0u &&
-                      vehicle_prepare_weapon_slot(world, *parent);
+                      world.vehicles.prepare_weapon_slot(*parent);
     }
     if (!route_valid) return false;
     out.applies = true;

@@ -1,3 +1,4 @@
+#include <runtime/world/zone_system.h>
 #include <runtime/world/spawn_select.h>
 
 #include <algorithm>
@@ -171,8 +172,8 @@ SpawnPointResult target_pose(World &world, const Entity &target) {
     if (count == 0)
         return out;
 
-    const size_t choice = world.spawn_cycle_counter % (count + 1);
-    ++world.spawn_cycle_counter;
+    const size_t choice = world.zones.spawn_cycle_counter % (count + 1);
+    ++world.zones.spawn_cycle_counter;
     return choice == 0 ? out : marker_pose(world, *nearby[choice - 1]);
 }
 
@@ -237,12 +238,12 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
         : team_mode ? 0 : 6095;
     if (primary_allowed && primary_type != 0 &&
         !markers_of_type(world, primary_type).empty()) {
-        ++world.spawn_cycle_counter;
+        ++world.zones.spawn_cycle_counter;
         return best_marker_pose(world, primary_type, spawning_player);
     }
 
     const int32_t fallback_type = team_mode ? team_fallback_marker(team) : 6002;
-    ++world.spawn_cycle_counter;
+    ++world.zones.spawn_cycle_counter;
     return fallback_type != 0
         ? best_marker_pose(world, fallback_type, spawning_player)
         : SpawnPointResult{};
@@ -260,8 +261,8 @@ SpawnPointResult resolve_player_spawn_pose(
                         game_type_value);
 }
 
-const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
-                                   uint16_t handle) {
+const Entity *ZoneSystem::resolve_spawn_target(uint8_t requester_team, uint16_t handle) const {
+    const World &world = world_;
     // [orig: Server_ResolveSpawnTargetHandle @0x4fe110]
     const EntityHandle handle_view{handle};
     if (!handle_view.valid()) return nullptr;
@@ -278,15 +279,17 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
     return e;
 }
 
-bool world_has_spawn_zone(const World &world) {
+bool ZoneSystem::has_spawn_zone() const {
+    const World &world = world_;
     // SpawnZoneList membership has no alive filter. Use the canonical registry
     // builder so join, 0x0F and deploy gameplay cannot acquire different lists.
     // [orig: SpawnZoneList_GetCount @0x43B920;
     // Entity_BuildSpawnZoneList @0x43EAE0]
-    return !build_spawn_zone_list(world).empty();
+    return !world.zones.build_spawn_zone_list().empty();
 }
 
-SpawnZoneRegistry build_spawn_zone_list(const World &world) {
+SpawnZoneRegistry ZoneSystem::build_spawn_zone_list() const {
+    const World &world = world_;
     // [orig: Entity_BuildSpawnZoneList @0x43EAE0]. Collect pool 2 then pool 1 in slot
     // order (the original walks each pool base upward), def attrib 0x40000 only, no
     // alive filter; AABB accumulated as it goes (the original seeds its bounds at 0,
@@ -350,11 +353,12 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) 
     return -1;
 }
 
-bool team_has_available_spawn_zone(const World &world, uint8_t team) {
+bool ZoneSystem::team_has_available_spawn_zone(uint8_t team) const {
+    const World &world = world_;
     // Despite the original helper's reverse-engineered name, its loop is over
     // SpawnZoneList and contains no player/alive census. +538 is zone number;
     // +540 is 16.16 control. [orig: Entity_HasAliveEntityOfTeam @0x4FC7B0]
-    const SpawnZoneRegistry registry = build_spawn_zone_list(world);
+    const SpawnZoneRegistry registry = world.zones.build_spawn_zone_list();
     for (const EntityHandle handle : registry.entries) {
         const Entity *zone = world.registry.get(handle);
         if (zone == nullptr || zone->team != team) continue;
@@ -484,8 +488,8 @@ void SpawnWaveList::reset_on_zone_team_change(const World &world,
     }
 }
 
-const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
-                                       uint8_t team, uint32_t game_type_value) {
+const Entity *ZoneSystem::find_spawn_zone_for_team(uint8_t team, uint32_t game_type_value) const {
+    const World &world = world_;
     // [orig: find_spawn_entity_for_team @0x4fc810]
     const Entity *found = nullptr;
     if (game_type::is_objective(game_type_value)) {
@@ -502,14 +506,14 @@ const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chai
     // the team's frontier number, fully secured. [orig: @0x4fc8c3..@0x4fc963 — the
     // walk runs over the zone registry; the frontier number comes from
     // ZoneSlotChain_FindFrontierZone]
-    const uint8_t frontier = zone_chain_frontier_zone(world, chain, team);
+    const uint8_t frontier = world.zones.frontier_zone(team);
     const uint8_t enemy = (team == 1) ? 2 : (team == 2) ? 1 : 0;
     if (enemy == 0) return nullptr; // [orig: teams other than 1/2 fall out @0x4fc8fc]
     for (const EntityHandle h : chain.zones) {
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
         if (e->team != team || e->zone_number == 0) continue;
-        const bool enemy_front = zone_chain_is_capturable(world, chain, enemy, *e);
+        const bool enemy_front = world.zones.is_capturable(enemy, *e);
         const bool at_frontier = frontier != 0 && e->zone_number == frontier;
         if ((enemy_front || at_frontier) && e->zone_control >= 0x10000) return e;
     }

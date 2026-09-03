@@ -37,7 +37,7 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
 	if (w.usegun_slot_active && w.usegun_mount.valid()) {
 		Entity *mount = world.registry.get(w.usegun_mount);
 		if (mount != nullptr) {
-			if (WeaponSlotState *slot = resolve_mounted_ammo_slot(world, *mount))
+			if (WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(*mount))
 				return slot;
 		}
 	}
@@ -50,7 +50,7 @@ const WeaponSlotState *active_local_weapon_slot(const World &world,
 		const Entity *mount = world.registry.get(w.usegun_mount);
 		if (mount != nullptr) {
 			if (const WeaponSlotState *slot =
-					resolve_mounted_ammo_slot(world, *mount))
+					world.vehicles.resolve_mounted_ammo_slot(*mount))
 				return slot;
 		}
 	}
@@ -143,7 +143,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (select_parent) {
 		Entity *mount = world.registry.get(w.usegun_pending_mount);
 		WeaponSlotState *resolved_slot = mount != nullptr
-				? resolve_mounted_ammo_slot(world, *mount)
+				? world.vehicles.resolve_mounted_ammo_slot(*mount)
 				: nullptr;
 		uint8_t resolved_adm =
 				mount != nullptr ? mount->primary_weapon_slot_adm : 0xFF;
@@ -211,7 +211,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 			? world.registry.get(player->mount_target)
 			: nullptr;
 	WeaponSlotState *mounted_slot = mounted_parent != nullptr
-			? resolve_mounted_ammo_slot(world, *mounted_parent)
+			? world.vehicles.resolve_mounted_ammo_slot(*mounted_parent)
 			: nullptr;
 	uint8_t mounted_adm = mounted_parent != nullptr
 			? mounted_parent->primary_weapon_slot_adm
@@ -1107,7 +1107,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			// [orig: WeaponAction_Reload @0x543108..0x543157]
 			Entity *mount = world.registry.get(w.usegun_mount);
 			WeaponSlotState *mounted_slot = mount != nullptr
-					? resolve_mounted_ammo_slot(world, *mount)
+					? world.vehicles.resolve_mounted_ammo_slot(*mount)
 					: nullptr;
 			Entity *slot_owner = mount;
 			uint8_t mounted_adm =

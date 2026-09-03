@@ -353,8 +353,8 @@ int main() {
         ZoneCaptureState::Request req;
         req.zone = kept;
         req.team = 2;
-        sw.zone_capture_state.requests.push_back(req);
-        sw.spawn_cycle_counter = 6;
+        sw.zones.capture.requests.push_back(req);
+        sw.zones.spawn_cycle_counter = 6;
         sw.logic_tick = 700;
         sw.preround_delay_seconds = 4;
         sw.prng16_state = 0x1234u;
@@ -370,8 +370,8 @@ int main() {
         MatchRules other_rules;
         other_rules.game_type = 0x10020u;
         sw.match.configure(other_rules);
-        sw.zone_capture_state.clear();
-        sw.spawn_cycle_counter = 0;
+        sw.zones.capture.clear();
+        sw.zones.spawn_cycle_counter = 0;
         sw.logic_tick = 0;
         sw.preround_delay_seconds = 0;
         sw.prng16_state = 1u;
@@ -386,9 +386,9 @@ int main() {
         CHECK(sw.weather.tod_fixed24 == 0x0ABCDEF0u);
         CHECK(sw.match.rules().game_type == 0x10001u);
         CHECK(sw.match.rules().score_limit == 3);
-        CHECK(sw.zone_capture_state.requests.size() == 1 &&
-              sw.zone_capture_state.requests[0].team == 2);
-        CHECK(sw.spawn_cycle_counter == 6);
+        CHECK(sw.zones.capture.requests.size() == 1 &&
+              sw.zones.capture.requests[0].team == 2);
+        CHECK(sw.zones.spawn_cycle_counter == 6);
         CHECK(sw.logic_tick == 700);
         CHECK(sw.preround_delay_seconds == 4);
         CHECK(sw.prng16_state == 0x1234u);

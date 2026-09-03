@@ -1125,7 +1125,7 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     if (!occ || !tgt || occ->mounted) return false;
     VehicleSeatSelection selection;
     if (!find_best_vehicle_seat(world_, th, oh, selection, mode)) return false;
-    return attach_to_vehicle_seat(world_, oh, selection);
+    return world_.vehicles.attach_to_seat(oh, selection);
 }
 
 bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn,
@@ -1201,7 +1201,7 @@ bool EntityCommands::mount_best(uint16_t occupant_ssn) {
 }
 
 bool EntityCommands::dismount(uint16_t occupant_ssn) {
-    return entity_detach_from_vehicle(world_, resolve_ssn(occupant_ssn));
+    return world_.vehicles.detach(resolve_ssn(occupant_ssn));
 }
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {

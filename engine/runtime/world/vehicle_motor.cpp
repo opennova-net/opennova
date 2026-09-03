@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/vehicle_motor.h>
 
 #include <algorithm>
@@ -91,7 +92,8 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
 // `parentEntity == vehicle && parentSlot in {2,5} && attachBoneId == controlBone`;
 // our seat model keys the same relation through Seat::occupant + Entity::mount_*,
 // the wire-bone divergence is tracked in D-NET-157].
-Entity *resolve_vehicle_controller(World &world, Entity &veh) {
+Entity *VehicleSystem::resolve_controller(Entity &veh) {
+    World &world = world_;
     Entity *controller = nullptr;
     for (Seat &s : veh.seats) {
         if (!is_vehicle_control_seat(s.type)) continue;
@@ -112,9 +114,9 @@ Entity *resolve_vehicle_controller(World &world, Entity &veh) {
     if (veh.primary_occupant.valid()) {
         Entity *po = world.registry.get(veh.primary_occupant);
         if (po == nullptr || !po->mounted || po->mount_target != veh.handle) {
-            stop_ground_vehicle_sound(world, veh);
+            world.vehicles.stop_ground_sound(veh);
             veh.primary_occupant = EntityHandle{};
-            emit_vehicle_control_stopped(world, veh);
+            world.vehicles.emit_control_stopped(veh);
         }
     }
     return controller;
@@ -258,10 +260,9 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
 // insisting on the host's local player left a remote pilot commanding nothing.
 // [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the ground twin is
 //  Entity_UpdateVehiclePhysics @0x48b0ff]
-Entity *resolve_piloting_player(World &world, Entity &veh,
-                                const VehicleTraits &traits) {
+Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits) {
     if (!traits.player_control) return nullptr;
-    Entity *occ = resolve_vehicle_controller(world, veh);
+    Entity *occ = world.vehicles.resolve_controller(veh);
     if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
         !occ->alive || occ->health <= 0)
         return nullptr;
@@ -273,7 +274,7 @@ Entity *resolve_piloting_player(World &world, Entity &veh,
 static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
                                                 const VehicleTraits &traits) {
     if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
-    Entity *occ = resolve_vehicle_controller(world, veh);
+    Entity *occ = world.vehicles.resolve_controller(veh);
     if (occ == nullptr || occ->handle != world.cached.local_player ||
         occ->handle.pool() != 0 || occ->player_class == 0 ||
         !occ->alive || occ->health <= 0)
@@ -285,8 +286,8 @@ static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
 // of Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0] — is declared in
 // vehicle_motor_detail.h and defined in vehicle_contact_solve.cpp.
 
-void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                        const VehicleDriveCmd *ai_cmd) {
+void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
+    World &world = world_;
     if (traits.physics == 0) return; // no vehicle physics selected [orig: @0x48efc7]
 
     Entity::VehicleMotorState &m = veh.veh;
@@ -335,7 +336,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
     // @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
     // it as prediction — we ARE the authority host.]
-    Entity *occ = traits.player_control ? resolve_vehicle_controller(world, veh) : nullptr;
+    Entity *occ = traits.player_control ? world.vehicles.resolve_controller(veh) : nullptr;
     // A DEAD controller counts as none. The infantry death edge now detaches first;
     // this remains the same-frame safety gate when motor/system ordering varies.
     // [orig: infantry death detach @0x4b9c57..0x4b9c60]
@@ -715,10 +716,10 @@ if (traits.family != VehicleFamily::Bike &&
     // emitter seam. The claimant gate lives in the sound consumer because the
     // motor still needs to settle an unoccupied PlayerControl vehicle.
     // [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
-    update_ground_vehicle_sound(world, veh, traits, wrecked, collided);
+    world.vehicles.update_ground_sound(veh, traits, wrecked, collided);
     // The part-animation accumulators, at the mover's tail [orig: the
     // Entity_UpdatePartSpinAccumulator call @0x48AE3D in this mover].
-    vehicle_part_anim_tick(world, veh, traits);
+    world.vehicles.part_anim_tick(veh, traits);
 }
 
 namespace {
@@ -1033,8 +1034,8 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out) {
 
 } // namespace detail
 
-void watercraft_platform_solve(World &world, Entity &veh,
-                               const VehicleTraits &traits) {
+void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &traits) {
+    World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     // No resolved model boxes (lib-only embedders / unresolved graphics):
     // the level-hull + chase-Z stand-in remains for this row.
@@ -1497,7 +1498,8 @@ void stamp_saved_live_pose(Entity &e) {
     e.saved_live_valid = true;
 }
 
-void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &traits) {
+    World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;
     if (!m.yaw_seeded) {
@@ -1749,7 +1751,7 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // before the yaw apply]. It owns Z + Pitch/Roll + the afloat/airborne
     // flags from here (the chase-staged Z above is its seed, matching the
     // template's airborne-only Z-step gate). Yaw applies only AFTER this call.
-    watercraft_platform_solve(world, veh, traits);
+    world.vehicles.watercraft_platform_solve(veh, traits);
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
@@ -1758,7 +1760,7 @@ static void watercraft_motor_core(World &world, Entity &veh,
     //  @0x48E9F0..0x48E9F9 inside Entity_UpdateWatercraftPhysics; the mover
     //  calls no rotor machine]. The ONE call per tick: the authority tick
     // below runs this core and adds nothing.
-    vehicle_part_anim_tick(world, veh, traits);
+    world.vehicles.part_anim_tick(veh, traits);
 }
 
 // The AUTHORITY watercraft tick — the host-side cbot mover (the D-NET-161
@@ -1772,8 +1774,8 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // every tick), the submerged-driver head-under-water input cut
 // @0x48DFD3..0x48DFDF, and the wake-anim lerp @0x48ECF5.
 // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path]
-void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                           const VehicleDriveCmd *ai_cmd) {
+void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
+    World &world = world_;
     if (traits.physics == 0) return; // selector-gated like the ground rows
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.yaw_seeded) {
@@ -1819,7 +1821,7 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
     // @0x48DFA8..0x48DFCD — no attrib 0x40 means the whole block is skipped and
     // the core runs on the persisted registers]
     if (traits.player_control) {
-        Entity *occ = resolve_vehicle_controller(world, veh);
+        Entity *occ = world.vehicles.resolve_controller(veh);
         if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
         const bool player_occupant =
                 occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
@@ -1855,7 +1857,7 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
 
     // Movement-sound presentation, same per-tick site as the ground core's tail
     // [orig: the cbot movement-sound call in step 18 @0x48ED76..].
-    update_ground_vehicle_sound(world, veh, traits, wrecked, /*collided=*/false);
+    world.vehicles.update_ground_sound(veh, traits, wrecked, /*collided=*/false);
     // The part-animation tick is the core's (@0x48E9F0..0x48E9F9 runs once
     // per mover pass); a second call here would double the wheel phase.
 }
@@ -1866,7 +1868,8 @@ void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &trait
 // (player_control=false leaves the registers untouched and skips the occupant
 // resolve; the handbrake/aim-lock/tire-slip legs inherit their existing
 // D-NET-161 deferrals).
-void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits) {
+    World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;
     if (!m.yaw_seeded) {
@@ -1891,7 +1894,7 @@ void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) 
     }
     VehicleTraits core = traits;
     core.player_control = false; // bypass the occupant/input block, keep the core
-    tick_vehicle_motor(world, veh, core, nullptr);
+    world.vehicles.tick_motor(veh, core, nullptr);
 }
 
 } // namespace opennova::world

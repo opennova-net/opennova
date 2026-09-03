@@ -2427,7 +2427,7 @@ guard)** in retail; then `Entity_DetachFromVehicle(e, *(e+0x16C))` @ 0x435d40.
 ownerSession (0x1CC)); clear every matching `mountHandles[i] == handle → 0xFFFF` (10 slots,
 BOTH the passed vehicle and `entity->parentEntity` when different); finally `Flags &= ~0x40;
 0x16C = 0; 0x157 = 0; 0x168 = 0`. Reimpl: `world::entity_process_vehicle_attach /
-entity_detach_from_vehicle` (engine/runtime/world/vehicle_attach.cpp) behind the dispatch cases; the
+VehicleSystem::detach` (engine/runtime/world/vehicle_attach.cpp) behind the dispatch cases; the
 0x27 subject is clamped to the sender's own entity. Production seat extraction preserves the
 USRP row's witnessed 1-based index, so attach classification uses the exact echoed bone.
 
@@ -8208,7 +8208,7 @@ picker UI's lifetime is a per-frame SERVER signal, not a one-shot:
    (the v32 rubber-band, D-NET-156).
 
 Reimpl: `replication::Connection::respawn_pending` (set in `Server_BuildPlayerInfoAndAdd` iff
-`world_has_spawn_zone`, host loopback exempt; cleared by the 0x0E dispatch case) → the
+`ZoneSystem::has_spawn_zone`, host loopback exempt; cleared by the 0x0E dispatch case) → the
 per-connection flags1 in `emit_connection_s2c`; the 0x0E case gates dead-or-pending. The
 S2C 0x6E empty-group form (`[u8 0]`) goes 1 Hz to pending/dead players (`Server_TickUpdate`;
 the recipient mask includes bit4 `[orig: NetPacket_WriteSpawnWaveStatus @ 0x5074c2]`).
@@ -12623,7 +12623,7 @@ The full retail flow is §5.10's "C2S 0x26/0x27" subsection (HandleVehicleAttach
 word0 anti-spoof → Entity_ProcessVehicleAttach @ 0x435AA0 validation order →
 Entity_AttachToVehicleSlot @ 0x4946D0 writes; detach @ 0x4FC980/@ 0x4355F0; NO confirm tag
 — the 0x0A mounted branch is the confirmation). PORTED: dispatch cases 0x26/0x27 →
-`world::entity_process_vehicle_attach / entity_detach_from_vehicle`
+`world::entity_process_vehicle_attach / VehicleSystem::detach`
 (engine/runtime/world/vehicle_attach.cpp) + `Entity::mount_bone` (+0x157) + the record byte0 echo +
 the header-tail mount handle. The former seat-classification divergence is resolved: the
 model USRP enumeration has the witnessed 48-byte runtime row shape (name at +32), and the
@@ -12662,7 +12662,7 @@ chain" + the §5.9 flags1 row: join sets slot bit4 iff `SpawnZoneList_GetCount()
 hidden bit0 while pending [orig: NetPacket_WritePlayerState @ 0x4ff7bd/@ 0x4ff7dd — the
 golden pre-deploy record byte13 = 0x01], the 0x0E gate accepts dead-OR-pending
 [orig: @ 0x519cc7], and the deploy leg clears bit4 [orig: @ 0x517791]. PORTED:
-`replication::Connection::respawn_pending` (join-set via `world_has_spawn_zone`, host loopback
+`replication::Connection::respawn_pending` (join-set via `ZoneSystem::has_spawn_zone`, host loopback
 exempt; 0x0E-cleared with the hidden bit) → per-connection flags1; the 0x0E dispatch gate;
 S2C 0x6E empty-group form at 1 Hz to pending/dead players; optional parity landed with it:
 the 0x0F location-name block (def-2044 markers, §5.29) + the 0x0D zone byte/radius fields

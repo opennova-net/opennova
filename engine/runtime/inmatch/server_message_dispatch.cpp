@@ -819,9 +819,9 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain; a
 	// chain-less world keeps the golden ASH_I5A default 0x8. [orig: ZoneSlotChain_GetOwnedZoneMask
 	// @0x4a2620 per recipient team @0x4ff9a3; net-re §5.61]
-	if (world != nullptr && !world->zone_chain.empty())
+	if (world != nullptr && !world->zones.chain.empty())
 		ctx.uniform_team_mask =
-				world::zone_chain_owned_zone_mask(*world, world->zone_chain, ctx.team);
+				world->zones.owned_zone_mask(ctx.team);
 	return ctx;
 }
 
@@ -999,9 +999,9 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 	std::vector<uint8_t> body;
 	const world::Entity *recipient = world.registry.get(requester);
 	const uint8_t team = recipient != nullptr ? recipient->team : 0;
-	const world::SpawnZoneRegistry zones = world::build_spawn_zone_list(world);
+	const world::SpawnZoneRegistry zones = world.zones.build_spawn_zone_list();
 	std::vector<const world::SpawnWaveEntry *> visible;
-	for (const world::SpawnWaveEntry &entry : world.spawn_waves.entries())
+	for (const world::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
 		if (entry.team == team && visible.size() < 0xFFu)
 			visible.push_back(&entry);
 	body.reserve(1 + visible.size() * 9);
@@ -1042,7 +1042,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// occupant, this clears +0x170 and the subsequent mobile-spawn gate rejects.
 	// [orig: Server_ProcessPlayerDeath @0x5177A9..0x5177DB]
 	if (player->mounted)
-		world::entity_detach_from_vehicle(world, player->handle);
+		world.vehicles.detach(player->handle);
 	const world::Entity *target = world.registry.get(target_zone);
 	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
 			target->item_type == 1;
@@ -1107,7 +1107,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		world::VehicleSeatSelection selected;
 		if (world::find_best_vehicle_seat(
 					world, target_zone, player->handle, selected))
-			world::attach_to_vehicle_seat(world, player->handle, selected);
+			world.vehicles.attach_to_seat(player->handle, selected);
 	}
 	const world::WeaponTable *armory = !world.tables.weapons.empty()
 			? &world.tables.weapons
@@ -1117,8 +1117,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 					conn.reply.last_loadout_reply, player->player_class, armory)));
 	replies.push_back(make_protocol_message(
 			0x61, Server_RerollPlayerTickSeed(conn)));
-	const uint8_t frontier = world::zone_chain_frontier_zone(
-			world, world.zone_chain, player->team);
+	const uint8_t frontier = world.zones.frontier_zone(player->team);
 	if (frontier != 0)
 		replies.push_back(make_protocol_message(
 				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
@@ -1312,7 +1311,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						world->registry.get(conn.link.owned_entity);
 				if (requester == nullptr || conn.link.downed_revive_seconds == 0u)
 					break;
-				world->spawn_waves.remove_player(conn.link.owned_entity);
+				world->zones.spawn_waves.remove_player(conn.link.owned_entity);
 				const std::string message = format_medic_request(
 						*inputs.medic_request_format, requester->name);
 				if (!conn.link.auto_medic_enabled &&
@@ -1713,10 +1712,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (pick == world::kDeployPickAutoTeam) {
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
 					// [orig: find_spawn_entity_for_team @0x4fc810 -> requestedHandle -1 on miss].
-					target = world::find_spawn_zone_for_team(*world, world->zone_chain,
-					                                         player->team, config.game_type);
+					target = world->zones.find_spawn_zone_for_team(player->team, config.game_type);
 				} else if (pick != 0 && pick != 0xFFFF) {
-					target = world::resolve_spawn_target(*world, player->team, pick);
+					target = world->zones.resolve_spawn_target(player->team, pick);
 					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
 				}
 				// +364 is tested only after the requested handle resolves to a
@@ -1739,7 +1737,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Entity_HasAliveEntityOfTeam @0x4FC7B0]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
 						target == nullptr &&
-						world::team_has_available_spawn_zone(*world, player->team))
+						world->zones.team_has_available_spawn_zone(player->team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
@@ -1760,7 +1758,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						break;
 				}
 				if (target != nullptr) {
-					if (world->spawn_waves.try_queue(
+					if (world->zones.spawn_waves.try_queue(
 							*world, target->handle, player->handle)) {
 						ProtocolMessage status = make_protocol_message(
 								s2c::SPAWN_WAVE_STATUS,
@@ -1769,9 +1767,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						replies.push_back(std::move(status));
 						break;
 					}
-					if (world->spawn_waves.has_entry(target->handle)) break;
+					if (world->zones.spawn_waves.has_entry(target->handle)) break;
 				}
-				world->spawn_waves.remove_player(player->handle);
+				world->zones.spawn_waves.remove_player(player->handle);
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
@@ -1810,7 +1808,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						mount->item_type == 1u ||
 						(mount->item_attrib & world::kItemAttribEweap) == 0u ||
 						(mount->emplacement_attachment_flags & 0x02u) == 0u ||
-						!world::vehicle_prepare_weapon_slot(*world, *mount))
+						!world->vehicles.prepare_weapon_slot(*mount))
 					break;
 
 				if (!selection.use_parent_slot) {
@@ -1832,7 +1830,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								mount->emplacement_parent_spawn_id ||
 						!parent->has_item_def || parent->item_type != 1u ||
 						(parent->item_attrib & world::kItemAttribEweap) == 0u ||
-						!world::vehicle_prepare_weapon_slot(*world, *parent))
+						!world->vehicles.prepare_weapon_slot(*parent))
 					break;
 				mount->primary_weapon_slot.redirect_to_parent_slot = true;
 				player->equipped_adm_index = parent->primary_weapon_slot_adm;
@@ -1870,7 +1868,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const uint16_t veh =
 						static_cast<uint16_t>(msg.payload[2] | (msg.payload[3] << 8));
 				const uint8_t bone = msg.payload[4];
-				world::entity_process_vehicle_attach(*world, conn.link.owned_entity,
+				world->vehicles.process_attach(conn.link.owned_entity,
 				                                     world::EntityHandle{veh}, bone);
 				break;
 			}
@@ -1883,7 +1881,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// SENDS ONLY and waits for the 0x0A echo [orig: @0x4369c7].]
 				if (world == nullptr || !conn.burst.spawned || !conn.link.owned_entity.valid())
 					break;
-				world::entity_detach_from_vehicle(*world, conn.link.owned_entity);
+				world->vehicles.detach(conn.link.owned_entity);
 				break;
 			}
 			case c2s::END_ROUND_STATS_REQUEST: {
@@ -1976,8 +1974,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							world::Entity *mount =
 									world->registry.get(shooter->mount_target);
 							if (mount != nullptr) {
-								mounted_slot = world::resolve_mounted_ammo_slot(
-										*world, *mount);
+								mounted_slot = world->vehicles.resolve_mounted_ammo_slot(*mount);
 								if (mounted_slot == &mount->primary_weapon_slot) {
 									mounted_adm = mount->primary_weapon_slot_adm;
 								} else if (mounted_slot != nullptr) {
@@ -2135,11 +2132,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							addressed_entity->has_item_def &&
 							(addressed_entity->item_attrib &
 									world::kItemAttribEweap) != 0u &&
-							world::vehicle_prepare_weapon_slot(
-									*world, *addressed_entity)) {
+							world->vehicles.prepare_weapon_slot(*addressed_entity)) {
 						world::WeaponSlotState *slot =
-								world::resolve_mounted_ammo_slot(
-										*world, *addressed_entity);
+								world->vehicles.resolve_mounted_ammo_slot(*addressed_entity);
 						uint8_t slot_adm = addressed_entity->primary_weapon_slot_adm;
 						if (slot != nullptr &&
 								slot != &addressed_entity->primary_weapon_slot) {

@@ -502,7 +502,7 @@ void MissionKernel::collect_attach_labels(std::vector<w::AttachLabel> &out) {
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
 	const w::AiEntity *body =
 			world.ai.for_handle(world.cached.local_player);
-	w::collect_attach_labels(world, *player, armory_mode, local_player_can_fire(body), out);
+	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(body), out);
 }
 
 bool MissionKernel::local_player_can_fire(const w::AiEntity *body) const {
@@ -965,10 +965,10 @@ bool MissionKernel::toggle_mount() {
 	// Flags&0x100 && !EquippedSlot` @0x546c07].
 	if (!session_open && !weapon.active) {
 		w::VehicleSeatSelection hit;
-		if (w::find_mount_toggle_candidate(world, *toggle_player, hit) && hit.type == w::SeatType::Gunner)
+		if (world.vehicles.find_mount_toggle_candidate(*toggle_player, hit) && hit.type == w::SeatType::Gunner)
 			return false;
 	}
-	const bool changed = w::player_toggle_vehicle_mount(world, world.cached.local_player);
+	const bool changed = world.vehicles.player_toggle_mount(world.cached.local_player);
 	if (changed) {
 		view.binoculars_requested = false;
 		view_tracker.binocular_yaw_offset_deg = 0.0f;

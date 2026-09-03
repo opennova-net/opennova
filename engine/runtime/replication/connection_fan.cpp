@@ -1055,7 +1055,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 				hs.mount_ammo.has_mount = true;
 				if (const world::Entity *mount = w.registry.get(own->mount_target)) {
 					if (const world::WeaponSlotState *slot =
-							world::resolve_mounted_ammo_slot(w, *mount)) {
+							w.vehicles.resolve_mounted_ammo_slot(*mount)) {
 						hs.mount_ammo.clip = static_cast<uint16_t>(slot->clip);
 						hs.mount_ammo.reserve = static_cast<uint16_t>(slot->reserve);
 					}

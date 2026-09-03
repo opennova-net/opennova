@@ -362,7 +362,7 @@ int main() {
     CHECK(tankt != nullptr && !tankt->has_husk);
 
     // ---- the vehicle-trait table: every slot's sentinel in its own field ----
-    const VehicleTraits *vt = w.tables.vehicle_traits.get(500);
+    const VehicleTraits *vt = w.vehicles.traits.get(500);
     CHECK(vt != nullptr);
     if (vt != nullptr) {
         CHECK(vt->physics == 2);
@@ -396,7 +396,7 @@ int main() {
         CHECK(vt->sound_loops[0] == "LP_TANK");
         CHECK(vt->sound_loops[1].empty());
     }
-    const VehicleTraits *apc_vt = w.tables.vehicle_traits.get(501);
+    const VehicleTraits *apc_vt = w.vehicles.traits.get(501);
     CHECK(apc_vt != nullptr);
     if (apc_vt != nullptr) {
         CHECK(apc_vt->family == VehicleFamily::Ground);
@@ -404,14 +404,14 @@ int main() {
     }
     // CHel rows legitimately omit the ground physics selector and still land
     // (direct air mover); the case-folded fourcc accepts mixed-case CHelScout.
-    const VehicleTraits *helo_vt = w.tables.vehicle_traits.get(502);
+    const VehicleTraits *helo_vt = w.vehicles.traits.get(502);
     CHECK(helo_vt != nullptr);
     if (helo_vt != nullptr) {
         CHECK(helo_vt->family == VehicleFamily::Helicopter);
         CHECK(helo_vt->physics == 0);
     }
     // A ground row without the physics selector lands NO traits row.
-    CHECK(w.tables.vehicle_traits.get(503) == nullptr);
+    CHECK(w.vehicles.traits.get(503) == nullptr);
     (void)apc_h; (void)helo_h; (void)truck_h; (void)bush_h; (void)player_h;
 
     // ---- the throwable class scan ----
@@ -439,7 +439,7 @@ int main() {
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.
     simassets::resolve_item_traits(w, file, wire_class);
-    CHECK(w.tables.vehicle_traits.get(500) != nullptr);
+    CHECK(w.vehicles.traits.get(500) != nullptr);
     CHECK(w.registry.get(tank_h)->health == -25536);
 
     // ---- resolve_ai_weapons: the D-AI-5 seed + sound-profile bind ----

@@ -736,7 +736,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 					static_cast<uint32_t>(world.logic_tick - link.last_deploy_tick) < 620u)
 				hold = 3;
 			link.respawn_delay_seconds = hold;
-			link.spawn_target_hold_seconds = world::world_has_spawn_zone(world)
+			link.spawn_target_hold_seconds = world.zones.has_spawn_zone()
 					? std::max(link.spawn_target_hold_seconds, hold)
 					: 0u;
 			link.respawn_hold_armed = true;
@@ -1271,7 +1271,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Server_OnPlayerTouchCaptureZone @0x500BA0]
 	if (!preround_active && ctx.is_in_session &&
 			!world.match.outcome().ended)
-		world::zone_capture_contact_tick(world);
+		world.zones.capture_contact_tick();
 
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
@@ -1331,7 +1331,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	if (ctx.is_in_session && !world.match.outcome().ended &&
 			periodic_second) {
 		for (const world::SpawnWaveRelease &release :
-				world.spawn_waves.tick(world)) {
+				world.zones.spawn_waves.tick(world)) {
 			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
@@ -1386,7 +1386,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			periodic_second &&
 			(world.match.rules().game_type & 0x30000u) != 0) {
 		world::ZoneCaptureEvents ev;
-		world::zone_capture_second_tick(world, ev);
+		world.zones.capture_second_tick(ev);
 		for (const world::ZoneCaptureEvents::Event &event : ev.ordered) {
 			if (const auto *flip =
 						std::get_if<world::ZoneCaptureEvents::Flip>(&event))
@@ -1398,7 +1398,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 
 		const world::SpawnZoneRegistry spawn_zones =
-				world::build_spawn_zone_list(world);
+				world.zones.build_spawn_zone_list();
 		auto zone_index_of = [&](world::EntityHandle h) -> uint8_t {
 			const int index = world::spawn_zone_index_of(spawn_zones, h);
 			return index >= 0 && index <= 0xFE

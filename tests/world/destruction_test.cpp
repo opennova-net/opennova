@@ -1338,7 +1338,7 @@ void test_specialized_piece_physics_callback() {
     VehicleTraits model;
     model.box_z_lo = -2 * 65536;
     model.box_z_hi = 65536;
-    w.tables.vehicle_traits.set(730, model);
+    w.vehicles.traits.set(730, model);
 
     Entity seed;
     seed.kind = EntityKind::Item;
@@ -1547,7 +1547,7 @@ void test_specialized_piece_physics_callback() {
     client.rules.logic_authority = false;
     client.registry.configure_pool(1, 4);
     client.tables.item_death_traits.set(732, traits);
-    client.tables.vehicle_traits.set(732, model);
+    client.vehicles.traits.set(732, model);
     seed.item_id = 732;
     seed.position = Vec3{64.0f, 8.0f,
             opennova::terrain::height_field_height_world_bilinear(
@@ -1578,7 +1578,7 @@ void test_specialized_piece_physics_callback() {
     seed_ammo(bare);
     bare.registry.configure_pool(1, 4);
     bare.tables.item_death_traits.set(734, traits);
-    bare.tables.vehicle_traits.set(734, model);
+    bare.vehicles.traits.set(734, model);
     seed.item_id = 734;
     seed.position = Vec3{8.0f, 8.0f, 0.5f};
     seed.yaw = 90;

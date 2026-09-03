@@ -185,14 +185,7 @@ struct ZoneCaptureDeltaInput {
 // and minimum signed delta. Exposed as one input value for exact formula pins.
 int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
 
-// Per-logic-tick consumer of the collision world's exact type-10 Change Team
-// contacts. It updates active presence and queues one request per zone/team;
-// it performs no ownership transition itself.
-void zone_capture_contact_tick(World &world);
 
-// One 1 Hz capture transaction. Reads its configuration and persistent state
-// from World, emits all semantic wire events, and drains pending requests.
-void zone_capture_second_tick(World &world, ZoneCaptureEvents &out);
 
 } // namespace opennova::world
 

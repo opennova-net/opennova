@@ -57,7 +57,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.disabled = ent ? ent->disabled : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
-		if (const VehicleTraits *traits = world.tables.vehicle_traits.get(ent->item_id))
+		if (const VehicleTraits *traits = world.vehicles.traits.get(ent->item_id))
 			d.vehicle_family = static_cast<int32_t>(traits->family);
 	}
 	d.body_anim_slot = ent ? ent->body_anim_slot : -1;
@@ -173,7 +173,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.primary_occupant = ve->primary_occupant.valid();
 		// The mover family, so a rotor check can tell "no helicopter here"
 		// from "the helicopter's blades are not turning".
-		const VehicleTraits *vt = world.tables.vehicle_traits.get(ve->item_id);
+		const VehicleTraits *vt = world.vehicles.traits.get(ve->item_id);
 		d.veh_family = vt != nullptr ? static_cast<int32_t>(vt->family) : -1;
 		d.player_control = vt != nullptr && vt->player_control;
 		// Flight-command chain, so a "the helicopter will not move" report can
@@ -310,7 +310,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	d.item_attrib = static_cast<int64_t>(ent.item_attrib);
 	d.item_attrib2 = static_cast<int64_t>(ent.item_attrib2);
 	d.vehicle_family = -1;
-	if (const VehicleTraits *traits = world.tables.vehicle_traits.get(ent.item_id))
+	if (const VehicleTraits *traits = world.vehicles.traits.get(ent.item_id))
 		d.vehicle_family = static_cast<int32_t>(traits->family);
 	d.has_minimap_model_marker = ent.has_minimap_model_marker;
 	d.is_capture_trigger = ent.is_capture_trigger;
@@ -319,8 +319,8 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	d.zone_radius = static_cast<int32_t>(ent.zone_radius);
 	d.zone_control = ent.zone_control;
 	d.zone_chain_index = -1;
-	for (size_t i = 0; i < world.zone_chain.zones.size(); ++i) {
-		if (world.zone_chain.zones[i] == h) {
+	for (size_t i = 0; i < world.zones.chain.zones.size(); ++i) {
+		if (world.zones.chain.zones[i] == h) {
 			d.zone_chain_index = static_cast<int32_t>(i);
 			break;
 		}

@@ -168,19 +168,5 @@ inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
 	return phase + (forward << 13);
 }
 
-// ---------------------------------------------------------------------------
-// The per-tick entry every family mover calls at its tail. Picks the rotor
-// machine by the brain's profile type (a brainless row — a lib embedder's
-// loose vehicle, a unit rig — has no profile, and its family stands in: the
-// Helicopter/Plane movers are where retail calls the HELO twin from), runs it
-// (seeding the rate from the shared PRNG when a non-player-control item needs
-// a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
-// once per unoccupied tick for such an item) and advances the wheel phase
-// from the motor's own speed register. A WATERCRAFT runs no rotor machine at
-// all — its mover Entity_UpdateWatercraftPhysics @0x48D480 calls neither
-// @0x4928B0 nor @0x48FA70 — only the wheel phase.
-// `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
-// occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
-void vehicle_part_anim_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world

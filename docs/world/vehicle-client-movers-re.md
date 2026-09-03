@@ -416,15 +416,15 @@ orientationMatrix from `&entity->Position` and sets Flags bit 0x20000 [0x48EF50.
 
 Question: does the client-executed subset of `Entity_UpdateVehiclePhysics` (ground)
 structurally match `world::tick_vehicle_motor` (engine/runtime/world/vehicle_motor.cpp) minus
-the input block — can ground prediction reuse tick_vehicle_motor driven by the mirrored
+the input block — can ground prediction reuse VehicleSystem::tick_motor driven by the mirrored
 cmd registers?
 
 **Yes.** The ground client path after the mirror (`v51[136]=v51[177]; v51[132]=v51[179]`,
 occupant != local, decomp l.616-622 — identical to the boat's) falls through the same
 code the authority runs below the input gate, and that code is exactly what
-tick_vehicle_motor ports:
+VehicleSystem::tick_motor ports:
 
-| ground client block (decomp) | tick_vehicle_motor |
+| ground client block (decomp) | VehicleSystem::tick_motor |
 |---|---|
 | turn blend `minRate + ((turnRate-minRate)*f + 0x8000)>>16`, f = clamp0(0x10000 - speed<<16/playerSpeed) (l.994-1016) | steering-chase block, identical constants |
 | steer step `(reg132 - Yaw + 32)>>6` clamp +/-eff (l.1017-1022) | identical |
@@ -441,7 +441,7 @@ tick_vehicle_motor ports:
 Client-only deltas to account for when reusing it as the prediction leg:
 
 1. **Command source**: brain[136]/[132] come from the mirror every tick (not from
-   resolve_vehicle_controller / ai_cmd) — run tick_vehicle_motor with the input block
+   VehicleSystem::resolve_controller / ai_cmd) — run VehicleSystem::tick_motor with the input block
    bypassed and `m.cmd_speed / m.steer_target_bam` loaded from the mirrored registers;
    include the [177] stale decay (§8) or the boat/vehicle never coasts to rest.
 2. LABEL_208 byte-gates run on the client too (decomp l.972-993): the handbrake latch
@@ -452,7 +452,7 @@ Client-only deltas to account for when reusing it as the prediction leg:
    prediction, flag it in the record.
 3. The tire-slip / surface-normal steering legs (huskModel fields, l.1064-1121,
    1244-1557) DO run on the retail client and feed the velocity direction; the
-   tick_vehicle_motor simplification is an existing ledgered divergence that prediction
+   VehicleSystem::tick_motor simplification is an existing ledgered divergence that prediction
    inherits.
 4. speedAccel/currentSpeed/aiState/modelPtr0 evolve purely locally on the client — no
    net override besides the chase; drift is the chase's job (already ported).
@@ -466,7 +466,7 @@ Client-only deltas to account for when reusing it as the prediction leg:
    presumed `&entity->Position` by the boat's verified codegen pattern (0x48E972);
    confirm at disasm before citing in code.
 
-Boat-vs-ground family deltas (why the boat needs its own motor, not tick_vehicle_motor):
+Boat-vs-ground family deltas (why the boat needs its own motor, not VehicleSystem::tick_motor):
 the boat has no speedAccel/target_speed pipeline (thrust adds directly to velocity, and
 "speed" is re-derived from velocity each tick); drag is 1/64 exponential + keel lateral
 bleed instead of direction-projection; gravity is 167 (vs 324); yaw applies ungated
@@ -1232,7 +1232,7 @@ near-twin (dead code; do not port).
 prediction stand-in for cbik?** Yes, with ledgered residuals. The command/steering core
 is literally the same skeleton with the same constants (mirror registers, [177] decay,
 turn blend, steer chase, aiState filter, modelPtr0 formula, speedAccel pipeline,
-<48 snap), so a mirrored-register-driven tick_vehicle_motor will track a remote bike's
+<48 snap), so a mirrored-register-driven VehicleSystem::tick_motor will track a remote bike's
 speed and heading correctly between records — and the per-record chase corrects the
 rest. What it will get wrong (bias, not divergence): the bike's velocity rides a
 3D slope-aligned direction vector (so predicted hills behave like flat ground), the
@@ -3371,7 +3371,7 @@ push, the in-water flag with the r/2 hysteresis, corner-quad conform, and the
 ### 2. The client subset (the port contract)
 
 `ground_contact_solve` in `engine/runtime/world/vehicle_motor.cpp`, dispatched inside
-`tick_vehicle_motor` at the witnessed call position (after integration, before
+`VehicleSystem::tick_motor` at the witnessed call position (after integration, before
 the yaw apply) for the Ground and Bike families with resolved boxes on a
 terrain-backed world; Watercraft (the authority stand-in path) and
 boxless/terrain-less rows keep the 5-tap terrain clamp. Ported legs: the sleep

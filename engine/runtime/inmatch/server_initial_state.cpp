@@ -199,7 +199,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, 0);                                // pitch
 	put_u16(b, 0);                                // roll
 	const bool has_spawn_zones =
-			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
+			ctx.world != nullptr && ctx.world->zones.has_spawn_zone();
 	uint8_t game_flags = has_spawn_zones ? 0x01u : 0x00u;
 	if (ctx.config.default_spawn_requires_no_team_zone != 0 &&
 			ctx.is_in_session != 0) {

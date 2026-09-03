@@ -97,7 +97,7 @@ int main() {
         CHECK(approx(r.position.y, 10.0f));
         CHECK(approx(r.position.z, 3.0f));
         CHECK(r.yaw == 90);
-        CHECK(w.spawn_cycle_counter == 1);
+        CHECK(w.zones.spawn_cycle_counter == 1);
     }
 
     // --- The clamp-random arm draws one CRT value per candidate, in row
@@ -172,7 +172,7 @@ int main() {
         CHECK(r.found);
         CHECK(approx(r.position.x, 0.25f));
         CHECK(r.yaw == 11);
-        CHECK(w.spawn_cycle_counter == 1);
+        CHECK(w.zones.spawn_cycle_counter == 1);
     }
 
     // --- Stock/training Co-op is the exact 00TRa route: no mission-mode bit
@@ -192,7 +192,7 @@ int main() {
         CHECK(r.found);
         CHECK(approx(r.position.x, 297.81f));
         CHECK(r.yaw == 22);
-        CHECK(w.spawn_cycle_counter == 0);
+        CHECK(w.zones.spawn_cycle_counter == 0);
     }
 
     // --- A parented Co-op primary keeps its full local pose, then applies
@@ -315,7 +315,7 @@ int main() {
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
         CHECK(r.found && approx(r.position.x, 100.0f));
         CHECK(approx(r.position.z, 4.0f));
-        CHECK(w.spawn_cycle_counter == 0);
+        CHECK(w.zones.spawn_cycle_counter == 0);
     }
 
     // --- No cross-family safety net: a DM does not consume Co-op/team
@@ -330,7 +330,7 @@ int main() {
         const SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, EntityHandle{}, 0, 0, 0x00000u);
         CHECK(!r.found);
-        CHECK(w.spawn_cycle_counter == 1);
+        CHECK(w.zones.spawn_cycle_counter == 1);
     }
 
     // --- A numbered deploy target cycles over the target itself plus the first
@@ -357,20 +357,20 @@ int main() {
         CHECK(pose.found && approx(pose.position.x, 10.0f));
         CHECK(approx(pose.position.z, 4.0f));
         CHECK(pose.yaw == 30);
-        CHECK(w.spawn_cycle_counter == 1);
+        CHECK(w.zones.spawn_cycle_counter == 1);
 
         pose = resolve_player_spawn_pose(
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
         CHECK(approx(pose.position.x, 12.0f));
         CHECK(approx(pose.position.z, 7.0f));
         CHECK(pose.yaw == 60);
-        CHECK(w.spawn_cycle_counter == 2);
+        CHECK(w.zones.spawn_cycle_counter == 2);
 
         pose = resolve_player_spawn_pose(
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
         CHECK(approx(pose.position.x, 10.0f));
         CHECK(approx(pose.position.z, 4.0f));
-        CHECK(w.spawn_cycle_counter == 3);
+        CHECK(w.zones.spawn_cycle_counter == 3);
     }
 
     // --- A parented 6007 keeps local coordinates until selected, then takes
@@ -422,11 +422,11 @@ int main() {
         target->position = {0.0f, 0.0f, 0.0f};
         target->zone_radius = 2;
         spawn_marker(w, 6007, {10.0f, 0.0f, 0.0f});
-        w.spawn_cycle_counter = 17;
+        w.zones.spawn_cycle_counter = 17;
         const SpawnPointResult pose = resolve_player_spawn_pose(
             w, EntityHandle{}, zone, 0, 1, 0x10010u);
         CHECK(approx(pose.position.z, 1.0f));
-        CHECK(w.spawn_cycle_counter == 17);
+        CHECK(w.zones.spawn_cycle_counter == 17);
     }
 
     // --- SpawnZoneList membership, and the target-less respawn restriction's
@@ -444,12 +444,12 @@ int main() {
         w.registry.get(base)->alive = false;
         const EntityHandle numbered = spawn_zone(w, 2, 2, 1, 0xFFFF);
 
-        CHECK(world_has_spawn_zone(w));
-        CHECK(team_has_available_spawn_zone(w, 1));
-        CHECK(!team_has_available_spawn_zone(w, 2));
+        CHECK(w.zones.has_spawn_zone());
+        CHECK(w.zones.team_has_available_spawn_zone(1));
+        CHECK(!w.zones.team_has_available_spawn_zone(2));
         w.registry.get(numbered)->zone_control = 0x10000;
-        CHECK(team_has_available_spawn_zone(w, 2));
-        CHECK(!team_has_available_spawn_zone(w, 3));
+        CHECK(w.zones.team_has_available_spawn_zone(2));
+        CHECK(!w.zones.team_has_available_spawn_zone(3));
     }
 
     // --- SpawnWaveList_BuildFromMission: retail defaults put NUMBERED zones on
@@ -463,16 +463,16 @@ int main() {
         w.registry.configure_pool(2, 16);
         const EntityHandle numbered = spawn_zone(w, 2, 1, 3);
         const EntityHandle base = spawn_zone(w, 1, 1, 0);
-        w.spawn_waves.build_from_mission(w, 0, 10);
-        CHECK(w.spawn_waves.entries().size() == 1);
-        CHECK(w.spawn_waves.has_entry(numbered));
-        CHECK(!w.spawn_waves.has_entry(base));
-        CHECK(w.spawn_waves.entries()[0].interval == 10);
+        w.zones.spawn_waves.build_from_mission(w, 0, 10);
+        CHECK(w.zones.spawn_waves.entries().size() == 1);
+        CHECK(w.zones.spawn_waves.has_entry(numbered));
+        CHECK(!w.zones.spawn_waves.has_entry(base));
+        CHECK(w.zones.spawn_waves.entries()[0].interval == 10);
 
-        w.spawn_waves.build_from_mission(w, 7, 0);
-        CHECK(w.spawn_waves.entries().size() == 2);
-        CHECK(w.spawn_waves.entries()[0].interval == 7);
-        CHECK(w.spawn_waves.entries()[1].interval == 7);
+        w.zones.spawn_waves.build_from_mission(w, 7, 0);
+        CHECK(w.zones.spawn_waves.entries().size() == 2);
+        CHECK(w.zones.spawn_waves.entries()[0].interval == 7);
+        CHECK(w.zones.spawn_waves.entries()[1].interval == 7);
     }
 
     // --- Queue semantics: same-player duplicates are rejected, moving to a new
@@ -487,7 +487,7 @@ int main() {
         w.registry.configure_pool(2, 16);
         const EntityHandle a = spawn_zone(w, 2, 1, 1);
         const EntityHandle b = spawn_zone(w, 2, 1, 2);
-        w.spawn_waves.build_from_mission(w, 0, 10);
+        w.zones.spawn_waves.build_from_mission(w, 0, 10);
         std::vector<EntityHandle> players;
         for (int i = 0; i < 9; ++i) {
             Entity p;
@@ -495,23 +495,23 @@ int main() {
             p.team = (i == 8) ? 2 : 1;
             players.push_back(w.registry.spawn(0, p));
         }
-        CHECK(w.spawn_waves.try_queue(w, a, players[0]));
-        CHECK(!w.spawn_waves.try_queue(w, a, players[0]));
-        CHECK(w.spawn_waves.try_queue(w, b, players[0]));
-        CHECK(w.spawn_waves.entries()[0].queued.empty());
-        CHECK(w.spawn_waves.entries()[1].queued.size() == 1);
-        CHECK(!w.spawn_waves.try_queue(w, b, players[8]));
+        CHECK(w.zones.spawn_waves.try_queue(w, a, players[0]));
+        CHECK(!w.zones.spawn_waves.try_queue(w, a, players[0]));
+        CHECK(w.zones.spawn_waves.try_queue(w, b, players[0]));
+        CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
+        CHECK(w.zones.spawn_waves.entries()[1].queued.size() == 1);
+        CHECK(!w.zones.spawn_waves.try_queue(w, b, players[8]));
         for (int i = 1; i < 8; ++i)
-            CHECK(w.spawn_waves.try_queue(w, b, players[i]));
+            CHECK(w.zones.spawn_waves.try_queue(w, b, players[i]));
         Entity extra;
         extra.kind = EntityKind::Organic;
         extra.team = 1;
         const EntityHandle ninth = w.registry.spawn(0, extra);
-        CHECK(!w.spawn_waves.try_queue(w, b, ninth));
-        CHECK(w.spawn_waves.entries()[1].queued.size() == 8);
-        CHECK(w.spawn_waves.entries()[1].requester_countdown(players[0]) == 0);
-        CHECK(w.spawn_waves.entries()[1].requester_countdown(players[3]) == 30);
-        CHECK(w.spawn_waves.entries()[1].requester_countdown(ninth) == 80);
+        CHECK(!w.zones.spawn_waves.try_queue(w, b, ninth));
+        CHECK(w.zones.spawn_waves.entries()[1].queued.size() == 8);
+        CHECK(w.zones.spawn_waves.entries()[1].requester_countdown(players[0]) == 0);
+        CHECK(w.zones.spawn_waves.entries()[1].requester_countdown(players[3]) == 30);
+        CHECK(w.zones.spawn_waves.entries()[1].requester_countdown(ninth) == 80);
     }
 
     // --- Tick semantics: countdown zero releases the head on the next 1 Hz
@@ -532,41 +532,41 @@ int main() {
         Entity p2 = p1;
         const EntityHandle h1 = w.registry.spawn(0, p1);
         const EntityHandle h2 = w.registry.spawn(0, p2);
-        w.spawn_waves.build_from_mission(w, 0, 2);
-        CHECK(w.spawn_waves.try_queue(w, zone, h1));
-        CHECK(w.spawn_waves.try_queue(w, zone, h2));
-        auto released = w.spawn_waves.tick(w);
+        w.zones.spawn_waves.build_from_mission(w, 0, 2);
+        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
+        CHECK(w.zones.spawn_waves.try_queue(w, zone, h2));
+        auto released = w.zones.spawn_waves.tick(w);
         CHECK(released.size() == 1 && released[0].player == h1 &&
               released[0].zone == zone);
-        CHECK(w.spawn_waves.entries()[0].countdown == 2);
+        CHECK(w.zones.spawn_waves.entries()[0].countdown == 2);
         // The requester ETA is countdown + position * interval for a member
         // and countdown + count * interval for a nonmember; the row's +48 word
         // contributes nothing (zero-only) [orig: SpawnWaveEntry_MemberEta
         // @0x52A2FF; SpawnWaveEntry_TailEta @0x52A66E].
-        CHECK(w.spawn_waves.entries()[0].requester_countdown(h2) == 2);
-        CHECK(w.spawn_waves.entries()[0].requester_countdown(h1) == 4);
-        CHECK(w.spawn_waves.tick(w).empty());
-        CHECK(w.spawn_waves.entries()[0].countdown == 1);
-        CHECK(w.spawn_waves.tick(w).empty());
-        CHECK(w.spawn_waves.entries()[0].countdown == 0);
-        released = w.spawn_waves.tick(w);
+        CHECK(w.zones.spawn_waves.entries()[0].requester_countdown(h2) == 2);
+        CHECK(w.zones.spawn_waves.entries()[0].requester_countdown(h1) == 4);
+        CHECK(w.zones.spawn_waves.tick(w).empty());
+        CHECK(w.zones.spawn_waves.entries()[0].countdown == 1);
+        CHECK(w.zones.spawn_waves.tick(w).empty());
+        CHECK(w.zones.spawn_waves.entries()[0].countdown == 0);
+        released = w.zones.spawn_waves.tick(w);
         CHECK(released.size() == 1 && released[0].player == h2);
 
-        w.spawn_waves.build_from_mission(w, 0, 2);
-        CHECK(w.spawn_waves.try_queue(w, zone, h1));
-        CHECK(w.spawn_waves.tick(w).size() == 1);
-        CHECK(w.spawn_waves.try_queue(w, zone, h2));
+        w.zones.spawn_waves.build_from_mission(w, 0, 2);
+        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
+        CHECK(w.zones.spawn_waves.tick(w).size() == 1);
+        CHECK(w.zones.spawn_waves.try_queue(w, zone, h2));
         w.registry.get(zone)->zone_control = 0xFFFF;
-        CHECK(w.spawn_waves.tick(w).empty());
-        CHECK(w.spawn_waves.entries()[0].queued.empty());
-        CHECK(w.spawn_waves.entries()[0].countdown == 0);
+        CHECK(w.zones.spawn_waves.tick(w).empty());
+        CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
+        CHECK(w.zones.spawn_waves.entries()[0].countdown == 0);
 
         w.registry.get(zone)->zone_control = 0x10000;
-        CHECK(w.spawn_waves.try_queue(w, zone, h1));
+        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
         w.registry.get(zone)->team = 2;
-        w.spawn_waves.reset_on_zone_team_change(w, zone);
-        CHECK(w.spawn_waves.entries()[0].queued.empty());
-        CHECK(w.spawn_waves.entries()[0].team == 2);
+        w.zones.spawn_waves.reset_on_zone_team_change(w, zone);
+        CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
+        CHECK(w.zones.spawn_waves.entries()[0].team == 2);
     }
 
     if (failures == 0) std::printf("OK spawn_select\n");

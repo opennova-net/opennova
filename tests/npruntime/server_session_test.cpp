@@ -2684,7 +2684,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	zone.zone_control = 0x10000;
 	const opennova::world::EntityHandle zone_handle =
 			world.registry.spawn(2, zone);
-	world.spawn_waves.build_from_mission(world, 0, 2);
+	world.zones.spawn_waves.build_from_mission(world, 0, 2);
 
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
@@ -2745,7 +2745,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	            "queue-join 0x6E carries zone index, roster and positional ETA"))
 		return false;
 	if (!expect(queue(0).empty() &&
-	                    world.spawn_waves.entries()[0].queued.size() == 2,
+	                    world.zones.spawn_waves.entries()[0].queued.size() == 2,
 	            "duplicate wave pick waits without duplicate row or deployment"))
 		return false;
 
@@ -2938,8 +2938,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	driver_seed.health = 100;
 	const opennova::world::EntityHandle driver =
 			world.registry.spawn(0, driver_seed);
-	if (!expect(opennova::world::entity_process_vehicle_attach(
-				world, driver, vehicle, 4),
+	if (!expect(world.vehicles.process_attach(driver, vehicle, 4),
 			"fixture driver claims the mobile spawn vehicle"))
 		return false;
 
@@ -2978,7 +2977,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	auto reset_player = [&]() {
 		opennova::world::Entity *entity = world.registry.get(player);
 		if (entity->mounted)
-			opennova::world::entity_detach_from_vehicle(world, player);
+			world.vehicles.detach(player);
 		entity->alive = false;
 		entity->health = 0;
 		entity->flags |= opennova::world::kEntityFlagDead;
@@ -3531,7 +3530,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 		return batches;
 	};
 
-	if (!expect(world.zone_chain.empty(),
+	if (!expect(world.zones.chain.empty(),
 	            "00TRg minimap oracle deliberately has no capture-zone chain"))
 		return false;
 	opennova::inmatch::Server_TickUpdate(ctx);
