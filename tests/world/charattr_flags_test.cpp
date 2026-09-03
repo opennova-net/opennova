@@ -93,16 +93,16 @@ int main() {
 
     World w;
     w.registry.configure_pool(0, 16);
-    w.class_attribute_flags = rows;
-    CHECK(w.class_has_attribute(5, World::kCharAttrMedic));
-    CHECK(w.class_has_attribute(4, World::kCharAttrMedic));
-    CHECK(!w.class_has_attribute(1, World::kCharAttrMedic));
-    CHECK(w.class_has_attribute(1, 0x1u));
-    CHECK(!w.class_has_attribute(3, World::kCharAttrMedic));
+    w.tables.class_attribute_flags = rows;
+    CHECK(w.tables.class_has_attribute(5, MissionTables::kCharAttrMedic));
+    CHECK(w.tables.class_has_attribute(4, MissionTables::kCharAttrMedic));
+    CHECK(!w.tables.class_has_attribute(1, MissionTables::kCharAttrMedic));
+    CHECK(w.tables.class_has_attribute(1, 0x1u));
+    CHECK(!w.tables.class_has_attribute(3, MissionTables::kCharAttrMedic));
     // Class 0 wraps to row 15 (empty); class 21 wraps to row 4 -- retail's
     // `(class - 1) & 0xF` select, kept as is.
-    CHECK(!w.class_has_attribute(0, World::kCharAttrMedic));
-    CHECK(w.class_has_attribute(21, World::kCharAttrMedic));
+    CHECK(!w.tables.class_has_attribute(0, MissionTables::kCharAttrMedic));
+    CHECK(w.tables.class_has_attribute(21, MissionTables::kCharAttrMedic));
 
     // The friendly-tag feed reads the bit per entity class.
     const EntityHandle local = spawn_organic(w, 1, 1, true);
@@ -123,9 +123,9 @@ int main() {
 
     // S2C 0x41 property 0 blanks every row's word: the plates go with it.
     opennova::inmatch::clear_charattr_challenge_property(table, 0);
-    w.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
-    CHECK(!w.class_has_attribute(5, World::kCharAttrMedic));
-    CHECK(!w.class_has_attribute(1, 0x1u));
+    w.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
+    CHECK(!w.tables.class_has_attribute(5, MissionTables::kCharAttrMedic));
+    CHECK(!w.tables.class_has_attribute(1, 0x1u));
     tags.clear();
     collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
     CHECK(tags.size() == 2);
@@ -140,9 +140,9 @@ int main() {
     CHECK(opennova::inmatch::charattr_class_attribute_rows(again)[4] == 0x8u);
 
     // An unloaded table (a missing charattr.def) reads as no attribute at all.
-    w.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(
+    w.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(
             opennova::inmatch::CharAttrChallengeTable{});
-    for (uint8_t c = 0; c < 32; ++c) CHECK(!w.class_has_attribute(c, 0xFFFFFFFFu));
+    for (uint8_t c = 0; c < 32; ++c) CHECK(!w.tables.class_has_attribute(c, 0xFFFFFFFFu));
 
     if (failures == 0) std::printf("charattr_flags_test: ok\n");
     return failures == 0 ? 0 : 1;

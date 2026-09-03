@@ -183,7 +183,7 @@ int main() {
 	opennova::terrain::TerrainHeightField hf;
 	hf.heightmap = heightmap.data();
 	hf.dim = 64;
-	world.terrain = &hf;
+	world.tables.terrain = &hf;
 
 	{
 		int32_t probe[3] = {fx(-1.07), fx(-2.04), fx(2.54)};

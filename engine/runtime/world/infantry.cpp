@@ -667,7 +667,7 @@ void infantry_rain_ambient(World &world, const Entity &ent) {
         ev.pitch_q16 = 0x10000;
         ev.volume_q8_8 = volume_word;
         ev.set_name = side == 0 ? "LPNV_RAIN_L" : "LPNV_RAIN_R";
-        world.sound_emitters.publish(std::move(ev));
+        world.out.sound_emitters.publish(std::move(ev));
     }
 }
 
@@ -1047,7 +1047,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             : 0u;
     const bool mounted_for_spread = tick_entity != nullptr && tick_entity->mounted;
     const WeaponTableEntry *held = tick_entity != nullptr
-            ? world.weapons.by_index(tick_entity->equipped_adm_index)
+            ? world.tables.weapons.by_index(tick_entity->equipped_adm_index)
             : nullptr;
     weight_inputs.produce = e.inf.is_local_player && e.inf.player_moving &&
                             !mounted_for_spread && held != nullptr;
@@ -1147,7 +1147,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // Entity_PlaySound3D_FullVolume]
             if (ent == nullptr || !ent->dismemberment_piece) {
                 const bool night_death =
-                    (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0;
+                    (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
                 if (inf.is_local_player) {
                     SoundSlotEvent scream;
                     scream.source_handle = e.handle.packed;
@@ -1161,7 +1161,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                             night_death ? audio::kEntitySoundDeathNight
                                         : audio::kEntitySoundDeath,
                             scream.set_name, sizeof(scream.set_name));
-                    world.slot_sounds.push_back(scream);
+                    world.out.slot_sounds.push_back(scream);
                 } else {
                     emit_slot_sound(world, e,
                                     night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
@@ -1230,7 +1230,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     // being replicated; announcing WITHOUT destroying would be worse
                     // than either, since the client would drop a row we keep sending.
                     ent->hidden = true;
-                    world.entity_removals.push_back(e.handle.packed);
+                    world.out.entity_removals.push_back(e.handle.packed);
                     world.registry.despawn(e.handle);
                 }
             }
@@ -1998,8 +1998,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
             if (inf.airborne && e.health > 0 && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0 &&
-                inf.vel[2] <= -1057 * world.wac_values.fallmps) {
-                int32_t excess = (-1057 * world.wac_values.fallmps) - inf.vel[2];
+                inf.vel[2] <= -1057 * world.script.wac_values.fallmps) {
+                int32_t excess = (-1057 * world.script.wac_values.fallmps) - inf.vel[2];
                 int32_t dmg = excess >> 4;
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);

@@ -171,11 +171,11 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // staggering is a load-spreading detail, refreshed here per tick when cheap.
     // The sample runs at Z - brain[11]: retail subtracts the probe offset,
     // samples, and restores Z [orig: @0x4903AD..0x4903D8].
-    if (world.terrain != nullptr) {
+    if (world.tables.terrain != nullptr) {
         const int32_t pos3[3] = {px, py, pz - m.air_probe_z_off};
         const GroundClearance clearance{};
         const int32_t g =
-                calc_average_ground_height(*world.terrain, pos3, 0, clearance);
+                calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
         if (g != INT32_MIN) m.ground_cache = g;
     }
     const int32_t ground = m.ground_cache;

@@ -99,7 +99,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     t.binocular_pitch_offset_deg = 0.0f;
     v.nvg_gain = kNvgGainMin;
     v.nvg_active = world != nullptr &&
-                   (world->mission_attrib_flags &
+                   (world->tables.mission_attrib_flags &
                     static_cast<uint32_t>(bms::AttribFlags::StartWithNVGOn)) != 0;
     w.nvg_scope_restore = false;
     local_player_view_refresh(world, v);

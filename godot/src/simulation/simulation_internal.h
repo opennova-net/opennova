@@ -37,7 +37,7 @@
 #include <runtime/inmatch/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
-#include <runtime/world/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
+#include <runtime/world/score_rules_build.h> // build_score_rules (score.ini -> world.tables.score_rules)
 #include <base/gameprofile/game_type.h>              // game_type::for_mission_mode
 
 #include <formats/def/def.h> // def_parse_weapons_memory / def_free_weapons
@@ -148,7 +148,7 @@ inline void write_present_vehicle_motion_controls(float *record,
 	// moving item. Only the authority owns the full steer and currentSpeed
 	// fields; ClientEntityState carries neither and must leave VALID clear.
 	if (entity.handle.pool() != 1 ||
-			world.vehicle_traits.get(entity.item_id) == nullptr)
+			world.tables.vehicle_traits.get(entity.item_id) == nullptr)
 		return;
 	const opennova::world::VehicleCtrlRegisters controls =
 			opennova::world::vehicle_ctrl_registers(entity.veh);

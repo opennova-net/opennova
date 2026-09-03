@@ -209,7 +209,7 @@ int main() {
         World world;
         world.registry.configure_pool(0, 4);
         AiSystem &ai = world.ai;
-        world.item_names.set(5311, "Rifleman");
+        world.tables.item_names.set(5311, "Rifleman");
         const EntityHandle h =
                 spawn_entity(world, 0, 5311, 45, "rifle", Vec3{0, 0, 0});
         world.registry.get(h)->health_max = 120;
@@ -329,9 +329,9 @@ int main() {
         ai.at(idle_ai)->pos[1] = 3 << 16;
 
         // Group + counters state.
-        world.relations.group(5).alert = TriggerRelations::kAlertRed;
-        world.relations.group(5).initial_count = 4;
-        world.relations.group(5).live_count = 3;
+        world.script.relations.group(5).alert = TriggerRelations::kAlertRed;
+        world.script.relations.group(5).initial_count = 4;
+        world.script.relations.group(5).live_count = 3;
         ai.unported_calls = 2;
         ai.find_target_calls = 8;
         ai.scheduler.budget = 128;

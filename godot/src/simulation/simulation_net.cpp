@@ -97,8 +97,8 @@ void Simulation::bringup_host_runtime() {
 		host_config.game_type = mission_game_type();
 	}
 	if (kernel_) {
-		kernel_->world.fat_bullets = host_config.fat_bullets;
-		kernel_->world.one_shot_kill = host_config.one_shot_kill;
+		kernel_->world.rules.fat_bullets = host_config.fat_bullets;
+		kernel_->world.rules.one_shot_kill = host_config.one_shot_kill;
 	}
 
 	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
@@ -129,9 +129,9 @@ void Simulation::bringup_host_runtime() {
 		// handshake, so seed its view directly from the consolidated config.
 		runtime_->view().set_game_type(host_config.game_type);
 		// The 0x1D header-form session half: the loopback replica stands in
-		// world.mp_session for the retail is_in_session (SP listen stays the
+		// world.rules.mp_session for the retail is_in_session (SP listen stays the
 		// 7-byte team form). [orig: NapiNPClientMsg_0x01D @0x43086c]
-		runtime_->view().set_mp_session(kernel_ != nullptr && kernel_->world.mp_session);
+		runtime_->view().set_mp_session(kernel_ != nullptr && kernel_->world.rules.mp_session);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
 		// motor drives entity Yaw from kernel_->input.look_heading each frame, else input snaps it to 0).
@@ -678,8 +678,8 @@ bool Simulation::enable_host_listen(int p_port) {
 	}
 	host_listen_ = true;
 	if (kernel_) {
-		kernel_->world.projectile_authority = true;
-		kernel_->world.mp_session = true;
+		kernel_->world.rules.projectile_authority = true;
+		kernel_->world.rules.mp_session = true;
 	}
 	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
@@ -789,8 +789,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 			static_cast<int>(opennova::inmatch::kMaxPlayersCap)));
 	host_session_config_ = std::move(config);
 	if (kernel_ && host_listen_) {
-		kernel_->world.fat_bullets = host_session_config_.fat_bullets;
-		kernel_->world.one_shot_kill = host_session_config_.one_shot_kill;
+		kernel_->world.rules.fat_bullets = host_session_config_.fat_bullets;
+		kernel_->world.rules.one_shot_kill = host_session_config_.one_shot_kill;
 	}
 }
 
@@ -906,8 +906,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_item_class_resolver();
 	joiner_ = true;
 	if (kernel_) {
-		kernel_->world.projectile_authority = false;
-		kernel_->world.mp_session = true;
+		kernel_->world.rules.projectile_authority = false;
+		kernel_->world.rules.mp_session = true;
 	}
 	joiner_bridge_.reset_for_join();
 	joiner_applied_loadout_revision_ = 0;

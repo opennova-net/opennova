@@ -30,7 +30,7 @@ static void emit_vehicle_control(World &world, const char *kind, uint16_t target
     effect.b = target_bms_id;
     effect.c = static_cast<int32_t>(target_spawn_origin);
     effect.d = static_cast<int32_t>(target_wire_handle);
-    world.effects.push(std::move(effect));
+    world.out.effects.push(std::move(effect));
 }
 
 void emit_vehicle_control_started(World &world, const Entity &vehicle) {
@@ -87,10 +87,10 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
 }
 
 bool vehicle_prepare_weapon_slot(World &world, Entity &vehicle) {
-    const int weapon_index = world.weapons.index_of(vehicle.primary_weapon.c_str());
+    const int weapon_index = world.tables.weapons.index_of(vehicle.primary_weapon.c_str());
     if (weapon_index < 0 || weapon_index > 0xFF) return false;
     const uint8_t adm = static_cast<uint8_t>(weapon_index);
-    const WeaponTableEntry *weapon = world.weapons.by_index(adm);
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(adm);
     if (weapon == nullptr) return false;
     if (vehicle.primary_weapon_slot_adm != adm) {
         vehicle.primary_weapon_slot = WeaponSlotState{};
@@ -383,16 +383,16 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     ctx.phase = phase;
     const bool pre_mission = phase == TickPhase::PreMission;
     const bool gameplay = phase == TickPhase::Gameplay;
-    logic_authority = is_authority;
+    rules.logic_authority = is_authority;
     // The pending fire-sound countdown, before this tick's spawns: retail
     // drains after the client network frame (whose receive seeds our embedder
     // also applies pre-tick) and before the server/entity updates that seed
     // the rest [orig: Sound_TickPendingSlots @ 0x526697 in
     // Game_ProcessMainFrame, between Client_ProcessNetworkFrame and
     // Server_TickUpdate / Entity_UpdateAllEntities].
-    fire_sounds.tick();
+    out.fire_sounds.tick();
     // The presenting-client identity for the spawn-time tracer style select — stamped
-    // before the system loop so rounds spawned THIS tick (AI fire, local fire) select
+    // before the system loop so out.rounds spawned THIS tick (AI fire, local fire) select
     // against fresh values [orig: g_local_player_entity->Team read @ 0x4ec740].
     round_sim.local_player = cached.local_player;
     if (const Entity *lp = registry.get(cached.local_player))
@@ -418,7 +418,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         lap.restart();
         pose_emplacement_attachments(*this);
         // Static attachment poses can change after AI collision queries. The
-        // projectile/destruction half of the tick starts a fresh matrix-view
+        // projectile/out.destruction half of the tick starts a fresh matrix-view
         // epoch so it never inherits a pre-attachment target transform.
         if (collision != nullptr) collision->reset_query_view_cache();
     }
@@ -430,7 +430,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // These presentation events describe only the current authoritative tick.
     if (is_authority && gameplay) {
         throwables.events.clear();
-        throwables.tick(*this, ai.collision, terrain);
+        throwables.tick(*this, ai.collision, tables.terrain);
     }
     // The precipitation fall: while it rains every drop slot lowers by the
     // kind's per-tick amount, once per ENTITY update — retail runs it inside
@@ -459,18 +459,18 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     if (phase != TickPhase::PreMission)
         ai.pump_mounted_weapon_slots(*this, logic_tick);
     lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
-    // Live rounds step on the host and on an explicitly configured MP
+    // Live out.rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
     // every decoded/predicted round carries VisualOnly through all consequence
     // sites, so only the host can mutate gameplay state. Do not infer a client
     // role from is_authority=false alone -- tests and pre-mission callers use it too.
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     if (gameplay &&
-        (is_authority || (mp_session && !projectile_authority)))
-        round_sim.tick(*this, terrain, ai.collision);
+        (is_authority || (rules.mp_session && !rules.projectile_authority)))
+        round_sim.tick(*this, tables.terrain, ai.collision);
     lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
     if (gameplay &&
-        (is_authority || (mp_session && !projectile_authority))) {
+        (is_authority || (rules.mp_session && !rules.projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
         // damage callbacks push (the kz death chain) land next tick, exactly like
@@ -492,10 +492,10 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         // [orig: Env_WaterHeightFixed @0x26c6454].
         const float water_z =
                 env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
-        explosions.process(*this, ai.collision, terrain,
-                           water_z, destruction);
-        destruction_tick_dead_items(*this, terrain, water_z, destruction);
-        death_pieces.tick(*this, terrain, water_z, destruction);
+        explosions.process(*this, ai.collision, tables.terrain,
+                           water_z, out.destruction);
+        destruction_tick_dead_items(*this, tables.terrain, water_z, out.destruction);
+        death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
     }
     lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
     // The waypoint current-selection pass, from the local player's position (the
@@ -503,9 +503,9 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // is that client — the pure-client view is D-HUD-16). Position converts to
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
-    if (is_authority && gameplay && !waypoints.empty()) {
+    if (is_authority && gameplay && !script.waypoints.empty()) {
         if (const Entity *lp = registry.get(cached.local_player))
-            waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
+            script.waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
                                    static_cast<int32_t>(lp->position.y * 65536.0f));
     }
     if (is_authority) {
@@ -525,7 +525,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
-    sound_emitters.prune(logic_tick);
+    out.sound_emitters.prune(logic_tick);
     lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
 }
 
@@ -554,7 +554,7 @@ void World::process_round_end(int32_t winning_team) {
     // (Cine_StartPlayback @0x577840 letterbox/fade + the jo_Epil2.tga MISSION FAILED
     // screen) + end track 2 (MusicCtx_SelectEndTrack @0x672fd0). All host
     // presentation: the effect carries the winner, the host selects the flow.
-    effects.push({"round_end", winning_team, 0, 0, 0, std::string()});
+    out.effects.push({"round_end", winning_team, 0, 0, 0, std::string()});
 }
 
 // Count alive members per commandGroup over the actor pools; group 0 is
@@ -580,8 +580,8 @@ void World::recount_group_initials() {
     int32_t counts[TriggerRelations::kGroups] = {};
     count_groups(registry, counts);
     for (int g = 0; g < TriggerRelations::kGroups; ++g) {
-        relations.group(g).initial_count = counts[g];
-        relations.group(g).live_count = counts[g];
+        script.relations.group(g).initial_count = counts[g];
+        script.relations.group(g).live_count = counts[g];
     }
 }
 
@@ -589,14 +589,14 @@ void World::recount_group_live() {
     int32_t counts[TriggerRelations::kGroups] = {};
     count_groups(registry, counts);
     for (int g = 0; g < TriggerRelations::kGroups; ++g)
-        relations.group(g).live_count = counts[g];
+        script.relations.group(g).live_count = counts[g];
 }
 
 World::Snapshot World::snapshot() const {
     Snapshot s;
     s.registry = registry;
-    s.vars = vars;
-    s.wac_values = wac_values;
+    s.vars = script.vars;
+    s.wac_values = script.wac_values;
     s.env = env;
     s.weather = weather;
     s.match = match;
@@ -613,8 +613,8 @@ World::Snapshot World::snapshot() const {
 
 void World::restore(const Snapshot &s) {
     registry.restore_from(s.registry);
-    vars = s.vars;
-    wac_values = s.wac_values;
+    script.vars = s.vars;
+    script.wac_values = s.wac_values;
     env = s.env;
     weather = s.weather;
     match = s.match;
@@ -632,18 +632,18 @@ void World::restore(const Snapshot &s) {
     // unconditionally gets one of those cases wrong.
     cached = CachedFrameState{};
     cached.local_player = s.local_player;
-    effects.clear();
-    slot_sounds.clear();
-    sound_emitters.clear();
-    fire_sounds.clear();
+    out.effects.clear();
+    out.slot_sounds.clear();
+    out.sound_emitters.clear();
+    out.fire_sounds.clear();
     round_sim.reset();
     explosions.reset();
     throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();
-    scars.reset();
-    terrain_scorches.reset();
-    destruction = DestructionEvents{};
+    out.scars.reset();
+    out.terrain_scorches.reset();
+    out.destruction = DestructionEvents{};
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is
@@ -682,7 +682,7 @@ int32_t count_defined_subgoals(const World &world) {
     //  the header win-condition ids; the count lands in dword_C8468C]
     int32_t count = 0;
     for (int slot = 1; slot <= 8; ++slot) {
-        const uint8_t id = world.subgoals.win_text_ids[slot];
+        const uint8_t id = world.script.subgoals.win_text_ids[slot];
         if (id == 0 || id == 0xFF) break;
         ++count;
     }

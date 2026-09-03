@@ -1843,7 +1843,7 @@ bool check_global_scoreboard_integrity_phase() {
 			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
@@ -1852,9 +1852,9 @@ bool check_global_scoreboard_integrity_phase() {
 	if (!expect(player.valid(), "integrity phase player spawned")) return false;
 	opennova::world::Entity *entity = world.registry.get(player);
 	entity->equipped_adm_index = 0x20;
-	world.weapons.entries.resize(0x21);
-	world.weapons.entries[0x20].valid = true;
-	world.weapons.entries[0x20].ammo_index = 0x1A;
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
 	ctx.world = &world;
 
 	opennova::replication::UdpSessionTransport transport(
@@ -1994,7 +1994,7 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
@@ -2078,7 +2078,7 @@ bool check_requester_score_delta_refresh() {
 			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	opennova::world::Entity player_entity;
 	player_entity.kind = opennova::world::EntityKind::Organic;
@@ -2158,7 +2158,7 @@ bool check_listen_host_receives_targeted_maintenance() {
 		return false;
 
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
@@ -2167,9 +2167,9 @@ bool check_listen_host_receives_targeted_maintenance() {
 	if (!expect(player.valid(), "listen maintenance player spawned")) return false;
 	opennova::world::Entity *entity = world.registry.get(player);
 	entity->equipped_adm_index = 0x20;
-	world.weapons.entries.resize(0x21);
-	world.weapons.entries[0x20].valid = true;
-	world.weapons.entries[0x20].ammo_index = 0x1A;
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
 	ctx.world = &world;
 	ctx.loaded_model_viewport_height = 100;
 	ctx.scoreboard_broadcast_timer = 0x136u;
@@ -2224,7 +2224,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	ctx.loaded_model_viewport_height = 100;
 	opennova::world::World world;
 	world.prng16_state = 1;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 64);
 	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn player_spawn;
@@ -2235,9 +2235,9 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 		return false;
 	opennova::world::Entity *player_entity = world.registry.get(player);
 	player_entity->equipped_adm_index = 0x20;
-	world.weapons.entries.resize(0x21);
-	world.weapons.entries[0x20].valid = true;
-	world.weapons.entries[0x20].ammo_index = 0x1A;
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
 	ctx.world = &world;
 
 	opennova::replication::UdpSessionTransport transport(
@@ -3226,7 +3226,7 @@ bool check_timed_capture_host_wire_transaction() {
 	opennova::world::World world;
 	opennova::world::CollisionWorld collision;
 	opennova::world::AiSystem &ai = world.ai;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	world.collision = &collision;
 	ai.collision = &collision;
 	world.add_system(&ai);
@@ -3452,7 +3452,7 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	opennova::world::World world;
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	ctx.world = &world;
 	world.registry.configure_pool(1, 256);
 	world.registry.configure_pool(2, 27);

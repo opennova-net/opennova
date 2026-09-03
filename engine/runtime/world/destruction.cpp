@@ -152,7 +152,7 @@ int32_t piece_physics_rest_floor_q16(const World &world, const Entity &entity) {
                 : nullptr;
         return husk != nullptr ? husk->min[2] : 0;
     }
-    const VehicleTraits *vehicle = world.vehicle_traits.get(entity.item_id);
+    const VehicleTraits *vehicle = world.tables.vehicle_traits.get(entity.item_id);
     return vehicle != nullptr ? vehicle->box_z_lo : 0;
 }
 
@@ -208,10 +208,10 @@ PiecePhysicsSlope piece_physics_slope(
 
 void queue_named_landing_blast(World &world, const Entity &entity,
                                const char *ammo_name, float radius) {
-    const int ammo_index = world.ammo.index_of(ammo_name);
+    const int ammo_index = world.tables.ammo.index_of(ammo_name);
     if (ammo_index < 0) return;
     ExplosionEntry blast;
-    if (const AmmoTableEntry *ammo = world.ammo.by_index(ammo_index))
+    if (const AmmoTableEntry *ammo = world.tables.ammo.by_index(ammo_index))
         blast.type = ammo->kztype;
     blast.ammo_index = ammo_index;
     blast.owner = entity.handle;
@@ -235,7 +235,7 @@ void update_dead_wreck_effects(World &world, Entity &entity,
         return;
     events.effects.push_back(DestructionEffectEvent{
             kFireCrackleEffect, entity.position, Vec3{0.0f, 0.0f, 1.0f}});
-    world.fire_sounds.play_with_distance_delay(
+    world.out.fire_sounds.play_with_distance_delay(
             kFireCrackleSound, entity.position, entity.bms_id);
     ++events.crackles;
 }
@@ -348,14 +348,14 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
 void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEntry &e,
                                 EntityHandle attacker, float distance, float blast_radius) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
-    const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     // In-session building gate. `World::mp_session` is the retail session
     // discriminator here: our socketless SP host still uses loopback transport
     // but must retain offline damage semantics.
     // [orig: g_napi_np_ctx.is_in_session && ItemType_Building &&
     // !g_destroy_buildings @0x4E682E..0x4E6860]
-    if (world.mp_session && target.kind == EntityKind::Building &&
-        !world.destroy_buildings)
+    if (world.rules.mp_session && target.kind == EntityKind::Building &&
+        !world.rules.destroy_buildings)
         return;
     const Entity *owner = world.registry.get(attacker);
     // Same-team blast immunity when the def authors attrib 0x8000
@@ -371,7 +371,7 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
     // attacker [orig: `pad_1ba = sourceHandle->groundEntity` @ 0x4e68b0].
     target.last_attacker = attacker;
 
-    const AmmoTableEntry *ammo = world.ammo.by_index(e.ammo_index);
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
     if (ammo == nullptr) return;
     // Authority-only base damage [orig: @ 0x4e68cf — non-authority reads 0].
     int32_t damage = ammo->kz_damage; // [orig: ammoDef word +46 @ 0x4e68d5]
@@ -428,7 +428,7 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
             if (target.health <= 0 && before > 0) {
-                world.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
+                world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
                 RoundDeath d;
                 d.victim = target.handle;
                 d.killer = attacker;
@@ -478,7 +478,7 @@ void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
         (target.engine_flags & kEntityFlagHusk) != 0)
         return;
     const ItemDeathTraits *traits =
-            world.item_death_traits.get(target.item_id);
+            world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || traits->glass_points.empty()) return;
 
     const CollisionMatrix orientation = destruction_orientation(target);
@@ -544,7 +544,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
     batch.swap(queue);
     for (const ExplosionEntry &e : batch) {
         ++events.explosions_processed;
-        const AmmoTableEntry *ammo = world.ammo.by_index(e.ammo_index);
+        const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
         if (ammo == nullptr) continue;
         // Type dispatch [orig: the switch @ 0x4eadc6]: 2/5/6/7 -> weapon
         // damage; 1 (vehicle ram) and 3 (medic heal) are cited stubs at this
@@ -678,8 +678,8 @@ namespace {
 // The death sound + effect families + the kz blasts — the shared presentation
 // tail every husked death runs [orig: Entity_InitDeathSounds @ 0x4939b0].
 void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
-    const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
-    DestructionEvents &ev = world.destruction;
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
+    DestructionEvents &ev = world.out.destruction;
     if (!silent && traits != nullptr && !traits->sound_death.empty())
         ev.sounds.push_back(DestructionSoundEvent{traits->sound_death, target.position});
     if (silent || traits == nullptr) return;
@@ -709,11 +709,11 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
     // at the entity with r = kz ?: bound radius [orig:
     // Entity_QueueKzBlastAtUserPoints(g_ammo_kz_OrganicBlast, ..., "KZ", 1, ...)
     // @ 0x493b57; the fallback radius legs @ 0x4ead12-0x4ead68].
-    const int kz_ammo = world.ammo.index_of(kAmmoKzOrganicBlast);
+    const int kz_ammo = world.tables.ammo.index_of(kAmmoKzOrganicBlast);
     if (kz_ammo >= 0) {
         ExplosionEntry blast;
         blast.type = ammo_kz::kStandard; // kz_OrganicBlast kztype (word +44)
-        if (const AmmoTableEntry *a = world.ammo.by_index(kz_ammo))
+        if (const AmmoTableEntry *a = world.tables.ammo.by_index(kz_ammo))
             blast.type = a->kztype;
         blast.ammo_index = kz_ammo;
         blast.owner = target.handle;
@@ -743,7 +743,7 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
 
 void process_destructible_death(World &world, Entity &target) {
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0]
-    DestructionEvents &ev = world.destruction;
+    DestructionEvents &ev = world.out.destruction;
     // Per-section debris burst — sample the intact model's collision faces
     // before the husk flag changes collision identity. [orig: the
     // Entity_SpawnSectionDebris loop @ 0x43fbd9].
@@ -769,7 +769,7 @@ void process_destructible_death(World &world, Entity &target) {
     // The dying entity's scar ring is cleared before the husk flag lands
     // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 (thunk @0x43a950), called
     //  from the death chain ahead of Flags |= 6 @ 0x43fbf6].
-    world.scars.clear_entity(target.handle);
+    world.out.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]
     target.alive = false;
     target.health = 0;
@@ -788,7 +788,7 @@ void process_destructible_death(World &world, Entity &target) {
 uint32_t spawn_death_pieces(World &world, Entity &target) {
     // [orig: Entity_SpawnDeathPieces @ 0x493400] Gate: not already husked, a
     // husk model exists, not fully underwater.
-    const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->has_husk) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
     if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
@@ -797,7 +797,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     // piece model's bound radius, non-decorations only; the presenter's light
     // pool renders it (renderer/light_scene.h)].
     if (!traits->is_decoration && traits->husk_piece_bound_radius > 0.0f) {
-        world.destruction.death_lights.push_back(DeathLightEvent{
+        world.out.destruction.death_lights.push_back(DeathLightEvent{
                 target.position, 2.0f * traits->husk_piece_bound_radius});
     }
     uint32_t mask = 0;
@@ -923,7 +923,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot (the AI
     // rows already snapshot net_saved_live_pose), then the unitType dispatch,
     // then the death sounds.]
-    const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
     const bool matched_row = unit_type == 1 || unit_type == 2 || unit_type == 3 ||
                              unit_type == 5 || unit_type == 6 || unit_type == 7 ||
@@ -957,7 +957,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
             mask = spawn_death_pieces(world, target);
             if (target.veh.slide_z > 0) target.veh.slide_z = 0;
             target.death_motion = DeathMotionMode::Static;
-            world.destruction.sounds.push_back(
+            world.out.destruction.sounds.push_back(
                     DestructionSoundEvent{"EXPLO_SHIP_TINY", target.position});
         }
         break;
@@ -976,7 +976,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
                     static_cast<float>(world.env.water_z) / io::kFp16One;
             for (const Vec3 &point : traits->bridge_dead_points) {
                 const Vec3 offset = rotate_authored_point(orientation, point);
-                world.destruction.effects.push_back(DestructionEffectEvent{
+                world.out.destruction.effects.push_back(DestructionEffectEvent{
                         "Effect_ShockWaterBrdg",
                         Vec3{target.position.x + offset.x,
                              target.position.y + offset.y, water_z},
@@ -991,16 +991,16 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     if (!matched_row) target.engine_flags &= ~kEntityFlagBuilding;
     // The second death entry clears the scar ring the same way
     // [orig: Scar_ClearEntriesByEntity @ 0x5ccec0 ahead of the Flags |= 6].
-    if (!was_husked) world.scars.clear_entity(target.handle);
+    if (!was_husked) world.out.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {
-        world.destruction.husk_swaps.push_back(
+        world.out.destruction.husk_swaps.push_back(
                 HuskSwapEvent{target.net_id, target.handle.packed, target.bms_id,
                               target.spawn_origin, target.item_id, mask,
                               target.position});
-        ++world.destruction.items_destroyed;
+        ++world.out.destruction.items_destroyed;
     }
     // The successful spawn applied the death vertical kick [orig: @ 0x493969
     // — the key is the def TYPE word
@@ -1014,7 +1014,7 @@ int32_t item_bullet_damage_gate(const World &world, const Entity &target,
                                 int32_t damage, int32_t penetration_impact) {
     // [orig: Projectile_ProcessDamageOnTarget @ 0x4e7fb0 zeroing gates]
     if ((target.engine_flags & kEntityFlagIndestructible) != 0) return 0; // @ 0x4e7ff6
-    const ItemDeathTraits *traits = world.item_death_traits.get(target.item_id);
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits != nullptr) {
         if (traits->armor_impact == -1) return 0;                 // @ 0x4e8019
         if (penetration_impact < traits->armor_impact) return 0;  // @ 0x4e802a
@@ -1058,7 +1058,7 @@ void destruction_tick_dead_items(World &world,
             Entity *e = world.registry.get(EntityHandle::make(pool, static_cast<int>(s)));
             if (e == nullptr) continue;
             if ((e->engine_flags & kEntityFlagHusk) == 0) continue;
-            const ItemDeathTraits *traits = world.item_death_traits.get(e->item_id);
+            const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
             // The wreck-fire random crackle (S12b), one roll per burning wreck
             // per tick on the engine PRNG stream — the draw is consumed BEFORE
             // the water gate, retail's evaluation order. The sound rides the
@@ -1163,9 +1163,9 @@ void destruction_tick_dead_items(World &world,
                     events.effects.push_back(DestructionEffectEvent{
                             "Effect_HeloGroundHit", e->position,
                             Vec3{0.0f, 0.0f, 1.0f}});
-                    world.terrain_scorches.emit_standard(
+                    world.out.terrain_scorches.emit_standard(
                             x_q16, y_q16, 7, world.logic_tick);
-                    if (world.logic_authority) {
+                    if (world.rules.logic_authority) {
                         const float radius =
                                 traits != nullptr && traits->kz != 0.0f
                                 ? traits->kz
@@ -1281,7 +1281,7 @@ void destruction_tick_dead_items(World &world,
                 events.effects.push_back(DestructionEffectEvent{
                         "Effect_MedSplash", Vec3{new_x, new_y, water_height},
                         Vec3{0.0f, 0.0f, 1.0f}});
-                world.destruction.sounds.push_back(DestructionSoundEvent{
+                world.out.destruction.sounds.push_back(DestructionSoundEvent{
                         "IMP_DEBLRG_WATER",
                         Vec3{new_x, new_y, water_height}});
             }
@@ -1305,7 +1305,7 @@ void destruction_tick_dead_items(World &world,
                     // integrated pose committed at @0x49421C.
                     // [orig: ground-entity test @0x49414E; scorch 7 call
                     // @0x49416B..0x494179]
-                    world.terrain_scorches.emit_standard(
+                    world.out.terrain_scorches.emit_standard(
                             to_fixed(e->position.x), to_fixed(e->position.y),
                             7, world.logic_tick);
                 } else {
@@ -1319,9 +1319,9 @@ void destruction_tick_dead_items(World &world,
                 // @ 0x4941be, r = def kz ?: boundRadius]; generic items
                 // (0x461d30) land silently.
                 if (routed_falling) {
-                    world.destruction.sounds.push_back(
+                    world.out.destruction.sounds.push_back(
                             DestructionSoundEvent{"IMP_VCL_DROP", e->position});
-                    if (world.logic_authority) {
+                    if (world.rules.logic_authority) {
                         const float radius =
                                 (traits != nullptr && traits->kz > 0.0f)
                                 ? traits->kz
@@ -1429,7 +1429,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
             // call @0x492FE7]
             p.pos.z = ground;
             if ((p.flags & 0x2u) == 0) {
-                world.terrain_scorches.emit_standard(
+                world.out.terrain_scorches.emit_standard(
                         to_fixed(p.pos.x), to_fixed(p.pos.y),
                         7, world.logic_tick);
             }

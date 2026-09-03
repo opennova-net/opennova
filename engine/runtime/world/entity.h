@@ -920,7 +920,7 @@ struct Entity {
 // facts the engine derives from them at spawn (the items.def trait sweep,
 // simassets/item_traits.cpp) and again when a tool overrides one entity's words
 // (EntityCommands::set_entity_item_attrib). Per-item caches keyed by item id
-// (world.item_death_traits, vehicle_traits) are the sweep's alone.
+// (world.tables.item_death_traits, vehicle_traits) are the sweep's alone.
 // [orig: Entity_InitFromItemDef @0x49e550 — the def+84/+88 copies; the AS zone
 //  gates @0x4a2de0 / @0x4fe110 (ChangeTeam / SpawnPoint); the AIData gate
 //  @0x433327; LeaveCorpse @0x4b9e54]

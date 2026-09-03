@@ -1440,7 +1440,7 @@ void test_proximity_tables_use_host_bound_radius() {
 
     VehicleTraits vehicle_traits;
     vehicle_traits.physics = 1;
-    world.vehicle_traits.set(vehicle_seed.item_id, vehicle_traits);
+    world.tables.vehicle_traits.set(vehicle_seed.item_id, vehicle_traits);
     cw.assign_entity(vehicle, tiny_model);
     cw.assign_entity(near_static, tiny_model);
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
@@ -2661,7 +2661,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     CHECK(vehicle.valid());
     VehicleTraits traits;
     traits.physics = 1;
-    world.vehicle_traits.set(vehicle_seed.item_id, traits);
+    world.tables.vehicle_traits.set(vehicle_seed.item_id, traits);
 
     auto spawn_static = [&](float y) {
         Entity seed;
@@ -2738,7 +2738,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     CHECK(hull.valid() && cannon.valid() && pintle.valid());
     VehicleTraits traits;
     traits.physics = 1;
-    world.vehicle_traits.set(900, traits);
+    world.tables.vehicle_traits.set(900, traits);
 
     // The cannon rides the hull (the 0x0D target -> groundEntity relation the
     // materializer lands); the pintle rides the cannon (a 2-hop chain).
@@ -4389,7 +4389,7 @@ void test_round_indestructible_organic_still_collides() {
     AmmoTableEntry ammo;
     ammo.valid = true;
     ammo.weight_in_grains = 875;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     LiveRound &round = world.round_sim.rounds[0];
     round.active = true;
@@ -4443,7 +4443,7 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     AmmoTableEntry ammo;
     ammo.valid = true;
     ammo.weight_in_grains = 875;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     LiveRound &round = world.round_sim.rounds[0];
     round.active = true;
@@ -4766,9 +4766,9 @@ void test_projectile_trace_authority_radius_and_damage_gates() {
 
     Entity *shooter = world.registry.get(oh);
     shooter->flags |= 0x100u;
-    world.mp_session = true;
-    world.projectile_authority = true;
-    world.fat_bullets = true;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = true;
+    world.rules.fat_bullets = true;
     world.cached.local_player = th; // owner is a remote player on this authority
     hit = cw.trace_projectile(world, q);
     CHECK(hit.hit_class == ProjectileHitClass::Person);

@@ -312,7 +312,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // cbik -> the light solve @0x479600 (call @0x486672).
     enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
     ContactSolveKind solve_kind = ContactSolveKind::None;
-    if (world.terrain != nullptr) {
+    if (world.tables.terrain != nullptr) {
         if (traits.family == VehicleFamily::Ground &&
             ground_contact_solve_active(traits))
             solve_kind = ContactSolveKind::Tracked;
@@ -652,11 +652,11 @@ if (traits.family != VehicleFamily::Bike &&
         } else if (solve_kind == ContactSolveKind::Light) {
             light_contact_solve(world, veh, traits, m, prev[0], prev[1],
                                 px, py, pz);
-        } else if (world.terrain != nullptr) {
+        } else if (world.tables.terrain != nullptr) {
             const int32_t pos3[3] = {px, py, pz};
             const GroundClearance clearance{};
             const int32_t ground =
-                    calc_average_ground_height(*world.terrain, pos3, 0, clearance);
+                    calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
             if (ground != INT32_MIN) {
                 if (pz <= ground) {
                     pz = ground;
@@ -903,11 +903,11 @@ namespace detail {
 int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
                            int32_t r, int32_t soft, int32_t hard,
                            PlatProbeForce &out) {
-    if (world.terrain == nullptr) return 0;
+    if (world.tables.terrain == nullptr) return 0;
     const GroundClearance clearance{};
     auto sample = [&](int32_t sx, int32_t sy) {
         const int32_t p3[3] = {sx, sy, Z};
-        return calc_average_ground_height(*world.terrain, p3, 0, clearance);
+        return calc_average_ground_height(*world.tables.terrain, p3, 0, clearance);
     };
     const int32_t h_xm = sample(X - r, Y), h_xp = sample(X + r, Y);
     const int32_t h_ym = sample(X, Y - r), h_yp = sample(X, Y + r);
@@ -1196,7 +1196,7 @@ void watercraft_platform_solve(World &world, Entity &veh,
         //  `dest[6] = Env_WaterHeightFixed`, then
         //  Server_SendOverlayActionToAlive @0x50a1b0]
         if (!m.plat_afloat) {
-            world.water_crossings.add(
+            world.out.water_crossings.add(
                     to_fixed(veh.position.x), to_fixed(veh.position.y), W,
                     /*airborne=*/(veh.flags & kEntityFlagInAir) != 0);
         }
@@ -1444,7 +1444,7 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
     Entity::VehicleMotorState &m = veh.veh;
     bool afloat = false;
     if (world.env.water_z != 0) {
-        if (world.terrain == nullptr) {
+        if (world.tables.terrain == nullptr) {
             afloat = true;
         } else {
             const int32_t pos[3] = {to_fixed(veh.position.x),
@@ -1452,7 +1452,7 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
                                     to_fixed(veh.position.z)};
             const GroundClearance clearance{};
             const int32_t ground = calc_average_ground_height(
-                    *world.terrain, pos, 0, clearance);
+                    *world.tables.terrain, pos, 0, clearance);
             afloat = ground == INT32_MIN || ground < world.env.water_z;
         }
     }
@@ -1679,15 +1679,15 @@ static void watercraft_motor_core(World &world, Entity &veh,
         } else {
             afloat = false;
             int32_t ground_here = INT32_MIN;
-            if (world.terrain != nullptr) {
+            if (world.tables.terrain != nullptr) {
                 const int32_t pos3[3] = {px, py, pz};
                 const GroundClearance clearance{};
                 ground_here =
-                        calc_average_ground_height(*world.terrain, pos3, 0, clearance);
+                        calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
             }
             if (world.env.water_z != 0 && ground_here != INT32_MIN)
                 afloat = ground_here < world.env.water_z;
-            else if (world.env.water_z != 0 && world.terrain == nullptr)
+            else if (world.env.water_z != 0 && world.tables.terrain == nullptr)
                 afloat = true; // headless/no-terrain world with water: float
         }
         if (!afloat) {
@@ -1704,11 +1704,11 @@ static void watercraft_motor_core(World &world, Entity &veh,
         // position [orig: Terrain_SampleHeightBilinear(pos + vel)
         // @0x48EC19..0x48EC2D] — radius 0 with default clearance collapses
         // calc_average_ground_height to exactly that center-only column.
-        if (world.terrain != nullptr && world.env.water_z != 0) {
+        if (world.tables.terrain != nullptr && world.env.water_z != 0) {
             const int32_t ahead3[3] = {px + m.vel_x, py + m.vel_y, pz};
             const GroundClearance clearance{};
             const int32_t ground =
-                    calc_average_ground_height(*world.terrain, ahead3, 0, clearance);
+                    calc_average_ground_height(*world.tables.terrain, ahead3, 0, clearance);
             if (ground != INT32_MIN && ground >= world.env.water_z) {
                 m.vel_x -= (m.vel_x + 4) >> 3;
                 m.vel_y -= (m.vel_y + 4) >> 3;

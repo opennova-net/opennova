@@ -1899,10 +1899,10 @@ bool run_roundtrip() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
-	world.subgoals.won = 0x12u;
-	world.subgoals.lost = 0x24u;
-	world.subgoals.show_win = 0x48u;
-	world.subgoals.show_lose = 0x90u;
+	world.script.subgoals.won = 0x12u;
+	world.script.subgoals.lost = 0x24u;
+	world.script.subgoals.show_win = 0x48u;
+	world.script.subgoals.show_lose = 0x90u;
 	ctx.world = &world;
 	// The host's own local player (sets cached.local_player, which apply_player_intent refuses to snap).
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
@@ -2256,10 +2256,10 @@ bool run_roundtrip() {
 	            "client ClientState anchor == joiner's post-SNAP position (0x0A folded)")) return false;
 	if (!expect(client.state().frames_applied >= 1, "client folded at least one 0x0A frame")) return false;
 	if (!expect(client.state().objective_updates_applied == 1 &&
-	                    client.state().objective_won == world.subgoals.won &&
-	                    client.state().objective_lost == world.subgoals.lost &&
-	                    client.state().objective_show_win == world.subgoals.show_win &&
-	                    client.state().objective_show_lose == world.subgoals.show_lose,
+	                    client.state().objective_won == world.script.subgoals.won &&
+	                    client.state().objective_lost == world.script.subgoals.lost &&
+	                    client.state().objective_show_win == world.script.subgoals.show_win &&
+	                    client.state().objective_show_lose == world.script.subgoals.show_lose,
 	            "objective Co-op frame folds all four authoritative subgoal masks")) return false;
 
 	// Partial 0x0A decoding is intentionally useful for entity presentation, but a

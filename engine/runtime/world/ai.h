@@ -265,7 +265,7 @@ struct AiProfile {
     int32_t fire_interval_b = 0;  // +156: secondary fire interval (word +210 gate)
     // The two .aip weapon def blocks the fire-transform solver reads
     // (profile+120 primary / +152 secondary; engine/formats/aip WeaponBlock).
-    // ammo_index is the world.ammo row resolved from the authored weapon NAME
+    // ammo_index is the world.tables.ammo row resolved from the authored weapon NAME
     // at the item-traits sweep (-1 = unresolved -> the leg cannot fire), the
     // sibling of the D-AI-5 infantry seed. [orig: AIProfile_ParseProperty
     // "primary_weap" -> AmmoDef_LookupByName -> profile+148 @0x45e0xx]
@@ -275,7 +275,7 @@ struct AiProfile {
         uint32_t flags = 0;       // block+16: aip::kWeapon* mask
         int32_t facing_bam = 0;   // block+20: yaw bias
         int32_t pitch_bam = 0;    // block+24: pitch bias
-        int32_t ammo_index = -1;  // resolved world.ammo row for block+28's name
+        int32_t ammo_index = -1;  // resolved world.tables.ammo row for block+28's name
         std::string ammo_name;    // authored "*_weap" value, pre-resolution
     };
     WeaponFire fire_a;
@@ -288,7 +288,7 @@ struct AiProfile {
     // One ammo id + clip stands in for the four anim-fire weapon bytes (+0x358..0x35B —
     // JO riflemen author all four = the rifle round) until the block-copy writer is
     // witnessed. -1 = unarmed (the pass never fires).
-    int32_t ammo_primary = -1;    // world.ammo index [orig: items.def ammo_closeattack family]
+    int32_t ammo_primary = -1;    // world.tables.ammo index [orig: items.def ammo_closeattack family]
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
     // Indices into world.sound_profiles (the def's sound_profile pair, resolved
     // at the host's item-traits sweep; -1 = unresolved -> the table's
@@ -727,7 +727,7 @@ public:
 
     // ---- P2: GROUND combat + targeting ----
     std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops (trace;
-                                           // the APPLY now writes world.relations — D-AI-3)
+                                           // the APPLY now writes world.script.relations — D-AI-3)
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
     uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]

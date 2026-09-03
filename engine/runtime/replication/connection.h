@@ -99,7 +99,7 @@ struct Connection {
 	std::array<uint16_t, 4> tracked_handle{{0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}};
 	std::array<int32_t, 4> tracked_score{{0, 0, 0, 0}};
 
-	// Per-connection round-event watermark: the newest world.rounds sequence already swept
+	// Per-connection round-event watermark: the newest world.out.rounds sequence already swept
 	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
 	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk
 	// until the player is armed]. Armed on the first in-match emit at the CURRENT ring sequence,

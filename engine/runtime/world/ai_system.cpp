@@ -376,7 +376,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (victim_entity != nullptr &&
                 (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
                 victim->slot.bytes()[AiSlot::kAlertByte] = 2;
-                world.relations.group(victim_entity->group_id).alert =
+                world.script.relations.group(victim_entity->group_id).alert =
                         TriggerRelations::kAlertRed;
             }
             // Self-damage does not stamp a reaction or attacker. Retail tests the
@@ -493,7 +493,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
-                    ent != nullptr ? world.vehicle_traits.get(ent->item_id) : nullptr;
+                    ent != nullptr ? world.tables.vehicle_traits.get(ent->item_id) : nullptr;
             const bool motor_driven = vt != nullptr &&
                     (vt->physics != 0 ||
                      vehicle_family_uses_direct_air_mover(vt->family));
@@ -516,11 +516,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
     // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
     // authority drive gates @0x48b0ff / @0x48DF8C]
-    if (is_authority && !world.vehicle_traits.empty()) {
+    if (is_authority && !world.tables.vehicle_traits.empty()) {
         devtools::ProfileLap vehicle_lap(world.profile);
         vehicle_pass_handles_.clear();
         world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            const VehicleTraits *traits = world.tables.vehicle_traits.get(e.item_id);
             // Ground/water rows are selector-gated. Direct CHel/cpln rows are
             // admitted regardless of the selector — they branch to the shared
             // aircraft mover below, never through tick_vehicle_motor.
@@ -533,7 +533,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         for (const EntityHandle h : vehicle_pass_handles_) {
             Entity *veh = world.registry.get(h);
             if (veh == nullptr) continue;
-            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
+            const VehicleTraits *traits = world.tables.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
             // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
             // stamps every mover carries; rider deltas read (current - saved)].
@@ -669,10 +669,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // this path; an explicit replicated collision bit can replace `false` later.
     // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
     // @0x48d181..0x48d1c4]
-    if (!is_authority && !world.vehicle_traits.empty()) {
+    if (!is_authority && !world.tables.vehicle_traits.empty()) {
         vehicle_pass_handles_.clear();
         world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            const VehicleTraits *traits = world.tables.vehicle_traits.get(e.item_id);
             if (traits == nullptr) return;
             // Ground/water/bike rows retain their selector gate. CHel/cpln
             // dispatch directly and therefore remain eligible at physics=0.
@@ -683,7 +683,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         for (const EntityHandle h : vehicle_pass_handles_) {
             Entity *veh = world.registry.get(h);
             if (veh == nullptr) continue;
-            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
+            const VehicleTraits *traits = world.tables.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
             // Mover-entry savedLivePose, stamped BEFORE the prediction gates
             // so a frozen/parked hull reads as zero rider delta — retail
@@ -761,13 +761,13 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // here as well would run one slot twice per frame. Remote players and
         // NPC gunners remain owned by this global world pump.
         // [orig: one WeaponAction_ProcessAllEntities walk @0x542690]
-        if (world.external_local_mounted_weapon_pump &&
+        if (world.rules.external_local_mounted_weapon_pump &&
             owner->handle == world.cached.local_player)
             continue;
         AiEntity *gunner = for_handle(owner->handle);
         if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) continue;
         const WeaponTableEntry *weapon =
-                world.weapons.by_index(mount->primary_weapon_slot_adm);
+                world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
         if (weapon == nullptr || weapon->ammo_index < 0) continue;
 
         WeaponFsmInputs inputs;

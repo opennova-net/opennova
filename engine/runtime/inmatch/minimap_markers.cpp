@@ -53,8 +53,8 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
             // @0x5a49e0 -- the team gate @0x5a4ac6/@0x5a4acf,
             // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3].
             medic = local_player != nullptr && entity->team == local_player->team &&
-                            world->class_has_attribute(entity->player_class,
-                                                       world::World::kCharAttrMedic)
+                            world->tables.class_has_attribute(entity->player_class,
+                                                       world::MissionTables::kCharAttrMedic)
                         ? 1
                         : 0;
         } else {
@@ -124,8 +124,8 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
     m.floor_px = policy.floor_px;
     // The restored local row is a local-team player by definition; its medic
     // bit is its own class attribute.
-    m.medic = in.world->class_has_attribute(local_player->player_class,
-                                            world::World::kCharAttrMedic)
+    m.medic = in.world->tables.class_has_attribute(local_player->player_class,
+                                            world::MissionTables::kCharAttrMedic)
                   ? 1
                   : 0;
     out.push_back(m);

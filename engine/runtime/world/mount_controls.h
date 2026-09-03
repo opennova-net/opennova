@@ -48,7 +48,7 @@ inline bool world_model_heat_glow_for(
 			seat.bone_index == 0 || seat.occupant != child->handle)
 		return false;
 	const WeaponTableEntry *weapon =
-			world.weapons.by_index(carrier.primary_weapon_slot_adm);
+			world.tables.weapons.by_index(carrier.primary_weapon_slot_adm);
 	if (weapon == nullptr) return false;
 	const int32_t tick = static_cast<int32_t>(world.logic_tick);
 	r_heat_glow = weapon_slot_world_heat_glow(
@@ -126,7 +126,7 @@ inline bool emplaced_weapon_controls_for(
 			mount.emplacement_right_limit_bam,
 			mount.emplacement_left_limit_bam,
 			mount.primary_weapon_slot_adm != kAdmSlotNone
-					? world.weapons.by_index(mount.primary_weapon_slot_adm)
+					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
 					: nullptr);
 	if (window.per_seat) {
 		emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,

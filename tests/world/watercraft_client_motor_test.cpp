@@ -306,7 +306,7 @@ bool run_bike_family_deltas() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 
 	// Steer hard right while flying: the live steer chain (servo -> wheel rate)
 	// must keep turning the airborne bike; speed is held by the bike's own
@@ -346,7 +346,7 @@ bool run_bike_family_deltas() {
 	g.traits.acceleration = 512;
 	g.traits.deceleration = 512;
 	g.world.env.water_z = 0;
-	g.world.terrain = &field;
+	g.world.tables.terrain = &field;
 	w::Entity *gveh = g.world.registry.get(g.boat);
 	stage(*gveh, x0, y0, z0, 0, 8192, steer);
 	w::ground_client_tick(g.world, *gveh, g.traits);
@@ -401,7 +401,7 @@ bool run_ground_parked_rests_at_wheel_clearance() {
 		Rig r;
 		make_rig(r);
 		r.world.env.water_z = 0; // dry land
-		r.world.terrain = &field;
+		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Ground;
 		r.traits.player_speed = 20972;
 		r.traits.acceleration = 512;
@@ -491,7 +491,7 @@ bool run_tank_parked_rests_at_wheel_clearance() {
 		Rig r;
 		make_rig(r);
 		r.world.env.water_z = 0; // dry land
-		r.world.terrain = &field;
+		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Tank;
 		r.traits.player_speed = 15000;
 		r.traits.acceleration = 512;
@@ -571,7 +571,7 @@ bool run_bike_parked_rests_at_wheel_clearance() {
 		Rig r;
 		make_rig(r);
 		r.world.env.water_z = 0;
-		r.world.terrain = &field;
+		r.world.tables.terrain = &field;
 		r.traits.family = w::VehicleFamily::Bike;
 		r.traits.player_speed = 20972;
 		r.traits.acceleration = 512;
@@ -648,7 +648,7 @@ bool run_tank_family_deltas() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 
 	const int32_t x0 = w::to_fixed(100.0f);
 	const int32_t y0 = w::to_fixed(200.0f);
@@ -880,8 +880,8 @@ bool run_prior_euler_drives_thrust_and_beach_stop() {
 	}
 	pitched.world.env.water_z = 1 << 16;
 	level.world.env.water_z = 1 << 16;
-	pitched.world.terrain = &shore.field;
-	level.world.terrain = &shore.field;
+	pitched.world.tables.terrain = &shore.field;
+	level.world.tables.terrain = &shore.field;
 	pitched.world.registry.get(pitched.boat)->position = {100.0f, 0.0f, 10.0f};
 	level.world.registry.get(level.boat)->position = {100.0f, 0.0f, 10.0f};
 	pitched.world.registry.get(pitched.boat)->veh.air_pitch_bam =
@@ -930,7 +930,7 @@ bool run_platform_solve_precedes_yaw() {
 	for (Rig *r : {&actual, &staged, &expected, &wrong}) {
 		make_rig(*r);
 		r->world.env.water_z = 0;
-		r->world.terrain = &ramp.field;
+		r->world.tables.terrain = &ramp.field;
 		w::Entity *boat = r->world.registry.get(r->boat);
 		boat->position = {100.0f, 0.0f, 6.5f};
 		prime_prediction_tick(*boat, 0);
@@ -1299,7 +1299,7 @@ bool run_aircraft_contact_lands_and_conforms() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 	w::Entity *heli = r.world.registry.get(r.boat);
 	if (!expect(heli != nullptr, "heli spawned")) return false;
 	// Start airborne well above ground 0 and descend.
@@ -1350,7 +1350,7 @@ bool run_aircraft_contact_conforms_to_ramp() {
 	set_zodiac_boxes(r.traits);
 	r.world.env.water_z = 0;
 	RampField ramp(true);
-	r.world.terrain = &ramp.field;
+	r.world.tables.terrain = &ramp.field;
 	w::Entity *heli = r.world.registry.get(r.boat);
 	// Terrain at x=100 is 100/16 = 6.25 m; start above it and descend.
 	heli->position.z = 12.0f;
@@ -1449,7 +1449,7 @@ bool run_aircraft_steep_slope_sheds_and_shoves() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 	w::Entity *heli = r.world.registry.get(r.boat);
 	// Terrain at x=10 is 30 u; sit the hull against the face.
 	heli->position.x = 10.0f;
@@ -1496,7 +1496,7 @@ bool run_aircraft_contact_conforms_to_side_slope() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 	w::Entity *heli = r.world.registry.get(r.boat);
 	// Terrain at y=200 is 12.5 u; start above and descend.
 	heli->position.z = 18.0f;
@@ -1556,7 +1556,7 @@ bool run_aircraft_sleep_fast_path() {
 	field.layout.sector_grid = sector_grid.data();
 	field.layout.origin_x = 0;
 	field.layout.origin_y = 0;
-	r.world.terrain = &field;
+	r.world.tables.terrain = &field;
 	w::Entity *heli = r.world.registry.get(r.boat);
 	heli->position.z = 0.5f; // the landed chassis height over ground 0
 	heli->flags &= ~w::kEntityFlagInAir;
@@ -1685,12 +1685,12 @@ bool run_physicsless_air_dispatches_directly() {
 	air_traits.acceleration = 80;
 	air_traits.turn_rate = 0x600000;
 	air_traits.climb_speed = 10255;
-	world.vehicle_traits.set(6001, air_traits);
+	world.tables.vehicle_traits.set(6001, air_traits);
 	w::VehicleTraits ground_traits;
 	ground_traits.physics = 0;
 	ground_traits.family = w::VehicleFamily::Ground;
 	ground_traits.player_speed = 26214;
-	world.vehicle_traits.set(6002, ground_traits);
+	world.tables.vehicle_traits.set(6002, ground_traits);
 
 	w::Entity *air = world.registry.get(air_h);
 	w::Entity *ground = world.registry.get(ground_h);
@@ -1767,7 +1767,7 @@ bool run_client_family_sound_dispatch_scope() {
 		traits.turn_rate = 0x600000;
 		traits.climb_speed = 10255;
 		traits.sound_loops[0] = idle_set;
-		world.vehicle_traits.set(item_id, traits);
+		world.tables.vehicle_traits.set(item_id, traits);
 	};
 	install_traits(6101, w::VehicleFamily::Helicopter, 0, "AIR_HELI_IDLE");
 	install_traits(6102, w::VehicleFamily::Plane, 0, "AIR_PLANE_IDLE");
@@ -1796,7 +1796,7 @@ bool run_client_family_sound_dispatch_scope() {
 	bool saw_ground = false;
 	bool saw_water = false;
 	bool saw_air = false;
-	for (const w::SoundEmitterEvent &event : world.sound_emitters.pending()) {
+	for (const w::SoundEmitterEvent &event : world.out.sound_emitters.pending()) {
 		if (event.source_handle == ground_h.packed && event.lane == 0 &&
 		    event.set_name == "GROUND_IDLE") saw_ground = true;
 		if (event.source_handle == water_h.packed && event.lane == 0 &&

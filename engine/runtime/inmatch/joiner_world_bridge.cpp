@@ -183,7 +183,7 @@ void JoinerWorldBridge::wire_frame_providers(
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B7CF4;
 	// Entity_UpdateInfantryAI @0x4BF7FA; Entity_MovementCollisionResolver tail
 	// @0x4B3D6E..0x4B3DA9]
-	ctx.runtime.view().set_remote_motion_terrain(ctx.world.terrain);
+	ctx.runtime.view().set_remote_motion_terrain(ctx.world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
 	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
 	// water in this world).
@@ -434,10 +434,10 @@ JoinerWorldBridge::FrameSignals JoinerWorldBridge::run_client_net_frame(
 			ctx.runtime.state().objective_updates_applied != objective_updates_before;
 	if (decoded.objectives) {
 		const replication::ClientState &client = ctx.runtime.state();
-		ctx.world.subgoals.won = client.objective_won;
-		ctx.world.subgoals.lost = client.objective_lost;
-		ctx.world.subgoals.show_win = client.objective_show_win;
-		ctx.world.subgoals.show_lose = client.objective_show_lose;
+		ctx.world.script.subgoals.won = client.objective_won;
+		ctx.world.script.subgoals.lost = client.objective_lost;
+		ctx.world.script.subgoals.show_win = client.objective_show_win;
+		ctx.world.script.subgoals.show_lose = client.objective_show_lose;
 	}
 	return decoded;
 }
@@ -541,7 +541,7 @@ void JoinerWorldBridge::spawn_and_arm_local_player(
 					if (ctx.weapon.presentation_pending) {
 						ctx.weapon.presentation_pending = false;
 						const world::WeaponTableEntry *def =
-								ctx.world.weapons.by_index(
+								ctx.world.tables.weapons.by_index(
 										static_cast<uint8_t>(slot->adm_index));
 						world::WeaponPresentationEvent event;
 						event.tick = ctx.world.logic_tick;
@@ -864,7 +864,7 @@ void JoinerWorldBridge::mirror_mission_entities(const PumpContext &ctx) {
 		// after the tick (mirror_predicted_vehicles).
 		if (pool == 1 && es.cls == EntityClass::Vehicle) {
 			const world::VehicleTraits *traits =
-					ctx.world.vehicle_traits.get(local->item_id);
+					ctx.world.tables.vehicle_traits.get(local->item_id);
 			if (traits != nullptr) {
 				es.net_world_mover = true;
 				// The row-side fallback chase selects its constant set by
@@ -987,7 +987,7 @@ void JoinerWorldBridge::mirror_predicted_vehicles(const PumpContext &ctx) {
 		// pose, not a validity sentinel. A boxless ground row's motor never
 		// advances the seeded wire attitude, so the mirror is stable there.
 		const world::VehicleTraits *traits =
-				ctx.world.vehicle_traits.get(local->item_id);
+				ctx.world.tables.vehicle_traits.get(local->item_id);
 		const bool owns_attitude = traits != nullptr;
 		if (owns_attitude) {
 			es.pitch_bam = local->veh.air_pitch_bam;
@@ -1128,7 +1128,7 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 		if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
 			continue;
 		const world::WeaponTableEntry *adm =
-				ctx.world.weapons.by_index(ev.adm_index);
+				ctx.world.tables.weapons.by_index(ev.adm_index);
 		if (adm == nullptr || adm->ammo_index < 0) continue;
 		world::RoundSpawnParams round;
 		world::RoundSourceState source;
@@ -1226,7 +1226,7 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 		world::WeaponInventorySlot *reloaded = ctx.inventory.slot(combo);
 		const world::WeaponTableEntry *def =
 				(reloaded != nullptr && reloaded->adm_index >= 0)
-						? ctx.world.weapons.by_index(
+						? ctx.world.tables.weapons.by_index(
 								static_cast<uint8_t>(reloaded->adm_index))
 						: nullptr;
 		if (reloaded == nullptr || def == nullptr) continue;
@@ -1236,7 +1236,7 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 		// draw a full clip. A late echo still reloads that exact slot after a switch;
 		// only the currently active personal slot has an FSM mirror to update here.
 		world::weapon_inventory_reload_slot(
-				ctx.world.weapons, ctx.inventory, combo);
+				ctx.world.tables.weapons, ctx.inventory, combo);
 		if (ctx.weapon.active && !ctx.weapon.usegun_slot_active &&
 				ctx.inventory.equipped_combo >= 0) {
 			world::WeaponSlotState &active_slot =
@@ -1245,7 +1245,7 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 					ctx.inventory.slot(ctx.inventory.equipped_combo);
 			const world::WeaponTableEntry *equipped_def =
 					(equipped != nullptr && equipped->adm_index >= 0)
-							? ctx.world.weapons.by_index(
+							? ctx.world.tables.weapons.by_index(
 									static_cast<uint8_t>(equipped->adm_index))
 							: nullptr;
 			if (equipped_def != nullptr) {

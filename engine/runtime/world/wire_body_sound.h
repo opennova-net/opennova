@@ -12,7 +12,7 @@ namespace opennova::world {
 class World;
 
 // Consume the authored trigger words a wire body's clip playhead crossed and
-// queue the witnessed slot sounds into world.slot_sounds. One word per
+// queue the witnessed slot sounds into world.out.slot_sounds. One word per
 // authored clip frame ENTERED, and inside each word the foley block precedes
 // the foot block [orig: org1 foley @0x4bf169-0x4bf23e then feet
 // @0x4bf23e-0x4bf2b0; org2 foley @0x4b76f1-0x4b77c6 then feet

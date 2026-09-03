@@ -88,7 +88,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
                     // candidate == g_local_player_entity && dword_24C1930 & 0x800
                     // @0x467155].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
-                    if (h == world.cached.local_player && world.ai_rules_skip_local_player)
+                    if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
                         continue;
                 } else {
                     // The class-0 pool-1 leg (and an inherited case-3 walk): unbrained
@@ -259,7 +259,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
 // g_SeesMatrix*/g_TargetedMatrix* bases. [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2;
 // world-wac-ai-re §16.4/§17.2; matrix map docs/mission/bms-event-runtime-re.md §3a]
 void AiSystem::apply_engage_relations(World &world, const Entity &self, const Entity &target) {
-    TriggerRelations &rel = world.relations;
+    TriggerRelations &rel = world.script.relations;
     const int sg = self.group_id, ss = self.net_id;
     const int tg = target.group_id, ts = target.net_id;
     rel.set_group_group(TriggerRelations::kSees, sg, tg);       // [orig: @0x452a40 GG]
@@ -464,7 +464,7 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t radius) {
 // effect (g_ammoDefTable +64/+68) are host-presentation, deferred.]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
-    if (world.ammo.by_index(ammo_index) == nullptr) return false;
+    if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
     ++fire_shot_seq; // [orig: word_B7C670 round-trips into the ring +28 word]
 
     RoundEvent ev;
@@ -477,12 +477,12 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     ev.shot_seq = fire_shot_seq;
     const Entity *shooter = world.registry.get(e.handle);
     const uint8_t adm_index = shooter != nullptr &&
-                                      world.weapons.by_index(
+                                      world.tables.weapons.by_index(
                                               shooter->equipped_adm_index) != nullptr
             ? shooter->equipped_adm_index
             : static_cast<uint8_t>(ammo_index & 0xFF);
     ev.adm_index = adm_index;
-    world.rounds.add(ev);
+    world.out.rounds.add(ev);
 
     RoundSpawnParams rp;
     rp.owner = e.handle;

@@ -54,7 +54,7 @@ void ClientReplicaPipeline::apply_end_round_header(
 	EndRoundHeader header;
 	// The retail client picks the form from `is_in_session && !(g_GameType &
 	// 0x10000)` [orig: NapiNPClientMsg_0x01D @0x43086c..0x430883]; the
-	// SP listen host's loopback replica stands in world.mp_session for
+	// SP listen host's loopback replica stands in world.rules.mp_session for
 	// is_in_session (see mp_session_).
 	if (!decode_end_round_header(body.data(), body.size(),
 			mp_session_ && (game_type_ & 0x10000u) == 0, header))

@@ -234,7 +234,7 @@ bool pull_round_board(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &
 void test_tdm_round_wire_and_linger() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = 0x10000u;
 	rules.score_limit = 1;
@@ -375,7 +375,7 @@ void test_tdm_round_wire_and_linger() {
 void test_dm_round_wire_named_header() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kDeathmatch;
 	rules.score_limit = 1;
@@ -447,7 +447,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 		w::World world;
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(2, 4);
-		world.mp_session = true;
+		world.rules.mp_session = true;
 		w::MatchRules rules;
 		rules.game_type = game_type;
 		rules.game_time_minutes = 1;
@@ -530,7 +530,7 @@ void test_aas_round_wire() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
@@ -570,7 +570,7 @@ void test_coop_script_producers_share_round_wire() {
 	auto run_case = [](uint32_t game_type_code, bool use_wac) {
 		w::World world;
 		world.registry.configure_pool(0, 4);
-		world.mp_session = true;
+		world.rules.mp_session = true;
 		w::MatchRules rules;
 		rules.game_type = game_type_code;
 		world.match.configure(rules);
@@ -641,7 +641,7 @@ void test_aas_events_use_spawn_registry_index() {
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = 0x10010u;
 	world.match.configure(rules);
@@ -717,7 +717,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
@@ -894,7 +894,7 @@ void test_flag_timeout_wire_transaction() {
 	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kFlagBall;
 	rules.max_score = 99;
@@ -1090,10 +1090,10 @@ int main() {
 		w::count_mission_units(world);
 		expect(world.kill_stats.enemy_unit_total == 2,
 		       "census counts team>=2 units with a unit-class byte only");
-		world.subgoals.win_text_ids[1] = 3;
-		world.subgoals.win_text_ids[2] = 7;
-		world.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
-		world.subgoals.win_text_ids[4] = 5;
+		world.script.subgoals.win_text_ids[1] = 3;
+		world.script.subgoals.win_text_ids[2] = 7;
+		world.script.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
+		world.script.subgoals.win_text_ids[4] = 5;
 		expect(w::count_defined_subgoals(world) == 2,
 		       "defined subgoals = the leading non-zero, non-0xFF run");
 	}
@@ -1106,7 +1106,7 @@ int main() {
 	expect(world.kill_stats.greenkills_by_player == 1, "the by-player bucket is untouched");
 
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
-	world.mission_attrib_flags = 0x40;
+	world.tables.mission_attrib_flags = 0x40;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
@@ -1115,18 +1115,18 @@ int main() {
 
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---
-	world.mission_attrib_flags = 0;
+	world.tables.mission_attrib_flags = 0;
 	push_death(world, player, red_person);
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");
 	expect(world.match.outcome().winner_team == 2, "auto-lose winner is team 2 (red)");
-	expect(world.effects.count("round_end") == 1, "one round_end host effect");
+	expect(world.out.effects.count("round_end") == 1, "one round_end host effect");
 	for (int i = 0; i < 700; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(!world.registry.get(player)->alive,
 	       "respawns hold once the round is over [orig: the gate check @0x519af6]");
 	world.process_round_end(1);
 	expect(world.match.outcome().winner_team == 2, "the latch ignores a second round end");
-	expect(world.effects.count("round_end") == 1, "no second round_end effect");
+	expect(world.out.effects.count("round_end") == 1, "no second round_end effect");
 
 	test_tdm_round_wire_and_linger();
 	test_dm_round_wire_named_header();

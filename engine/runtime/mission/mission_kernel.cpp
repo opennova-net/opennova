@@ -52,7 +52,7 @@ MissionKernel::MissionKernel() {
 	// with the live trigger/reload/scope inputs), so the world's global weapon
 	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
 	// per frame [orig: one WeaponAction_ProcessAllEntities walk @0x542690].
-	world.external_local_mounted_weapon_pump = true;
+	world.rules.external_local_mounted_weapon_pump = true;
 	world.profile = &profile;
 }
 
@@ -61,7 +61,7 @@ MissionKernel::~MissionKernel() {
 	// non-owning links before the members tear down in reverse order.
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
-	world.terrain = nullptr;
+	world.tables.terrain = nullptr;
 	world.ai.collision = nullptr;
 	world.ai.terrain = nullptr;
 	world.ai.root_motion = nullptr;
@@ -148,14 +148,14 @@ void MissionKernel::sync_water_plane() {
 
 void MissionKernel::wire_terrain() {
 	sync_water_plane();
-	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	world.tables.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	world.ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	world.ai.ground_clearance = w::GroundClearance{};
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	// The footstep surface pick reads the charmap through this view; the
 	// shell's apply_terrain_to_ai calls this and then re-layers its
 	// device-fed extras (placed tiles, sound profiles).
-	world.surface_map = terrain_store.surface_map();
+	world.tables.surface_map = terrain_store.surface_map();
 }
 
 void MissionKernel::wire_collision() {
@@ -197,7 +197,7 @@ bool MissionKernel::load_mission_into_world() {
 
 void MissionKernel::finish_load() {
 	events.load(mission.events, mission.triggers, mission.actions);
-	world.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
+	world.tables.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
 	// The net half stands its session up here — between the world wiring and
 	// the system registration, exactly where the SP listen host's bring-up
 	// sits inside the load (inmatch::listen_host::bringup)
@@ -314,7 +314,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.weapons = w::build_weapon_table(file,
+	world.tables.weapons = w::build_weapon_table(file,
 			table_index != nullptr ? table_index : asset_index());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
@@ -323,7 +323,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	// The authoritative side's own player spawned before this feed: re-stamp
 	// its equipped default now that WPN_M4AUTO resolves by name
 	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143).
-	const int m4 = world.weapons.index_of("WPN_M4AUTO");
+	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
 	if (m4 >= 0) {
 		std::vector<w::EntityHandle> handles;
 		world.registry.for_each([&](const w::Entity &e) {
@@ -354,9 +354,9 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefAmmoFile file = {};
 	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.ammo = w::build_ammo_table(file);
+	world.tables.ammo = w::build_ammo_table(file);
 	def_free_ammo(&file);
-	w::resolve_weapon_round_types(world.weapons, world.ammo);
+	w::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
 	w::local_loadout_sync_damage_classes(world, loadout);
 	ammo_ok = true;
 	return true;
@@ -687,13 +687,13 @@ void MissionKernel::tick_no_net() {
 void MissionKernel::tick_weather() {
 	w::WeatherTickEvents events;
 	world.weather.tick_sim(&world, events);
-	if (events.thunder_a) world.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
-	if (events.thunder_b) world.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
+	if (events.thunder_a) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
+	if (events.thunder_b) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
 	// A host without an audio presenter (the dedicated host) never drains
 	// the queue: keep it bounded, dropping the oldest.
 	constexpr size_t kWeatherSoundQueueCap = 32;
-	while (world.weather_sounds.size() > kWeatherSoundQueueCap) {
-		world.weather_sounds.erase(world.weather_sounds.begin());
+	while (world.out.weather_sounds.size() > kWeatherSoundQueueCap) {
+		world.out.weather_sounds.erase(world.out.weather_sounds.begin());
 	}
 	// The quake HARD-SETS the shake counter [orig: @ 0x57eb7d / @ 0x57ec29].
 	if (events.quake_shake_local) view.shake.counter = w::kShakeQuakeLevel;
@@ -803,7 +803,7 @@ bool MissionKernel::restore_baseline() {
 		if (w::Entity *player_row = world.registry.get(world.cached.local_player))
 			player_row->equipped_adm_index = saved_personal_adm;
 		weapon.active = false;
-		const w::WeaponTableEntry *saved_def = world.weapons.by_index(saved_personal_adm);
+		const w::WeaponTableEntry *saved_def = world.tables.weapons.by_index(saved_personal_adm);
 		weapon.start_in_switchto = saved_def != nullptr;
 		w::WeaponPresentationEvent event;
 		event.tick = world.logic_tick;
@@ -997,8 +997,8 @@ float MissionKernel::ground_height(float mission_x, float mission_y) const {
 // --- observation ------------------------------------------------------------
 
 std::vector<w::Effect> MissionKernel::drain_effects() {
-	std::vector<w::Effect> out = world.effects.entries();
-	world.effects.clear();
+	std::vector<w::Effect> out = world.out.effects.entries();
+	world.out.effects.clear();
 	return out;
 }
 

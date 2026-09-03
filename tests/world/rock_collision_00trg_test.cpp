@@ -208,7 +208,7 @@ int main() {
 	}
 	if (!expect(rig.has_local_player(), "the local player spawned at the start")) return 1;
 	if (!expect(rig.collision_attached > 0, "collision instances attached")) return 1;
-	const int ammo_index = rig.world.ammo.index_of(kAmmo);
+	const int ammo_index = rig.world.tables.ammo.index_of(kAmmo);
 	if (!expect(ammo_index >= 0, "ammo.def carries AMMO_M16_556MM")) return 1;
 
 	const w::AiEntity *pai = rig.player_ai();

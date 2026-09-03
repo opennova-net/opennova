@@ -54,7 +54,7 @@ struct Rig {
     int m4 = -1;
 
     Rig() {
-        WeaponTable &t = world.weapons;
+        WeaponTable &t = world.tables.weapons;
         t.ammo_class_names.emplace_back("");
         t.ammo_class_caps.push_back(0);
         WeaponTableEntry null_e;
@@ -78,7 +78,7 @@ std::vector<WeaponKitEntry> kit_of(const char *name, int32_t pri = -1,
 // mission chunks [orig: @ 0x40f694 -> the fseek pair @ 0x40f6b2/@ 0x40f6e1].
 void test_promotion_gate_skips_in_session() {
     Rig r;
-    r.world.mp_session = true;
+    r.world.rules.mp_session = true;
     CHECK(!local_loadout_promote_mission_rules(r.world, r.loadout,
             {{"WPN_AK47AUTO", 0}}, kit_of("WPN_M4AUTO", 3)));
     CHECK(!r.loadout.spawn_kit_set);
@@ -108,7 +108,7 @@ void test_accept_requested_ammo_and_banned_validation() {
             /*validate_banned=*/true));
     CHECK(r.inventory_valid);
     const WeaponTableEntry *def =
-            r.world.weapons.by_index(static_cast<uint8_t>(r.m4));
+            r.world.tables.weapons.by_index(static_cast<uint8_t>(r.m4));
     CHECK(def != nullptr &&
             r.inventory.pools[static_cast<size_t>(def->ammo_class_id)] == 90);
 

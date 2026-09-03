@@ -250,7 +250,7 @@ bool attach_to_vehicle_seat(World &world, EntityHandle player,
     if (occ->mounted)
         entity_detach_from_vehicle(world, player); // [orig: @0x435BCE]
     attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index);
-    world.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
+    world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
     return true;
 }
 
@@ -502,10 +502,10 @@ void collect_attach_labels(World &world, const Entity &player, bool armory_mode,
         label.world_pos = lifted;
         if (type == SeatType::Gunner && !cand.primary_weapon.empty()) {
             // [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d]
-            const int wi = world.weapons.index_of(cand.primary_weapon.c_str());
+            const int wi = world.tables.weapons.index_of(cand.primary_weapon.c_str());
             if (wi >= 0)
                 label.attach_text_key =
-                        world.weapons.entries[static_cast<size_t>(wi)].attach_text_id;
+                        world.tables.weapons.entries[static_cast<size_t>(wi)].attach_text_id;
         }
         out.push_back(label);
     };

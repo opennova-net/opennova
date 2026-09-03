@@ -1090,7 +1090,7 @@ public:
 			int p_viewport_w, int p_viewport_h);
 
 	// The sound-profile chain (engine: base/gameprofile/required_resources.c): feed SndProf.def text (VFS
-	// bytes) — parsed into world.sound_profiles now and re-applied on
+	// bytes) — parsed into world.tables.sound_profiles now and re-applied on
 	// reset_world; per-entity bindings resolve in the kernel boot's
 	// simassets::resolve_ai_weapons step.
 	void set_sound_profiles(const PackedByteArray &p_sndprof_text);

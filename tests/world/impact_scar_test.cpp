@@ -288,7 +288,7 @@ void test_add_entry() {
 	// the face gate, so the 128 entries are not spent on misses.
 	hit.face_index = -1;
 	CHECK(!scar_add_entry(world, hit, *target, 1), "a faceless hit takes no scar");
-	CHECK(world.scars.find(h) == nullptr, "and leases no ring");
+	CHECK(world.out.scars.find(h) == nullptr, "and leases no ring");
 	hit.face_index = 7;
 
 	// A scorch on a pool-1 vehicle: the entity ring, two draws — the SPIN
@@ -305,7 +305,7 @@ void test_add_entry() {
 		expect_state = probe.prng16_state;
 	}
 	CHECK(world.prng16_state == expect_state, "the scorch draws exactly two words");
-	const ScarRing *ring = world.scars.find(h);
+	const ScarRing *ring = world.out.scars.find(h);
 	CHECK(ring != nullptr && ring->cursor == 1, "one slot written in the entity ring");
 	if (ring != nullptr) {
 		const ScarSlot &s = ring->slots[0];
@@ -376,30 +376,30 @@ void test_add_entry() {
 	const EntityHandle bh = world.registry.spawn(2, b);
 	hit.geometry_entity = bh;
 	CHECK(scar_add_entry(world, hit, *world.registry.get(bh), 1), "a building scars");
-	CHECK(world.scars.find(bh) == nullptr, "a building leases no entity ring");
-	CHECK(world.scars.world_ring().cursor == 1, "it wrote the shared ring");
-	CHECK(world.scars.world_ring().slots[0].owner == bh, "with its owner");
-	CHECK(world.scars.world_ring().slots[0].building, "and the building byte");
+	CHECK(world.out.scars.find(bh) == nullptr, "a building leases no entity ring");
+	CHECK(world.out.scars.world_ring().cursor == 1, "it wrote the shared ring");
+	CHECK(world.out.scars.world_ring().slots[0].owner == bh, "with its owner");
+	CHECK(world.out.scars.world_ring().slots[0].building, "and the building byte");
 	Entity p;
 	p.kind = EntityKind::Organic;
 	p.item_type = 3;
 	const EntityHandle ph = world.registry.spawn(0, p);
 	hit.geometry_entity = ph;
 	CHECK(scar_add_entry(world, hit, *world.registry.get(ph), 1), "a person scars");
-	CHECK(world.scars.world_ring().cursor == 2, "in the shared ring");
-	CHECK(!world.scars.world_ring().slots[1].building, "not a building");
+	CHECK(world.out.scars.world_ring().cursor == 2, "in the shared ring");
+	CHECK(!world.out.scars.world_ring().slots[1].building, "not a building");
 	// Attrib 0x80 promotes a non-pool-1 owner to an entity ring.
 	Entity *person = world.registry.get(ph);
 	person->item_attrib |= kItemAttribScarEntityLocal;
 	CHECK(scar_add_entry(world, hit, *person, 1), "an attrib-0x80 def scars");
-	CHECK(world.scars.find(ph) != nullptr, "into its own ring");
+	CHECK(world.out.scars.find(ph) != nullptr, "into its own ring");
 
 	// Death clears the entity's ring AND its shared-ring slots.
-	world.scars.clear_entity(h);
-	CHECK(world.scars.find(h) == nullptr, "the ring is gone after the clear");
-	world.scars.clear_entity(bh);
-	CHECK(!world.scars.world_ring().slots[0].live, "the building's shared slot is dropped");
-	CHECK(world.scars.world_ring().slots[1].live, "the person's shared slot stays");
+	world.out.scars.clear_entity(h);
+	CHECK(world.out.scars.find(h) == nullptr, "the ring is gone after the clear");
+	world.out.scars.clear_entity(bh);
+	CHECK(!world.out.scars.world_ring().slots[0].live, "the building's shared slot is dropped");
+	CHECK(world.out.scars.world_ring().slots[1].live, "the person's shared slot stays");
 }
 
 } // namespace

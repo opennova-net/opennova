@@ -119,13 +119,13 @@ int main() {
         World w;
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
-        w.player_item_hp = 150; // the class-8 Player items.def hp, stamped by resolve_item_traits
-        w.player_item_type = 3;
-        w.player_item_attrib = 0x200u;
-        w.player_armor_impact = 7;
-        w.player_armor_kz = 9;
-        w.player_damage_reduc_pp = 0.1f;
-        w.player_damage_reduc_max = 0.25f;
+        w.tables.player.item_hp = 150; // the class-8 Player items.def hp, stamped by resolve_item_traits
+        w.tables.player.item_type = 3;
+        w.tables.player.item_attrib = 0x200u;
+        w.tables.player.armor_impact = 7;
+        w.tables.player.armor_kz = 9;
+        w.tables.player.damage_reduc_pp = 0.1f;
+        w.tables.player.damage_reduc_max = 0.25f;
         const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
@@ -148,10 +148,10 @@ int main() {
         World w;
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
-        w.player_has_item_def = true;
-        w.player_item_hp = 65535;       // low word 0xFFFF -> -1
-        w.player_armor_impact = 65546;  // low word 0x000A -> 10
-        w.player_armor_kz = 65535;      // low word 0xFFFF -> -1
+        w.tables.player.has_item_def = true;
+        w.tables.player.item_hp = 65535;       // low word 0xFFFF -> -1
+        w.tables.player.armor_impact = 65546;  // low word 0x000A -> 10
+        w.tables.player.armor_kz = 65535;      // low word 0xFFFF -> -1
         const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
@@ -164,7 +164,7 @@ int main() {
         World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
-        w.player_has_item_def = false;
+        w.tables.player.has_item_def = false;
         const EntityHandle h = spawn_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);

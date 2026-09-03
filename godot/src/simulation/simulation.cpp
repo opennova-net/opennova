@@ -148,8 +148,8 @@ void Simulation::reset_world() {
 	// process-scoped g_CharAttr outlives every mission, CharAttr_LoadFromDef
 	// @0x412140 runs once at boot; see docs/interface/hud-re.md].
 	sync_class_attribute_flags();
-	kernel_->world.projectile_authority = !joiner_;
-	kernel_->world.mp_session = host_listen_ || joiner_;
+	kernel_->world.rules.projectile_authority = !joiner_;
+	kernel_->world.rules.mp_session = host_listen_ || joiner_;
 	world_installed_ = false;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
@@ -269,14 +269,14 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 TypedArray<WeatherSoundRow> Simulation::drain_weather_sounds() {
 	TypedArray<WeatherSoundRow> out;
 	if (!world_installed_ || kernel_ == nullptr) return out;
-	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.weather_sounds) {
+	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.out.weather_sounds) {
 		Ref<WeatherSoundRow> d;
 		d.instantiate();
 		d->set_distance(static_cast<float>(ev.distance_q16) / 65536.0f);
 		d->set_bearing(static_cast<int>(ev.bearing));
 		out.push_back(d);
 	}
-	kernel_->world.weather_sounds.clear();
+	kernel_->world.out.weather_sounds.clear();
 	return out;
 }
 
@@ -413,10 +413,10 @@ void Simulation::apply_terrain_to_ai() {
 	// The placed-tile override rides the surface view (D-SND-15). With no
 	// charmap the sampler's early return-1 skips the walk exactly like
 	// retail, so attaching the tiles unconditionally is faithful.
-	kernel_->world.surface_map.tiles =
+	kernel_->world.tables.surface_map.tiles =
 			surface_tiles_.empty() ? nullptr : surface_tiles_.data();
-	kernel_->world.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-	kernel_->world.surface_map.tile_surface = tile_surface_table_.data();
+	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
+	kernel_->world.tables.surface_map.tile_surface = tile_surface_table_.data();
 	apply_sound_state_to_world();
 }
 
@@ -427,9 +427,9 @@ void Simulation::apply_terrain_to_ai() {
 // header — not re-applied here.)
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
-	kernel_->world.sound_profiles.clear();
+	kernel_->world.tables.sound_profiles.clear();
 	if (!sndprof_text_.empty())
-		kernel_->world.sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
+		kernel_->world.tables.sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
 		                             sndprof_text_.size());
 	kernel_->world.env.water_z = env_water_z_q16_;
 	kernel_->sync_water_plane();
@@ -459,9 +459,9 @@ void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
 
 void Simulation::apply_character_traits_to_world() {
 	if (!kernel_) return;
-	kernel_->world.character_traits.clear();
+	kernel_->world.tables.character_traits.clear();
 	for (const CharacterSexRow &row : character_sex_rows_)
-		kernel_->world.character_traits.set(row.character_id, row.female);
+		kernel_->world.tables.character_traits.set(row.character_id, row.female);
 }
 
 void Simulation::set_water_z(double p_water_y) {
@@ -475,7 +475,7 @@ void Simulation::set_water_z(double p_water_y) {
 TypedArray<SlotSoundRow> Simulation::drain_slot_sounds() {
 	TypedArray<SlotSoundRow> out;
 	if (!world_installed_) return out;
-	for (const opennova::world::SoundSlotEvent &ev : kernel_->world.slot_sounds) {
+	for (const opennova::world::SoundSlotEvent &ev : kernel_->world.out.slot_sounds) {
 		Ref<SlotSoundRow> d;
 		d.instantiate();
 		d->set_soundset(String(ev.set_name));
@@ -487,7 +487,7 @@ TypedArray<SlotSoundRow> Simulation::drain_slot_sounds() {
 		d->set_slot(static_cast<int>(ev.slot));
 		out.push_back(d);
 	}
-	kernel_->world.slot_sounds.clear();
+	kernel_->world.out.slot_sounds.clear();
 	return out;
 }
 
@@ -495,7 +495,7 @@ TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
 	TypedArray<SoundEmitterRow> out;
 	if (!world_installed_) return out;
 	const std::vector<opennova::world::SoundEmitterEvent> events =
-			kernel_->world.sound_emitters.drain();
+			kernel_->world.out.sound_emitters.drain();
 	for (const opennova::world::SoundEmitterEvent &ev : events) {
 		Ref<SoundEmitterRow> d;
 		d.instantiate();
@@ -1040,7 +1040,7 @@ bool Simulation::is_wac_paused() const {
 }
 
 void Simulation::set_mission_variable(int index, int value) {
-	if (kernel_) kernel_->world.vars.set_mission(index, value);
+	if (kernel_) kernel_->world.script.vars.set_mission(index, value);
 }
 
 Error Simulation::debug_kill_player_entity(int p_handle) {
@@ -1202,7 +1202,7 @@ opennova::world::EntityCommands *Simulation::entity_commands() {
 }
 
 int Simulation::get_mission_variable(int index) const {
-	return kernel_ ? kernel_->world.vars.get_mission(index) : 0;
+	return kernel_ ? kernel_->world.script.vars.get_mission(index) : 0;
 }
 
 Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
@@ -1218,7 +1218,7 @@ Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
 	out->set_friendly_kills_by_others(kernel_->world.kill_stats.friendly_kills_by_others);
 	out->set_enemy_kills_by_others(kernel_->world.kill_stats.enemy_kills_by_others);
 	out->set_humans(kernel_->world.cached.humans);
-	out->set_mp_session(kernel_->world.mp_session);
+	out->set_mp_session(kernel_->world.rules.mp_session);
 	return out;
 }
 
@@ -1259,7 +1259,7 @@ PackedInt32Array snapshot_bank(const opennova::world::World *world, int count,
 	out.resize(count);
 	int32_t *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
-		w[i] = world ? (world->vars.*getter)(i) : 0;
+		w[i] = world ? (world->script.vars.*getter)(i) : 0;
 	}
 	return out;
 }
@@ -1281,11 +1281,11 @@ PackedInt32Array Simulation::get_music_variables_snapshot() const {
 }
 
 void Simulation::set_global_variable(int index, int value) {
-	if (kernel_) kernel_->world.vars.set_global(index, value);
+	if (kernel_) kernel_->world.script.vars.set_global(index, value);
 }
 
 int Simulation::get_global_variable(int index) const {
-	return kernel_ ? kernel_->world.vars.get_global(index) : 0;
+	return kernel_ ? kernel_->world.script.vars.get_global(index) : 0;
 }
 
 PackedByteArray Simulation::get_fired_events_snapshot() const {

@@ -97,7 +97,7 @@ void BmsEventSystem::on_load(World &w) {
     }
     // The sticky relation/visited/group state zeroes once per mission load
     // [orig: EventSystem_FreeAll @ 0x453210].
-    w.relations.clear();
+    w.script.relations.clear();
     for (ScriptedEvent &se : events_) {
         se.active = false;
         se.activate_countdown = 0;
@@ -118,7 +118,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
         case bms::TriggerMainType::MissionVariable: {
             // [orig: EventTrigger_EvaluateCondition cat 4 — dword_C6B240[param1] <op> param2.]
             // THE shared variable store (same array WAC V# uses).
-            int32_t v = w.vars.get_mission(t.param1);
+            int32_t v = w.script.vars.get_mission(t.param1);
             switch (static_cast<bms::MissionVariableTriggerType>(t.sub_type)) {
                 case bms::MissionVariableTriggerType::MissionVariableIsEqual: return v == t.param2;
                 case bms::MissionVariableTriggerType::MissionVariableIsLessThan: return v < t.param2;
@@ -132,7 +132,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             // Matrix rows are keyed by the RAW authored SSN — no FindByNetId
             // resolution for the matrix sub-types [orig: the cat-2 mirror of
             // the @ 0x45364a sub-switch over the S-family matrices, record §3a].
-            auto &rel = w.relations;
+            auto &rel = w.script.relations;
             using R = opennova::world::TriggerRelations;
             switch (static_cast<bms::SingleTriggerType>(t.sub_type)) {
                 case bms::SingleTriggerType::SingleSeesGroup:
@@ -211,7 +211,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
         case bms::TriggerMainType::Group: {
             // The cat-1 sub-switch over the relation matrices + the 48-byte
             // group records [orig: @ 0x45364a; expressions record §3a / §7.4].
-            auto &rel = w.relations;
+            auto &rel = w.script.relations;
             using R = opennova::world::TriggerRelations;
             const R::GroupState *grp = rel.group_or_null(t.param1);
             switch (static_cast<bms::GroupTriggerType>(t.sub_type)) {
@@ -294,14 +294,14 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // trigger; otherwise it is the game option's inverse.
                     // [orig: @0x453b53 is_in_session -> false; @0x453b67
                     //  !(dword_24D1E34 & 0x20)]
-                    if (w.mp_session) return false;
-                    return !w.teammates_disabled;
+                    if (w.rules.mp_session) return false;
+                    return !w.rules.teammates_disabled;
                 case bms::TeammateTriggerType::TeammateMedicAssisting:
                 case bms::TeammateTriggerType::TeammateEvacuating:
                     // Both subs read the same "any teammate heli-lift op in
                     // flight" state — indistinguishable in retail JO.
                     // [orig: @0x453b42 -> getter @0x451720 -> dword_AC4F40]
-                    return w.heli_lift_active_count != 0;
+                    return w.script.heli_lift_active_count != 0;
             }
             return false; // [orig: sub-type range check @0x453b3c]
         }
@@ -400,13 +400,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             break;
         case bms::ActionType::MisvarChange: {
             // [orig: case 5 — writes dword_C6B240[param1]; the shared var store.]
-            int32_t cur = w.vars.get_mission(a.param1);
+            int32_t cur = w.script.vars.get_mission(a.param1);
             switch (static_cast<bms::MissionVariableActionSubType>(a.action_sub_type)) {
-                case bms::MissionVariableActionSubType::Set: w.vars.set_mission(a.param1, a.param2); break;
-                case bms::MissionVariableActionSubType::Add: w.vars.set_mission(a.param1, cur + a.param2); break;
-                case bms::MissionVariableActionSubType::Subtract: w.vars.set_mission(a.param1, cur - a.param2); break;
-                case bms::MissionVariableActionSubType::Increment: w.vars.set_mission(a.param1, cur + 1); break;
-                case bms::MissionVariableActionSubType::Decrement: w.vars.set_mission(a.param1, cur - 1); break;
+                case bms::MissionVariableActionSubType::Set: w.script.vars.set_mission(a.param1, a.param2); break;
+                case bms::MissionVariableActionSubType::Add: w.script.vars.set_mission(a.param1, cur + a.param2); break;
+                case bms::MissionVariableActionSubType::Subtract: w.script.vars.set_mission(a.param1, cur - a.param2); break;
+                case bms::MissionVariableActionSubType::Increment: w.script.vars.set_mission(a.param1, cur + 1); break;
+                case bms::MissionVariableActionSubType::Decrement: w.script.vars.set_mission(a.param1, cur - 1); break;
                 default: break;
             }
             break;
@@ -442,37 +442,37 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             cmds.apply_area_ai_command(a.param1, /*team=*/1, a.action_sub_type, a.param2, a.param3, a.param4);
             break;
         case bms::ActionType::OutputText:
-            w.effects.push({"text", a.param1, 0, 0, 0, std::string()});
+            w.out.effects.push({"text", a.param1, 0, 0, 0, std::string()});
             break;
         // Presentation effects: the engine hands these to the embedder's audio/HUD/overlay.
         case bms::ActionType::PlayWavList: // play dialog/wav param1 (param2 = always-play flag)
-            w.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
+            w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWaypoints:
             // The engine flag the waypoint HUD label + SP cycle key gate on
             // (init 1 at HUD bring-up); the effect stays as the presentation log.
             // [orig: action 40 -> Game_SetShowWaypoints @0x58fb50 ->
             //  g_showWaypoints @0x27238BC, init @0x5a4913]
-            w.waypoints.show = (a.param1 != 0);
-            w.effects.push({"show_waypoints", a.param1, 0, 0, 0, std::string()});
+            w.script.waypoints.show = (a.param1 != 0);
+            w.out.effects.push({"show_waypoints", a.param1, 0, 0, 0, std::string()});
             break;
         case bms::ActionType::SetLightState:
-            w.effects.push({"set_light", a.param1, a.param2, 0, 0, std::string()});
+            w.out.effects.push({"set_light", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWinSubgoal:
             // Set/clear the show-win bit — the RAW slot shift is the original's
             // (slot 1..8 -> bits 1..8). The "New Objective" toast rides the
             // effect. [orig: case 35 @0x4546af — bit @0x4546bf/@0x4546d0;
             //  HUD_ShowObjectiveNotification @0x4546e2]
-            if (a.param2 != 0) w.subgoals.show_win |= (1u << a.param1);
-            else w.subgoals.show_win &= ~(1u << a.param1);
-            w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
+            if (a.param2 != 0) w.script.subgoals.show_win |= (1u << a.param1);
+            else w.script.subgoals.show_win &= ~(1u << a.param1);
+            w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/0, 0, std::string()});
             break;
         case bms::ActionType::ShowLoseSubgoal:
             // [orig: case 36 @0x454724 — the show-lose mirror @0x454734/@0x454745]
-            if (a.param2 != 0) w.subgoals.show_lose |= (1u << a.param1);
-            else w.subgoals.show_lose &= ~(1u << a.param1);
-            w.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
+            if (a.param2 != 0) w.script.subgoals.show_lose |= (1u << a.param1);
+            else w.script.subgoals.show_lose &= ~(1u << a.param1);
+            w.out.effects.push({"subgoal_show", a.param1, a.param2, /*lose=*/1, 0, std::string()});
             break;
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
@@ -480,15 +480,15 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         // sites gate on g_spawn_success_gate — process_round_end's own latch covers
         // that]. The "win" effect stays as the presentation signal.
         case bms::ActionType::BlueWin:
-            w.effects.push({"win", 1, 0, 0, 0, std::string()});
+            w.out.effects.push({"win", 1, 0, 0, 0, std::string()});
             w.process_round_end(1);
             break;
         case bms::ActionType::RedWin:
-            w.effects.push({"win", 2, 0, 0, 0, std::string()});
+            w.out.effects.push({"win", 2, 0, 0, 0, std::string()});
             w.process_round_end(2);
             break;
         case bms::ActionType::GreenWin:
-            w.effects.push({"win", 0, 0, 0, 0, std::string()});
+            w.out.effects.push({"win", 0, 0, 0, 0, std::string()});
             w.process_round_end(0);
             break;
         case bms::ActionType::SubGoalWon: {
@@ -503,12 +503,12 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             // [orig: case 14 @0x454500 — guard @0x45450a, set @0x45451d,
             //  round-running gate @0x45453a, STRWINMSG resolve @0x45456f]
             const uint32_t bit = 1u << a.param1;
-            if ((w.subgoals.won & bit) != 0) break;
-            w.subgoals.won |= bit;
+            if ((w.script.subgoals.won & bit) != 0) break;
+            w.script.subgoals.won |= bit;
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
-                    ? w.subgoals.win_text_ids[a.param1] : 0;
+                    ? w.script.subgoals.win_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
-            w.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
+            w.out.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
             break;
         }
         case bms::ActionType::SubGoalLost: {
@@ -518,22 +518,22 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             // sibling. [orig: case 15 @0x4545e0 — set @0x4545ea, gate
             //  @0x4545f0, STRLOSEMSG chat @0x454632 + SetBannerText @0x454647;
             //  byte_A762D7 leg @0x45465c]
-            w.subgoals.lost |= (1u << a.param1);
+            w.script.subgoals.lost |= (1u << a.param1);
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
-                    ? w.subgoals.lose_text_ids[a.param1] : 0;
+                    ? w.script.subgoals.lose_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
-            w.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
+            w.out.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
             break;
         }
         case bms::ActionType::GroupResetHasVisited:
             // Clears ONE group row of the visited matrix — only lists 0..31,
             // the witnessed 0x80-byte memset quirk
             // [orig: EventTrigger_ClearSlotB @ 0x4535e0].
-            w.relations.clear_group_visited_row(a.param1);
+            w.script.relations.clear_group_visited_row(a.param1);
             break;
         case bms::ActionType::SingleResetHasVisited:
             // [orig: EventTrigger_ClearSlotA @ 0x453600] — the same 32-list quirk.
-            w.relations.clear_single_visited_row(a.param1);
+            w.script.relations.clear_single_visited_row(a.param1);
             break;
         case bms::ActionType::ResetEvent:
             // Clears ONLY the active latch; live countdowns keep ticking.
@@ -551,14 +551,14 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             // One front-end invoking the other: the BMS action installs/runs a
             // WAC program. Recorded as an effect here; the embedder wires the actual
             // WAC invocation (the WacSystem) at runtime. [D-EVT-6]
-            w.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
+            w.out.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
             break;
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should
             // emit zero of these; a test asserts that. The remaining owners are
             // ledgered as D-EVT-6 (bms-event-runtime-re §10.1).
-            w.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
+            w.out.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
                             a.param1, a.param2, std::string()});
             break;
     }
@@ -576,7 +576,7 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0, called right after
     //  both dispatch loops @0x454cbd/@0x454d25]
     if (!events_.empty() && &se >= events_.data() && &se < events_.data() + events_.size())
-        w.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()));
+        w.script.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()));
 }
 
 void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {

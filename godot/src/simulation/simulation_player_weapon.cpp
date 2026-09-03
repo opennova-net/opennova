@@ -49,7 +49,7 @@ void Simulation::request_local_player_weapon_category(WeaponCategory p_category)
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
 		return;
 	handle_weapon_switch_outcome(opennova::world::weapon_switch_to_handle(
-			kernel_->world.weapons, kernel_->inventory,
+			kernel_->world.tables.weapons, kernel_->inventory,
 			p_category * opennova::world::weapon_combo::kRanksPerCategory,
 			local_weapon_switch_gates()));
 }
@@ -61,7 +61,7 @@ void Simulation::request_local_player_weapon_cycle(int p_direction) {
 	if (kernel_->weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
 	if (!kernel_->inventory_valid) return;
 	handle_weapon_switch_outcome(opennova::world::weapon_cycle_slot(
-			kernel_->world.weapons, kernel_->inventory, p_direction,
+			kernel_->world.tables.weapons, kernel_->inventory, p_direction,
 			local_weapon_switch_gates()));
 }
 
@@ -76,7 +76,7 @@ void Simulation::request_local_player_weapon_cycle(int p_direction) {
 String Simulation::get_weapon_third_person_model(int p_adm_index) const {
 	if (kernel_ == nullptr || p_adm_index <= 0 || p_adm_index > 0xFF) return String();
 	const opennova::world::WeaponTableEntry *entry =
-			kernel_->world.weapons.by_index(static_cast<uint8_t>(p_adm_index));
+			kernel_->world.tables.weapons.by_index(static_cast<uint8_t>(p_adm_index));
 	if (entry == nullptr) return String();
 	return String::utf8(entry->third_person_model.c_str());
 }
@@ -450,7 +450,7 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 		const int row = category + (aimed_shot_available ? 3 : 0);
 		const opennova::world::WeaponTableEntry *weapon =
 				kernel_ != nullptr && local != nullptr
-				? kernel_->world.weapons.by_index(local->equipped_adm_index)
+				? kernel_->world.tables.weapons.by_index(local->equipped_adm_index)
 				: nullptr;
 		const int32_t authored_error = weapon != nullptr
 				? weapon->error_fp16[row]
@@ -508,12 +508,12 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 	// row lets parity tests pin the observed tag-2 mode byte without exposing mutable
 	// ring state. [orig: ((MountSlot.clip & 3) << 4) | 2 sampled before consume
 	// @ WeaponAction_Fire 0x542c11 / 0x542c75].
-	out->set_round_ring_count(kernel_ ? kernel_->world.rounds.count : 0);
-	if (kernel_ && kernel_->world.rounds.count > 0) {
-		const int last = kernel_->world.rounds.cursor == 0
+	out->set_round_ring_count(kernel_ ? kernel_->world.out.rounds.count : 0);
+	if (kernel_ && kernel_->world.out.rounds.count > 0) {
+		const int last = kernel_->world.out.rounds.cursor == 0
 				? opennova::world::RoundRing::kCapacity - 1
-				: kernel_->world.rounds.cursor - 1;
-		const opennova::world::RoundEvent &round = kernel_->world.rounds.records[
+				: kernel_->world.out.rounds.cursor - 1;
+		const opennova::world::RoundEvent &round = kernel_->world.out.rounds.records[
 				static_cast<std::size_t>(last)];
 		out->set_last_round_flags(round.mode_flags);
 		out->set_last_round_subtype(round.subtype);
@@ -627,7 +627,7 @@ const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
 
 int Simulation::native_equipped_weapon_adm_index() const {
 	if (!kernel_ || kernel_->weapon.def_name.empty()) return -1;
-	return kernel_->world.weapons.index_of(kernel_->weapon.def_name.c_str());
+	return kernel_->world.tables.weapons.index_of(kernel_->weapon.def_name.c_str());
 }
 
 const opennova::world::WeaponSlotState *Simulation::native_active_weapon_slot() const {

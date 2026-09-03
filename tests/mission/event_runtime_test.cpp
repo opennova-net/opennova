@@ -83,10 +83,10 @@ static void test_bms_to_wac_shared_var() {
     w.load_systems();
 
     tick_n(w, kPass);
-    CHECK(w.vars.get_mission(5) == 7); // BMS fired on its first processing pass
-    CHECK(w.vars.get_mission(6) == 0); // WAC has not executed yet (62-tick divider)
+    CHECK(w.script.vars.get_mission(5) == 7); // BMS fired on its first processing pass
+    CHECK(w.script.vars.get_mission(6) == 0); // WAC has not executed yet (62-tick divider)
     tick_n(w, 62 - kPass);
-    CHECK(w.vars.get_mission(6) == 1); // WAC eq(v5,7) saw the same var and fired
+    CHECK(w.script.vars.get_mission(6) == 1); // WAC eq(v5,7) saw the same var and fired
 }
 
 // WAC sets V1=1; a BMS event gated by MissionVariable(V1==1) kills an entity.
@@ -127,7 +127,7 @@ static void test_wac_to_bms_shared_var() {
     w.load_systems();
 
     tick_n(w, 62);
-    CHECK(w.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
     CHECK(!w.commands.ssn_dead(100)); // the event's quarter is next touched at tick 80
     tick_n(w, 80 - 62);
     CHECK(w.commands.ssn_dead(100));
@@ -169,7 +169,7 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     // Spread 1 (the mission-load default is 10 [orig: WacScript_FreeAll @0x4f6395];
     // pinned to 1 here so the WAC write below is an exact x3): target is due east,
     // so the heading is only the witnessed sawtooth error term.
-    w.wac_values.accuracy_spread = 1;
+    w.script.wac_values.accuracy_spread = 1;
     ai.infantry_combat_think(npc, w, /*key=*/1);
     CHECK(npc.inf.aim_valid);
     const int32_t default_heading = npc.inf.aim_heading;
@@ -183,8 +183,8 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     w.add_system(&wac_sys);
     w.load_systems();
     tick_n(w, wac::WacSystem::kTicksPerExecution);
-    CHECK(w.vars.get_mission(0) == 0); // the named lvalue must not alias V0
-    CHECK(w.vars.get_mission(9) == 1); // WAC can read its write back
+    CHECK(w.script.vars.get_mission(0) == 0); // the named lvalue must not alias V0
+    CHECK(w.script.vars.get_mission(9) == 1); // WAC can read its write back
 
     npc.inf.aim_point[0] = 20 << 16;
     ai.infantry_combat_think(npc, w, /*key=*/1);
@@ -223,8 +223,8 @@ static void test_bms_increment_and_threshold() {
     w.load_systems();
 
     tick_n(w, 224);
-    CHECK(w.vars.get_mission(2) == 4); // A fired at ticks 16/80/144/208
-    CHECK(w.vars.get_mission(3) == 1); // B saw V2==3 at tick 160, fired once
+    CHECK(w.script.vars.get_mission(2) == 4); // A fired at ticks 16/80/144/208
+    CHECK(w.script.vars.get_mission(3) == 1); // B saw V2==3 at tick 160, fired once
 }
 
 // Activation delay [orig: event +18 reload -> +16 countdown, -64 per processing pass].
@@ -243,12 +243,12 @@ static void test_activation_delay() {
     w.load_systems();
 
     tick_n(w, kPass); // pass 1: chain true -> latch + arm (no fire)
-    CHECK(w.effects.count("text") == 0);
+    CHECK(w.out.effects.count("text") == 0);
     CHECK(!sys.event_fired(0)); // active but still counting
     tick_n(w, kCycle); // pass @tick 80: 128 -> 64
-    CHECK(w.effects.count("text") == 0);
+    CHECK(w.out.effects.count("text") == 0);
     tick_n(w, kCycle); // pass @tick 144: 64 -> 0 -> fire
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
     CHECK(sys.event_fired(0));
 }
 
@@ -266,9 +266,9 @@ static void test_activation_delay_signed_wrap() {
     w.load_systems();
 
     tick_n(w, kPass);          // arm
-    CHECK(w.effects.count("text") == 0);
+    CHECK(w.out.effects.count("text") == 0);
     tick_n(w, kCycle);         // first decrement: wraps negative -> fires
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
 }
 
 // Repeat cooldown [orig: event +14 reload -> +12 countdown; +20 cleared on expiry].
@@ -286,16 +286,16 @@ static void test_repeat_cooldown() {
     w.load_systems();
 
     tick_n(w, kPass); // pass 1 (tick 16): fire + arm cooldown 128
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
     CHECK(sys.event_fired(0)); // window open
     tick_n(w, kCycle); // tick 80: cooldown 128 -> 64
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
     CHECK(sys.event_fired(0));
     tick_n(w, kCycle); // tick 144: cooldown 64 -> 0, latch cleared
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
     CHECK(!sys.event_fired(0)); // window closed
     tick_n(w, kCycle); // tick 208: re-evaluated -> fires again
-    CHECK(w.effects.count("text") == 2);
+    CHECK(w.out.effects.count("text") == 2);
 }
 
 // reset_after == 0: a repeat event re-fires on EVERY processing pass while its chain
@@ -310,7 +310,7 @@ static void test_repeat_zero_refires_every_pass() {
     w.load_systems();
 
     tick_n(w, kPass + 2 * kCycle); // passes at ticks 16, 80, 144
-    CHECK(w.effects.count("text") == 3);
+    CHECK(w.out.effects.count("text") == 3);
 }
 
 // PreMission events run on the pre-mission pass (whole list per call, no 16-tick gate)
@@ -328,9 +328,9 @@ static void test_pre_mission_pass() {
     w.load_systems();
 
     w.run_logic_tick(true, opennova::world::TickPhase::PreMission); // one pre pass
-    CHECK(w.effects.count("text") == 1); // only the PreMission event fired
+    CHECK(w.out.effects.count("text") == 1); // only the PreMission event fired
     tick_n(w, kPass + kCycle); // normal passes touch only the normal event
-    CHECK(w.effects.count("text") == 2); // +1 from the normal event, pre event excluded
+    CHECK(w.out.effects.count("text") == 2); // +1 from the normal event, pre event excluded
 }
 
 // A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no embedder
@@ -375,7 +375,7 @@ static void test_playpartanim_mutates_brain() {
         CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
     }
     // In-engine mutation, NOT an embedder effect.
-    CHECK(w.effects.count("unported_action") == 0);
+    CHECK(w.out.effects.count("unported_action") == 0);
 }
 
 // RedirectGroupTo/RedirectSingleTo carry an authored waypoint node in param3.
@@ -444,10 +444,10 @@ static void test_redirect_actions_preserve_authored_node() {
     second_ai.pos[0] = 100 << 16;
     ai.update_waypoint_movement(first_ai, w);
     ai.update_waypoint_movement(second_ai, w);
-    CHECK(w.relations.group_visited(3, 2, 0));
-    CHECK(w.relations.group_visited(3, 2, 1));
-    CHECK(w.relations.single_visited(42, 2, 0));
-    CHECK(w.relations.single_visited(43, 2, 1));
+    CHECK(w.script.relations.group_visited(3, 2, 0));
+    CHECK(w.script.relations.group_visited(3, 2, 1));
+    CHECK(w.script.relations.single_visited(42, 2, 0));
+    CHECK(w.script.relations.single_visited(43, 2, 1));
 }
 
 // Presentation actions surface as presentation-only EffectLog entries; an unmodelled
@@ -471,12 +471,12 @@ static void test_presentation_effects() {
     w.load_systems();
 
     tick_n(w, kPass);
-    CHECK(w.effects.count("dialog") == 1);
-    CHECK(w.effects.count("show_waypoints") == 1);
-    CHECK(w.effects.count("unported_action") == 0);
+    CHECK(w.out.effects.count("dialog") == 1);
+    CHECK(w.out.effects.count("show_waypoints") == 1);
+    CHECK(w.out.effects.count("unported_action") == 0);
     // ShowWaypoints(1) with param1=1 keeps the flag on; the engine-side gate
     // lives on the world track. [orig: Game_SetShowWaypoints @0x58fb50]
-    CHECK(w.waypoints.show);
+    CHECK(w.script.waypoints.show);
 }
 
 // A fired event completes the waypoint-track entries linked to its index (the HUD
@@ -495,8 +495,8 @@ static void test_waypoint_track_integration() {
     world::WaypointEntry b;
     b.x = 100 << 16; b.y = 0;
     b.linked_event = 1;
-    w.waypoints.entries = {a, b};
-    w.waypoints.current = 1;
+    w.script.waypoints.entries = {a, b};
+    w.script.waypoints.current = 1;
 
     // Event 0: inert filler (its OutputText is irrelevant); event 1: the linked
     // one, whose action also hides the waypoints.
@@ -513,12 +513,12 @@ static void test_waypoint_track_integration() {
     w.add_system(&sys);
     w.load_systems();
 
-    CHECK(w.waypoints.show);
+    CHECK(w.script.waypoints.show);
     tick_n(w, kCycle); // a full quarter cycle: both events process + fire
-    CHECK(!w.waypoints.show);            // ShowWaypoints(0) applied
-    CHECK(w.waypoints.entries[1].done);  // the linked entry completed
-    CHECK(w.waypoints.current == 0);     // skip_done cycled off the done entry
-    CHECK(!w.waypoints.entries[0].done); // no chain_back: entry 0 untouched
+    CHECK(!w.script.waypoints.show);            // ShowWaypoints(0) applied
+    CHECK(w.script.waypoints.entries[1].done);  // the linked entry completed
+    CHECK(w.script.waypoints.current == 0);     // skip_done cycled off the done entry
+    CHECK(!w.script.waypoints.entries[0].done); // no chain_back: entry 0 untouched
 }
 
 // The subgoal actions drive the objectives-panel state: ShowWinSubgoal sets the
@@ -530,8 +530,8 @@ static void test_subgoal_state() {
     World w;
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
-    w.subgoals.win_text_ids[2] = 7;   // header WinConditions slot 2 -> STRWINCOND007
-    w.subgoals.lose_text_ids[3] = 4;
+    w.script.subgoals.win_text_ids[2] = 7;   // header WinConditions slot 2 -> STRWINCOND007
+    w.script.subgoals.lose_text_ids[3] = 4;
 
     bms::Event show_e = simple_event(bms::EventFlags::None, 0);
     bms::Event won_e = simple_event(bms::EventFlags::None, 1);
@@ -554,13 +554,13 @@ static void test_subgoal_state() {
     w.load_systems();
 
     tick_n(w, kCycle);
-    CHECK((w.subgoals.show_win & (1u << 2)) != 0);   // raw-slot bit
-    CHECK((w.subgoals.won & (1u << 2)) != 0);
-    CHECK((w.subgoals.lost & (1u << 3)) != 0);
-    CHECK(w.effects.count("subgoal_won") == 1);       // the refire was guarded
-    CHECK(w.effects.count("subgoal_lost") == 1);
+    CHECK((w.script.subgoals.show_win & (1u << 2)) != 0);   // raw-slot bit
+    CHECK((w.script.subgoals.won & (1u << 2)) != 0);
+    CHECK((w.script.subgoals.lost & (1u << 3)) != 0);
+    CHECK(w.out.effects.count("subgoal_won") == 1);       // the refire was guarded
+    CHECK(w.out.effects.count("subgoal_lost") == 1);
     bool saw_won = false;
-    for (const auto &e : w.effects.entries()) {
+    for (const auto &e : w.out.effects.entries()) {
         if (e.kind != "subgoal_won") continue;
         saw_won = true;
         CHECK(e.a == 2);
@@ -590,12 +590,12 @@ static void test_output_text_and_reset_event() {
     w.load_systems();
 
     tick_n(w, kPass);
-    CHECK(w.effects.count("text") == 1); // event 0 fired OutputText(7) at tick 16
-    w.effects.clear();
+    CHECK(w.out.effects.count("text") == 1); // event 0 fired OutputText(7) at tick 16
+    w.out.effects.clear();
     // tick 32: event 1 fires ResetEvent -> clears event 0's latch.
     // tick 80: event 0 re-evaluates and fires its OutputText again.
     tick_n(w, 80 - kPass);
-    CHECK(w.effects.count("text") == 1);
+    CHECK(w.out.effects.count("text") == 1);
 }
 
 // The Event trigger category reads the live latch window (active && delay elapsed),
@@ -626,7 +626,7 @@ static void test_event_trigger_reads_window() {
     tick_n(w, kPass); // event 0 fires; window opens
     CHECK(sys.event_fired(0));
     tick_n(w, kPass); // event 1's pass: sees the open window -> fires
-    CHECK(w.effects.count("text") == 2);
+    CHECK(w.out.effects.count("text") == 2);
 }
 
 // PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). Retail then
@@ -717,7 +717,7 @@ static void test_second_time_through_parity() {
         w.add_system(&sys);
         w.load_systems();
         tick_n(w, kPass);
-        CHECK((w.vars.get_mission(9) == 1) == expected);
+        CHECK((w.script.vars.get_mission(9) == 1) == expected);
     }
 }
 
@@ -741,15 +741,15 @@ static void test_teammate_triggers() {
         World w;
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
-        w.mp_session = c.mp;
-        w.teammates_disabled = c.disabled;
-        w.heli_lift_active_count = c.lifts;
+        w.rules.mp_session = c.mp;
+        w.rules.teammates_disabled = c.disabled;
+        w.script.heli_lift_active_count = c.lifts;
         mission::BmsEventSystem sys;
         load_probe(sys, make_trigger(bms::TriggerMainType::Teammate, c.sub));
         w.add_system(&sys);
         w.load_systems();
         tick_n(w, kPass);
-        CHECK((w.vars.get_mission(9) == 1) == c.fires);
+        CHECK((w.script.vars.get_mission(9) == 1) == c.fires);
     }
 }
 
@@ -784,10 +784,10 @@ static void test_player_awol_counter_and_trigger() {
     w.registry.get(player)->position = {500.0f, 500.0f, 0.0f}; // out of every zone
     tick_n(w, kCycle);
     CHECK(sys.awol_count() == 1);
-    CHECK(w.vars.get_mission(9) == 0); // threshold 2 not reached
+    CHECK(w.script.vars.get_mission(9) == 0); // threshold 2 not reached
     tick_n(w, kCycle);
     CHECK(sys.awol_count() == 2);
-    CHECK(w.vars.get_mission(9) == 1); // PlayerAwol fires at >= threshold
+    CHECK(w.script.vars.get_mission(9) == 1); // PlayerAwol fires at >= threshold
 
     w.registry.get(player)->position = {50.0f, 50.0f, 0.0f};
     tick_n(w, kCycle);
@@ -862,7 +862,7 @@ static void test_player_mount_trigger_dispatch() {
         w.add_system(&sys);
         w.load_systems();
         tick_n(w, kPass);
-        CHECK((w.vars.get_mission(9) == 1) == c.fires);
+        CHECK((w.script.vars.get_mission(9) == 1) == c.fires);
     }
 }
 
@@ -880,12 +880,12 @@ static void test_post_pass_is_a_one_shot() {
     w.load_systems();
 
     tick_n(w, kCycle * 2);
-    CHECK(w.vars.get_mission(9) == 0); // normal ticking never runs post entries
+    CHECK(w.script.vars.get_mission(9) == 0); // normal ticking never runs post entries
 
     sys.run_post_mission_pass(w);
-    CHECK(w.vars.get_mission(9) == 1); // exactly one sweep per transition call
+    CHECK(w.script.vars.get_mission(9) == 1); // exactly one sweep per transition call
     sys.run_post_mission_pass(w);
-    CHECK(w.vars.get_mission(9) == 1); // fire-once latch holds across transitions
+    CHECK(w.script.vars.get_mission(9) == 1); // fire-once latch holds across transitions
 }
 
 
@@ -920,8 +920,8 @@ static void test_trigger_relations_group_records() {
     // Initial counts land on the pre-mission pass, ordered after the pre
     // sweep [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
     w.run_logic_tick(true, opennova::world::TickPhase::PreMission);
-    CHECK(w.relations.group(3).initial_count == 3);
-    CHECK(w.relations.group(3).live_count == 3);
+    CHECK(w.script.relations.group(3).initial_count == 3);
+    CHECK(w.script.relations.group(3).live_count == 3);
 
     // A kill reads STALE until the 62-tick live rescan — retail cadence
     // [orig: timer reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup].
@@ -929,7 +929,7 @@ static void test_trigger_relations_group_records() {
     w.commands.kill_ssn(10);
     CHECK(!sys.evaluate_trigger_for_test(w, lost));
     tick_n(w, 62);
-    CHECK(w.relations.group(3).live_count == 2);
+    CHECK(w.script.relations.group(3).live_count == 2);
     CHECK(sys.evaluate_trigger_for_test(w, lost));
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupIntact, 3)));
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasMoreUnits, 3, 2)));
@@ -956,13 +956,13 @@ static void test_trigger_relations_matrices_and_visited() {
     w.load_systems();
     using R = world::TriggerRelations;
 
-    w.relations.set_group_group(R::kSees, 2, 5);
+    w.script.relations.set_group_group(R::kSees, 2, 5);
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 2, 5)));
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 5, 2)));
 
     // The G->S table is transposed storage; the trigger still reads
     // (group, single) [orig: index [2b + (a >> 5)] at the GS bases].
-    w.relations.set_group_single(R::kShot, 7, 40);
+    w.script.relations.set_group_single(R::kShot, 7, 40);
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasShotSingle, 7, 40)));
 
     bms::Trigger sss{};
@@ -970,13 +970,13 @@ static void test_trigger_relations_matrices_and_visited() {
     sss.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleSeesSingle);
     sss.param1 = 100;
     sss.param2 = 101;
-    w.relations.set_single_single(R::kSees, 100, 101);
+    w.script.relations.set_single_single(R::kSees, 100, 101);
     CHECK(sys.evaluate_trigger_for_test(w, sss));
 
     // Out-of-range rows: retail writes are guarded (< 0x80) and our reads are
     // sanitized to false instead of reproducing the unguarded OOB read
     // (record §3a, ADR 0003 class).
-    w.relations.set_single_single(R::kSees, 200, 5); // no-op
+    w.script.relations.set_single_single(R::kSees, 200, 5); // no-op
     sss.param1 = 200;
     sss.param2 = 5;
     CHECK(!sys.evaluate_trigger_for_test(w, sss));
@@ -984,8 +984,8 @@ static void test_trigger_relations_matrices_and_visited() {
     // Visited matrices + the 32-list clear quirk: actions 32/33 memset only
     // 0x80 bytes = lists 0..31 of the row [orig: EventTrigger_ClearSlotB
     // @ 0x4535e0 / ClearSlotA @ 0x453600].
-    w.relations.mark_waypoint_visited(9, 4, /*list=*/5, /*number=*/3);
-    w.relations.mark_waypoint_visited(9, 4, /*list=*/40, /*number=*/3);
+    w.script.relations.mark_waypoint_visited(9, 4, /*list=*/5, /*number=*/3);
+    w.script.relations.mark_waypoint_visited(9, 4, /*list=*/40, /*number=*/3);
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 5, 3)));
     CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 40, 3)));
     bms::Action clear_group{};
@@ -1289,10 +1289,10 @@ static void test_single_distance_los_chain() {
     // separated -> "farther than 40" latches on its processing pass and fires
     // at the next 64-tick delay-expiry slot (the witnessed cadence).
     tick_n(w, kPass);
-    CHECK(w.vars.get_mission(7) == 0);
+    CHECK(w.script.vars.get_mission(7) == 0);
     w.registry.get(b_h)->position = {80.0f, 0.0f, 0.0f};
     tick_n(w, kPass + kCycle);
-    CHECK(w.vars.get_mission(7) == 1);
+    CHECK(w.script.vars.get_mission(7) == 1);
 }
 
 // Zone refs in the FILE carry the authored zone ID; the load-time resolver
@@ -1366,7 +1366,7 @@ static void test_dangling_zone_ref_neuters_trigger() {
     w.add_system(&sys);
     w.load_systems();
     tick_n(w, kPass);
-    CHECK(w.effects.count("text") == 0); // neutered trigger evaluates false
+    CHECK(w.out.effects.count("text") == 0); // neutered trigger evaluates false
 }
 
 // The BMS win actions end the round through the SAME entry the WAC win/lose
@@ -1388,8 +1388,8 @@ static void test_bluewin_ends_round() {
     tick_n(w, kPass);
     CHECK(w.match.outcome().ended);
     CHECK(w.match.outcome().winner_team == 1);
-    CHECK(w.effects.count("win") == 1);
-    CHECK(w.effects.count("round_end") == 1);
+    CHECK(w.out.effects.count("win") == 1);
+    CHECK(w.out.effects.count("round_end") == 1);
 }
 
 // An EMPTY host must not burn through its mission. Retail wraps the WAC tick,
@@ -1655,10 +1655,10 @@ static void test_structural_bms_actions() {
     dispatch(bms::ActionType::Null);
     dispatch(bms::ActionType::SingleVelocity, 200, 99);
     CHECK(w.registry.get(pool1_h)->move_speed_kph == 0);
-    CHECK(w.effects.count("unported_action") == 0);
+    CHECK(w.out.effects.count("unported_action") == 0);
 
     dispatch(bms::ActionType::GroupVelocity, 2, 36);
-    CHECK(w.relations.group(2).move_speed_q16_per_sec == 655360);
+    CHECK(w.script.relations.group(2).move_speed_q16_per_sec == 655360);
 
     dispatch(bms::ActionType::ChangeGTeamAction, 2, 3);
     CHECK(w.registry.get(pool0_h)->team == 3);
@@ -1719,7 +1719,7 @@ static void test_structural_bms_actions() {
     CHECK(w.registry.get(pool3_h) == nullptr);
     CHECK(w.registry.get(pool0_h) != nullptr);
     CHECK(w.registry.get(dead_h) != nullptr);
-    CHECK(w.effects.count("unported_action") == 0);
+    CHECK(w.out.effects.count("unported_action") == 0);
 }
 
 int main() {
@@ -1783,7 +1783,7 @@ int main() {
         CHECK(pw.commands.spawn_marker_particle_effects(1) == 1);
         CHECK(pw.commands.spawn_marker_particle_effects(2) == 2);
         CHECK(pw.commands.spawn_marker_particle_effects(3) == 0);
-        CHECK(pw.effects.count("particle_effect") == 3);
+        CHECK(pw.out.effects.count("particle_effect") == 3);
     }
 
     return failures ? 1 : 0;

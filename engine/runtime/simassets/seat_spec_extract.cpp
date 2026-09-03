@@ -306,10 +306,10 @@ void stamp_seat_spec_turret_limits(world::World &world,
 		std::vector<mission::ItemSeatSpec> &specs) {
 	for (mission::ItemSeatSpec &spec : specs) {
 		if (spec.primary_weapon.empty()) continue;
-		const int index = world.weapons.index_of(spec.primary_weapon.c_str());
+		const int index = world.tables.weapons.index_of(spec.primary_weapon.c_str());
 		const world::WeaponTableEntry *entry =
 				index >= 0 && index <= 0xFF
-						? world.weapons.by_index(static_cast<uint8_t>(index))
+						? world.tables.weapons.by_index(static_cast<uint8_t>(index))
 						: nullptr;
 		if (entry == nullptr) continue;
 		spec.turret_yaw_range_bam =

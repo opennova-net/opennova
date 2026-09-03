@@ -1963,14 +1963,14 @@ header; the rest is client-side.
 | event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 round event; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
 
 **Objective-phase reimplementation (2026-07-21).** The phase-3 writer now emits the four live
-`World::subgoals` masks in retail order whenever `game_type & 0x20000`; non-objective modes retain
+`World::script.subgoals` masks in retail order whenever `game_type & 0x20000`; non-objective modes retain
 the faithful zero-byte body. A joiner learns the off-wire gate from the initial S2C `0x08` session
 config field 3 and the later S2C `0x7B extra`; the host loopback receives the configured game type
 directly. `ClientReplicaPipeline` also consumes both metadata tags itself for chronological capture/replay
 folds, while a replay starting midstream can seed `game_type` through `ClientRuntime::seed_session`.
 The view commits the masks and advances its objective revision only after all 16
 bytes decode, so a truncated phase-3 datagram cannot replace the last authoritative snapshot with
-partial/default values. `Simulation` mirrors fresh masks into the joiner's `World::subgoals`,
+partial/default values. `Simulation` mirrors fresh masks into the joiner's `World::script.subgoals`,
 which is already the objective-HUD source. Codec, truncation, fanout, runtime, and two-simulation
 coverage lives in `nw_ingame_encode_test`, `netsim_client_replica_pipeline_class_resolver_test`,
 `netsim_two_peer_fanout_test`, `npruntime_client_runtime_test`, and `coop_two_sim_test.gd`.
@@ -6972,7 +6972,7 @@ mechanism by which a retail host replicates dozens of vehicles/AI a few per fram
 free byte; `build_0a_frame` dispatches on `flags2 & 3`). Phase 0 carries the
 live pre-round timer's low byte and the joiner retains it as its entity-update
 freeze predicate. Phase 2 is sourced from live mission/runtime
-environment owners and quantized at the wire boundary; phase 3 emits authoritative `World::subgoals`
+environment owners and quantized at the wire boundary; phase 3 emits authoritative `World::script.subgoals`
 only for objective game types; phase 8 carries the recipient's actual mount handle and mounted
 clip/reserve. The joiner folds the complete environment state and applies each revision once. Header
 width, including the variable phase-8 tail, is charged before the entity budget is divided. Entity-loop
@@ -13009,7 +13009,7 @@ spawn-seed default health 100 with no health_max, so the tier ratio landed at 10
 spawns every entity at `Health = itemDef->healthMax` [orig: Entity_InitFromItemDef @ 0x49e550].
 Cosmetic for the joiner's own client (local apply skipped @0x4c11ac) but a wire divergence any
 other observer decodes. FIXED: `resolve_item_traits` caches the Player-template hp on the world
-(`World::player_item_hp`, class-8 = 150) and `spawn_player_entity` seeds
+(`World::tables.player.item_hp`, class-8 = 150) and `spawn_player_entity` seeds
 `health = health_max = hp` (item-less worlds fall back to the seed and still spawn at full) —
 the structural port of the retail spawn init. Pinned by player_spawn + two_peer_fanout (spawn
 byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the

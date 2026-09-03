@@ -130,15 +130,15 @@ bool check_mounted_slot_select_fire_and_reload() {
 			w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "mounted-route shooter spawned")) return false;
 
-	world.weapons.entries.resize(7);
-	w::WeaponTableEntry &child_weapon = world.weapons.entries[5];
+	world.tables.weapons.entries.resize(7);
+	w::WeaponTableEntry &child_weapon = world.tables.weapons.entries[5];
 	child_weapon.name = "WPN_CHILD";
 	child_weapon.category = 3;
 	child_weapon.rank = 2;
 	child_weapon.clipsize = 4;
 	child_weapon.startrounds = 4;
 	child_weapon.valid = true;
-	w::WeaponTableEntry &parent_weapon = world.weapons.entries[6];
+	w::WeaponTableEntry &parent_weapon = world.tables.weapons.entries[6];
 	parent_weapon.name = "WPN_PARENT";
 	parent_weapon.category = 4;
 	parent_weapon.rank = 3;
@@ -256,19 +256,19 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "session replay shooter spawned")) return false;
 
-	world.weapons.entries.resize(6);
-	w::WeaponTableEntry &rifle = world.weapons.entries[5];
+	world.tables.weapons.entries.resize(6);
+	w::WeaponTableEntry &rifle = world.tables.weapons.entries[5];
 	rifle.name = "WPN_TESTRIFLE";
 	rifle.category = 3;
 	rifle.rank = 2;
 	rifle.clipsize = 30;
 	rifle.ammo_index = 0;
 	rifle.valid = true;
-	world.ammo.entries.resize(1);
-	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.ammo.entries[0].velocity = 620;
-	world.ammo.entries[0].max_age_ticks = 248;
-	world.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 248;
+	world.tables.ammo.entries[0].valid = true;
 
 	const PeerAddr peer{0x0100007Fu, 30123};
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
@@ -298,7 +298,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(session_body));
 
 	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
-	if (!expect(world.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
+	if (!expect(world.out.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
 		return false;
 	const uint16_t combo = uint16_t(3 * 65 + 2);
 	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
@@ -306,7 +306,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 		return false;
 
 	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
-	if (!expect(world.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
+	if (!expect(world.out.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
 		return false;
 	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
 	            "exact duplicate C2S 0x06 does not spend a second cartridge"))
@@ -358,27 +358,27 @@ int main() {
 
 	// Armory: adm 5 = a 30-round rifle (category 3, rank 2 -> combo 197); adm 7 = a
 	// no-clip weapon (clipsize -1, the knife/medpack shape).
-	world.weapons.entries.resize(8);
+	world.tables.weapons.entries.resize(8);
 	{
-		w::WeaponTableEntry &rifle = world.weapons.entries[5];
+		w::WeaponTableEntry &rifle = world.tables.weapons.entries[5];
 		rifle.name = "WPN_TESTRIFLE";
 		rifle.category = 3;
 		rifle.rank = 2;
 		rifle.clipsize = 30;
 		rifle.ammo_index = 0;
 		rifle.valid = true;
-		w::WeaponTableEntry &knife = world.weapons.entries[7];
+		w::WeaponTableEntry &knife = world.tables.weapons.entries[7];
 		knife.name = "WPN_TESTKNIFE";
 		knife.category = 1;
 		knife.rank = 0;
 		knife.clipsize = -1;
 		knife.valid = true;
 	}
-	world.ammo.entries.resize(1);
-	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.ammo.entries[0].velocity = 620;
-	world.ammo.entries[0].max_age_ticks = 248;
-	world.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 248;
+	world.tables.ammo.entries[0].valid = true;
 
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
@@ -402,9 +402,9 @@ int main() {
 		return 1;
 	int nreplies = dispatch_fire(roster[1], roster, world, body);
 	if (!expect(nreplies == 0, "0x06 draws NO reactive reply")) return 1;
-	if (!expect(world.rounds.count == 1, "one ring event appended")) return 1;
+	if (!expect(world.out.rounds.count == 1, "one ring event appended")) return 1;
 	{
-		const w::RoundEvent &ev = world.rounds.records[0];
+		const w::RoundEvent &ev = world.out.rounds.records[0];
 		if (!expect(ev.shooter_handle == hb.packed, "ring shooter = the connection's entity"))
 			return 1;
 		if (!expect(ev.origin_x == 0x100000 && ev.origin_y == 0x200000 && ev.origin_z == 0x30000,
@@ -454,17 +454,17 @@ int main() {
 	// --- 2. Spoofed shooter (C's handle on B's connection) -> dropped. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hc.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
-	if (!expect(world.rounds.count == 1, "spoofed shooter handle dropped")) return 1;
+	if (!expect(world.out.rounds.count == 1, "spoofed shooter handle dropped")) return 1;
 
 	// --- 3. Unknown adm on an armory-fed host -> dropped [orig: NULL wpn -3]. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 6, 0, 0, 0, 0, 0, 0xFFFF, 2, 12, 0));
-	if (!expect(world.rounds.count == 1, "unknown adm dropped")) return 1;
+	if (!expect(world.out.rounds.count == 1, "unknown adm dropped")) return 1;
 
 	// --- 4. Alt fire appends WITHOUT touching the clip [orig: @0x50bb0d/@0x50be2b]. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, 0xFFFF, 3, 12, 0));
-	if (!expect(world.rounds.count == 2, "alt fire appended")) return 1;
+	if (!expect(world.out.rounds.count == 2, "alt fire appended")) return 1;
 	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 29,
 	            "alt fire leaves the clip untouched"))
 		return 1;
@@ -472,16 +472,16 @@ int main() {
 	// --- 5. The host's own loopback 0x06 is a no-op [orig: @0x50c18d]. ---
 	dispatch_fire(roster[0], roster, world,
 	              fire_body(ha.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 4, 12, 0));
-	if (!expect(world.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
+	if (!expect(world.out.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
 
 	// --- 6. Clip exhaustion rejects; the 0x25 relay refills [orig: @0x541720]. ---
 	roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip = 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 5, 12, 0));
-	if (!expect(world.rounds.count == 3, "last round fires")) return 1;
+	if (!expect(world.out.rounds.count == 3, "last round fires")) return 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 6, 12, 0));
-	if (!expect(world.rounds.count == 3, "empty clip rejects fire (NO AMMO)")) return 1;
+	if (!expect(world.out.rounds.count == 3, "empty clip rejects fire (NO AMMO)")) return 1;
 	{
 		// C2S 0x25 [u16 handle][u16 combo] from B -> relay + host-side refill.
 		std::vector<uint8_t> reload;
@@ -502,20 +502,20 @@ int main() {
 		return 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 7, 12, 0));
-	if (!expect(world.rounds.count == 4, "fire works again after the reload")) return 1;
+	if (!expect(world.out.rounds.count == 4, "fire works again after the reload")) return 1;
 
 	// --- 7. A no-clip weapon (clipsize -1) never ammo-rejects [orig: adm+88 == -1]. ---
 	for (int i = 0; i < 3; ++i)
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 0x12, 7, 0, 0, 0, 0, 0, 0xFFFF, uint16_t(10 + i),
 		                        12, 0));
-	if (!expect(world.rounds.count == 7, "no-clip weapon fires freely")) return 1;
+	if (!expect(world.out.rounds.count == 7, "no-clip weapon fires freely")) return 1;
 
 	// --- 8. Table-less host accepts without bookkeeping (the 0x5A echo fallback shape). ---
-	world.weapons.entries.clear();
+	world.tables.weapons.entries.clear();
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 9, 0, 0, 0, 0, 0, 0xFFFF, 20, 12, 0));
-	if (!expect(world.rounds.count == 8, "table-less host accepts the fire")) return 1;
+	if (!expect(world.out.rounds.count == 8, "table-less host accepts the fire")) return 1;
 
 	std::printf("OK\n");
 	return 0;

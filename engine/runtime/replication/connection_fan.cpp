@@ -72,7 +72,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
                                     const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
                                     const FrameHeaderState &hdr,
                                     uint32_t game_type,
-                                    const world::World::SubgoalState &subgoals,
+                                    const world::SubgoalState &subgoals,
                                     std::vector<RoundEventRecord> round_events = {},
                                     bool authority_recipient = false) {
 	FrameUpdate fu;
@@ -740,7 +740,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
                                                   std::size_t budget_left,
                                                   std::size_t hard_budget_left) {
 	std::vector<RoundEventRecord> out;
-	const world::RoundRing &ring = w.rounds;
+	const world::RoundRing &ring = w.out.rounds;
 
 	// Watermark arm gate [orig: the playerSlot+97544 non-zero gate @0x4ffee8 — a
 	// fresh player is armed at the current sequence, so the pre-join ring backlog
@@ -968,7 +968,7 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 	// [orig: NetPacket_WriteOverlayAction @0x505d50 via
 	//  Server_SendOverlayActionToAlive @0x50a1b0]
 	std::vector<std::vector<uint8_t>> out;
-	for (const world::WaterCrossEvent &ev : world.water_crossings.events) {
+	for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
 		PlaySoundCommand cmd;
 		cmd.flag = 1; // positioned
 		cmd.sound_name = ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect;
@@ -1013,7 +1013,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			(conn.respawn_pending ? 0x02u : 0x00u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
-	hs.fallmps = static_cast<uint8_t>(std::clamp(w.wac_values.fallmps, 0, 255));
+	hs.fallmps = static_cast<uint8_t>(std::clamp(w.script.wac_values.fallmps, 0, 255));
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
 	// The weather home's native globals narrowed exactly once here
 	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — Env_FogDistTarget hi word,
@@ -1076,7 +1076,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			conn.owned_entity == w.cached.local_player;
 	if (local_recipient) {
 		std::vector<uint8_t> frame = build_0a_frame(
-				anchor, {}, flags2, hs, game_type, w.subgoals, {},
+				anchor, {}, flags2, hs, game_type, w.script.subgoals, {},
 				/*authority_recipient=*/true);
 		lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
 		conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
@@ -1119,7 +1119,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
 	std::vector<uint8_t> frame = build_0a_frame(
-			anchor, selected, flags2, hs, game_type, w.subgoals,
+			anchor, selected, flags2, hs, game_type, w.script.subgoals,
 			std::move(rounds));
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),

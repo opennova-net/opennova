@@ -76,11 +76,11 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
             return (i < prog_->operands.size()) ? prog_->operands[i] : 0;
         }
         case OperandKind::MissionVar:
-            return w.vars.get_mission(static_cast<int>(operand_index(ref)));
+            return w.script.vars.get_mission(static_cast<int>(operand_index(ref)));
         case OperandKind::GlobalVar:
-            return w.vars.get_global(static_cast<int>(operand_index(ref)));
+            return w.script.vars.get_global(static_cast<int>(operand_index(ref)));
         case OperandKind::MusicVar:
-            return w.vars.get_music(static_cast<int>(operand_index(ref)));
+            return w.script.vars.get_music(static_cast<int>(operand_index(ref)));
         case OperandKind::Builtin: {
             switch (static_cast<Builtin>(operand_index(ref))) {
                 case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: wac_var_ticks]
@@ -101,8 +101,8 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::GameOver: return w.match.outcome().winner_team != 0 ? 1 : 0;
                 case Builtin::WinVar: return w.match.outcome().winner_team == 1 ? 1 : 0;
                 case Builtin::LoseVar: return w.match.outcome().winner_team == 2 ? 1 : 0;
-                case Builtin::AccuracySpread: return w.wac_values.accuracy_spread;
-                case Builtin::Fallmps: return w.wac_values.fallmps;               // [orig: 0xC6EAE4]
+                case Builtin::AccuracySpread: return w.script.wac_values.accuracy_spread;
+                case Builtin::Fallmps: return w.script.wac_values.fallmps;               // [orig: 0xC6EAE4]
                 case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
             }
             return 0;
@@ -113,18 +113,18 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
 
 void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) const {
     switch (operand_kind(ref)) {
-        case OperandKind::MissionVar: w.vars.set_mission(static_cast<int>(operand_index(ref)), v); break;
-        case OperandKind::GlobalVar: w.vars.set_global(static_cast<int>(operand_index(ref)), v); break;
-        case OperandKind::MusicVar: w.vars.set_music(static_cast<int>(operand_index(ref)), v); break;
+        case OperandKind::MissionVar: w.script.vars.set_mission(static_cast<int>(operand_index(ref)), v); break;
+        case OperandKind::GlobalVar: w.script.vars.set_global(static_cast<int>(operand_index(ref)), v); break;
+        case OperandKind::MusicVar: w.script.vars.set_music(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::Builtin:
             // The retail named-value resolver returns the address of this mutable
             // engine dword, so ordinary set/add/sub/inc/dec/store write through.
             // [orig: WacScript_ResolveParameter @0x4f2940 ->
             //  wac_var_accuracyspread @0xC6EAE8 / dword_C6EAE4 (fallmps)]
             if (static_cast<Builtin>(operand_index(ref)) == Builtin::AccuracySpread)
-                w.wac_values.accuracy_spread = v;
+                w.script.wac_values.accuracy_spread = v;
             else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Fallmps)
-                w.wac_values.fallmps = v;
+                w.script.wac_values.fallmps = v;
             else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Wind)
                 w.commands.set_wind_scale(v); // Env_WindScale [orig: the `wind` row @0x82EEF0]
             break;
@@ -322,7 +322,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- objective ----
     // [orig: WacAction_Win @0x4ed4a0 — Server_ProcessRoundEnd(team) straight through.]
     if (ieq(n, "win")) {
-        w.effects.push({"win", A(0), 0, 0, 0, std::string()});
+        w.out.effects.push({"win", A(0), 0, 0, 0, std::string()});
         w.process_round_end(A(0));
         return 0;
     }
@@ -338,7 +338,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "lose")) {
         const int32_t team = A(0);
         if (team != 0 && team != 1) return 0;
-        w.effects.push({"lose", team, 0, 0, 0,
+        w.out.effects.push({"lose", team, 0, 0, 0,
                         std::string(team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN")});
         w.process_round_end(2);
         return 1;
@@ -351,19 +351,19 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // Chat_AddDebugMessage]. Keep them separate so game hosts can present
     // mission text without leaking authored debug output into the HUD.
     if (ieq(n, "text") || ieq(n, "ptext")) {
-        w.effects.push({"text", 0, 0, 0, 0, S(0)});
+        w.out.effects.push({"text", 0, 0, 0, 0, S(0)});
         return 0;
     }
     if (ieq(n, "consol") || ieq(n, "pconsol")) {
-        w.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
+        w.out.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
         return 0;
     }
     if (ieq(n, "text#")) {
-        w.effects.push({"text", A(1), 0, 0, 0, S(0)});
+        w.out.effects.push({"text", A(1), 0, 0, 0, S(0)});
         return 0;
     }
     if (ieq(n, "consol#")) {
-        w.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
+        w.out.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
         return 0;
     }
 
@@ -375,7 +375,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // (PlayWavList), not serialized with it. The filename rides the effect string.
     // pwave is the network-broadcast twin (same handler); host-side identical.
     if (ieq(n, "wave") || ieq(n, "pwave")) {
-        w.effects.push({"dialog_wav", 0, 0, 0, 0, S(0)});
+        w.out.effects.push({"dialog_wav", 0, 0, 0, 0, S(0)});
         return 0;
     }
 
@@ -390,7 +390,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
 
     // ---- default: record the command as an observable effect ----
-    w.effects.push({def.name, A(0), A(1), A(2), A(3), S(0)});
+    w.out.effects.push({def.name, A(0), A(1), A(2), A(3), S(0)});
     return 0;
 }
 

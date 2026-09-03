@@ -634,10 +634,10 @@ bool run_0a_subblock_phase_cycle() {
 	// Co-op's shared g_GameType (0x30020) turns phase 3 into a 16-byte
 	// objective block. The gate is not encoded in flags2, so both fan and view
 	// must receive the same session value.
-	world.subgoals.won = 0x00000102u;
-	world.subgoals.lost = 0x00000204u;
-	world.subgoals.show_win = 0x00000408u;
-	world.subgoals.show_lose = 0x00000810u;
+	world.script.subgoals.won = 0x00000102u;
+	world.script.subgoals.lost = 0x00000204u;
+	world.script.subgoals.show_win = 0x00000408u;
+	world.script.subgoals.show_lose = 0x00000810u;
 	conns[0].s2c_phase = 2; // next retail counter value is phase 3
 	ns::test::emit_all(world, conns, 0x30020u);
 	ns::Datagram objective_dg;
@@ -649,10 +649,10 @@ bool run_0a_subblock_phase_cycle() {
 	            "objective 0x0A frame decodes with the session hint")) return false;
 	if (!expect(objective_fu.flags2 == 3 && objective_fu.objective.present,
 	            "co-op phase 3 carries the required 16-byte objective block")) return false;
-	if (!expect(uint32_t(objective_fu.objective.state[0]) == world.subgoals.won &&
-	                    uint32_t(objective_fu.objective.state[1]) == world.subgoals.lost &&
-	                    uint32_t(objective_fu.objective.state[2]) == world.subgoals.show_win &&
-	                    uint32_t(objective_fu.objective.state[3]) == world.subgoals.show_lose,
+	if (!expect(uint32_t(objective_fu.objective.state[0]) == world.script.subgoals.won &&
+	                    uint32_t(objective_fu.objective.state[1]) == world.script.subgoals.lost &&
+	                    uint32_t(objective_fu.objective.state[2]) == world.script.subgoals.show_win &&
+	                    uint32_t(objective_fu.objective.state[3]) == world.script.subgoals.show_lose,
 	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
 	if (!expect(objective_fu.local_tail_present,
 	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
@@ -691,7 +691,7 @@ bool run_0a_health_class_byte_packed() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
-	world.player_item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
+	world.tables.player.item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -1686,7 +1686,7 @@ bool run_round_event_fanout() {
 		w::RoundEvent backlog;
 		backlog.shooter_handle = peer_h.packed;
 		backlog.adm_index = 9;
-		world.rounds.add(backlog);
+		world.out.rounds.add(backlog);
 	}
 	ns::test::emit_all(world, conns);
 	{
@@ -1717,7 +1717,7 @@ bool run_round_event_fanout() {
 		ev.subtype = 12;
 		ev.slot_byte = 0;
 		ev.adm_index = 11;
-		world.rounds.add(ev);
+		world.out.rounds.add(ev);
 	}
 	ns::test::emit_all(world, conns);
 	{
@@ -1813,7 +1813,7 @@ bool run_vehicle_drive_authority() {
 		t.turn_rate = 65 * 192426;
 		t.turn_rate2 = 41 * 192426;
 		t.player_control = true;
-		world.vehicle_traits.set(0x1004, t);
+		world.tables.vehicle_traits.set(0x1004, t);
 	}
 
 	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))

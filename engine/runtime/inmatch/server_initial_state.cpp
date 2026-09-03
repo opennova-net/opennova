@@ -223,8 +223,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	std::vector<const world::WaypointEntry *> waypoints;
 	if (waypoint_gametype && recipient_team == 1 && ctx.world != nullptr) {
 		waypoints.reserve(std::min<std::size_t>(
-				ctx.world->waypoints.entries.size(), 128));
-		for (const world::WaypointEntry &entry : ctx.world->waypoints.entries) {
+				ctx.world->script.waypoints.entries.size(), 128));
+		for (const world::WaypointEntry &entry : ctx.world->script.waypoints.entries) {
 			if (waypoints.size() >= 128) break;
 			if (entry.node < 0 || entry.node > 0x0FFF) continue;
 			waypoints.push_back(&entry);

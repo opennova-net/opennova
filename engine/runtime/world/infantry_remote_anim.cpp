@@ -92,7 +92,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             // Only latch the synthesized vertical state when the authority has
             // terrain and can therefore observe its landing on a later uplink.
             // Terrain-free harnesses retain the documented cooldown-only residual.
-            if (world.terrain != nullptr && world.terrain->valid()) {
+            if (world.tables.terrain != nullptr && world.tables.terrain->valid()) {
                 inf.airborne = true;
                 ent->flags |= kEntityFlagInAir;
                 ent->engine_flags |= kEntityFlagInAir;

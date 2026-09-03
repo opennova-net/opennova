@@ -335,7 +335,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // the prone-in-foliage +40 concealment term needs the foliage-mask seam — D-AI-6.]
     const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
     const int64_t err_unit =
-        (static_cast<int64_t>(119304) * world.wac_values.accuracy_spread * acc) >> 5;
+        (static_cast<int64_t>(119304) * world.script.wac_values.accuracy_spread * acc) >> 5;
     const int32_t err_a = static_cast<int32_t>(
         err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
     const int32_t err_b = static_cast<int32_t>(
@@ -465,7 +465,7 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     // [orig: Entity_AttachToUseGunSlot @0x546c42..0x546c73]
     const uint8_t adm = mount->primary_weapon_slot_adm;
     const WeaponTableEntry *weapon =
-            world.weapons.by_index(adm);
+            world.tables.weapons.by_index(adm);
     if (weapon == nullptr || weapon->ammo_index < 0) return;
 
     const int32_t dx = io::bam_sub(target_pos[0], e.pos[0]);

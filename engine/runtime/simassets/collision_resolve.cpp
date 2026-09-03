@@ -307,7 +307,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					key, std::move(points)).first;
 		}
 		if (world::ItemDeathTraits *traits =
-					world.item_death_traits.get_mutable(e->item_id);
+					world.tables.item_death_traits.get_mutable(e->item_id);
 				traits != nullptr && traits->glass_points.empty() &&
 				!glass_it->second.empty())
 			traits->glass_points = glass_it->second;
@@ -343,7 +343,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// sentinel-boxed hull (its solve-active test also fails).
 		if (h.pool() == 1) {
 			world::VehicleTraits *vt =
-					world.vehicle_traits.get_mutable(e->item_id);
+					world.tables.vehicle_traits.get_mutable(e->item_id);
 			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
 				const Threedi3di3 *vm3 = deps.models.has_index()
 						? deps.models.model_for(key)
@@ -418,7 +418,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					final_husk_m3 = deps.models.model_for(final_husk_name);
 			}
 			if (world::ItemDeathTraits *t =
-						world.item_death_traits.get_mutable(e->item_id)) {
+						world.tables.item_death_traits.get_mutable(e->item_id)) {
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The death-flash radius source is the PIECE model — huskFinal
@@ -475,7 +475,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							husk_key, std::move(kz_points)).first;
 				}
 				if (world::ItemDeathTraits *t =
-							world.item_death_traits.get_mutable(e->item_id);
+							world.tables.item_death_traits.get_mutable(e->item_id);
 						t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
 					t->kz_points = kz_it->second;
 
@@ -505,7 +505,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							husk_key, std::move(dead_points)).first;
 				}
 				if (world::ItemDeathTraits *t =
-							world.item_death_traits.get_mutable(e->item_id);
+							world.tables.item_death_traits.get_mutable(e->item_id);
 						t != nullptr && t->bridge_dead_points.empty() &&
 						!dead_it->second.empty())
 					t->bridge_dead_points = dead_it->second;
@@ -575,7 +575,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 			}
 			if (world::ItemDeathTraits *t =
-						world.item_death_traits.get_mutable(e->item_id)) {
+						world.tables.item_death_traits.get_mutable(e->item_id)) {
 				const CollisionHuskPieceInfo &info = hs->second;
 				if (t->husk_section_count == 0 && info.sections > 0)
 					t->husk_section_count = info.sections;

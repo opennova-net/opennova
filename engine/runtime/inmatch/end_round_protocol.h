@@ -13,7 +13,7 @@ namespace opennova::inmatch {
 EndRoundStats build_end_round_stats(const world::MatchResult &result);
 // non_team_form mirrors the serializer's `is_in_session && !(GameType &
 // 0x10000)` pick [orig: EndRoundScoreboard_SerializeHeader @0x5052a6]; our
-// SP-as-listen-server passes world.mp_session for the retail is_in_session.
+// SP-as-listen-server passes world.rules.mp_session for the retail is_in_session.
 EndRoundHeader build_end_round_header(const world::MatchResult &result,
 		uint8_t recipient_slot, bool non_team_form);
 

@@ -76,7 +76,7 @@ void AiSystem::mark_waypoint_visited(AiEntity &e, World &world, int32_t list, in
 
     relmat_calls.push_back({1, group, list, node}); // SetBitB first
     relmat_calls.push_back({0, ssn, list, node});   // SetBitA second
-    world.relations.mark_waypoint_visited(ssn, group, list, node);
+    world.script.relations.mark_waypoint_visited(ssn, group, list, node);
 }
 
 // [orig: AI_UpdateWaypointMovement @0x457bd0] advance along the path; write the working
@@ -795,10 +795,10 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         // [orig: Entity_CalcAverageGroundHeight @0x491845 (self) / @0x491855
         //  (the node entity)].
         int32_t node_ground = INT32_MIN;
-        if (world.terrain != nullptr) {
+        if (world.tables.terrain != nullptr) {
             const int32_t npos[3] = {node->f[1], node->f[2], node->f[3]};
             const GroundClearance clearance{};
-            node_ground = calc_average_ground_height(*world.terrain, npos, 0, clearance);
+            node_ground = calc_average_ground_height(*world.tables.terrain, npos, 0, clearance);
         }
         const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
         const int32_t floor = ground + (to_fixed(veh.bound_radius) >> 2);

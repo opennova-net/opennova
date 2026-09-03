@@ -57,7 +57,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.disabled = ent ? ent->disabled : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
-		if (const VehicleTraits *traits = world.vehicle_traits.get(ent->item_id))
+		if (const VehicleTraits *traits = world.tables.vehicle_traits.get(ent->item_id))
 			d.vehicle_family = static_cast<int32_t>(traits->family);
 	}
 	d.body_anim_slot = ent ? ent->body_anim_slot : -1;
@@ -173,7 +173,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.primary_occupant = ve->primary_occupant.valid();
 		// The mover family, so a rotor check can tell "no helicopter here"
 		// from "the helicopter's blades are not turning".
-		const VehicleTraits *vt = world.vehicle_traits.get(ve->item_id);
+		const VehicleTraits *vt = world.tables.vehicle_traits.get(ve->item_id);
 		d.veh_family = vt != nullptr ? static_cast<int32_t>(vt->family) : -1;
 		d.player_control = vt != nullptr && vt->player_control;
 		// Flight-command chain, so a "the helicopter will not move" report can
@@ -296,7 +296,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 			: static_cast<int32_t>(spawn_origin_index(ent.spawn_origin));
 	d.item_id = ent.item_id;
 	d.name = ent.name;
-	if (const std::string *item_name = world.item_names.get(ent.item_id))
+	if (const std::string *item_name = world.tables.item_names.get(ent.item_id))
 		d.item_name = *item_name;
 	d.team = static_cast<int32_t>(ent.team);
 	d.alive = ent.alive;
@@ -310,7 +310,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	d.item_attrib = static_cast<int64_t>(ent.item_attrib);
 	d.item_attrib2 = static_cast<int64_t>(ent.item_attrib2);
 	d.vehicle_family = -1;
-	if (const VehicleTraits *traits = world.vehicle_traits.get(ent.item_id))
+	if (const VehicleTraits *traits = world.tables.vehicle_traits.get(ent.item_id))
 		d.vehicle_family = static_cast<int32_t>(traits->family);
 	d.has_minimap_model_marker = ent.has_minimap_model_marker;
 	d.is_capture_trigger = ent.is_capture_trigger;
@@ -397,7 +397,7 @@ std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 		row.item_id = e.item_id;
 		row.wire_handle = e.handle.packed;
 		row.name = e.name;
-		if (const std::string *item_name = world.item_names.get(e.item_id))
+		if (const std::string *item_name = world.tables.item_names.get(e.item_id))
 			row.item_name = *item_name;
 		row.health = e.health;
 		row.alive = e.alive;
@@ -437,7 +437,7 @@ std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 			row.wire_handle = e->handle.packed;
 			row.name = ent ? ent->name : std::string();
 			if (const std::string *item_name =
-							ent ? world.item_names.get(ent->item_id) : nullptr)
+							ent ? world.tables.item_names.get(ent->item_id) : nullptr)
 				row.item_name = *item_name;
 			row.state_name = ai_state_name(e->brain.f[AiBrain::kCurState]);
 			row.health = ent ? ent->health : 0;
@@ -505,7 +505,7 @@ AiDebugReport ai_debug_report(World &world) {
 		// keeps the overlay label meaningful.
 		row.name = ent ? ent->name : std::string();
 		if (row.name.empty() && ent != nullptr) {
-			if (const std::string *item_name = world.item_names.get(ent->item_id))
+			if (const std::string *item_name = world.tables.item_names.get(ent->item_id))
 				row.name = *item_name;
 		}
 		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
@@ -590,7 +590,7 @@ AiDebugReport ai_debug_report(World &world) {
 
 	for (int g = 0; g < TriggerRelations::kGroups; ++g) {
 		const TriggerRelations::GroupState *state =
-				world.relations.group_or_null(g);
+				world.script.relations.group_or_null(g);
 		if (state == nullptr || state->initial_count <= 0) continue;
 		AiGroupRow grow;
 		grow.id = g;

@@ -147,9 +147,9 @@ PlayerDeathFeed classify_player_death(
 		out.event_type = death_family_variant(world, 13);
 	} else {
 		const world::AmmoTableEntry *ammo =
-				world.ammo.by_index(death.ammo_index);
+				world.tables.ammo.by_index(death.ammo_index);
 		out.event_type = ammo != nullptr &&
-					world.ammo.index_of("AMMO_60MM_MORTAR") == death.ammo_index
+					world.tables.ammo.index_of("AMMO_60MM_MORTAR") == death.ammo_index
 				? 49u
 				: death_family_variant(world, 4);
 	}
@@ -679,7 +679,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// Score_ProcessKillEvent @0x4fd400 — the !is_in_session gate @0x4fd447].
 		// NB: our SP-as-listen-server always runs with ctx.is_in_session=1 (the
 		// in-process loopback IS a session), so the retail SP discriminator here is
-		// world.mp_session — false for SP, stamped true by real MP hosts.
+		// world.rules.mp_session — false for SP, stamped true by real MP hosts.
 		// Killer == the host/local player -> the by-player buckets
 		// [orig: Score_TallyKillByLocalPlayer @0x4fd160], anyone else -> the by-others
 		// family [orig: Score_TallyKillByOthers @0x4fd300]. Blue/green buckets take
@@ -691,7 +691,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		// human-player-victim bucket (victim+534 -> 0xC846A0) are unmodeled — counts
 		// only, which is what the WAC predicates and the epilog columns consume
 		// (D-AI-10; world-wac-ai-re §20.4).
-		if (!world.mp_session) {
+		if (!world.rules.mp_session) {
 			if (const world::Entity *victim2 = world.registry.get(d.victim)) {
 				bool killer_is_host_player = false;
 				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
@@ -757,7 +757,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	(void)ctx;
 	if (world.match.outcome().ended) return;
-	if (world.mp_session) {
+	if (world.rules.mp_session) {
 		if (const std::optional<int32_t> winner =
 					world.match.winner_if_finished(world);
 				winner.has_value())
@@ -769,12 +769,12 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	const bool dead = !local->alive || (local->flags & 2u) != 0;
-	if (dead && (world.mission_attrib_flags & world::World::kMissionAttribSinglePlayerRespawn) == 0)
+	if (dead && (world.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
 }
 
 bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
-	if (!world.mp_session || ctx.round_end_announced ||
+	if (!world.rules.mp_session || ctx.round_end_announced ||
 			!world.match.result().ready)
 		return false;
 	const world::MatchResult &result = world.match.result();
@@ -786,12 +786,12 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 			encode_end_round_stats(build_end_round_stats(result));
 	// The header form is session state: the in-session non-team (DM/KOTH
 	// family) header carries the top three frozen-board names/scores instead
-	// of the winner/team-score words. world.mp_session is our SP-as-listen-
+	// of the winner/team-score words. world.rules.mp_session is our SP-as-listen-
 	// server stand-in for the retail is_in_session (ctx.is_in_session is
 	// always 1 here — the in-process loopback IS a session).
 	// [orig: EndRoundScoreboard_SerializeHeader form pick @0x5052a6]
 	const bool non_team_header =
-			world.mp_session && (result.game_type & 0x10000u) == 0;
+			world.rules.mp_session && (result.game_type & 0x10000u) == 0;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
 		// The zero 0x61 precedes each recipient-specific 0x1D header, then the
@@ -982,7 +982,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
 				// skips the request exactly as retail does; no fallback row exists.
 				const world::WeaponTableEntry *adm =
-						world.weapons.by_index(player->equipped_adm_index);
+						world.tables.weapons.by_index(player->equipped_adm_index);
 				if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
 					conn.link.transport->host_send(
 							s2c::LOADOUT_CRC_REQ,
@@ -1573,7 +1573,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// cleared every tick whether or not anyone is listening, because a crossing
 	// is presentation, never simulation state.
 	// [orig: Server_SendOverlayActionToAlive @0x50a1b0, send_mask 128]
-	if (ctx.is_in_session && !world.water_crossings.events.empty()) {
+	if (ctx.is_in_session && !world.out.water_crossings.events.empty()) {
 		const std::vector<std::vector<uint8_t>> splashes =
 				replication::build_water_cross_messages(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1590,7 +1590,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				                               /*reliable=*/false);
 		}
 	}
-	world.water_crossings.clear();
+	world.out.water_crossings.clear();
 	lap.mark(devtools::Slot::SIM_SERVER_RULES);
 
 	// (3) serialize-after — SESSION-ONLY [D-NET-120]: the original's per-frame replicate/broadcast

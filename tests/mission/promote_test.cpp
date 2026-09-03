@@ -733,15 +733,15 @@ int main() {
         World ww;
         AiSystem &wai = ww.ai;
         mission::promote_mission(wm, ww);
-        CHECK(ww.waypoints.entries.size() == 2);    // the blue route only
-        CHECK(ww.waypoints.show);                    // visible by default
-        CHECK(ww.waypoints.current == -1);           // no selection until the tick
-        CHECK(ww.waypoints.entries[0].x == (100 << 16));
-        CHECK(ww.waypoints.entries[0].radius == (25 << 16)); // authored wp_distance
-        CHECK(ww.waypoints.entries[0].name_id == 4);
-        CHECK(ww.waypoints.entries[1].radius == 0x8000);     // default 0.5 u
-        CHECK(ww.waypoints.entries[1].linked_event == 3);
-        CHECK(ww.waypoints.entries[1].chain_back);
+        CHECK(ww.script.waypoints.entries.size() == 2);    // the blue route only
+        CHECK(ww.script.waypoints.show);                    // visible by default
+        CHECK(ww.script.waypoints.current == -1);           // no selection until the tick
+        CHECK(ww.script.waypoints.entries[0].x == (100 << 16));
+        CHECK(ww.script.waypoints.entries[0].radius == (25 << 16)); // authored wp_distance
+        CHECK(ww.script.waypoints.entries[0].name_id == 4);
+        CHECK(ww.script.waypoints.entries[1].radius == 0x8000);     // default 0.5 u
+        CHECK(ww.script.waypoints.entries[1].linked_event == 3);
+        CHECK(ww.script.waypoints.entries[1].chain_back);
         // The raw route-flags word rides the nav channel (bit1 = the blue mark).
         CHECK((wai.nav.channel(2)->loopflag &
                static_cast<int32_t>(bms::WaypointFlags::BlueTeam)) != 0);

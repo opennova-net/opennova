@@ -244,7 +244,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// [orig: PlayerClass_InitEntity @0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")];
 	// 0xFF (none) when no armory table is fed (unit-test hosts). A joiner's own extended uplink
 	// overwrites it on the first drained 0x0C. (D-NET-143)
-	const int m4 = world.weapons.index_of("WPN_M4AUTO");
+	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
 	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
 
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
