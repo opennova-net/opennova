@@ -13,8 +13,9 @@ lives in its record's catalog (the record is the authoritative content home per
 Consequence 1; the ledger stays the authoritative disposition dashboard). The
 scoreboard's "Closed rows still tabled" column counts down to zero, and a fully
 burned-and-pruned domain drops off the scoreboard. Ids remain stable and
-greppable in the closure lines; `host_lint.py --frozen-audit` verifies every
-citation and id still resolves under docs/ after a move. Nothing in the
+greppable in the closure lines; `cite_census.py --audit-range <range>` (ADR
+0043's census, which absorbed the retired `host_lint.py --frozen-audit`)
+verifies every citation and id still resolves under docs/ after a move. Nothing in the
 original decision changes — the zero-OPEN target, the vocabulary, and the
 PERMANENT register are as written below.
 

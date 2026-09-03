@@ -88,10 +88,11 @@ jobs:
           # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
           python scripts/lint/orphan_header_check.py --enforce
           python scripts/lint/ledger_check.py --check
-          # Host-terminology gate (CONTEXT.md Host / Joiner): "host" means
-          # the game/server host and nothing else. Any uncovered use fails;
-          # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
-          python scripts/lint/host_lint.py --enforce
+          # Witness-address census (ADR 0043): the SET of `@0xADDR` addresses
+          # cited under engine/, godot/, apps/ and tests/ never loses a member
+          # silently; a structural slice leaves it identical, a deletion is
+          # banked with --write-baseline and named in the commit.
+          python scripts/lint/cite_census.py --enforce
           # Fixture provenance gate (fixtures/README.md): every fixture is
           # minted by a generator, authored, or a keep-set retail-interop row
           # in scripts/lint/fixture_allowlist.json; LFS-tracked, under 2 MiB,
@@ -101,9 +102,7 @@ jobs:
           # roots through their resolvers, GODOT_BIN in the scripts, the
           # deployed service's own config and the OS variables; nothing else.
           python scripts/lint/env_lint.py --enforce
-          # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040),
-          # no em dashes in public-facing copy, no checked-off checklist rows
-          # (completed entries are deleted, not ticked).
+          # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce
           # The asset-gate attestation tables (scripts/ci/retail_gates_ran.py)
           # and the docs/asset-gated-tests.md matrix name the same ctests.

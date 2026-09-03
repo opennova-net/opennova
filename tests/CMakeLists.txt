@@ -1841,6 +1841,16 @@ target_include_directories(listen_host_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(listen_host_test PRIVATE cxx_std_17)
 add_test(NAME listen_host COMMAND listen_host_test)
 
+# The tick digest (ADR 0043): the per-tick state hash a structural slice must
+# leave unchanged. The ctest leg is the synthetic mission (committed chain,
+# determinism); `tick_digest_test --mission <name>` is the local retail tool
+# behind scripts/parity/tick_digest.py and is never a ctest leg.
+add_executable(tick_digest_test mission/tick_digest_test.cpp)
+target_link_libraries(tick_digest_test PRIVATE opennova_test_rig)
+target_include_directories(tick_digest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tick_digest_test PRIVATE cxx_std_17)
+add_test(NAME tick_digest COMMAND tick_digest_test)
+
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.

@@ -1397,7 +1397,7 @@ new ones.
    rationale.
 5. **The ledger is updated in the same PR that changes a disposition** — the dashboard
    never lags the tree.
-6. **Closed rows are condensed, not hoarded** — once a row's full detail lives in its record's catalog, the table row is replaced by a dated prose closure line ("Closed <date>: **ID** -> `FIXED` — <one line> (full entry: <record>)"). The scoreboard's "Closed rows still tabled" column counts down to zero, and a domain with zero open and zero tabled-closed rows drops off the scoreboard (the pruned state). Ids stay stable and greppable in the closure lines forever; `host_lint.py --frozen-audit` verifies nothing stops resolving.
+6. **Closed rows are condensed, not hoarded** — once a row's full detail lives in its record's catalog, the table row is replaced by a dated prose closure line ("Closed <date>: **ID** -> `FIXED` — <one line> (full entry: <record>)"). The scoreboard's "Closed rows still tabled" column counts down to zero, and a domain with zero open and zero tabled-closed rows drops off the scoreboard (the pruned state). Ids stay stable and greppable in the closure lines forever; `cite_census.py --audit-range <range>` verifies nothing stops resolving.
 
 ---
 

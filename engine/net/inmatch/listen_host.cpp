@@ -52,6 +52,9 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 	host_cfg.config = config;
 	host_cfg.socket_mode = np::SocketMode::Socketless;
 	host_cfg.serve_and_play = true;
+	host_cfg.host_key = state.host_key;
+	host_cfg.host_start_tick = state.host_start_tick;
+	host_cfg.session_seed_id = state.session_seed_id;
 	np::start_host_session(state.host_owner, host_cfg);
 	state.client_runtime = std::make_unique<np::ClientRuntime>(state.host_loop);
 	state.client_runtime->view().set_game_type(config.game_type);

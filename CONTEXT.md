@@ -122,8 +122,8 @@ a local client too; "client" survives in wire-protocol prose (retail message nam
 This is the ONLY meaning of "host" in this codebase. UI attachment points are
 containers, presentation owners are **Presenters**, application front-ends are
 **Shells**, the application embedding a portable lib is its **embedder**, and our
-engine contrasted with retail is **the reimpl** — never "the host". Enforced by `scripts/lint/host_lint.py`
-(code suffixes; Markdown gets a non-failing advisory and `.agents/**` is exempt).
+engine contrasted with retail is **the reimpl** — never "the host". A review
+concern, not a lint (ADR 0043 retired `host_lint.py`).
 _Avoid_: master/slave, owner (when you mean the host); host for anything that is not
 the authoritative session side
 
