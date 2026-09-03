@@ -24,14 +24,14 @@ bool Simulation::local_player_dead() const {
 	// The one role-agnostic read of the local player's dead bit: the joiner's
 	// replica (inmatch::ClientRuntime), the authority's entity flags (the kernel).
 	if (joiner_) return runtime_ != nullptr && runtime_->local_player_dead();
-	return kernel_ != nullptr && kernel_->local_player_dead();
+	return kernel_ != nullptr && kernel_->local.local_player_dead();
 }
 
 bool Simulation::request_local_player_medic() {
 	// The session/entity gates are the binding's (a live runtime, a local
 	// entity); the dead-bit and cooldown gates are the kernel's.
 	if (!runtime_ || !kernel_->world.cached.local_player.valid()) return false;
-	if (!kernel_->medic_request_allowed(local_player_dead())) return false;
+	if (!kernel_->local.medic_request_allowed(local_player_dead())) return false;
 	bool sent = false;
 	if (joiner_) {
 		sent = runtime_->queue_medic_request();
@@ -45,16 +45,16 @@ bool Simulation::request_local_player_medic() {
 				opennova::encode_medic_request(request));
 		sent = true;
 	}
-	if (sent) kernel_->stamp_medic_request();
+	if (sent) kernel_->local.stamp_medic_request();
 	return sent;
 }
 
 int Simulation::local_medic_request_cooldown_ticks() const {
-	return kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
+	return kernel_ ? kernel_->local.medic_request_cooldown_ticks : 0;
 }
 
 int Simulation::local_medic_request_serial() const {
-	return kernel_ ? kernel_->medic_request_serial : 0;
+	return kernel_ ? kernel_->local.medic_request_serial : 0;
 }
 
 void Simulation::set_server_text(const String &p_medic_request_format) {
@@ -106,7 +106,7 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	opennova::world::DeployStaticsInput statics_in;
 	statics_in.hold_seconds = hold;
 	statics_in.revive_seconds = revive;
-	statics_in.local_mounted = kernel_->view.mount.control_seat;
+	statics_in.local_mounted = kernel_->local.view.mount.control_seat;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
 	Ref<DeployStatus> out;
@@ -120,8 +120,8 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	out->set_queued_numbered(line.numbered);
 	out->set_show_psp_respawn(statics.psp_respawn);
 	out->set_show_medic(statics.medic);
-	out->set_medic_cooldown_ticks(kernel_ ? static_cast<int>(kernel_->medic_request_cooldown_ticks) : 0);
-	out->set_medic_request_serial(kernel_ ? static_cast<int>(kernel_->medic_request_serial) : 0);
+	out->set_medic_cooldown_ticks(kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0);
+	out->set_medic_request_serial(kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0);
 	return out;
 }
 

@@ -37,6 +37,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/player_input.h>
@@ -167,21 +168,9 @@ public:
 	void update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z);
 
 	// --- the per-tick legs a session frame orders around its pump -----------
-	// Pack the frame input onto the local player's body before the logic tick
-	// (the view-flag stamps ride along); no local player = no-op.
-	void apply_player_input_pre_tick();
-	// The post-tick local pumps in retail order: the sim-wrote-the-view fold,
-	// the per-frame view promoter, then the equipped-slot FSM pump.
-	void run_local_player_post_tick();
 	// Ground every soldier that appeared since the previous sweep on its OWN
 	// model .adm (D-INF-6); also the session pump's before-server-tick hook.
 	void resolve_new_infantry_adm_ids();
-	// Reset the frame-input state and seed the look heading from the (auto-)
-	// spawned local player's facing — the session bring-up's tail.
-	void reset_local_player_input_to_player_facing();
-	// The same reset with an explicit heading (the joiner's spawn/redeploy
-	// edges hand the authoritative facing in).
-	void reset_local_player_input(int32_t look_heading_bam);
 	// Restore the post-PreMission snapshot — the play-start world, the WAC
 	// runtime state, the local weapon's epoch resets (the borrowed-UseGun
 	// reinstall event), the view reset, and the fresh-soldier .adm re-ground;
@@ -190,44 +179,7 @@ public:
 	// Re-capture the baseline from the CURRENT state (the shell's sealed
 	// mission-start point: post-eager-WAC, fully settled play start).
 	void capture_baseline();
-
 	// --- the local player ----------------------------------------------------
-	bool has_local_player() const;
-	world::Entity *player();
-	const world::Entity *player() const;
-	world::AiEntity *player_ai();
-	world::Vec3 player_position() const; // mission space (Z-up)
-	std::string player_anim_key() const; // "anim_<state>"
-	int32_t player_health() const;
-	// The movement keys the pre-tick packs onto the body (look rides look()).
-	world::PlayerInput input;
-	// One frame of movement keys: packs the keys plus the sim-owned stance
-	// latch onto `input`, runs the witnessed movement-held unscope (while
-	// SETTLED at scope on a Scoped weapon, any direction key routes through
-	// the full unscope; the ForceScoped pin keeps pinned sights raised), and
-	// refreshes the view aggregates. [orig: Player_PackInputStateToEntity
-	// @0x4df450 — g_movementKeyHeld @0x4df29c; the unscope route
-	// @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
-	void set_movement_keys(bool forward, bool back, bool left, bool right,
-			bool lean_left, bool lean_right, bool jump);
-	// Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
-	// at apply, REFUSED while the equipped weapon has ForceCrouch or the
-	// player sits in the UseGun seat. Returns whether the latch changed.
-	// [orig: input cases 169/170/172 @0x4e0d77.. -> NapiNPServerMsg_HandleStanceChange
-	// @0x501c60; the ForceCrouch gate Entity_CheckWeaponSeatFlags(equipped,
-	// 0x40000) @0x4e0d8a; the `parentSlot == 3` gate @0x4e0da0..0x4e0db5]
-	bool request_stance(int stance);
-	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
-	// dword_B76484 prone-latch equivalent the render-slot drape gate reads.
-	int stance_latch() const { return stance_latch_; }
-	// Mouse pixels onto the look angles (the center-lock accumulator).
-	void look(float dx_px, float dy_px);
-	// Point the look straight at a mission-space target from a mission-space
-	// eye (absolute heading + pitch, engine BAM frame).
-	void aim_at(const world::Vec3 &eye, const world::Vec3 &target);
-	void teleport_local_player(const world::Vec3 &mission_pos, double yaw_deg,
-			double pitch_deg);
-	void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
 	// The by-name weapon install from the retained weapon.def rows. A
 	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`
 	// asks for the re-bake that keeps the live slot, serials, latches and
@@ -265,44 +217,6 @@ public:
 	// -- the .adm ground, the input reset seeded from the spawn facing, the
 	// view reset. False when the registry refuses the spawn.
 	bool spawn_local_player(const world::PlayerSpawn &spawn);
-	// The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
-	// @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
-	// out-of-session UseGun rejection (session_open gates it).
-	bool toggle_mount();
-	world::LocalPlayerViewFrame view_frame();
-	// The Player_CanFireWeapon verdict the body updater and the HUD share
-	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
-	// @0x4dcd30].
-	bool local_player_can_fire(const world::AiEntity *body) const;
-	// The seat/armory labels the HUD draws around the local player: nothing
-	// for a dead or absent player; armory mode is the raw entity flag [orig:
-	// is_armory_mode = entity Flags & 0x400000 @0x5a32c4]; the nearest-only
-	// gate is the CanFire verdict above, computed here so camera changes
-	// cannot lag one logic tick.
-	void collect_attach_labels(std::vector<world::AttachLabel> &out);
-	// The authority's read of the local player's dead bit (the entity flags;
-	// a joiner reads its replica through inmatch::ClientRuntime::local_player_dead).
-	bool local_player_dead() const;
-
-	// --- the medic call (the dead player's C2S 0x2E) -------------------------
-	// The retail client medic-call cooldown: 310 ticks stamped at the send
-	// [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
-	// 0x136`; decremented once per frame in Player_UpdatePerFrame @0x4de73e;
-	// cleared on the local death path @0x4b4d06; net-re 0x2E].
-	static constexpr int kMedicRequestCooldownTicks = 0x136;
-	int medic_request_cooldown_ticks = 0;
-	int medic_request_serial = 0;
-	// The action gates past the session/entity checks: a dead local player
-	// with the cooldown at zero [orig: case 217 @0x49b4b4..0x49b4da].
-	bool medic_request_allowed(bool local_dead) const {
-		return local_dead && medic_request_cooldown_ticks == 0;
-	}
-	// The send stamp: the cooldown and the serial the HUD keys its line on.
-	void stamp_medic_request();
-	// One per tick: the local death edge zeroes the cooldown, else it counts
-	// down [orig: Player_UpdatePerFrame @0x4de736..0x4de744; @0x4b4d06].
-	void tick_medic_cooldown(bool local_dead);
-
 	// --- terrain queries -----------------------------------------------------
 	bool has_terrain() const { return terrain_store.valid(); }
 	// The renderer-accurate column height under a mission x/y, world units.
@@ -328,11 +242,6 @@ public:
 	bool items_ok = false;
 
 	// --- the world and its systems -------------------------------------------
-	// The retail is_in_session fact: a net session (listen or dedicated) has
-	// been brought up over this kernel. The net bring-ups set it; the bare
-	// no-net kernel keeps false. Gates the UseGun null-slot rejection
-	// [orig: Entity_AttachToUseGunSlot @0x546c07].
-	bool session_open = false;
 	world::World world;
 	BmsEventSystem events;
 	wac::WacSystem wac;
@@ -371,30 +280,14 @@ public:
 	devtools::TickProfile profile;
 
 	// --- the local player's weapon and view ----------------------------------
+	// The local player (world/local_player.h): its input, weapon, loadout,
+	// view and medic-call state plus the verbs over them; the kernel keeps the
+	// asset-bound legs (the def tables, the .adm clips, the spawn entries).
+	world::LocalPlayer local;
 	DefWeaponsFile weapon_defs{};
 	bool weapon_defs_ok = false;
 	bool ammo_ok = false;
-	world::LocalPlayerWeapon weapon;
-	// The resident kit: the mission's loadout/availability chunks promoted
-	// through the SP gate at load_weapon_table, then the Player_InitPlayer
-	// weapon leg (the spawn-default select + the slot pool the reloads refill).
-	world::LocalPlayerLoadout loadout;
-	world::WeaponInventory inventory;
-	bool inventory_valid = false;
-	world::PlayerViewState view;
-	world::LocalPlayerViewTracker view_tracker;
-	world::PlayerLookSettings look_settings;
 	simassets::AdmClipIndex clip_index;
-	// What the view arbiter reads from the embedder's session (death screen,
-	// end-round, the death-camera target): a live embedder refreshes this
-	// before each session frame; the bare kernel keeps the no-session default.
-	world::LocalViewSessionInputs view_session_inputs;
-	// The post-tick pump's wire-facing outcomes, overwritten every pump: a
-	// serving embedder relays the reload onto its loopback (the witnessed
-	// local reload producer -> the S2C 0x49 broadcast) and a joiner ships the
-	// fired round; the bare kernel drops both, having already applied them.
-	world::LocalWeaponFiredWire last_fired;
-	world::LocalWeaponReloadWire last_reload;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD for the PANM pose clock; -1 = deterministic logic time
 	// (simassets::mounted_pose_time_ms consumes it).
@@ -419,9 +312,6 @@ public:
 	// embedder calls it after every environment change.
 	void sync_water_plane();
 	void wire_collision();
-	// The post-tick "sim wrote the view" fold, exposed for the embedder's
-	// mount-change edges (the joiner's authoritative attach echo).
-	void sync_local_mounted_input_heading();
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
@@ -464,10 +354,6 @@ private:
 	std::function<std::string(int32_t)> people_name_resolver_;
 	bool infantry_adm_retained_ = false;
 	int infantry_adm_resolved_ai_count_ = 0;
-	float look_accum_x_ = 0.0f;
-	float look_accum_y_ = 0.0f;
-	int stance_latch_ = 0;
-	bool medic_dead_edge_seen_ = false;
 
 	struct MountedPoseRest {
 		simassets::MountedPosePartMatrices parts;

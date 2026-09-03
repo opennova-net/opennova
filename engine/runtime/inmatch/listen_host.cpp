@@ -28,7 +28,7 @@ void reset_state(mission::MissionKernel &kernel, ListenHostState &state,
 	state.host_owner.ctx.mission_text_loaded = false;
 	kernel.world.rules.fat_bullets = config.fat_bullets;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill;
-	kernel.session_open = true;
+	kernel.world.rules.session_open = true;
 }
 
 // host_session_pump's before-server-tick hook: ground every soldier the tick
@@ -61,7 +61,7 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 	state.client_runtime->view().set_game_type(config.game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
 	// Seed the look heading from the auto-spawned player's facing.
-	kernel.reset_local_player_input_to_player_facing();
+	kernel.local.reset_local_player_input_to_player_facing();
 }
 
 void bringup_dedicated(mission::MissionKernel &kernel, ListenHostState &state,
@@ -115,14 +115,14 @@ void frame(mission::MissionKernel &kernel, ListenHostState &state,
 			viewport_height > 0 ? static_cast<uint32_t>(viewport_height) : 0u;
 	const uint32_t now = state.host_owner.now_tick;
 	drain_host_client_gameplay_requests(kernel, state);
-	kernel.apply_player_input_pre_tick();
+	kernel.local.apply_player_input_pre_tick();
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
 	// The weather tick follows the server tick's entity update [orig:
 	// Game_ProcessMainFrame @ 0x52674b -> @ 0x526774]; the next frame's 0x0A
 	// fan projects the advanced weather.
 	kernel.tick_weather();
-	kernel.run_local_player_post_tick();
+	kernel.local.run_local_player_post_tick();
 	if (state.client_runtime)
 		state.client_runtime->Client_ProcessNetworkFrame(now); // fold host_loop -> ClientState
 	kernel.resolve_new_infantry_adm_ids();

@@ -118,7 +118,7 @@ void Simulation::bringup_host_runtime() {
 		host_cfg.local_character_vars = local_character_vars_;
 	}
 	inmatch::start_host_session(host_owner_, host_cfg);
-	kernel_->session_open = true; // the retail is_in_session fact
+	kernel_->world.rules.session_open = true; // the retail is_in_session fact
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
@@ -134,8 +134,8 @@ void Simulation::bringup_host_runtime() {
 		runtime_->view().set_mp_session(kernel_ != nullptr && kernel_->world.rules.mp_session);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
-		// motor drives entity Yaw from kernel_->input.look_heading each frame, else input snaps it to 0).
-		kernel_->reset_local_player_input_to_player_facing();
+		// motor drives entity Yaw from kernel_->local.input.look_heading each frame, else input snaps it to 0).
+		kernel_->local.reset_local_player_input_to_player_facing();
 	} else {
 		// Dedicated (UI "serve only"). The witnessed original makes this a true host-only session
 		// [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1), is_host=1/is_client=0; HostDialog
@@ -220,7 +220,7 @@ void Simulation::host_pump() {
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): sampled pre-fold, exactly the value the old inline
 	// view tick consumed at this point in the frame.
-	kernel_->view_session_inputs = local_view_session_inputs();
+	kernel_->local.view_session_inputs = local_view_session_inputs();
 	UdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	if (profiling)
 		kernel_->profile.add(opennova::devtools::Slot::SIM_HOST_PREP,
@@ -232,17 +232,17 @@ void Simulation::host_pump() {
 	// [orig: Game_ProcessMainFrame @0x5263f0]
 	opennova::inmatch::listen_host::frame(*kernel_, host_state_, sock,
 			static_cast<int32_t>(viewport_height));
-	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
+	kernel_->local.tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	// The kernel pump's wire-facing reload outcome relays onto the loopback so
 	// the shared dispatcher broadcasts the S2C 0x49 to every client next frame
 	// (the authority already performed WeaponSlot_ReloadAmmo inside the pump;
 	// the server handler's local-connection gate prevents a second refill).
-	if (kernel_->last_reload.valid && host_owner_.serve_and_play) {
+	if (kernel_->local.last_reload.valid && host_owner_.serve_and_play) {
 		opennova::WeaponReload reload;
-		reload.entity_handle = kernel_->last_reload.entity_handle;
-		reload.reload_param = kernel_->last_reload.reload_param;
+		reload.entity_handle = kernel_->local.last_reload.entity_handle;
+		reload.reload_param = kernel_->local.last_reload.reload_param;
 		host_loop_.client_send(0x25, opennova::encode_weapon_reload(reload));
-		kernel_->last_reload = opennova::world::LocalWeaponReloadWire{};
+		kernel_->local.last_reload = opennova::world::LocalWeaponReloadWire{};
 	}
 	// The host's measurable net leg for the F3 Stats board: the ClientState
 	// fold. The S2C serialize/emit half rides inside inmatch::host_session_pump
@@ -402,8 +402,8 @@ void Simulation::joiner_pump() {
 	// resolution, the loadout profile seams (S7b disposition), device input,
 	// the view/weapon pumps shared with the host path, and the clocks.
 	opennova::inmatch::JoinerWorldBridge::PumpContext ctx{
-			kernel_->world, *runtime_, kernel_->weapon, kernel_->loadout,
-			kernel_->inventory, kernel_->inventory_valid, kernel_->seat_specs,
+			kernel_->world, *runtime_, kernel_->local.weapon, kernel_->local.loadout,
+			kernel_->local.inventory, kernel_->local.inventory_valid, kernel_->seat_specs,
 			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
 	opennova::inmatch::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
@@ -432,22 +432,22 @@ void Simulation::joiner_pump() {
 		on_joiner_local_player_redeployed(look_heading_bam);
 	};
 	hooks.on_mount_changed = [this] {
-		kernel_->view.binoculars_requested = false;
-		kernel_->view_tracker.binocular_yaw_offset_deg = 0.0f;
-		kernel_->view_tracker.binocular_pitch_offset_deg = 0.0f;
+		kernel_->local.view.binoculars_requested = false;
+		kernel_->local.view_tracker.binocular_yaw_offset_deg = 0.0f;
+		kernel_->local.view_tracker.binocular_pitch_offset_deg = 0.0f;
 		refresh_local_player_view_effects();
-		kernel_->sync_local_mounted_input_heading();
+		kernel_->local.sync_local_mounted_input_heading();
 	};
 	hooks.wire_collision_shape = [this](uint16_t type_id) {
 		return wire_collision_shape_for_type(type_id);
 	};
-	hooks.apply_input_pre_tick = [this] { kernel_->apply_player_input_pre_tick(); };
+	hooks.apply_input_pre_tick = [this] { kernel_->local.apply_player_input_pre_tick(); };
 	hooks.sync_mounted_input_heading =
-			[this] { kernel_->sync_local_mounted_input_heading(); };
+			[this] { kernel_->local.sync_local_mounted_input_heading(); };
 	hooks.tick_view = [this] { tick_local_player_view(); };
 	hooks.tick_weapon = [this] {
 		tick_local_player_weapon();
-		kernel_->tick_medic_cooldown(local_player_dead());
+		kernel_->local.tick_medic_cooldown(local_player_dead());
 	};
 	hooks.tick_weather = [this] { kernel_->tick_weather(); };
 	joiner_bridge_.pump(ctx, hooks);
@@ -514,13 +514,13 @@ void Simulation::print_joiner_net_diagnostic_sample() {
 // polls live keys; a press during the join wait must not cross the spawn edge).
 void Simulation::on_joiner_local_player_spawned(int32_t p_look_heading_bam) {
 	kernel_->resolve_new_infantry_adm_ids();
-	kernel_->reset_local_player_input(p_look_heading_bam);
+	kernel_->local.reset_local_player_input(p_look_heading_bam);
 }
 
 // L revived on an ACK-qualified redeploy release: the same input-latch reset
 // from the redeployed authoritative heading, plus the respawn loadout rebuild.
 void Simulation::on_joiner_local_player_redeployed(int32_t p_look_heading_bam) {
-	kernel_->reset_local_player_input(p_look_heading_bam);
+	kernel_->local.reset_local_player_input(p_look_heading_bam);
 	respawn_local_player_loadout();
 }
 
@@ -944,7 +944,7 @@ bool Simulation::set_local_spectator(bool p_spectator) {
 					ctx_, connection, kernel_->world, p_spectator)) {
 			return false;
 		}
-		kernel_->reset_local_player_input_to_player_facing();
+		kernel_->local.reset_local_player_input_to_player_facing();
 		set_local_player_weapon_input(false, false, false);
 		if (!p_spectator) respawn_local_player_loadout();
 		return true;

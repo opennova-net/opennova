@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 
 	// --- P0 baseline: promote results (seats, brains, crews) settle well before
 	// the first event quantum can matter for the kickoffs we watch.

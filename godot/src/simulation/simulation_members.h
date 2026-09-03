@@ -297,14 +297,14 @@ private:
 	// The shell applies the profile kit/class right after runtime setup — on a
 	// joiner that is BEFORE L exists (L spawns on the name-match). The class
 	// latch lives on the world-typed loadout aggregate
-	// (kernel_->loadout.pending_player_class); L's spawn block stamps it with
+	// (kernel_->local.loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
 	// spawn performs. (engine: runtime/inmatch/host_session.h)
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 
 	// The local-player frame input, look accumulators, stance latch and mouse
-	// settings all live on the kernel (kernel_->input / look() /
+	// settings all live on the kernel (kernel_->local.input / look() /
 	// request_stance / look_settings); this binding only converts device
 	// input and routes the joiner's wire edges.
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
@@ -324,7 +324,7 @@ private:
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
 	// The whole equipped-weapon state (def/slot/rings/serials/UseGun/
-	// PowerThrow/presentation events) lives on the kernel (kernel_->weapon,
+	// PowerThrow/presentation events) lives on the kernel (kernel_->local.weapon,
 	// with the retained weapon.def rows and the clip index beside it); this
 	// binding marshals installs, inputs, drains, and the two wire request
 	// records.
@@ -333,27 +333,27 @@ private:
 	// inline wrappers keep the family's call sites unchanged.
 	opennova::world::WeaponSlotState *active_local_weapon_slot() {
 		return opennova::world::active_local_weapon_slot(
-				kernel_->world, kernel_->weapon);
+				kernel_->world, kernel_->local.weapon);
 	}
 	const opennova::world::WeaponSlotState *active_local_weapon_slot() const {
 		return opennova::world::active_local_weapon_slot(
-				kernel_->world, kernel_->weapon);
+				kernel_->world, kernel_->local.weapon);
 	}
 	bool local_usegun_switch_is_instant() const {
 		return opennova::world::local_usegun_switch_is_instant(
-				kernel_->world, kernel_->weapon);
+				kernel_->world, kernel_->local.weapon);
 	}
 	void sync_local_usegun_weapon_transition() {
 		opennova::world::sync_local_usegun_weapon_transition(
-				kernel_->world, kernel_->weapon);
+				kernel_->world, kernel_->local.weapon);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
-				kernel_->world, kernel_->weapon);
+				kernel_->world, kernel_->local.weapon);
 	}
 	void queue_local_usegun_weapon_switch(bool p_same_category) {
 		opennova::world::queue_local_usegun_weapon_switch(
-				kernel_->world, kernel_->weapon, p_same_category);
+				kernel_->world, kernel_->local.weapon, p_same_category);
 	}
 	void install_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                 const Dictionary &p_clip_seconds,
@@ -366,7 +366,7 @@ private:
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
 	// The slot pool, spawn kit, availability table and pre-spawn class latch
-	// all live on the kernel (kernel_->inventory / kernel_->loadout, with the
+	// all live on the kernel (kernel_->local.inventory / kernel_->local.loadout, with the
 	// world-typed rules in world/player_loadout.h); this binding converts
 	// dictionaries and routes the joiner wire submissions.
 	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
@@ -382,25 +382,25 @@ private:
 	// wrappers keep the family's call sites unchanged.
 	void commit_pending_weapon_switch() {
 		opennova::world::commit_pending_weapon_switch(
-				kernel_->world, kernel_->weapon,
-				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
+				kernel_->world, kernel_->local.weapon,
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
 	}
 	void handle_weapon_switch_outcome(
 			const opennova::world::WeaponSwitchOutcome &p_out) {
 		opennova::world::handle_weapon_switch_outcome(
-				kernel_->world, kernel_->weapon,
-				kernel_->inventory_valid ? &kernel_->inventory : nullptr, p_out);
+				kernel_->world, kernel_->local.weapon,
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, p_out);
 	}
 	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const {
 		return opennova::world::local_weapon_switch_gates(
-				kernel_->world, kernel_->weapon,
-				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
+				kernel_->world, kernel_->local.weapon,
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
 	}
 	// Player_InitPlayer's weapon leg (engine: runtime/inmatch/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h). False when
+	// (kernel_->local.loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h). False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
@@ -435,8 +435,8 @@ private:
 	opennova::world::SpawnZoneRegistry deploy_zone_registry_;
 	bool deploy_zone_registry_built_ = false;
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
-	// The view state and its trackers live on the kernel (kernel_->view /
-	// kernel_->view_tracker; the witnessed gates in world/local_player_view.h);
+	// The view state and its trackers live on the kernel (kernel_->local.view /
+	// kernel_->local.view_tracker; the witnessed gates in world/local_player_view.h);
 	// this class converts frames and routes wire requests
 	// (simulation_player_view.cpp).
 	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;

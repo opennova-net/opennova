@@ -135,8 +135,8 @@ int main() {
 			CHECK(host.client_runtime->is_authority());
 		}
 		CHECK(local_loopback_connections(host) == 1);
-		CHECK(kernel.has_local_player());
-		CHECK(kernel.player_ai() != nullptr);
+		CHECK(kernel.local.has_local_player());
+		CHECK(kernel.local.player_ai() != nullptr);
 
 		// N listen frames over the null wire: one logic tick and one owner
 		// tick per frame; the per-tick 0x0A fan reaches the local ClientState
@@ -168,7 +168,7 @@ int main() {
 		const size_t s2c_before = host.host_loop.s2c_pending();
 		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
 		WeaponReload reload;
-		reload.entity_handle = kernel.player()->handle.packed;
+		reload.entity_handle = kernel.local.player()->handle.packed;
 		reload.reload_param = 0;
 		host.host_loop.client_send(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload));
 		CHECK(host.host_loop.c2s_pending() == 2);
@@ -219,7 +219,7 @@ int main() {
 		CHECK(host.host_owner.ctx.config.max_players == 4u);
 		CHECK(local_loopback_connections(host) == 0);
 		CHECK(host.host_owner.ctx.np_protocol.connection_list.empty());
-		CHECK(!kernel.has_local_player());
+		CHECK(!kernel.local.has_local_player());
 
 		// The same frame drives a dedicated host: the logic clock and the
 		// owner tick advance together, and the drain has no local connection
@@ -233,7 +233,7 @@ int main() {
 		CHECK(host.host_owner.now_tick == now0 + 4);
 		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);
 		CHECK(host.host_loop.c2s_pending() == 0);
-		CHECK(!kernel.has_local_player());
+		CHECK(!kernel.local.has_local_player());
 	}
 
 	if (failures == 0) std::printf("listen_host: all checks passed\n");

@@ -174,6 +174,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_look.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp

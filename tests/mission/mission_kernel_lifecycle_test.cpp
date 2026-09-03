@@ -88,7 +88,7 @@ int main() {
 		std::string error;
 		CHECK(!kernel.boot(options, error));
 		CHECK(error == "open() / open_document() first");
-		CHECK(!kernel.has_local_player());
+		CHECK(!kernel.local.has_local_player());
 		CHECK(!kernel.have_baseline);
 		CHECK(!kernel.restore_baseline());
 	}
@@ -108,7 +108,7 @@ int main() {
 		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(kernel.boot(options, error));
-		CHECK(kernel.has_local_player());
+		CHECK(kernel.local.has_local_player());
 		CHECK(kernel.have_baseline);
 		CHECK(kernel.have_wac_baseline);
 		// The boot's own baseline is the post-PreMission point; the embedders
@@ -116,31 +116,31 @@ int main() {
 		// shell's seal_mission_start_baseline). Seal here, then mutate.
 		kernel.tick_no_net();
 		kernel.capture_baseline();
-		const w::Vec3 spawn_pos = kernel.player_position();
-		const int32_t spawn_health = kernel.player_health();
+		const w::Vec3 spawn_pos = kernel.local.player_position();
+		const int32_t spawn_health = kernel.local.player_health();
 		const uint32_t sealed_tick = kernel.world.logic_tick;
-		const w::EntityHandle player_h = kernel.player()->handle;
+		const w::EntityHandle player_h = kernel.local.player()->handle;
 		CHECK(spawn_health > 0);
 
 		kernel.tick_no_net();
 		kernel.tick_no_net();
-		kernel.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
+		kernel.local.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
 		kernel.world.commands.set_entity_health(player_h, 37);
 		kernel.world.script.vars.set_mission(3, 99);
 		CHECK(kernel.world.logic_tick == sealed_tick + 2);
-		CHECK(kernel.player_health() == 37);
-		CHECK(near_equal(kernel.player_position().x, 100.0f, 0.001f));
+		CHECK(kernel.local.player_health() == 37);
+		CHECK(near_equal(kernel.local.player_position().x, 100.0f, 0.001f));
 
 		CHECK(kernel.restore_baseline());
-		CHECK(kernel.has_local_player());
-		CHECK(kernel.player() != nullptr);
-		CHECK(kernel.player_ai() != nullptr);
+		CHECK(kernel.local.has_local_player());
+		CHECK(kernel.local.player() != nullptr);
+		CHECK(kernel.local.player_ai() != nullptr);
 		CHECK(kernel.world.logic_tick == sealed_tick);
-		CHECK(kernel.player_health() == spawn_health);
-		CHECK(near_equal(kernel.player_position().x, spawn_pos.x, 0.001f));
-		CHECK(near_equal(kernel.player_position().y, spawn_pos.y, 0.001f));
-		CHECK(near_equal(kernel.player_position().z, spawn_pos.z, 0.001f));
-		if (const w::AiEntity *body = kernel.player_ai()) {
+		CHECK(kernel.local.player_health() == spawn_health);
+		CHECK(near_equal(kernel.local.player_position().x, spawn_pos.x, 0.001f));
+		CHECK(near_equal(kernel.local.player_position().y, spawn_pos.y, 0.001f));
+		CHECK(near_equal(kernel.local.player_position().z, spawn_pos.z, 0.001f));
+		if (const w::AiEntity *body = kernel.local.player_ai()) {
 			CHECK(near_equal(body->pos[0] / 65536.0f, spawn_pos.x, 0.01f));
 			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
 		}
@@ -153,7 +153,7 @@ int main() {
 		// A second restore rewinds again (the SP round restart).
 		CHECK(kernel.restore_baseline());
 		CHECK(kernel.world.logic_tick == sealed_tick);
-		CHECK(kernel.has_local_player());
+		CHECK(kernel.local.has_local_player());
 	}
 
 	// --- the WAC diagnostic policy ---------------------------------------------
@@ -218,9 +218,9 @@ int main() {
 		const uint32_t tick0 = kernel.world.logic_tick;
 		kernel.tick_no_net();
 		CHECK(kernel.world.logic_tick == tick0 + 1);
-		kernel.teleport_local_player(w::Vec3{7.0f, 8.0f, 9.0f}, 0.0, 0.0);
-		CHECK(near_equal(kernel.player_position().z, 9.0f, 0.001f));
-		if (const w::AiEntity *body = kernel.player_ai()) CHECK(body->pos[2] == 9 << 16);
+		kernel.local.teleport_local_player(w::Vec3{7.0f, 8.0f, 9.0f}, 0.0, 0.0);
+		CHECK(near_equal(kernel.local.player_position().z, 9.0f, 0.001f));
+		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[2] == 9 << 16);
 		kernel.tick_no_net();
 		CHECK(kernel.world.logic_tick == tick0 + 2);
 	}

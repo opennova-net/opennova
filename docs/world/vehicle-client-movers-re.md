@@ -2384,7 +2384,7 @@ Witness session 2026-07-31. Target: `Entity_UpdatePlayerInfantryMovement @ 0x483
 (name is a known misnomer; this is the cbike-family mover — class row `cbik` in the
 update-callback table `@ 0x82ABC0`, reached via dispatch stub `@ 0x48EFF0`; net-re
 §5.38e row). Comparison base: the ground core `Entity_UpdateVehiclePhysics @ 0x48AF00`
-(our `world::ground_client_tick` interim carrier for bikes,
+(our `VehicleSystem::ground_client_tick` interim carrier for bikes,
 `engine/runtime/world/vehicle_motor.cpp:725`).
 
 Decompiler field-path glossary (IDB names, misnomer-tolerant — same struct both movers):

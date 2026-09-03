@@ -16,21 +16,21 @@
 using namespace sim_internal;
 
 void Simulation::reset_local_player_view_effects() {
-	opennova::world::local_player_view_reset(&kernel_->world, kernel_->weapon, kernel_->view, kernel_->view_tracker);
+	opennova::world::local_player_view_reset(&kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker);
 }
 
 void Simulation::refresh_local_player_view_effects() {
-	opennova::world::local_player_view_refresh(&kernel_->world, kernel_->view);
+	opennova::world::local_player_view_refresh(&kernel_->world, kernel_->local.view);
 }
 
 bool Simulation::request_local_player_scope_toggle() {
-	if (!kernel_->weapon.active || kernel_ == nullptr) return false;
+	if (!kernel_->local.weapon.active || kernel_ == nullptr) return false;
 	// Action 6 first toggles the selected MountSlot on a designated-G carried
 	// EWeap; the engine validates the route, this leg only carries it: the joiner
 	// queues it toward the authority, a serving host sends it to its own loopback
 	// client, a standalone/tool world applies the same validated transition.
 	opennova::world::MountSlotSelectRequest req;
-	if (opennova::world::local_player_mount_slot_select(kernel_->world, kernel_->weapon, req)) {
+	if (opennova::world::local_player_mount_slot_select(kernel_->world, kernel_->local.weapon, req)) {
 		if (joiner_ && runtime_)
 			return runtime_->queue_mounted_weapon_slot_selection(req.use_parent_slot);
 		if (host_owner_.serve_and_play) {
@@ -41,12 +41,12 @@ bool Simulation::request_local_player_scope_toggle() {
 					opennova::encode_mounted_weapon_slot_selection(selection));
 			return true;
 		}
-		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->weapon, req);
+		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->local.weapon, req);
 		return true;
 	}
 	opennova::world::WeaponSlotState *active_slot = active_local_weapon_slot();
 	if (active_slot == nullptr) return false;
-	return opennova::world::local_player_scope_toggle(kernel_->weapon, kernel_->view, *active_slot);
+	return opennova::world::local_player_scope_toggle(kernel_->local.weapon, kernel_->local.view, *active_slot);
 }
 
 bool Simulation::request_local_player_binoculars_toggle() {
@@ -58,30 +58,30 @@ bool Simulation::request_local_player_binoculars_toggle() {
 				(static_cast<double>(RAND_MAX) + 1.0));
 	};
 	return opennova::world::local_player_binoculars_toggle(
-			kernel_->world, kernel_->weapon, kernel_->view, kernel_->view_tracker, unit_random);
+			kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker, unit_random);
 }
 
 bool Simulation::request_local_player_nvg_toggle() {
 	if (kernel_ == nullptr) return false;
 	return opennova::world::local_player_nvg_toggle(
-			kernel_->world, kernel_->weapon, kernel_->view,
+			kernel_->world, kernel_->local.weapon, kernel_->local.view,
 			[this]() { return request_local_player_scope_toggle(); });
 }
 
 int Simulation::request_local_player_nvg_gain(int p_delta) {
-	return opennova::world::player_view_adjust_nvg_gain(kernel_->view, p_delta);
+	return opennova::world::player_view_adjust_nvg_gain(kernel_->local.view, p_delta);
 }
 
 void Simulation::set_local_player_third_person_selected(bool p_selected) {
 	// The preference re-resolves the mode at once [orig: the next frame's
 	// arbiter; see world/player_view.h].
-	opennova::world::player_view_set_third_person_selected(kernel_->view, p_selected);
+	opennova::world::player_view_set_third_person_selected(kernel_->local.view, p_selected);
 	refresh_local_player_view_effects();
 }
 
 void Simulation::set_local_player_debug_third_person(bool p_enabled) {
-	kernel_->view.debug_third_person_on_foot = p_enabled;
-	opennova::world::player_view_resolve_mode(kernel_->view);
+	kernel_->local.view.debug_third_person_on_foot = p_enabled;
+	opennova::world::player_view_resolve_mode(kernel_->local.view);
 	refresh_local_player_view_effects();
 }
 
@@ -117,13 +117,13 @@ opennova::world::LocalViewSessionInputs Simulation::local_view_session_inputs() 
 // WeaponAction_ProcessAllEntities call).
 void Simulation::tick_local_player_view() {
 	opennova::world::local_player_view_tick(
-			&kernel_->world, kernel_->weapon, kernel_->view, kernel_->view_tracker, local_view_session_inputs());
+			&kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker, local_view_session_inputs());
 }
 
 void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) {
 	// Godot (x, y, z) -> mission (x, -z, y), the get_local_player_position inverse.
 	const float eye[3] = {p_eye_godot.x, -p_eye_godot.z, p_eye_godot.y};
-	opennova::world::local_player_set_eye(&kernel_->world, kernel_->weapon, eye, p_valid);
+	opennova::world::local_player_set_eye(&kernel_->world, kernel_->local.weapon, eye, p_valid);
 }
 
 void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid) {
@@ -134,7 +134,7 @@ void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot, bool
 Ref<PlayerLocalView> Simulation::get_local_player_view() const {
 	Ref<PlayerLocalView> out;
 	out.instantiate();
-	out->assign(kernel_->view_frame());
+	out->assign(kernel_->local.view_frame());
 	return out;
 }
 
@@ -147,8 +147,8 @@ Vector3 Simulation::local_player_viewmodel_bias_view_units(
 	const float pos[3] = {p_pos_raw_units.x, p_pos_raw_units.y, p_pos_raw_units.z};
 	const float tpos[3] = {p_tpos_raw_units.x, p_tpos_raw_units.y, p_tpos_raw_units.z};
 	float out[3];
-	opennova::world::local_player_viewmodel_bias(&kernel_->world, kernel_->weapon, kernel_->view,
-			kernel_->view_tracker, pos, tpos, p_viewport_w, p_viewport_h, out);
+	opennova::world::local_player_viewmodel_bias(&kernel_->world, kernel_->local.weapon, kernel_->local.view,
+			kernel_->local.view_tracker, pos, tpos, p_viewport_w, p_viewport_h, out);
 	return Vector3(out[0], out[1], out[2]);
 }
 

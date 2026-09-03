@@ -48,7 +48,7 @@ struct Victim {
 // then blue 1). The round sim's entity hits scan pool 0 only.
 Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &blacklist) {
 	Victim best;
-	const w::Vec3 player = rig.player_position();
+	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
 		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active || blacklist.count(e->handle.packed)) continue;
@@ -82,7 +82,7 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.wac_loaded, "04TR's WAC compiled and installed")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	if (!expect(!rig.world.match.outcome().ended, "the round has not ended at spawn")) return 1;
@@ -113,17 +113,17 @@ int main() {
 		// defeats straight-line walking) the victim is brought to the player —
 		// the outcome loop is under test, not nav.
 		w::EntityHandle target;
-		rig.input.forward = true;
+		rig.local.input.forward = true;
 		while (seconds < kMaxMissionSeconds) {
 			const Victim npc = pick_victim(rig, blacklist);
 			if (npc.ai == nullptr) {
 				mission_second();
 				continue;
 			}
-			const w::Vec3 me = rig.player_position();
+			const w::Vec3 me = rig.local.player_position();
 			w::Vec3 to = testrig::ai_position(*npc.ai);
 			to.z = me.z;
-			rig.aim_at(me, to);
+			rig.local.aim_at(me, to);
 			if (npc.distance <= kFireDistance) {
 				target = npc.ai->handle;
 				target_team = npc.ai->team;
@@ -137,18 +137,18 @@ int main() {
 				// bring the player to the victim's open ground, 5 u away and
 				// facing it. The outcome loop is under test, not nav.
 				const w::Vec3 victim = testrig::ai_position(*npc.ai);
-				const w::Vec3 pp = rig.player_position();
+				const w::Vec3 pp = rig.local.player_position();
 				const double away = std::atan2(pp.y - victim.y, pp.x - victim.x);
 				const w::Vec3 spot{victim.x + 5.0f * float(std::cos(away)), victim.y + 5.0f * float(std::sin(away)), victim.z};
 				const double facing_engine_deg = std::atan2(victim.y - spot.y, victim.x - spot.x) * 180.0 / 3.14159265358979323846;
-				rig.teleport_local_player(spot, 90.0 - facing_engine_deg, 0.0);
+				rig.local.teleport_local_player(spot, 90.0 - facing_engine_deg, 0.0);
 				std::printf("lose-flow: teleport the player 5 u from net=%d team=%d\n", int(npc.entity->net_id),
 						int(npc.ai->team));
 			}
 			if (seconds % 10 == 0)
 				std::printf("lose-flow: approach t=%ds dist=%.1fu team=%d\n", seconds, npc.distance, int(npc.ai->team));
 		}
-		rig.input.forward = false;
+		rig.local.input.forward = false;
 		if (!target.valid()) break;
 
 		// Fire at the locked target (pre-weakened through the SETHP store so the
@@ -160,14 +160,14 @@ int main() {
 		while (seconds < kMaxMissionSeconds) {
 			for (int t = 0; t < 62; ++t) {
 				if (const w::AiEntity *tai = rig.world.ai.for_handle(target)) {
-					const w::Vec3 me = rig.player_position();
+					const w::Vec3 me = rig.local.player_position();
 					const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
 					w::Vec3 chest = testrig::ai_position(*tai);
 					chest.z += 0.9f;
-					rig.aim_at(muzzle, chest);
-					rig.input.forward = testrig::planar_distance(me, chest) > 8.0f;
+					rig.local.aim_at(muzzle, chest);
+					rig.local.input.forward = testrig::planar_distance(me, chest) > 8.0f;
 				}
-				rig.set_weapon_input(true, pressed, false);
+				rig.local.set_weapon_input(true, pressed, false);
 				pressed = false;
 				tick();
 			}
@@ -181,27 +181,27 @@ int main() {
 				const int idx = (rs.debug_trail_next - 1 + w::RoundSim::kDebugTrailCap) % w::RoundSim::kDebugTrailCap;
 				const w::RoundDebugEvent &last = rs.debug_trail[idx];
 				std::printf("lose-flow: fire t=%ds target hp=%d dist=%.1f clip=%d fired_serial=%u active_rounds=%d trail=%d last(kind=%d entity=%u tick=%u)\n",
-						seconds, hp, tai != nullptr ? testrig::distance(testrig::ai_position(*tai), rig.player_position()) : -1.0f,
-						rig.weapon.slot.clip, unsigned(rig.weapon.fired_serial), rs.active_count, rs.debug_trail_count,
+						seconds, hp, tai != nullptr ? testrig::distance(testrig::ai_position(*tai), rig.local.player_position()) : -1.0f,
+						rig.local.weapon.slot.clip, unsigned(rig.local.weapon.fired_serial), rs.active_count, rs.debug_trail_count,
 						int(last.kind), unsigned(last.entity), unsigned(last.tick));
 			}
 			if (hp < hp_prev && hp >= 0) std::printf("lose-flow: HIT t=%ds target hp %d -> %d\n", seconds, hp_prev, hp);
 			hp_prev = hp;
 			if (tent == nullptr || !tent->alive || hp <= 0) {
 				killed = true;
-				rig.input.forward = false;
-				rig.set_weapon_input(false, false, false);
+				rig.local.input.forward = false;
+				rig.local.set_weapon_input(false, false, false);
 				std::printf("lose-flow: KILLED t=%ds team-%d person down\n", seconds, target_team);
 				break;
 			}
-			if (rig.player_health() <= 0) {
+			if (rig.local.player_health() <= 0) {
 				std::fprintf(stderr, "FAIL: the player died first (t=%ds) — rerun\n", seconds);
 				return 1;
 			}
 			if (fire_seconds >= 15) {
 				std::printf("lose-flow: stall on net=%d hp=%d — retargeting\n", tent != nullptr ? int(tent->net_id) : -1, hp);
 				blacklist.insert(target.packed);
-				rig.set_weapon_input(false, false, false);
+				rig.local.set_weapon_input(false, false, false);
 				break;
 			}
 		}
