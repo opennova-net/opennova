@@ -16,7 +16,6 @@
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/client_replica_pipeline.h>
-#include <runtime/replication/serializing_sink.h>
 
 #include "conn_fan_test_util.h"
 
@@ -246,11 +245,8 @@ bool run() {
 	const w::EntityHandle h = world.registry.spawn(0, seed);
 	if (!expect(h.valid(), "entity spawned")) return false;
 
-	// --- the SP serializing sink replaces LocalSink (the seam is wired) ---
+	// --- the socketless channel the SP host's own client rides ---
 	ns::LoopbackChannel channel;
-	ns::SerializingSink sink(channel);
-	world.net = &sink;
-	if (!expect(world.net->is_authority(h), "SP host is authority")) return false;
 
 	// --- one loopback connection owned by the live subject ---
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 takes its reference from

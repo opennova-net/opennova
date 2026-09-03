@@ -53,8 +53,8 @@ int main() {
 	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
 	rig.install_weapon("WPN_M4AUTO");
 	for (int t = 0; t < 62; ++t) rig.tick(); // one settled second of posing
-	expect(rig.world.muzzle_pose_provider != nullptr, "the world carries a muzzle pose provider");
-	if (rig.world.muzzle_pose_provider == nullptr) return 1;
+	expect(rig.world.pose_provider != nullptr, "the world carries a muzzle pose provider");
+	if (rig.world.pose_provider == nullptr) return 1;
 
 	// --- Every live foot NPC resolves a muzzle inside the rifle envelope.
 	int persons = 0, stamped = 0, good = 0, misses = 0, head_height = 0;
@@ -66,7 +66,7 @@ int main() {
 		if (ent == rig.player()) continue;
 		++persons;
 		int32_t out[3] = {};
-		if (!rig.world.muzzle_pose_provider->resolve_muzzle_pose(rig.world, e->handle, out)) continue;
+		if (!rig.world.pose_provider->resolve_muzzle_pose(rig.world, e->handle, out)) continue;
 		++stamped;
 		const w::Vec3 origin = testrig::ai_position(*e);
 		const float up = fx(out[2]) - origin.z;
@@ -92,7 +92,7 @@ int main() {
 	// --- The player's own rig: US01's head and hand pivots, and the held model.
 	const w::Entity *pe = rig.player();
 	int32_t pm[3] = {};
-	const bool player_muzzle = rig.world.muzzle_pose_provider->resolve_muzzle_pose(
+	const bool player_muzzle = rig.world.pose_provider->resolve_muzzle_pose(
 			rig.world, pe->handle, pm);
 	std::printf("muzzle: player launch point resolved=%d (the local player's fire pass reads the viewmodel)\n",
 			int(player_muzzle));

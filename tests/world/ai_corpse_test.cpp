@@ -141,14 +141,14 @@ int main() {
 		if (tent0 != nullptr && tent0->net_id != 0)
 			rig.world.commands.set_ssn_guard(tent0->net_id, true);
 	}
-	rig.set_entity_health(target, 10);
+	rig.world.commands.set_entity_health(target, 10);
 	int hp_prev = 10;
 	int fire_seconds = 0;
 	bool killed = false;
 	bool pressed = true;
 	while (seconds < kMaxMissionSeconds && fire_seconds < kFireSeconds) {
 		for (int t = 0; t < 62; ++t) {
-			const w::AiEntity *tai = rig.ai_for(target);
+			const w::AiEntity *tai = rig.ai.for_handle(target);
 			if (tai != nullptr) {
 				const w::Vec3 me = rig.player_position();
 				const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
@@ -160,13 +160,13 @@ int main() {
 			rig.set_weapon_input(true, pressed, false);
 			pressed = false;
 			if (rig.world.cached.local_player.valid())
-				rig.set_entity_health(rig.world.cached.local_player, 150);
+				rig.world.commands.set_entity_health(rig.world.cached.local_player, 150);
 			rig.tick();
 		}
 		++seconds;
 		++fire_seconds;
 		const w::Entity *tent = rig.world.registry.get(target);
-		const w::AiEntity *tai = rig.ai_for(target);
+		const w::AiEntity *tai = rig.ai.for_handle(target);
 		const int hp = tai != nullptr ? tai->health : -1;
 		if (hp < hp_prev && hp >= 0) std::printf("corpse: HIT t=%ds target hp %d -> %d\n", seconds, hp_prev, hp);
 		hp_prev = hp;
@@ -208,7 +208,7 @@ int main() {
 	// --- Corpse: dead but NOT hidden; a death-family anim; the timer seeded and
 	// draining; still visible after the timer would have expired (the watch rule).
 	const w::Entity *c0 = rig.world.registry.get(target);
-	const w::AiEntity *a0 = rig.ai_for(target);
+	const w::AiEntity *a0 = rig.ai.for_handle(target);
 	if (!expect(c0 != nullptr && a0 != nullptr, "the corpse entity persists after the kill")) return 1;
 	const int anim0 = a0->inf.anim_state;
 	const int timer0 = c0->corpse_timer;
@@ -230,7 +230,7 @@ int main() {
 		rig.tick(62 * 5);
 		seconds += 5;
 		const w::Entity *c = rig.world.registry.get(target);
-		const w::AiEntity *a = rig.ai_for(target);
+		const w::AiEntity *a = rig.ai.for_handle(target);
 		const bool hidden = c == nullptr || c->hidden;
 		std::printf("corpse: watch t=%ds hidden=%d corpse_timer=%d anim=%d\n", seconds, int(hidden),
 				c != nullptr ? c->corpse_timer : -1, a != nullptr ? a->inf.anim_state : -1);

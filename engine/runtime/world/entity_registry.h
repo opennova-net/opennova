@@ -69,6 +69,10 @@ public:
     // Faithful to EntityPool_FindByNetId @0x4f0a20: scans pool 0 first, then pools
     // 1..3 (mask &0xF), first match wins; returns (pool<<12)|slot, else invalid.
     EntityHandle find_by_net_id(uint16_t net_id) const;
+    // The row itself, or null: the net_id scan above, and the file id
+    // (bms::Entity::id) the mission drives key placed entities by.
+    Entity *by_net_id(uint16_t net_id);
+    Entity *by_bms_id(int32_t bms_id);
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
     void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;

@@ -10,7 +10,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/body_anim.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 
 #include <array>
@@ -123,11 +123,11 @@ void test_vehicle_death_rows() {
 // origin for spawned rounds; absent or stale stamps fall back. [orig: the
 // anim-event fire spawns from Entity_GetAttachmentWorldPosition @0x4b2670 —
 // the posed gun-flash userpoint; our embedder present layer feeds it back.]
-// A stand-in for the asset-aware muzzle-pose provider (SimCollisionPoseProvider
+// A stand-in for the asset-aware muzzle-pose provider (SimPoseProvider
 // in production): fixed points per handle, so the consumers' plumbing is pinned
 // without a rig. [orig: Entity_GetAttachmentWorldPosition @0x4b2670;
 //  Entity_ComputeUserpointWorldTransform @0x545c60]
-struct FakeMuzzleProvider : IMuzzlePoseProvider {
+struct FakeMuzzleProvider : IPoseProvider {
     std::unordered_map<uint16_t, std::array<int32_t, 3>> points;
     std::unordered_map<uint16_t, std::array<int32_t, 6>> userpoints;
     std::unordered_map<uint16_t, std::array<int32_t, 3>> rigid_points;
@@ -187,7 +187,7 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     // The provider resolves the posed launch point -> rounds spawn from it.
     FakeMuzzleProvider provider;
     provider.points[h.packed] = {(10 << 16) + 0x8000, (20 << 16) - 0x4000, (5 << 16) + 0x4000};
-    w->muzzle_pose_provider = &provider;
+    w->pose_provider = &provider;
     e.inf.last_events = 0x4;
     sys.infantry_fire_pass(e, *w, 3);
     CHECK(w->round_sim.active_count == 2);
@@ -202,7 +202,7 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     sys.infantry_fire_pass(e, *w, 9);
     CHECK(w->round_sim.active_count == 3);
     CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.0f));
-    w->muzzle_pose_provider = nullptr;
+    w->pose_provider = nullptr;
 }
 
 // D-AI-6: the shared fire-origin helper — the provider's posed launch point
@@ -229,7 +229,7 @@ static void test_weapon_fire_origin_fallback_chain() {
 
     FakeMuzzleProvider provider;
     provider.points[h.packed] = {(10 << 16) + 7, (20 << 16) - 9, (5 << 16) + 0x8000};
-    w.muzzle_pose_provider = &provider;
+    w.pose_provider = &provider;
     sys.weapon_fire_origin(w, e, out);
     CHECK(out[0] == (10 << 16) + 7 && out[1] == (20 << 16) - 9 && out[2] == (5 << 16) + 0x8000);
     AiSystem::weapon_fire_origin(e, out); // the static form never consults a provider
@@ -245,7 +245,7 @@ static void test_weapon_fire_origin_fallback_chain() {
     provider.points[ent.handle.packed] = {111, 222, 333};
     sys.weapon_fire_origin(w, ent, out);
     CHECK(out[0] == 111 && out[1] == 222 && out[2] == 333);
-    w.muzzle_pose_provider = nullptr;
+    w.pose_provider = nullptr;
 }
 
 // D-AI-6a: the LOS endpoints ride the muzzle seam. A 1.2 u ridge band between
@@ -301,10 +301,10 @@ static void test_los_endpoints_use_muzzle_stamp() {
     FakeMuzzleProvider provider;
     provider.points[ha.packed] = {2 << 16, 100 << 16, static_cast<int32_t>(1.5 * 65536.0)};
     provider.points[hb.packed] = {20 << 16, 100 << 16, static_cast<int32_t>(1.5 * 65536.0)};
-    w.muzzle_pose_provider = &provider;
+    w.pose_provider = &provider;
     CHECK(clear_between()); // posed muzzles ride above the band
 
-    w.muzzle_pose_provider = nullptr; // no provider -> the raw origins again
+    w.pose_provider = nullptr; // no provider -> the raw origins again
     CHECK(!clear_between());
 }
 
@@ -348,7 +348,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     // [orig: @0x43b5d4..0x43b5f6].
     FakeMuzzleProvider provider;
     provider.rigid_points[veh.packed] = {11 << 16, 22 << 16, 33 << 16};
-    w.muzzle_pose_provider = &provider;
+    w.pose_provider = &provider;
     w.registry.get(veh)->target_userpoint_byte = 2;
     sys.weapon_aim_origin(w, *w.registry.get(veh), out);
     CHECK(out[0] == (11 << 16) && out[1] == (22 << 16) && out[2] == (33 << 16));
@@ -368,7 +368,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     provider.points[person.packed] = {3 << 16, 4 << 16, 5 << 16};
     sys.weapon_aim_origin(w, *w.registry.get(person), out);
     CHECK(out[0] == (3 << 16) && out[1] == (4 << 16) && out[2] == (5 << 16));
-    w.muzzle_pose_provider = nullptr;
+    w.pose_provider = nullptr;
 }
 
 // D-AI-6a: the aim solution's EYE and TARGET point ride the seam. Stampless,
@@ -449,7 +449,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     // anims, so run ticks until the aim re-asserts (a few dozen suffice).
     FakeMuzzleProvider provider;
     provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(0.5 * 65536.0)};
-    w.muzzle_pose_provider = &provider;
+    w.pose_provider = &provider;
     npc.inf.aim_valid = false;
     for (uint32_t end = t + 500; t < end; ++t) {
         tctx.logic_tick = t;
@@ -471,7 +471,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     }
     CHECK(npc.inf.aim_valid);
     CHECK(npc.inf.aim_pitch == 0);
-    w.muzzle_pose_provider = nullptr;
+    w.pose_provider = nullptr;
 }
 
 // The D-AI-2 turret solver (solve_weapon_fire_transform — Entity_
@@ -1188,7 +1188,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     FakeMuzzleProvider provider;
     provider.userpoints[gun_live->handle.packed] =
             {0x12345, -0x23456, 0x34567, 0x40000000, static_cast<int32_t>(0xFF000000u), 0};
-    w->muzzle_pose_provider = &provider;
+    w->pose_provider = &provider;
     // Merely caching an owner as local cannot disable the standalone World's
     // global slot pump. Only an adapter that explicitly supplies its own pump
     // may take ownership.
@@ -2788,12 +2788,12 @@ int main() {
         CHECK(npc_h.valid());
         // Headless: no models, so the rig's posed launch points are emulated at
         // chest height (a production world resolves them through
-        // SimCollisionPoseProvider); without a provider both ends are the raw
+        // SimPoseProvider); without a provider both ends are the raw
         // origins at the feet and every level shot grazes the ground.
         FakeMuzzleProvider provider;
         provider.points[player_h.packed] = {20 << 16, 0, static_cast<int32_t>(0.9 * 65536.0)};
         provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(0.9 * 65536.0)};
-        w.muzzle_pose_provider = &provider;
+        w.pose_provider = &provider;
 
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;

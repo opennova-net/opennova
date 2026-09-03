@@ -6,7 +6,6 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/muzzle_pose.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -264,11 +263,11 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.combat_move_timer = e.inf.combat_move_timer;
 	// The fire-origin readback (probe surface): the launch userpoint on this
 	// body's posed skeleton, resolved now by the sim's own provider — the same
-	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
+	// point the fire pass, LOS rays, and aim eye read (world/pose_provider.h).
 	{
 		int32_t muzzle[3] = {};
-		d.muzzle_valid = world.muzzle_pose_provider != nullptr &&
-				world.muzzle_pose_provider->resolve_muzzle_pose(
+		d.muzzle_valid = world.pose_provider != nullptr &&
+				world.pose_provider->resolve_muzzle_pose(
 						world, e.handle, muzzle);
 		d.muzzle = d.muzzle_valid ? mission_from_fixed3(muzzle) : Vec3{};
 	}
@@ -545,9 +544,9 @@ AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
 		row.aim_heading = e->inf.aim_heading;
 		row.aim_pitch = e->inf.aim_pitch;
 		// The muzzle resolve walks the posed skeleton — engaged brains only.
-		if (row.target_valid && world.muzzle_pose_provider != nullptr) {
+		if (row.target_valid && world.pose_provider != nullptr) {
 			int32_t muzzle[3] = {};
-			row.muzzle_valid = world.muzzle_pose_provider->resolve_muzzle_pose(
+			row.muzzle_valid = world.pose_provider->resolve_muzzle_pose(
 					world, e->handle, muzzle);
 			if (row.muzzle_valid)
 				for (int c = 0; c < 3; ++c) row.muzzle[c] = muzzle[c];

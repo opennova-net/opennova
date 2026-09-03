@@ -218,7 +218,7 @@ int main() {
 	const double yaw_rad = yaw_deg * 3.14159265358979323846 / 180.0;
 	const V spawn_forward = normalized(V{float(std::sin(yaw_rad)), float(std::cos(yaw_rad)), 0.0f});
 
-	w::Entity *target = rig.by_bms_id(kTargetBmsId);
+	w::Entity *target = rig.world.registry.by_bms_id(kTargetBmsId);
 	if (!expect(target != nullptr, "entity 650 promoted")) return 1;
 	const w::CollisionMatrix placement = w::entity_placement_matrix(*target);
 	const Threedi3di3 *model = rig.models.model_for(kTargetGraphic);

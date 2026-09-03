@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 
 #include "object/entity_index.h"
 #include "object/object_model.h"
@@ -123,7 +123,7 @@ public:
 
 	// Third-person held-weapon placement — the ONE home (the witnessed
 	// calibration constants and the full derivation live at engine
-	// simassets/sim_collision_pose.h). `body` may be the body root or the
+	// simassets/sim_pose_provider.h). `body` may be the body root or the
 	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
 	// null when the skeleton cannot place one.
 	static Variant held_weapon_attach_transform(Object *body,

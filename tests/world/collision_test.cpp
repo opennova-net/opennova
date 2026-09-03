@@ -2528,7 +2528,7 @@ CollisionModel two_section_face_model(uint8_t root_material, uint8_t piece_mater
     return m;
 }
 
-struct TwoSectionMatrixProvider final : ICollisionSectionMatrixProvider {
+struct TwoSectionMatrixProvider final : IPoseProvider {
     bool build_section_matrices(World &, EntityHandle, int32_t,
                                 const CollisionMatrix &,
                                 const CollisionModel &model,
@@ -2559,7 +2559,7 @@ CollisionModel person_section_model() {
     return model;
 }
 
-struct PosedHeadMatrixProvider final : ICollisionSectionMatrixProvider {
+struct PosedHeadMatrixProvider final : IPoseProvider {
     bool build_section_matrices(World &, EntityHandle, int32_t,
                                 const CollisionMatrix &entity_world,
                                 const CollisionModel &model,
@@ -2572,7 +2572,7 @@ struct PosedHeadMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
-struct CountingMatrixProvider final : ICollisionSectionMatrixProvider {
+struct CountingMatrixProvider final : IPoseProvider {
     std::vector<EntityHandle> build_handles;
 
     bool build_section_matrices(World &, EntityHandle entity, int32_t,
@@ -2615,7 +2615,7 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     if (stale_live != nullptr) stale_live->position = {100.0f, 100.0f, 0.0f};
 
     CountingMatrixProvider provider;
-    rig.cw.set_section_matrix_provider(&provider);
+    rig.cw.set_pose_provider(&provider);
 
     const int32_t probe[3] = {fx(10.0), fx(10.0), fx(5.0)};
     EntityHandle hit;
@@ -2685,7 +2685,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     if (stale_live != nullptr) stale_live->position = {100.0f, 100.0f, 0.0f};
 
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
     const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
     int32_t push[2] = {};
@@ -2754,7 +2754,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     CHECK(collision.candidate_count(hull) == 2);
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
 
     const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
     const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
@@ -2781,7 +2781,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     CHECK(push2[0] != 0 || push2[1] != 0);
 }
 
-struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
+struct DemandPersonProvider final : IPoseProvider {
     CollisionWorld *collision = nullptr;
     int32_t model_id = -1;
     EntityHandle expected;
@@ -2805,7 +2805,7 @@ struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
-struct ReusedSlotPersonProvider final : ICollisionSectionMatrixProvider {
+struct ReusedSlotPersonProvider final : IPoseProvider {
     CollisionWorld *collision = nullptr;
     int32_t replacement_model_id = -1;
     uint64_t expected_spawn_id = 0;
@@ -2833,7 +2833,7 @@ struct ReusedSlotPersonProvider final : ICollisionSectionMatrixProvider {
 
 // Test host for the late clone's model-initialization leg.
 // [orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30]
-struct DemandItemProvider final : ICollisionSectionMatrixProvider {
+struct DemandItemProvider final : IPoseProvider {
     CollisionWorld *collision = nullptr;
     EntityHandle expected;
     uint64_t expected_spawn_id = 0;
@@ -2866,7 +2866,7 @@ void test_person_section_raycast_uses_posed_bone_matrix() {
     rig.cw.assign_entity(rig.soldier, 0);
     rig.world.registry.get(rig.soldier)->yaw = 90;
     PosedHeadMatrixProvider provider;
-    rig.cw.set_section_matrix_provider(&provider);
+    rig.cw.set_pose_provider(&provider);
 
     // The soldier is at the origin and its posed head center is near
     // (1.055, 0.001, 0.830). A Y-axis segment through that moved center must
@@ -2918,7 +2918,7 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
     collision.assign_entity(near_static, model_id);
     collision.assign_entity(far_static, model_id);
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
 
     const int32_t anchor[3] = {};
     const auto statics = collision.debug_hitboxes(
@@ -2986,7 +2986,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     CHECK(collision.candidate_count(source) == 1);
 
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     const int32_t start[3] = {0, 0, fx(1.0)};
     const int32_t end[3] = {fx(10.0), 0, fx(1.0)};
     CHECK(collision.candidate_segment_hits_solid(world, source, start, end, 0));
@@ -3042,7 +3042,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
 
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     const int32_t start[3] = {0, 0, fx(1.0)};
     const int32_t end[3] = {0, fx(10.0), fx(1.0)};
     const int32_t inflated = collision.sound_occlusion_inflate(
@@ -3119,7 +3119,7 @@ void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
     provider.collision = &collision;
     provider.model_id = model_id;
     provider.expected = victim;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     // RoundSim consumes the normal per-tick proximity snapshot. The entity may
     // be present before its graphic instance; ensure-on-hit attaches that late.
     collision.build_tick_tables(world);
@@ -3172,7 +3172,7 @@ void test_projectile_person_broad_gate_skips_far_provider() {
     provider.collision = &collision;
     provider.model_id = model_id;
     provider.expected = victim;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     collision.set_trace_profile_enabled(true);
     collision.build_tick_tables(world);
 
@@ -3214,7 +3214,7 @@ void test_projectile_trace_view_cache_is_tick_scoped() {
     provider.collision = &collision;
     provider.model_id = model_id;
     provider.expected = victim;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     collision.build_tick_tables(world);
 
     ProjectileTrace trace;
@@ -3256,7 +3256,7 @@ void test_projectile_trace_view_cache_is_tick_scoped() {
     CHECK(provider.matrix_calls == 5);
 
     CountingMatrixProvider replacement_provider;
-    collision.set_section_matrix_provider(&replacement_provider);
+    collision.set_pose_provider(&replacement_provider);
     CHECK(hits_victim(collision.trace_projectile(world, trace)));
     CHECK(replacement_provider.calls_for(victim) == 1);
 }
@@ -3415,7 +3415,7 @@ void test_projectile_trace_cache_observes_husk_assignment_same_tick() {
     const int32_t husk_id = collision.add_model(std::move(husk));
     collision.assign_entity(victim, intact_id);
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     collision.build_tick_tables(world);
 
     ProjectileTrace trace;
@@ -3481,7 +3481,7 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     provider.collision = &collision;
     provider.replacement_model_id = replacement_id;
     provider.expected_spawn_id = reused_spawn_id;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
 
     const int32_t start[3] = {fx(0.0), 0, 0};
     const int32_t end[3] = {fx(10.0), 0, 0};
@@ -3732,7 +3732,7 @@ void test_face_raycast_uses_callback_matrix_per_section() {
     }
     rig.world.registry.get(rig.building)->bound_radius = 12.0f;
     TwoSectionMatrixProvider provider;
-    rig.cw.set_section_matrix_provider(&provider);
+    rig.cw.set_pose_provider(&provider);
 
     RayFaceHit fh;
     const int32_t old_piece_start[3] = {fx(13.0), fx(10.0), fx(3.0)};
@@ -4671,7 +4671,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     provider.expected = first;
     provider.expected_spawn_id = world.registry.get(first)->registry_spawn_id;
     provider.model_id = first_model;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
     collision.build_tick_tables(world);
 
     ProjectileTrace graze;
@@ -5214,7 +5214,7 @@ void test_entity_sun_visibility_rays_and_eligibility() {
 
     collision.build_initial_tables(world);
     CountingMatrixProvider provider;
-    collision.set_section_matrix_provider(&provider);
+    collision.set_pose_provider(&provider);
 
     // Straight-up sun step: light_dir * 200 u.
     const int32_t sun[3] = {0, 0, fx(200.0)};

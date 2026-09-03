@@ -539,7 +539,7 @@ void Simulation::finish_kernel_boot() {
 
 // The kernel boot's bringup_net_session hook for this sim's role: the listen
 // host stands its npruntime session up between the world wiring and
-// register_mission_systems [orig: SinglePlayer_StartMission @0x561af0]; a
+// the system registration [orig: SinglePlayer_StartMission @0x561af0]; a
 // joiner (re)builds its non-authority ClientRuntime at the same point. The
 // bare no-net world installs only the decode-view class table.
 std::function<void()> Simulation::role_bringup_hook() {

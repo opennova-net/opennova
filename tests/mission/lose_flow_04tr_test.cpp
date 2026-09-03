@@ -153,13 +153,13 @@ int main() {
 
 		// Fire at the locked target (pre-weakened through the SETHP store so the
 		// first connecting round completes the kill).
-		rig.set_entity_health(target, 10);
+		rig.world.commands.set_entity_health(target, 10);
 		int hp_prev = 10;
 		int fire_seconds = 0;
 		bool pressed = true;
 		while (seconds < kMaxMissionSeconds) {
 			for (int t = 0; t < 62; ++t) {
-				if (const w::AiEntity *tai = rig.ai_for(target)) {
+				if (const w::AiEntity *tai = rig.ai.for_handle(target)) {
 					const w::Vec3 me = rig.player_position();
 					const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
 					w::Vec3 chest = testrig::ai_position(*tai);
@@ -174,7 +174,7 @@ int main() {
 			++seconds;
 			++fire_seconds;
 			const w::Entity *tent = rig.world.registry.get(target);
-			const w::AiEntity *tai = rig.ai_for(target);
+			const w::AiEntity *tai = rig.ai.for_handle(target);
 			const int hp = tai != nullptr ? tai->health : -1;
 			{
 				const w::RoundSim &rs = rig.world.round_sim;

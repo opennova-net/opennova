@@ -799,8 +799,8 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // @0x50c1f4]; the m/c fields anchor the effect legs, not the round.
         int32_t fire[6];
         const uint8_t userpoint = weapon_userpoint_byte(*mount, /*slot=*/0, /*field=*/0);
-        const bool posed = userpoint != 0 && world.muzzle_pose_provider != nullptr &&
-                world.muzzle_pose_provider->resolve_userpoint_transform(
+        const bool posed = userpoint != 0 && world.pose_provider != nullptr &&
+                world.pose_provider->resolve_userpoint_transform(
                         world, mount->handle, userpoint, fire);
         if (!posed) {
             fire[0] = to_fixed(mount->position.x);

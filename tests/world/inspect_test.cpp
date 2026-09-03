@@ -5,7 +5,7 @@
 // facts the deleted GDScript DebugEntities join and Dictionary getters carried.
 #include <runtime/world/ai.h>
 #include <runtime/world/inspect.h>
-#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 
 #include <cmath>
@@ -34,7 +34,7 @@ EntityHandle spawn_entity(World &world, int pool, int32_t item_id,
 }
 
 // Fixed-point muzzle stub so the report's engaged-only resolve is countable.
-struct TestMuzzleProvider : IMuzzlePoseProvider {
+struct TestMuzzleProvider : IPoseProvider {
     int resolves = 0;
     bool resolve_muzzle_pose(World &, EntityHandle, int32_t out[3]) override {
         ++resolves;
@@ -254,7 +254,7 @@ int main() {
         AiSystem ai;
         world.ai = &ai;
         TestMuzzleProvider muzzle;
-        world.muzzle_pose_provider = &muzzle;
+        world.pose_provider = &muzzle;
 
         // Channel 1: a 3-node route (node coords in 16.16).
         ai.nav.channels.resize(2);

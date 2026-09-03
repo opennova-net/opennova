@@ -2256,7 +2256,7 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `ICollisionSectionMatrixProvider`; `Simulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `simulation_test.gd`, `panm_clock_test.gd`, `mission_presentation_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones now use the separately ported per-entity current-pose path (§15.8b), not Generic PANM |
+| D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `world::IPoseProvider` (the collision-section leg); `Simulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `simulation_test.gd`, `panm_clock_test.gd`, `mission_presentation_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones now use the separately ported per-entity current-pose path (§15.8b), not Generic PANM |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | **FIXED 2026-08-23:** production models consume GHDR+24's exact Q16 gpm[5]; `items.def scale` parses by the retail `atof × 65536` truncation and feeds visual matrices, collision matrices/inverses, bbox midpoint, movement/proximity, projectile local/wire proxies, and shadow entity bounds. The collision-block gate suppresses the whole bound/center stamp, the base bound is scaled with the signed `+0x8000` multiply before the signed max against the unscaled first husk, then receives +0x1000. Typed wire rows use the same `ResolvedCollisionShape`; the 1u replica compatibility radius and out-param shape API are deleted. | entity+0 boundRadius = max(scale × exact model gpm[5], first-husk gpm[5]) + 0x1000, stamped only when the model carries collision data; bbox center and matrix use the same effective scale [orig: `Entity_InitFromModel @ 0x40dc30`] | native parser/FFI/model/collision/replica/projectile regressions plus GUT wire-pose coverage pin the cutover; only headerless in-memory model fixtures derive a fallback radius |
 | D-COL-4 | NARROWED 2026-08-23: the eye test point is the org1 at-rest CameraOffset stand-in built in `collision_resolve.cpp` when the caller carries no offset (h = max(top - bottom, 0x9000), Z = h, lean at rest so X = Y = 0) | eye point = pos + the entity's +0x74 CameraOffset, written by the think before the resolver call (org1 `@0x4b9910` kong 155519-155521; lateral = (3*(h*sin(lean)))>>2 rotated by Yaw) | residual: the live-lean CameraOffset vs the at-rest stand-in; head and eye no longer share a column (the 00TRg wave-3 convoy pin, probe diff 2026-08-23) |
@@ -2487,7 +2487,7 @@ dominate-axis plane. The husk model pick (`Flags & 4` + fallback) and the
 transform chain match. Static placement uses D-COL-1's full-Euler entity matrix;
 live non-organic effective-LOD0 PANM runs the retail float sandwich (fixed
 entity `@ 0x611080` → x87-PC53 row-vector pose × entity → final
-Q22/16.16 `@ 0x611140`) through `ICollisionSectionMatrixProvider`
+Q22/16.16 `@ 0x611140`) through `world::IPoseProvider`
 and the production `Simulation` binding. Local LOD0 PANM suppresses
 the model-level fallback even when inert; LOD1+ never drives COBJ. The visual
 model and collision provider consume one frame-sampled 32-bit presentation
@@ -4218,9 +4218,9 @@ Retail never pushes a muzzle anywhere per frame: every consumer computes the use
 synchronously at its own call site, on the logic tick that needs it, building the model pose
 on demand. The port does the same (2026-08-26; the present-pass push and its stamps are gone):
 
-- `World::muzzle_pose_provider` (`IMuzzlePoseProvider`, `engine/runtime/world/muzzle_pose.h`)
-  is the native collision rig, `SimCollisionPoseProvider`
-  (`engine/runtime/simassets/sim_collision_pose.cpp`).
+- `World::pose_provider` (`world::IPoseProvider`, `engine/runtime/world/pose_provider.h`)
+  is the native collision rig, `SimPoseProvider`
+  (`engine/runtime/simassets/sim_pose_provider.cpp`).
 - Persons — `resolve_muzzle_pose`: the composed clip/blend/aim-overlay pose of the current
   tick, the launch bone's FK prefix against `rest_global_inverse`, the def's
   `launchups_closeattack` userpoint through `collision_matrix_from_euler(body overlay,
@@ -4253,7 +4253,7 @@ on demand. The port does the same (2026-08-26; the present-pass push and its sta
 
 Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fire_origin_fallback_chain`,
 the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
-`IMuzzlePoseProvider`); the `ai_muzzle_pose` ctest (`tests/world/ai_muzzle_pose_test.cpp`,
+`world::IPoseProvider`); the `ai_muzzle_pose` ctest (`tests/world/ai_muzzle_pose_test.cpp`,
 gated on `OPENNOVA_JO_DIR`) reads the same provider
 through the entity card (`world::inspect` `muzzle_valid` / `muzzle`) and A/Bs it against the presented
 skeleton's `ObjectModel.get_muzzle_world_position()`: CP01 2026-08-26 PASS, 92/102 infantry in

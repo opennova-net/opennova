@@ -13,7 +13,7 @@
 #include <runtime/simassets/adm_skeletal_clips.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/pose_provider.h>
 
 #include <cstdint>
 #include <memory>
@@ -83,8 +83,7 @@ inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 bool model_bone_table(const Threedi3di3 &model,
 		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents);
 
-class SimCollisionPoseProvider : public world::ICollisionSectionMatrixProvider,
-		public world::IMuzzlePoseProvider {
+class SimPoseProvider : public world::IPoseProvider {
 public:
 	// The rig source for skeletal registrations (the same mounted index the
 	// SimModelCache reads). The provider never loads models itself — the

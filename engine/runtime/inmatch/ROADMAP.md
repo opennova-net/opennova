@@ -237,9 +237,10 @@ owner reframes it onto `conn.link.transport->push_inbound`, the proven path — 
 production `PeerC2SInMatch` consumer yet, so an inline apply would be dead code + a P7 double-apply
 trap). The per-frame `0x0A` codec is unchanged: `build_tag_0a_world_reference` already returns
 `encode_frame_update` (the witnessed §5.9 bytes `decode_frame_update`/`ClientReplicaPipeline` round-trip) — the
-P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. `SerializingSink::send_command`
-stays the structural no-op: the `0x23` entity-command body is unwitnessed and the sink has zero callers
-(faithful-port — never invent bytes; grill `NapiNPServer_SendFiltered` 0x23 then port once a caller exists).
+P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. The `0x23` entity-command body
+is unwitnessed and has zero callers, so no sink exists for it (faithful-port — never invent bytes; grill
+`NapiNPServer_SendFiltered` 0x23 then port once a caller exists; the empty `SerializingSink` that once
+stood in for it was deleted under ADR 0043 slice E3).
 
 Bar met: `npruntime_golden_gameplay` — the gameplay golden's real retail C2S `0x0C` (2351 extended
 uplinks) drains → SNAPs the owned entity → the emitted S2C `0x0A` anchor IS that entity's post-SNAP
@@ -488,6 +489,6 @@ bank table lives in `scripts/net/README.md` "Reference captures". Decode best wi
   redirect in a circle.)
 - Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
   deleted at P8.1, recorded above): `engine/net/novaworld/{host_session_accept.h,joiner_session.h}`.
-- Seam: `engine/runtime/replication/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
+- Seam: `engine/runtime/replication/{connection_fan.h,connection.h,session_transport.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
   `tests/novaworld/nw_pcap_stream_test.cpp`.

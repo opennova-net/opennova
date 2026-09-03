@@ -9,7 +9,6 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <formats/mission/mission.h>
-#include <runtime/mission/mission_systems.h>
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/seat_spec_extract.h>
 #include <runtime/terrain_query/height_field.h>
@@ -61,14 +60,13 @@ MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
 	// non-owning links before the members tear down in reverse order.
 	world.collision = nullptr;
-	world.mounted_pose_provider = nullptr;
-	world.muzzle_pose_provider = nullptr;
+	world.pose_provider = nullptr;
 	world.terrain = nullptr;
 	world.ai = nullptr;
 	ai.collision = nullptr;
 	ai.terrain = nullptr;
 	ai.root_motion = nullptr;
-	collision.set_section_matrix_provider(nullptr);
+	collision.set_pose_provider(nullptr);
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	if (items_ok) def_free_items(&items);
 }
@@ -163,10 +161,9 @@ void MissionKernel::wire_terrain() {
 
 void MissionKernel::wire_collision() {
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-	collision.set_section_matrix_provider(this);
+	collision.set_pose_provider(this);
 	world.collision = &collision;
-	world.mounted_pose_provider = this;
-	world.muzzle_pose_provider = &collision_pose;
+	world.pose_provider = this;
 	ai.collision = &collision;
 }
 
@@ -204,11 +201,23 @@ void MissionKernel::finish_load() {
 	world.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
 	world.ai = &ai;
 	// The net half stands its session up here — between the world wiring and
-	// register_mission_systems, exactly where the SP listen host's bring-up
+	// the system registration, exactly where the SP listen host's bring-up
 	// sits inside the load (inmatch::listen_host::bringup)
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
-	register_mission_systems(world, wac, events, ai);
+	// The mission systems register in the faithful within-tick order, then
+	// load (each system's on_load). Order: WAC -> BMS -> AI.
+	// [orig: Game_ProcessMainFrame @0x5263f0 calls Server_TickUpdate @0x51d7e0
+	//  (which runs the WAC executor WacScript_AdvanceTick @0x51d8bf first, then
+	//  the BMS event quarter pass @0x51d8f4) BEFORE Entity_UpdateAllEntities
+	//  @0x4c2100 (the AI/motor pass).] AI registers last so it consumes the
+	// entity state the scripts mutate this tick; each system carries its own
+	// cadence gate (WAC every 62nd tick, BMS quarters every 16th), so the
+	// registration order only fixes the within-tick sequence.
+	world.add_system(&wac);
+	world.add_system(&events);
+	world.add_system(&ai);
+	world.load_systems();
 	// PreMission events settle initial scripted state before the clock starts.
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 	w::count_mission_units(world);
@@ -979,33 +988,6 @@ w::LocalPlayerViewFrame MissionKernel::view_frame() {
 	return f;
 }
 
-// --- entities ---------------------------------------------------------------
-
-w::Entity *MissionKernel::by_net_id(uint16_t ssn) {
-	const w::EntityHandle h = world.registry.find_by_net_id(ssn);
-	return h.valid() ? world.registry.get(h) : nullptr;
-}
-
-w::Entity *MissionKernel::by_bms_id(int32_t bms_id) {
-	w::EntityHandle found;
-	world.registry.for_each([&](const w::Entity &e) {
-		if (!found.valid() && e.bms_id == bms_id) found = e.handle;
-	});
-	return found.valid() ? world.registry.get(found) : nullptr;
-}
-
-w::AiEntity *MissionKernel::ai_for(w::EntityHandle h) {
-	return h.valid() ? ai.for_handle(h) : nullptr;
-}
-
-void MissionKernel::set_entity_position(w::EntityHandle h, const w::Vec3 &mission_pos) {
-	world.commands.set_entity_position(h, mission_pos);
-}
-
-void MissionKernel::set_entity_health(w::EntityHandle h, int32_t hp) {
-	world.commands.set_entity_health(h, hp);
-}
-
 // --- terrain ----------------------------------------------------------------
 
 float MissionKernel::ground_height(float mission_x, float mission_y) const {
@@ -1036,11 +1018,11 @@ std::vector<w::CollisionWorld::DebugHitboxEntity> MissionKernel::hitboxes(
 	return collision.debug_hitboxes(world, a, range, max_entities, max_faces);
 }
 
-// --- world::IMountedPoseProvider --------------------------------------------
+// --- world::IPoseProvider: seats ---------------------------------------------
 
 bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
 		const w::Seat &seat, w::MountedPose &out) {
-	// The kernel IS the world's IMountedPoseProvider: the one mounted-pose
+	// The kernel IS the world's IPoseProvider: the one mounted-pose
 	// resolver every embedder's world reaches.
 	if (&p_world != &world || seat.type != w::SeatType::Gunner || seat.bone_index == 0) return false;
 	++mounted_queries;
@@ -1108,7 +1090,24 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	return resolved;
 }
 
-// --- world::ICollisionSectionMatrixProvider ---------------------------------
+// --- world::IPoseProvider: muzzles / userpoints (the sim pose) ---------------
+
+bool MissionKernel::resolve_muzzle_pose(w::World &p_world, w::EntityHandle entity,
+		int32_t out[3]) {
+	return collision_pose.resolve_muzzle_pose(p_world, entity, out);
+}
+
+bool MissionKernel::resolve_userpoint_transform(w::World &p_world, w::EntityHandle entity,
+		int userpoint_index, int32_t out[6]) {
+	return collision_pose.resolve_userpoint_transform(p_world, entity, userpoint_index, out);
+}
+
+bool MissionKernel::resolve_userpoint_rigid(w::World &p_world, w::EntityHandle entity,
+		int userpoint_index, int32_t out[3]) {
+	return collision_pose.resolve_userpoint_rigid(p_world, entity, userpoint_index, out);
+}
+
+// --- world::IPoseProvider: collision sections --------------------------------
 
 bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle entity) {
 	if (&p_world != &world || items_table() == nullptr) return false;

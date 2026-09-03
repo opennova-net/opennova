@@ -322,8 +322,8 @@ void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
 // The live-pose seam shared by both World& forms: the world's native muzzle
 // provider resolves against the current simulation pose first.
 static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3]) {
-    return world.muzzle_pose_provider != nullptr &&
-           world.muzzle_pose_provider->resolve_muzzle_pose(world, h, out);
+    return world.pose_provider != nullptr &&
+           world.pose_provider->resolve_muzzle_pose(world, h, out);
 }
 
 void AiSystem::weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const {
@@ -349,8 +349,8 @@ void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) 
     }
     // def+1350: the TARGET userpoint through the placement matrix
     // [orig: @0x43b5d4..0x43b5f6].
-    if (e.target_userpoint_byte != 0 && world.muzzle_pose_provider != nullptr &&
-        world.muzzle_pose_provider->resolve_userpoint_rigid(
+    if (e.target_userpoint_byte != 0 && world.pose_provider != nullptr &&
+        world.pose_provider->resolve_userpoint_rigid(
                 world, e.handle, e.target_userpoint_byte, out))
         return;
     // Else the model collision-bbox center entity+0x1FC through the same

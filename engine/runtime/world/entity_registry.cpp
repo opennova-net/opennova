@@ -114,6 +114,19 @@ void EntityRegistry::restore_from(const EntityRegistry &snapshot) {
     if (next_spawn_id_ < live_high_water) next_spawn_id_ = live_high_water;
 }
 
+Entity *EntityRegistry::by_net_id(uint16_t net_id) {
+    const EntityHandle h = find_by_net_id(net_id);
+    return h.valid() ? get(h) : nullptr;
+}
+
+Entity *EntityRegistry::by_bms_id(int32_t bms_id) {
+    EntityHandle found;
+    for_each([&](const Entity &e) {
+        if (!found.valid() && e.bms_id == bms_id) found = e.handle;
+    });
+    return found.valid() ? get(found) : nullptr;
+}
+
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {
     // [orig: EntityPool_FindByNetId @0x4f0a20] pool 0 first, then pools where
     // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins.
