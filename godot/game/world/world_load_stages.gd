@@ -580,7 +580,7 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 ## The revealed world must never race the budgeted cold wire materialization:
 ## NetSessionDrive holds the join-admission edge until the wire presenter's
 ## deferred-spawn queue drains behind the loading/DEATH hold. Trivially true
-## with no runtime, a harness stub runtime, or no wire presenter.
+## with no runtime or no wire presenter.
 func is_join_wire_present_drained() -> bool:
 	var runtime := _world._runtime as MissionPresentation
 	return runtime == null or runtime.join_wire_present_pending() == 0

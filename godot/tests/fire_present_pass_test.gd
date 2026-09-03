@@ -3,38 +3,56 @@ extends GutTest
 # FirePresentPass on the typed surfaces (ADR 0034): the drained rows are pure
 # data fed through the public present_* data legs (the present_snapshot
 # precedent — production present() drains the typed Simulation and forwards the
-# same rows), and the audio sink is a real MissionAudio subclass capturing the
-# typed calls.
+# same rows), and the audio sink is a REAL MissionAudio over a staged root whose
+# mission bank authors every set the rows name (ADR 0043 rule 11: no production
+# subclass). Its recent-fires ring, mixer channel census, and the spawned
+# AudioStreamPlayer3D voices under the container are the read seams.
 
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 
+# Every set the drained rows below name, authored into the staged mission bank
+# (one layer each, playing the fixture tone).
+const SOUND_SETS: PackedStringArray = [
+	"AI_FIRE", "GS_END", "FSP_DIRT_L", "FREEFALL", "V_TRUCK_ILP"]
 
-class CaptureAudio:
-	extends MissionAudio
-	var calls: Array = []
-	var slot_calls: Array = []
-	var sound_emitter_calls: Array = []
+var _root_dir := ""
+var _audio: MissionAudio = null
 
-	func fire_soundset(set_name: String, world_pos: Vector3,
-			source_bms_id: int = 0) -> bool:
-		calls.append({
-			"set": set_name,
-			"pos": world_pos,
-			"source_bms_id": source_bms_id,
-		})
-		return true
 
-	func slot_soundset(set_name: String, world_pos: Vector3,
-			exclusive_key: String = "") -> bool:
-		slot_calls.append({
-			"set": set_name,
-			"pos": world_pos,
-			"key": exclusive_key,
-		})
-		return true
+func after_each() -> void:
+	if _audio != null:
+		_audio.teardown()
+		_audio = null
+	if not _root_dir.is_empty():
+		TestFs.remove_dir_recursive(_root_dir)
+		_root_dir = ""
 
-	func apply_sound_emitters(events: Array) -> void:
-		sound_emitter_calls.append(events.duplicate(true))
+
+# A REAL MissionAudio set up over a staged root carrying the mission's co-named
+# bank (fire.LWF authors SOUND_SETS), its audio root parented under
+# `container`. No listener is stamped: a one-shot fired before the first tick
+# skips the set-range cull, the way retail's play-before-first-frame does.
+func _staged_audio(container: Node3D) -> MissionAudio:
+	_root_dir = OS.get_cache_dir().path_join(
+			"opennova_fire_present_pass_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(_root_dir), OK)
+	WorldFixture.stage_sound_bank(_root_dir, SOUND_SETS, "fire.LWF")
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(_root_dir), OK, "the staged root mounts")
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	_audio = MissionAudio.new(root, null)
+	var stats := _audio.setup(mission, "fire.bms", container)
+	assert_eq(int(stats.banks_loaded), 1, "the staged mission bank loads")
+	return _audio
+
+
+# The positional voices MissionAudio spawned under `container`.
+func _voices(container: Node) -> Array[AudioStreamPlayer3D]:
+	var out: Array[AudioStreamPlayer3D] = []
+	for value in container.find_children("*", "AudioStreamPlayer3D", true, false):
+		out.append(value as AudioStreamPlayer3D)
+	return out
 
 
 func _event(pos: Vector3, source_bms_id: int) -> FirePresentationEvent:
@@ -61,7 +79,7 @@ func _slot_sound(soundset: String, pos: Vector3, handle: int, slot: int) -> Slot
 	return row
 
 
-func _make_pass(audio: CaptureAudio) -> FirePresentPass:
+func _make_pass(audio: MissionAudio) -> FirePresentPass:
 	var presenter := FirePresentPass.new()
 	presenter.setup(
 		null,
@@ -76,7 +94,9 @@ func _make_pass(audio: CaptureAudio) -> FirePresentPass:
 func test_drained_fire_sounds_play_with_source_identity() -> void:
 	# The distance gate and delay countdown live in the sim (world/fire_sound.h,
 	# pinned by the fire_sound ctest); the pass plays each drained row verbatim.
-	var audio := CaptureAudio.new(null, null)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio := _staged_audio(container)
 	var presenter := _make_pass(audio)
 
 	presenter.present_fire_sounds([
@@ -84,11 +104,19 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 		_fire_sound("GS_END", Vector3(4, 1, 2), 0),
 	])
 
-	assert_eq(audio.calls.size(), 2)
-	if audio.calls.size() == 2:
-		assert_eq(String(audio.calls[0]["set"]), "AI_FIRE")
-		assert_eq(int(audio.calls[0]["source_bms_id"]), 77)
-		assert_eq(audio.calls[1]["pos"], Vector3(4, 1, 2))
+	var fired := audio.recent_fired_soundsets()
+	assert_eq(fired.size(), 2)
+	if fired.size() == 2:
+		assert_eq(fired[0].set_name, "AI_FIRE")
+		assert_eq(fired[0].source_bms_id, 77,
+				"the shooter's BMS identity reaches the bank's occlusion leg")
+		assert_false(fired[0].slot, "drained fire rows ride the fire_soundset leg")
+		assert_true(fired[0].played, "the staged bank resolves the set and spawns its voice")
+		assert_eq(fired[1].set_name, "GS_END")
+		assert_eq(fired[1].position, Vector3(4, 1, 2))
+		assert_eq(fired[1].source_bms_id, 0)
+		assert_true(fired[1].played)
+	assert_eq(_voices(container).size(), 2, "each drained row spawned one positional voice")
 	assert_eq(presenter.get_stats().sounds, 2)
 	presenter.teardown()
 
@@ -100,7 +128,7 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	# (The sim's own seed applies the same local filter to the sound queue —
 	# the fire_sound ctest pins that half; the drain-consumption itself is the
 	# native queue's contract, exercised by present() over the typed sim.)
-	var audio := CaptureAudio.new(null, null)
+	var audio := MissionAudio.new(null, null)
 	var presenter := _make_pass(audio)
 	var local := _event(Vector3(1, 0, 0), 11)
 	local.is_local_player = true
@@ -111,6 +139,8 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 
 	assert_eq(presenter.get_stats().fires, 128,
 			"only the decoded remote shot reaches the presentation legs")
+	assert_true(audio.recent_fired_soundsets().is_empty(),
+			"the effect drain plays no sound of its own")
 	presenter.teardown()
 
 
@@ -118,7 +148,7 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 	# A live stdred channel (style 1, 4 points along +X) must produce ONE additive
 	# triangle-strip surface: pairs at points 0..count-2 (the newest point steers
 	# direction only), 2 verts per pair [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0].
-	var audio := CaptureAudio.new(null, null)
+	var audio := MissionAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var presenter := FirePresentPass.new()
@@ -149,7 +179,7 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 	# A rocket channel (style 3) draws on the smoke surface: alpha blend + scene fog
 	# [orig: style +0 additive flag 0 -> SetFogAndBlendMode mode 0].
-	var audio := CaptureAudio.new(null, null)
+	var audio := MissionAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var presenter := FirePresentPass.new()
@@ -178,7 +208,9 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	# leg — they play the tick they drain [orig: Entity_PlaySound3D_FullVolume
 	# @ 0x528e20 direct]. Slots 43/44 carry the per-(handle,slot) exclusive key
 	# (the D-SND-10 refire fold); everything else passes an empty key.
-	var audio := CaptureAudio.new(null, null)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio := _staged_audio(container)
 	var presenter := _make_pass(audio)
 
 	presenter.present_slot_sounds([
@@ -187,17 +219,26 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 		_slot_sound("", Vector3.ZERO, 3, 18),
 	])
 
-	assert_eq(audio.slot_calls.size(), 2, "empty set name is the id-0 no-op")
-	if audio.slot_calls.size() == 2:
-		assert_eq(String(audio.slot_calls[0]["set"]), "FSP_DIRT_L")
-		assert_eq(String(audio.slot_calls[0]["key"]), "")
-		assert_eq(String(audio.slot_calls[1]["set"]), "FREEFALL")
-		assert_eq(String(audio.slot_calls[1]["key"]), "3:44")
+	var fired := audio.recent_fired_soundsets()
+	assert_eq(fired.size(), 2, "empty set name is the id-0 no-op")
+	if fired.size() == 2:
+		assert_eq(fired[0].set_name, "FSP_DIRT_L")
+		assert_eq(fired[0].exclusive_key, "")
+		assert_true(fired[0].slot, "body slot rows ride the slot_soundset leg")
+		assert_true(fired[0].played, "the footstep plays the tick it drains")
+		assert_eq(fired[0].position, Vector3(400, 0, 0))
+		assert_eq(fired[1].set_name, "FREEFALL")
+		assert_eq(fired[1].exclusive_key, "3:44")
+		assert_true(fired[1].played)
+	assert_eq(_voices(container).size(), 2, "each named slot row spawned one positional voice")
+	assert_eq(presenter.get_stats().sounds, 2, "the pass counts every slot row the bank played")
 	presenter.teardown()
 
 
 func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
-	var audio := CaptureAudio.new(null, null)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio := _staged_audio(container)
 	var presenter := _make_pass(audio)
 	var idle := SoundEmitterRow.new()
 	idle.source_spawn_id = 77
@@ -213,9 +254,24 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 
 	presenter.present_sound_emitters([idle])
 
-	assert_eq(audio.sound_emitter_calls.size(), 1)
-	if audio.sound_emitter_calls.size() == 1:
-		var batch: Array = audio.sound_emitter_calls[0]
-		assert_eq(batch.size(), 1)
-		assert_eq(batch[0], idle)
+	# The registration is a keep-alive intent for the shared loudest-eight
+	# emitter table, not a one-shot: it lands at the next audio pass and
+	# occupies one physical channel at the row's emitter position.
+	assert_true(audio.recent_fired_soundsets().is_empty(),
+			"emitter registrations never enter the one-shot ring")
+	assert_true(audio.active_ambient_candidate_ids().is_empty(),
+			"the intent queues until the audio pass advances the mixer")
+	audio.tick(idle.pos, 0.2)
+	var ids := audio.active_ambient_candidate_ids()
+	assert_eq(ids.size(), 1, "the idle lane registers one voice in the shared emitter mix")
+	assert_eq(int(audio.get_perf_counters().get("active_channels", -1)), 1)
+	if ids.size() == 1:
+		var voice := audio.ambient_player_for_candidate(ids[0])
+		assert_not_null(voice, "the registered lane holds a physical channel")
+		if voice != null:
+			assert_true(voice.position.is_equal_approx(idle.pos),
+					"the voice rides the row's emitter position")
+			assert_true(voice.playing)
+			assert_eq((voice.stream as AudioStreamWAV).loop_mode,
+					AudioStreamWAV.LOOP_FORWARD, "the engine emitter is a persistent loop")
 	presenter.teardown()

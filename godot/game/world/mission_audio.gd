@@ -212,11 +212,36 @@ var _wac_wav_cache: Dictionary = {}  # filename(lower) -> AudioStreamWAV (or nul
 var _perf_tick_us: int = 0
 var _perf_markers: int = 0
 var _perf_voice_writes: int = 0
+# The last RECENT_FIRES positional one-shots (fire_soundset / slot_soundset),
+# oldest first: a bounded diagnostic ring the F3 audio rows and the GUT pins
+# read (ADR 0018 read seam); the players themselves live under the audio root.
+const RECENT_FIRES := 16
+var _recent_fires: Array[FiredSoundset] = []
 
 
 func _init(resource_root: ResourceRoot, item_db: ItemDatabase) -> void:
 	_resource_root = resource_root
 	_item_db = item_db
+
+
+func _record_fire(set_name: String, world_pos: Vector3, source_bms_id: int,
+		exclusive_key: String, slot: bool, played: bool) -> bool:
+	var fired := FiredSoundset.new()
+	fired.set_name = set_name
+	fired.position = world_pos
+	fired.source_bms_id = source_bms_id
+	fired.exclusive_key = exclusive_key
+	fired.slot = slot
+	fired.played = played
+	_recent_fires.append(fired)
+	while _recent_fires.size() > RECENT_FIRES:
+		_recent_fires.pop_front()
+	return played
+
+
+## The recent positional one-shots, oldest first (see _recent_fires).
+func recent_fired_soundsets() -> Array[FiredSoundset]:
+	return _recent_fires.duplicate()
 
 
 ## Load banks, describe ambient marker candidates under `container`, and apply the reverb bed.
@@ -469,9 +494,9 @@ func play_weather_sounds(events: Array, camera_xform: Transform3D) -> void:
 ## @ 0x527cb0; cull @ 0x527cd1].
 func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> bool:
 	if _bank == null or _audio_root == null:
-		return false
-	return _bank.play_oneshot_3d(
-		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id)
+		return _record_fire(name, world_pos, source_bms_id, "", false, false)
+	return _record_fire(name, world_pos, source_bms_id, "", false, _bank.play_oneshot_3d(
+			_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id))
 
 
 ## A non-positional interface one-shot: the engine's zero-position play used by
@@ -494,9 +519,9 @@ func ui_soundset(name: String) -> bool:
 ## optional exclusive key for the every-tick refire slots (chute flap/freefall).
 func slot_soundset(name: String, world_pos: Vector3, exclusive_key: String = "") -> bool:
 	if _bank == null or _audio_root == null:
-		return false
-	return _bank.play_oneshot_3d(
-		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, 0, exclusive_key)
+		return _record_fire(name, world_pos, 0, exclusive_key, true, false)
+	return _record_fire(name, world_pos, 0, exclusive_key, true, _bank.play_oneshot_3d(
+			_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, 0, exclusive_key))
 
 
 ## Enqueue a mission dialog by its PlayWavList id (param1). Resolution, faithful

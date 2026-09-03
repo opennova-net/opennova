@@ -13,8 +13,7 @@ const LocalPlayerPresenter := preload("res://game/world/local_player_presenter.g
 
 # The world serves the sim; the presenter serves the presentation surfaces this
 # router drives around the sample (fly-camera lock, model lifetime, the
-# head-bone eye). Untyped for the same reason as the presenter's _world: GUT
-# harness worlds serve value-only doubles.
+# head-bone eye).
 var _world: GameWorld = null
 var _presenter: LocalPlayerPresenter = null
 var _input_source := Callable()

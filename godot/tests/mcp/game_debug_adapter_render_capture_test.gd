@@ -1,11 +1,9 @@
 extends GutTest
 
-
-class LoadedWorldHarness:
-	extends GameWorld
-
-	func mark_loaded() -> void:
-		_world_ready = true
+# The adapter's render-capture gates over REAL worlds (ADR 0043 rule 11): the
+# loaded cases boot the packaged GameWorld with the minimal mission
+# (WorldFixture.boot_minimal), the no-world case keeps the permanent world
+# unloaded (WorldFixture.make_world).
 
 
 # The in-world shell the adapter captures through: a GameShell over the test's
@@ -58,8 +56,7 @@ func _adapter(world: GameWorld, world_loading: bool) -> GameDebugAdapter:
 
 
 func test_capture_rejects_loading_or_start_splash_before_touching_viewport() -> void:
-	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
-	world.mark_loaded()
+	var world := WorldFixture.boot_minimal(self)
 	var adapter := _adapter(world, true)
 	var shell := adapter.get_shell() as CaptureShell
 
@@ -74,8 +71,7 @@ func test_capture_rejects_loading_or_start_splash_before_touching_viewport() -> 
 
 
 func test_capture_rejects_a_loaded_world_without_a_current_gameplay_camera() -> void:
-	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
-	world.mark_loaded()
+	var world := WorldFixture.boot_minimal(self)
 	var adapter := _adapter(world, false)
 
 	var result: Dictionary = await adapter.capture_mcp_render_bundle({
@@ -88,15 +84,15 @@ func test_capture_rejects_a_loaded_world_without_a_current_gameplay_camera() -> 
 
 
 func test_render_diagnostics_reports_no_world_while_permanent_world_is_unloaded() -> void:
-	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
+	var world := WorldFixture.make_world(self)
+	assert_false(world.is_loaded(), "the permanent world starts unloaded")
 	var adapter := _adapter(world, false)
 
 	assert_true((adapter.get_mcp_render_diagnostics() as Dictionary).is_empty())
 
 
 func test_hud_hidden_bundle_scopes_presentation_to_its_target_capture() -> void:
-	var world: LoadedWorldHarness = autofree(LoadedWorldHarness.new())
-	world.mark_loaded()
+	var world := WorldFixture.boot_minimal(self)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.current = true

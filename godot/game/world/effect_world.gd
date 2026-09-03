@@ -583,9 +583,12 @@ func render_frame() -> void:
 
 ## Value-only F3 read model. Emitter ids join portable simulation values to
 ## the renderer's draw list bounds; no particle/render Nodes escape this facade.
-func get_debug_group_report() -> Array:
+## Hidden particles report nothing unless `include_hidden` (the GUT pins over
+## the retail master switch read the suppressed groups through it); each row
+## carries the spawn's `owner_key` (null for unowned groups).
+func get_debug_group_report(include_hidden := false) -> Array:
 	var out: Array = []
-	if _particles_disabled:
+	if _particles_disabled and not include_hidden:
 		return out
 	_ensure_renderer()
 	var rendered_by_id: Dictionary = {}
@@ -630,6 +633,7 @@ func get_debug_group_report() -> Array:
 		out.append({
 			"id": group_id,
 			"name": String(group.get("effect_name", "")),
+			"owner_key": _owner_keys_by_token.get(int(group.get("owner_token", 0))),
 			"source": String(group.get("source", "")).get_file(),
 			"forever": forever and not bool(group.get("detached", false)),
 			"admission": int(group.get("admission", ADMISSION_ALWAYS)),

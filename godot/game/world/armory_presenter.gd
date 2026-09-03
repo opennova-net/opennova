@@ -31,7 +31,7 @@ const ACCEPT_HOTKEY := KEY_SHIFT
 signal opened
 signal closed
 
-var _world: GameWorld = null
+var _view: ArmoryWorldView = null
 var _player_presenter: LocalPlayerPresenter = null  # viewmodel rebuild on ACCEPT
 var _ui_parent: Node = null
 # The layout source, converted ONCE at setup: a Control parent (test overlays)
@@ -59,11 +59,11 @@ func _init() -> void:
 	_armory.armory_closed.connect(close)
 
 
-## Wire the presenter to a world + player presenter and the node the menu overlays
-## (the HUD layer in the game shell; tests pass their own Control parent).
-func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter,
+## Wire the presenter to its world view + player presenter and the node the menu
+## overlays (the HUD layer in the game shell; tests pass their own Control parent).
+func setup(view: ArmoryWorldView, player_presenter_in: LocalPlayerPresenter,
 		ui_parent: Node) -> void:
-	_world = world
+	_view = view
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
@@ -89,9 +89,9 @@ func get_menu_driver() -> MenuDriver:
 ## stands in an armory zone. Returns false when out of zone or the menu cannot
 ## build (the key is then ignored, matching the original's silent gate).
 func try_open() -> bool:
-	if _world == null:
+	if _view == null:
 		return false
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null or not sim.local_player_in_armory_zone():
 		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
 	return open()
@@ -101,9 +101,9 @@ func try_open() -> bool:
 ## play. The shells arrive through try_open()'s zone gate; tests that stage the
 ## world without a type-6 volume drive this directly.
 func open() -> bool:
-	if is_open() or _world == null or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null:
 		return false
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null:
 		return false
 	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
@@ -152,7 +152,7 @@ func open() -> bool:
 		"SECONDARY": -1,
 		"ACCESSORY": -1,
 	}
-	var weapon_db: WeaponDatabase = _world.get_weapon_database()
+	var weapon_db: WeaponDatabase = _view.weapon_database()
 	if weapon_db != null and weapon_db.is_loaded():
 		current_primary = ""
 		for row: WeaponKitEntry in sim.get_local_player_loadout():
@@ -253,7 +253,7 @@ func teardown() -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -295,7 +295,7 @@ func _ensure_menu() -> bool:
 		teardown()
 		return false
 	_menu_root = root
-	_armory.set_weapon_database(_world.get_weapon_database())
+	_armory.set_weapon_database(_view.weapon_database())
 	return true
 
 
@@ -332,8 +332,8 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
-	if _world != null:
-		var sim: Simulation = _world.get_sim()
+	if _view != null:
+		var sim: Simulation = _view.sim()
 		var kit: Array[WeaponKitEntry] = []
 		for slot_key in ["primary", "secondary", "accessory"]:
 			var weapon_name := String(loadout.get(slot_key, ""))
@@ -361,7 +361,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
 			# leaves the table bare; the knife fallback is the MISSION loader's rule,
 			# not the armory's].
-			_world.clear_local_player_weapon()
+			_view.clear_local_player_weapon()
 			if _player_presenter != null:
 				_player_presenter.refresh_viewmodel()
 			close()
@@ -374,7 +374,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \
-				and _world.set_local_player_weapon_by_name(equipped) \
+				and _view.set_local_player_weapon_by_name(equipped) \
 				and _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
 	close()

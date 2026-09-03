@@ -28,7 +28,7 @@ const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # The GameWorld whose render nodes this pass drives — a direct reference,
 # stored once in setup(); per-frame reads go through its public getters as
-# direct calls (harnesses subclass GameWorld, ADR 0034).
+# direct calls (ADR 0043 rule 11: no test subclasses the world).
 var _world: GameWorld
 
 # The local player's applied blink letter gates (render-occlusion-re.md §4):

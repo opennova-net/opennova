@@ -37,15 +37,17 @@ const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
 
 
-class DeployWorldHarness:
-	extends GameWorld
+# The screen's narrow world view, faked over the loopback joiner sim and the
+# staged menu root (rule 11: a fake of a GDScript interface, public verbs only).
+class FakeWorldView:
+	extends WorldView
 	var root: ResourceRoot
-	var sim: Simulation
+	var sim_value: Simulation
 
-	func get_sim() -> Simulation:
-		return sim
+	func sim() -> Simulation:
+		return sim_value
 
-	func get_resource_root() -> ResourceRoot:
+	func resource_root() -> ResourceRoot:
 		return root
 
 
@@ -237,18 +239,14 @@ func _join_pair_with_pending_pick() -> Dictionary:
 
 
 func _make_presenter(sim: Simulation) -> DeployPresenter:
-	var world := DeployWorldHarness.new()
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	world.root = _make_root()
-	world.sim = sim
-	add_child_autofree(world)
+	var view := FakeWorldView.new()
+	view.root = _make_root()
+	view.sim_value = sim
 	_overlay = Control.new()
 	_overlay.size = Vector2(800, 600)
 	add_child_autofree(_overlay)
 	var presenter := DeployPresenter.new()
-	presenter.setup(world, _overlay)
+	presenter.setup(view, _overlay)
 	add_child_autofree(presenter)
 	return presenter
 

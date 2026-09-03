@@ -734,6 +734,9 @@ public:
 	                                bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
 	void set_local_player_first_person_model_available(bool p_available);
+	// Whether the last push found a first-person model (a read seam for the
+	// GUT viewmodel pins; the presenter reads the def, not this).
+	bool is_local_player_first_person_model_available() const;
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
 	// gate runs sim-side) (engine: runtime/world/local_player_view.cpp).
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,

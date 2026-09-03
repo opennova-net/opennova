@@ -82,9 +82,10 @@ func _local_player_visual_spec() -> PlayerVisualSpec:
 # the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
 # the same boundary without constructing hidden scene nodes. Later builders hit
 # the placer's cache, so they cannot introduce a definition just after freeze.
-func prewarm_loaded_model_challenge_definitions() -> void:
+func prewarm_loaded_model_challenge_definitions() -> PackedStringArray:
+	var resolved := PackedStringArray()  # the graphics warmed, in order
 	if _world._placer == null:
-		return
+		return resolved
 	# By the deployment/admission boundary the complete initial world stream has
 	# populated the joiner's replica snapshot. (S2C 0x11 itself comes earlier and
 	# releases the client's C2S 0x0A world request.) Resolve each unique wire type
@@ -107,6 +108,7 @@ func prewarm_loaded_model_challenge_definitions() -> void:
 				var wire_graphic := String(_world._placer.graphic_for(visual_item_id))
 				if not wire_graphic.is_empty():
 					_world._placer.object_data_for(wire_graphic)
+					resolved.append(wire_graphic)
 		# The header-only join learned its entity types from the stream after
 		# MissionPresentation's ordinary mission-body setup. Resolve the model-derived
 		# seat/emplacement table and world collision/trait consumers now, before
@@ -132,9 +134,10 @@ func prewarm_loaded_model_challenge_definitions() -> void:
 	var avatar_graphic := String(_world._placer.graphic_for(player_visual_item_id))
 	if not avatar_graphic.is_empty():
 		_world._placer.object_data_for(avatar_graphic)
+		resolved.append(avatar_graphic)
 
 	if _world._viewmodel_weapon_cleared:
-		return
+		return resolved
 	var def := _world.local_player_viewmodel_def()
 	var character_spec := _local_player_visual_spec()
 	var spec := Simulation.fp_viewmodel_spec(def != null,
@@ -143,8 +146,11 @@ func prewarm_loaded_model_challenge_definitions() -> void:
 			def.animadm if def != null else "", def.flags if def != null else 0)
 	if not spec.gun.is_empty():
 		_world._placer.object_data_for(spec.gun)
+		resolved.append(spec.gun)
 	if spec.show_arms and not spec.arms.is_empty():
 		_world._placer.object_data_for(spec.arms)
+		resolved.append(spec.arms)
+	return resolved
 
 
 ## Armory apply, presentation side: point the FP viewmodel + action FSM at `weapon_name`.

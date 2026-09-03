@@ -28,7 +28,7 @@ func retail_install_error(retail_dir: String) -> String:
 	return GamePacker.retail_install_error(retail_dir)
 
 
-func stage_retail(resource_dir: String, retail_dir: String) -> Dictionary:
+func stage_retail(resource_dir: String, retail_dir: String) -> RetailStageResult:
 	return GamePacker.stage_retail(resource_dir, retail_dir)
 
 

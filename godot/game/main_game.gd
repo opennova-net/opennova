@@ -251,11 +251,12 @@ func _ready() -> void:
 	_armory_presenter = ArmoryPresenter.new()
 	_armory_presenter.name = "ArmoryPresenter"
 	add_child(_armory_presenter)
-	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	_armory_presenter.setup(_world.armory_view(), _player_presenter,
+			_hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
 	_armory_presenter.closed.connect(resume)
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
-	_deploy_presenter = DeployScreenPresenter.install(self, _world,
+	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
@@ -267,7 +268,7 @@ func _ready() -> void:
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
 	_on_player_options_changed(_player_options.current())
 	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
-	_end_round_presenter = EndRoundPresenter.install(self, _world,
+	_end_round_presenter = EndRoundPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
 			_armory_presenter, func() -> void: _state = State.END_ROUND,
 			_leave_screen.bind(State.END_ROUND))

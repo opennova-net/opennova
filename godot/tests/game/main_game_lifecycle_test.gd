@@ -5,65 +5,11 @@ extends GutTest
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
-const BAKED_TERRAIN_DIR := "res://../fixtures/terrain/tmap"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
-# Witnessed retail placement (assets/README.md): strings plus the
-# mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
-# localres; environment, terrain, and terrain art in resource.
-const LANGUAGE_FILES := [
-	"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
-	"menutxt.bin", "mnml.bin", "mnml.pcx", "mnml.lwf",
-]
-const LOCALRES_FILES := [
-	"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu",
-	"game.mnu", "weapon.mnu",
-	"mnml.bms", "menu_style.mns", "newarow1.tga", "mnml.dbf",
-]
-const RESOURCE_FILES := [
-	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
-	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
-	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
-]
-# The synthetic Tmap terrain (its .trn names the mnml art packed above).
-const BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
-# This lifecycle-only armory deliberately resolves the engine fallback as well
-# as the selected profile weapon. The regression must fail if GameWorld mistakes
-# a nonempty WPN_M4AUTO fallback inventory for a mission-authored kit.
-const LIFECYCLE_WEAPON_DEF := """
-ammoclass_max_carry CLASS_556MM 1000
-
-weapon "WPN_AK47AUTO"
-	category 1
-	rank 0
-	statid 102
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 AK_TEST_FIRST
-end
-
-weapon "WPN_M4AUTO"
-	category 1
-	rank 0
-	statid 101
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 M4AUTO_TEST_FIRST
-end
-
-weapon "WPN_M4"
-	category 1
-	rank 0
-	statid 100
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 M4_TEST_FIRST
-end
-"""
+# The packed shell recipe (the retail-shaped archive layout, the baked Tmap
+# terrain, the lifecycle-only weapon.def) lives on WorldFixture.boot_shell.
 
 
 # The shell the entity-discovery adapter reads: a GameShell answering one real
@@ -374,9 +320,7 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 		return
 	var picked_dir := _temp_dir.path_join("picked")
 	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
-	_write_pff(picked_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
-	_write_pff(picked_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	_write_pff(picked_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	WorldFixture.stage_shell_archives(self, picked_dir, false)
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir)
 
 	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
@@ -409,12 +353,10 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	assert_not_null(loose)
 	loose.store_string("loose trn")
 	loose.close()
-	# The packed variant satisfies the boot manifest the same way _make_shell's
+	# The packed variant satisfies the boot manifest the same way boot_shell's
 	# fixture does — a partial runtime install would report missing boot
 	# resources as engine errors and fail this test about mounting.
-	_write_pff(packed_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
-	_write_pff(packed_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	_write_pff(packed_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	WorldFixture.stage_shell_archives(self, packed_dir, false)
 	ResourceDirSettings.set_game("jo")
 
 	assert_null(BootRootMount.mount(loose_dir, false),
@@ -444,7 +386,7 @@ func test_bundled_game_dir_is_the_exe_dir_only_when_it_carries_a_boot_archive() 
 			"no boot archive -> not a game dir")
 	assert_eq(LaunchFlags.bundled_game_dir(""), "",
 			"an empty probe dir is never a game dir")
-	_write_pff(_temp_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), [])
 	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), _temp_dir,
 			"any boot-table archive makes the exe dir the default game dir")
 
@@ -459,7 +401,7 @@ func test_boot_defaults_to_the_bundled_game_dir_and_never_persists_it() -> void:
 	var configured_dir := _temp_dir.path_join("configured")
 	assert_eq(DirAccess.make_dir_recursive_absolute(game_dir), OK)
 	assert_eq(DirAccess.make_dir_recursive_absolute(configured_dir), OK)
-	_write_pff(game_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, game_dir.path_join("localres.pff"), [])
 	var saved_dir := ResourceDirSettings.get_resource_dir()
 	var saved_override: String = LaunchFlags.get_bundled_probe_override()
 	ResourceDirSettings.set_resource_dir("")
@@ -504,7 +446,7 @@ func test_boot_falls_through_to_bundled_loose_assets_and_blesses_only_them() -> 
 
 	# The packed bundle outranks the loose sibling when both are present (tagged zip
 	# carrying stray sources still boots the packed game).
-	_write_pff(exe_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, exe_dir.path_join("localres.pff"), [])
 	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), exe_dir,
 			"a boot archive beside the exe wins over the assets/ sibling")
 	ResourceDirSettings.set_resource_dir(saved_dir)
@@ -1138,67 +1080,12 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 			"the world rows read unavailable again once the world is gone")
 
 
-func _make_shell():
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 31,
-			"the retail-shaped archives contain every minimal fixture resource")
-	var language_entries := _fixture_entries(LANGUAGE_FILES)
-	var localres_entries := _fixture_entries(LOCALRES_FILES)
-	var resource_entries := _fixture_entries(RESOURCE_FILES)
-	# The minimal TRN is intentionally CPT-less and cannot create render RIDs.
-	# Pack the substituted TRN's baked payload + textures so this regression
-	# reaches the exact raw-patch visibility leak.
-	for filename in BAKED_TERRAIN_FILES:
-		var bytes := FileAccess.get_file_as_bytes(BAKED_TERRAIN_DIR.path_join(filename))
-		assert_false(bytes.is_empty(), "%s is available in the baked fixture" % filename)
-		resource_entries.append({"name": filename, "bytes": bytes})
-	_write_pff(_temp_dir.path_join("language.pff"), language_entries)
-	_write_pff(_temp_dir.path_join("localres.pff"), localres_entries)
-	_write_pff(_temp_dir.path_join("resource.pff"), resource_entries)
-
-	ResourceDirSettings.set_resource_dir(_temp_dir)
-	ResourceDirSettings.set_expansion("")
-	ResourceDirSettings.set_game("jo")
-	var shell = MAIN_GAME_SCENE.instantiate()
-	assert_not_null(shell)
-	if shell == null:
-		return null
-	add_child(shell)
-	await get_tree().process_frame
-	var menu_shell = shell.get_node("MenuLayer/MenuShell")
-	assert_eq(menu_shell.get_current_menu_file().to_lower(),
-			"main.mnu", "the packed fixture boots through the real menu shell")
+# The packed shell (WorldFixture.boot_shell): the staged archive dir is this
+# test's _temp_dir so after_each removes it once the shell released its roots.
+func _make_shell() -> MainGame:
+	var shell: MainGame = await WorldFixture.boot_shell(self)
+	_temp_dir = WorldFixture.last_shell_dir()
 	return shell
-
-
-func _fixture_entries(filenames: Array) -> Array:
-	var entries: Array = []
-	for filename in filenames:
-		var source := FIXTURE_DIR.path_join(filename)
-		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
-		# while retaining that logical archive name.
-		if filename == "mnml.trn":
-			source = BAKED_TERRAIN_DIR.path_join("Tmap.trn")
-		# The in-world screens (ESC pause overlay + armory) pack the shipped JO
-		# menus from the reference fixture set under their retail archive names;
-		# without the set the boot packs the minted main menu under those names
-		# (a valid menu; the screen-verb test that opens them pends).
-		elif filename == "game.mnu":
-			source = RetailData.fixture("mnu/jo_game.mnu")
-			if source.is_empty():
-				source = FIXTURE_DIR.path_join("main.mnu")
-		elif filename == "weapon.mnu":
-			source = RetailData.fixture("mnu/jo_weapon.mnu")
-			if source.is_empty():
-				source = FIXTURE_DIR.path_join("main.mnu")
-		var bytes := FileAccess.get_file_as_bytes(source)
-		if filename == "weapon.def":
-			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()
-		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
-		entries.append({"name": filename, "bytes": bytes})
-	return entries
 
 
 func _wait_for_world_load(world, frame_limit := 240) -> void:
@@ -1248,11 +1135,6 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"the mission sky clear is restored to the boot/menu frame clear")
 	assert_null(world.get_node_or_null("MissionObjects"),
 			"no mission presentation subtree remains")
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # The SP lose flow's SHELL half (world-wac-ai-re §20): the WAC Lose banner

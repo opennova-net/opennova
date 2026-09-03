@@ -21,15 +21,8 @@ func test_joiner_network_diagnostics_are_explicitly_opt_in() -> void:
 	sim.free()
 
 
-class RuntimeStub:
-	extends MissionPresentation
-
-	var stub_sim: Simulation = null
-
-	func get_sim() -> Simulation:
-		return stub_sim
-
-
+# The in-world shell the table reads: a GameShell answering one real runtime
+# (rule 11's sanctioned fake: public verbs of a GDScript shell class).
 class RuntimeShell:
 	extends GameShell
 
@@ -40,9 +33,12 @@ class RuntimeShell:
 
 
 func test_the_debug_control_table_exposes_the_switch_as_a_net_check() -> void:
-	var sim: Simulation = autofree(Simulation.new())
-	var runtime: RuntimeStub = autofree(RuntimeStub.new())
-	runtime.stub_sim = sim
+	# A real MissionPresentation over an in-memory default mission owns the
+	# Simulation the row writes through.
+	var runtime: MissionPresentation = WorldFixture.boot_mission_data(
+			self, WorldFixture.default_mission(0))
+	var sim: Simulation = runtime.get_sim()
+	assert_not_null(sim, "the runtime owns a live Simulation")
 	var shell: RuntimeShell = autofree(RuntimeShell.new())
 	shell.runtime = runtime
 	var adapter: GameDebugAdapter = autofree(GameDebugAdapter.new())

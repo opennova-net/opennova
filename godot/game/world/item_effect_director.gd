@@ -17,7 +17,7 @@ extends RefCounted
 # private seams arriving as setup() Callables, null-guarded by the world (the
 # NetSessionDrive Callable precedent): the placer's static item-effect
 # sources, and the placer's ItemDatabase (typed at the resolve boundary,
-# ADR 0034 — harnesses hand real fixture databases).
+# ADR 0034).
 
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
@@ -38,7 +38,7 @@ var _particles_hidden := false
 
 # owner key -> Callable returning the live anchor Transform3D (or null once
 # stale) for registered owner-bound effect groups; consulted before the
-# item-fx/SSN legs by _effect_owner_transform.
+# item-fx/SSN legs by resolve_owner_transform.
 var _effect_anchor_resolvers: Dictionary = {}
 
 # owner key (String) -> presented Node3D, for the per-item attached effect groups.
@@ -148,6 +148,23 @@ func unregister_effect_anchor(owner_key: Variant) -> void:
 	_effect_anchor_resolvers.erase(owner_key)
 
 
+func has_effect_anchor(owner_key: Variant) -> bool:
+	return _effect_anchor_resolvers.has(owner_key)
+
+
+## Value-only census of the per-item effect bookkeeping (ADR 0018 read seam).
+func get_stats() -> ItemEffectDirectorStats:
+	var stats := ItemEffectDirectorStats.new()
+	stats.registered_nodes = _item_fx_registered_nodes.size()
+	stats.registered_static = _item_fx_registered_static.size()
+	stats.pending_nodes = _item_fx_pending_nodes.size()
+	stats.pending_static = _item_fx_pending_static.size()
+	stats.control_nodes = _item_fx_control_nodes.size()
+	stats.control_active = _item_fx_control_active.size()
+	stats.owner_keys = _item_fx_nodes.size()
+	return stats
+
+
 ## The world just built a fresh EffectWorld for a mission (_start_effect_world):
 ## wire the owner-pose provider, attach the persistent per-item effects, and
 ## hook the wire-spawn callback so late net spawns get their authored emitters.
@@ -158,7 +175,7 @@ func on_effect_world_started() -> void:
 	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
 	# (resolved through the runtime), String keys are the per-item effect attaches
 	# (resolved to the placed node's live transform).
-	effect_world.set_owner_position_provider(_effect_owner_transform)
+	effect_world.set_owner_position_provider(resolve_owner_transform)
 	reattach()
 	# The wire-spawn callback is single-subscriber; GameWorld registers one
 	# router that fans out to this director AND the effect-light director.
@@ -188,7 +205,7 @@ func reset() -> void:
 # are the per-item effect attaches registered by reattach (the placed
 # entity's current value snapshot. The Node remains only as a pre-first-tick
 # seed and lifetime fallback for non-sim-owned callers.
-func _effect_owner_transform(owner_key: Variant) -> Variant:
+func resolve_owner_transform(owner_key: Variant) -> Variant:
 	# Registered live anchors first (the local weapon flash follows its viewmodel
 	# userpoint for the emitter group's whole life [orig: the actionEffectHandle
 	# per-tick tracker in WeaponAction_ProcessFrame @ 0x540edf]).

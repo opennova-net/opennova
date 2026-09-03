@@ -60,4 +60,4 @@ func _set_click_catcher(world: GameWorld, enabled: bool) -> void:
 	var catcher := PickClickCatcher.new()
 	catcher.name = PICK_CATCHER_NAME
 	world.add_child(catcher)
-	catcher.setup(world, list)
+	catcher.setup(world.world_view(), list)

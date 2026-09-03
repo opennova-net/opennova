@@ -55,15 +55,17 @@ var _temp_dir := ""
 var _shell: Node = null
 
 
-class DeployWorldHarness:
-	extends GameWorld
+# The screen's narrow world view, faked over the loopback joiner sim and the
+# staged menu root (rule 11: a fake of a GDScript interface, public verbs only).
+class FakeWorldView:
+	extends WorldView
 	var root: ResourceRoot
-	var sim: Simulation
+	var sim_value: Simulation
 
-	func get_sim() -> Simulation:
-		return sim
+	func sim() -> Simulation:
+		return sim_value
 
-	func get_resource_root() -> ResourceRoot:
+	func resource_root() -> ResourceRoot:
 		return root
 
 
@@ -282,14 +284,10 @@ func test_shell_returns_a_punted_deploy_screen_to_the_menu() -> void:
 	var deploy_host: DeployScreenPresenter = deploy_hosts[0]
 	var shell_world = _shell.get_node("World")
 	var pair := _join_pair_with_pending_pick()
-	var world := DeployWorldHarness.new()
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	world.root = _make_root()
-	world.sim = pair.joiner
-	add_child_autofree(world)
-	deploy_host.setup(world, _shell.get_node("HUD"))
+	var view := FakeWorldView.new()
+	view.root = _make_root()
+	view.sim_value = pair.joiner
+	deploy_host.setup(view, _shell.get_node("HUD"))
 	assert_true(deploy_host.open(), "the shell's deploy screen opens over the join")
 	await get_tree().process_frame
 	assert_false(_shell.is_gameplay_input_active(),

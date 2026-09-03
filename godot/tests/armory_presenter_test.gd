@@ -28,25 +28,25 @@ func should_skip_script():
 	return false
 
 
-class ArmoryWorldHarness:
-	extends GameWorld
+# The armory's world view, faked over a REAL spawned simulation and the staged
+# retail menu root; the viewmodel verbs record what ACCEPT drove (rule 11: a
+# fake of a GDScript interface, public verbs only).
+class FakeArmoryView:
+	extends ArmoryWorldView
 	var root: ResourceRoot
 	var weapons: WeaponDatabase
-	var sim: Simulation
+	var sim_value: Simulation
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
-	func get_sim() -> Simulation:
-		return sim
+	func sim() -> Simulation:
+		return sim_value
 
-	func get_resource_root() -> ResourceRoot:
+	func resource_root() -> ResourceRoot:
 		return root
 
-	func get_weapon_database() -> WeaponDatabase:
+	func weapon_database() -> WeaponDatabase:
 		return weapons
-
-	func local_player_viewmodel_def() -> PlayerViewmodelDef:
-		return null
 
 	func set_local_player_weapon_by_name(weapon_name: String,
 			_preserve_slot_state: bool = false) -> bool:
@@ -55,14 +55,6 @@ class ArmoryWorldHarness:
 
 	func clear_local_player_weapon() -> void:
 		clear_calls += 1
-
-
-class CapturePlayerPresenter:
-	extends LocalPlayerPresenter
-	var refresh_calls := 0
-
-	func refresh_viewmodel() -> void:
-		refresh_calls += 1
 
 
 func before_each() -> void:
@@ -124,18 +116,12 @@ func _real_sim(entity_team: int = 2) -> Simulation:
 	return sim
 
 
-func _make_world(sim: Simulation, weapons: WeaponDatabase) -> ArmoryWorldHarness:
-	var world := ArmoryWorldHarness.new()
-	# GameWorld's _ready resolves its $Terrain child by name (the scene always
-	# carries one); the bare harness supplies it the same way host_punt's does.
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	world.root = _make_root()
-	world.weapons = weapons
-	world.sim = sim
-	add_child_autofree(world)
-	return world
+func _make_world(sim: Simulation, weapons: WeaponDatabase) -> FakeArmoryView:
+	var view := FakeArmoryView.new()
+	view.root = _make_root()
+	view.weapons = weapons
+	view.sim_value = sim
+	return view
 
 
 func _weapon_display_text(row: WeaponDef) -> String:
@@ -181,8 +167,11 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make(equipped)], 8),
 			"the real simulation owns the equipped rifleman context")
 	var world := _make_world(sim, weapons)
-	var player_presenter := CapturePlayerPresenter.new()
+	# A REAL local-player presenter (no world behind it): the FP refreshes the
+	# armory drives are read through its viewmodel generation.
+	var player_presenter := LocalPlayerPresenter.new()
 	add_child_autofree(player_presenter)
+	var refresh_start := player_presenter.viewmodel_generation()
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(1600, 900)
@@ -234,7 +223,8 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
-	assert_eq(player_presenter.refresh_calls, 2, "both equip and unequip rebuild the FP view")
+	assert_eq(player_presenter.viewmodel_generation() - refresh_start, 2,
+			"both equip and unequip rebuild the FP view")
 
 
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:

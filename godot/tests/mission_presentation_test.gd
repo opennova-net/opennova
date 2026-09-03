@@ -131,58 +131,63 @@ class FireAudioStub:
 		return true
 
 
-# The typed owner-anchor registry (ItemEffectDirector) with the registrations
-# captured for the pose-follow assertions below.
-class CatchupEffectAnchorMount:
-	extends ItemEffectDirector
-	var anchors: Dictionary = {}
-
-	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
-		anchors[owner_key] = resolver
-		super.register_effect_anchor(owner_key, resolver)
-
-	func unregister_effect_anchor(owner_key: Variant) -> void:
-		anchors.erase(owner_key)
-		super.unregister_effect_anchor(owner_key)
+# The flashbang's effects_table tag-1 "move" effect (retail ammo.def grenadefb):
+# the round-bound particle the pose-follow test below watches.
+const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
 
 
-class CatchupEffectWorld:
-	extends EffectWorld
-	var anchor_mount: CatchupEffectAnchorMount
-	var owner_key: Variant
-	var group_live := false
-	var spawn_count := 0
-	var fixed_advance_count := 0
-	var active_tick_numbers: Array[int] = []
-	var active_poses: Array[Transform3D] = []
-	var stops_after_advance: Array[int] = []
+# One synthetic in-memory particle catalog authoring that move effect as a
+# FOREVEREMIT definition (the effect_world_test recipe), so a REAL EffectWorld
+# interns and spawns it without a resource root and the round-bound group
+# stays live until the throwable pass stops it.
+func _catalog_file() -> ParticleFile:
+	var def := ParticleDef.new()
+	def.id = "toss dots"
+	def.emit_dur = 0.1
+	def.emit_rate = 50.0
+	def.emit_burst = 4
+	def.age = 0.2
+	def.alpha = 1.0
+	def.scale_value = 1.0
+	def.flags = ParticleDef.FLAG_FOREVER_EMIT
+	var effect := ParticleEffect.new()
+	effect.id = FLASHBANG_MOVE_EFFECT
+	effect.pdefs = PackedStringArray(["toss dots"])
+	var file := ParticleFile.new()
+	var particles: Array = file.particles
+	particles.append(def)
+	file.particles = particles
+	var effects: Array = file.effects
+	effects.append(effect)
+	file.effects = effects
+	return file
 
-	func _init(mount: CatchupEffectAnchorMount) -> void:
-		anchor_mount = mount
 
-	func spawn_effect_owned_request(key: Variant, _name: String,
-			_position: Vector3, _orientation: Vector3 = Vector3.ZERO) -> EffectSpawnReceipt:
-		owner_key = key
-		group_live = true
-		spawn_count += 1
-		return EffectSpawnReceipt.make(true, 1, 91)
+# The round-bound move group in the effect world's public report: by id once
+# known (a released owner drops its key from the row, so a retired group is
+# only reachable by id), else the first row owned by a throwable-move key.
+# {} when there is none or it was swept.
+func _round_move_group(fx: EffectWorld, group_id: int) -> Dictionary:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as Dictionary
+		if group_id > 0:
+			if int(row.get("id", 0)) == group_id:
+				return row
+		else:
+			var owner: Variant = row.get("owner_key")
+			if owner is String and (owner as String).begins_with("throwable-move:"):
+				return row
+	return {}
 
-	func stop_group(group_id: int) -> void:
-		assert(group_id == 91)
-		group_live = false
-		stops_after_advance.append(fixed_advance_count)
 
-	func advance_fixed_tick(_delta: float) -> void:
-		fixed_advance_count += 1
-		if not group_live:
-			return
-		var resolver: Variant = anchor_mount.anchors.get(owner_key)
-		if not (resolver is Callable) or not (resolver as Callable).is_valid():
-			return
-		var pose: Variant = (resolver as Callable).call()
-		if pose is Transform3D:
-			active_tick_numbers.append(fixed_advance_count)
-			active_poses.append(pose)
+# Every report row still owned by a throwable-move key (the live spawn census).
+func _round_move_rows(fx: EffectWorld) -> Array:
+	var out: Array = []
+	for row_v in fx.get_debug_group_report():
+		var owner: Variant = (row_v as Dictionary).get("owner_key")
+		if owner is String and (owner as String).begins_with("throwable-move:"):
+			out.append(row_v)
+	return out
 
 
 # Build a one-organic mission + a real placer registering one real ObjectModel for it by
@@ -616,9 +621,16 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# flashbang exercises the same attached-effect path as the smoke grenade in
 	# a short, production-authored lifetime.
 	var w := _make_world(Transform3D.IDENTITY)
-	var anchor_mount := CatchupEffectAnchorMount.new()
-	var effect_world := CatchupEffectWorld.new(anchor_mount)
+	# A REAL ItemEffectDirector and a REAL EffectWorld (ADR 0043 rule 11): the
+	# runtime anchors the round through options.effect_anchors and spawns into
+	# options.fire_fx; the world's public group report is the read seam.
+	var anchor_mount := ItemEffectDirector.new()
+	var effect_world := EffectWorld.new()
 	add_child_autofree(effect_world)
+	effect_world.load_particle_file(_catalog_file())
+	# The production owner-pose wiring (ItemEffectDirector.on_effect_world_started):
+	# the anchor registry resolves the owned group's live pose each fixed tick.
+	effect_world.set_owner_position_provider(anchor_mount.resolve_owner_transform)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	var catchup_options := _options_with_placer(w.placer)
@@ -634,24 +646,50 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	rt.get_sim().resolve_item_traits(item_db)
 	assert_gte(rt.get_sim().debug_spawn_round(
 			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
+	# The per-tick observation (the GameFramePipeline leg): advance the real
+	# effect world after each fixed tick and read the round-bound group from
+	# the public report. A group the tick's throwable sync retired is already
+	# detached BEFORE that advance (the release timing pinned below); the
+	# emitter position read AFTER the advance is the owner sync's result, i.e.
+	# the pose the group actually emitted from on that tick.
+	var probe := {
+		"advances": 0,
+		"group_id": 0,
+		"active_tick_numbers": [],
+		"active_poses": [],
+		"stops_after_advance": [],
+	}
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
+		var group_id := int(probe["group_id"])
+		if group_id > 0 and (probe["stops_after_advance"] as Array).is_empty():
+			var before := _round_move_group(effect_world, group_id)
+			if before.is_empty() or bool(before.get("detached", false)):
+				(probe["stops_after_advance"] as Array).append(int(probe["advances"]))
 		effect_world.advance_fixed_tick(Simulation.tick_dt())
+		probe["advances"] = int(probe["advances"]) + 1
+		var after := _round_move_group(effect_world, group_id)
+		if after.is_empty() or bool(after.get("detached", false)):
+			return
+		probe["group_id"] = int(after.get("id", 0))
+		(probe["active_tick_numbers"] as Array).append(int(probe["advances"]))
+		var emitters: Array = after.get("emitters", [])
+		(probe["active_poses"] as Array).append(
+				(emitters[0] as Dictionary).get("position", Vector3.INF))
 	)
 	rt.play()
 
 	assert_eq(_advance_ticks(rt, 0.05), 3,
 			"one render frame catches up the first three round ticks")
-	assert_eq(effect_world.spawn_count, 1,
+	assert_eq(_round_move_rows(effect_world).size(), 1,
 			"the attached move group exists before its first particle advance")
-	assert_eq(effect_world.active_tick_numbers, [1, 2, 3],
+	assert_eq(probe["active_tick_numbers"], [1, 2, 3],
 			"every birth-batch fixed tick advances the live group")
-	assert_eq(effect_world.active_poses.size(), 3)
-	if effect_world.active_poses.size() == 3:
-		assert_false(effect_world.active_poses[0].origin.is_equal_approx(
-				effect_world.active_poses[1].origin),
+	var active_poses: Array = probe["active_poses"]
+	assert_eq(active_poses.size(), 3)
+	if active_poses.size() == 3:
+		assert_false((active_poses[0] as Vector3).is_equal_approx(active_poses[1]),
 				"the second emission sees the second simulated round pose")
-		assert_false(effect_world.active_poses[1].origin.is_equal_approx(
-				effect_world.active_poses[2].origin),
+		assert_false((active_poses[1] as Vector3).is_equal_approx(active_poses[2]),
 				"catch-up does not emit repeatedly from the frame-start pose")
 
 	# max_age 4 parses to 248 fixed ticks. Stop at age 240, then expire eight
@@ -660,14 +698,15 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	for _batch in range(7):
 		assert_eq(_advance_ticks(rt, 31.0 * Simulation.tick_dt()), 31)
 	assert_eq(_advance_ticks(rt, 20.0 * Simulation.tick_dt()), 20)
-	assert_eq(effect_world.fixed_advance_count, 240)
+	assert_eq(int(probe["advances"]), 240)
 	assert_eq(_advance_ticks(rt, 12.0 * Simulation.tick_dt()), 12)
-	assert_eq(effect_world.fixed_advance_count, 252)
-	assert_eq(effect_world.active_tick_numbers.size(), 247,
+	assert_eq(int(probe["advances"]), 252)
+	var active_tick_numbers: Array = probe["active_tick_numbers"]
+	assert_eq(active_tick_numbers.size(), 247,
 			"the group advances exactly while the round is alive")
-	assert_eq(effect_world.active_tick_numbers[-1], 247,
+	assert_eq(int(active_tick_numbers[-1]), 247,
 			"the expiry tick never advances a released round effect")
-	assert_eq(effect_world.stops_after_advance, [247],
+	assert_eq(probe["stops_after_advance"], [247],
 			"release happens before fixed advance 248, inside the catch-up batch")
 
 

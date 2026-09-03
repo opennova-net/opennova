@@ -2,11 +2,13 @@ extends GutTest
 
 # DestructionPresentPass on the typed surfaces (ADR 0034): event/piece rows are
 # pure data through the public present_drained data leg (production present()
-# drains the typed Simulation), the collaborators are real
-# MissionObjectPlacer/EffectWorld/ItemEffectDirector/WirePresentPass subclasses
-# capturing the typed calls, the entity index is a real EntityIndex over real
-# ObjectModels, and the item database is the real fixture items.def
-# (item 1291 = the dune buggy with husk Dbuggy1X).
+# drains the typed Simulation), the collaborators are a real
+# MissionObjectPlacer/WirePresentPass plus a REAL EffectWorld over an in-memory
+# catalog and a REAL ItemEffectDirector (ADR 0043 rule 11: the group report,
+# the anchor registry and the owner-pose resolve are the read seams), the
+# entity index is a real EntityIndex over real ObjectModels, and the item
+# database is the real fixture items.def (item 1291 = the dune buggy with husk
+# Dbuggy1X).
 #
 # The live settling-pose follow (a REAL sim's present-effect state feeding the
 # node-less graft) is exercised by the real-sim test at the bottom; the
@@ -18,6 +20,14 @@ const DestructionPresentPass := preload('res://game/world/destruction_present_pa
 const MissionPresentation := preload('res://game/world/mission_presentation.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
+const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
+
+# Every effect name the drained rows below spawn: the piece-type trails, the
+# wreck families, and the resolved debris/glass transients.
+const CATALOG_EFFECTS: PackedStringArray = [
+	'Effect_VexpM', 'Effect_VexpS', 'Effect_VehExplode',
+	'Effect_Family1', 'Effect_Family2', 'Effect_Family3', 'Effect_Transient',
+	'Effect_TreeFoliageExp', 'Effect_BldGlassExp']
 
 static var _item_db: ItemDatabase = null
 
@@ -29,52 +39,95 @@ func before_all() -> void:
 			'the fixture items.def loads (101291 carries husk Dbuggy1X)')
 
 
-class CaptureFx:
-	extends EffectWorld
-	var owned_spawns: Array = []
-	var spawns: Array = []
+# One synthetic in-memory particle catalog authoring every effect the rows
+# name (the effect_world_test recipe): one FOREVEREMIT definition shared by
+# one effect per name, so the real EffectWorld interns and spawns them without
+# a resource root and an owned group stays live until its owner is retired.
+func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
+	var def := ParticleDef.new()
+	def.id = 'wreck dots'
+	def.emit_dur = 0.1
+	def.emit_rate = 50.0
+	def.emit_burst = 4
+	def.age = 0.2
+	def.alpha = 1.0
+	def.scale_value = 1.0
+	def.flags = ParticleDef.FLAG_FOREVER_EMIT
+	var file := ParticleFile.new()
+	var particles: Array = file.particles
+	particles.append(def)
+	file.particles = particles
+	var effects: Array = file.effects
+	for effect_name in effect_names:
+		var effect := ParticleEffect.new()
+		effect.id = effect_name
+		effect.pdefs = PackedStringArray(['wreck dots'])
+		effects.append(effect)
+	file.effects = effects
+	return file
 
-	func spawn_effect_owned(owner_key: Variant, effect: String, position: Vector3,
-			orientation: Vector3 = Vector3.ZERO) -> int:
-		owned_spawns.append({
-			'owner': owner_key,
-			'effect': effect,
-			'position': position,
-			'orientation': orientation,
-		})
-		return owned_spawns.size()
 
-	func spawn_effect(name: String, position: Vector3,
-			orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({
-			'effect': name,
-			'position': position,
-			'orientation': orientation,
-		})
-		return spawns.size()
+# A REAL EffectWorld over the in-memory catalog, its owner poses resolved by
+# `anchors` (the production wiring ItemEffectDirector.on_effect_world_started
+# performs for GameWorld's world): advance_fixed_tick(0.0) is the sync.
+func _make_fx(anchors: ItemEffectDirector) -> EffectWorld:
+	var fx := EffectWorld.new()
+	add_child_autofree(fx)
+	fx.load_particle_file(_catalog_file(CATALOG_EFFECTS))
+	fx.set_owner_position_provider(anchors.resolve_owner_transform)
+	return fx
 
 
-class CaptureAnchors:
-	extends ItemEffectDirector
-	var anchors: Dictionary = {}
-	var registrations: Array = []
-	var unregistrations: Array = []
+# The live (still attached) group report row owned by `key`, or {} when none.
+func _live_owned_row(fx: EffectWorld, key: String) -> Dictionary:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as Dictionary
+		if row.get('owner_key') == key and not bool(row.get('detached', false)):
+			return row
+	return {}
 
-	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
-		anchors[owner_key] = resolver
-		registrations.append(owner_key)
-		super.register_effect_anchor(owner_key, resolver)
 
-	func unregister_effect_anchor(owner_key: Variant) -> void:
-		anchors.erase(owner_key)
-		unregistrations.append(owner_key)
-		super.unregister_effect_anchor(owner_key)
+# Every group report row owned by `key`, attached or detached.
+func _owned_rows(fx: EffectWorld, key: String) -> Array:
+	var out: Array = []
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as Dictionary
+		if row.get('owner_key') == key:
+			out.append(row)
+	return out
 
-	func anchor_position(owner_key: Variant) -> Variant:
-		if not anchors.has(owner_key):
-			return null
-		var resolver: Callable = anchors[owner_key]
-		return resolver.call() if resolver.is_valid() else null
+
+# Every unowned (transient) group report row.
+func _transient_rows(fx: EffectWorld) -> Array:
+	var out: Array = []
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as Dictionary
+		if row.get('owner_key') == null:
+			out.append(row)
+	return out
+
+
+# The group report row with `group_id`, or {} once swept.
+func _row_by_id(fx: EffectWorld, group_id: int) -> Dictionary:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as Dictionary
+		if int(row.get('id', 0)) == group_id:
+			return row
+	return {}
+
+
+func _emitter_position(row: Dictionary) -> Vector3:
+	var emitters: Array = row.get('emitters', [])
+	if emitters.is_empty():
+		return Vector3.INF
+	return (emitters[0] as Dictionary).get('position', Vector3.INF)
+
+
+func _emitter_forward(row: Dictionary) -> Vector3:
+	var emitters: Array = row.get('emitters', [])
+	if emitters.is_empty():
+		return Vector3.INF
+	return (emitters[0] as Dictionary).get('forward', Vector3.INF)
 
 
 # A REAL wire presenter with injected per-handle avatars (native methods
@@ -147,13 +200,7 @@ func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
 	return row
 
 
-func _make_fx() -> CaptureFx:
-	var fx := CaptureFx.new()
-	add_child_autofree(fx)
-	return fx
-
-
-func _make_pass(fx: CaptureFx, anchors: CaptureAnchors) -> DestructionPresentPass:
+func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> DestructionPresentPass:
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, null, null, null, null, anchors, Callable(),
 			func(): return fx)
@@ -162,60 +209,84 @@ func _make_pass(fx: CaptureFx, anchors: CaptureAnchors) -> DestructionPresentPas
 
 # Ring-slot lifecycle regressions.
 func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:7'
 	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
-	assert_eq(fx.owned_spawns.size(), 1)
+	var first := _live_owned_row(fx, key)
+	assert_false(first.is_empty(), 'a new piece spawns its trail as one owned group')
+	assert_eq(_owned_rows(fx, key).size(), 1)
+	assert_eq(String(first.get('name', '')), 'Effect_VexpM')
+	var first_id := int(first.get('id', 0))
 	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
-	assert_eq(fx.owned_spawns.size(), 1)
-	assert_eq(anchors.anchor_position(key), Vector3(4, 5, 6))
+	assert_eq(_owned_rows(fx, key).size(), 1, 'the same generation never respawns')
+	assert_eq(anchors.resolve_owner_transform(key), Vector3(4, 5, 6))
+	fx.advance_fixed_tick(0.0)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, key)), Vector3(4, 5, 6),
+			POSITION_EPS, 'the presented incarnation follows the live piece pose')
 	presenter.present_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
-	assert_eq(fx.owned_spawns.size(), 2)
-	if fx.owned_spawns.size() == 2:
-		assert_eq(String(fx.owned_spawns[1]['effect']), 'Effect_VexpS')
-		assert_eq(String(fx.owned_spawns[1]['owner']), key)
-	assert_eq(anchors.anchor_position(key), Vector3(8, 9, 10))
+	assert_eq(_owned_rows(fx, key).size(), 2, 'a new generation spawns a fresh incarnation')
+	var replacement := _live_owned_row(fx, key)
+	assert_false(replacement.is_empty())
+	assert_eq(String(replacement.get('name', '')), 'Effect_VexpS')
+	assert_ne(int(replacement.get('id', 0)), first_id)
+	assert_true(bool(_row_by_id(fx, first_id).get('detached', false)),
+			'the replaced incarnation is detached, never re-posed')
+	assert_eq(anchors.resolve_owner_transform(key), Vector3(8, 9, 10))
 	presenter.teardown()
 
 
 func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:3'
 	presenter.present_drained(null, [_piece(3, 30, 1, Vector3(2, 3, 4))])
-	assert_eq(fx.owned_spawns.size(), 1)
-	assert_true(anchors.anchors.has(key))
+	assert_eq(_owned_rows(fx, key).size(), 1)
+	assert_true(anchors.has_effect_anchor(key))
 	presenter.present_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
-	assert_eq(fx.owned_spawns.size(), 1)
-	assert_eq(anchors.unregistrations.count(key), 1)
-	assert_false(anchors.anchors.has(key))
+	assert_eq(_owned_rows(fx, key).size(), 1, 'a no-trail type spawns nothing')
+	assert_false(anchors.has_effect_anchor(key), 'the outgoing owner retires its anchor')
+	# With no anchor left, the next fixed-tick owner sync resolves nothing for
+	# the key and the old group detaches.
+	fx.advance_fixed_tick(0.0)
+	var rows := _owned_rows(fx, key)
+	assert_eq(rows.size(), 1)
+	if rows.size() == 1:
+		assert_true(bool((rows[0] as Dictionary).get('detached', false)),
+				'the old owner is detached instead of riding the reused slot')
 	presenter.teardown()
 
 
 func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 	var key := 'piece:13'
 	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
-	assert_eq(fx.owned_spawns.size(), 1)
+	assert_eq(_owned_rows(fx, key).size(), 1)
+	var first_id := int(_live_owned_row(fx, key).get('id', 0))
 	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
-	assert_eq(fx.owned_spawns.size(), 1)
-	assert_eq(anchors.anchor_position(key), Vector3(1, 0, 2))
+	assert_eq(_owned_rows(fx, key).size(), 1, 'settling never respawns the incarnation')
+	assert_eq(anchors.resolve_owner_transform(key), Vector3(1, 0, 2))
+	fx.advance_fixed_tick(0.0)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, key)), Vector3(1, 0, 2),
+			POSITION_EPS, 'the settled piece keeps presenting at its rest pose')
 	presenter.present_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
-	assert_eq(fx.owned_spawns.size(), 2)
-	if fx.owned_spawns.size() == 2:
-		assert_eq(String(fx.owned_spawns[1]['effect']), 'Effect_VexpS')
-	assert_eq(anchors.anchor_position(key), Vector3(9, 3, 5))
+	assert_eq(_owned_rows(fx, key).size(), 2)
+	var replacement := _live_owned_row(fx, key)
+	assert_false(replacement.is_empty())
+	assert_eq(String(replacement.get('name', '')), 'Effect_VexpS')
+	assert_true(bool(_row_by_id(fx, first_id).get('detached', false)),
+			'the settled incarnation is replaced, not revived')
+	assert_eq(anchors.resolve_owner_transform(key), Vector3(9, 3, 5))
 	presenter.teardown()
 
 
 func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -244,8 +315,12 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_false(static_caster.visible,
 			"the intact individual caster follows the visible model into the husk swap")
 	assert_eq(_husk_models(self).size(), 1)
-	assert_true(anchors.anchors.has('wreck:91:2'))
-	assert_true(anchors.anchors.has('piece:5'))
+	assert_true(anchors.has_effect_anchor('wreck:91:2'))
+	assert_true(anchors.has_effect_anchor('piece:5'))
+	assert_false(_live_owned_row(fx, 'wreck:91:2').is_empty(),
+			'the fire family spawned its owned wreck group')
+	assert_false(_live_owned_row(fx, 'piece:5').is_empty(),
+			'the piece spawned its owned trail group')
 	var graft: ObjectModel = _husk_models(self)[0]
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the individual husk replaces the intact static silhouette")
@@ -259,18 +334,28 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_true(static_caster.visible,
 			"reset restores the intact caster with its visible model")
 	assert_true(graft.is_queued_for_deletion())
-	assert_eq(anchors.anchors.size(), 0)
-	assert_true(anchors.unregistrations.has('wreck:91:2'))
-	assert_true(anchors.unregistrations.has('piece:5'))
-	var unregister_count := anchors.unregistrations.size()
+	assert_false(anchors.has_effect_anchor('wreck:91:2'), 'reset retires the wreck anchor')
+	assert_false(anchors.has_effect_anchor('piece:5'), 'reset retires the piece anchor')
+	# Retired anchors resolve nothing: the next fixed-tick owner sync detaches
+	# both owned groups from the prior incarnation.
+	fx.advance_fixed_tick(0.0)
+	assert_true(_live_owned_row(fx, 'wreck:91:2').is_empty(),
+			'the retired wreck group no longer follows an owner')
+	assert_true(_live_owned_row(fx, 'piece:5').is_empty(),
+			'the retired piece group no longer follows an owner')
+	# The old call-count ledger has no public read; the idempotence pin is that
+	# a second reset leaves the restored state exactly as it was.
 	presenter.reset_runtime_state()
-	assert_eq(anchors.unregistrations.size(), unregister_count,
-			'reset is public and idempotent')
+	assert_true(originally_visible.visible, 'reset is public and idempotent')
+	assert_false(originally_hidden.visible)
+	assert_true(static_caster.visible)
+	assert_false(anchors.has_effect_anchor('wreck:91:2'))
+	assert_false(anchors.has_effect_anchor('piece:5'))
 
 
 func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -324,7 +409,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, _index_of([_entry(intact, 41)]),
-			_husk_placer(), _item_db, CaptureAnchors.new(), Callable(), Callable(),
+			_husk_placer(), _item_db, ItemEffectDirector.new(), Callable(), Callable(),
 			null, Callable())
 	presenter.present_drained(DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
 	assert_eq(_husk_models(world).size(), 1,
@@ -344,8 +429,8 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 
 
 func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -377,8 +462,8 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 
 
 func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer(false)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -402,8 +487,8 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 
 
 func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer(false)
 	placer.register_static_instance(77, 'StaticProp', 0,
 			Transform3D(Basis.IDENTITY, Vector3(9, 8, 7)), false)
@@ -424,8 +509,8 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 
 
 func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -465,8 +550,8 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 
 
 func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -517,7 +602,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db,
-			CaptureAnchors.new(), Callable(), Callable(), resolver)
+			ItemEffectDirector.new(), Callable(), Callable(), resolver)
 
 	presenter.present_drained(events, [])
 
@@ -529,8 +614,8 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 
 
 func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var first := ObjectModel.new()
@@ -557,25 +642,42 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 
 	presenter.present_drained(DestructionDrain.make([], effects), [])
 
-	assert_eq(fx.owned_spawns.size(), 6,
+	var owned := 0
+	for row_v in fx.get_debug_group_report():
+		if (row_v as Dictionary).get('owner_key') != null:
+			owned += 1
+	assert_eq(owned, 6,
 			'all attached death/fire/other banks stay owned for zero-net children')
-	assert_eq(fx.spawns.size(), 1, 'family-zero effects remain transient')
-	assert_eq(fx.spawns[0]['position'], Vector3(20, 30, 40))
+	var transients := _transient_rows(fx)
+	assert_eq(transients.size(), 1, 'family-zero effects remain transient')
+	if transients.size() == 1:
+		assert_eq(String((transients[0] as Dictionary).get('name', '')), 'Effect_Transient')
+		assert_almost_eq(_emitter_position(transients[0]), Vector3(20, 30, 40), POSITION_EPS)
 	for wire_handle in [0x1004, 0x1005]:
 		var node: Node3D = resolver.resolve_wire_handle(wire_handle)
 		for family in [1, 2, 3]:
 			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
-			assert_true(anchors.anchors.has(key),
+			assert_true(anchors.has_effect_anchor(key),
 					'each sibling/family pair owns a distinct effect group')
-			assert_eq(anchors.anchor_position(key), node.global_transform)
+			assert_false(_live_owned_row(fx, key).is_empty(),
+					'%s holds its own live owned group' % key)
+			assert_eq(anchors.resolve_owner_transform(key), node.global_transform)
 		var fire_key := 'wreck:wire:%d:2' % wire_handle
 		assert_true(presenter.has_active_wreck_fire(fire_key),
 				'family 2 enters the per-owner wreck crackle set')
 	first.position = Vector3(-3, 4, 5)
 	second.position = Vector3(12, -2, 6)
-	assert_eq(anchors.anchor_position('wreck:wire:4100:1'), first.global_transform)
-	assert_eq(anchors.anchor_position('wreck:wire:4101:3'), second.global_transform,
+	assert_eq(anchors.resolve_owner_transform('wreck:wire:4100:1'), first.global_transform)
+	assert_eq(anchors.resolve_owner_transform('wreck:wire:4101:3'), second.global_transform,
 			'owned effects follow the live WirePresent nodes after they move')
+	# The fixed-tick owner sync carries the moved node poses into the scene.
+	fx.advance_fixed_tick(0.0)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, 'wreck:wire:4100:1')),
+			first.global_position, POSITION_EPS,
+			'the first sibling group rides its moved wire node')
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, 'wreck:wire:4101:3')),
+			second.global_position, POSITION_EPS,
+			'the second sibling group rides its own moved wire node')
 	presenter.teardown()
 
 
@@ -614,8 +716,8 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	assert_almost_eq(state[1].x, 0.0, 0.001, 'the authored pose is yaw-only')
 	assert_almost_eq(state[1].z, 0.0, 0.001, 'the authored pose is yaw-only')
 
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var placer := _husk_placer()
 	var authored_rot := Vector3(17, 40, -12)
 	var authored := Transform3D(
@@ -643,17 +745,22 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	var expected := Transform3D(authored.basis, state[0])
 	assert_true(graft.transform.is_equal_approx(expected),
 			'the graft takes the live present origin while keeping the authored tilt')
-	var anchor_pose: Variant = anchors.anchor_position('wreck:91:2')
+	var anchor_pose: Variant = anchors.resolve_owner_transform('wreck:91:2')
 	assert_true(anchor_pose is Transform3D)
 	if anchor_pose is Transform3D:
 		assert_true((anchor_pose as Transform3D).is_equal_approx(expected),
 				'the owned wreck effect resolves the same live present pose')
+	# The fixed-tick owner sync lands the owned group on that pose too.
+	fx.advance_fixed_tick(0.0)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, 'wreck:91:2')),
+			expected.origin, POSITION_EPS,
+			'the wreck group emits from the live present origin')
 	presenter.teardown()
 
 
 func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
 	var presenter := _make_pass(fx, anchors)
 
 	presenter.present_drained(DestructionDrain.make(
@@ -668,12 +775,17 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 
 	assert_eq(presenter.get_stats().debris_triangles, 1)
 	assert_eq(presenter.get_stats().glass_points, 1)
-	assert_eq(fx.spawns.size(), 2)
-	if fx.spawns.size() == 2:
-		assert_eq(fx.spawns[0]['effect'], 'Effect_TreeFoliageExp')
-		assert_eq(fx.spawns[0]['position'], Vector3.ZERO,
+	var transients := _transient_rows(fx)
+	assert_eq(transients.size(), 2)
+	assert_eq(fx.get_debug_group_report().size(), 2, 'both resolved rows spawn unowned transients')
+	if transients.size() == 2:
+		var foliage := transients[0] as Dictionary
+		var glass := transients[1] as Dictionary
+		assert_eq(String(foliage.get('name', '')), 'Effect_TreeFoliageExp')
+		assert_almost_eq(_emitter_position(foliage), Vector3.ZERO, POSITION_EPS,
 				'world origin is a valid authored triangle centroid')
-		assert_eq(fx.spawns[0]['orientation'], Vector3.RIGHT)
-		assert_eq(fx.spawns[1]['effect'], 'Effect_BldGlassExp')
-		assert_eq(fx.spawns[1]['orientation'], Vector3.UP)
+		assert_almost_eq(_emitter_forward(foliage), Vector3.RIGHT, POSITION_EPS)
+		assert_eq(String(glass.get('name', '')), 'Effect_BldGlassExp')
+		assert_almost_eq(_emitter_position(glass), Vector3(1, 2, 3), POSITION_EPS)
+		assert_almost_eq(_emitter_forward(glass), Vector3.UP, POSITION_EPS)
 	presenter.teardown()

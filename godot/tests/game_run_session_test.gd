@@ -12,11 +12,7 @@ class FakePlatform:
 	var existing_files := {}
 	var cwd_supported := true
 	var retail_error := ""
-	var staged_result := {
-		"ok": true,
-		"exe": "C:/staged/Jointops.exe",
-		"packed_dir": "C:/staged",
-	}
+	var staged_result := RetailStageResult.success("C:/staged/Jointops.exe", "C:/staged")
 	var spawned: Array = []
 	var stage_calls: Array = []
 	var killed: Array = []
@@ -37,8 +33,7 @@ class FakePlatform:
 
 	func file_exists(path: String) -> bool:
 		var clean := path.replace("\\", "/")
-		if bool(staged_result.get("ok", false)) \
-				and clean == String(staged_result.get("exe", "")).replace("\\", "/"):
+		if staged_result.ok and clean == staged_result.exe.replace("\\", "/"):
 			return true
 		return bool(existing_files.get(clean, false))
 
@@ -48,10 +43,10 @@ class FakePlatform:
 	func retail_install_error(_retail_dir: String) -> String:
 		return retail_error
 
-	func stage_retail(resource_dir: String, retail_dir: String) -> Dictionary:
+	func stage_retail(resource_dir: String, retail_dir: String) -> RetailStageResult:
 		stage_calls.append({"resource_dir": resource_dir, "retail_dir": retail_dir})
 		events.append("stage")
-		return staged_result.duplicate(true)
+		return staged_result
 
 	func spawn_process(path: String, args: PackedStringArray, cwd: String) -> int:
 		var pid := next_pid
@@ -237,7 +232,7 @@ func test_retail_readiness_is_read_only_and_explains_missing_install() -> void:
 func test_retail_stage_failure_never_spawns() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	platform.staged_result = {"ok": false, "error": "staging failed"}
+	platform.staged_result = RetailStageResult.failure("staging failed")
 	assert_false(session.run_retail("C:/assets", "C:/retail"))
 	assert_eq(platform.stage_calls.size(), 1)
 	assert_true(platform.spawned.is_empty())
