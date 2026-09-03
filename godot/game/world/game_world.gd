@@ -115,8 +115,7 @@ var _runtime: MissionPresentation = null  # the one mission runtime driver (sim 
 var _panm_clock := PanmClock.new()
 var _frame_pipeline: GameFramePipeline
 var _mission_stats: MissionPlacementStats = null
-var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database); untyped
-             # because game_world_test's ViewmodelWorldHarness installs a RefCounted double
+var _placer: MissionObjectPlacer  # kept so mission audio reuses its item database
 var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon: WeaponDef = null  # the resolved weapon.def row (the viewmodel/HUD slices decode it)
@@ -140,8 +139,7 @@ var _occlusion: OcclusionFramePass
 # and the renderer/audio/environment leg bodies GameFramePipeline orders
 # around the session tick, extracted to world_device_frame.gd on the same
 # plain-RefCounted pattern. One-line delegates below keep every leg name on
-# GameWorld — the pipeline and its FakeWorld test pin the duck-typed contract
-# here.
+# GameWorld for the pipeline's contract (typed with G10's leg table).
 var _device_frame: WorldDeviceFrame
 # The load-plan stage bodies (WorldLoadStages), reached through this handle.
 var _load_stages: WorldLoadStages
@@ -176,8 +174,7 @@ var _net_drive: NetSessionDrive
 # attached/static/controller item emitters, the effect-anchor resolvers, and
 # the retail master particle switch, on the same internal pattern (plain
 # RefCounted — it owns no Nodes). Public delegates below keep the shell-facing
-# names on GameWorld. ALSO the sanctioned test-injection seam: like _runtime,
-# harnesses may swap in a director double (see game_world_test.gd).
+# names on GameWorld; get_item_effect_director() is its read seam.
 var _item_fx: ItemEffectDirector
 var _light_director: EffectLightDirector
 var _local_player_spawn_loadout: Dictionary = {}
@@ -259,9 +256,9 @@ func _init() -> void:
 	_effect_router.setup(self)
 	# The item-effect director, wired like the debug-view set: its two lent
 	# privates are the placer's static item-effect sources and its item
-	# database, null-guarded here. The db seam stays duck-typed on purpose —
-	# the public get_item_db() keeps its ItemDatabase contract while
-	# harness worlds serve value-only db doubles.
+	# database, null-guarded here. The db seam is a Callable: the
+	# director resolves the placer's database lazily (a placer exists only
+	# once a mission is placed).
 	_item_fx = ItemEffectDirector.new()
 	_item_fx.setup(self,
 			func() -> Array:
@@ -632,6 +629,63 @@ func get_resource_root() -> ResourceRoot:
 	return _resource_root
 
 
+## The narrow live view of this world (its sim and resource root, re-resolved
+## per call) the in-world screens and the click picker depend on.
+func world_view() -> WorldView:
+	return LiveWorldView.new(self)
+
+
+## The armory screen's live view (WorldView plus the weapon table and the
+## local player's viewmodel verbs).
+func armory_view() -> ArmoryWorldView:
+	return LiveArmoryWorldView.new(self)
+
+
+class LiveWorldView:
+	extends WorldView
+
+	var _world: GameWorld
+
+	func _init(world: GameWorld) -> void:
+		_world = world
+
+	func sim() -> Simulation:
+		return _world.get_sim() if is_instance_valid(_world) else null
+
+	func resource_root() -> ResourceRoot:
+		return _world.get_resource_root() if is_instance_valid(_world) else null
+
+
+class LiveArmoryWorldView:
+	extends ArmoryWorldView
+
+	var _world: GameWorld
+
+	func _init(world: GameWorld) -> void:
+		_world = world
+
+	func sim() -> Simulation:
+		return _world.get_sim() if is_instance_valid(_world) else null
+
+	func resource_root() -> ResourceRoot:
+		return _world.get_resource_root() if is_instance_valid(_world) else null
+
+	func weapon_database() -> WeaponDatabase:
+		return _world.get_weapon_database() if is_instance_valid(_world) else null
+
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return _world.local_player_viewmodel_def() if is_instance_valid(_world) else null
+
+	func set_local_player_weapon_by_name(weapon_name: String,
+			preserve_slot_state: bool = false) -> bool:
+		return is_instance_valid(_world) \
+				and _world.set_local_player_weapon_by_name(weapon_name, preserve_slot_state)
+
+	func clear_local_player_weapon() -> void:
+		if is_instance_valid(_world):
+			_world.clear_local_player_weapon()
+
+
 func is_loaded() -> bool:
 	return _world_ready
 
@@ -752,7 +806,7 @@ func get_perf_probe_spans() -> Dictionary:
 # one visible order around inmatch::Session::advance(). The leg bodies and the
 # per-frame camera/timing latch live in WorldDeviceFrame
 # (world_device_frame.gd); these one-line delegates keep every leg name on
-# GameWorld for the pipeline's duck-typed contract, the probes, and the tests.
+# GameWorld for the pipeline's contract, the probes, and the tests.
 
 # The shell-owned local-player presenter whose camera/viewmodel placement the
 # local-view device leg runs inside the frame (null in worlds without one —
@@ -766,9 +820,8 @@ func device_frame() -> WorldDeviceFrame:
 	return _device_frame
 
 
-## The load-plan stage bodies (world_load_stages.gd); the harnesses that drive
-## one stage directly reach it here. Built on first use so a harness that
-## overrides _init without chaining still gets one.
+## The load-plan stage bodies (world_load_stages.gd); a test that drives one
+## stage directly reaches it here (built on first use).
 func load_stages() -> WorldLoadStages:
 	if _load_stages == null:
 		_load_stages = WorldLoadStages.new()
@@ -832,11 +885,9 @@ func get_scar_present_stats() -> RefCounted:
 # --- Local-player visuals (viewmodel / avatar / loadout) ----------------------
 # The builder/apply/decode bodies live in WorldPlayerVisuals
 # (world_player_visuals.gd); these one-line delegates keep the
-# presenter/probe/test names on GameWorld, and the subclass override points
-# (local_player_viewmodel_def, local_player_character_id,
-# _set_local_player_first_person_model_available, the armory apply/clear pair)
-# stay overridable here — the component always calls back through _world so
-# harness overrides keep binding.
+# presenter/probe/test names on GameWorld (the component calls back through
+# _world for the viewmodel def, the character id, the FP-model-available push
+# and the armory apply/clear pair).
 
 func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 	return _player_visuals.build_local_player_held_weapon(graphic)
@@ -886,6 +937,21 @@ func _set_local_player_first_person_model_available(available: bool) -> void:
 	var sim := get_sim()
 	if sim != null:
 		sim.set_local_player_first_person_model_available(available)
+
+
+## Whether the last first-person build found a model for the equipped weapon
+## (the sim's flag; a read seam for the viewmodel pins).
+func local_player_first_person_model_available() -> bool:
+	var sim := get_sim()
+	return sim != null and sim.is_local_player_first_person_model_available()
+
+
+## The joiner's pre-freeze model warm (prewarm_loaded_model_challenge_definitions):
+## resolves the present snapshot's wire graphics, the player body and the current
+## viewmodel through the placer's cache and returns the graphics it resolved, in
+## order (empty before a mission is placed).
+func prewarm_challenge_models() -> PackedStringArray:
+	return _player_visuals.prewarm_loaded_model_challenge_definitions()
 
 
 func build_local_player_viewmodel() -> Node3D:
@@ -971,8 +1037,8 @@ func route_mission_effects(effects: Array) -> void:
 	_effect_router.route_mission_effects(effects)
 
 
-# _load_stages._start_runtime's signal connects bind these GameWorld methods (a future
-# harness can override them here); the handler bodies live in
+# _load_stages._start_runtime's signal connects bind these GameWorld methods;
+# the handler bodies live in
 # WorldEffectRouter (world_effect_router.gd).
 # The load-time effect warm pass (see the load-path call site): spawn every
 # catalog effect in front of the load camera, advance the fixed tick so fresh
@@ -991,6 +1057,12 @@ func get_minimap_water_mask() -> ImageTexture:
 
 func get_effect_world() -> EffectWorld:
 	return _effect_world
+
+
+## The per-item effect director (built once with the world; its attach/anchor
+## bookkeeping reads through ItemEffectDirector's public seams).
+func get_item_effect_director() -> ItemEffectDirector:
+	return _item_fx
 
 
 ## The live terrain node, for the F3 Terrain & foliage page's counters/knobs.
@@ -1094,7 +1166,7 @@ func get_render_diagnostics(
 ## bound to owner_key is alive; re-registering the same key overwrites.
 ## One-line delegates into the item-effect director (item_effect_director.gd):
 ## the names stay on GameWorld — LocalPlayerPresenter and the present passes
-## register through the world, and harness worlds pin these methods.
+## register through the world.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
 	_item_fx.register_effect_anchor(owner_key, resolver)
 

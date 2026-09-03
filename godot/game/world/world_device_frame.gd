@@ -17,8 +17,8 @@ extends RefCounted
 
 # The GameWorld whose device nodes these legs drive — a direct reference,
 # stored once in setup(); reads go through its members as direct calls
-# (harnesses subclass GameWorld, ADR 0034 — overridable names are always
-# invoked as _world.<name>() so subclass overrides keep binding).
+# (ADR 0043 rule 11: the world is its one implementation, no test
+# subclasses it).
 var _world: GameWorld
 
 # Godot reserves this many vec4 values of the global shader buffer per
@@ -30,8 +30,7 @@ var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the
 # engine's exit teardown when a test leaks a GameWorld instance (Godot 4.6
 # quirk, bisected 2026-08-09); the Variant carries the camera transform.
-# Several GUT files still construct GameWorld.new() without autofree, so the
-# leak is not pinned to one test.
+# (The fixtures autofree every world; the guard stays for the quirk.)
 var _frame_camera_xform := Transform3D()
 var _frame_delta := 0.0
 var _frame_probe_enabled := false

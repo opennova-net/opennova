@@ -215,6 +215,10 @@ void Simulation::set_local_player_first_person_model_available(bool p_available)
 		kernel_->local.weapon.first_person_model_adm = player->equipped_adm_index;
 }
 
+bool Simulation::is_local_player_first_person_model_available() const {
+	return kernel_ && kernel_->local.weapon.first_person_model_adm != 0xFF;
+}
+
 void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 		bool p_reload_pressed) {
 	// This is the ONE funnel both roles feed (apply_frame_input, once per tick),

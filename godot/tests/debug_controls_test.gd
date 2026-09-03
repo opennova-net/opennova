@@ -1,10 +1,12 @@
 extends GutTest
 
 # DebugControls is the typed debug-control table (ADR 0042 d5) shared by the
-# MCP game_debug plane. These tests drive the real table over a stub shell with
-# REAL Simulation instances: rows resolve their owners live per call, typed
-# argument checks refuse bad input before any engine call, and nothing
-# replays across an owner swap (a fresh mission gets fresh debug state).
+# MCP game_debug plane. These tests drive the real table over a shell fake
+# answering REAL MissionPresentation runtimes (each over an in-memory default
+# mission, so its Simulation is the engine row owner): rows resolve their
+# owners live per call, typed argument checks refuse bad input before any
+# engine call, and nothing replays across an owner swap (a fresh mission gets
+# fresh debug state).
 
 # The registration order IS the op=list wire order.
 const EXPECTED_IDS: Array[StringName] = [
@@ -66,16 +68,7 @@ const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 		"writable", "authoritative", "reason"]
 
 
-class RuntimeStub:
-	extends MissionPresentation
-
-	var stub_sim: Simulation = null
-
-	func get_sim() -> Simulation:
-		return stub_sim
-
-
-# The in-world shell the table reads: a GameShell answering the stub runtime
+# The in-world shell the table reads: a GameShell answering one real runtime
 # (rule 11's sanctioned fake: public verbs of a GDScript shell class).
 class RuntimeShell:
 	extends GameShell
@@ -99,19 +92,22 @@ class AuthorityAdapter:
 
 
 var _sim: Simulation
-var _runtime: RuntimeStub
+var _runtime: MissionPresentation
+var _shell: RuntimeShell
 var _adapter: AuthorityAdapter
 var _controls: DebugControls
 
 
 func before_each() -> void:
-	_sim = autofree(Simulation.new())
-	_runtime = autofree(RuntimeStub.new())
-	_runtime.stub_sim = _sim
-	var shell: RuntimeShell = autofree(RuntimeShell.new())
-	shell.runtime = _runtime
+	# A real MissionPresentation over an in-memory default mission: its
+	# Simulation is the engine row owner the table resolves per call.
+	_runtime = WorldFixture.boot_mission_data(self, WorldFixture.default_mission(0))
+	_sim = _runtime.get_sim()
+	assert_not_null(_sim, "the runtime owns a live Simulation")
+	_shell = autofree(RuntimeShell.new())
+	_shell.runtime = _runtime
 	_adapter = add_child_autofree(AuthorityAdapter.new())
-	_adapter.configure(shell)
+	_adapter.configure(_shell)
 	_controls = _adapter.get_debug_controls()
 
 
@@ -248,9 +244,17 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 	assert_eq(picked["result"], false,
 			"in-domain arguments reach the engine's own verdict")
 
+	# Over the real runtime the local player exists, so the seat refusal is the
+	# mount command's own verdict (no vehicle carries SSN 11 in the default
+	# mission: ERR_INVALID_PARAMETER), not the typed-argument gate (11 is in
+	# the argument's domain) and not the "no local player" ERR_UNAVAILABLE of a
+	# mission-less Simulation. The engine's direct answer to the same call is
+	# the action result.
 	var seat := _controls.invoke_control(&"crew_local_player", [11], true)
-	assert_eq(int(seat["error"]), int(ERR_UNAVAILABLE),
+	assert_eq(int(seat["error"]), int(_sim.debug_crew_local_player(11)),
 			"the engine's seat refusal propagates as the action result")
+	assert_eq(int(seat["error"]), int(ERR_INVALID_PARAMETER),
+			"the refusal is the mount command's, with a live local player to seat")
 
 
 func test_action_args_marshal_by_name_and_publish_their_schema() -> void:
@@ -337,8 +341,12 @@ func test_reads_are_live_and_nothing_replays_across_an_owner_swap() -> void:
 	assert_true(_sim.is_joiner_network_diagnostics_enabled())
 	assert_eq(_controls.get_control_state(&"net_joiner_diagnostics").value, true)
 
-	var replacement: Simulation = autofree(Simulation.new())
-	_runtime.stub_sim = replacement
+	# A fresh mission: a second real runtime (its own Simulation) behind the
+	# same shell.
+	var replacement_runtime: MissionPresentation = WorldFixture.boot_mission_data(
+			self, WorldFixture.default_mission(0))
+	var replacement: Simulation = replacement_runtime.get_sim()
+	_shell.runtime = replacement_runtime
 	assert_eq(_controls.get_control_state(&"net_joiner_diagnostics").value, false,
 			"reads re-resolve the replacement owner on the next call")
 	assert_false(replacement.is_joiner_network_diagnostics_enabled(),
@@ -351,7 +359,7 @@ func test_reads_are_live_and_nothing_replays_across_an_owner_swap() -> void:
 	assert_eq(int(outcome["error"]), OK)
 	assert_true(replacement.is_joiner_network_diagnostics_enabled())
 
-	_runtime.stub_sim = null
+	_shell.runtime = null
 	var gone := _controls.get_control_state(&"net_joiner_diagnostics")
 	assert_false(gone.available)
 	assert_string_contains(gone.reason, "No simulation is active")

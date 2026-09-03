@@ -46,7 +46,7 @@ const SPAWN_LIST := "SPAWNPOINTS_LIST"
 signal opened
 signal closed
 
-var _world: GameWorld = null
+var _view: WorldView = null
 var _ui_parent: Node = null
 # The layout source, converted ONCE at setup: a Control parent (test overlays)
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
@@ -77,8 +77,8 @@ class SpawnRow extends RefCounted:
 var _spawn_rows: Array[SpawnRow] = []
 
 
-func setup(world: GameWorld, ui_parent: Node) -> void:
-	_world = world
+func setup(view: WorldView, ui_parent: Node) -> void:
+	_view = view
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
@@ -90,12 +90,12 @@ func is_open() -> bool:
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam):
 ## `on_opened`/`on_closed` report the screen's cursor ownership.
-static func install(parent: Node, world: GameWorld, ui_parent: Node,
+static func install(parent: Node, view: WorldView, ui_parent: Node,
 		on_opened: Callable, on_closed: Callable) -> DeployScreenPresenter:
 	var presenter := DeployScreenPresenter.new()
 	presenter.name = "DeployScreenPresenter"
 	parent.add_child(presenter)
-	presenter.setup(world, ui_parent)
+	presenter.setup(view, ui_parent)
 	presenter.opened.connect(func() -> void: on_opened.call())
 	presenter.closed.connect(func() -> void: on_closed.call())
 	return presenter
@@ -131,9 +131,9 @@ func select_spawn_row(row: int) -> void:
 ## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
 ## (engine/runtime/replication/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:
-	if is_open() or _world == null or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null:
 		return false
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null or not (bool(sim.is_join_deploy_pick_pending())
 			or bool(sim.is_join_deploy_overlay_active())):
 		return false
@@ -171,7 +171,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode != KEY_X and key.keycode != KEY_SPACE:
 		return
-	var sim: Simulation = _world.get_sim() if _world != null else null
+	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null or bool(sim.is_join_deploy_pick_pending()):
 		return
 	close()
@@ -198,7 +198,7 @@ func _process(delta: float) -> void:
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
 	_driver.tick(Time.get_ticks_msec())
-	var sim: Simulation = _world.get_sim() if _world != null else null
+	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		close()
 		return
@@ -246,7 +246,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		return
 	if index < 0 or index >= _spawn_rows.size():
 		return
-	var sim: Simulation = _world.get_sim() if _world != null else null
+	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		return
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
@@ -387,7 +387,7 @@ func _apply_statics(sim: Simulation) -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)

@@ -205,11 +205,21 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
     C++ from engine snapshots (the ImGui windows are the F3 surface).
 
 11. **Tests drive real fixtures.** A test never subclasses a production Node
-    to override behavior; it boots a real fixture through public load seams
-    (`godot/tests/support/world_fixture.gd`) or fakes a GDScript interface
-    (`ShellScreen`). Overriding a PUBLIC verb of a GDScript shell class stays
-    acceptable; overriding a private never is. The sanctioned `_world: Node`
-    double seam is deleted. (Amends ADR 0018 and ADR 0034.)
+    or world-layer class to override behavior; it boots a real fixture through
+    public load seams (`godot/tests/support/world_fixture.gd`: the packaged
+    world over the minimal pack, an in-memory MissionPresentation, the packed
+    shell; `hud_fixture.gd`: a real HudOverlay) and reads public seams, or it
+    fakes a GDScript INTERFACE class by overriding public verbs (`GameShell`,
+    the null shell the tooling depends on; `WorldView` / `ArmoryWorldView`,
+    the sim-plus-root surface the in-world screens and the click picker take;
+    `RunSessionPlatform`; the `MenuCompanion` hooks). Overriding a private
+    never is; a stub that captured a call becomes an assertion over the real
+    receiver's state, through read seams added in ADR 0018's form where none
+    existed (G1). `scripts/lint/ratchet_counts.py gd_test_production_subclasses`
+    holds the residue at the interface fakes. One seam survives until G10: the
+    frame pipeline's duck world (`game_frame_pipeline_test`'s 22-leg trace)
+    is deleted with the leg table, where `frame_leg_names()` makes the order
+    pin real. (Amends ADR 0018 and ADR 0034.)
 
 12. **Tooling.** The MCP transport stays GDScript (ADR 0034 d6) but leaves the
     release export and loads by path under `--mcp-port`; the debug-control

@@ -269,11 +269,11 @@ func _spawn_pending() -> void:
 func _spawn_request(request: Request, retail_dir: String) -> bool:
 	if request.mode == Mode.RETAIL:
 		_status("Staging game data for retail...")
-		var staged: Dictionary = _platform.stage_retail(request.resource_dir, retail_dir)
-		if not bool(staged.get("ok", false)):
-			return _fail(String(staged.get("error", "Retail staging failed.")))
-		request.exe_path = String(staged.get("exe", ""))
-		request.staged_dir = String(staged.get("packed_dir", ""))
+		var staged: RetailStageResult = _platform.stage_retail(request.resource_dir, retail_dir)
+		if not staged.ok:
+			return _fail(staged.error if not staged.error.is_empty() else "Retail staging failed.")
+		request.exe_path = staged.exe
+		request.staged_dir = staged.packed_dir
 
 	var plan := _current_plan(request)
 	if plan == null:

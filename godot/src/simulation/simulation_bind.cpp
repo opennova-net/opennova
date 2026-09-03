@@ -280,6 +280,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &Simulation::clear_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("set_local_player_first_person_model_available", "available"),
 			&Simulation::set_local_player_first_person_model_available);
+	ClassDB::bind_method(D_METHOD("is_local_player_first_person_model_available"),
+			&Simulation::is_local_player_first_person_model_available);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &Simulation::set_local_player_weapon_input);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &Simulation::request_local_player_scope_toggle);
 	ClassDB::bind_method(D_METHOD("request_local_player_binoculars_toggle"),

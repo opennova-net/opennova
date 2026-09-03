@@ -4,14 +4,15 @@ const CaptureSession := preload(
 		"res://probes/render/shadow_attribution_capture_session.gd")
 const CaptureVariant := preload(
 		"res://probes/render/render_capture_variant.gd")
+const ITEMS_DEF_FIXTURE := "res://../fixtures/def/items.def"
+
+var _root_dir := ""
 
 
-class ItemDatabaseWorld:
-	extends GameWorld
-	var item_db: ItemDatabase
-
-	func get_item_db() -> ItemDatabase:
-		return item_db
+func after_each() -> void:
+	if not _root_dir.is_empty():
+		TestFs.remove_dir_recursive(_root_dir)
+		_root_dir = ""
 
 
 func _add_caster(
@@ -215,14 +216,15 @@ func test_dynamic_caster_inventory_is_typed_complete_and_deterministic() -> void
 
 
 func test_inventory_resolves_graphic_and_attrib2_through_the_public_item_db() -> void:
-	var world := ItemDatabaseWorld.new()
-	world.item_db = ItemDatabase.new()
-	assert_eq(world.item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	add_child_autofree(world)
+	# A REAL loaded world whose staged root carries the committed def fixture
+	# as its items.def, so world.get_item_db() is the placer's own database.
+	_root_dir = WorldFixture.stage_minimal_root("shadow_item_db", false, {
+		"items.def": FileAccess.get_file_as_string(
+				ProjectSettings.globalize_path(ITEMS_DEF_FIXTURE)),
+	})
+	var world := WorldFixture.boot_minimal(self, _root_dir)
+	assert_not_null(world.get_item_db(),
+			"the loaded mission mounted the placer's item database")
 	var viewport := SubViewport.new()
 	world.add_child(viewport)
 	var model := ObjectModel.new()

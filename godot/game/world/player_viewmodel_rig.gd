@@ -74,12 +74,12 @@ const CTRL_OWNER_FP_TEAM := "first_person:team"
 const CTRL_OWNER_FP_ARMS_CAMO := "first_person:arms_camo"
 
 # The world serves the viewmodel builder + def; the presenter serves the weapon
-# effects (play-serial resync on rebuild). Untyped for the same reason as the
-# presenter's _world: GUT harness worlds serve value-only doubles.
+# effects (play-serial resync on rebuild).
 var _world: GameWorld
 var _presenter: LocalPlayerPresenter
 var _camera: Camera3D = null
 var _viewmodel: Node3D = null
+var _generation := 0  # refresh_viewmodel count
 var _vm_parts: Array[ObjectModel] = []  # the builder's typed viewmodel models
 # A world-only render capture hides the gun for its duration (the shell's
 # capture session latches this; the per-frame submission gate ANDs it in).
@@ -185,6 +185,13 @@ func refresh_viewmodel() -> void:
 	if _viewmodel != null and is_instance_valid(_viewmodel):
 		_viewmodel.queue_free()
 	_viewmodel = null
+	_generation += 1
+
+
+## How many times the viewmodel was dropped for a rebuild (a read seam: the
+## armory pins count the equip/unequip refreshes).
+func viewmodel_generation() -> int:
+	return _generation
 
 
 ## The viewmodel leg of the presenter's clear-models path.
@@ -346,8 +353,7 @@ func restamp_at_camera() -> void:
 
 func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		weapon_view: PlayerWeaponView) -> void:
-	# setup()'s world contract already includes get_sim; LocalPlayerPresenter and its
-	# value-only harness doubles both use that same explicit seam.
+	# setup()'s world contract already includes get_sim.
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	for visual in _vm_parts:
 		if not is_instance_valid(visual):
@@ -430,7 +436,7 @@ func _viewmodel_view_offset(view_units: Vector3) -> Vector3:
 	return Simulation.viewmodel_camera_local_from_view(view_units)
 
 
-# The raw-def-units fallback for a null-sim harness: the same axis map over the
+# The raw-def-units fallback without a sim: the same axis map over the
 # /256 scale the sim's blend otherwise applies [orig: flt_7D1D70=256 @0x544770].
 func _viewmodel_offset(units: Vector3) -> Vector3:
 	return _viewmodel_view_offset(units / Simulation.weapon_def_pos_scale())

@@ -8,6 +8,19 @@ in maturity_baseline.json:
                         that access an _underscore member of ANOTHER object
                         (self._ excluded) -- ADR 0018: each is a missing public
                         seam, on the test side and the probe side alike.
+  gd_test_production_subclasses
+                        test classes (a file-level `extends` or an inline
+                        `class X extends Y` / `class X:` + `extends Y`) under
+                        godot/tests/**/*.gd whose base is a PRODUCTION class:
+                        a `class_name` declared under godot/game or
+                        godot/modtools, or a class registered in
+                        godot/src/register_types.cpp. ADR 0043 rule 11: a test
+                        boots a real fixture or fakes a GDScript INTERFACE
+                        class (GameShell, WorldView, RunSessionPlatform,
+                        MenuCompanion hooks) by overriding public verbs; it
+                        never subclasses a production Node to override
+                        behavior and never overrides a private. Non-increasing;
+                        the baseline is the sanctioned interface-fake residue.
   engine_uncited_src_files  engine/<group>/<lib> source files (post-flatten:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
@@ -132,6 +145,51 @@ def count_gd_foreign_private_accesses() -> int:
     C++ `friend` without the keyword. A class owns its state; an object that
     needs another's privates is a method of that other class (ADR 0043)."""
     return _count_private_pokes(("game", "modtools"))
+
+
+CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
+GDREGISTER = re.compile(r"GDREGISTER_(?:ABSTRACT_|VIRTUAL_|INTERNAL_)?CLASS\((\w+)\)")
+# `extends Y` at file level, `class X extends Y:` inline, or the two-line
+# `class X:` / `\textends Y` form.
+TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?\s*$", re.M)
+
+
+def _production_class_names() -> set[str]:
+    names: set[str] = set()
+    for sub in ("game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            names.update(CLASS_NAME_DECL.findall(text))
+    register = REPO / "godot" / "src" / "register_types.cpp"
+    try:
+        names.update(GDREGISTER.findall(register.read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        pass
+    return names
+
+
+def count_gd_test_production_subclasses() -> int:
+    """Test classes extending a production class (see the module doc)."""
+    production = _production_class_names()
+    count = 0
+    for path in (REPO / "godot" / "tests").rglob("*.gd"):
+        parts = path.relative_to(REPO).parts
+        if "addons" in parts or _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for base in TEST_EXTENDS.findall(text):
+            if base in production:
+                count += 1
+    return count
 
 
 def count_engine_uncited_src_files(allowlist: set[str]) -> int:
@@ -482,6 +540,7 @@ def main() -> int:
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "gd_foreign_private_accesses": count_gd_foreign_private_accesses(),
+        "gd_test_production_subclasses": count_gd_test_production_subclasses(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
         "godot_orig_cites": count_godot_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),

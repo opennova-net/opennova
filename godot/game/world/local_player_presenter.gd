@@ -184,6 +184,11 @@ func refresh_viewmodel() -> void:
 	_viewmodel_rig.refresh_viewmodel()
 
 
+## How many times the FP viewmodel was dropped for a rebuild (read seam).
+func viewmodel_generation() -> int:
+	return _viewmodel_rig.viewmodel_generation()
+
+
 func set_input_source(source: Callable) -> void:
 	_input_router.set_input_source(source)
 

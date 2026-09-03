@@ -44,7 +44,7 @@ signal closed
 # teardown.
 signal exit_to_menu_requested
 
-var _world: GameWorld = null
+var _view: WorldView = null
 var _ui_parent: Node = null
 var _layout_control: Control = null
 var _hud_presenter: GameHudPresenter = null
@@ -60,8 +60,8 @@ var _overlay_shown := false
 var _team_mode := false
 
 
-func setup(world: GameWorld, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
-	_world = world
+func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
+	_view = view
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
 	_hud_presenter = hud_presenter
@@ -80,13 +80,13 @@ func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
 
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam).
-static func install(parent: Node, world: GameWorld, ui_parent: Node,
+static func install(parent: Node, view: WorldView, ui_parent: Node,
 		hud_presenter: GameHudPresenter, deploy_presenter: DeployScreenPresenter,
 		armory_presenter, on_opened: Callable, on_closed: Callable) -> EndRoundPresenter:
 	var presenter := EndRoundPresenter.new()
 	presenter.name = "EndRoundPresenter"
 	parent.add_child(presenter)
-	presenter.setup(world, ui_parent, hud_presenter)
+	presenter.setup(view, ui_parent, hud_presenter)
 	presenter.connect_shell(deploy_presenter, armory_presenter, on_opened, on_closed)
 	return presenter
 
@@ -132,9 +132,9 @@ func reset() -> void:
 ## the shell can tear the deploy/armory screens down); the 6 s + board gate
 ## opens STAT once.
 func tick() -> void:
-	if _world == null:
+	if _view == null:
 		return
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null:
 		return
 	var state: EndRoundState = sim.get_end_round_state()
@@ -186,7 +186,7 @@ func _apply_overlay(sim: Simulation) -> void:
 func _hide_overlay() -> void:
 	var hud := _hud()
 	if hud != null and _overlay_shown:
-		var sim: Simulation = _world.get_sim() if _world != null else null
+		var sim: Simulation = _view.sim() if _view != null else null
 		var overlay: EndRoundOverlay = (
 				sim.get_end_round_overlay(null) if sim != null else EndRoundOverlay.new())
 		hud.set_end_round_overlay(false, overlay.top, overlay.bottom,
@@ -292,7 +292,7 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		for i in TAB_WIDGETS.size():
 			if widget_name.nocasecmp_to(TAB_WIDGETS[i]) == 0:
 				tab = i
-		var sim: Simulation = _world.get_sim() if _world != null else null
+		var sim: Simulation = _view.sim() if _view != null else null
 		var list_id := _driver.widget_id(RESULT_LIST) if _driver != null else -1
 		if sim != null and list_id >= 0:
 			_fill_table(sim, list_id, tab)
@@ -301,7 +301,7 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)

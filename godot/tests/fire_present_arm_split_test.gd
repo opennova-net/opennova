@@ -20,44 +20,57 @@ extends GutTest
 # through drain_fire_sounds — this pass presents effects only.
 #
 # Typed surfaces (ADR 0034): the event rows are pure data through the public
-# present_fires data leg; the fx/audio sinks are real EffectWorld/MissionAudio
-# subclasses capturing the typed calls.
+# present_fires data leg; the fx/audio sinks are a REAL EffectWorld over an
+# in-memory catalog authoring both effect names (its group report is the read
+# seam) and a REAL bank-less MissionAudio (its recent-fires ring stays empty).
 
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 
 const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const MUZZLE := Vector3(10.6, 1.55, -4.7)
+const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
+# The two effect names the event rows address: the ammo def's own muzzle
+# effect and the addressed def's FIRE action-row effect.
+const CATALOG_EFFECTS: PackedStringArray = ["AMMO_EFFECT", "EFFECT_M16MF"]
 
-class CaptureFx:
-	extends EffectWorld
-	var spawns: Array = []
-
-	func spawn_effect(name: String, position: Vector3,
-			orientation: Vector3 = Vector3.ZERO) -> int:
-		spawns.append({"name": name, "pos": position, "forward": orientation})
-		return spawns.size()
-
-
-class CaptureAudio:
-	extends MissionAudio
-	var played: Array = []
-
-	func fire_soundset(set_name: String, world_pos: Vector3,
-			source_bms_id: int = 0) -> bool:
-		played.append({"name": set_name, "pos": world_pos})
-		return true
-
-
-var _fx: CaptureFx
-var _audio: CaptureAudio
+var _fx: EffectWorld
+var _audio: MissionAudio
 var _fire: FirePresentPass
 
 
+# One synthetic in-memory particle catalog authoring every effect the rows
+# name (the effect_world_test recipe): one burst definition shared by one
+# effect per name, so the real EffectWorld interns and spawns them without a
+# resource root.
+func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
+	var def := ParticleDef.new()
+	def.id = "flash dots"
+	def.emit_dur = 0.1
+	def.emit_rate = 50.0
+	def.emit_burst = 4
+	def.age = 0.2
+	def.alpha = 1.0
+	def.scale_value = 1.0
+	var file := ParticleFile.new()
+	var particles: Array = file.particles
+	particles.append(def)
+	file.particles = particles
+	var effects: Array = file.effects
+	for effect_name in effect_names:
+		var effect := ParticleEffect.new()
+		effect.id = effect_name
+		effect.pdefs = PackedStringArray(["flash dots"])
+		effects.append(effect)
+	file.effects = effects
+	return file
+
+
 func before_each() -> void:
-	_fx = CaptureFx.new()
+	_fx = EffectWorld.new()
 	add_child_autofree(_fx)
-	_audio = CaptureAudio.new(null, null)
+	_fx.load_particle_file(_catalog_file(CATALOG_EFFECTS))
+	_audio = MissionAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	_fire = FirePresentPass.new()
@@ -82,22 +95,36 @@ func _event(adm_arm: bool) -> FirePresentationEvent:
 	return event
 
 
+# The emitter position of one group report row (the spawn point of a transient).
+func _emitter_position(row: Dictionary) -> Vector3:
+	var emitters: Array = row.get("emitters", [])
+	if emitters.is_empty():
+		return Vector3.INF
+	return (emitters[0] as Dictionary).get("position", Vector3.INF)
+
+
 func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 	_fire.present_fires([_event(false)])
-	assert_eq(_fx.spawns.size(), 1, "the ammo arm spawns exactly one effect")
-	assert_eq(String(_fx.spawns[0]["name"]), "AMMO_EFFECT",
-			"the ammo arm uses the AMMO def's effect")
-	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(WIRE_EYE),
-			"the ammo arm spawns at the wire position, unmoved")
+	var groups := _fx.get_debug_group_report()
+	assert_eq(groups.size(), 1, "the ammo arm spawns exactly one effect")
+	if groups.size() == 1:
+		var group := groups[0] as Dictionary
+		assert_eq(String(group.get("name", "")), "AMMO_EFFECT",
+				"the ammo arm uses the AMMO def's effect")
+		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
+				"the ammo arm spawns at the wire position, unmoved")
 
 
 func test_adm_arm_uses_the_fire_row_at_the_weapon_anchor() -> void:
 	_fire.present_fires([_event(true)])
-	assert_eq(_fx.spawns.size(), 1, "the adm arm still spawns exactly one effect")
-	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
-			"the adm arm uses the FIRE action row's effect, not the ammo def's")
-	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(MUZZLE),
-			"the adm arm spawns at the weapon anchor, NOT the wire eye position")
+	var groups := _fx.get_debug_group_report()
+	assert_eq(groups.size(), 1, "the adm arm still spawns exactly one effect")
+	if groups.size() == 1:
+		var group := groups[0] as Dictionary
+		assert_eq(String(group.get("name", "")), "EFFECT_M16MF",
+				"the adm arm uses the FIRE action row's effect, not the ammo def's")
+		assert_true(_emitter_position(group).is_equal_approx(MUZZLE),
+				"the adm arm spawns at the weapon anchor, NOT the wire eye position")
 
 
 func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
@@ -113,14 +140,22 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 			func(): return _fx,
 			func(): return Vector3.ZERO)
 	bare.present_fires([_event(true)])
-	assert_eq(_fx.spawns.size(), 1)
-	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
-			"the row choice does not depend on the anchor provider")
+	var groups := _fx.get_debug_group_report()
+	assert_eq(groups.size(), 1)
+	if groups.size() == 1:
+		var group := groups[0] as Dictionary
+		assert_eq(String(group.get("name", "")), "EFFECT_M16MF",
+				"the row choice does not depend on the anchor provider")
+		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
+				"with no provider at all the wire value is the only origin there is")
 
 
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
 	var ev := _event(true)
 	ev.action_effect = ""
 	_fire.present_fires([ev])
-	assert_eq(_fx.spawns.size(), 0, "an unauthored fire row spawns no effect")
-	assert_eq(_audio.played.size(), 0, "and this pass plays no sound of its own")
+	assert_true(_fx.get_debug_group_report().is_empty(),
+			"an unauthored fire row spawns no effect")
+	assert_eq(_fx.live_group_count(), 0)
+	assert_true(_audio.recent_fired_soundsets().is_empty(),
+			"and this pass plays no sound of its own")
