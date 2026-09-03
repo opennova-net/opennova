@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include "devtools/debug_control_table.h"
 #include "devtools/imgui_pass_node.h"
 #include "devtools/frame_stats.h"
 
@@ -59,14 +60,23 @@ public:
 	void set_frame_stats(const Ref<FrameStats> &p_stats);
 	Ref<FrameStats> get_frame_stats() const { return frame_stats_; }
 
-	// The Simulation the engine-fact windows read and mutate through
-	// (ADR 0042 d6): a raw pointer the shell sets on world load and nulls on
-	// world unload (and _exit_tree nulls) — the stats-board pattern. The
-	// per-frame leg pushes the entity-directory record (built by the ENGINE
-	// join, world::inspect::entity_directory, at the window's 0.5 s cadence
-	// and only while the window shows) and drains the windows' typed
-	// DebugRequests into the same debug delegates the MCP control plane uses.
+	// The Simulation the engine-fact windows read through (ADR 0042 d6): a
+	// raw pointer the shell sets on world load and nulls on world unload (and
+	// _exit_tree nulls) — the stats-board pattern. The per-frame leg pushes
+	// the entity-directory record (built by the ENGINE join,
+	// world::inspect::entity_directory, at the window's 0.5 s cadence and
+	// only while the window shows).
 	void set_simulation(const Ref<Simulation> &p_simulation);
+
+	// The debug-control table the windows' control requests drain into (ADR
+	// 0043 d12): the SAME instance MCP's game_debug drives, built by the
+	// shell's debug adapter and lent here for the shell's lifetime. Every
+	// window mutation — the spectator toggle, the entity edits, the weather
+	// strip — lands in DebugControlTable::invoke with F3's local authority,
+	// so the table's argument schema and its session-role gate decide once
+	// for both surfaces; requests queued with no table drain and drop.
+	void set_debug_control_table(const Ref<DebugControlTable> &p_table);
+	Ref<DebugControlTable> get_debug_control_table() const { return control_table_; }
 
 	// The shell's world pick lands here as a typed request into the Entities
 	// window carrying only the engine handle: the window opens, focuses, and
@@ -124,16 +134,16 @@ protected:
 
 private:
 	Ref<FrameStats> frame_stats_;
+	Ref<DebugControlTable> control_table_;
 #if OPENNOVA_DEVTOOLS
 	void draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
 	void sync_game_spectator_state();
-	void apply_debug_requests();
+	void apply_control_requests();
 	bool push_entity_directory();
 	void push_entity_detail(bool p_directory_pushed);
 	void push_weapon_records();
 	void apply_weapon_requests();
-	void apply_environment_requests();
 	void push_environment_snapshot();
 	void push_ai_debug();
 	void apply_rays_requests();

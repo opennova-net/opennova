@@ -236,6 +236,13 @@ public:
 	bool command_lightning_flash();
 	bool command_lightning_far_flash();
 	bool command_wind_scale(int p_value);
+	bool command_sky_height(int p_height_raw);
+	bool command_sun_fade(int p_percent, int p_seconds);
+	bool command_color_fade(int p_seconds);
+	// One weather color block (world::WeatherColorTarget index, packed
+	// 0xRRGGBB) and the lightning color.
+	bool command_weather_color(int p_target, int p_rgb);
+	bool command_lightning_color(int p_rgb);
 
 private:
 	// The shared post-kernel-boot binding legs: session-header capture, HUD

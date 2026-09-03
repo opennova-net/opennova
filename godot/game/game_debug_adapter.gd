@@ -9,22 +9,76 @@ extends GameMcpAdapter
 ## document state.
 
 const MCP_ENTITY_LIMIT_MAX := 128
+## The runtime MCP transport (ADR 0043 d12): loaded by path under --mcp-port
+## because the Runtime export excludes godot/game/mcp/ (the endpoint is a
+## debug / Mod Tools capability). The class name never appears in this
+## script, so it parses in every flavour.
+const RUNTIME_MCP_SERVICE_PATH := "res://game/mcp/game_mcp_service.gd"
 
-var _service: GameMcpService = null
+
+## The debug-control table's shell seam (DebugShellHost, ADR 0043 d12): every
+## owner resolves live through the adopted GameShell on each call, and the two
+## shell verbs the table cannot own come back to this adapter.
+class ShellHost:
+	extends DebugShellHost
+
+	var _adapter: GameDebugAdapter = null
+
+	func _init(adapter: GameDebugAdapter) -> void:
+		_adapter = adapter
+
+	func _live_shell() -> GameShell:
+		return _adapter.get_shell() if is_instance_valid(_adapter) else null
+
+	func _world() -> GameWorld:
+		var shell := _live_shell()
+		return shell.get_world() if shell != null else null
+
+	func _runtime() -> MissionRoot:
+		var shell := _live_shell()
+		var value := shell.get_runtime() if shell != null else null
+		return value if value != null and is_instance_valid(value) else null
+
+	func _player_presenter() -> LocalPlayerPresenter:
+		var shell := _live_shell()
+		var value := shell.get_player_presenter() if shell != null else null
+		return value if value != null and is_instance_valid(value) else null
+
+	func _viewport() -> Viewport:
+		if not is_instance_valid(_adapter) or not _adapter.is_inside_tree():
+			return null
+		return _adapter.get_viewport()
+
+	## F3's local Stop button and the runtime_return_to_menu row share the
+	## shell's one gated return leg without classifying leaving a multiplayer
+	## session as an authoritative world mutation.
+	func _return_to_menu() -> Error:
+		if not is_instance_valid(_adapter):
+			return ERR_UNAVAILABLE
+		return _adapter.mcp_game_control("return_to_menu")
+
+	func _has_debug_authority() -> bool:
+		return is_instance_valid(_adapter) and _adapter.has_debug_authority()
+
+
+# The runtime MCP endpoint (GameMcpService), loaded by path; null unflagged.
+var _service: Node = null
 # The game shell (GameShell: suppliers, state reads, action legs, capture
 # presentation), every supplier resolved live per call.
 var _shell: GameShell = null
-# The typed debug-control table (ADR 0042 d5), built once over the adopted
-# shell; every row re-resolves its live owner per call.
-var _controls: DebugControls = null
+# The typed debug-control table (ADR 0043 d12), built once over the adopted
+# shell; every row re-resolves its live owner per call. F3 drives the same
+# instance (MainGame lends it to the DevTools node).
+var _controls: DebugControlTable = null
 
 
 func configure(shell: GameShell) -> void:
 	_shell = shell
-	_controls = DebugControls.new(shell, self)
+	_controls = DebugControlTable.new()
+	_controls.setup(ShellHost.new(self))
 
 
-## Drop the shell reference and the row closures before its script teardown.
+## Drop the shell reference and the table's rows before its script teardown.
 func release_shell() -> void:
 	if _controls != null:
 		_controls.clear()
@@ -33,21 +87,33 @@ func release_shell() -> void:
 
 
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
-## launch runs none.
+## launch runs none, and a build without the transport (the Runtime export)
+## refuses the flag with a log line.
 func start_runtime_endpoint() -> void:
 	var port := LaunchFlags.mcp_port()
 	if port <= 0:
 		return
-	_service = GameMcpService.new()
+	if not ResourceLoader.exists(RUNTIME_MCP_SERVICE_PATH):
+		push_warning(("--mcp-port %d ignored: this build carries no runtime MCP "
+				+ "transport (%s is not exported; the endpoint is a debug / Mod Tools "
+				+ "capability).") % [port, RUNTIME_MCP_SERVICE_PATH])
+		return
+	var service_script := load(RUNTIME_MCP_SERVICE_PATH) as GDScript
+	if service_script == null:
+		push_warning("Runtime MCP transport failed to load from %s." % RUNTIME_MCP_SERVICE_PATH)
+		return
+	_service = service_script.new()
 	_service.name = "RuntimeMcpService"
 	add_child(_service)
-	var err := _service.setup(self, port)
+	# The transport's class is absent from the Runtime export, so its setup
+	# verb is reached by name: the one dynamic call of the load-by-path seam.
+	var err: Error = _service.call("setup", self, port)
 	if err != OK:
 		push_warning("Runtime MCP failed to start on port %d: %s" % [
 				port, error_string(err)])
 
 
-func get_debug_controls() -> DebugControls:
+func get_debug_controls() -> DebugControlTable:
 	return _controls
 
 
@@ -394,54 +460,11 @@ func mcp_game_control(action: String) -> Error:
 	return OK
 
 
-## F3's local Stop button shares the control without classifying leaving a
-## multiplayer session as an authoritative world mutation.
-func debug_return_to_menu() -> Error:
-	return mcp_game_control("return_to_menu")
-
-
-## Process-local audio knobs shared by F3 and runtime MCP.
-func debug_set_audio_bus_volume(bus_name: String, volume_db: float) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	if not is_finite(volume_db) \
-			or volume_db < DebugControls.AUDIO_BUS_VOLUME_MIN_DB \
-			or volume_db > DebugControls.AUDIO_BUS_VOLUME_MAX_DB:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_volume_db(bus, volume_db)
-	return OK
-
-
-func debug_set_audio_bus_mute(bus_name: String, muted: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_mute(bus, muted)
-	return OK
-
-
-func debug_set_audio_bus_solo(bus_name: String, soloed: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_solo(bus, soloed)
-	return OK
-
-
-func debug_set_audio_bus_bypass(bus_name: String, bypassed: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_bypass_effects(bus, bypassed)
-	return OK
-
-
 func has_debug_authority() -> bool:
 	# Authority is the session-role fact: ROLE_JOINER is the one
 	# non-authoritative role; every other session role owns the world.
-	var world := _current_world()
-	var sim: Simulation = world.get_sim() if world != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	return sim != null and int(sim.session_role()) != Simulation.ROLE_JOINER
 
 

@@ -105,6 +105,10 @@
 #include "hud/hud_overlay.h"
 #include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
+#include "devtools/debug_arg_spec.h"
+#include "devtools/debug_control_records.h"
+#include "devtools/debug_control_table.h"
+#include "devtools/debug_shell_host.h"
 #include "devtools/frame_stats.h"
 #include "devtools/oned_ui.h"
 #include "hud/hud_pos.h"
@@ -468,6 +472,15 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FrameStats);
 	GDREGISTER_ABSTRACT_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
+	// The debug-control table F3 and MCP share (ADR 0043 d12), in every
+	// flavour: only the ImGui windows are debug-only.
+	GDREGISTER_CLASS(DebugArgSpec);
+	GDREGISTER_CLASS(DebugMarshalResult);
+	GDREGISTER_CLASS(DebugControlRow);
+	GDREGISTER_CLASS(DebugControlState);
+	GDREGISTER_CLASS(DebugInvokeResult);
+	GDREGISTER_CLASS(DebugShellHost);
+	GDREGISTER_CLASS(DebugControlTable);
 	GDREGISTER_CLASS(OnedUiRequest);
 	GDREGISTER_CLASS(OnedUi);
 }

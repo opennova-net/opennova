@@ -12,7 +12,7 @@ const LOCAL_PLAYER_TIMEOUT_MS := 240_000
 
 var run_id := ""
 var name := ""
-## The validated arguments (ProbeSchema output, defaults filled in).
+## The validated arguments (ProbeDef.validate_args output, defaults filled in).
 var args: Dictionary = {}
 ## Absolute directory for this run's files (user://probe-runs/<run>).
 var artifact_dir := ""
@@ -295,13 +295,12 @@ func artifacts() -> Array[Dictionary]:
 
 # --- log / progress -----------------------------------------------------------------------
 
-## One line into the run's log (op=status streams it) and the "probe" source
-## of game_logs. Never print(): the probe's output IS this channel.
+## One line into the run's log (op=status streams it; the runner's sink also
+## forwards it to the "probe" source of game_logs). Never print(): the
+## probe's output IS this channel.
 func log(text: String) -> void:
 	if _line_sink.is_valid():
 		_line_sink.call(text)
-	if McpLogHub.instance != null:
-		McpLogHub.instance.note("probe", "info", "[%s] %s" % [name, text])
 
 
 ## Publish the run's current progress object (op=status reports it).

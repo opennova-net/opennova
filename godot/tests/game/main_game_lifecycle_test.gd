@@ -45,14 +45,17 @@ var _shell: Node = null
 
 
 func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
+	# The audio rows of the shell's debug-control table bind the AudioServer
+	# in C++ (ADR 0043 d12): their argument schemas refuse before the mixer.
 	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
 	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
-	assert_eq(debug_adapter.debug_set_audio_bus_mute("__missing_bus__", true),
+	var controls: DebugControlTable = debug_adapter.get_debug_controls()
+	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["__missing_bus__", true]).error),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_adapter.debug_set_audio_bus_volume("Master", INF),
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["Master", INF]).error),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_adapter.debug_set_audio_bus_volume(
-			"Master", DebugControls.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume",
+			["Master", DebugControlTable.AUDIO_BUS_VOLUME_MAX_DB + 0.5]).error),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
 	if bus < 0:
@@ -64,10 +67,10 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 		"solo": AudioServer.is_bus_solo(bus),
 		"bypass": AudioServer.is_bus_bypassing_effects(bus),
 	}
-	assert_eq(debug_adapter.debug_set_audio_bus_volume("SFX", -14.5), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_mute("SFX", true), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_solo("SFX", true), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_bypass("SFX", true), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["SFX", -14.5]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["SFX", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_solo", ["SFX", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_bypass", ["SFX", true]).error), OK)
 	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
 	assert_true(AudioServer.is_bus_mute(bus))
 	assert_true(AudioServer.is_bus_solo(bus))
@@ -976,13 +979,13 @@ func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
 		"the spawned simulation equips the same selected primary")
 
 
-# Every DebugControls row resolves its live owner over a loaded world (ADR 0042
-# d5). The no-world harness (debug_controls_test.gd) can only read the engine
-# rows as unavailable; here each value row is available and writable for a
-# confirmed authority caller, writes its own value back through its owner and
-# reads it back, and each action reaches its engine or device verdict instead
-# of "no owner" (ERR_UNAVAILABLE) or "no row" (ERR_DOES_NOT_EXIST). A row whose
-# read/write/invoke closure stops resolving fails here, on the real shell.
+# Every DebugControlTable row resolves its live owner over a loaded world (ADR
+# 0043 d12). The no-world harness (debug_controls_test.gd) can only read the
+# world rows as unavailable; here each value row is available and writable for
+# a confirmed authority caller, writes its own value back through its owner
+# and reads it back, and each action reaches its engine or device verdict
+# instead of "no owner" (ERR_UNAVAILABLE) or "no row" (ERR_DOES_NOT_EXIST). A
+# row whose owner binding stops resolving fails here, on the real shell.
 func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -998,39 +1001,42 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 	await get_tree().process_frame
 
 	var adapter: GameDebugAdapter = _shell.get_game_debug_adapter()
-	var controls: DebugControls = adapter.get_debug_controls()
+	var controls: DebugControlTable = adapter.get_debug_controls()
 	assert_true(adapter.has_debug_authority(), "the SP shell owns debug authority")
+	assert_same(_shell.get_dev_tools().get_debug_control_table(), controls,
+			"F3 drives the same table MCP does")
 	var ids := controls.row_ids()
 	assert_gt(ids.size(), 0, "the table carries its rows")
 	var engine_rows := 0
 	for id in ids:
 		var row := controls.control(id)
-		var state := controls.get_control_state(id, true)
+		var state := controls.get_state(id, true)
 		assert_true(state.available,
 				"'%s' resolves its owner over the loaded world (%s)" % [id, state.reason])
 		if not state.available:
 			continue
-		if row.owner == DebugControls.OWNER_ENGINE:
+		if row.owner == DebugControlRow.OWNER_ENGINE:
 			engine_rows += 1
 		assert_true(state.writable,
 				"'%s' is writable for a confirmed authority caller (%s)" % [id, state.reason])
-		if row.kind == DebugControls.Kind.ACTION:
+		if row.kind == DebugControlRow.ACTION:
 			continue
 		assert_ne(state.value, null, "'%s' reads a live value" % id)
-		var normalized: Dictionary = DebugControls.normalize_value(row, state.value)
-		assert_true(bool(normalized["ok"]), "'%s' reads a value inside its own domain" % id)
-		assert_eq(controls.set_control_value(id, state.value, true), OK,
+		var normalized: Variant = DebugControlTable.normalize_value(row, state.value)
+		assert_ne(normalized, null, "'%s' reads a value inside its own domain" % id)
+		assert_eq(controls.set_value(id, state.value, true), OK,
 				"'%s' writes its own value back through its owner" % id)
-		var read_back: Variant = controls.get_control_state(id, true).value
-		if row.kind == DebugControls.Kind.SLIDER:
-			assert_almost_eq(float(read_back), float(normalized["value"]), maxf(row.step, 0.001),
+		var read_back: Variant = controls.get_state(id, true).value
+		if row.kind == DebugControlRow.SLIDER:
+			assert_almost_eq(float(read_back), float(normalized), maxf(row.step, 0.001),
 					"'%s' reads back the value it wrote" % id)
 		else:
-			assert_eq(read_back, normalized["value"], "'%s' reads back the value it wrote" % id)
+			assert_eq(read_back, normalized, "'%s' reads back the value it wrote" % id)
 	assert_gt(engine_rows, 0, "the engine rows answer over the loaded world")
 
 	# The actions, each with in-domain arguments, against the engine's or the
-	# device's own verdict. The audio rows write the mixer, so they restore it.
+	# device's own verdict. The audio rows write the mixer, so they restore it;
+	# the weather rows write the world that leaves below.
 	var master := AudioServer.get_bus_index("Master")
 	var master_volume := AudioServer.get_bus_volume_db(master)
 	var master_mute := AudioServer.is_bus_mute(master)
@@ -1046,6 +1052,14 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"set_mission_variable", [0, 0]],
 		[&"environment_lightning_short", []],
 		[&"environment_lightning_long", []],
+		[&"environment_sky_height", [65536000]],
+		[&"environment_time_of_day_minutes", [720]],
+		[&"environment_sun_fade", [0, 0]],
+		[&"environment_color_fade", [0]],
+		[&"environment_wind_scale", [256]],
+		[&"environment_block_color", [0, 0xFFFFFF]],
+		[&"environment_lightning_color", [0xFFFFFF]],
+		[&"environment_weather_snapshot", []],
 		[&"deploy_pick", [0]],
 		[&"set_viewmodel_weapon", ["WPN_M4"]],
 		[&"clear_viewmodel_weapon", []],
@@ -1053,8 +1067,8 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"local_player_look", [1.0, 0.0]],
 	]
 	for case in must_succeed:
-		var outcome := controls.invoke_control(case[0], case[1], true)
-		assert_eq(int(outcome["error"]), OK,
+		var outcome := controls.invoke(case[0], case[1], true)
+		assert_eq(int(outcome.error), OK,
 				"action '%s' reaches its owner's verdict" % case[0])
 	# In-domain arguments that name entities this minimal world may not carry:
 	# the engine answers with its own refusal, never with a missing owner.
@@ -1065,20 +1079,20 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"crew_local_player", [1]],
 	]
 	for case in may_refuse:
-		var outcome := controls.invoke_control(case[0], case[1], true)
-		var error := int(outcome["error"])
+		var outcome := controls.invoke(case[0], case[1], true)
+		var error := int(outcome.error)
 		assert_true(error == OK or error == ERR_INVALID_PARAMETER,
 				"action '%s' reaches the engine (error %d)" % [case[0], error])
 	AudioServer.set_bus_volume_db(master, master_volume)
 	AudioServer.set_bus_mute(master, master_mute)
 
 	# The one action that ends the world runs last, and leaves a clean menu.
-	var leave := controls.invoke_control(&"runtime_return_to_menu", [], true)
-	assert_eq(int(leave["error"]), OK, "runtime_return_to_menu reaches the shell")
+	var leave := controls.invoke(&"runtime_return_to_menu", [], true)
+	assert_eq(int(leave.error), OK, "runtime_return_to_menu reaches the shell")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
-	assert_false(controls.get_control_state(&"hide_foliage").available,
+	assert_false(controls.get_state(&"hide_foliage").available,
 			"the world rows read unavailable again once the world is gone")
 
 

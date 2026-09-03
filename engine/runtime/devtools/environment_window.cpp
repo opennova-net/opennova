@@ -1,5 +1,6 @@
 #include <runtime/devtools/environment_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
 #include <runtime/world/weather_state.h>
 
 #include <imgui.h>
@@ -131,11 +132,11 @@ const char *EnvironmentWindow::row_text(int row) const {
 	return rows_[static_cast<size_t>(row)].c_str();
 }
 
-void EnvironmentWindow::enqueue_request(const EnvironmentRequest &request) {
+void EnvironmentWindow::enqueue_request(const ControlRequest &request) {
 	requests_.push_back(request);
 }
 
-bool EnvironmentWindow::take_request(EnvironmentRequest &request) {
+bool EnvironmentWindow::take_request(ControlRequest &request) {
 	if (requests_.empty()) return false;
 	request = requests_.front();
 	requests_.pop_front();
@@ -213,9 +214,11 @@ void EnvironmentWindow::draw_rows() {
 										ImGuiColorEditFlags_DisplayRGB)) {
 						const int32_t packed = static_cast<int32_t>(pack_rgb(rgb));
 						if (block_targets[i] == kLightningTarget) {
-							enqueue_request({EnvironmentRequest::Kind::LightningColor, 0, packed});
+							enqueue_request({control_id::kEnvironmentLightningColor,
+									{ControlArg::integer(packed)}});
 						} else {
-							enqueue_request({EnvironmentRequest::Kind::BlockColor, block_targets[i], packed});
+							enqueue_request({control_id::kEnvironmentBlockColor,
+									{ControlArg::integer(block_targets[i]), ControlArg::integer(packed)}});
 						}
 					}
 					ImGui::EndPopup();
@@ -240,63 +243,71 @@ void EnvironmentWindow::draw_controls() {
 	ImGui::InputInt("Seconds##transition", &seconds_edit_);
 	if (seconds_edit_ < 0) seconds_edit_ = 0;
 
+	// Every button is one debug-control row invoked with the WAC arguments
+	// (debug_control_ids.h); the drain hands them to the table unchanged.
+	const auto one = [](int32_t a) { return std::vector<ControlArg>{ControlArg::integer(a)}; };
+	const auto two = [](int32_t a, int32_t b) {
+		return std::vector<ControlArg>{ControlArg::integer(a), ControlArg::integer(b)};
+	};
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##rain", &rain_pct_edit_, 0, 100, "%d%%");
 	ImGui::SameLine();
-	if (ImGui::Button("Rain")) enqueue_request({EnvironmentRequest::Kind::Rain, rain_pct_edit_, seconds_edit_});
+	if (ImGui::Button("Rain")) enqueue_request({control_id::kEnvironmentRain, two(rain_pct_edit_, seconds_edit_)});
 	ImGui::SameLine();
-	if (ImGui::Button("Snow")) enqueue_request({EnvironmentRequest::Kind::Snow, rain_pct_edit_, seconds_edit_});
+	if (ImGui::Button("Snow")) enqueue_request({control_id::kEnvironmentSnow, two(rain_pct_edit_, seconds_edit_)});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##overcast", &overcast_pct_edit_, 0, 100, "%d%%");
 	ImGui::SameLine();
-	if (ImGui::Button("Overcast")) enqueue_request({EnvironmentRequest::Kind::Overcast, overcast_pct_edit_, seconds_edit_});
+	if (ImGui::Button("Overcast")) enqueue_request({control_id::kEnvironmentOvercast, two(overcast_pct_edit_, seconds_edit_)});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##fog", &fog_metres_edit_);
 	ImGui::SameLine();
-	if (ImGui::Button("Fog dist")) enqueue_request({EnvironmentRequest::Kind::FogDistance, fog_metres_edit_, 0});
+	if (ImGui::Button("Fog dist")) enqueue_request({control_id::kEnvironmentFogDistance, one(fog_metres_edit_)});
 	ImGui::SameLine();
-	if (ImGui::Button("Move fog")) enqueue_request({EnvironmentRequest::Kind::MoveFog, fog_metres_edit_, seconds_edit_});
+	if (ImGui::Button("Move fog")) enqueue_request({control_id::kEnvironmentMoveFog, two(fog_metres_edit_, seconds_edit_)});
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##fogtype", &fog_type_edit_, 0, 3, "type %d");
 	ImGui::SameLine();
-	if (ImGui::Button("Fog type")) enqueue_request({EnvironmentRequest::Kind::FogType, fog_type_edit_, 0});
+	if (ImGui::Button("Fog type")) enqueue_request({control_id::kEnvironmentFogType, one(fog_type_edit_)});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##skyspeed", &sky_speed_edit_);
 	ImGui::SameLine();
-	if (ImGui::Button("Sky speed")) enqueue_request({EnvironmentRequest::Kind::SkySpeed, sky_speed_edit_, 0});
+	if (ImGui::Button("Sky speed")) enqueue_request({control_id::kEnvironmentSkySpeed, one(sky_speed_edit_)});
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##wind", &wind_edit_);
 	ImGui::SameLine();
-	if (ImGui::Button("Wind")) enqueue_request({EnvironmentRequest::Kind::WindScale, wind_edit_, 0});
+	if (ImGui::Button("Wind")) enqueue_request({control_id::kEnvironmentWindScale, one(wind_edit_)});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##minute", &minute_edit_, 0, 1439, "%d min");
 	ImGui::SameLine();
-	if (ImGui::Button("Time of day")) enqueue_request({EnvironmentRequest::Kind::TimeOfDayMinutes, minute_edit_, 0});
+	if (ImGui::Button("Time of day")) enqueue_request({control_id::kEnvironmentTimeOfDayMinutes, one(minute_edit_)});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##quake", &quake_seconds_edit_);
 	ImGui::SameLine();
-	if (ImGui::Button("Quake")) enqueue_request({EnvironmentRequest::Kind::Quake, quake_seconds_edit_, 0});
+	if (ImGui::Button("Quake")) enqueue_request({control_id::kEnvironmentQuake, one(quake_seconds_edit_)});
 	ImGui::SameLine();
-	if (ImGui::Button("Flash")) enqueue_request({EnvironmentRequest::Kind::Flash, 0, 0});
+	// flash / farflash are the lightning rows' handlers (the short and the
+	// long strike), so the buttons invoke those rows.
+	if (ImGui::Button("Flash")) enqueue_request({control_id::kEnvironmentLightningShort, {}});
 	ImGui::SameLine();
-	if (ImGui::Button("Far flash")) enqueue_request({EnvironmentRequest::Kind::FarFlash, 0, 0});
+	if (ImGui::Button("Far flash")) enqueue_request({control_id::kEnvironmentLightningLong, {}});
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##sunfade", &sun_fade_pct_edit_, 0, 100, "%d%%");
 	ImGui::SameLine();
-	if (ImGui::Button("Sun fade")) enqueue_request({EnvironmentRequest::Kind::SunFade, sun_fade_pct_edit_, seconds_edit_});
+	if (ImGui::Button("Sun fade")) enqueue_request({control_id::kEnvironmentSunFade, two(sun_fade_pct_edit_, seconds_edit_)});
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##colorfade", &color_fade_seconds_edit_);
 	ImGui::SameLine();
-	if (ImGui::Button("Color fade")) enqueue_request({EnvironmentRequest::Kind::ColorFade, color_fade_seconds_edit_, 0});
+	if (ImGui::Button("Color fade")) enqueue_request({control_id::kEnvironmentColorFade, one(color_fade_seconds_edit_)});
 	ImGui::EndDisabled();
 }
 

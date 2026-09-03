@@ -1,9 +1,10 @@
 extends GutTest
 
-# The game_probe machinery (ADR 0041): ProbeRunner over fixture probes
-# (run/status/cursor/long-poll/cancel/one-at-a-time/preconditions/schema/
-# artifacts/restores/log hub/watchdog), then the same through the loopback
-# game_probe tool, including the refusal while a serial tool job runs.
+# The game_probe machinery (ADR 0041; the four-type probe model of ADR 0043
+# d12): ProbeRunner over fixture probes (run/status/cursor/long-poll/cancel/
+# one-at-a-time/preconditions/schema/artifacts/restores/log sink/watchdog),
+# then the same through the loopback game_probe tool, including the refusal
+# while a serial tool job runs.
 
 const FIXTURES := "res://tests/probes/fixtures"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
@@ -49,7 +50,7 @@ func _defs() -> Array[ProbeDef]:
 func _settled(run_id: String) -> Dictionary:
 	for _i in SETTLE_FRAMES:
 		var status: Dictionary = await _runner.status(run_id, 0, 0)
-		if String(status["state"]) != ProbeRun.STATE_RUNNING:
+		if String(status["state"]) != ProbeRunner.STATE_RUNNING:
 			return status
 		await get_tree().process_frame
 	return await _runner.status(run_id, 0, 0)
@@ -80,7 +81,7 @@ func test_run_status_verdict_lines_and_cursor_paging() -> void:
 			"the artifact directory exists before the probe runs")
 	assert_true(_runner.is_running())
 	var status := await _settled(run_id)
-	assert_eq(String(status["state"]), ProbeRun.STATE_PASSED)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_PASSED)
 	assert_true(bool(status["verdict"]["ok"]))
 	assert_eq(String(status["verdict"]["summary"]), "echoed")
 	assert_eq(status["verdict"]["data"]["args"]["text"], "hi", "the default filled in")
@@ -111,11 +112,11 @@ func test_status_long_polls_until_new_lines_and_cancel_stops_a_run() -> void:
 	var polled: Dictionary = await _runner.status(run_id, cursor, 3000)
 	assert_true((polled["lines"] as Array).size() > 0, "the long-poll woke for new lines")
 	assert_lt(Time.get_ticks_msec() - t0, 3000, "and returned before its wait budget")
-	assert_eq(String(polled["state"]), ProbeRun.STATE_RUNNING)
+	assert_eq(String(polled["state"]), ProbeRunner.STATE_RUNNING)
 	var cancelled := _runner.cancel(run_id)
 	assert_true(bool(cancelled["cancel_requested"]))
 	var status := await _settled(run_id)
-	assert_eq(String(status["state"]), ProbeRun.STATE_CANCELLED)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_CANCELLED)
 	assert_true(bool(status["cancel_requested"]))
 	assert_false(_runner.is_running())
 
@@ -126,7 +127,7 @@ func test_one_probe_at_a_time() -> void:
 	assert_true(String(second.get("refused", "")).contains("still running"), str(second))
 	_runner.cancel(String(started["run_id"]))
 	var status := await _settled(String(started["run_id"]))
-	assert_eq(String(status["state"]), ProbeRun.STATE_CANCELLED)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_CANCELLED)
 	var third := _runner.start("echo", {})
 	assert_false(third.has("refused"), "a settled run frees the slot")
 	await _settled(String(third["run_id"]))
@@ -153,11 +154,11 @@ func test_preconditions_schema_and_catalog_refusals() -> void:
 
 func test_fail_and_missing_verdict_states() -> void:
 	var failing := await _settled(String(_runner.start("failing", {})["run_id"]))
-	assert_eq(String(failing["state"]), ProbeRun.STATE_FAILED)
+	assert_eq(String(failing["state"]), ProbeRunner.STATE_FAILED)
 	assert_false(bool(failing["verdict"]["ok"]))
 	assert_eq(int(failing["verdict"]["data"]["measured"]), 3)
 	var erroring := await _settled(String(_runner.start("erroring", {})["run_id"]))
-	assert_eq(String(erroring["state"]), ProbeRun.STATE_ERROR)
+	assert_eq(String(erroring["state"]), ProbeRunner.STATE_ERROR)
 	assert_null(erroring["verdict"])
 	assert_true(String(erroring["error"]).contains("no verdict"), str(erroring))
 
@@ -165,7 +166,7 @@ func test_fail_and_missing_verdict_states() -> void:
 func test_watchdog_cancels_on_timeout_and_reaps_an_unresponsive_run() -> void:
 	var started := _runner.start("stubborn", {})
 	var status := await _settled(String(started["run_id"]))
-	assert_eq(String(status["state"]), ProbeRun.STATE_ERROR)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_ERROR)
 	assert_true(bool(status["cancel_requested"]), "the timeout asked first")
 	assert_true(String(status["error"]).contains("unresponsive"), str(status))
 	assert_false(_runner.is_running(), "the reaped run frees the slot")
@@ -180,13 +181,13 @@ func test_cancel_and_wait_settles_a_stubborn_run() -> void:
 	await _runner.cancel_and_wait(150)
 	assert_false(_runner.is_running())
 	var status: Dictionary = await _runner.status(String(started["run_id"]), 0, 0)
-	assert_eq(String(status["state"]), ProbeRun.STATE_ERROR)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_ERROR)
 	assert_true(String(status["error"]).contains("shutdown"), str(status))
 
 
 func test_restores_run_on_finish_and_artifacts_are_recorded() -> void:
 	var status := await _settled(String(_runner.start("restore", {})["run_id"]))
-	assert_eq(String(status["state"]), ProbeRun.STATE_PASSED)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_PASSED)
 	assert_almost_eq(float(status["verdict"]["data"]["time_scale_during"]), 0.5, 0.001)
 	assert_almost_eq(Engine.time_scale, 1.0, 0.001, "finish() restored the time scale")
 	var artifacts: Array = status["artifacts"]
@@ -203,8 +204,11 @@ func test_restores_run_on_finish_and_artifacts_are_recorded() -> void:
 
 
 func test_probe_lines_reach_the_log_hub_as_the_probe_source() -> void:
+	# The probe model never names the transport: the service installs the
+	# runner's log sink (game_mcp_service.gd does the same wiring).
 	var hub := McpLogHub.new()
 	McpLogHub.instance = hub
+	_runner.log_sink = func(text: String) -> void: hub.note("probe", "info", text)
 	await _settled(String(_runner.start("echo", {"text": "hub"})["run_id"]))
 	var page := hub.get_entries(0, 50, PackedStringArray(["probe"]))
 	var entries: Array = page["entries"]
@@ -219,7 +223,7 @@ func test_leaving_the_tree_reaps_the_active_run() -> void:
 	var started := runner.start("slow", {})
 	remove_child(runner)
 	var status: Dictionary = await runner.status(String(started["run_id"]), 0, 0)
-	assert_eq(String(status["state"]), ProbeRun.STATE_ERROR)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_ERROR)
 	assert_false(runner.is_running())
 	runner.free()
 
@@ -268,16 +272,16 @@ func test_game_probe_tool_runs_polls_and_cancels_over_loopback() -> void:
 	var polled := _structured(await client.call_tool(get_tree(), "game_probe", {
 		"op": "status", "run_id": run_id, "cursor": 1, "wait_ms": 2000,
 	}))
-	assert_eq(String(polled["state"]), ProbeRun.STATE_RUNNING)
+	assert_eq(String(polled["state"]), ProbeRunner.STATE_RUNNING)
 	assert_gt((polled["lines"] as Array).size(), 0)
 	var cancelled := _structured(await client.call_tool(get_tree(), "game_probe", {"op": "cancel"}))
 	assert_eq(String(cancelled["run_id"]), run_id)
 	var final := {}
 	for _i in SETTLE_FRAMES:
 		final = _structured(await client.call_tool(get_tree(), "game_probe", {"op": "status", "wait_ms": 100}))
-		if String(final["state"]) != ProbeRun.STATE_RUNNING:
+		if String(final["state"]) != ProbeRunner.STATE_RUNNING:
 			break
-	assert_eq(String(final["state"]), ProbeRun.STATE_CANCELLED)
+	assert_eq(String(final["state"]), ProbeRunner.STATE_CANCELLED)
 	var bad: Variant = await client.call_tool(get_tree(), "game_probe", {"op": "status", "wait_ms": 99999})
 	assert_true(bool(bad["result"]["isError"]), "wait_ms past the cap is rejected")
 	var unknown: Variant = await client.call_tool(get_tree(), "game_probe", {"op": "run", "name": "nope"})
@@ -326,5 +330,5 @@ func test_game_control_quit_cancels_the_active_probe_first() -> void:
 	assert_true(quit is Dictionary)
 	assert_false(service.probe_runner.is_running(), "quit settled the probe before the shell verb")
 	var status: Dictionary = await service.probe_runner.status(String(started["run_id"]), 0, 0)
-	assert_eq(String(status["state"]), ProbeRun.STATE_CANCELLED)
+	assert_eq(String(status["state"]), ProbeRunner.STATE_CANCELLED)
 	client.close()

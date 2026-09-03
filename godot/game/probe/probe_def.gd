@@ -1,11 +1,21 @@
-class_name ProbeCatalog
+class_name ProbeDef
 extends RefCounted
 
-## THE list of runtime probes (docs/mcp.md, ADR 0041): every game_probe entry
-## is declared here with its script under res://probes/. The scripts are
-## source-only (export_presets.cfg excludes probes/*), so a shipped build
-## still lists the catalog but reports each probe unavailable; load_probe
-## resolves them with load() at run time for that reason.
+## One registered runtime probe (docs/mcp.md, ADR 0041): the name and
+## description game_probe op=list shows, the JSON Schema of its typed
+## arguments, the script that implements it under res://probes/, and the
+## preconditions the runner checks before starting it; plus THE catalog
+## (`definitions()`, the single list every game_probe entry is declared in)
+## and the argument validation the runner runs before a probe starts
+## (`validate_args`). ADR 0043 d12 folded the catalog and the schema
+## validator into this record. Typed record per ADR 0017; the schema is the
+## wire's Dictionary shape by design.
+##
+## The scripts are source-only (export_presets.cfg excludes probes/*), so a
+## shipped build still lists the catalog but reports each probe unavailable;
+## load_probe resolves them with load() at run time for that reason.
+
+const DEFAULT_TIMEOUT_MS := 600_000
 
 const PERF := "res://probes/perf/"
 const RENDER := "res://probes/render/"
@@ -13,14 +23,206 @@ const STAGE := "res://probes/stage/"
 const RUNTIME := "res://probes/runtime/"
 const NET := "res://probes/net/"
 
+
+## The outcome of validate_args / validate: the coerced argument values with
+## the schema's defaults filled in, or the list of what was wrong.
+class ArgsResult:
+	extends RefCounted
+
+	var ok := false
+	var errors := PackedStringArray()
+	## The validated arguments (JSON-facing; the probe reads them as-is).
+	var values: Dictionary = {}
+
+
+var name := ""
+var description := ""
+## The GameProbe script, always under res://probes/ (never exported: a
+## shipped build lists the probe as unavailable).
+var script_path := ""
+## JSON Schema (the validate() subset) for the probe's `args` object.
+var input_schema: Dictionary = { "type": "object", "properties": {} }
+## Refused under a headless DisplayServer.
+var needs_window := false
+## Refused unless a mission world is loaded.
+var needs_mission := false
+## The runner's watchdog budget: past it the run is cancelled.
+var timeout_ms := DEFAULT_TIMEOUT_MS
+
 # Built once: the runner and the tool look definitions up by identity.
 static var _definitions: Array[ProbeDef] = []
 
 
+static func make(p_name: String, p_description: String, p_script_path: String,
+		properties: Dictionary = {}, required: Array = [], p_needs_window := false,
+		p_needs_mission := false, p_timeout_ms := DEFAULT_TIMEOUT_MS) -> ProbeDef:
+	var def := ProbeDef.new()
+	def.name = p_name
+	def.description = p_description
+	def.script_path = p_script_path
+	var schema := { "type": "object", "properties": properties }
+	if not required.is_empty():
+		schema["required"] = required
+	def.input_schema = schema
+	def.needs_window = p_needs_window
+	def.needs_mission = p_needs_mission
+	def.timeout_ms = p_timeout_ms
+	return def
+
+
+## THE list of runtime probes: every game_probe entry is declared here with
+## its script under res://probes/.
 static func definitions() -> Array[ProbeDef]:
 	if _definitions.is_empty():
 		_definitions = _build_definitions()
 	return _definitions
+
+
+static func definition(p_name: String) -> ProbeDef:
+	for def in definitions():
+		if def.name == p_name:
+			return def
+	return null
+
+
+## Whether the probe's script is present in this build.
+func is_available() -> bool:
+	return not script_path.is_empty() and ResourceLoader.exists(script_path)
+
+
+## A fresh probe instance, or null when the script is absent or is not a
+## GameProbe.
+func load_probe() -> GameProbe:
+	if not is_available():
+		return null
+	var script := load(script_path) as GDScript
+	if script == null:
+		return null
+	var instance: Variant = script.new()
+	return instance as GameProbe
+
+
+## The game_probe op=list wire entry (transport edge only).
+func to_list_entry(available: bool) -> Dictionary:
+	return {
+		"name": name,
+		"description": description,
+		"input_schema": input_schema,
+		"needs_window": needs_window,
+		"needs_mission": needs_mission,
+		"timeout_ms": timeout_ms,
+		"available": available,
+	}
+
+
+## The probe's raw wire arguments against its input_schema.
+func validate_args(raw: Variant) -> ArgsResult:
+	return validate(input_schema, raw)
+
+
+## The JSON Schema subset an input_schema may use, validated on the game side
+## before a probe starts: object properties with type (string, integer,
+## number, boolean, array, object), enum, minimum/maximum, minLength/maxLength,
+## minItems/maxItems, items.type, required, and default injection. Unknown
+## keys are rejected (a typo never silently becomes the default) and integral
+## floats coerce to int (JSON has no integer type).
+static func validate(schema: Dictionary, raw: Variant) -> ArgsResult:
+	var result := ArgsResult.new()
+	if raw == null:
+		raw = {}
+	if not (raw is Dictionary):
+		result.errors.append("args must be a JSON object")
+		return result
+	var given: Dictionary = raw
+	var properties: Dictionary = schema.get("properties", {}) \
+			if schema.get("properties") is Dictionary else {}
+	var required: Array = schema.get("required", []) \
+			if schema.get("required") is Array else []
+	for key in given:
+		if not properties.has(key):
+			result.errors.append("unknown argument '%s'" % key)
+	for key in properties:
+		var spec: Dictionary = properties[key] if properties[key] is Dictionary else {}
+		if given.has(key):
+			result.values[key] = _coerce(String(key), spec, given[key], result.errors)
+		elif spec.has("default"):
+			var fallback: Variant = spec["default"]
+			result.values[key] = fallback.duplicate(true) \
+					if fallback is Dictionary or fallback is Array else fallback
+		elif key in required:
+			result.errors.append("missing required argument '%s'" % key)
+	result.ok = result.errors.is_empty()
+	return result
+
+
+static func _coerce(key: String, spec: Dictionary, value: Variant,
+		errors: PackedStringArray) -> Variant:
+	var type := String(spec.get("type", ""))
+	match type:
+		"string":
+			if typeof(value) != TYPE_STRING:
+				errors.append("'%s' must be a string" % key)
+				return value
+			var text := String(value)
+			if spec.has("minLength") and text.length() < int(spec["minLength"]):
+				errors.append("'%s' must be at least %d characters" % [key, int(spec["minLength"])])
+			if spec.has("maxLength") and text.length() > int(spec["maxLength"]):
+				errors.append("'%s' must be at most %d characters" % [key, int(spec["maxLength"])])
+		"integer":
+			if not _is_integral(value):
+				errors.append("'%s' must be an integer" % key)
+				return value
+			value = int(value)
+			_check_range(key, spec, float(value), errors)
+		"number":
+			if not _is_finite_number(value):
+				errors.append("'%s' must be a number" % key)
+				return value
+			_check_range(key, spec, float(value), errors)
+		"boolean":
+			if typeof(value) != TYPE_BOOL:
+				errors.append("'%s' must be a boolean" % key)
+				return value
+		"array":
+			if not (value is Array):
+				errors.append("'%s' must be an array" % key)
+				return value
+			var items: Array = value
+			if spec.has("minItems") and items.size() < int(spec["minItems"]):
+				errors.append("'%s' needs at least %d items" % [key, int(spec["minItems"])])
+			if spec.has("maxItems") and items.size() > int(spec["maxItems"]):
+				errors.append("'%s' allows at most %d items" % [key, int(spec["maxItems"])])
+			var item_spec: Dictionary = spec.get("items", {}) if spec.get("items") is Dictionary else {}
+			if not item_spec.is_empty():
+				var coerced := []
+				for index in items.size():
+					coerced.append(_coerce("%s[%d]" % [key, index], item_spec, items[index], errors))
+				value = coerced
+		"object":
+			if not (value is Dictionary):
+				errors.append("'%s' must be an object" % key)
+				return value
+		_:
+			pass
+	if spec.has("enum") and spec["enum"] is Array and not (value in (spec["enum"] as Array)):
+		errors.append("'%s' must be one of %s" % [key, JSON.stringify(spec["enum"])])
+	return value
+
+
+static func _check_range(key: String, spec: Dictionary, value: float,
+		errors: PackedStringArray) -> void:
+	if spec.has("minimum") and value < float(spec["minimum"]):
+		errors.append("'%s' must be >= %s" % [key, str(spec["minimum"])])
+	if spec.has("maximum") and value > float(spec["maximum"]):
+		errors.append("'%s' must be <= %s" % [key, str(spec["maximum"])])
+
+
+static func _is_finite_number(value: Variant) -> bool:
+	return (typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT) and is_finite(float(value))
+
+
+static func _is_integral(value: Variant) -> bool:
+	return _is_finite_number(value) and float(value) == floorf(float(value))
 
 
 static func _build_definitions() -> Array[ProbeDef]:
@@ -308,28 +510,3 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"exercise_motion": { "type": "boolean", "default": false },
 				}, [], false, false, 30_000),
 	]
-
-
-static func definition(name: String) -> ProbeDef:
-	for def in definitions():
-		if def.name == name:
-			return def
-	return null
-
-
-## Whether the probe's script is present in this build.
-static func is_available(def: ProbeDef) -> bool:
-	return def != null and not def.script_path.is_empty() \
-			and ResourceLoader.exists(def.script_path)
-
-
-## A fresh probe instance, or null when the script is absent or is not a
-## GameProbe.
-static func load_probe(def: ProbeDef) -> GameProbe:
-	if not is_available(def):
-		return null
-	var script := load(def.script_path) as GDScript
-	if script == null:
-		return null
-	var instance: Variant = script.new()
-	return instance as GameProbe

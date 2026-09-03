@@ -101,6 +101,14 @@ public:
 	void command_quake(int p_seconds);
 	void command_time_of_day_minutes(int p_minute_of_day);
 	void command_fog_type(int p_type);
+	void command_sky_height(int p_height_raw);
+	void command_sun_fade(int p_percent, int p_seconds);
+	void command_color_fade(int p_seconds);
+	void command_wind_scale(int p_value);
+	// One weather color block by world::WeatherColorTarget index, packed
+	// 0xRRGGBB; the lightning color the same way.
+	void command_weather_color(int p_target, int p_rgb);
+	void command_lightning_color(int p_rgb);
 	void set_wind_duration(int p_seconds);
 	int get_wind_duration() const;
 

@@ -13,11 +13,10 @@
 #include <godot_cpp/classes/time.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/ai_window.h>
-#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
-#include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/physics_request.h>
@@ -47,6 +46,9 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"), &DevTools::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"), &DevTools::get_frame_stats);
 	ClassDB::bind_method(D_METHOD("set_simulation", "simulation"), &DevTools::set_simulation);
+	ClassDB::bind_method(D_METHOD("set_debug_control_table", "table"),
+			&DevTools::set_debug_control_table);
+	ClassDB::bind_method(D_METHOD("get_debug_control_table"), &DevTools::get_debug_control_table);
 	ClassDB::bind_method(D_METHOD("select_entity", "handle"), &DevTools::select_entity);
 	ClassDB::bind_method(D_METHOD("selected_entity_handle"), &DevTools::selected_entity_handle);
 	ClassDB::bind_method(D_METHOD("set_game_viewport", "viewport"), &DevTools::set_game_viewport);
@@ -92,6 +94,12 @@ Dictionary DevTools::engine_log_after(int64_t p_cursor) {
 	return out;
 }
 
+// Both flavours: the table serves MCP in the release DLL too; only the
+// windows that would drain into it are compiled out there.
+void DevTools::set_debug_control_table(const Ref<DebugControlTable> &p_table) {
+	control_table_ = p_table;
+}
+
 #if OPENNOVA_DEVTOOLS
 
 DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {
@@ -117,6 +125,7 @@ void DevTools::_exit_tree() {
 	tools_->pass().set_open(false);
 	apply_weapon_requests();
 	set_simulation(nullptr);
+	control_table_.unref();
 	tools_->set_frame_stats(nullptr);
 	if (frame_stats_.is_valid()) {
 		frame_stats_->sync_capture_signal();
@@ -131,9 +140,8 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	}
 	apply_game_requests();
 	sync_game_spectator_state();
-	apply_debug_requests();
+	apply_control_requests();
 	apply_weapon_requests();
-	apply_environment_requests();
 	apply_rays_requests();
 	apply_physics_requests();
 	push_entity_detail(push_entity_directory());
@@ -259,15 +267,6 @@ void DevTools::apply_game_requests() {
 			case opennova::devtools::GameWindowRequest::CloseTools:
 				set_open(false);
 				return;
-			case opennova::devtools::GameWindowRequest::EnableSpectator:
-			case opennova::devtools::GameWindowRequest::DisableSpectator: {
-				Simulation *sim = simulation();
-				if (sim != nullptr && !sim->is_joiner()) {
-					(void)sim->set_local_spectator(
-							request == opennova::devtools::GameWindowRequest::EnableSpectator);
-				}
-				break;
-			}
 		}
 	}
 }
@@ -363,51 +362,49 @@ int DevTools::selected_entity_handle() const {
 	return handle == opennova::world::EntityHandle::kInvalid ? -1 : static_cast<int>(handle);
 }
 
-// Drain the F3 windows' typed mutation requests into the SAME engine-backed
-// debug delegates the MCP control plane uses (ADR 0042 d6). Requests queued
-// with no world behind them drain and drop.
-void DevTools::apply_debug_requests() {
-	opennova::devtools::DebugRequest request;
-	Simulation *simulation_ = simulation();
+namespace {
+
+// One window argument as the Variant the table marshals against the row's
+// schema (the same kinds an MCP caller sends).
+Variant control_arg_to_variant(const opennova::devtools::ControlArg &p_arg) {
+	using Kind = opennova::devtools::ControlArg::Kind;
+	switch (p_arg.kind) {
+		case Kind::Int:
+			return Variant(p_arg.i);
+		case Kind::Float:
+			return Variant(p_arg.f);
+		case Kind::Bool:
+			return Variant(p_arg.b);
+		case Kind::Text:
+			return Variant(String::utf8(p_arg.text.c_str()));
+		case Kind::Vec3:
+			return Variant(Vector3(p_arg.v[0], p_arg.v[1], p_arg.v[2]));
+	}
+	return Variant();
+}
+
+} // namespace
+
+// Drain the F3 windows' control requests into the ONE debug-control table
+// MCP's game_debug drives too (ADR 0043 d12): the row's schema validates the
+// arguments and its session-role gate refuses a joiner, once for both
+// surfaces. F3 is the local operator, so it carries the per-call
+// confirmation; requests queued with no table (or no owner behind the row)
+// drain and drop.
+void DevTools::apply_control_requests() {
+	opennova::devtools::ControlRequest request;
 	bool drained = false;
-	while (tools_->take_debug_request(request)) {
-		if (simulation_ == nullptr) {
+	while (tools_->take_control_request(request)) {
+		if (control_table_.is_null()) {
 			continue;
 		}
-		// A joiner never mutates: its rows are replicas the wire re-writes and
-		// its local player's pose rides the uplink. The windows disable the
-		// controls; this is the same refusal the debug-control table makes.
-		if (simulation_->session_role() == Simulation::ROLE_JOINER) {
-			continue;
+		Array args;
+		for (const opennova::devtools::ControlArg &arg : request.args) {
+			args.push_back(control_arg_to_variant(arg));
 		}
-		drained = true;
-		// The window's requests carry the engine handle; they reach the engine
-		// mutators (EntityCommands, ADR 0042 d5) by that handle, no index detour.
-		opennova::world::EntityCommands *commands = simulation_->entity_commands();
-		switch (request.kind) {
-			case opennova::devtools::DebugRequest::Kind::SetEntityHealth:
-				if (commands != nullptr) {
-					(void)commands->set_entity_health(request.target, request.health);
-				}
-				break;
-			case opennova::devtools::DebugRequest::Kind::SetEntityPosition:
-				if (commands != nullptr) {
-					(void)commands->set_entity_position(request.target,
-							opennova::world::Vec3{request.pos[0], request.pos[1], request.pos[2]});
-				}
-				break;
-			case opennova::devtools::DebugRequest::Kind::TeleportLocalPlayer:
-				simulation_->debug_teleport_local_player(
-						Vector3(request.pos[0], request.pos[1], request.pos[2]),
-						request.yaw, request.pitch);
-				break;
-			case opennova::devtools::DebugRequest::Kind::SetEntityItemAttrib:
-				if (commands != nullptr) {
-					(void)commands->set_entity_item_attrib(request.target, request.attrib,
-							request.attrib2);
-				}
-				break;
-		}
+		const Ref<DebugInvokeResult> outcome =
+				control_table_->invoke(StringName(request.id), args, true);
+		drained = drained || outcome->get_error() == OK;
 	}
 	if (drained) {
 		// The records pushed this same frame show the mutation, not the
@@ -679,49 +676,6 @@ void DevTools::push_weapon_records() {
 	tools_->set_weapon_live(std::move(live));
 }
 
-// Drain the Environment window's typed weather commands into the ONE
-// command layer (world::EntityCommands, ADR 0042 d5) — the same handlers the
-// WAC VM and the MCP rows reach.
-void DevTools::apply_environment_requests() {
-	opennova::devtools::EnvironmentRequest request;
-	Simulation *simulation_ = simulation();
-	while (tools_->take_environment_request(request)) {
-		if (simulation_ == nullptr || simulation_->is_joiner()) {
-			continue;
-		}
-		opennova::world::EntityCommands *commands = simulation_->entity_commands();
-		if (commands == nullptr) {
-			continue;
-		}
-		using Kind = opennova::devtools::EnvironmentRequest::Kind;
-		switch (request.kind) {
-			case Kind::Rain: commands->set_rain(request.a, request.b); break;
-			case Kind::Snow: commands->set_snow(request.a, request.b); break;
-			case Kind::Overcast: commands->set_overcast(request.a, request.b); break;
-			case Kind::FogDistance: commands->set_fog_distance(request.a); break;
-			case Kind::MoveFog: commands->move_fog(request.a, request.b); break;
-			case Kind::SkySpeed: commands->set_sky_speed(request.a); break;
-			case Kind::SkyHeight: commands->set_sky_height(request.a); break;
-			case Kind::Quake: commands->quake(request.a); break;
-			case Kind::TimeOfDayMinutes: commands->set_time_of_day_minutes(request.a); break;
-			case Kind::FogType: commands->set_fog_type(request.a); break;
-			case Kind::SunFade: commands->sun_fade(request.a, request.b); break;
-			case Kind::ColorFade: commands->set_color_fade(request.a); break;
-			case Kind::Flash: commands->lightning_flash(); break;
-			case Kind::FarFlash: commands->lightning_far_flash(); break;
-			case Kind::WindScale: commands->set_wind_scale(request.a); break;
-			case Kind::BlockColor:
-				commands->set_weather_color(
-						static_cast<opennova::world::WeatherColorTarget>(request.a),
-						static_cast<uint32_t>(request.b));
-				break;
-			case Kind::LightningColor:
-				commands->set_lightning_color(static_cast<uint32_t>(request.b));
-				break;
-		}
-	}
-}
-
 // Push the environment record while the Environment window shows, on its
 // 0.25 s cadence: the ENGINE join (Simulation::native_environment_snapshot)
 // over the weather home — no Variant round-trip (ADR 0042 d6).
@@ -939,6 +893,7 @@ opennova::devtools::ImGuiPass *DevTools::engine_pass() {
 }
 
 void DevTools::_exit_tree() {
+	control_table_.unref();
 	ImGuiPassNode::_exit_tree();
 }
 

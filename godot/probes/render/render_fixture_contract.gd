@@ -6,11 +6,10 @@ extends RefCounted
 ## realized-pose/TOD/reflection checks, the comparison contract (the exact
 ## retail spawn kit, teleport and witnesses), provenance, minute selection,
 ## and the file helpers the probe and the publication share. Pure functions
-## over the shell's public seams; the probe orchestrates, the GUT companion
-## pins every rule.
+## over the shell's public seams, typed to their production owners (GameShell,
+## GameWorld, Simulation, Terrain, Weather, LocalPlayerPresenter); the probe
+## orchestrates, the GUT companion pins every rule.
 
-const HudHiddenCaptureWitness := preload(
-		"res://game/world/hud_hidden_capture_witness.gd")
 const CaptureVariant := preload(
 		"res://probes/render/render_capture_variant.gd")
 
@@ -325,15 +324,13 @@ static func post_spawn_capture_state_matches(state: Dictionary) -> bool:
 			and not bool(state.get("spawn_or_menu_active", true))
 
 
-static func pin_weather_phase(world: Node) -> Error:
-	if world == null or not is_instance_valid(world) \
-			or not world.has_method("get_weather_node"):
+static func pin_weather_phase(world: GameWorld) -> Error:
+	if world == null or not is_instance_valid(world):
 		return ERR_INVALID_PARAMETER
-	var weather: Variant = world.call("get_weather_node")
-	if not (weather is Node) or not is_instance_valid(weather) \
-			or not (weather as Node).has_method("prepare_world_driven"):
+	var weather: Weather = world.get_weather_node()
+	if weather == null or not is_instance_valid(weather):
 		return ERR_UNAVAILABLE
-	(weather as Node).call("prepare_world_driven")
+	weather.prepare_world_driven()
 	return OK
 
 
@@ -678,22 +675,14 @@ static func comparison_spawn_profile(contract: Dictionary) -> Dictionary:
 
 
 static func apply_comparison_weapon_fallback(
-		game: Object, world: Object, contract: Dictionary) -> Dictionary:
-	if game == null or world == null or not world.has_method("get_sim"):
+		game: GameShell, world: GameWorld, contract: Dictionary) -> Dictionary:
+	if game == null or world == null:
 		return {"error": "comparison Armory fallback has no live game world"}
-	var sim: Variant = world.call("get_sim")
-	if not (sim is Object):
+	var sim: Simulation = world.get_sim()
+	if sim == null:
 		return {"error": "comparison Armory fallback has no live simulation"}
-	var sim_object := sim as Object
-	for method_name in ["apply_local_player_loadout", "get_local_player_inventory"]:
-		if not sim_object.has_method(method_name):
-			return {"error": "comparison simulation has no %s Armory seam" % method_name}
-	if not world.has_method("set_local_player_weapon_by_name"):
-		return {"error": "comparison world has no Armory presentation seam"}
-	if not (game is Node):
-		return {"error": "comparison game has no presenter tree"}
-	var presenter: Node = (game as Node).get_node_or_null("LocalPlayerPresenter")
-	if presenter == null or not presenter.has_method("refresh_viewmodel"):
+	var presenter: LocalPlayerPresenter = game.get_player_presenter()
+	if presenter == null:
 		return {"error": "comparison game has no viewmodel refresh seam"}
 
 	var weapon := comparison_weapon_name(contract)
@@ -703,20 +692,18 @@ static func apply_comparison_weapon_fallback(
 	var soldier_class := int(profile.get("player_class", 0))
 	var kit: Array[WeaponKitEntry] = [
 		WeaponKitEntry.make(weapon, COMPARISON_PRIMARY_CLIPS)]
-	if not bool(sim_object.call(
-			"apply_local_player_loadout", kit, soldier_class)):
+	if not sim.apply_local_player_loadout(kit, soldier_class):
 		return {"error": "production Armory apply rejected comparison weapon %s" % weapon}
-	var inventory_value: Variant = sim_object.call("get_local_player_inventory")
-	if not (inventory_value is PlayerInventory):
+	var inventory: PlayerInventory = sim.get_local_player_inventory()
+	if inventory == null:
 		return {"error": "production Armory apply produced no inventory witness"}
-	var inventory := inventory_value as PlayerInventory
 	var equipped := inventory.equipped_name
 	if not inventory.valid or equipped != weapon:
 		return {"error": (
 				"production Armory apply equipped %s, expected %s") % [equipped, weapon]}
-	if not bool(world.call("set_local_player_weapon_by_name", equipped)):
+	if not world.set_local_player_weapon_by_name(equipped):
 		return {"error": "production Armory presentation rejected %s" % equipped}
-	presenter.call("refresh_viewmodel")
+	presenter.refresh_viewmodel()
 	return {
 		"weapon_install_source": "production_armory_fallback_after_spawn_override",
 		"equipped_weapon": equipped,
@@ -724,21 +711,17 @@ static func apply_comparison_weapon_fallback(
 	}
 
 
-static func teleport_comparison_player(world: Object, contract: Dictionary) -> Dictionary:
-	if world == null or not world.has_method("get_sim"):
+static func teleport_comparison_player(world: GameWorld, contract: Dictionary) -> Dictionary:
+	if world == null:
 		return {"error": "comparison world has no simulation"}
-	var sim: Variant = world.call("get_sim")
-	if not (sim is Object) or not (sim as Object).has_method(
-			"debug_teleport_local_player"):
+	var sim: Simulation = world.get_sim()
+	if sim == null:
 		return {"error": "comparison simulation cannot teleport the local player"}
-	var teleport_value: Variant = (sim as Object).call(
-			"debug_teleport_local_player",
+	var teleport_error: Error = sim.debug_teleport_local_player(
 			contract.get("player_position_bms", Vector3.ZERO),
 			float(contract.get("yaw_deg", 0.0)),
 			float(contract.get("pitch_deg", 0.0)))
-	if typeof(teleport_value) != TYPE_INT or int(teleport_value) != OK:
-		var teleport_error := int(teleport_value) \
-				if typeof(teleport_value) == TYPE_INT else ERR_UNAVAILABLE
+	if teleport_error != OK:
 		return {"error": "could not apply comparison player pose: %s" \
 				% error_string(teleport_error)}
 	return {
@@ -749,44 +732,30 @@ static func teleport_comparison_player(world: Object, contract: Dictionary) -> D
 
 
 static func verify_comparison_spawn(
-		world: Object, contract: Dictionary) -> Dictionary:
-	if world == null or not world.has_method("get_sim"):
+		world: GameWorld, contract: Dictionary) -> Dictionary:
+	if world == null:
 		return {"error": "comparison world is unavailable"}
-	var sim: Variant = world.call("get_sim")
-	if not (sim is Object):
+	var sim: Simulation = world.get_sim()
+	if sim == null:
 		return {"error": "comparison simulation is unavailable"}
-	var sim_object := sim as Object
-	for method_name in [
-		"get_local_player_inventory",
-		"get_local_player_class",
-		"get_local_player_weapon_name",
-		"get_local_player_weapon_state",
-	]:
-		if not sim_object.has_method(method_name):
-			return {"error": "comparison simulation has no %s witness" % method_name}
 	var expected_weapon := comparison_weapon_name(contract)
-	var inventory_value: Variant = sim_object.call("get_local_player_inventory")
-	if not (inventory_value is PlayerInventory):
+	var inventory: PlayerInventory = sim.get_local_player_inventory()
+	if inventory == null:
 		return {"error": "comparison spawn produced no inventory witness"}
-	var inventory := inventory_value as PlayerInventory
 	var equipped := inventory.equipped_name
-	var sim_weapon := String(sim_object.call("get_local_player_weapon_name"))
+	var sim_weapon := sim.get_local_player_weapon_name()
 	if not inventory.valid or equipped != expected_weapon \
 			or sim_weapon != expected_weapon:
 		return {"error": (
 				"comparison spawn weapon mismatch: inventory=%s sim=%s expected=%s") \
 				% [equipped, sim_weapon, expected_weapon]}
-	if not world.has_method("local_player_weapon_name"):
-		return {"error": "comparison world has no presented-weapon witness"}
-	var presented_weapon := String(world.call("local_player_weapon_name"))
+	var presented_weapon := world.local_player_weapon_name()
 	if presented_weapon != expected_weapon:
 		return {"error": "comparison world presents %s, expected %s" \
 				% [presented_weapon, expected_weapon]}
-	var weapon_state_value: Variant = sim_object.call(
-			"get_local_player_weapon_state")
-	if not (weapon_state_value is PlayerWeaponView):
+	var weapon_state: PlayerWeaponView = sim.get_local_player_weapon_state()
+	if weapon_state == null:
 		return {"error": "comparison spawn produced no weapon-state witness"}
-	var weapon_state := weapon_state_value as PlayerWeaponView
 	var weapon_clip := weapon_state.clip
 	var weapon_reserve := weapon_state.reserve
 	if not weapon_state.active \
@@ -798,63 +767,44 @@ static func verify_comparison_spawn(
 						COMPARISON_WEAPON_CLIP, COMPARISON_WEAPON_RESERVE]}
 	return {
 		"equipped_weapon": equipped,
-		"player_class": int(sim_object.call("get_local_player_class")),
+		"player_class": sim.get_local_player_class(),
 		"weapon_clip": weapon_clip,
 		"weapon_reserve": weapon_reserve,
 	}
 
 
 static func observe_comparison_contract(
-		game: Object, world: Object, viewport: Object,
+		game: GameShell, world: GameWorld, viewport: Viewport,
 		contract: Dictionary,
 		captured_hud_witness: Dictionary = {}) -> Dictionary:
-	if game == null or world == null or viewport == null \
-			or not world.has_method("get_sim"):
+	if game == null or world == null or viewport == null:
 		return {"error": "comparison presentation is unavailable"}
 	var spawn_witness := verify_comparison_spawn(world, contract)
 	if spawn_witness.has("error"):
 		return spawn_witness
-	var sim: Variant = world.call("get_sim")
-	if not (sim is Object):
+	var sim: Simulation = world.get_sim()
+	if sim == null:
 		return {"error": "comparison simulation is unavailable"}
-	var sim_object := sim as Object
-	for method_name in [
-		"get_local_player_weapon_name",
-		"get_local_player_class",
-		"get_local_player_position",
-	]:
-		if not sim_object.has_method(method_name):
-			return {"error": "comparison simulation has no %s witness" % method_name}
 	var weapon := String(spawn_witness.equipped_weapon)
-	var player_position_godot: Variant = sim_object.call("get_local_player_position")
-	if not (player_position_godot is Vector3):
-		return {"error": "comparison player position witness is unavailable"}
-	var player_position_bms := godot_to_mission(player_position_godot as Vector3)
+	var player_position_bms := godot_to_mission(sim.get_local_player_position())
 	var requested_position: Vector3 = contract.get(
 			"player_position_bms", Vector3.ZERO)
 	if player_position_bms.distance_to(requested_position) > PLAYER_POSE_TOLERANCE:
 		return {"error": "comparison player pose drifted: observed=%s expected=%s" \
 				% [str(player_position_bms), str(requested_position)]}
 
-	var hud: CanvasLayer = (game as Node).get_node_or_null("HUD") as CanvasLayer \
-			if game is Node else null
+	var hud: CanvasLayer = game.get_node_or_null("HUD") as CanvasLayer
 	if hud == null or not hud.visible:
 		return {"error": "comparison HUD CanvasLayer is absent or hidden"}
 	# The FP gun draws inside the beauty pass; the presenter owns its node.
-	var presenter: Object = (game as Node).get_node_or_null(
-			"LocalPlayerPresenter") if game is Node else null
-	var viewmodel: Node3D = presenter.call("viewmodel") as Node3D \
-			if presenter != null and presenter.has_method("viewmodel") else null
+	var presenter: LocalPlayerPresenter = game.get_player_presenter()
+	var viewmodel: Node3D = presenter.viewmodel() if presenter != null else null
 	if viewmodel == null or not viewmodel.visible:
 		return {"error": "comparison first-person viewmodel is absent or hidden"}
-	if not world.has_method("get_terrain_data") \
-			or world.call("get_terrain_data") == null:
+	if world.get_terrain_data() == null:
 		return {"error": "comparison terrain data is unavailable"}
-	if not world.has_method("get_terrain_node"):
-		return {"error": "comparison terrain node is unavailable"}
-	var terrain_value: Variant = world.call("get_terrain_node")
-	if not (terrain_value is Node3D) \
-			or not (terrain_value as Node3D).is_visible_in_tree():
+	var terrain_node: Terrain = world.get_terrain_node()
+	if terrain_node == null or not terrain_node.is_visible_in_tree():
 		return {"error": "comparison terrain node is absent or hidden"}
 	var observed := {
 		"observed_at": "after_pose_settle_before_fixture_freeze",
@@ -880,12 +830,9 @@ static func observe_comparison_contract(
 	if hud_witness_value.is_empty():
 		# Direct contract probes may inspect a live transaction. Published capture
 		# paths pass the completed-draw witness embedded by GameDebugAdapter.
-		if not game.has_method("hud_hidden_capture_witness"):
+		var hud_witness: HudHiddenCaptureWitness = game.hud_hidden_capture_witness()
+		if hud_witness == null:
 			return {"error": "comparison game has no HUD-hidden presentation witness"}
-		var hud_value: Variant = game.call("hud_hidden_capture_witness")
-		if not (hud_value is HudHiddenCaptureWitness):
-			return {"error": "comparison HUD-hidden presentation witness is untyped"}
-		var hud_witness := hud_value as HudHiddenCaptureWitness
 		if not hud_witness.is_valid():
 			return {"error": "comparison HUD-hidden presentation is invalid: %s" \
 					% hud_witness.error}
@@ -904,13 +851,9 @@ static func observe_comparison_contract(
 	]:
 		if not hud_witness_value.has(key):
 			return {"error": "captured HUD-hidden witness is missing %s" % key}
-	if not world.has_method("local_player_first_person_arms_witness"):
+	var arms_witness: FirstPersonArmsWitness = world.local_player_first_person_arms_witness()
+	if arms_witness == null:
 		return {"error": "comparison world has no first-person arms witness"}
-	var arms_value: Variant = world.call(
-			"local_player_first_person_arms_witness")
-	if not (arms_value is FirstPersonArmsWitness):
-		return {"error": "comparison first-person arms witness is untyped"}
-	var arms_witness: FirstPersonArmsWitness = arms_value
 	if not arms_witness.is_valid():
 		return {"error": "comparison first-person arms are invalid: %s" \
 				% arms_witness.error}
@@ -932,7 +875,7 @@ static func observe_comparison_contract(
 		"player_view_effects_active": bool(
 				hud_witness_value.player_view_effects_active),
 		"viewmodel_enabled": viewmodel.visible,
-		"terrain_enabled": (terrain_value as Node3D).is_visible_in_tree(),
+		"terrain_enabled": terrain_node.is_visible_in_tree(),
 		"ads_active": bool(hud_witness_value.ads_active),
 		"big_map_active": bool(hud_witness_value.big_map_active),
 		"player_pose_source": "retail_player_bms.applied",

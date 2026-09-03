@@ -1,7 +1,8 @@
 // A typed ray-capture mutation the F3 Rays window queues for its embedder to
-// drain (ADR 0042 d6; the EnvironmentRequest pattern). The window never
-// mutates engine state itself — the embedder routes the filter/clear requests
-// into the Simulation's ray-debug seam.
+// drain (ADR 0042 d6). The window never mutates engine state itself — the
+// embedder routes the filter/clear requests into the Simulation's ray-debug
+// seam. A window-local seam: the ray-debug filter has no debug-control row,
+// so it stays beside the ControlRequest channel rather than in it.
 #pragma once
 
 #include <cstdint>

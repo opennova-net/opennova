@@ -152,6 +152,10 @@ add_library(${TARGET_NAME} SHARED
     devtools/frame_stats.cpp
     devtools/imgui_pass_node.cpp
     devtools/dev_tools.cpp
+    devtools/debug_arg_spec.cpp
+    devtools/debug_control_records.cpp
+    devtools/debug_shell_host.cpp
+    devtools/debug_control_table.cpp
     devtools/oned_ui.cpp
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp

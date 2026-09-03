@@ -26,6 +26,7 @@ static func failed(p_summary: String, p_data: Dictionary = {}) -> ProbeVerdict:
 	return verdict
 
 
-## The game_probe status wire shape (transport edge only).
+## The game_probe status wire shape (transport edge only; the transport
+## sanitizes the payload it carries, so this record never names it).
 func to_json_value() -> Dictionary:
-	return { "ok": ok, "summary": summary, "data": McpJson.sanitize(data) }
+	return { "ok": ok, "summary": summary, "data": data }

@@ -120,7 +120,7 @@ integration is not a one-off.
    F3 opens the ImGui tools. What survives under `godot/game/debug/` has other
    owners: the MCP `game_debug` control plane (`DebugSession` and its catalog
    [since ADR 0042 d5 the typed `DebugControls` table,
-   `godot/game/debug/debug_controls.gd`; the `DebugSession` family is gone]),
+   `godot/game/debug/debug_controls.gd` (since ADR 0043 slice G12: the C++ `godot/src/devtools/debug_control_table`); the `DebugSession` family is gone]),
    the world-owned debug views and pick nodes (`DebugViewSet` itself is at
    `godot/game/world/debug_view_set.gd`) and the three
    samplers (retyped to `FrameStats`); the env-var probes that survived this
