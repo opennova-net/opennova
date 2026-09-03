@@ -17,27 +17,6 @@ namespace godot {
 
 // --- read-back seams ---------------------------------------------------------
 
-// Snapshot of successfully rendered static user-point sources for a world
-// debug view; every record is minted fresh so a consumer cannot mutate the
-// placer's placement record.
-TypedArray<StaticUserPointSource> MissionObjectPlacer::get_static_user_point_sources() {
-	_check_epoch();
-	TypedArray<StaticUserPointSource> out;
-	for (const StaticUserPointGroup &group : static_user_point_sources_) {
-		Ref<StaticUserPointSource> record;
-		record.instantiate();
-		record->set_graphic(group.graphic);
-		record->set_object_data(group.object_data);
-		TypedArray<Transform3D> transforms;
-		for (const Transform3D &xform : group.transforms) {
-			transforms.push_back(xform);
-		}
-		record->set_transforms(transforms);
-		out.push_back(record);
-	}
-	return out;
-}
-
 // Snapshot of successfully rendered static entities for mission-start item
 // effects. Every row is a value descriptor; no placed/render Node is
 // exposed; row order is placement order and stable for the mission.
@@ -223,19 +202,6 @@ MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
 		out.push_back(row);
 	}
 	return out;
-}
-
-void MissionObjectPlacer::_record_static_user_point_group(
-		const String &p_graphic, const Vector<Transform3D> &p_transforms) {
-	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_null() || data->get_user_point_count() <= 0) {
-		return;
-	}
-	StaticUserPointGroup group;
-	group.graphic = p_graphic;
-	group.object_data = data;
-	group.transforms = p_transforms;
-	static_user_point_sources_.push_back(group);
 }
 
 int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,

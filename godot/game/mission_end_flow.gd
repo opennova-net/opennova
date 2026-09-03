@@ -60,9 +60,7 @@ func show_screen(sim: Simulation, banner: String, root: ResourceRoot, mount: Nod
 	if sim != null:
 		outcome = sim.get_round_outcome_debug()
 	if outcome == null:
-		outcome = RoundOutcome.new()
-		outcome.ended = true
-		outcome.winner_team = _winner
+		outcome = RoundOutcome.make(true, _winner)
 	_screen = MissionEndScreen.new()
 	_screen.name = "MissionEndScreen"
 	_screen.setup(outcome, banner, root)

@@ -351,4 +351,73 @@ std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w);
 uint32_t weapon_trace_samples_since(const LocalPlayerWeapon &w, uint32_t after_tick,
                                     bool take_all, std::vector<WeaponTraceSample> &out);
 
+
+// The local player's equipped-weapon FSM view for one tick, as one value the
+// embedder fills (Simulation::get_local_player_weapon_state carries the
+// field witnesses): the action ladder position, the FP clip channel, the last
+// action's audio/effect legs, the event serials, the magazine, heat and
+// recoil, the HUD crosshair spread in retail's integer domains, the
+// PowerThrow windup, the emplaced-gun controls, the round-ring diagnostics
+// and the 3P body weapon channel. `active` false = no weapon FSM installed
+// (every other field reads its default). Its Godot record wraps it by value
+// (ADR 0043 d10).
+struct LocalPlayerWeaponView {
+    bool active = false;
+    int32_t current_action = 0;
+    int32_t next_action = 0;
+    int32_t phase = 0;
+    int32_t switch_deferred_action = -1;
+    bool switch_in_flight = false;
+    int32_t pending_combo = 0;
+    std::string anim_key;
+    int32_t anim_variant = 0;
+    int32_t anim_advance_ticks = 0;
+    int32_t play_serial = 0;
+    int32_t action_serial = 0;
+    int32_t action_started = -1;
+    std::string action_soundset;
+    std::string action_particle;
+    std::string action_particle_userpoint;
+    int32_t action_end_serial = 0;
+    std::string action_end_soundset;
+    bool windup_active = false;
+    int32_t windup_held_ticks = 0;
+    int32_t fired_serial = 0;
+    int32_t tracer_counter = 0;
+    int32_t dry_serial = 0;
+    int32_t reload_serial = 0;
+    int32_t reload_applied_serial = 0;
+    int32_t reload_received_serial = 0;
+    int32_t reload_received_entity = 0;
+    int32_t reload_received_param = 0;
+    int32_t unscope_serial = 0;
+    int32_t rescope_serial = 0;
+    int32_t clip = 0;
+    int32_t reserve = 0;
+    int32_t kick = 0;
+    int32_t recoil_pitch_bam = 0;
+    int32_t weapon_weight_spread_bam = 0;
+    bool aimed_shot_available = false;
+    int32_t hud_spread_row = 0;
+    int32_t hud_spread_fp16 = 0;
+    int32_t heat = 0;
+    int32_t heat_glow = 0;
+    bool borrowed_usegun_slot = false;
+    bool emplaced_controls_valid = false;
+    int32_t emplaced_gun_yaw = 0;
+    int32_t emplaced_gun_pitch = 0;
+    int32_t round_ring_count = 0;
+    int32_t last_round_flags = 0;
+    int32_t last_round_subtype = 0;
+    int32_t last_round_slot_byte = 0;
+    int32_t last_round_seq = 0;
+    std::string body_anim_key;
+    int32_t body_anim_phase = 0;
+    std::string body_anim_prev_key;
+    int32_t body_anim_prev_phase = 0;
+    float body_anim_blend_weight = 1.0f;
+    int32_t body_anim_variant = 0;
+    int32_t body_anim_prev_variant = 0;
+};
+
 } // namespace opennova::world

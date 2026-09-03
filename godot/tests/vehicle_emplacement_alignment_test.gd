@@ -36,8 +36,8 @@ func _retail_attachment_basis(direction: Vector3) -> Basis:
 func _blackhawk_carriers(mission: MissionData) -> Array:
 	var carriers: Array = []
 	for raw in mission.get_all_entities():
-		var entity: Dictionary = raw
-		if int(entity.get("item_id", 0)) == CARRIER_ITEM_ID:
+		var entity: MissionEntityRecord = raw
+		if entity.item_id == CARRIER_ITEM_ID:
 			carriers.append(entity)
 	return carriers
 
@@ -160,14 +160,14 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	var expected: Array = []
 	for carrier in carriers:
 		var carrier_xform := MissionObjectPlacer.entity_transform(
-				carrier.get("position", Vector3.ZERO),
-				carrier.get("rotation_deg", Vector3.ZERO))
+				carrier.position,
+				carrier.rotation_deg)
 		for anchor: ModelUserPoint in anchors:
 			var direction := anchor.rotation
 			assert_gt(direction.length_squared(), 0.99,
 					"%s carries an authored forward direction" % anchor.name)
 			expected.append({
-				"label": "SSN %d %s" % [int(carrier.get("bms_id", 0)), anchor.name],
+				"label": "SSN %d %s" % [carrier.bms_id, anchor.name],
 				"position": carrier_xform * anchor.position,
 				"forward": (
 						carrier_xform.basis
@@ -250,9 +250,9 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	assert_eq(mission.create_default(), OK)
 	var carrier_position := Vector3(7.0, -3.0, 2.0)
 	var carrier_rotation := Vector3(0.0, 37.0, 0.0)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, MRK5_ITEM_ID,
-			carrier_position, carrier_rotation).is_empty())
+			carrier_position, carrier_rotation))
 	var carrier_xform := MissionObjectPlacer.entity_transform(
 			carrier_position, carrier_rotation)
 	var expected: Array = []
@@ -348,7 +348,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, CARRIER_ITEM_ID,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := MissionObjectPlacer.create(root, item_db)
@@ -367,9 +367,9 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	assert_gt(int(rt.setup(mission, mission_objects, model_options)), 0)
 	assert_true(rt.tick())
 	var carrier_model := rt.get_entity_index().resolve(
-			int(placed.get("bms_id", 0)),
+			placed.bms_id,
 			MissionData.KIND_ITEM,
-			int(placed.get("index", 0))) as ObjectModel
+			placed.index) as ObjectModel
 	assert_not_null(carrier_model, "the Blackhawk resolves through the placed registry")
 	if carrier_model == null:
 		return
@@ -383,7 +383,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	# passenger bench, and a passenger never claims the engine-start latch
 	# (+0x170 — retail: Entity_AttachToVehicleSlot @0x4946d0 claims it for
 	# ctrlx/drvrx only), so the rotor would rest in retail too.
-	assert_eq(rt.get_sim().debug_crew_local_player(int(placed.get("bms_id", 0))), OK,
+	assert_eq(rt.get_sim().debug_crew_local_player(placed.bms_id), OK,
 			"the local player takes the Blackhawk's control seat")
 	rt.play()
 	for _tick in range(62):
@@ -454,7 +454,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, DBUGGY_ITEM_ID,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := MissionObjectPlacer.create(root, item_db)
@@ -477,9 +477,9 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
 	assert_true(rt.tick())
 	var carrier_node := rt.get_entity_index().resolve(
-			int(placed.get("bms_id", 0)),
+			placed.bms_id,
 			MissionData.KIND_ITEM,
-			int(placed.get("index", 0))) as Node3D
+			placed.index) as Node3D
 	assert_not_null(carrier_node, "the DBuggy model resolves through the placed registry")
 	var before_rows := _synthetic_attachment_rows(rt.get_sim(), child_types)
 	assert_eq(before_rows.size(), attachments.size(),
@@ -496,7 +496,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 					* child_node.global_transform)
 			relative_before[handle] = carrier_local
 			var attachment: Dictionary = attachment_by_type.get(
-					int(row.get("type_id", 0)), {})
+					row.type_id, {})
 			var authored_forward: Vector3 = attachment.get(
 					"raw_rotation", Vector3.ZERO)
 			assert_gt(authored_forward.length_squared(), 0.99,

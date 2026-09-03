@@ -9,24 +9,6 @@ using namespace godot;
 						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),        \
 			"", m_getter)
 
-// --- ItemParticleFx ------------------------------------------------------------
-
-void ItemParticleFx::assign(const String &p_effect, const String &p_userpoint,
-		const String &p_secondary_effect) {
-	effect_ = p_effect;
-	userpoint_ = p_userpoint;
-	secondary_effect_ = p_secondary_effect;
-}
-
-void ItemParticleFx::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_effect"), &ItemParticleFx::get_effect);
-	ClassDB::bind_method(D_METHOD("get_userpoint"), &ItemParticleFx::get_userpoint);
-	ClassDB::bind_method(D_METHOD("get_secondary_effect"), &ItemParticleFx::get_secondary_effect);
-	ITEM_RECORD_READ_ONLY(Variant::STRING, "effect", "get_effect");
-	ITEM_RECORD_READ_ONLY(Variant::STRING, "userpoint", "get_userpoint");
-	ITEM_RECORD_READ_ONLY(Variant::STRING, "secondary_effect", "get_secondary_effect");
-}
-
 // --- ItemEmplacementAttachment ---------------------------------------------------
 
 void ItemEmplacementAttachment::assign(int p_kind, const String &p_userpoint, int p_item_id,

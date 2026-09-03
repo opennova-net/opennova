@@ -12,6 +12,8 @@
 #include "object/entity_ref.h"
 #include "object/object_data.h"
 #include "simulation/present_event_records.h"
+#include "util/axes.h"
+#include "util/color_convert.h"
 #include "simulation/simulation.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -871,17 +873,26 @@ void EffectLightDirector::on_death_light(const Vector3 &p_world_pos, float p_rad
 								->masking(true, false, false));
 }
 
-void EffectLightDirector::sync_round_glows(const Array &p_rows) {
-	HashSet<int64_t> seen;
+void EffectLightDirector::sync_round_glow_records(const Array &p_rows) {
+	std::vector<opennova::world::RoundGlowRow> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
 	for (int64_t i = 0; i < p_rows.size(); ++i) {
 		const Ref<RoundGlowRow> row = p_rows[i];
-		if (row.is_null()) {
-			continue;
+		if (row.is_valid()) {
+			rows.push_back(row->value());
 		}
-		const int64_t id = row->get_id();
+	}
+	sync_round_glows(rows);
+}
+
+void EffectLightDirector::sync_round_glows(const std::vector<opennova::world::RoundGlowRow> &p_rows) {
+	HashSet<int64_t> seen;
+	for (const opennova::world::RoundGlowRow &row : p_rows) {
+		const int64_t id = static_cast<int64_t>(row.id);
 		seen.insert(id);
-		const float radius = row->get_radius();
-		const Vector3 pos = row->get_pos();
+		const float radius = row.radius;
+		// Mission (x, y, z-up) -> Godot (x, z, -y), the presentation drains' rule.
+		const Vector3 pos = mission_to_godot(row.pos);
 		const int64_t *cached = round_handles_.getptr(id);
 		if (cached == nullptr || *cached == 0) {
 			// The spawn rides radius/2 above the round; the per-tick follow
@@ -890,7 +901,7 @@ void EffectLightDirector::sync_round_glows(const Array &p_rows) {
 			// round-glow law.
 			const int64_t handle = scene()->spawn_glow(
 					GlowSpawn::make(pos + Vector3(0.0f, opennova::renderer::round_glow_spawn_lift(radius), 0.0f),
-							radius, row->get_color())
+							radius, opennova::color_from_rgb24(row.color_rgb24))
 							->masking(false, true, false));
 			if (handle != 0) {
 				round_handles_.insert(id, handle);
@@ -945,7 +956,8 @@ void EffectLightDirector::_bind_methods() {
 			&EffectLightDirector::on_impact_light);
 	ClassDB::bind_method(D_METHOD("on_death_light", "world_pos", "radius"),
 			&EffectLightDirector::on_death_light);
-	ClassDB::bind_method(D_METHOD("sync_round_glows", "rows"), &EffectLightDirector::sync_round_glows);
+	ClassDB::bind_method(D_METHOD("sync_round_glows", "rows"),
+			&EffectLightDirector::sync_round_glow_records);
 	ClassDB::bind_method(D_METHOD("get_report"), &EffectLightDirector::get_report);
 	ClassDB::bind_method(D_METHOD("_on_wire_node_exiting", "node_id"),
 			&EffectLightDirector::_on_wire_node_exiting);

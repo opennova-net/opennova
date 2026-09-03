@@ -11,6 +11,8 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -26,6 +28,7 @@
 namespace godot {
 
 class HudDrawListStats;
+class RtxtStringFile;
 class Simulation;
 class VehicleHudBlock;
 
@@ -155,21 +158,35 @@ public:
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);
 	void clear_waypoint();
-	void set_objectives(const PackedStringArray &p_texts,
-			const PackedByteArray &p_done);
-	void set_attach_labels(const PackedVector2Array &p_screens,
-			const PackedStringArray &p_texts, const PackedByteArray &p_nearest);
-	// The projected friendly tags (D-HUD-20): parallel typed arrays; the
-	// flags word's layout is hud/friendly_tag_flags.h (medic, speaking,
-	// player-slot entry, dead, has a connection slot, medic request standing,
-	// bits 8..15 = the slot's revive countdown in seconds — retail PlayerSlot
-	// +0x10 / +0x2C, the downed legs of the drawer), packed by the Simulation's
-	// get_friendly_tags feed.
-	void set_friendly_tags(const PackedVector2Array &p_screens,
-			const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
-			const PackedInt32Array &p_entity_ids,
-			const PackedInt32Array &p_health_ratios_fp16,
-			const PackedInt32Array &p_flags);
+	// The objectives panel: the sim's shown win-condition rows resolved
+	// through the mission text table (Simulation::fill_objectives); hidden,
+	// or no sim, clears the panel — the retail toggle's off state.
+	void set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
+			const Ref<Simulation> &p_sim);
+	// The floating attach labels: the sim's selection (distance/LOS/occupancy/
+	// nearest, armory-zone mode; Simulation::fill_attach_labels) projected
+	// through the play camera (its global transform + projection) to overlay
+	// pixels, each with its label text resolved in the gametext table's
+	// Overlays section. Behind-camera points drop at projection, mirroring
+	// the frustum clip.
+	void set_attach_labels(const Transform3D &p_camera_xform,
+			const Projection &p_camera_projection, const Ref<RtxtStringFile> &p_gametext,
+			const Ref<Simulation> &p_sim);
+	// The read seams over the projected labels (tests and probes): the count,
+	// the index of the full-bright nearest label (-1 = none) and a label's
+	// resolved text.
+	int get_attach_label_count() const;
+	int get_attach_label_selected() const;
+	String get_attach_label_text(int p_index) const;
+	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
+	// (Simulation::fill_friendly_tags) lifted, projected through the play
+	// camera with its view distance and fed to the compiler's element; the
+	// environment's live fog distance rides along for the fog cull (the
+	// speaking level stays the dialog-channel follow-up). `shown` false, no
+	// sim, or the OFF mode clears the tags.
+	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
+			const Projection &p_camera_projection, float p_fog_distance_units,
+			const Ref<Simulation> &p_sim);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {

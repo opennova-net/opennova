@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <runtime/hud/hud_scoreboard.h>
@@ -44,5 +45,17 @@ ClientScoreboardHeader scoreboard_header(const ClientState &state);
 
 // (The game-type label rung lives with the rest of the game-type key maps:
 // npwire game_type.h overlay_label_key [orig: @0x5b8680].)
+
+
+// The Tab-board header as the shell needs it: the projection's counts plus
+// the session game type and names (joiner-decoded, empty on a host until the
+// host sessionvars are plumbed, D-HUD-24). One value the embedder fills; its
+// Godot record wraps it by value (ADR 0043 d10).
+struct ClientScoreboardSession {
+	ClientScoreboardHeader header;
+	uint32_t game_type = 0;
+	std::string server_name;
+	std::string mission_name;
+};
 
 } // namespace opennova::replication

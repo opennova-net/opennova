@@ -92,19 +92,17 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	statics_in.local_mounted = kernel_->local.view.mount.control_seat;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
+	opennova::world::DeployScreenStatus v;
+	v.penalty_seconds = penalty;
+	v.revive_seconds = revive;
+	v.hold_seconds = hold;
+	v.line = line;
+	v.statics = statics;
+	v.medic_cooldown_ticks = kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0;
+	v.medic_request_serial = kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0;
 	Ref<DeployStatus> out;
 	out.instantiate();
-	out->set_penalty_seconds(penalty);
-	out->set_revive_seconds(revive);
-	out->set_hold_seconds(hold);
-	out->set_queued_kind(static_cast<int>(line.kind));
-	out->set_queued_zone_index(static_cast<int>(line.zone_index));
-	out->set_queued_seconds(static_cast<int>(line.seconds));
-	out->set_queued_numbered(line.numbered);
-	out->set_show_psp_respawn(statics.psp_respawn);
-	out->set_show_medic(statics.medic);
-	out->set_medic_cooldown_ticks(kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0);
-	out->set_medic_request_serial(kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0);
+	out->assign(v);
 	return out;
 }
 
@@ -114,11 +112,7 @@ String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext)
 	// resolved here (GameText_GetString("Overlays", "STROVER_PENALTYTIMER") /
 	// ("WPNames", "STRWPNAME%03d") @0x5536a0, their shipped fallbacks).
 	const Ref<DeployStatus> status = get_deploy_status();
-	opennova::world::DeployStatusLine line;
-	line.kind = static_cast<opennova::world::DeployStatusLine::Kind>(status->get_queued_kind());
-	line.seconds = status->get_queued_seconds();
-	line.numbered = status->get_queued_numbered();
-	line.zone_index = status->get_queued_zone_index();
+	const opennova::world::DeployStatusLine &line = status->value().line;
 	auto game_text = [&p_gametext](const char *section, const String &key, const char *fallback) {
 		if (!p_gametext.is_null() && p_gametext->has_string_in_section(section, StringName(key)))
 			return p_gametext->get_string_in_section(section, StringName(key));
@@ -157,8 +151,7 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 	for (const opennova::world::DeployListRow &row : opennova::world::build_deploy_rows(in)) {
 		Ref<DeployListRow> record;
 		record.instantiate();
-		record->set_text(String::utf8(row.text.c_str()));
-		record->set_value(row.value);
+		record->assign(row);
 		out.push_back(record);
 	}
 	return out;

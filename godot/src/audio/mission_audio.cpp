@@ -9,6 +9,7 @@
 #include "object/item_records.h"
 #include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
+#include "util/axes.h"
 #include "simulation/simulation.h"
 
 #include <godot_cpp/classes/audio_effect.hpp>
@@ -84,8 +85,6 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_perf_counters"), &MissionAudio::get_perf_counters);
 	ClassDB::bind_method(D_METHOD("get_bank"), &MissionAudio::get_bank);
 	ClassDB::bind_method(D_METHOD("apply_sound_emitters", "events"), &MissionAudio::apply_sound_emitters);
-	ClassDB::bind_method(D_METHOD("play_weather_sounds", "events", "camera_xform"),
-			&MissionAudio::play_weather_sounds);
 	ClassDB::bind_method(D_METHOD("fire_soundset", "name", "world_pos", "source_bms_id"),
 			&MissionAudio::fire_soundset, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("ui_soundset", "name"), &MissionAudio::ui_soundset);
@@ -427,29 +426,36 @@ Ref<MissionAudioPerf> MissionAudio::get_perf_counters() const {
 }
 
 void MissionAudio::apply_sound_emitters(const Array &p_events) {
-	if (mixer_.is_null() || bank_.is_null()) {
-		return;
-	}
+	std::vector<opennova::world::SoundEmitterEvent> events;
+	events.reserve(static_cast<size_t>(p_events.size()));
 	for (int64_t i = 0; i < p_events.size(); ++i) {
 		const Ref<SoundEmitterRow> event = p_events[i];
 		if (event.is_valid()) {
-			queued_sound_emitters_.push_back(event);
+			events.push_back(event->value());
 		}
 	}
+	apply_sound_emitter_events(events);
 }
 
-void MissionAudio::play_weather_sounds(const Array &p_events, const Transform3D &p_camera_xform) {
-	if (p_events.is_empty() || bank_.is_null() || !root_attached_) {
+void MissionAudio::apply_sound_emitter_events(
+		const std::vector<opennova::world::SoundEmitterEvent> &p_events) {
+	if (mixer_.is_null() || bank_.is_null()) {
+		return;
+	}
+	queued_sound_emitters_.insert(queued_sound_emitters_.end(), p_events.begin(), p_events.end());
+}
+
+void MissionAudio::play_weather_sounds(
+		const std::vector<opennova::world::WeatherSoundEvent> &p_events,
+		const Transform3D &p_camera_xform) {
+	if (p_events.empty() || bank_.is_null() || !root_attached_) {
 		return;
 	}
 	const Vector3 forward = -p_camera_xform.basis.get_column(2);
-	for (int64_t i = 0; i < p_events.size(); ++i) {
-		const Ref<WeatherSoundRow> event = p_events[i];
-		if (event.is_null()) {
-			continue;
-		}
-		const double distance = event->get_distance();
-		const int bearing = event->get_bearing();
+	for (const opennova::world::WeatherSoundEvent &event : p_events) {
+		// The listener-relative distance (16.16) and the 8-bit-turn bearing.
+		const double distance = static_cast<double>(event.distance_q16) / 65536.0;
+		const int bearing = static_cast<int>(event.bearing);
 		const Vector3 dir = forward.rotated(Vector3(0.0f, 1.0f, 0.0f),
 				static_cast<real_t>(static_cast<double>(bearing) * Math_TAU / kBearingBam8Turn));
 		const Vector3 pos = p_camera_xform.origin + dir * static_cast<real_t>(distance);
@@ -961,21 +967,18 @@ void MissionAudio::_feed_mixer() {
 // alive; retired IDs are recycled only after no physical channel still carries
 // them, keeping the native row identity exact for long missions.
 void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
-	if (mixer_.is_null() || bank_.is_null() || queued_sound_emitters_.is_empty()) {
+	if (mixer_.is_null() || bank_.is_null() || queued_sound_emitters_.empty()) {
 		return;
 	}
-	std::vector<Ref<SoundEmitterRow>> pending;
-	pending.reserve(static_cast<size_t>(queued_sound_emitters_.size()));
-	for (const Ref<SoundEmitterRow> &event : queued_sound_emitters_) {
-		pending.push_back(event);
-	}
-	queued_sound_emitters_.clear();
+	std::vector<opennova::world::SoundEmitterEvent> pending;
+	pending.swap(queued_sound_emitters_);
 	std::stable_sort(pending.begin(), pending.end(),
-			[](const Ref<SoundEmitterRow> &a, const Ref<SoundEmitterRow> &b) {
-				return a->get_emitted_tick() < b->get_emitted_tick();
+			[](const opennova::world::SoundEmitterEvent &a,
+					const opennova::world::SoundEmitterEvent &b) {
+				return a.emitted_tick < b.emitted_tick;
 			});
-	for (const Ref<SoundEmitterRow> &event : pending) {
-		int64_t event_tick = event->get_emitted_tick();
+	for (const opennova::world::SoundEmitterEvent &event : pending) {
+		int64_t event_tick = static_cast<int64_t>(event.emitted_tick);
 		if (world_driven_ticks_) {
 			event_tick += world_driven_tick_offset_;
 		}
@@ -983,15 +986,17 @@ void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
 		if (event_tick > mixer_->clock_tick()) {
 			mixer_->advance_to_tick(event_tick);
 		}
-		const int64_t source_spawn_id = event->get_source_spawn_id();
-		const int lane = event->get_lane();
+		const int64_t source_spawn_id = static_cast<int64_t>(event.source_spawn_id);
+		const int lane = static_cast<int>(event.lane);
 		const String key = dynamic_emitter_key(source_spawn_id, lane);
-		const Vector3 pos = event->get_pos();
-		const int source_bms_id = event->get_source_bms_id();
-		const int lifetime = MAX(1, event->get_lifetime());
-		const int pitch_q16 = event->get_pitch_q16();
-		const int volume_q8_8 = event->get_volume_q8_8();
-		if (event->get_source_only()) {
+		// Mission coordinates -> Godot (x, z, -y), matching every other
+		// positional presentation drain.
+		const Vector3 pos = mission_to_godot(event.pos);
+		const int source_bms_id = static_cast<int>(event.source_bms_id);
+		const int lifetime = MAX(1, static_cast<int>(event.lifetime_ticks));
+		const int pitch_q16 = static_cast<int>(event.pitch_q16);
+		const int volume_q8_8 = static_cast<int>(event.volume_q8_8);
+		if (event.source_only) {
 			mixer_->update_emitter_source(source_spawn_id, pos, source_bms_id);
 			continue;
 		}
@@ -1002,7 +1007,7 @@ void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
 			continue;
 		}
 
-		const String set_name = event->get_soundset();
+		const String set_name = String::utf8(event.set_name.c_str());
 		if (set_name.is_empty()) {
 			continue;
 		}

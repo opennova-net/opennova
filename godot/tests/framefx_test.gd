@@ -716,13 +716,13 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	assert_eq(mission.create_default(), OK)
 	var record := mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3.ZERO, Vector3.ZERO)
-	assert_false(record.is_empty())
+	assert_not_null(record)
 	# A second bulb in the same 512-unit bin keeps the population live after
 	# the carve below: the dense populations hide an emptied level, and a
 	# hidden population is (rightly) never compiled or re-read.
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3(2.0, 0.0, 0.0),
-			Vector3.ZERO).is_empty())
+			Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(PLACER_ITEMS_DEF)), OK)
 	var root := ResourceRoot.new()
@@ -772,7 +772,7 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 
 	# The destruction carve rewrites the population's rows through the
 	# production path (the RLOD switch shares _write_static_instance_slots).
-	var bms_id := int(record.get("bms_id", 0))
+	var bms_id := record.bms_id
 	assert_true(placer.hide_static_instance(bms_id) is Transform3D)
 	renderer.advance_frame()
 	var carved := renderer.get_backend_report()

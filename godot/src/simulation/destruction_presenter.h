@@ -17,12 +17,13 @@
 #include <cstdint>
 #include <vector>
 
+#include <runtime/world/destruction.h>
+#include <runtime/world/present_drains.h>
+
 #include "mission/mission_object_placer.h"
 #include "object/entity_index.h"
 #include "object/item_database.h"
 #include "object/object_model.h"
-#include "simulation/destruction_events.h"
-#include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "world/item_effect_director.h"
 
@@ -99,8 +100,8 @@ public:
 	void present();
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() drains the typed sim; tests feed the same event/piece rows.
-	void present_drained(const Ref<DestructionDrain> &p_events,
-			const TypedArray<DeathPieceRow> &p_pieces);
+	void present_drained(const opennova::world::DestructionEvents &p_events,
+			const std::vector<opennova::world::DeathPieceRow> &p_pieces);
 	// Whether an owned fire-family effect is still registered for retail wreck
 	// crackle updates. The owner key is the same public identity used by the
 	// effect-anchor registry.
@@ -156,14 +157,14 @@ private:
 	EffectWorld *fx() const;
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
-	void apply_husk_swap(const Ref<HuskSwapEvent> &p_husk);
+	void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
 	static bool node_has_static_shadow_caster(Node *p_root);
 	static void set_husk_static_shadow(ObjectModel *p_model, bool p_enabled);
 	Variant present_transform_for_identity(int p_bms_id, int64_t p_spawn_origin) const;
 	void sync_static_husks();
-	void apply_effect(const Ref<DestructionEffectEvent> &p_effect);
+	void apply_effect(const opennova::world::DestructionEffectEvent &p_effect);
 	void apply_sound(const String &p_name, const Vector3 &p_pos);
-	void present_pieces(const TypedArray<DeathPieceRow> &p_pieces);
+	void present_pieces(const std::vector<opennova::world::DeathPieceRow> &p_pieces);
 	void unregister_piece_anchor(int p_slot);
 	void unregister_effect_anchor(const Variant &p_key);
 	void tick_wreck_fires();

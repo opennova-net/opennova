@@ -241,7 +241,7 @@ private:
 	HashMap<int64_t, Transform3D> owner_pose_cache_;
 	// The one pose-update batch, cleared and refilled per push so the
 	// per-frame owner sync allocates nothing once warm.
-	Ref<EffectOwnerPoseBatch> owner_pose_batch_;
+	EffectOwnerPoseBatch owner_pose_batch_;
 	int64_t next_token_ = 1;
 };
 

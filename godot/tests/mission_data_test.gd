@@ -31,11 +31,11 @@ func test_mission_data_parses_header_and_entities() -> void:
 	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(buildings.size(), building_count, "get_entities count matches get_entity_count")
 
-	var first: Dictionary = buildings[0]
-	assert_true(first.has("item_id"), "entity dict exposes item_id")
-	assert_true(first.has("position"), "entity dict exposes position")
-	assert_typeof(first["position"], TYPE_VECTOR3, "position is a Vector3")
-	assert_typeof(first["rotation_deg"], TYPE_VECTOR3, "rotation_deg is a Vector3")
+	var first: MissionEntityRecord = buildings[0]
+	assert_true("item_id" in first, "entity record exposes item_id")
+	assert_true("position" in first, "entity record exposes position")
+	assert_typeof(first.position, TYPE_VECTOR3, "position is a Vector3")
+	assert_typeof(first.rotation_deg, TYPE_VECTOR3, "rotation_deg is a Vector3")
 
 	var total := m.get_entity_count(MissionData.KIND_ITEM) \
 		+ m.get_entity_count(MissionData.KIND_BUILDING) \
@@ -47,14 +47,14 @@ func test_mission_data_parses_header_and_entities() -> void:
 func test_get_entity_matches_the_scanned_entry() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var first: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	var index := int(first["index"])
+	var first: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	var index := first.index
 	var direct := m.get_entity(MissionData.KIND_BUILDING, index)
-	assert_eq(int(direct.get("index", -1)), index, "get_entity returns the entity at that index")
-	assert_eq(direct.get("position"), first.get("position"), "with the same position as the scanned entry")
-	assert_eq(int(direct.get("item_id", -1)), int(first.get("item_id", -2)), "and the same item_id")
-	assert_eq(m.get_entity(MissionData.KIND_BUILDING, 999999), {}, "an out-of-range index yields an empty dict")
-	assert_eq(m.get_entity(MissionData.KIND_BUILDING, -1), {}, "a negative index yields an empty dict")
+	assert_eq(direct.index, index, "get_entity returns the entity at that index")
+	assert_eq(direct.position, first.position, "with the same position as the scanned entry")
+	assert_eq(direct.item_id, first.item_id, "and the same item_id")
+	assert_null(m.get_entity(MissionData.KIND_BUILDING, 999999), "an out-of-range index yields null")
+	assert_null(m.get_entity(MissionData.KIND_BUILDING, -1), "a negative index yields null")
 
 
 func test_item_database_loads_and_handles_missing() -> void:
@@ -171,7 +171,7 @@ func test_entities_resolve_to_models() -> void:
 
 	var resolved := 0
 	for e in m.get_all_entities():
-		var id: int = e["item_id"]
+		var id: int = e.item_id
 		if db.has_item(id) and not db.get_graphic(id).is_empty():
 			resolved += 1
 	assert_gt(resolved, 0, "the item_id -> items.def graphic chain resolves real placements")
@@ -199,11 +199,11 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 
 	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 1, "need at least two buildings to check a neighbor")
-	var target: Dictionary = buildings[0]
-	var neighbor_before: Vector3 = buildings[1]["position"]
-	var kind := int(target["kind"])
-	var index := int(target["index"])
-	var rotation: Vector3 = target["rotation_deg"]
+	var target: MissionEntityRecord = buildings[0]
+	var neighbor_before: Vector3 = buildings[1].position
+	var kind := target.kind
+	var index := target.index
+	var rotation: Vector3 = target.rotation_deg
 	var new_pos := Vector3(123.0, 45.0, -67.0)
 
 	assert_true(m.set_entity_transform(kind, index, new_pos, rotation), "moving a valid entity succeeds")
@@ -218,12 +218,12 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 	var b2 := reopened.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(b2.size(), buildings.size(), "entity count is unchanged by an in-place move")
 
-	var moved: Vector3 = b2[0]["position"]
+	var moved: Vector3 = b2[0].position
 	assert_almost_eq(moved.x, new_pos.x, 0.02, "moved entity keeps its new X")
 	assert_almost_eq(moved.y, new_pos.y, 0.02, "moved entity keeps its new Y")
 	assert_almost_eq(moved.z, new_pos.z, 0.02, "moved entity keeps its new Z")
 
-	var neighbor_after: Vector3 = b2[1]["position"]
+	var neighbor_after: Vector3 = b2[1].position
 	assert_almost_eq(neighbor_after.x, neighbor_before.x, 0.02, "untouched neighbor X is unchanged")
 	assert_almost_eq(neighbor_after.y, neighbor_before.y, 0.02, "untouched neighbor Y is unchanged")
 	assert_almost_eq(neighbor_after.z, neighbor_before.z, 0.02, "untouched neighbor Z is unchanged")
@@ -231,19 +231,17 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 	DirAccess.remove_absolute(tmp)
 
 
-# Guards the undo/redo rebake heuristic: object_records_revision() (and the structure_fingerprint
-# it feeds) must move for placed-object edits and stay put for non-object edits, so the controller
-# re-bakes the ~1600-node world only when an object actually changed and otherwise just refreshes the
-# overlay.
-func test_object_records_revision_and_fingerprint_track_placed_objects() -> void:
+# Guards the undo/redo rebake heuristic: object_records_revision() (beside the
+# event / zone counts the editor captures before a restore) must move for
+# placed-object edits and stay put for non-object edits, so the controller
+# re-bakes the ~1600-node world only when an object actually changed and
+# otherwise just refreshes the overlay.
+func test_object_records_revision_tracks_placed_objects() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 
 	var rev0 := m.object_records_revision()
-	var fp0 := m.structure_fingerprint()
-	assert_true(fp0.has("events") and fp0.has("zones") and fp0.has("object_rev"),
-		"structure_fingerprint exposes events / zones / object_rev")
-	assert_eq(int(fp0["object_rev"]), rev0, "the fingerprint's object_rev mirrors object_records_revision")
+	var events0 := m.get_event_count()
 
 	# A non-object edit (the mission header) must NOT move the placed-object revision -- this is what
 	# lets an undo/redo of header / event / zone data skip re-baking the world.
@@ -252,18 +250,19 @@ func test_object_records_revision_and_fingerprint_track_placed_objects() -> void
 
 	# A zone edit moves the zone count in the fingerprint but still leaves object_rev alone (area
 	# triggers are not placed objects), so a zone undo takes the lightweight overlay-only path.
-	var zones0 := int(m.structure_fingerprint()["zones"])
+	var zones0 := m.get_area_trigger_count()
 	var zone := m.add_area_trigger(Vector3(-1, -1, -1), Vector3(1, 1, 1), true, false, 0)
-	assert_false(zone.is_empty(), "a zone is added")
-	assert_eq(int(m.structure_fingerprint()["zones"]), zones0 + 1, "the zone count moves in the fingerprint")
+	assert_not_null(zone, "a zone is added")
+	assert_eq(m.get_area_trigger_count(), zones0 + 1, "the zone count moves")
+	assert_eq(m.get_event_count(), events0, "adding a zone leaves the event count alone")
 	assert_eq(m.object_records_revision(), rev0, "adding a zone does not move the object revision")
 
 	# An object edit (moving a placed entity) MUST move the revision -> a full re-bake on undo/redo.
 	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 0, "need a building to move")
-	var b: Dictionary = buildings[0]
-	assert_true(m.set_entity_transform(int(b["kind"]), int(b["index"]),
-		Vector3(10.0, 20.0, 30.0), b["rotation_deg"]), "moving a building applies")
+	var b: MissionEntityRecord = buildings[0]
+	assert_true(m.set_entity_transform(b.kind, b.index,
+		Vector3(10.0, 20.0, 30.0), b.rotation_deg), "moving a building applies")
 	assert_ne(m.object_records_revision(), rev0, "moving a placed entity moves the object revision")
 
 
@@ -325,8 +324,8 @@ func test_save_without_edits_is_non_destructive() -> void:
 	var after := reopened.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(after.size(), before.size(), "save->reload preserves the entity set")
 	for i in before.size():
-		var p0: Vector3 = before[i]["position"]
-		var p1: Vector3 = after[i]["position"]
+		var p0: Vector3 = before[i].position
+		var p1: Vector3 = after[i].position
 		assert_almost_eq(p1.x, p0.x, 0.02, "building %d X round-trips" % i)
 		assert_almost_eq(p1.y, p0.y, 0.02, "building %d Y round-trips" % i)
 		assert_almost_eq(p1.z, p0.z, 0.02, "building %d Z round-trips" % i)
@@ -365,55 +364,55 @@ const _OTHER_PROPERTY_KEYS := [
 ]
 
 
-func _entity(m: MissionData, kind: int, index: int) -> Dictionary:
+func _entity(m: MissionData, kind: int, index: int) -> MissionEntityRecord:
 	for e in m.get_entities(kind):
-		if int((e as Dictionary)["index"]) == index:
+		if e.index == index:
 			return e
-	return {}
+	return null
 
 
 func test_set_entity_property_int_team_preserves_other_fields() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	var index := int(before["index"])
+	var before: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	var index := before.index
 
-	var new_team := int(before.get("team", 0)) + 1
+	var new_team := before.team + 1
 	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "team", new_team),
 		"editing team on a valid entity succeeds")
 	assert_true(m.is_modified(), "a property edit sets the modified flag")
 
 	var after := _entity(m, MissionData.KIND_BUILDING, index)
-	assert_eq(int(after["team"]), new_team, "team takes the new value")
-	assert_eq(int(after["group"]), int(before["group"]), "group is left untouched by a team edit")
+	assert_eq(after.team, new_team, "team takes the new value")
+	assert_eq(after.group, before.group, "group is left untouched by a team edit")
 	for key in _OTHER_PROPERTY_KEYS:
-		assert_eq(after[key], before[key], "%s is preserved through a team-only edit" % key)
+		assert_eq(after.get(key), before.get(key), "%s is preserved through a team-only edit" % key)
 
 
 func test_set_entity_property_int_group_roundtrips() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	var index := int(before["index"])
+	var before: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	var index := before.index
 
-	var new_group := int(before.get("group", 0)) + 3
+	var new_group := before.group + 3
 	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "group", new_group))
 	var after := _entity(m, MissionData.KIND_BUILDING, index)
-	assert_eq(int(after["group"]), new_group, "group takes the new value")
-	assert_eq(int(after["team"]), int(before["team"]), "team is left untouched by a group edit")
+	assert_eq(after.group, new_group, "group takes the new value")
+	assert_eq(after.team, before.team, "team is left untouched by a group edit")
 
 
 func test_set_entity_property_int_persists_through_save_reload() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var index := int(m.get_entities(MissionData.KIND_BUILDING)[0]["index"])
+	var index := int(m.get_entities(MissionData.KIND_BUILDING)[0].index)
 	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "team", 4))
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
 	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
-	assert_eq(int(_entity(reopened, MissionData.KIND_BUILDING, index)["team"]), 4,
+	assert_eq(int(_entity(reopened, MissionData.KIND_BUILDING, index).team), 4,
 		"an edited team survives the byte-faithful save and reload")
 	DirAccess.remove_absolute(tmp)
 
@@ -450,26 +449,26 @@ func test_set_entity_property_int_supports_behavior_fields() -> void:
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var kind := _kind_with_entities(m)
 	for prop in _BEHAVIOR_PROPERTY_KEYS:
-		var before: Dictionary = m.get_entities(kind)[0]
-		var index := int(before["index"])
-		var target := int(before.get(prop, 0)) + 1
+		var before: MissionEntityRecord = m.get_entities(kind)[0]
+		var index := before.index
+		var target := int(before.get(prop)) + 1
 		assert_true(m.set_entity_property_int(kind, index, prop, target),
 			"%s is an editable property" % prop)
 		var after := _entity(m, kind, index)
-		assert_eq(int(after[prop]), target, "%s takes its new value" % prop)
+		assert_eq(int(after.get(prop)), target, "%s takes its new value" % prop)
 		# Every OTHER editable field is preserved by this single-field write.
-		assert_eq(int(after["team"]), int(before["team"]), "team preserved through a %s edit" % prop)
-		assert_eq(int(after["group"]), int(before["group"]), "group preserved through a %s edit" % prop)
+		assert_eq(after.team, before.team, "team preserved through a %s edit" % prop)
+		assert_eq(after.group, before.group, "group preserved through a %s edit" % prop)
 		for other in _BEHAVIOR_PROPERTY_KEYS:
 			if other != prop:
-				assert_eq(int(after[other]), int(before[other]), "%s preserved through a %s edit" % [other, prop])
+				assert_eq(int(after.get(other)), int(before.get(other)), "%s preserved through a %s edit" % [other, prop])
 
 
 func test_set_entity_property_int_behavior_field_persists_through_save_reload() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var kind := _kind_with_entities(m)
-	var index := int(m.get_entities(kind)[0]["index"])
+	var index := int(m.get_entities(kind)[0].index)
 	assert_true(m.set_entity_property_int(kind, index, "waypoint_id", 5),
 		"a unit can be assigned to a waypoint path")
 
@@ -477,7 +476,7 @@ func test_set_entity_property_int_behavior_field_persists_through_save_reload() 
 	assert_eq(m.save_as(tmp), OK)
 	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
-	assert_eq(int(_entity(reopened, kind, index)["waypoint_id"]), 5,
+	assert_eq(int(_entity(reopened, kind, index).waypoint_id), 5,
 		"the waypoint assignment survives the byte-faithful save and reload")
 	DirAccess.remove_absolute(tmp)
 
@@ -505,16 +504,16 @@ func test_add_entity_appends_and_returns_the_new_record() -> void:
 
 	var pos := Vector3(111.0, 22.0, -33.0)
 	var record := m.add_entity(MissionData.KIND_BUILDING, 102001, pos, Vector3.ZERO)
-	assert_false(record.is_empty(), "add_entity returns the new record")
+	assert_not_null(record, "add_entity returns the new record")
 	assert_true(m.is_modified(), "adding an entity dirties the document")
 	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1, "the kind's count grows by one")
-	assert_eq(int(record["index"]), before, "the new entity is appended at the end of its list")
-	assert_eq(int(record["item_id"]), 102001, "the record carries the placed item id")
-	assert_eq(int(record["kind"]), MissionData.KIND_BUILDING, "the record carries the requested kind")
+	assert_eq(record.index, before, "the new entity is appended at the end of its list")
+	assert_eq(record.item_id, 102001, "the record carries the placed item id")
+	assert_eq(record.kind, MissionData.KIND_BUILDING, "the record carries the requested kind")
 
 	var fetched := m.get_entity(MissionData.KIND_BUILDING, before)
-	assert_eq(int(fetched.get("item_id", -1)), 102001, "get_entity finds the appended entity")
-	var fp: Vector3 = fetched["position"]
+	assert_eq(fetched.item_id, 102001, "get_entity finds the appended entity")
+	var fp: Vector3 = fetched.position
 	assert_almost_eq(fp.x, pos.x, 0.02, "stored X matches what was placed")
 	assert_almost_eq(fp.y, pos.y, 0.02, "stored Y matches what was placed")
 	assert_almost_eq(fp.z, pos.z, 0.02, "stored Z matches what was placed")
@@ -525,7 +524,7 @@ func test_add_entity_persists_through_save_reload() -> void:
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var before := m.get_entity_count(MissionData.KIND_ITEM)
 	var record := m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(7.0, 8.0, 9.0), Vector3(0, 90, 0))
-	var new_index := int(record["index"])
+	var new_index := record.index
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK, "the mission with a new entity saves")
@@ -533,16 +532,15 @@ func test_add_entity_persists_through_save_reload() -> void:
 	assert_eq(reopened.open_file(tmp), OK, "and reopens")
 	assert_eq(reopened.get_entity_count(MissionData.KIND_ITEM), before + 1, "the added entity survives save+reload")
 	var roundtripped := reopened.get_entity(MissionData.KIND_ITEM, new_index)
-	assert_eq(int(roundtripped.get("item_id", -1)), 101291, "the placed item id round-trips")
-	var rot: Vector3 = roundtripped["rotation_deg"]
+	assert_eq(roundtripped.item_id, 101291, "the placed item id round-trips")
+	var rot: Vector3 = roundtripped.rotation_deg
 	assert_almost_eq(rot.y, 90.0, 0.5, "the placed yaw round-trips (rounded to integer degrees)")
 	DirAccess.remove_absolute(tmp)
 
 
 func test_add_entity_without_a_mission_is_rejected() -> void:
 	var m := MissionData.new()  # never opened -> no document loaded
-	assert_eq(m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO), {},
-		"adding to an unloaded mission returns an empty dict")
+	assert_null(m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO), "adding to an unloaded mission returns an empty dict")
 	assert_false(m.is_modified(), "a rejected add does not dirty the document")
 
 
@@ -581,16 +579,16 @@ func test_remove_entity_drops_count_and_reindexes() -> void:
 
 	# Capture the entity at index 1: after removing index 0 it must shift down to index 0,
 	# carrying its own data (so the removal is not just a truncation of the last element).
-	var was_at_1_item: int = int(buildings[1]["item_id"])
-	var was_at_1_pos: Vector3 = buildings[1]["position"]
+	var was_at_1_item: int = int(buildings[1].item_id)
+	var was_at_1_pos: Vector3 = buildings[1].position
 
 	assert_true(m.remove_entity(MissionData.KIND_BUILDING, 0), "removing a valid entity succeeds")
 	assert_true(m.is_modified(), "a removal dirties the document")
 	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), buildings.size() - 1, "the kind's count drops by one")
 
 	var new_first := m.get_entity(MissionData.KIND_BUILDING, 0)
-	assert_eq(int(new_first["item_id"]), was_at_1_item, "the entity at index 1 shifted down into index 0")
-	var np: Vector3 = new_first["position"]
+	assert_eq(new_first.item_id, was_at_1_item, "the entity at index 1 shifted down into index 0")
+	var np: Vector3 = new_first.position
 	assert_almost_eq(np.x, was_at_1_pos.x, 0.02, "the shifted entity kept its X position")
 	assert_almost_eq(np.z, was_at_1_pos.z, 0.02, "the shifted entity kept its Z position")
 
@@ -637,15 +635,15 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 		if entities.is_empty():
 			continue
 		covered += 1
-		var before: Dictionary = entities[0]
-		var index := int(before["index"])
-		assert_true(m.set_entity_property_int(kind, index, "group", int(before.get("group", 0)) + 1),
+		var before: MissionEntityRecord = entities[0]
+		var index := before.index
+		assert_true(m.set_entity_property_int(kind, index, "group", before.group + 1),
 			"editing group on kind %d succeeds" % kind)
 		var after := _entity(m, kind, index)
-		assert_eq(int(after["group"]), int(before["group"]) + 1, "group updates on kind %d" % kind)
-		assert_eq(int(after["team"]), int(before["team"]), "team untouched on kind %d" % kind)
+		assert_eq(after.group, before.group + 1, "group updates on kind %d" % kind)
+		assert_eq(after.team, before.team, "team untouched on kind %d" % kind)
 		for key in _OTHER_PROPERTY_KEYS:
-			assert_eq(after[key], before[key], "%s preserved on kind %d" % [key, kind])
+			assert_eq(after.get(key), before.get(key), "%s preserved on kind %d" % [key, kind])
 	# The fixture is expected to place items and/or organics; flag if neither resolved so
 	# this guard never silently degrades to a no-op.
 	assert_gt(covered, 0, "the fixture provides at least one item or organic to exercise")
@@ -659,8 +657,8 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 
 func _first_empty_waypoint_path(m: MissionData) -> int:
 	for s in m.get_waypoint_summaries():
-		if int((s as Dictionary)["marker_count"]) == 0:
-			return int((s as Dictionary)["index"])
+		if s.marker_count == 0:
+			return s.index
 	return -1
 
 
@@ -668,7 +666,7 @@ func _any_marker_item_id(m: MissionData) -> int:
 	# Reuse a real marker's item id when the fixture has markers; otherwise any id works
 	# (the lib stores it without validating against items.def).
 	var markers := m.get_entities(MissionData.KIND_MARKER)
-	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
+	return int(markers[0].item_id) if not markers.is_empty() else 100001
 
 
 func test_get_waypoint_summaries_enumerates_all_paths() -> void:
@@ -677,7 +675,7 @@ func test_get_waypoint_summaries_enumerates_all_paths() -> void:
 	var summaries := m.get_waypoint_summaries()
 	assert_eq(summaries.size(), 128, "a mission has 128 fixed waypoint records")
 	for s in summaries:
-		assert_true((s as Dictionary).has("index") and (s as Dictionary).has("marker_count"),
+		assert_true("index" in s and "marker_count" in s,
 			"each summary carries index + marker_count")
 
 
@@ -690,11 +688,11 @@ func test_add_waypoint_marker_creates_marker_and_links_it() -> void:
 	assert_false(m.is_modified(), "a freshly opened mission is not modified")
 
 	var result := m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(5, 1, -5), Vector3.ZERO, -1)
-	assert_false(result.is_empty(), "add_waypoint_marker returns the new marker + path")
-	assert_true(result.has("marker") and result.has("path"), "the result carries both halves")
+	assert_not_null(result, "add_waypoint_marker returns the new marker + path")
+	assert_true("marker" in result and "path" in result, "the result carries both halves")
 	assert_eq(m.get_entity_count(MissionData.KIND_MARKER), markers_before + 1,
 		"one marker entity was created (no separate add_entity needed)")
-	assert_eq(int((result["path"] as Dictionary)["marker_count"]), 1, "the path now references one marker")
+	assert_eq(int(result.path.marker_count), 1, "the path now references one marker")
 	assert_true(m.is_modified(), "authoring a marker dirties the document")
 
 
@@ -709,7 +707,7 @@ func test_add_waypoint_marker_round_trips_through_save_reload() -> void:
 	assert_eq(m.save_as(tmp), OK)
 	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
-	assert_eq(int(reopened.get_waypoint_path(path_index)["marker_count"]), 1,
+	assert_eq(int(reopened.get_waypoint_path(path_index).marker_count), 1,
 		"the authored marker survives save+reload")
 	DirAccess.remove_absolute(tmp)
 
@@ -722,18 +720,18 @@ func test_set_waypoint_path_reorders_and_flags() -> void:
 	var mid := _any_marker_item_id(m)
 	m.add_waypoint_marker(path_index, mid, Vector3(1, 0, -1), Vector3.ZERO, -1)
 	var second := m.add_waypoint_marker(path_index, mid, Vector3(2, 0, -2), Vector3.ZERO, -1)
-	var indices: PackedInt32Array = (second["path"] as Dictionary)["marker_indices"]
+	var indices: PackedInt32Array = second.path.marker_indices
 	assert_eq(indices.size(), 2, "the path has two markers to reorder")
 
 	var reversed := PackedInt32Array([indices[1], indices[0]])
 	assert_true(m.set_waypoint_path(path_index, reversed, MissionData.WP_FLAG_DOES_NOT_LOOP),
 		"set_waypoint_path accepts a reordered list + flags")
 	var after := m.get_waypoint_path(path_index)
-	var after_indices: PackedInt32Array = after["marker_indices"]
+	var after_indices: PackedInt32Array = after.marker_indices
 	assert_eq(after_indices[0], indices[1], "the order was reversed")
-	assert_eq(int(after["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP, MissionData.WP_FLAG_DOES_NOT_LOOP,
+	assert_eq(int(after.flags) & MissionData.WP_FLAG_DOES_NOT_LOOP, MissionData.WP_FLAG_DOES_NOT_LOOP,
 		"the DoesNotLoop flag was set")
-	assert_eq(int(after["marker_count"]), 2, "reorder does not change the marker count")
+	assert_eq(after.marker_count, 2, "reorder does not change the marker count")
 
 
 func test_clear_waypoint_path_empties_it() -> void:
@@ -742,21 +740,20 @@ func test_clear_waypoint_path_empties_it() -> void:
 	var path_index := _first_empty_waypoint_path(m)
 	assert_true(path_index >= 0)
 	m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(1, 0, -1), Vector3.ZERO, -1)
-	assert_eq(int(m.get_waypoint_path(path_index)["marker_count"]), 1, "precondition: the path has a marker")
+	assert_eq(int(m.get_waypoint_path(path_index).marker_count), 1, "precondition: the path has a marker")
 
 	assert_true(m.clear_waypoint_path(path_index), "clearing a path succeeds")
-	assert_eq(int(m.get_waypoint_path(path_index)["marker_count"]), 0, "the path is now empty")
+	assert_eq(int(m.get_waypoint_path(path_index).marker_count), 0, "the path is now empty")
 
 
 func test_waypoint_methods_reject_out_of_range_paths() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_eq(m.get_waypoint_path(128), {}, "path index 128 is out of range (0..127)")
-	assert_eq(m.get_waypoint_path(-1), {}, "a negative path index is out of range")
+	assert_null(m.get_waypoint_path(128), "path index 128 is out of range (0..127)")
+	assert_null(m.get_waypoint_path(-1), "a negative path index is out of range")
 	assert_false(m.set_waypoint_path(128, PackedInt32Array(), 0), "set rejects an out-of-range path")
 	assert_false(m.clear_waypoint_path(-1), "clear rejects a negative path")
-	assert_eq(m.add_waypoint_marker(-1, _any_marker_item_id(m), Vector3.ZERO, Vector3.ZERO, -1), {},
-		"add_waypoint_marker rejects a negative path")
+	assert_null(m.add_waypoint_marker(-1, _any_marker_item_id(m), Vector3.ZERO, Vector3.ZERO, -1), "add_waypoint_marker rejects a negative path")
 
 
 # --- create_default (from-scratch) --------------------------------------------
@@ -837,23 +834,23 @@ func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
 
 # --- Phase 1: hidden entity fields + mission-header editing --------------------
 
-func test_entity_dictionary_exposes_hidden_fields() -> void:
+func test_entity_record_exposes_hidden_fields() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var e: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	assert_true(e.has("no_less_than"), "dict carries no_less_than (byte 75)")
-	assert_true(e.has("map_symbol"), "dict carries map_symbol (byte 81)")
-	assert_true(e.has("name1"), "dict carries name1 (AI class)")
-	assert_true(e.has("name2"), "dict carries name2 (AI script)")
-	assert_true(e.has("max_simultaneous"), "no_more_than stays exposed as max_simultaneous (byte 74)")
+	var e: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	assert_true("no_less_than" in e, "record carries no_less_than (byte 75)")
+	assert_true("map_symbol" in e, "record carries map_symbol (byte 81)")
+	assert_true("name1" in e, "record carries name1 (AI class)")
+	assert_true("name2" in e, "record carries name2 (AI script)")
+	assert_true("max_simultaneous" in e, "no_more_than stays exposed as max_simultaneous (byte 74)")
 
 
 func test_set_entity_property_string_round_trips_through_save_reload() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var target: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	var kind := int(target["kind"])
-	var index := int(target["index"])
+	var target: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	var kind := target.kind
+	var index := target.index
 	assert_true(m.set_entity_property_string(kind, index, "name1", "rifle"), "name1 write succeeds")
 	assert_true(m.set_entity_property_string(kind, index, "name2", "patrol"), "name2 write succeeds")
 	assert_false(m.set_entity_property_string(kind, index, "bogus", "x"), "unknown string property rejected")
@@ -861,22 +858,22 @@ func test_set_entity_property_string_round_trips_through_save_reload() -> void:
 	assert_eq(m.save_as(tmp), OK)
 	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
-	var e2: Dictionary = r.get_entity(kind, index)
-	assert_eq(String(e2["name1"]), "rifle", "name1 survives save/reload")
-	assert_eq(String(e2["name2"]), "patrol", "name2 survives save/reload")
+	var e2: MissionEntityRecord = r.get_entity(kind, index)
+	assert_eq(String(e2.name1), "rifle", "name1 survives save/reload")
+	assert_eq(String(e2.name2), "patrol", "name2 survives save/reload")
 
 
 func test_set_hidden_int_fields_round_trip() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var target: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
-	var kind := int(target["kind"])
-	var index := int(target["index"])
+	var target: MissionEntityRecord = m.get_entities(MissionData.KIND_BUILDING)[0]
+	var kind := target.kind
+	var index := target.index
 	assert_true(m.set_entity_property_int(kind, index, "no_less_than", 9))
 	assert_true(m.set_entity_property_int(kind, index, "map_symbol", 17))
-	var e2: Dictionary = m.get_entity(kind, index)
-	assert_eq(int(e2["no_less_than"]), 9, "no_less_than reads back")
-	assert_eq(int(e2["map_symbol"]), 17, "map_symbol reads back")
+	var e2: MissionEntityRecord = m.get_entity(kind, index)
+	assert_eq(int(e2.no_less_than), 9, "no_less_than reads back")
+	assert_eq(int(e2.map_symbol), 17, "map_symbol reads back")
 
 
 func test_set_header_string_and_int_round_trip() -> void:
@@ -914,12 +911,12 @@ func test_set_event_preserves_unmodeled_flag_bits() -> void:
 	var UNMODELED := 0x10 # confirmed internal bit, must survive edits
 	# Seed an event carrying the unmodeled bit plus an exposed one (ResetAfter = 0x01).
 	var added := m.add_event(UNMODELED | 0x01, 0, 0)
-	assert_false(added.is_empty(), "event added")
-	var idx := int(added["index"])
-	assert_eq(int(m.get_event(idx)["flags"]) & UNMODELED, UNMODELED, "unmodeled bit present after add")
+	assert_not_null(added, "event added")
+	var idx := added.index
+	assert_eq(int(m.get_event(idx).flags) & UNMODELED, UNMODELED, "unmodeled bit present after add")
 	# Apply PreMission (0x02) while clearing ResetAfter (0x01).
 	assert_true(m.set_event(idx, 0x02, 0, 0), "set_event succeeds")
-	var flags := int(m.get_event(idx)["flags"])
+	var flags := int(m.get_event(idx).flags)
 	assert_eq(flags & UNMODELED, UNMODELED, "internal bit 0x10 preserved across the edit")
 	assert_eq(flags & 0x02, 0x02, "exposed PreMission bit applied")
 	assert_eq(flags & 0x01, 0, "exposed ResetAfter bit cleared (unchecked)")
@@ -927,20 +924,20 @@ func test_set_event_preserves_unmodeled_flag_bits() -> void:
 
 # --- Phase 2: area-trigger / zone binding -------------------------------------
 
-func test_area_trigger_dictionary_shape() -> void:
+func test_area_trigger_record_shape() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_eq(m.get_area_triggers().size(), m.get_area_trigger_count(), "list size matches count")
 	# Add one so the shape is exercised even if the fixture carries none.
 	var z := m.add_area_trigger(Vector3(-5, -6, -7), Vector3(5, 6, 7), true, false, 3)
-	assert_false(z.is_empty(), "add returns the new zone dict")
+	assert_not_null(z, "add returns the new zone record")
 	for key in ["index", "id", "min", "max", "active", "constrain_z", "raw_flags"]:
-		assert_true(z.has(key), "zone dict exposes %s" % key)
-	assert_typeof(z["min"], TYPE_VECTOR3, "min is a Vector3")
-	assert_typeof(z["max"], TYPE_VECTOR3, "max is a Vector3")
-	assert_eq(int(z["id"]), 3, "zone id carried through")
-	assert_true(bool(z["active"]), "active flag set")
-	assert_false(bool(z["constrain_z"]), "constrain_z flag clear")
+		assert_true(key in z, "zone record exposes %s" % key)
+	assert_typeof(z.min, TYPE_VECTOR3, "min is a Vector3")
+	assert_typeof(z.max, TYPE_VECTOR3, "max is a Vector3")
+	assert_eq(int(z.id), 3, "zone id carried through")
+	assert_true(bool(z.active), "active flag set")
+	assert_false(bool(z.constrain_z), "constrain_z flag clear")
 
 
 func test_area_trigger_add_set_remove_round_trip() -> void:
@@ -950,16 +947,16 @@ func test_area_trigger_add_set_remove_round_trip() -> void:
 	# Crossed corners must be normalized to min<=max (the engine does not auto-swap).
 	var z := m.add_area_trigger(Vector3(10, 20, 8), Vector3(-10, -20, -8), true, true, 0)
 	assert_eq(m.get_area_trigger_count(), base + 1, "count grew by one")
-	var idx := int(z["index"])
-	assert_eq((z["min"] as Vector3), Vector3(-10, -20, -8), "min normalized to the lower corner")
-	assert_eq((z["max"] as Vector3), Vector3(10, 20, 8), "max normalized to the upper corner")
+	var idx := z.index
+	assert_eq((z.min as Vector3), Vector3(-10, -20, -8), "min normalized to the lower corner")
+	assert_eq((z.max as Vector3), Vector3(10, 20, 8), "max normalized to the upper corner")
 	assert_true(m.is_modified(), "adding a zone dirties the mission")
 	# Edit it: move max, drop constrain_z.
 	var z2 := m.set_area_trigger(idx, Vector3(-10, -20, -8), Vector3(30, 20, 8), true, false, 0)
-	assert_false(z2.is_empty(), "set returns the updated dict")
-	assert_eq((z2["max"] as Vector3).x, 30.0, "max_x updated")
-	assert_false(bool(z2["constrain_z"]), "constrain_z cleared")
-	assert_true(bool(z2["active"]), "active preserved")
+	assert_not_null(z2, "set returns the updated record")
+	assert_eq((z2.max as Vector3).x, 30.0, "max_x updated")
+	assert_false(bool(z2.constrain_z), "constrain_z cleared")
+	assert_true(bool(z2.active), "active preserved")
 	# Persist + reload: the new zone survives a byte round-trip.
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
@@ -967,32 +964,31 @@ func test_area_trigger_add_set_remove_round_trip() -> void:
 	assert_eq(r.open_file(tmp), OK)
 	assert_eq(r.get_area_trigger_count(), base + 1, "zone count survives reload")
 	var rz := r.get_area_trigger(idx)
-	assert_eq((rz["max"] as Vector3).x, 30.0, "edited max_x survives reload")
-	assert_true(bool(rz["active"]), "active survives reload")
+	assert_eq((rz.max as Vector3).x, 30.0, "edited max_x survives reload")
+	assert_true(bool(rz.active), "active survives reload")
 	# Remove it: count returns to baseline; out-of-range guards return false/empty.
 	assert_true(m.remove_area_trigger(idx), "remove succeeds")
 	assert_eq(m.get_area_trigger_count(), base, "count back to baseline")
 	assert_false(m.remove_area_trigger(999999), "out-of-range remove is rejected")
-	assert_eq(m.get_area_trigger(999999), {}, "out-of-range get yields {}")
-	assert_eq(m.set_area_trigger(999999, Vector3.ZERO, Vector3.ONE, true, true, 0), {}, "out-of-range set yields {}")
+	assert_null(m.get_area_trigger(999999), "out-of-range get yields null")
+	assert_null(m.set_area_trigger(999999, Vector3.ZERO, Vector3.ONE, true, true, 0), "out-of-range set yields null")
 
 
-func test_weapon_loadout_dictionary_and_round_trip() -> void:
+func test_weapon_loadout_record_and_round_trip() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var entries := m.get_weapon_loadout()
 	# The minted mission authors 4 loadout records (tests/fixtures/minimal_bms_gen.cpp).
 	assert_eq(entries.size(), 4, "fixture loadout has 4 weapons")
-	var first := entries[0] as Dictionary
+	var first: MissionWeaponLoadoutEntry = entries[0]
 	for key in ["index", "name", "ammo_primary", "ammo_secondary", "flags"]:
-		assert_true(first.has(key), "loadout dict exposes %s" % key)
-	assert_eq(String(first["name"]), "WPN_M4AUTO", "first weapon name")
-	assert_eq(String(first["ammo_primary"]), "6", "first primary-ammo request")
-	assert_eq(String(first["flags"]), "-1", "first damage class")
+		assert_true(key in first, "loadout record exposes %s" % key)
+	assert_eq(String(first.name), "WPN_M4AUTO", "first weapon name")
+	assert_eq(String(first.ammo_primary), "6", "first primary-ammo request")
+	assert_eq(String(first.flags), "-1", "first damage class")
 	# Edit one entry + append a custom one; persist and reload.
-	entries[0]["ammo_primary"] = "5"
-	entries[0]["flags"] = "1"
-	entries.append({ "name": "WPN_TEST", "ammo_primary": "1", "ammo_secondary": "2", "flags": "2" })
+	entries[0] = MissionWeaponLoadoutEntry.make(first.name, "5", first.ammo_secondary, "1")
+	entries.append(MissionWeaponLoadoutEntry.make("WPN_TEST", "1", "2", "2"))
 	assert_true(m.set_weapon_loadout(entries), "set_weapon_loadout succeeds")
 	assert_true(m.is_modified(), "editing the loadout dirties the mission")
 	var tmp := _temp_bms_path()
@@ -1001,10 +997,10 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	assert_eq(r.open_file(tmp), OK)
 	var reloaded := r.get_weapon_loadout()
 	assert_eq(reloaded.size(), 5, "edited loadout survives reload")
-	assert_eq(String((reloaded[0] as Dictionary)["ammo_primary"]), "5", "edited primary-ammo request survives reload")
-	assert_eq(String((reloaded[0] as Dictionary)["flags"]), "1", "edited damage class survives reload")
-	assert_eq(String((reloaded[4] as Dictionary)["name"]), "WPN_TEST", "appended weapon survives reload")
-	assert_eq(String((reloaded[4] as Dictionary)["flags"]), "2", "appended damage class survives reload")
+	assert_eq(String(reloaded[0].ammo_primary), "5", "edited primary-ammo request survives reload")
+	assert_eq(String(reloaded[0].flags), "1", "edited damage class survives reload")
+	assert_eq(String(reloaded[4].name), "WPN_TEST", "appended weapon survives reload")
+	assert_eq(String(reloaded[4].flags), "2", "appended damage class survives reload")
 	# Clearing yields an empty list.
 	assert_true(m.set_weapon_loadout([]), "clearing the loadout succeeds")
 	assert_eq(m.get_weapon_loadout().size(), 0, "loadout is empty after clear")
@@ -1017,23 +1013,26 @@ func test_group_get_set_round_trip() -> void:
 	assert_eq(m.get_groups().size(), m.get_group_count(), "groups list matches count")
 	var g := m.get_group(3)
 	for key in ["index", "field0", "field8", "field12"]:
-		assert_true(g.has(key), "group dict exposes %s" % key)
+		assert_true(key in g, "group record exposes %s" % key)
 	# A neighbour's baseline must be untouched by editing group 3.
 	var neighbour_before := m.get_group(4)
 	assert_true(m.set_group(3, 3, 5678, 10), "set_group succeeds")
 	var g2 := m.get_group(3)
-	assert_eq(int(g2["field0"]), 3, "group flags written")
-	assert_eq(int(g2["field8"]), 5678, "group value written")
-	assert_eq(int(g2["field12"]), 10, "group constant remains fixed")
-	assert_eq(m.get_group(4), neighbour_before, "neighbouring group untouched")
+	assert_eq(int(g2.field0), 3, "group flags written")
+	assert_eq(int(g2.field8), 5678, "group value written")
+	assert_eq(int(g2.field12), 10, "group constant remains fixed")
+	var neighbour_after := m.get_group(4)
+	assert_eq(neighbour_after.field0, neighbour_before.field0, "neighbouring group flags untouched")
+	assert_eq(neighbour_after.field8, neighbour_before.field8, "neighbouring group value untouched")
+	assert_eq(neighbour_after.field12, neighbour_before.field12, "neighbouring group constant untouched")
 	# Persist + reload.
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
 	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
-	assert_eq(int(r.get_group(3)["field8"]), 5678, "edited group survives reload")
+	assert_eq(int(r.get_group(3).field8), 5678, "edited group survives reload")
 	# Out-of-range guards.
-	assert_eq(m.get_group(999), {}, "out-of-range group get yields {}")
+	assert_null(m.get_group(999), "out-of-range group get yields null")
 	assert_false(m.set_group(999, 1, 2, 3), "out-of-range group set rejected")
 	assert_false(m.set_group(3, 4, 2, 10), "unsupported group flag bits rejected")
 	assert_false(m.set_group(3, 3, 2, 11), "noncanonical group constant rejected")
@@ -1041,18 +1040,18 @@ func test_group_get_set_round_trip() -> void:
 
 # --- Phase 4: mission scripting (events / triggers / actions) ------------------
 
-func test_event_chain_dictionary_shape() -> void:
+func test_event_chain_record_shape() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_gt(m.get_event_count(), 0, "the reference mission has events")
 	var chain := m.get_event_chain(0)
-	assert_true(chain.has("event"), "the chain carries the event")
-	assert_true(chain.has("triggers"), "the chain carries triggers")
-	assert_true(chain.has("actions"), "the chain carries actions")
-	assert_true(chain.has("references"), "the chain carries references")
-	assert_true(chain.has("diagnostics"), "the chain carries diagnostics")
+	assert_true("event" in chain, "the chain carries the event")
+	assert_true("triggers" in chain, "the chain carries triggers")
+	assert_true("actions" in chain, "the chain carries actions")
+	assert_true("references" in chain, "the chain carries references")
+	assert_true("diagnostics" in chain, "the chain carries diagnostics")
 	var summary := m.get_logic_summary()
-	assert_eq(int(summary["events"]), m.get_event_count(), "the logic summary event count matches")
+	assert_eq(int(summary.events), m.get_event_count(), "the logic summary event count matches")
 
 
 func test_add_event_with_trigger_and_action_persists_through_save_reload() -> void:
@@ -1061,16 +1060,16 @@ func test_add_event_with_trigger_and_action_persists_through_save_reload() -> vo
 	var base_events := m.get_event_count()
 
 	var event := m.add_event(1, 7, 3)  # ResetAfter flag, reset_after 7, delay 3
-	assert_false(event.is_empty(), "add_event returns the new event dict")
-	assert_eq(int(event["index"]), base_events, "the new event is appended at the end")
-	var ev_index := int(event["index"])
+	assert_not_null(event, "add_event returns the new event record")
+	assert_eq(event.index, base_events, "the new event is appended at the end")
+	var ev_index := event.index
 
 	# Append a trigger and an action to the new event.
-	var with_trigger := m.add_event_trigger(ev_index, {"main_type": 2, "sub_type": 10, "param2": 1, "negated": true})
-	assert_false(with_trigger.is_empty(), "add_event_trigger returns the chain")
-	assert_eq((with_trigger["triggers"] as Array).size(), 1, "the event now has one trigger")
-	var with_action := m.add_event_action(ev_index, {"action_type": 34, "param1": ev_index})
-	assert_eq((with_action["actions"] as Array).size(), 1, "the event now has one action")
+	var with_trigger := m.add_event_trigger(ev_index, MissionEventTrigger.make(2, 10, 0, 1, 0, 0, true))
+	assert_not_null(with_trigger, "add_event_trigger returns the chain")
+	assert_eq((with_trigger.triggers as Array).size(), 1, "the event now has one trigger")
+	var with_action := m.add_event_action(ev_index, MissionEventAction.make(34, 0, ev_index))
+	assert_eq((with_action.actions as Array).size(), 1, "the event now has one action")
 	assert_true(m.is_modified(), "scripting edits set the modified flag")
 
 	var tmp := _temp_bms_path()
@@ -1079,29 +1078,30 @@ func test_add_event_with_trigger_and_action_persists_through_save_reload() -> vo
 	assert_eq(r.open_file(tmp), OK, "the augmented mission reopens")
 	assert_eq(r.get_event_count(), base_events + 1, "the new event survives reload")
 	var chain := r.get_event_chain(ev_index)
-	var triggers := chain["triggers"] as Array
-	var actions := chain["actions"] as Array
+	var triggers := chain.triggers as Array
+	var actions := chain.actions as Array
 	assert_eq(triggers.size(), 1, "the trigger survives reload")
-	assert_eq(int((triggers[0] as Dictionary)["main_type"]), 2, "the trigger main type round-trips (Single)")
-	assert_eq(int((triggers[0] as Dictionary)["sub_type"]), 10, "the trigger sub type round-trips")
-	assert_true(bool((triggers[0] as Dictionary)["negated"]), "the negate flag round-trips")
-	assert_eq(int((actions[0] as Dictionary)["action_type"]), 34, "the action type round-trips (ResetEvent)")
-	assert_eq(int((chain["event"] as Dictionary)["reset_after"]), 7, "reset_after round-trips")
+	assert_eq(int(triggers[0].main_type), 2, "the trigger main type round-trips (Single)")
+	assert_eq(int(triggers[0].sub_type), 10, "the trigger sub type round-trips")
+	assert_true(bool(triggers[0].negated), "the negate flag round-trips")
+	assert_eq(int(actions[0].action_type), 34, "the action type round-trips (ResetEvent)")
+	assert_eq(int(chain.event.reset_after), 7, "reset_after round-trips")
 
 
 func test_set_event_trigger_edits_a_param_in_place() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var event := m.add_event(0, 0, 0)
-	var ev_index := int(event["index"])
-	m.add_event_trigger(ev_index, {"main_type": 1, "sub_type": 1})
-	# Overwrite the trigger's param1 + logic flag, leaving its type alone (omitted keys keep their value).
-	var chain := m.set_event_trigger(ev_index, 0, {"param1": 42, "logic_or": true})
-	assert_false(chain.is_empty(), "set_event_trigger returns the chain")
-	var trigger := (chain["triggers"] as Array)[0] as Dictionary
-	assert_eq(int(trigger["param1"]), 42, "the edited param lands")
-	assert_eq(int(trigger["main_type"]), 1, "the omitted main type is preserved")
-	assert_true(bool(trigger["logic_or"]), "the OR logic flag lands")
+	var ev_index := event.index
+	m.add_event_trigger(ev_index, MissionEventTrigger.make(1, 1))
+	# Overwrite the trigger's param1 + logic flag, restating its type (a typed
+	# edit carries every authored field; the seed keeps only the unmodeled bits).
+	var chain := m.set_event_trigger(ev_index, 0, MissionEventTrigger.make(1, 1, 42, 0, 0, 0, false, true))
+	assert_not_null(chain, "set_event_trigger returns the chain")
+	var trigger: MissionEventTrigger = chain.triggers[0]
+	assert_eq(int(trigger.param1), 42, "the edited param lands")
+	assert_eq(int(trigger.main_type), 1, "the restated main type lands")
+	assert_true(bool(trigger.logic_or), "the OR logic flag lands")
 
 
 func test_remove_event_drops_it_and_repairs_reset_references() -> void:
@@ -1110,17 +1110,17 @@ func test_remove_event_drops_it_and_repairs_reset_references() -> void:
 	var base_events := m.get_event_count()
 	# Append an event whose action resets itself, then remove event 0: the self-reference must follow.
 	var event := m.add_event(0, 0, 0)
-	var ev_index := int(event["index"])
-	m.add_event_action(ev_index, {"action_type": 34, "param1": ev_index})  # ResetEvent -> self
+	var ev_index := event.index
+	m.add_event_action(ev_index, MissionEventAction.make(34, 0, ev_index))  # ResetEvent -> self
 	assert_eq(m.get_event_count(), base_events + 1)
 
 	assert_true(m.remove_event(0), "remove_event drops event 0")
 	assert_eq(m.get_event_count(), base_events, "the count drops back")
 	# The appended event is now at base_events - 1; its ResetEvent must point at the new index.
 	var chain := m.get_event_chain(base_events - 1)
-	var actions := chain["actions"] as Array
+	var actions := chain.actions as Array
 	assert_eq(actions.size(), 1, "the appended event kept its action")
-	assert_eq(int((actions[0] as Dictionary)["param1"]), base_events - 1, "the ResetEvent reference was repaired")
+	assert_eq(int(actions[0].param1), base_events - 1, "the ResetEvent reference was repaired")
 	# Out-of-range guards.
-	assert_eq(m.get_event(9999), {}, "out-of-range event get yields {}")
+	assert_null(m.get_event(9999), "out-of-range event get yields null")
 	assert_false(m.remove_event(9999), "out-of-range event remove rejected")

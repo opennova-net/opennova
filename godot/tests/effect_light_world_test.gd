@@ -272,24 +272,14 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	presenter.teardown()
 
 
-# One light_move round glow row as Simulation.get_round_glow_rows emits it.
+# One light_move round glow row as Simulation::fill_round_glows emits it.
 func _round_glow(id: int, pos: Vector3) -> RoundGlowRow:
-	var row := RoundGlowRow.new()
-	row.id = id
-	row.pos = pos
-	row.radius = 6.0
-	row.color = Color(0.5, 0.47, 0.31)
-	return row
+	return RoundGlowRow.make(id, pos, 6.0, Color(0.5, 0.47, 0.31))
 
 
 # A local-player fire event carrying only the muzzle-glow leg.
 func _muzzle_fire(shooter_handle: int, origin: Vector3, mf_light: int) -> FirePresentationEvent:
-	var event := FirePresentationEvent.new()
-	event.shooter_handle = shooter_handle
-	event.origin = origin
-	event.mf_light = mf_light
-	event.is_local_player = true
-	return event
+	return FirePresentationEvent.make(origin, 0, shooter_handle, true, mf_light)
 
 
 func test_destruction_present_dictionary_routes_death_light_into_output() -> void:
@@ -303,8 +293,8 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup_passes(null, null, null, null, null, director, null, null)
-	var drain := DestructionDrain.make([], [])
-	drain.add_death_light(Vector3(2.0, 0.0, 0.0), 6.0)
+	var drain := DestructionDrain.make([], [], 0, 0, 0,
+			PackedVector3Array([Vector3(2.0, 0.0, 0.0)]), PackedFloat32Array([6.0]))
 	presenter.present_destruction_drained(drain, [])
 	assert_eq(director.get_report().live, 1,
 			"the destruction drain creates one death flash")

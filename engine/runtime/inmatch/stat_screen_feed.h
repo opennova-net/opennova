@@ -26,6 +26,11 @@ struct StatScreenColumn {
 	int width = 0;               // design px inside the table rect
 	int field_id = 0;            // 0 for NAME / Squad
 	int field_index = -1;        // index into the declared fields
+	// The header TEXT the embedder resolved through its gametext table (a
+	// keyed header resolves like the ladder: present + non-empty, else the
+	// "!..." fallback stripped; the key-less NAME / Squad columns show their
+	// fallback stripped). Empty until the embedder fills it.
+	std::string header;
 };
 
 // The columns [orig: @0x562280..0x5624a0]: NAME (150 px, the table's rtxt
@@ -68,5 +73,27 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 // The tab filter [orig: stat_filter_tab_handler @0x562140]: tab 0 shows every
 // row, tab 1 only team 2, tab 2 only team 1.
 bool stat_screen_row_visible(int tab_index, uint8_t team);
+
+
+// The end-of-round SESSION facts the shell flow keys on (net-re 5.68), as one
+// value the embedder fills from the role's folded ClientEndRoundStats plus
+// the role's own facts (the game type, the round clock, the death-screen
+// latch, the assigned team, the session-open bit); its Godot record wraps it
+// by value (ADR 0043 d10).
+struct EndRoundSessionState {
+	bool header_known = false;
+	bool board_known = false;
+	uint32_t game_type = 0;
+	int winner = 0;
+	int team_score_0 = 0;
+	int team_score_1 = 0;
+	bool draw = false;
+	int my_index = 0;
+	int round_ticks = 0;
+	bool death_screen = false;
+	int local_team = 0;
+	bool team_mode = false;
+	bool session_open = false;
+};
 
 } // namespace opennova::inmatch

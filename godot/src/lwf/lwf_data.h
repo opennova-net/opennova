@@ -57,9 +57,6 @@ private:
 	void build_file_from_tree(opennova::lwf::File &r_file) const;
 
 	// Live (shared-ref) accessors into sets_; empty container on bad index.
-	Dictionary set_ref(int p_si) const;
-	Dictionary layer_ref(int p_si, int p_li) const;
-	Dictionary member_ref(int p_si, int p_li, int p_mi) const;
 
 protected:
 	static void _bind_methods();

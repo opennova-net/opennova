@@ -53,7 +53,6 @@ AABB godot_aabb(const opennova::renderer::ParticleAabb &bounds) {
 EffectWorld::EffectWorld() {
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
-	owner_pose_batch_.instantiate();
 }
 
 void EffectWorld::_notification(int p_what) {
@@ -296,8 +295,8 @@ Transform3D EffectWorld::forward_pose(const Vector3 &p_position, const Vector3 &
 
 void EffectWorld::_seed_owner_pose(int64_t p_owner_token, const Transform3D &p_transform) {
 	owner_pose_cache_.insert(p_owner_token, p_transform);
-	owner_pose_batch_->clear();
-	owner_pose_batch_->add(p_owner_token, p_transform);
+	owner_pose_batch_.clear();
+	owner_pose_batch_.add(p_owner_token, p_transform);
 	scene_->apply_owner_poses(owner_pose_batch_);
 }
 
@@ -523,8 +522,8 @@ void EffectWorld::release_effect_binding(const Variant &p_owner_key) {
 	// A group may already be detached by stop_group(), but explicitly
 	// retiring the native pose keeps this safe for rejected spawns and
 	// callers that only know the owner identity.
-	owner_pose_batch_->clear();
-	owner_pose_batch_->add_absent(owner_token);
+	owner_pose_batch_.clear();
+	owner_pose_batch_.add_absent(owner_token);
 	scene_->apply_owner_poses(owner_pose_batch_);
 	owner_pose_cache_.erase(owner_token);
 	owner_keys_by_token_.erase(owner_token);
@@ -554,8 +553,8 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 	if (!owner_position_provider_.is_valid()) {
 		return;
 	}
-	Ref<EffectOwnerPoseBatch> batch = owner_pose_batch_;
-	batch->clear();
+	EffectOwnerPoseBatch &batch = owner_pose_batch_;
+	batch.clear();
 	const std::vector<opennova::particle::EffectOwnerToken> tokens =
 			scene_->native_scene().active_owner_tokens();
 	for (const opennova::particle::EffectOwnerToken &token : tokens) {
@@ -573,7 +572,7 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 				}
 			}
 			owner_pose_cache_.insert(owner_token, owner_transform);
-			batch->add(owner_token, owner_transform);
+			batch.add(owner_token, owner_transform);
 		} else if (state.get_type() == Variant::VECTOR3) {
 			const Transform3D *cached_ptr = owner_pose_cache_.getptr(owner_token);
 			const bool had_cached = cached_ptr != nullptr;
@@ -583,13 +582,13 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 				continue;
 			}
 			owner_pose_cache_.insert(owner_token, translated);
-			batch->add(owner_token, translated);
+			batch.add(owner_token, translated);
 		} else {
 			owner_pose_cache_.erase(owner_token);
-			batch->add_absent(owner_token);
+			batch.add_absent(owner_token);
 		}
 	}
-	if (batch->get_count() > 0) {
+	if (batch.get_count() > 0) {
 		if (p_refresh_frame) {
 			scene_->apply_owner_poses(batch);
 		} else {

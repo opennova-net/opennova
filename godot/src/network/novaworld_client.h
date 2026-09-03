@@ -3,10 +3,13 @@
 #include <net/novaworld/gate_probe.h>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -16,7 +19,7 @@
 #include <net/novaworld/lobby_vars.h>
 
 #include "network/novaworld_server_row.h"
-#include "network/novaworld_server_totals.h"
+#include "network/novaworld_gate_info.h"
 #include "network/nwu_lobby_session.h"
 #include "network/ping_sweep_worker.h"
 
@@ -85,7 +88,9 @@ public:
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
 	bool is_authenticated() const { return authenticated_; }
-	Dictionary get_server_info() const;
+	// The gate reply the lobby HTTP legs resolve their base URL from; null
+	// until a gate response landed.
+	Ref<NovaWorldGateInfo> get_server_info() const;
 
 	// Server browser (ADR 0010 Phase 2). The list is fetched over HTTP from
 	// the GSB endpoint once the session is verified; rows arrive asynchronously
@@ -100,7 +105,11 @@ public:
 	// The GSB response's list-wide totals (network/novaworld_server_totals.h;
 	// the service-wide population line the retail browser shows). Zeros until
 	// the first list lands.
-	Ref<NovaWorldServerTotals> get_server_totals() const;
+	// The GSB response's list-wide totals: the service-wide server and
+	// player counts the retail browser shows as its population line (zeros
+	// until the first list lands).
+	int get_total_servers() const { return total_servers_; }
+	int get_total_players() const { return total_players_; }
 
 	// The ping sweep's per-row results so far: rid (int) -> ping. A
 	// non-negative value is the echo round-trip in ms; -2 = failed/timed out,
@@ -108,7 +117,11 @@ public:
 	// witnessed fold + timeout/retry constants). Rows still in flight are
 	// absent. Repopulated per list refresh; `server_pings_updated` fires when
 	// a pass lands.
-	Dictionary get_server_pings() const;
+	// The sweep results as two parallel packed arrays: the row ids and their
+	// ping (ms, or -2 / -3 for the engine's unreachable / never-attempted
+	// codes). A row absent from the arrays has no result yet.
+	PackedInt64Array get_server_ping_rids() const;
+	PackedInt32Array get_server_ping_values() const;
 
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
 	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the
@@ -186,7 +199,7 @@ private:
 	// State.
 	State state_ = STATE_IDLE;
 	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
-	Dictionary server_info_;
+	Ref<NovaWorldGateInfo> server_info_;
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, and the handshake timeout all live in here.
 	NwuLobbySession lobby_;

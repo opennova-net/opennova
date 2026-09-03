@@ -12,10 +12,12 @@
 #include <godot_cpp/variant/variant.hpp>
 
 #include <cstdint>
+#include <vector>
+
+#include <runtime/world/present_drains.h>
 
 #include "mission/mission_object_placer.h"
 #include "object/item_database.h"
-#include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "world/item_effect_director.h"
 
@@ -53,7 +55,7 @@ public:
 	void present();
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() feeds the typed sim's rows; tests feed the same rows directly.
-	void present_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
+	void present_visuals(const std::vector<opennova::world::ThrowableVisualRow> &p_visuals);
 	// Reconcile only the round-bound effects_table "move" groups at the fixed-tick
 	// seam. Scene nodes remain batched in present(), but particles must see every
 	// simulated pose and a release before the same tick's EffectWorld advance.
@@ -86,7 +88,7 @@ private:
 	Simulation *sim() const;
 	Node3D *container() const;
 	EffectWorld *fx() const;
-	void sync_move_effects(const TypedArray<ThrowableVisualRow> &p_visuals);
+	void sync_move_effects(const std::vector<opennova::world::ThrowableVisualRow> &p_visuals);
 	void present_move_effect(int64_t p_key, const String &p_effect,
 			const Transform3D &p_transform, bool p_live);
 	void retire_move_effect(int64_t p_key);

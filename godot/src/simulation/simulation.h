@@ -33,6 +33,13 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/deploy_screen_feed.h> // kDeployRefreshTicks (the death deploy screen cadence)
+#include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
+#include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
+#include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan)
+#include <runtime/world/destruction.h> // DestructionEvents (the destruction drain)
+#include <runtime/world/terrain_scorch_events.h> // TerrainScorchEvent (the scorch drain)
+#include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
+#include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
@@ -55,7 +62,7 @@ class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
-class WeatherHomeState;     // the weather home's probe view (simulation/weather_home_state.h)
+class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 // The small per-frame HUD view records (simulation/hud_view_records.h).
@@ -205,10 +212,11 @@ public:
 			const Vector3 &p_camera, const Vector3 &p_camera_right,
 			const Vector3 &p_camera_up, int p_terrain_light_rgb);
 	// Thunder one-shots since the last drain (weather_state.h carries the cites).
-	TypedArray<WeatherSoundRow> drain_weather_sounds();
-	// The probe/test view of the weather home in native units
-	// (simulation/weather_home_state.h); null without a weather home.
-	Ref<WeatherHomeState> get_weather_state() const;
+	// NOT ClassDB-bound: MissionAudio plays the engine rows.
+	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
+	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
+	// read for the GUT/probe side; null without a world.
+	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
 	// The F3 Environment window's record (ADR 0042 d6): the ENGINE join over
 	// the weather home; false without a world.
 	bool native_environment_snapshot(opennova::devtools::EnvironmentSnapshot &out) const;
@@ -828,8 +836,11 @@ public:
 	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
 	// The objectives-panel rows for header slots 1..8, terminated at the
 	// first 0/255 win-condition id — exactly the panel's row walk
-	// (engine: runtime/mission/promote.cpp).
-	TypedArray<ObjectiveRow> get_objectives_view() const;
+	// (engine: runtime/mission/promote.cpp) — filled natively for
+	// HudOverlay::set_objectives: the SHOWN rows with their mission-text
+	// lines resolved through the table. NOT ClassDB-bound.
+	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
+			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
@@ -839,11 +850,14 @@ public:
 	TypedArray<PlayerWeaponEvent> drain_local_player_weapon_events();
 	// Destructively drain the flight sim's resolved round impacts, each row already
 	// mapped through the ammo effects_table to its effect and sound legs
-	// (engine: runtime/world/ammo_table.h).
+	// (engine: runtime/world/ammo_table.h). The native form is the C++
+	// consumer's (GameWorld); the bound form wraps the same rows for the tests.
+	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
 	TypedArray<RoundImpactRow> drain_round_impacts();
-	// Destructively drain permanent terrain-cache scorch insertions. Bounds are
-	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
-	TypedArray<TerrainScorchRow> drain_terrain_scorches();
+	// Destructively drain permanent terrain-cache scorch insertions (mission
+	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
+	// NOT ClassDB-bound.
+	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events);
 	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
 	// per line the original posts to its message feed. The fold (suppression,
 	// the own/verbose gate, the camp keys, the bonus recompose, the color) is
@@ -995,10 +1009,6 @@ public:
 	}
 	static Ref<FpViewmodelSpec> fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_character_arms, const String &p_animadm, int p_flags);
-	// Read-only view of the active profile record for the shell's status copy
-	// (a WeaponProfileSummary: loaded, the blue and red sides with their kit
-	// names). The kit array is the SELECTED page — the one the class byte picks.
-	Ref<WeaponProfileSummary> get_weapon_profile_summary() const;
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
 	// default — the Player_InitPlayer weapon leg (engine: runtime/inmatch/host_session.h). Runs automatically after load_weapon_table; call
 	// again on respawn.
@@ -1070,18 +1080,21 @@ public:
 	// state mutation is applied in-engine, never here.
 	TypedArray<MissionEffect> drain_effects();
 
-	// The shell fire-presentation drain: one FirePresentationEvent per round
+	// The shell fire-presentation drain: one FirePresentationRow per round
 	// spawned since the last call, with the ammo-def 'ai_launch'/'ai_launcheffect'
 	// names resolved. The fire present pass spawns per event, skipping the local
-	// player (whose action-slot presentation is already ported).
-	// (engine: runtime/world/ai.h)
+	// player (whose action-slot presentation is already ported). The native
+	// form is the C++ consumer's (FirePresenter); the bound form wraps the
+	// same rows for the tests. (engine: runtime/world/ai.h)
+	void drain_fire_presentation_rows(std::vector<opennova::world::FirePresentationRow> &r_rows);
 	TypedArray<FirePresentationEvent> drain_fire_presentation_events();
 
 	// The fire-sound legs on the logic clock (world/fire_sound.h): the shell
 	// stamps the camera listener each frame before the tick batch, and drains
-	// the ready one-shots each present. (engine: runtime/world/collision.h)
+	// the ready one-shots each present (NOT ClassDB-bound; the fire pass reads
+	// the engine rows). (engine: runtime/world/collision.h)
 	void set_sound_listener(const Vector3 &p_listener_godot);
-	TypedArray<FireSoundRow> drain_fire_sounds();
+	void drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds);
 
 	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,
 	// Y=left, Z=up) from raw weapon.def pos/tpos units — the /256 blend +
@@ -1104,9 +1117,9 @@ public:
 	// landing legs compare feet against (engine: runtime/replication/client_replica_pipeline.h).
 	void set_water_z(double p_water_y);
 	// Drain the per-tick slot-sound emissions (footsteps/foley/landing/screams),
-	// played by the fire present pass at full volume
+	// played by the fire present pass at full volume; NOT ClassDB-bound
 	// (engine: net/npwire/ingame_decode.h).
-	TypedArray<SlotSoundRow> drain_slot_sounds();
+	void drain_slot_sounds(std::vector<opennova::world::SoundSlotEvent> &r_events);
 
 	// Queue this frame's REMOTE-body footsteps and foley for one wire row.
 	// Runs only for wire-RENDERED bodies (a joiner's remote rows, a listen
@@ -1123,7 +1136,9 @@ public:
 	// Drain persistent entity-attached emitter registrations. Producers refresh
 	// a keyed (source_spawn_id, lane) intent; the audio layer expands the set
 	// into LWF layers and owns keep-alive, spatial ranking, and physical voices.
-	// (engine: runtime/world/sound_emitter_mailbox.h)
+	// (engine: runtime/world/sound_emitter_mailbox.h) The native form is the
+	// fire pass's; the bound form wraps the same rows for the tests.
+	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
@@ -1139,16 +1154,18 @@ public:
 	// id, follows it per tick, and despawns dropped ids [orig:
 	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
 	// Projectile_ReleaseEffects clear — witness map on engine/runtime/renderer/light_scene.h].
-	TypedArray<RoundGlowRow> get_round_glow_rows() const;
+	// NOT ClassDB-bound: EffectLightDirector reads the engine rows.
+	void fill_round_glows(std::vector<opennova::world::RoundGlowRow> &r_rows) const;
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
-	// §24) as one DestructionDrain record (simulation/destruction_events.h):
-	// the effect/sound/husk-swap/death-light rows since the last drain plus the
-	// diagnostic counters. Null until a world is installed.
-	Ref<DestructionDrain> drain_destruction_events();
+	// §24): the effect/sound/husk-swap/death-light rows since the last drain
+	// plus the diagnostic counters, moved out and cleared (empty until a world
+	// is installed). NOT ClassDB-bound: DestructionPresenter reads the engine
+	// events; the tests author a DestructionDrain through its data leg.
+	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
 	// The live death-piece pool — each piece renders as its single husk-model
-	// section. (engine: runtime/world/destruction.cpp)
-	TypedArray<DeathPieceRow> get_death_pieces() const;
+	// section. NOT ClassDB-bound. (engine: runtime/world/destruction.cpp)
+	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
 	// Whether the collision world holds an instance for the placed entity
 	// `bms_id` — the one destruction-gate fact the GUT collision cases read
 	// (the item-trait banks themselves are pinned by the
@@ -1499,6 +1516,9 @@ public:
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices; the enemy-team item swap
 	// follows the viewer team (engine: runtime/world/round_sim.h).
+	// The native form is the throwable pass's; the bound form wraps the same
+	// rows for the tests.
+	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
@@ -1613,15 +1633,21 @@ public:
 	// mount, swap or dismount applied. (engine: runtime/mission/mission_kernel.h)
 	bool local_player_toggle_mount();
 
-	// The floating attach labels around the local player, one Dictionary per label:
-	// position (mission space, +0.1875 u lift applied), seat_type (world::SeatType,
-	// 4 = armory point), armory (bool), nearest (bool, the full-bright highlight),
-	// attach_text_key (the USEGUN weapon's attachtextid Overlays key, "" = absent ->
-	// the STROVER_USEGUN default). Armory mode rides the zone flag; the nearest-only
-	// gate consumes the same complete live fire verdict as body/HUD selection.
-	// (engine: runtime/hud/hud_frame.cpp)
-	TypedArray<AttachLabelRow> get_attach_labels() const;
-	TypedArray<FriendlyTagRow> get_friendly_tags() const;
+	// The floating attach labels around the local player (world::AttachLabel:
+	// the mission-space position with the +0.1875 u lift applied, the seat
+	// type (world::SeatType, 4 = armory point), the armory-zone flag, the
+	// nearest full-bright highlight and the USEGUN weapon's attachtextid
+	// Overlays key, "" = absent -> the STROVER_USEGUN default). Armory mode
+	// rides the zone flag; the nearest-only gate consumes the same complete
+	// live fire verdict as body/HUD selection. NOT ClassDB-bound:
+	// HudOverlay::set_attach_labels projects and resolves the rows natively.
+	// False without a kernel. (engine: runtime/hud/hud_frame.cpp)
+	bool fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const;
+	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw
+	// positions + per-entity facts; HudOverlay::set_friendly_tags lifts,
+	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
+	// False without a kernel or a local player.
+	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the

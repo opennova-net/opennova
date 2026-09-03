@@ -5,9 +5,8 @@
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
 #include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
-#include "simulation/weather_home_state.h" // the weather home's probe view
+#include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/present_event_records.h" // the per-tick present drain records
-#include "simulation/destruction_events.h" // the destruction drain record
 #include "simulation/debug_pick_card.h" // the entity picker card
 #include "simulation/hitbox_debug_report.h" // the hitbox oracle payload
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
@@ -46,8 +45,7 @@ static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
               opennova::world::kPlayerCameraFovHDeg);
 
 void Simulation::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("drain_weather_sounds"), &Simulation::drain_weather_sounds);
-	ClassDB::bind_method(D_METHOD("get_weather_state"), &Simulation::get_weather_state);
+	ClassDB::bind_method(D_METHOD("get_environment_snapshot"), &Simulation::get_environment_snapshot);
 	ClassDB::bind_method(D_METHOD("weather_state_bound"), &Simulation::weather_state_bound);
 	ClassDB::bind_method(D_METHOD("command_rain", "percent", "seconds"), &Simulation::command_rain);
 	ClassDB::bind_method(D_METHOD("command_snow", "percent", "seconds"), &Simulation::command_snow);
@@ -253,7 +251,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_hud_minimap_footprints);
 	ClassDB::bind_method(D_METHOD("get_hud_map_grid_origin"),
 	                     &Simulation::get_hud_map_grid_origin);
-	ClassDB::bind_method(D_METHOD("get_objectives_view"), &Simulation::get_objectives_view);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &Simulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &Simulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &Simulation::get_local_player_body_anim_slot);
@@ -295,8 +292,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
-	ClassDB::bind_method(D_METHOD("drain_terrain_scorches"),
-			&Simulation::drain_terrain_scorches);
 	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
 	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
 	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
@@ -323,23 +318,15 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_effects"), &Simulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&Simulation::drain_fire_presentation_events);
-	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
-			&Simulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
 					"pos_raw_units", "tpos_raw_units", "viewport_w", "viewport_h"),
 			&Simulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
-	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),
-			&Simulation::get_round_glow_rows);
-	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
-			&Simulation::drain_destruction_events);
-	ClassDB::bind_method(D_METHOD("get_death_pieces"), &Simulation::get_death_pieces);
 	ClassDB::bind_method(D_METHOD("has_collision_instance", "bms_id"),
 			&Simulation::has_collision_instance);
 	ClassDB::bind_method(D_METHOD("set_sound_profiles", "sndprof_text"),
 			&Simulation::set_sound_profiles);
 	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &Simulation::set_water_z);
-	ClassDB::bind_method(D_METHOD("drain_slot_sounds"), &Simulation::drain_slot_sounds);
 	ClassDB::bind_method(D_METHOD("drain_sound_emitters"), &Simulation::drain_sound_emitters);
 	ClassDB::bind_method(D_METHOD("run_mission_start_wac"), &Simulation::run_mission_start_wac);
 	ClassDB::bind_method(D_METHOD("seal_mission_start_baseline"),
@@ -512,8 +499,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
-	ClassDB::bind_method(D_METHOD("get_attach_labels"), &Simulation::get_attach_labels);
-	ClassDB::bind_method(D_METHOD("get_friendly_tags"), &Simulation::get_friendly_tags);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),
 	                     &Simulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "kit", "filter_by_availability"),
@@ -600,8 +585,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("spawn_origin_index", "origin"),
 			&Simulation::spawn_origin_index);
-	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
-	                     &Simulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),
 	                     &Simulation::request_local_player_weapon_category);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_cycle", "direction"),

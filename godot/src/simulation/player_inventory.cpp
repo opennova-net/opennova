@@ -1,37 +1,54 @@
 #include "simulation/player_inventory.h"
 
+#include "util/record_bind.h"
+
 using namespace godot;
 
-void PlayerInventorySlot::assign(int p_combo, const String &p_name, int p_clip) {
-	combo_ = p_combo;
-	name_ = p_name;
-	clip_ = p_clip;
+String PlayerInventorySlot::get_name() const {
+	return String::utf8(value_.name.c_str());
 }
 
 void PlayerInventorySlot::_bind_methods() {
-#define PLAYER_INVENTORY_SLOT_PROPERTY(m_variant, m_name)                                          \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &PlayerInventorySlot::get_##m_name);           \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &PlayerInventorySlot::set_##m_name);  \
-	ADD_PROPERTY(PropertyInfo(m_variant, #m_name), "set_" #m_name, "get_" #m_name);
-	PLAYER_INVENTORY_SLOT_PROPERTY(Variant::INT, combo)
-	PLAYER_INVENTORY_SLOT_PROPERTY(Variant::STRING, name)
-	PLAYER_INVENTORY_SLOT_PROPERTY(Variant::INT, clip)
-#undef PLAYER_INVENTORY_SLOT_PROPERTY
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventorySlot, Variant::INT, combo)
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventorySlot, Variant::STRING, name)
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventorySlot, Variant::INT, clip)
+}
+
+Ref<PlayerInventory> PlayerInventory::make(const String &p_equipped_name, bool p_valid,
+		int p_equipped_combo, int p_carry_flags) {
+	opennova::world::LocalInventoryView v;
+	v.valid = p_valid;
+	v.equipped_combo = p_equipped_combo;
+	v.equipped_name = p_equipped_name.utf8().get_data();
+	v.carry_flags = static_cast<uint32_t>(p_carry_flags);
+	Ref<PlayerInventory> out;
+	out.instantiate();
+	out->assign(v);
+	return out;
+}
+
+String PlayerInventory::get_equipped_name() const {
+	return String::utf8(value_.equipped_name.c_str());
+}
+
+TypedArray<PlayerInventorySlot> PlayerInventory::get_slots() const {
+	TypedArray<PlayerInventorySlot> out;
+	for (const opennova::world::LocalInventoryView::Slot &slot : value_.slots) {
+		Ref<PlayerInventorySlot> row;
+		row.instantiate();
+		row->assign(slot);
+		out.push_back(row);
+	}
+	return out;
 }
 
 void PlayerInventory::_bind_methods() {
-#define PLAYER_INVENTORY_PROPERTY(m_variant, m_name)                                              \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &PlayerInventory::get_##m_name);              \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &PlayerInventory::set_##m_name);     \
-	ADD_PROPERTY(PropertyInfo(m_variant, #m_name), "set_" #m_name, "get_" #m_name);
-	PLAYER_INVENTORY_PROPERTY(Variant::BOOL, valid)
-	PLAYER_INVENTORY_PROPERTY(Variant::INT, equipped_combo)
-	PLAYER_INVENTORY_PROPERTY(Variant::STRING, equipped_name)
-	PLAYER_INVENTORY_PROPERTY(Variant::INT, carry_flags)
-	PLAYER_INVENTORY_PROPERTY(Variant::DICTIONARY, pools)
-#undef PLAYER_INVENTORY_PROPERTY
-	ClassDB::bind_method(D_METHOD("get_slots"), &PlayerInventory::get_slots);
-	ClassDB::bind_method(D_METHOD("set_slots", "value"), &PlayerInventory::set_slots);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slots", PROPERTY_HINT_ARRAY_TYPE, "PlayerInventorySlot"),
-			"set_slots", "get_slots");
+	ClassDB::bind_static_method("PlayerInventory",
+			D_METHOD("make", "equipped_name", "valid", "equipped_combo", "carry_flags"),
+			&PlayerInventory::make, DEFVAL(true), DEFVAL(-1), DEFVAL(0));
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventory, Variant::BOOL, valid)
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventory, Variant::INT, equipped_combo)
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventory, Variant::STRING, equipped_name)
+	OPENNOVA_RECORD_READ_ONLY(PlayerInventory, Variant::INT, carry_flags)
+	OPENNOVA_RECORD_READ_ONLY_ROWS(PlayerInventory, slots, PlayerInventorySlot)
 }

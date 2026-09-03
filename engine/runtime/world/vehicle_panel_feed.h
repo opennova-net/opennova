@@ -68,4 +68,14 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root,
                               EntityHandle local, const DefVehicleHudBlock &block,
                               std::vector<hud::HudVehicleSeat> &out);
 
+
+// The vehicle the local player rides, re-rooted from an attached gun child to
+// its parent (vehicle_panel_root): shown + the root's items.def id the shell
+// joins to its VEHICLE_HUD block. One value the embedder fills; its Godot
+// record wraps it by value.
+struct VehiclePanelRoot {
+    bool shown = false;
+    int32_t item_id = 0;
+};
+
 } // namespace opennova::world

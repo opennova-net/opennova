@@ -14,8 +14,8 @@ func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
 	var seen := {}
 	var type_ids := PackedInt32Array()
 	for raw in mission.get_all_entities():
-		var entity: Dictionary = raw
-		var type_id := int(entity.get("type_id", 0))
+		var entity: MissionEntityRecord = raw
+		var type_id := entity.type_id
 		if type_id > 0 and not seen.has(type_id):
 			seen[type_id] = true
 			type_ids.append(type_id)
@@ -35,14 +35,14 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 
-	var gun: Dictionary = {}
+	var gun: MissionEntityRecord = null
 	for raw in mission.get_all_entities():
-		var entity: Dictionary = raw
-		if int(entity.get("bms_id", 0)) == GUN_BMS_ID:
+		var entity: MissionEntityRecord = raw
+		if entity.bms_id == GUN_BMS_ID:
 			gun = entity
 			break
-	assert_false(gun.is_empty(), "00TRc contains the near-spawn .50 cal")
-	assert_eq(int(gun.get("item_id", 0)), GUN_ITEM_ID)
+	assert_not_null(gun, "00TRc contains the near-spawn .50 cal")
+	assert_eq(gun.item_id, GUN_ITEM_ID)
 	assert_eq(String(item_db.get_graphic(GUN_ITEM_ID)), GUN_GRAPHIC)
 
 	var data := ObjectData.new()
@@ -112,7 +112,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 			* authored_model_position
 	var live_usegun_model := (live_parts[part_index] as Transform3D) * point_in_part
 	var gun_world := MissionObjectPlacer.entity_transform(
-			gun.get("position", Vector3.ZERO), gun.get("rotation_deg", Vector3.ZERO))
+			gun.position, gun.rotation_deg)
 	var live_usegun_world := gun_world * live_usegun_model
 	var avatar_root_world := sim.get_local_player_position()
 	var drift := avatar_root_world.distance_to(live_usegun_world)

@@ -145,44 +145,36 @@ void DestructionPresenter::present() {
 	if (s == nullptr) {
 		return;
 	}
-	present_drained(s->drain_destruction_events(), s->get_death_pieces());
+	opennova::world::DestructionEvents events;
+	s->drain_destruction_events(events);
+	std::vector<opennova::world::DeathPieceRow> pieces;
+	s->fill_death_pieces(pieces);
+	present_drained(events, pieces);
 }
 
-void DestructionPresenter::present_drained(const Ref<DestructionDrain> &p_events,
-		const TypedArray<DeathPieceRow> &p_pieces) {
-	if (p_events.is_valid()) {
-		const TypedArray<HuskSwapEvent> husk_swaps = p_events->get_husk_swaps();
-		for (int64_t i = 0; i < husk_swaps.size(); ++i) {
-			const Ref<HuskSwapEvent> husk = husk_swaps[i];
-			if (husk.is_valid()) {
-				apply_husk_swap(husk);
-			}
-		}
-		const TypedArray<DestructionEffectEvent> effects = p_events->get_effects();
-		for (int64_t i = 0; i < effects.size(); ++i) {
-			const Ref<DestructionEffectEvent> eff = effects[i];
-			if (eff.is_valid()) {
-				apply_effect(eff);
-			}
-		}
-		const PackedStringArray sound_names = p_events->get_sound_names();
-		const PackedVector3Array sound_positions = p_events->get_sound_positions();
-		for (int64_t i = 0; i < sound_names.size() && i < sound_positions.size(); ++i) {
-			apply_sound(sound_names[i], sound_positions[i]);
-		}
-		if (EffectLightDirector *light_director = lights()) {
-			const PackedVector3Array light_positions = p_events->get_death_light_positions();
-			const PackedFloat32Array light_radii = p_events->get_death_light_radii();
-			for (int64_t i = 0; i < light_positions.size() && i < light_radii.size(); ++i) {
-				light_director->on_death_light(light_positions[i], light_radii[i]);
-			}
-		}
-		stat_debris_triangles_ += p_events->get_debris_triangles();
-		stat_glass_points_ += p_events->get_glass_points();
-		// Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
-		// drain above; its sound rides the fire pass's drain_fire_sounds.
-		stat_crackles_ += p_events->get_crackles();
+// The events cross in mission space (x, y, z-up); every position axis-maps to
+// Godot (x, z, -y) here, the fire pass's rule.
+void DestructionPresenter::present_drained(const opennova::world::DestructionEvents &p_events,
+		const std::vector<opennova::world::DeathPieceRow> &p_pieces) {
+	for (const opennova::world::HuskSwapEvent &husk : p_events.husk_swaps) {
+		apply_husk_swap(husk);
 	}
+	for (const opennova::world::DestructionEffectEvent &eff : p_events.effects) {
+		apply_effect(eff);
+	}
+	for (const opennova::world::DestructionSoundEvent &sound : p_events.sounds) {
+		apply_sound(String::utf8(sound.sound.c_str()), mission_to_godot(sound.pos));
+	}
+	if (EffectLightDirector *light_director = lights()) {
+		for (const opennova::world::DeathLightEvent &light : p_events.death_lights) {
+			light_director->on_death_light(mission_to_godot(light.pos), light.radius);
+		}
+	}
+	stat_debris_triangles_ += p_events.debris_triangles;
+	stat_glass_points_ += p_events.glass_points;
+	// Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
+	// drain above; its sound rides the fire pass's drain_fire_sounds.
+	stat_crackles_ += p_events.crackles;
 	sync_static_husks();
 	present_pieces(p_pieces);
 	tick_wreck_fires();
@@ -216,16 +208,16 @@ Node3D *DestructionPresenter::resolve_entity_node(int p_bms_id, int64_t p_spawn_
 // husk grafts into the mission container at the placed transform. No husk
 // authored -> the intact graphic keeps standing, dead — the witnessed
 // render-pick fallback (batched statics stay in their batches).
-void DestructionPresenter::apply_husk_swap(const Ref<HuskSwapEvent> &p_husk) {
-	const int bms_id = p_husk->get_bms_id();
-	const int64_t spawn_origin = p_husk->get_spawn_origin();
-	const int wire_handle = p_husk->get_wire_handle();
+void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
+	const int bms_id = p_husk.bms_id;
+	const int64_t spawn_origin = static_cast<int64_t>(p_husk.spawn_origin);
+	const int wire_handle = static_cast<int>(p_husk.wire_handle);
 	const String husk_key = identity_key(bms_id, spawn_origin, wire_handle);
 	if (husked_.has(husk_key)) {
 		return;
 	}
 	++stat_husk_swaps_;
-	const int item_id = p_husk->get_item_id();
+	const int item_id = p_husk.item_id;
 	const int def_id = item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
 	String husk_graphic;
 	if (item_db_.is_valid()) {
@@ -436,25 +428,25 @@ void DestructionPresenter::sync_static_husks() {
 	}
 }
 
-void DestructionPresenter::apply_effect(const Ref<DestructionEffectEvent> &p_effect) {
+void DestructionPresenter::apply_effect(const opennova::world::DestructionEffectEvent &p_effect) {
 	EffectWorld *fx_world = fx();
 	if (fx_world == nullptr) {
 		return;
 	}
-	const String effect = p_effect->get_effect();
+	const String effect = String::utf8(p_effect.effect.c_str());
 	if (effect.is_empty()) {
 		return;
 	}
-	const Vector3 pos = p_effect->get_pos();
-	const int family = p_effect->get_family();
-	const int net_id = p_effect->get_attach_net_id();
-	const int bms_id = p_effect->get_attach_bms_id();
-	const int64_t spawn_origin = p_effect->get_attach_spawn_origin();
-	const int wire_handle = p_effect->get_attach_wire_handle();
+	const Vector3 pos = mission_to_godot(p_effect.pos);
+	const int family = static_cast<int>(p_effect.family);
+	const int net_id = static_cast<int>(p_effect.attach_net_id);
+	const int bms_id = p_effect.attach_bms_id;
+	const int64_t spawn_origin = static_cast<int64_t>(p_effect.attach_spawn_origin);
+	const int wire_handle = static_cast<int>(p_effect.attach_wire_handle);
 	const bool dynamic_identity = uses_dynamic_husk_identity(
 			bms_id, spawn_origin, wire_handle);
 	if (family == 0 || (net_id == 0 && !dynamic_identity)) {
-		fx_world->spawn_effect(effect, pos, p_effect->get_dir());
+		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir));
 		++stat_effects_;
 		return;
 	}
@@ -539,23 +531,19 @@ void DestructionPresenter::apply_sound(const String &p_name, const Vector3 &p_po
 // Death pieces: the sim owns positions/physics; each live piece carries its
 // type's trail effect as an owned follow group. The single-section husk mesh
 // chunk is the tracked residual (§24).
-void DestructionPresenter::present_pieces(const TypedArray<DeathPieceRow> &p_pieces) {
+void DestructionPresenter::present_pieces(const std::vector<opennova::world::DeathPieceRow> &p_pieces) {
 	EffectWorld *fx_world = fx();
 	stat_pieces_peak_ = MAX(stat_pieces_peak_, static_cast<int64_t>(p_pieces.size()));
 	HashSet<int> seen;
-	for (int64_t i = 0; i < p_pieces.size(); ++i) {
-		const Ref<DeathPieceRow> piece = p_pieces[i];
-		if (piece.is_null()) {
-			continue;
-		}
-		const int slot = piece->get_slot();
+	for (const opennova::world::DeathPieceRow &piece : p_pieces) {
+		const int slot = piece.slot;
 		if (slot < 0) {
 			continue;
 		}
 		seen.insert(slot);
-		const Vector3 pos = piece->get_pos();
+		const Vector3 pos = mission_to_godot(piece.pos);
 		piece_pos_[slot] = pos;
-		const int64_t generation = piece->get_generation();
+		const int64_t generation = static_cast<int64_t>(piece.generation);
 		const int64_t *presented = piece_generation_.getptr(slot);
 		const bool is_new_generation = (presented != nullptr ? *presented : -1) != generation;
 		if (is_new_generation) {
@@ -564,14 +552,14 @@ void DestructionPresenter::present_pieces(const TypedArray<DeathPieceRow> &p_pie
 			}
 			piece_generation_[slot] = generation;
 		}
-		if (piece->get_settled()) {
+		if (piece.settled) {
 			continue;
 		}
 		if (is_new_generation) {
-			// The type's trail effect rides the drain row from the ONE native
-			// table (world/destruction death_piece_trail_effect, S12b)
+			// The type's trail effect from the ONE native table
+			// (world/destruction death_piece_trail_effect, S12b)
 			// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
-			const String trail = piece->get_trail();
+			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
 			if (fx_world != nullptr && !trail.is_empty()) {
 				const String key = piece_owner_key(slot);
 				fx_world->spawn_effect_owned(key, trail, pos, Vector3(0, 1, 0));

@@ -22,23 +22,11 @@ namespace godot {
 // [orig: ItemDef_ParseProperty @ 0x49eb00; slot-A runtime attach witness
 // resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 ->
 // Entity_SpawnBoneTrailEffect @ 0x43bef0]
-class ItemParticleFx : public RefCounted {
-	GDCLASS(ItemParticleFx, RefCounted)
-
-	String effect_;
-	String userpoint_;
-	String secondary_effect_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	void assign(const String &p_effect, const String &p_userpoint,
-			const String &p_secondary_effect);
-
-	String get_effect() const { return effect_; }
-	String get_userpoint() const { return userpoint_; }
-	String get_secondary_effect() const { return secondary_effect_; }
+struct ItemParticleFx {
+	bool valid = false; // false = no such item row
+	String effect;
+	String userpoint;
+	String secondary_effect;
 };
 
 // One child-emplacement record (addeweap / addeweapG / addeweapC): the source

@@ -11,6 +11,8 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "util/axes.h"
+#include "util/color_convert.h"
 #include "particle/effect_scene.h"
 
 using namespace godot;
@@ -84,27 +86,26 @@ void GameWorld::route_round_impacts() {
 	}
 	EffectWorld *effect_world = get_effect_world();
 	MissionAudio *audio = get_mission_audio();
-	const TypedArray<RoundImpactRow> rows = sim->drain_round_impacts();
-	for (int64_t i = 0; i < rows.size(); ++i) {
-		const Ref<RoundImpactRow> row = rows[i];
-		if (row.is_null()) {
-			continue;
+	std::vector<opennova::world::RoundImpactPresentation> rows;
+	sim->drain_round_impact_rows(rows);
+	for (const opennova::world::RoundImpactPresentation &row : rows) {
+		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
+		const Vector3 pos = mission_to_godot(row.position);
+		if (effect_world != nullptr && !row.effect.empty()) {
+			effect_world->spawn_effect_transient(String::utf8(row.effect.c_str()), pos,
+					mission_to_godot(row.direction), static_cast<int64_t>(row.age_ticks),
+					EffectScene::RENDER_DOMAIN_WORLD, static_cast<int64_t>(row.source_tick),
+					static_cast<int64_t>(row.source_order));
 		}
-		const Vector3 pos = row->get_position();
-		if (effect_world != nullptr && !row->get_effect().is_empty()) {
-			effect_world->spawn_effect_transient(row->get_effect(), pos, row->get_direction(),
-					MAX(row->get_age_ticks(), 0), EffectScene::RENDER_DOMAIN_WORLD,
-					row->get_source_tick(), row->get_source_order());
-		}
-		if (audio != nullptr && !row->get_sound().is_empty()) {
-			audio->fire_soundset(row->get_sound(), pos);
+		if (audio != nullptr && !row.sound.empty()) {
+			audio->fire_soundset(String::utf8(row.sound.c_str()), pos);
 		}
 		// The light_impact flash rides the effect leg's own gate (the row only
 		// carries light fields when the ammo authors it and the effect presents)
 		// [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3].
-		if (light_director_.is_valid() && row->get_has_light()) {
-			light_director_->on_impact_light(pos, row->get_light_radius(), row->get_light_color(),
-					row->get_light_ticks());
+		if (light_director_.is_valid() && row.has_light) {
+			light_director_->on_impact_light(pos, row.light_radius,
+					opennova::color_from_rgb24(row.light_color_rgb24), row.light_ticks);
 		}
 	}
 }
@@ -117,14 +118,17 @@ void GameWorld::route_terrain_scorches() {
 	if (sim.is_null() || terrain_ == nullptr) {
 		return;
 	}
-	const TypedArray<TerrainScorchRow> rows = sim->drain_terrain_scorches();
-	for (int64_t i = 0; i < rows.size(); ++i) {
-		const Ref<TerrainScorchRow> row = rows[i];
-		if (row.is_null()) {
-			continue;
-		}
-		terrain_->append_terrain_scorch(row->get_texture_index(), row->get_minimum_x_q16(),
-				row->get_minimum_z_q16(), row->get_maximum_x_q16(), row->get_maximum_z_q16());
+	std::vector<opennova::world::TerrainScorchEvent> events;
+	sim->drain_terrain_scorches(events);
+	for (const opennova::world::TerrainScorchEvent &event : events) {
+		const opennova::terrain::TerrainScorchEntry &mission = event.mission_bounds;
+		// mission (x,y,z) -> Godot (x,z,-y): negation swaps the ordered
+		// extrema on the second ground-plane axis.
+		terrain_->append_terrain_scorch(static_cast<int64_t>(mission.texture_index),
+				static_cast<int64_t>(mission.minimum_x_q16),
+				-static_cast<int64_t>(mission.maximum_z_q16),
+				static_cast<int64_t>(mission.maximum_x_q16),
+				-static_cast<int64_t>(mission.minimum_z_q16));
 	}
 }
 
@@ -170,7 +174,9 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 		light_director_->advance_fixed_tick();
 		Ref<Simulation> glow_sim = get_sim();
 		if (glow_sim.is_valid()) {
-			light_director_->sync_round_glows(glow_sim->get_round_glow_rows());
+			std::vector<opennova::world::RoundGlowRow> glows;
+			glow_sim->fill_round_glows(glows);
+			light_director_->sync_round_glows(glows);
 		}
 	}
 	const bool skip_effect_tick = probe_enabled && perf_probe_skip_effect_tick_;

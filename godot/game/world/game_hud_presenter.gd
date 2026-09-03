@@ -326,7 +326,6 @@ func ensure_game_hud() -> void:
 ## player is in-world (the shells gate on their own state).
 ## [orig: HUD_BuildEntityInfo @0x4b8440]
 var _perf_probe_enabled := false
-var _perf_probe_spans: Dictionary = {}
 
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
@@ -339,18 +338,15 @@ func set_frame_stats(board: FrameStats) -> void:
 
 
 ## Enables the intentionally costly per-phase clock sampling used by the manual
-## fire probe. Normal HUD frames leave the span transport untouched and empty.
+## fire probe.
 func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_enabled = enabled
-	_perf_probe_spans.clear()
 
 
 func tick(gameplay_input_active: bool = false) -> void:
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := probe_enabled or stats_on
-	if probe_enabled:
-		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
 		return
 	var sim: Simulation = _world.get_sim()
@@ -560,12 +556,6 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_hud_ticks())
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
-		if probe_enabled:
-			_perf_probe_spans["scalars"] = probe_t1 - probe_t0
-			_perf_probe_spans["attach"] = probe_t2 - probe_t1
-			_perf_probe_spans["waypoint"] = probe_t3 - probe_t2
-			_perf_probe_spans["update_info"] = probe_t4 - probe_t3
-			_perf_probe_spans["flush"] = probe_t5 - probe_t4
 		if stats_on:
 			_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
 			_frame_stats.add(FrameStats.HUD_ATTACH, probe_t2 - probe_t1)
@@ -628,114 +618,50 @@ func _resolve_waypoint_name(name_id: int) -> String:
 
 
 # The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
-# armory-zone mode) projected through the play camera to screen pixels, each with its
-# resolved label text, fed to the overlay as parallel typed arrays. Behind-camera
-# points drop at projection, mirroring the frustum clip.
-# [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
-#  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
+# armory-zone mode) projected through the play camera to overlay pixels with the
+# resolved label text — the overlay's own fill (HudOverlay.set_attach_labels
+# carries the witness); no camera clears the labels.
 func _apply_attach_labels() -> void:
 	if _game_hud == null:
 		return
-	var screens := PackedVector2Array()
-	var texts := PackedStringArray()
-	var nearest := PackedByteArray()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim != null:
-		var labels: Array = sim.get_attach_labels()
-		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-				if not labels.is_empty() else null
-		if camera != null:
-			for l: AttachLabelRow in labels:
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(l.position)
-				if camera.is_position_behind(world_pos):
-					continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
-				screens.append(camera.unproject_position(world_pos))
-				texts.append(_attach_label_text(l.seat_type, l.attach_text_key))
-				nearest.append(1 if l.nearest else 0)
-	_game_hud.set_attach_labels(screens, texts, nearest)
+	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+			if sim != null else null
+	if camera == null:
+		_game_hud.set_attach_labels(Transform3D.IDENTITY, Projection.IDENTITY, null, null)
+		return
+	_game_hud.set_attach_labels(camera.global_transform, camera.get_camera_projection(),
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 
 
 
 
-# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
-# through the play camera with its view distance, fed as parallel typed arrays;
-# the environment's live fog distance rides along for the compiler's fog cull.
-# Behind-camera anchors drop at projection, mirroring the frustum clip.
-# [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
-#  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
-#  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
-#  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
 ## The live HudOverlay node (null until the first in-world HUD frame builds it).
 func get_game_hud() -> HudOverlay:
 	return _game_hud
 
 
+# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
+# through the play camera with the environment's live fog distance — the
+# overlay's own fill (HudOverlay.set_friendly_tags carries the witness); no
+# camera clears the tags.
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
-	var screens := PackedVector2Array()
-	var dists := PackedFloat32Array()
-	var names := PackedStringArray()
-	var ids := PackedInt32Array()
-	var ratios := PackedInt32Array()
-	var flags := PackedInt32Array()
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim != null and _game_hud.get_friendly_tag_mode() != HudOverlay.FRIENDLY_TAGS_OFF:
-		var tags: Array = sim.get_friendly_tags()
-		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-				if not tags.is_empty() else null
-		if camera != null:
-			var cam_pos := camera.global_position
-			for tag: FriendlyTagRow in tags:
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(tag.position)
-				world_pos.y += tag.eye_height + HudOverlay.friendly_tag_lift()
-				if camera.is_position_behind(world_pos):
-					continue # [orig: the nonzero-clip bail @0x5a3b80]
-				screens.append(camera.unproject_position(world_pos))
-				dists.append(cam_pos.distance_to(world_pos))
-				names.append(tag.name)
-				ids.append(tag.entity_id)
-				ratios.append(tag.health_ratio_fp16)
-				# The flag word is packed by the sim feed (hud/friendly_tag_flags.h).
-				flags.append(tag.flags)
 	var fog_distance := 0.0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null
 	if env != null:
 		fog_distance = env.get_fog_distance()
-	_game_hud.set_friendly_tag_env(fog_distance, 0)
-	_game_hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-
-
-# The label text per seat type, resolved in the gametext table's Overlays section with
-# the witnessed missing-string fallbacks. The Gunner label prefers the weapon's
-# attachtextid key: a PRESENT key resolves even to an empty string (the original stores
-# the parse-time GameText_GetString result, "" on a miss, and draws it) — only an
-# ABSENT key falls to the STROVER_USEGUN default.
-# [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
-#  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
-#  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
-#  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
-#  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
-func _attach_label_text(seat_type: int, attach_text_key: String) -> String:
-	match seat_type:
-		Simulation.SEAT_PASSENGER: # sitex [orig: dword_2723860]
-			return _overlay_text("STROVER_SIT", "!sit")
-		Simulation.SEAT_CONTROLLER, Simulation.SEAT_DRIVER:
-			# ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
-			return _overlay_text("STROVER_CONTROL", "!Control")
-		Simulation.SEAT_GUNNER: # UseGun [orig: def+0x3A0 else dword_2723868]
-			if attach_text_key.is_empty():
-				return _overlay_text("STROVER_USEGUN", "!UseGun")
-			# the witnessed empty-label quirk (parse-miss stores "")
-			return _overlay_text(attach_text_key, "")
-		Simulation.SEAT_ARMORY_POINT: # armory [orig: dword_272386C]
-			return _overlay_text("STROVER_USEARMORY", "!UseArmory")
-	return ""
-
-
-func _overlay_text(key: String, fallback: String) -> String:
-	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, key, fallback)
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+			if sim != null else null
+	if camera == null:
+		_game_hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY,
+				fog_distance, null)
+		return
+	_game_hud.set_friendly_tags(true, camera.global_transform, camera.get_camera_projection(),
+			fog_distance, sim)
 
 
 # The weapon's HUD display name: the raw weapon id resolved in the gametext table's
@@ -1064,29 +990,14 @@ func _apply_fp_gun_visible() -> void:
 				(_showhud_flags & HudOverlay.SHOWHUD_FLAG_GUN) != 0)
 
 
-# The panel's resolved rows: shown win-condition slots with mission-text lines
-# and their completed state, fed typed (an empty pair hides the panel — the
-# retail toggle's off state). [orig: HUD_DrawWinConditions @0x5ba940 — rows from
-# the header table walk, text = mission WinConditions/STRWINCOND%03i]
+# The objectives panel: the sim's shown win-condition rows resolved through
+# the mission text table by the overlay's own fill (Simulation.fill_objectives
+# carries the witness); the toggle's off state clears the panel.
 func _apply_objectives() -> void:
 	if _game_hud == null:
 		return
-	var texts := PackedStringArray()
-	var done := PackedByteArray()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if _objectives_visible and sim != null:
-		var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
-		for raw in sim.get_objectives_view():
-			var row: ObjectiveRow = raw
-			if not row.shown:
-				continue
-			var key := "STRWINCOND%03d" % row.text_id
-			var text := ""
-			if table != null and table.has_string_in_section("WinConditions", key):
-				text = table.get_string_in_section("WinConditions", key)
-			texts.append(text)
-			done.append(1 if row.done else 0)
-	_game_hud.set_objectives(texts, done)
+	_game_hud.set_objectives(_objectives_visible, Strings.get_table(Strings.TABLE_MISSION), sim)
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.

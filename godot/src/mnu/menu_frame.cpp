@@ -142,11 +142,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	// Stylesheet vars + the id text table feed the compiler's resolution.
 	std::map<std::string, std::string> vars;
 	if (p_style.is_valid()) {
-		const Dictionary d = p_style->get_variables();
-		const Array keys = d.keys();
-		for (int64_t i = 0; i < keys.size(); ++i) {
-			const String key = keys[i];
-			vars[to_std(key)] = to_std(String(d[keys[i]]));
+		for (const auto &kv : p_style->variables()) {
+			vars[kv.first] = kv.second;
 		}
 	}
 	compiler_.set_style_vars(vars);

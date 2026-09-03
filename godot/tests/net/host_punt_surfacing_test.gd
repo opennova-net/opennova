@@ -200,10 +200,10 @@ func _join_pair_with_pending_pick() -> Dictionary:
 	mission.add_entity(3, AI_TYPE, Vector3(0, 0, 0), Vector3.ZERO)
 	var zone := mission.add_entity(
 			MissionData.KIND_ITEM, SPAWN_ZONE_TYPE, Vector3(40, 0, 0), Vector3.ZERO)
-	assert_false(zone.is_empty())
-	if not zone.is_empty():
+	assert_not_null(zone)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
-				MissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
+				MissionData.KIND_ITEM, zone.index, "team", 1))
 	var item_db := _spawn_zone_item_db()
 	assert_not_null(item_db)
 

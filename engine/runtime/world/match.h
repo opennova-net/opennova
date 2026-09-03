@@ -349,4 +349,23 @@ class Match {
     std::vector<MatchGameplayEvent> gameplay_events_;
 };
 
+
+// The sim-side end-of-round state plus the SP kill-stat buckets the epilog
+// score screen and the WAC bluekills/greenkills builtins read, as one value
+// the embedder fills (World::match.outcome(), World::kill_stats,
+// World::cached.humans, World::rules.mp_session); its Godot record wraps it
+// by value (ADR 0043 d10).
+struct RoundOutcomeView {
+    bool ended = false;
+    int32_t winner_team = 0;
+    int32_t bluekills = 0;
+    int32_t greenkills = 0;
+    int32_t enemy_kills = 0;
+    int32_t team_kills_by_others = 0;
+    int32_t friendly_kills_by_others = 0;
+    int32_t enemy_kills_by_others = 0;
+    int32_t humans = 0;
+    bool mp_session = false;
+};
+
 } // namespace opennova::world

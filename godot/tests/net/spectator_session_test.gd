@@ -7,9 +7,9 @@ extends GutTest
 func _mission() -> MissionData:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_MARKER, 6094,
-			Vector3.ZERO, Vector3.ZERO).is_empty())
+			Vector3.ZERO, Vector3.ZERO))
 	return mission
 
 

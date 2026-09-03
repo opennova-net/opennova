@@ -154,4 +154,13 @@ struct EndRoundResolvedLine {
 std::vector<EndRoundResolvedLine> end_round_overlay_resolve(
 		const std::vector<EndRoundLine> &lines, const EndRoundTextLookup &lookup);
 
+
+// The resolved ladder as one value (the embedder's record wraps it by value):
+// the resolved lines and the overlay safe-area top/bottom in design px.
+struct EndRoundOverlayLadder {
+	std::vector<EndRoundResolvedLine> lines;
+	int top = kEndRoundOverlayTop;
+	int bottom = kEndRoundOverlayBottom;
+};
+
 } // namespace opennova::hud

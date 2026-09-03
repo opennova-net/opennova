@@ -32,7 +32,7 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
-		{"name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2"}]))
+		MissionWeaponLoadoutEntry.make("WPN_KNIFE", "3", "0", "2")]))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
 	var root := ResourceRoot.new()
@@ -209,12 +209,12 @@ func test_setup_promotes_and_counts() -> void:
 func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	var ref: Dictionary = mission.add_entity(MissionData.KIND_BUILDING, 102001,
+	var ref: MissionEntityRecord = mission.add_entity(MissionData.KIND_BUILDING, 102001,
 			Vector3(10, 20, 3), Vector3(0, 25, 0))
-	assert_false(ref.is_empty())
-	if ref.is_empty():
+	assert_not_null(ref)
+	if ref == null:
 		return
-	var bms_id := int(ref.get("bms_id", 0))
+	var bms_id := ref.bms_id
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var model := ObjectModel.new()
@@ -222,7 +222,7 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	model.set_process(false)
 	var placer := MissionObjectPlacer.new()
 	model.entity_ref = EntityRef.make(MissionData.KIND_BUILDING,
-			int(ref.get("index", -1)), bms_id, 102001)
+			ref.index, bms_id, 102001)
 	placer.placed_models.append(model)
 	placer.register_static_instance(bms_id, "Caster", 0,
 			Transform3D(Basis.IDENTITY, Vector3(-20, -20, -20)), true)
@@ -477,8 +477,8 @@ func test_effects_drained_signal_fires() -> void:
 	# unconditional OutputText event and confirm the signal carries it.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 42)))
 	var container := Node3D.new()
 	add_child_autofree(container)
 
@@ -699,8 +699,8 @@ func test_session_frame_drains_effects_per_tick() -> void:
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	assert_false(md.add_event(0, 0, 0).is_empty())
-	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 42)))
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var rt := MissionRoot.new()

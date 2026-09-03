@@ -89,8 +89,11 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
 	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
 	ClassDB::bind_method(D_METHOD("refresh_servers"), &NovaWorldClient::refresh_servers);
-	ClassDB::bind_method(D_METHOD("get_server_totals"), &NovaWorldClient::get_server_totals);
-	ClassDB::bind_method(D_METHOD("get_server_pings"), &NovaWorldClient::get_server_pings);
+	ClassDB::bind_method(D_METHOD("get_total_servers"), &NovaWorldClient::get_total_servers);
+	ClassDB::bind_method(D_METHOD("get_total_players"), &NovaWorldClient::get_total_players);
+	ClassDB::bind_method(D_METHOD("get_server_ping_rids"), &NovaWorldClient::get_server_ping_rids);
+	ClassDB::bind_method(D_METHOD("get_server_ping_values"),
+			&NovaWorldClient::get_server_ping_values);
 	ClassDB::bind_method(D_METHOD("_apply_ping_results", "results", "generation"),
 	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
@@ -112,7 +115,7 @@ void NovaWorldClient::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("server_list_updated", PropertyInfo(Variant::ARRAY, "rows")));
 	ADD_SIGNAL(MethodInfo("server_list_failed", PropertyInfo(Variant::STRING, "reason")));
-	// One ping-sweep pass landed; read get_server_pings() for the rid -> ping map.
+	// One ping-sweep pass landed; read get_server_ping_rids/values() for the results.
 	ADD_SIGNAL(MethodInfo("server_pings_updated"));
 	ADD_SIGNAL(MethodInfo("connected"));
 	ADD_SIGNAL(MethodInfo("disconnected", PropertyInfo(Variant::STRING, "reason")));
@@ -144,7 +147,7 @@ int NovaWorldClient::get_gate_port() const { return gate_port_; }
 void NovaWorldClient::set_player_name(const String &name) { player_name_ = name; }
 String NovaWorldClient::get_player_name() const { return player_name_; }
 
-Dictionary NovaWorldClient::get_server_info() const { return server_info_; }
+Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
 
 void NovaWorldClient::trace(const String &line) {
 	UtilityFunctions::print_verbose(line);
@@ -158,7 +161,7 @@ void NovaWorldClient::start() {
 	if (state_ != STATE_IDLE && state_ != STATE_DISCONNECTED && state_ != STATE_ERROR) {
 		return;
 	}
-	server_info_.clear();
+	server_info_.unref();
 	server_entries_.clear();
 	server_pings_ = Dictionary();
 	total_servers_ = 0;
@@ -279,21 +282,13 @@ NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 // The gate replied: stash the fields the lobby HTTP legs resolve their base
 // URL from (get_server_info).
 void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
-	Dictionary info;
-	info["post_ip"] = String(std::to_string(parsed.post_ip[0]).c_str()) + "." +
-	                  String(std::to_string(parsed.post_ip[1]).c_str()) + "." +
-	                  String(std::to_string(parsed.post_ip[2]).c_str()) + "." +
-	                  String(std::to_string(parsed.post_ip[3]).c_str());
-	info["post_port"] = parsed.post_port;
-	info["startup_url"] = String(parsed.startup_url.c_str());
-	info["udp_novaworld"] = String(parsed.udp_novaworld.c_str());
 	// NW-S3: the gate-issued session-auth codes the 0x42 join must carry as
-	// CU chunks (UDPCODE1/UDPCODE2 -> UdpCode1/UdpCode2). On live NW these
-	// are issued only to an authenticated request (web login); their
-	// presence/absence here tells us whether login is the remaining blocker.
-	info["udp_code1"] = String(parsed.udp_code1.c_str());
-	info["udp_code2"] = String(parsed.udp_code2.c_str());
-	info["met_label"] = String(parsed.met_label.c_str());
+	// CU chunks (UDPCODE1/UDPCODE2 -> UdpCode1/UdpCode2) ride the record. On
+	// live NW these are issued only to an authenticated request (web login);
+	// their presence/absence tells us whether login is the remaining blocker.
+	Ref<NovaWorldGateInfo> info;
+	info.instantiate();
+	info->assign(parsed);
 	server_info_ = info;
 	trace(String("gate response: udp_code1='")
 	    + String(parsed.udp_code1.c_str()) + "' udp_code2='"
@@ -459,15 +454,10 @@ TypedArray<NovaWorldServerRow> NovaWorldClient::get_server_rows() const {
 // touch the flow's cookie jar, so NWHANDLE/PCID survive login -> GSB -> join.
 void NovaWorldClient::sync_flow_context() {
 	opennova::LobbyHttpContext ctx;
-	if (server_info_.has("startup_url")) {
-		ctx.startup_url = std::string(String(server_info_["startup_url"]).utf8().get_data());
-	}
-	if (server_info_.has("post_ip")) {
-		ctx.post_ip = std::string(String(server_info_["post_ip"]).utf8().get_data());
-	}
-	if (server_info_.has("post_port")) {
-		// post_port is stored as an int Variant in server_info_ (see poll_gate).
-		ctx.post_port = std::to_string(static_cast<int>(server_info_["post_port"]));
+	if (server_info_.is_valid()) {
+		ctx.startup_url = server_info_->get_startup_url().utf8().get_data();
+		ctx.post_ip = server_info_->get_post_ip().utf8().get_data();
+		ctx.post_port = std::to_string(server_info_->get_post_port());
 	}
 	ctx.web_domain = std::string(nw_web_domain_.utf8().get_data());
 	ctx.server_nwuid = lobby_.session() ? lobby_.session()->server_nwuid() : std::string();
@@ -556,16 +546,22 @@ void NovaWorldClient::refresh_servers() {
 	trigger_gsb();
 }
 
-Ref<NovaWorldServerTotals> NovaWorldClient::get_server_totals() const {
-	Ref<NovaWorldServerTotals> totals;
-	totals.instantiate();
-	totals->set_total_servers(total_servers_);
-	totals->set_total_players(total_players_);
-	return totals;
+PackedInt64Array NovaWorldClient::get_server_ping_rids() const {
+	PackedInt64Array out;
+	const Array rids = server_pings_.keys();
+	for (int64_t i = 0; i < rids.size(); ++i) {
+		out.push_back(static_cast<int64_t>(rids[i]));
+	}
+	return out;
 }
 
-Dictionary NovaWorldClient::get_server_pings() const {
-	return server_pings_;
+PackedInt32Array NovaWorldClient::get_server_ping_values() const {
+	PackedInt32Array out;
+	const Array rids = server_pings_.keys();
+	for (int64_t i = 0; i < rids.size(); ++i) {
+		out.push_back(static_cast<int32_t>(static_cast<int>(server_pings_[rids[i]])));
+	}
+	return out;
 }
 
 void NovaWorldClient::start_ping_sweep() {

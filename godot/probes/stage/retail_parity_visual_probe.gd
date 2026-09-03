@@ -21,8 +21,8 @@ var _failure := ""
 
 class AttachDiagram:
 	extends Control
-	var labels: Array = []
-	var player_position := Vector3(12.0, 0.0, 0.0)
+	var label_count := 0
+	var selected := -1
 	var accent := Color("55d8ff")
 
 	func _draw() -> void:
@@ -34,16 +34,12 @@ class AttachDiagram:
 		draw_string(ThemeDB.fallback_font, center + Vector2(-24.0, 34.0),
 				"PLAYER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
 				Color("aebed0"))
-		for raw in labels:
-			var row: Dictionary = raw
-			var point: Vector3 = row.get("position", player_position)
-			var p := center + Vector2(
-					(point.x - player_position.x) * 31.0,
-					(point.y - player_position.y) * 31.0 - 64.0)
+		for index in range(label_count):
+			var p := center + Vector2((index - (label_count - 1) * 0.5) * 124.0, -64.0)
 			draw_rect(Rect2(p - Vector2(28.0, 15.0), Vector2(56.0, 30.0)),
 					Color("354353"), true)
 			draw_rect(Rect2(p - Vector2(28.0, 15.0), Vector2(56.0, 30.0)),
-					accent if bool(row.get("nearest", false)) else Color("74879a"),
+					accent if index == selected else Color("74879a"),
 					false, 2.0)
 			var bubble := Rect2(p + Vector2(-42.0, -48.0), Vector2(84.0, 23.0))
 			draw_rect(bubble, Color(0.02, 0.04, 0.07, 0.94), true)
@@ -93,9 +89,9 @@ func _build_attach_stage() -> bool:
 	if md.create_default() != OK:
 		return _fail("could not create attach mission")
 	if md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(10, 0, 0), Vector3.ZERO).is_empty() \
+			Vector3(10, 0, 0), Vector3.ZERO) == null \
 			or md.add_entity(MissionData.KIND_ITEM, 101294,
-			Vector3(14, 0, 0), Vector3.ZERO).is_empty():
+			Vector3(14, 0, 0), Vector3.ZERO) == null:
 		return _fail("could not add attach candidates")
 
 	var fixture_dir := OS.get_cache_dir().path_join(
@@ -138,17 +134,17 @@ end
 	weapon.startrounds = 60
 	sim.set_local_player_weapon(weapon, {})
 	sim.step()
-	var blocked: Array = sim.get_attach_labels()
+	var blocked := _attach_labels(sim)
 	if not sim.request_local_player_scope_toggle():
 		return _fail("could not raise attach probe scope")
 	for _tick in range(16):
 		sim.step()
-	var aimed: Array = sim.get_attach_labels()
+	var aimed := _attach_labels(sim)
 	sim.set_local_player_debug_third_person(true)
-	var third_person: Array = sim.get_attach_labels()
-	if blocked.size() != 2 or aimed.size() != 1 or third_person.size() != 2:
+	var third_person := _attach_labels(sim)
+	if blocked.count != 2 or aimed.count != 1 or third_person.count != 2:
 		return _fail("unexpected attach counts %s/%s/%s" % [
-				blocked.size(), aimed.size(), third_person.size()])
+				blocked.count, aimed.count, third_person.count])
 
 	_add_flat_background(Color("07111d"))
 	_add_screen_title("D-HUD-11  •  ATTACH LABELS SHARE Player_CanFireWeapon",
@@ -173,7 +169,9 @@ end
 		var diagram := AttachDiagram.new()
 		diagram.position = origin + Vector2(0, 58)
 		diagram.size = Vector2(280, 274)
-		diagram.labels = state["labels"]
+		var read: AttachLabels = state["labels"]
+		diagram.label_count = read.count
+		diagram.selected = read.selected
 		diagram.accent = state["accent"]
 		_scene.add_child(diagram)
 	var footer := _label(
@@ -181,6 +179,25 @@ end
 			Vector2(24, 490), 15, Color("dce8f3"))
 	_scene.add_child(footer)
 	return true
+
+
+# The overlay's read of the sim's attach labels through the play camera
+# (at the probe player, looking down +X so every candidate projects).
+class AttachLabels:
+	var count := 0
+	var selected := -1
+
+
+func _attach_labels(sim: Simulation) -> AttachLabels:
+	var hud := HudOverlay.new()
+	hud.set_attach_labels(
+			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
+			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, sim)
+	var read := AttachLabels.new()
+	read.count = hud.get_attach_label_count()
+	read.selected = hud.get_attach_label_selected()
+	hud.free()
+	return read
 
 
 func _build_debris_stage() -> bool:

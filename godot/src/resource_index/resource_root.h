@@ -68,7 +68,6 @@ private:
 	static String to_native_path(const String &path);
 	static String normalize_dir(const String &path);
 	static String lookup_name(const String &name);
-	static Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry);
 	static opennova::VfsLookupPolicy to_vfs_lookup_policy(LookupPolicy policy);
 
 	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR

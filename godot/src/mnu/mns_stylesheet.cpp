@@ -47,12 +47,8 @@ String MnsStyleSheet::substitute(const String &p_text) const {
 	return to_gd(sheet_.substitute(to_std(p_text)));
 }
 
-Dictionary MnsStyleSheet::get_variables() const {
-	Dictionary out;
-	for (const auto &kv : sheet_.variables) {
-		out[to_gd(kv.first)] = to_gd(kv.second);
-	}
-	return out;
+const std::unordered_map<std::string, std::string> &MnsStyleSheet::variables() const {
+	return sheet_.variables;
 }
 
 void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {

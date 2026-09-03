@@ -23,30 +23,6 @@
 
 namespace godot {
 
-// One graphic's grouped static user-point sources (the world debug view):
-// the shared ObjectData and every placement transform of that graphic.
-class StaticUserPointSource : public RefCounted {
-	GDCLASS(StaticUserPointSource, RefCounted)
-
-public:
-	String get_graphic() const { return graphic_; }
-	void set_graphic(const String &p_graphic) { graphic_ = p_graphic; }
-	Ref<ObjectData> get_object_data() const { return object_data_; }
-	void set_object_data(const Ref<ObjectData> &p_data) { object_data_ = p_data; }
-	TypedArray<Transform3D> get_transforms() const { return transforms_; }
-	void set_transforms(const TypedArray<Transform3D> &p_transforms) {
-		transforms_ = p_transforms;
-	}
-
-protected:
-	static void _bind_methods();
-
-private:
-	String graphic_;
-	Ref<ObjectData> object_data_;
-	TypedArray<Transform3D> transforms_;
-};
-
 // One retained static entity for mission-start item effects: its record
 // identity, graphic, base entity transform and data. Row order is placement
 // order and stable for the mission; `source_index` is that row's position.

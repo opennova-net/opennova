@@ -928,21 +928,7 @@ TypedArray<DeployZoneRow> Simulation::get_deploy_spawn_zones() {
 	for (const opennova::world::DeployZoneRow &row : deploy_zone_rows()) {
 		Ref<DeployZoneRow> record;
 		record.instantiate();
-		record->set_param(row.index + 1);
-		record->set_letter(String::chr(row.letter));
-		record->set_name_key(String::utf8(row.name_key.c_str()));
-		record->set_secured(row.secured);
-		record->set_wave_countdown(row.wave_countdown);
-		TypedArray<DeployOccupantRow> occupants;
-		for (const opennova::world::DeployOccupant &o : row.occupants) {
-			Ref<DeployOccupantRow> occupant;
-			occupant.instantiate();
-			occupant->set_handle(o.handle);
-			occupant->set_name(String::utf8(o.name.c_str()));
-			occupant->set_self(o.self);
-			occupants.push_back(occupant);
-		}
-		record->set_occupants(occupants);
+		record->assign(row);
 		out.push_back(record);
 	}
 	return out;
@@ -1105,20 +1091,15 @@ Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
 	Ref<ScoreboardHeader> out;
 	out.instantiate();
 	if (!runtime_) return out;
-	const opennova::replication::ClientScoreboardHeader header =
-			opennova::replication::scoreboard_header(runtime_->state());
-	out->set_known(header.known);
-	out->set_team_mode(header.team_mode);
-	out->set_timed(header.timed);
-	out->set_players(static_cast<int>(header.players));
-	out->set_in_game(static_cast<int>(header.in_game));
-	out->set_spectators(static_cast<int>(header.spectators));
+	opennova::replication::ClientScoreboardSession v;
+	v.header = opennova::replication::scoreboard_header(runtime_->state());
 	// The drawer branches on the session game type (retail reads g_GameType
 	// @0x423acb); the header's session strings ride along — joiner-decoded,
 	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
-	out->set_game_type(static_cast<int64_t>(runtime_->game_type()));
-	out->set_server(String::utf8(runtime_->server_name().c_str()));
-	out->set_mission(String::utf8(runtime_->mission_name().c_str()));
+	v.game_type = runtime_->game_type();
+	v.server_name = runtime_->server_name();
+	v.mission_name = runtime_->mission_name();
+	out->assign(v);
 	return out;
 }
 

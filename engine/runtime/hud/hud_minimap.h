@@ -423,4 +423,15 @@ struct HudMapControl {
 	void on_local_player_dead() { mode = 0; }
 };
 
+
+// The map grid-label origin (the mission's first type-2043 marker) in mission
+// 16.16, `present` false until the marker resolves (witness at
+// HudMinimapInput::grid_origin_x). One value the embedder fills; its Godot
+// record wraps it by value.
+struct HudMapGridOrigin {
+	bool present = false;
+	int32_t x_q16 = 0;
+	int32_t y_q16 = 0;
+};
+
 } // namespace opennova::hud

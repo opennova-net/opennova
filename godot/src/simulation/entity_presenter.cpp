@@ -18,6 +18,8 @@
 #include "env/mission_environment.h"
 #include "lights/effect_light_director.h"
 #include "particle/effect_world.h"
+#include "simulation/destruction_events.h"
+#include "simulation/present_event_records.h"
 #include "simulation/simulation.h"
 #include "world/item_effect_director.h"
 #include "world/scar_draw_list.h"
@@ -393,20 +395,37 @@ ScarPresenter *EntityPresenter::scar_presenter() const {
 	return scars();
 }
 
+// The bound data legs unwrap the test-authored records into the engine rows
+// the passes consume (ADR 0043 d10: C++ consumers read the native vectors).
+template <typename Row, typename Record>
+static std::vector<Row> unwrap_rows(const TypedArray<Record> &p_records) {
+	std::vector<Row> rows;
+	rows.reserve(static_cast<size_t>(p_records.size()));
+	for (int64_t i = 0; i < p_records.size(); ++i) {
+		const Ref<Record> record = p_records[i];
+		if (record.is_valid()) {
+			rows.push_back(record->value());
+		}
+	}
+	return rows;
+}
+
 void EntityPresenter::present_fires(const TypedArray<FirePresentationEvent> &p_events) {
-	fire_->present_fires(p_events);
+	fire_->present_fires(
+			unwrap_rows<opennova::world::FirePresentationRow, FirePresentationEvent>(p_events));
 }
 
 void EntityPresenter::present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds) {
-	fire_->present_fire_sounds(p_sounds);
+	fire_->present_fire_sounds(unwrap_rows<opennova::world::ReadyFireSound, FireSoundRow>(p_sounds));
 }
 
 void EntityPresenter::present_slot_sounds(const TypedArray<SlotSoundRow> &p_events) {
-	fire_->present_slot_sounds(p_events);
+	fire_->present_slot_sounds(unwrap_rows<opennova::world::SoundSlotEvent, SlotSoundRow>(p_events));
 }
 
 void EntityPresenter::present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events) {
-	fire_->present_sound_emitters(p_events);
+	fire_->present_sound_emitters(
+			unwrap_rows<opennova::world::SoundEmitterEvent, SoundEmitterRow>(p_events));
 }
 
 void EntityPresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
@@ -415,11 +434,14 @@ void EntityPresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 
 void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p_events,
 		const TypedArray<DeathPieceRow> &p_pieces) {
-	destruction_->present_drained(p_events, p_pieces);
+	const opennova::world::DestructionEvents none;
+	destruction_->present_drained(p_events.is_valid() ? p_events->value() : none,
+			unwrap_rows<opennova::world::DeathPieceRow, DeathPieceRow>(p_pieces));
 }
 
 void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
-	throwable_->present_visuals(p_visuals);
+	throwable_->present_visuals(
+			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
 }
 
 void EntityPresenter::present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list) {

@@ -24,13 +24,11 @@ class EffectLoadReport;
 class EffectSpawnReceipt;
 class EffectSpawnRequest;
 
-// A reusable batch of owner pose updates for EffectScene.apply_owner_poses:
+// A reusable batch of owner pose updates for EffectScene::apply_owner_poses:
 // EffectWorld clears and refills one per frame, so the per-frame path
 // allocates nothing once warm. add_absent retires the owner (every group
-// following it detaches).
-class EffectOwnerPoseBatch : public RefCounted {
-	GDCLASS(EffectOwnerPoseBatch, RefCounted)
-
+// following it detaches). A plain C++ scratch, not a ClassDB class.
+class EffectOwnerPoseBatch {
 public:
 	void clear() { updates_.clear(); }
 	void add(int64_t p_owner_token, const Transform3D &p_transform);
@@ -39,9 +37,6 @@ public:
 	const std::vector<opennova::particle::EffectOwnerPoseUpdate> &updates() const {
 		return updates_;
 	}
-
-protected:
-	static void _bind_methods();
 
 private:
 	std::vector<opennova::particle::EffectOwnerPoseUpdate> updates_;
@@ -118,8 +113,8 @@ public:
 
 	// Applies every update in the batch; an absent owner detaches all of its
 	// following groups. The non-in-place form also refreshes the snapshot.
-	void apply_owner_poses_in_place(const Ref<EffectOwnerPoseBatch> &p_batch);
-	void apply_owner_poses(const Ref<EffectOwnerPoseBatch> &p_batch);
+	void apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch);
+	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	PackedInt64Array get_active_owner_tokens() const;
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);

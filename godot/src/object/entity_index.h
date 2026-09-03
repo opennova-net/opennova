@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include "mission/mission_records.h"
 #include "object/object_model.h"
 
 namespace godot {
@@ -30,7 +31,7 @@ class EntityIndex : public RefCounted {
 	HashMap<int64_t, ObjectID> by_kind_index_;
 	HashMap<int64_t, Vector<ObjectID>> by_group_;
 	Vector<EntityRecord> records_;
-	Array area_triggers_;
+	TypedArray<MissionAreaTrigger> area_triggers_;
 	int64_t generation_ = 0;
 
 	// Keep both signed 32-bit inputs distinct without a formatted String in
@@ -50,7 +51,8 @@ public:
 	// (Re)build from the placer's registered models (each carrying its
 	// EntityRef). `area_triggers` supplies the mission's rects for zone
 	// resolution (empty for wire-header joiners).
-	void build(const TypedArray<ObjectModel> &p_models, const Array &p_area_triggers);
+	void build(const TypedArray<ObjectModel> &p_models,
+			const TypedArray<MissionAreaTrigger> &p_area_triggers);
 	void clear();
 	int64_t get_generation() const { return generation_; }
 

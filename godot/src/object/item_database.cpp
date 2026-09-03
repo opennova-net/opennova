@@ -69,7 +69,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &ItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("resolve_envs_markers", "mission"),
 			&ItemDatabase::resolve_envs_markers);
-	ClassDB::bind_method(D_METHOD("get_particle_fx", "id"), &ItemDatabase::get_particle_fx);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
@@ -402,15 +401,16 @@ TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 
 // Slot A ("particlefx") as authored — the one the runtime effect-attach pass
 // consumes (item_records.h carries the witness).
-Ref<ItemParticleFx> ItemDatabase::get_particle_fx(int id) const {
+ItemParticleFx ItemDatabase::get_particle_fx(int id) const {
+	ItemParticleFx out;
 	const ::DefItemDef *row = row_(id);
 	if (row == nullptr) {
-		return Ref<ItemParticleFx>();
+		return out;
 	}
-	Ref<ItemParticleFx> out;
-	out.instantiate();
-	out->assign(String(row->particlefx.effect), String(row->particlefx.userpoint),
-			String(row->particlefx.secondary_effect));
+	out.valid = true;
+	out.effect = String(row->particlefx.effect);
+	out.userpoint = String(row->particlefx.userpoint);
+	out.secondary_effect = String(row->particlefx.secondary_effect);
 	return out;
 }
 
