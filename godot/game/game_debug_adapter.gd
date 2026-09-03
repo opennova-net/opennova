@@ -286,11 +286,10 @@ func capture_mcp_render_bundle(
 	var capture_script: Variant = _render_capture_script()
 	if capture_script == null:
 		return {"error": "Render capture is unavailable in this build (the MCP transport is not shipped)."}
-	var capture_options: Dictionary = capture_script.get_script_constant_map()
 	var capture_args := args.duplicate(false)
 	if presentation_mode != "full_frame":
-		capture_args[capture_options["PRESENTATION_BEGIN_OPTION"]] = presentation_begin
-		capture_args[capture_options["PRESENTATION_FINISH_OPTION"]] = presentation_finish
+		capture_args[capture_script.PRESENTATION_BEGIN_OPTION] = presentation_begin
+		capture_args[capture_script.PRESENTATION_FINISH_OPTION] = presentation_finish
 	return await capture_script.capture(
 			viewport, diagnostics_source, capture_args, cancel_requested)
 
