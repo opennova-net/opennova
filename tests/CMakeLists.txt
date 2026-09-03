@@ -1814,9 +1814,9 @@ if(MSVC)
 endif()
 add_test(NAME mission_promote COMMAND promote_test)
 
-# S9 (ADR 0028): the mission boot policy — the first ctest lock on the boot ORDER:
-# run_mission_boot's exact step sequence + gates (role, missing inputs, the load abort,
-# the ammo-gated AI-weapon seed), the mission-text fallback, and the .aip speed resolve.
+# S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
+# fallback and the .aip resolve (the boot ORDER itself is pinned through
+# MissionKernel::boot_trace in mission_kernel_test, ADR 0043 slice E9).
 add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
 target_link_libraries(mission_runtime_boot_test PRIVATE opennova_runtime)
 add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)

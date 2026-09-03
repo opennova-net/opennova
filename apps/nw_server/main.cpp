@@ -212,18 +212,6 @@ void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
 }
 
-// The mission's .cpt/.trn(+charmap) height field, built into the kernel's own
-// terrain field store BEFORE boot — the embedder-side format-typed leg on the
-// far side of the ADR 0020 seam, through the engine's one loader. The raw .til
-// bytes feed the S2C 0x45 terrain-tile load a wire joiner streams (net-re
-// §5.37); absent, the tile stream is skipped.
-bool load_terrain(opennova::mission::MissionKernel &kernel,
-		const opennova::ResourceIndex &index,
-		std::vector<uint8_t> &til_bytes, std::string &error) {
-	return opennova::terrain::terrain_field_store_load(kernel.terrain_store, index,
-			kernel.mission.get_terrain(), error, &til_bytes);
-}
-
 } // namespace
 
 int main(int argc, char **argv) {
@@ -320,16 +308,12 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	// --- The mission's terrain field, built into the kernel's store before
-	//     the boot (the ground solve, collision heightfield, surface picks). ---
+	// --- The mission's terrain field is the kernel boot's own load through
+	//     the mounted index (the ground solve, collision heightfield, surface
+	//     picks); the raw .til bytes land here beside it for the S2C 0x45
+	//     terrain-tile stream a wire joiner streams (net-re §5.37); absent, the
+	//     tile stream is skipped. ---
 	std::vector<uint8_t> terrain_til_bytes;
-	{
-		std::string terrain_error;
-		if (!load_terrain(kernel, index, terrain_til_bytes, terrain_error))
-			std::fprintf(stderr,
-					"nw-server: terrain not loaded (%s) - the ground solve will not run\n",
-					terrain_error.c_str());
-	}
 
 	// --- The consolidated HostConfig: identity, the mission-derived (or
 	//     overridden) g_GameType, the fresh-host rule defaults, the flag
@@ -430,6 +414,7 @@ int main(int argc, char **argv) {
 	mission::KernelBootOptions boot_options;
 	boot_options.playable = false; // no synthetic loopback player; every roster row is a remote peer
 	boot_options.wac_strict_diagnostics = true;
+	boot_options.terrain_til_bytes = &terrain_til_bytes;
 	boot_options.game_type = host_cfg.config.game_type;
 	boot_options.bringup_net_session = [&] {
 		role.bring_up_dedicated(host_cfg);

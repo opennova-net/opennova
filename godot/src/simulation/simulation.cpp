@@ -603,7 +603,7 @@ void Simulation::apply_host_session_mission_header(const opennova::bms::File &fi
 }
 
 // The production boot (S9/ADR 0042 d3): the kernel owns the ordered step
-// table (mission_kernel.cpp — run_mission_boot's ONE filler); this entry only
+// sequence (MissionKernel::boot, recorded in its boot_trace); this entry only
 // converts the Godot Refs into the kernel's sources (the mounted index, the
 // parsed items.def rows, the terrain documents, the mission text) and runs the
 // binding-side legs the kernel deliberately leaves to the shell (net role
@@ -690,6 +690,9 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	ms::KernelBootOptions options;
 	options.playable = p_playable;
 	options.joiner = joiner_;
+	// The shell owns the terrain field's parsed-document entry (the store the
+	// setter above built, or none): the kernel never loads one from files here.
+	options.terrain = false;
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);

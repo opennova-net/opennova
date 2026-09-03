@@ -1,8 +1,7 @@
-// S9 (ADR 0028): the mission boot policy — the first ctest lock on the boot
-// ORDER. Pins run_mission_boot's exact step sequence and gates (role, missing
-// inputs, the load abort, the ammo-gated AI-weapon seed), the mission-text
-// fallback rule, and the .aip profile-speed resolution (parse, dedup order,
-// trim/lowercase, unauthored-row exclusion).
+// S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
+// fallback rule and the .aip profile-speed resolution (parse, dedup order,
+// trim/lowercase, unauthored-row exclusion). The boot ORDER itself is pinned
+// through MissionKernel::boot_trace in mission_kernel_test (ADR 0043 slice E9).
 
 #include <runtime/mission/runtime_boot.h>
 
@@ -38,147 +37,6 @@ ms::BootFileSource source_over(
 		return true;
 	};
 	return s;
-}
-
-struct StepRecorder {
-	std::vector<std::string> calls;
-	bool load_ok = true;
-	bool ammo_ok = true;
-
-	ms::BootSteps steps() {
-		ms::BootSteps s;
-		s.install_seat_specs = [this] { calls.push_back("seat_specs"); };
-		s.install_ai_profiles = [this] { calls.push_back("aip"); };
-		s.install_terrain_til = [this] { calls.push_back("til"); };
-		s.install_mission_text = [this] { calls.push_back("text"); };
-		s.load_mission = [this] {
-			calls.push_back("load");
-			return load_ok;
-		};
-		s.install_terrain_field = [this] { calls.push_back("terrain"); };
-		s.install_sound_profiles = [this] { calls.push_back("sndprof"); };
-		s.install_infantry_anim = [this] { calls.push_back("adm"); };
-		s.install_wac = [this] { calls.push_back("wac"); };
-		s.spawn_local_player = [this] { calls.push_back("spawn"); };
-		s.resolve_infantry_adm = [this] { calls.push_back("adm_ids"); };
-		s.resolve_item_traits = [this] { calls.push_back("traits"); };
-		s.install_asset_root = [this] { calls.push_back("asset_root"); };
-		s.resolve_collision = [this] { calls.push_back("collision"); };
-		s.occlusion_init = [this] { calls.push_back("occlusion"); };
-		s.load_weapon_table = [this] { calls.push_back("weapons"); };
-		s.load_ammo_table = [this] {
-			calls.push_back("ammo");
-			return ammo_ok;
-		};
-		s.resolve_ai_weapons = [this] { calls.push_back("ai_weapons"); };
-		return s;
-	}
-};
-
-bool dump_on_fail(const StepRecorder &r, const char *label) {
-	std::fprintf(stderr, "  %s:", label);
-	for (const std::string &c : r.calls) std::fprintf(stderr, " %s", c.c_str());
-	std::fprintf(stderr, "\n");
-	return false;
-}
-
-// The full-inputs SP boot runs every step in the exact order.
-bool run_full_order() {
-	StepRecorder r;
-	ms::BootParams p;
-	p.playable = true;
-	p.has_resource_root = true;
-	p.has_item_db = true;
-	p.has_terrain = true;
-	p.has_terrain_til = true;
-	p.has_wac = true;
-	const ms::BootAbort abort = ms::run_mission_boot(p, r.steps());
-	const std::vector<std::string> expected = {
-			"seat_specs", "aip", "til", "text", "load", "terrain", "sndprof",
-			"adm", "wac", "spawn", "adm_ids", "traits", "asset_root",
-			"collision", "occlusion", "weapons", "ammo", "ai_weapons"};
-	if (!expect(abort == ms::BootAbort::kNone, "full: boots clean")) return false;
-	if (r.calls != expected) {
-		expect(false, "full: exact step order");
-		return dump_on_fail(r, "got");
-	}
-	return true;
-}
-
-// Gates: a rootless boot keeps only the root-free steps; a joiner never
-// spawns; a missing item db drops trait/collision resolution.
-bool run_gates() {
-	{
-		StepRecorder r;
-		ms::BootParams p;
-		p.playable = true; // no root/db/placer/terrain/til/wac
-		(void)ms::run_mission_boot(p, r.steps());
-		const std::vector<std::string> expected = {"text", "load", "spawn"};
-		if (r.calls != expected) {
-			expect(false, "rootless: only the root-free steps");
-			return dump_on_fail(r, "got");
-		}
-	}
-	{
-		StepRecorder r;
-		ms::BootParams p;
-		p.is_joiner = true;
-		p.playable = true; // playable joiner still never spawns here
-		p.has_resource_root = true;
-		p.has_item_db = true;
-		(void)ms::run_mission_boot(p, r.steps());
-		for (const std::string &c : r.calls)
-			if (!expect(c != "spawn", "joiner: L spawns on the name-match, not here"))
-				return false;
-	}
-	{
-		StepRecorder r;
-		ms::BootParams p;
-		p.has_item_db = true; // db without root: collision resolves from the
-		                      // sim cache; only the root-fed asset_root skips
-		(void)ms::run_mission_boot(p, r.steps());
-		bool saw_collision = false, saw_occlusion = false;
-		for (const std::string &c : r.calls) {
-			saw_collision = saw_collision || c == "collision";
-			saw_occlusion = saw_occlusion || c == "occlusion";
-			if (!expect(c != "asset_root", "rootless db: no asset_root install"))
-				return false;
-		}
-		if (!expect(saw_collision && saw_occlusion,
-				"rootless db: collision + occlusion still run"))
-			return dump_on_fail(r, "got");
-	}
-	return true;
-}
-
-// The load abort: nothing after a failed load runs.
-bool run_load_abort() {
-	StepRecorder r;
-	r.load_ok = false;
-	ms::BootParams p;
-	p.playable = true;
-	p.has_resource_root = true;
-	p.has_item_db = true;
-	const ms::BootAbort abort = ms::run_mission_boot(p, r.steps());
-	if (!expect(abort == ms::BootAbort::kLoadFailed, "abort: reported")) return false;
-	if (!expect(!r.calls.empty() && r.calls.back() == "load",
-			"abort: load is the last step run"))
-		return dump_on_fail(r, "got");
-	return true;
-}
-
-// The AI-weapon seed runs only against a loaded ammo table.
-bool run_ammo_gate() {
-	StepRecorder r;
-	r.ammo_ok = false;
-	ms::BootParams p;
-	p.has_resource_root = true;
-	p.has_item_db = true;
-	(void)ms::run_mission_boot(p, r.steps());
-	for (const std::string &c : r.calls)
-		if (!expect(c != "ai_weapons", "ammo gate: no seed without the table"))
-			return false;
-	return true;
 }
 
 // <mission>.bin when present; medmssn.bin only when it does not exist.
@@ -414,10 +272,6 @@ bool run_aip_fallback() {
 
 int main() {
 	bool ok = true;
-	ok &= run_full_order();
-	ok &= run_gates();
-	ok &= run_load_abort();
-	ok &= run_ammo_gate();
 	ok &= run_text_fallback();
 	ok &= run_aip_parse();
 	ok &= run_aip_resolve();

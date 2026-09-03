@@ -100,6 +100,11 @@ TERRAIN_QUERY_HEADERS = {
     # world-owned interfaces grow here; the registry/textures stay behind).
     "runtime/terrain_query/terrain_scorch_record.h",
 }
+# ADR 0043 (amending ADR 0020 d3): the mission kernel owns the terrain field's
+# file entry, so runtime/mission alone may include the format-typed builder.
+SEAM_TREE_EXTRA_HEADERS = {
+    "engine/runtime/mission": {"runtime/terrain_query/terrain_field_build.h"},
+}
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
@@ -176,6 +181,8 @@ def scan() -> tuple[list[str], int]:
         except OSError:
             continue
         in_seam = any(posix == t or posix.startswith(t + "/") for t in SEAM_TREES)
+        seam_extra = set().union(*(h for t, h in SEAM_TREE_EXTRA_HEADERS.items()
+                                   if posix == t or posix.startswith(t + "/")))
         tree = includer_tree(rel)
         net_agnostic = tree == "runtime" and len(rel.parts) > 3 and \
                 rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
@@ -218,7 +225,8 @@ def scan() -> tuple[list[str], int]:
                             f"[net-agnostic] {where} (engine/{'/'.join(rel.parts[1:3])} is a "
                             f"headless runtime lib; only runtime/inmatch and "
                             f"runtime/replication carry the wire; ADR 0043 d4)")
-                if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and inc not in TERRAIN_QUERY_HEADERS:
+                if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and \
+                        inc not in TERRAIN_QUERY_HEADERS and inc not in seam_extra:
                     violations.append(f"[terrain-seam] {where}")
                 continue
             if first in all_libs:
