@@ -14,31 +14,17 @@ const SYN_YAW_STYLE114 := "res://../fixtures/threedi/synth/mount_yaw_style114.3d
 const SYN_CTRL1_LOD_FRAC_YAW_STYLE114 := "res://../fixtures/threedi/synth/mount_ctrl1_lod_frac_yaw_style114.3di"
 const SYN_MTRL0_RGBGEN113_REG1 := "res://../fixtures/threedi/synth/mount_mtrl0_rgbgen113_reg1.3di"
 const SYN_ARMRY_LGHT0_COLORGEN113 := "res://../fixtures/threedi/synth/armory_lght0_colorgen113_flicker.3di"
-const TRACK_NAMES := [
-	"rotation_x", "rotation_y", "rotation_z",
-	"scale_x", "scale_y", "scale_z", "translation",
-]
+# The mount's controlled yaw track: the first LOD0 track on register 1 is
+# row 1's rotation x, driving part 1 (the cradle). The authored rows are the
+# minimal_3di_gen ctest's ("cradle yaw row"), which byte-compares every
+# variant below; the register renames (mount_ctrl1_*) leave the row alone.
+const YAW_PART := 1
 
 
 func _open(path: String) -> ObjectData:
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK)
 	return data
-
-
-func _controlled_track(data: ObjectData, local_ordinal: int) -> Dictionary:
-	for anim_index in range(data.get_part_anim_count(0)):
-		var anim := data.get_part_anim_info(0, anim_index)
-		for track_name in TRACK_NAMES:
-			var track := anim.get_track(track_name)
-			if track.control == 113 and \
-					track.control_param == local_ordinal:
-				return {
-					"anim_index": anim_index,
-					"track_name": track_name,
-					"part_index": anim.transform_as,
-				}
-	return {}
 
 
 func _pose(data: ObjectData, part_index: int,
@@ -73,11 +59,7 @@ func _assert_cached_apply_matches(data: ObjectData,
 
 func test_panm_uses_case_insensitive_signed_global_dwords() -> void:
 	var data := _open(MOUNT)
-	var track := _controlled_track(data, 1) # EWEAP_GUNYAW
-	assert_false(track.is_empty(), "mount should carry its authored yaw track")
-	if track.is_empty():
-		return
-	var part := int(track.get("part_index", -1))
+	var part := YAW_PART # EWEAP_GUNYAW drives the cradle
 	var zero := _pose(data, part, {"EWEAP_GUNYAW": 0})
 	var half := _pose(data, part, {"EWEAP_GUNYAW": 0x8000})
 	var full_upper := _pose(data, part, {"EWEAP_GUNYAW": 0x10000})
@@ -118,54 +100,32 @@ func test_duplicate_and_unknown_authored_names_follow_retail_loader_aliases() ->
 	assert_eq(_register_name(duplicate, 0), "HEAT_GLOW")
 	assert_eq(_register_name(duplicate, 1), "HEAT_GLOW",
 			"the fixture authors CTRL 1 as a duplicate HEAT_GLOW")
-	var duplicate_track := _controlled_track(duplicate, 1)
-	assert_false(duplicate_track.is_empty())
-	if not duplicate_track.is_empty():
-		var part := int(duplicate_track.get("part_index", -1))
-		assert_gt(_transform_delta(
-				_pose(duplicate, part, {"HEAT_GLOW": 0x8000}),
-				_pose(duplicate, part, {"HEAT_GLOW": 0})), 0.001,
-				"duplicate local CTRL records should alias one global slot")
+	assert_gt(_transform_delta(
+			_pose(duplicate, YAW_PART, {"HEAT_GLOW": 0x8000}),
+			_pose(duplicate, YAW_PART, {"HEAT_GLOW": 0})), 0.001,
+			"duplicate local CTRL records should alias one global slot")
 
 	var unknown := _open(SYN_CTRL1_NOT_RETAIL)
 	assert_eq(_register_name(unknown, 1), "NOT_RETAIL",
 			"the fixture authors CTRL 1 as a name retail never registers")
-	var unknown_track := _controlled_track(unknown, 1)
-	assert_false(unknown_track.is_empty())
-	if not unknown_track.is_empty():
-		var part := int(unknown_track.get("part_index", -1))
-		assert_gt(_transform_delta(
-				_pose(unknown, part, {"lod_frac": 0x8000}),
-				_pose(unknown, part, {"LOD_FRAC": 0})), 0.001,
-				"an unknown authored CTRL name should alias retail ordinal zero")
+	assert_gt(_transform_delta(
+			_pose(unknown, YAW_PART, {"lod_frac": 0x8000}),
+			_pose(unknown, YAW_PART, {"LOD_FRAC": 0})), 0.001,
+			"an unknown authored CTRL name should alias retail ordinal zero")
 
 
 func test_wave_styles_receive_the_loader_resolved_phase_ordinal() -> void:
-	# The pristine model locates the yaw track (control 113, local ordinal 1);
-	# both fixtures carry that same track re-styled to 114.
-	var pristine_track := _controlled_track(_open(MOUNT), 1)
-	assert_false(pristine_track.is_empty())
-	if pristine_track.is_empty():
-		return
-	var anim_index := int(pristine_track.get("anim_index", -1))
-	var track_name := String(pristine_track.get("track_name", ""))
-
+	# Both fixtures carry the pristine yaw track (control 113, local ordinal 1,
+	# the cradle's row) re-styled to 114 — the minimal_3di_gen ctest pins the
+	# authored style on both ("yaw style 114").
 	var normal := _open(SYN_YAW_STYLE114)
-	var normal_track := normal.get_part_anim_info(0, anim_index).get_track(track_name)
-	assert_eq(normal_track.control, 114,
-			"the normal fixture authors the yaw track as style 114")
-
 	var patched := _open(SYN_CTRL1_LOD_FRAC_YAW_STYLE114)
 	assert_eq(_register_name(patched, 1), "LOD_FRAC",
 			"the patched fixture authors CTRL 1 as LOD_FRAC")
-	var patched_track := patched.get_part_anim_info(0, anim_index).get_track(track_name)
-	assert_eq(patched_track.control, 114,
-			"the patched fixture authors the yaw track as style 114")
 
-	var part := int(pristine_track.get("part_index", -1))
 	assert_gt(_transform_delta(
-			_pose(normal, part, {}),
-			_pose(patched, part, {})), 0.001,
+			_pose(normal, YAW_PART, {}),
+			_pose(patched, YAW_PART, {})), 0.001,
 			"style 114 should use global ordinal 55 vs LOD_FRAC ordinal zero as phase")
 
 
@@ -185,11 +145,9 @@ func test_light_controls_share_the_case_insensitive_global_bus() -> void:
 
 
 func test_material_case_aliases_collapse_in_dictionary_order() -> void:
+	# MTRL 0 authors a register-driven RGB generator on register 1 (the
+	# minimal_3di_gen ctest pins the row: "material alias").
 	var data := _open(SYN_MTRL0_RGBGEN113_REG1)
-	var material := data.get_material_info(0)
-	assert_eq(material.rgb_gen_style, 113,
-			"the fixture authors MTRL 0 with a register-driven RGB generator")
-	assert_eq(material.rgb_gen_reg, 1)
 
 	var high: Vector3 = data.eval_material_runtime(0, 0, {
 		"EWEAP_GUNYAW": 0,

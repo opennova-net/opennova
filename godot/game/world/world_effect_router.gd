@@ -5,7 +5,7 @@ extends RefCounted
 # GameWorld: the WAC/BMS effect routing (dialog audio, fx2ssn emitters), the
 # per-source-tick impact/scorch drains, the runtime signal handlers, and the
 # weather resync after a sim restore. Plain RefCounted on the internal-member
-# pattern (OcclusionFramePass / WorldDeviceFrame).
+# pattern (OcclusionFrame / WorldDeviceFrame).
 #
 # GameWorld keeps a route_mission_effects delegate (tests drive it) plus thin
 # on_runtime_effects/on_runtime_fixed_tick/on_runtime_simulation_restarted

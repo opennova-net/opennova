@@ -45,9 +45,6 @@
 
 namespace godot {
 
-class BodyBlendState;
-class PartAnimChannelState;
-class WeaponChannelState;
 
 class Terrain;
 class MeshInstance3D;
@@ -895,16 +892,17 @@ public:
 	void set_part_phase(int p_channel, int64_t p_phase);
 	void clear_part_phase(int p_channel);
 	void clear_part_anims();
-	// The running PLAYPARTANIM sweeps, one PartAnimChannelState per register
-	// (object/model_inspection_records.h); get_active_part_anim looks one up (null = none).
-	TypedArray<PartAnimChannelState> get_active_part_anims() const;
-	Ref<PartAnimChannelState> get_active_part_anim(const String &p_register) const;
+	// The registers carrying a running PLAYPARTANIM sweep (the sweep's live
+	// phase is the register's value, get_ctrl_values); empty = none running.
+	PackedStringArray get_active_part_anim_registers() const;
 	void set_weapon_channel(const String &p_key, int p_phase_ticks,
 			const String &p_prev_key = String(), int p_prev_phase_ticks = 0,
 			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0);
-	// The applied weapon-channel pose (null when no channel is held) —
-	// presentation-state read-back.
-	Ref<WeaponChannelState> get_weapon_channel() const;
+	// The applied weapon-channel pose — presentation-state read-back: whether
+	// a channel is held, its clip key and its phase (-1 = not replicated).
+	bool has_weapon_channel() const;
+	String get_weapon_channel_key() const { return wpn_key_; }
+	int get_weapon_channel_phase_ticks() const { return wpn_phase_ticks_; }
 	// The typed present path: p_deltas is kAimOverlayClasses body-relative
 	// per-class rotations; clear drops the overlay.
 	void set_aim_overlay_deltas(const Basis *p_deltas);
@@ -916,9 +914,13 @@ public:
 
 	void set_right_hand_collapsed(bool p_collapsed);
 	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
-	// The active two-channel blend (null when a single channel poses the
-	// body) — presentation-state read-back.
-	Ref<BodyBlendState> get_body_blend() const;
+	// The active two-channel blend — presentation-state read-back: whether a
+	// second channel is blending (a single channel poses the body otherwise),
+	// its source clip key, its playhead in seconds and the blend weight.
+	bool has_body_blend() const;
+	String get_body_blend_source_key() const { return body_blend_source_key_; }
+	float get_body_blend_source_time() const { return static_cast<float>(body_blend_source_time_); }
+	float get_body_blend_weight() const { return body_blend_weight_; }
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).

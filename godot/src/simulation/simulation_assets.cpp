@@ -2,7 +2,6 @@
 // item traits/weapons from the item database, collision instances + section
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/simulation_internal.h"
-#include "simulation/debug_cards.h"
 
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
@@ -181,20 +180,8 @@ void Simulation::apply_collision_to_ai() {
 	kernel_->wire_collision();
 }
 
-Ref<NativePoseStats> Simulation::debug_native_pose_stats() const {
-	Ref<NativePoseStats> out;
-	out.instantiate();
-	out->set_collision_queries(static_cast<int64_t>(kernel_->collision_queries));
-	out->set_collision_declines(static_cast<int64_t>(kernel_->collision_declines));
-	out->set_muzzle_queries(static_cast<int64_t>(kernel_->collision_pose.muzzle_query_count()));
-	out->set_muzzle_resolves(static_cast<int64_t>(kernel_->collision_pose.muzzle_resolve_count()));
-	out->set_mounted_queries(static_cast<int64_t>(kernel_->mounted_queries));
-	out->set_mounted_declines(static_cast<int64_t>(kernel_->mounted_declines));
-	out->set_mounted_evaluations(static_cast<int64_t>(kernel_->mounted_evaluations));
-	out->set_mounted_cache_hits(static_cast<int64_t>(kernel_->mounted_cache_hits));
-	out->set_mounted_rest_cache_entries(static_cast<int64_t>(kernel_->mounted_rest_cache_size()));
-	out->set_mounted_graphic_sources(static_cast<int64_t>(kernel_->mounted_graphics.size()));
-	return out;
+int Simulation::get_mounted_graphic_source_count() const {
+	return kernel_ != nullptr ? static_cast<int>(kernel_->mounted_graphics.size()) : 0;
 }
 
 

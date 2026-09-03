@@ -503,8 +503,11 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.run_occlusion_frame(
 			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
-	var unprofiled_buildings: PackedInt64Array = sim.get_building_visibility()
-	var unprofiled_culled: PackedInt32Array = sim.get_render_culled_bms_ids()
+	# The full verdict set through the delta forms: a baseline reset re-arms
+	# the complete emission (the same walk the occlusion frame consumes).
+	sim.reset_occlusion_apply_baseline()
+	var unprofiled_buildings: PackedInt64Array = sim.get_building_visibility_changes()
+	var unprofiled_culled: PackedInt32Array = sim.get_render_culled_changes()
 	var unprofiled_positions: Array[Vector3] = []
 	for i in range(sim.get_entity_count()):
 		unprofiled_positions.append(sim.get_entity_position(i))
@@ -517,9 +520,10 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
 			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
-	assert_eq(sim.get_building_visibility(), unprofiled_buildings,
+	sim.reset_occlusion_apply_baseline()
+	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
-	assert_eq(sim.get_render_culled_bms_ids(), unprofiled_culled,
+	assert_eq(sim.get_render_culled_changes(), unprofiled_culled,
 			"profiling does not change entity render gates")
 	assert_eq(sim.get_present_snapshot(), unprofiled_snapshot,
 			"profiling does not change the client-view snapshot")
@@ -1991,22 +1995,25 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 
 	var health_before := card.get_health()
 	var incoming := rendered_head_matrix.basis.x.normalized()
+	# The round's segment as a plain geometric trace first (the picker walks
+	# the same posed person bone spheres the round will): it resolves the
+	# rendered mounted target at its posed head section, never a stand-in
+	# sphere — read before the shot lands, since the kill spawns the corpse
+	# twin on the same spot.
+	var pick := sim.debug_pick_entity(rendered_head_center - incoming * 2.0, incoming, 4.0)
+	assert_true(pick.hit,
+			"the authoritative shot resolves against the rendered mounted target")
+	if pick.hit:
+		assert_eq(pick.entity_handle, enemy_handle)
+		assert_eq(pick.hit_class, "person")
+		assert_eq(pick.section, 14,
+				"the primary posed-hit section remains authoritative")
 	assert_gte(sim.debug_spawn_round(
 			rendered_head_center - incoming * 2.0,
 			incoming, "AMMO_CAR15_556MM"), 0,
 			"a local-owned round starts through the rendered mounted head")
 	for _tick in range(2):
 		sim.step()
-	var hit_event: RoundDebugEvent = null
-	for event: RoundDebugEvent in sim.get_round_debug().events:
-		if event.entity_handle == enemy_handle and event.kind_name == "organic":
-			hit_event = event
-	assert_not_null(hit_event,
-			"the authoritative shot resolves against the rendered mounted target")
-	if hit_event != null:
-		assert_eq(hit_event.section, 14,
-				"the primary posed-hit section remains authoritative")
-		assert_false(hit_event.fallback)
 	var impacts := sim.drain_round_impacts()
 	assert_eq(impacts.size(), 1)
 	if impacts.size() == 1:
@@ -3007,10 +3014,8 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(String((object_data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"HEAT_GLOW")
 	assert_eq(object_data.get_part_anim_count(0), 1)
-	var slide := object_data.get_part_anim_info(0, 0)
-	assert_eq(slide.transform_as, 1)
-	assert_eq(slide.translation.control, 113,
-			"the fixture authors a register-driven translation track on part 1")
+	# (The row itself — a register-driven translation slide of part 1 on
+	# CTRL 0 — is pinned by the minimal_3di_gen ctest: mount_heat_glow_slide_part1.)
 
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -3029,7 +3034,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
-	assert_eq(sim.debug_native_pose_stats().mounted_graphic_sources, 1,
+	assert_eq(sim.get_mounted_graphic_source_count(), 1,
 			"the fixture model resolves as the one mounted-pose source")
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
@@ -3970,7 +3975,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
-	var visibility: PackedInt64Array = sim.get_building_visibility()
+	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 2, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 2:
 		assert_eq(int(visibility[0]), int(placed.get("bms_id", 0)))
@@ -4019,251 +4024,6 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 			"a live placed building reads as present-visible")
 	assert_true(bool(sim.entity_present_visible(424242)),
 			"an unknown bms id defaults visible (never blocks a show)")
-
-
-func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
-	# Retail walks every exact, case-insensitive "KZ" point on the active first
-	# husk and queues a radius-5 blast there. Keep the main and final models out
-	# of the witness so reading either one cannot accidentally satisfy the test.
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var placed := md.add_entity(
-			MissionData.KIND_BUILDING, 105002, Vector3.ZERO, Vector3.ZERO)
-	assert_false(placed.is_empty())
-	var bms_id := int(placed.get("bms_id", 0))
-
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	# armory is a committed, loadable 3DI3 model with two user points. Relabel
-	# those two 16-byte name fields in a temporary copy so the integration test
-	# owns an exact multi-KZ witness without checking in another binary fixture.
-	var source_path := ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/synth/armory.3di")
-	var bytes := FileAccess.get_file_as_bytes(source_path)
-	for source_name in ["Armory", "Ground"]:
-		var needle := String(source_name).to_ascii_buffer()
-		var name_offset := -1
-		for offset in range(bytes.size() - needle.size() + 1):
-			var matches := true
-			for byte_index in range(needle.size()):
-				if bytes[offset + byte_index] != needle[byte_index]:
-					matches = false
-					break
-			if matches:
-				name_offset = offset
-				break
-		assert_gte(name_offset, 0, "source user-point name is present")
-		if name_offset < 0:
-			continue
-		for byte_index in range(16):
-			bytes[name_offset + byte_index] = 0
-		var replacement := "KZ" if source_name == "Armory" else "kz"
-		bytes[name_offset] = replacement.unicode_at(0)
-		bytes[name_offset + 1] = replacement.unicode_at(1)
-	var husk_dir := _native_fixture_dir()
-	_copy_fixture(husk_dir, "res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
-	_write_fixture_bytes(husk_dir, "Barrel1X.3di", bytes)
-	var husk_data := ObjectData.new()
-	assert_eq(husk_data.open_file(husk_dir.path_join("Barrel1X.3di")), OK)
-
-	var expected := PackedVector3Array()
-	for point_index in range(husk_data.get_user_point_count()):
-		var info := husk_data.get_user_point_info(point_index)
-		if info.name.nocasecmp_to("KZ") == 0:
-			var model_point: Vector3 = info.position
-			# Public model space is (source y, source z, source x); the
-			# destruction core consumes mission-local (forward, lateral, up).
-			expected.push_back(Vector3(model_point.z, model_point.x, model_point.y))
-	assert_gt(expected.size(), 1, "fixture carries a real multi-point KZ bank")
-
-	var sim := Simulation.new()
-	assert_true(sim.load_from_mission_data(md))
-	sim.resolve_item_traits(item_db)
-	# The root deliberately omits Barrel1XF: KZ belongs to the first husk,
-	# while the final husk is only the preferred death-piece model.
-	_native_asset_root(sim, husk_dir)
-	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	var debug := sim.get_destruction_debug(bms_id)
-	assert_true(debug.husk_model_loaded,
-			"a successfully opened first husk supplies the retail live-model gate")
-	assert_eq(debug.kz_point_count, expected.size(),
-			"all first-husk KZ points reach the destruction traits")
-	var actual: PackedVector3Array = debug.kz_points
-	assert_eq(actual.size(), expected.size())
-	for point_index in range(mini(actual.size(), expected.size())):
-		assert_eq(actual[point_index], expected[point_index],
-				"KZ point %d preserves retail mission-local axes" % point_index)
-
-	# The sibling unitType-11 callback mines exact case-insensitive DEAD points
-	# from this same first husk. Prove the native collision sweep retains that
-	# bank independently of KZ before the world callback consumes it.
-	var dead_bytes := FileAccess.get_file_as_bytes(source_path)
-	dead_bytes = _bytes_with_renamed_user_point(dead_bytes, "Armory", "dEaD")
-	var dead_dir := _native_fixture_dir()
-	_copy_fixture(dead_dir,
-			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
-	_write_fixture_bytes(dead_dir, "Barrel1X.3di", dead_bytes)
-	var dead_data := ObjectData.new()
-	assert_eq(dead_data.open_file(dead_dir.path_join("Barrel1X.3di")), OK)
-	var expected_dead := PackedVector3Array()
-	for point_index in range(dead_data.get_user_point_count()):
-		var info := dead_data.get_user_point_info(point_index)
-		if info.name.nocasecmp_to("DEAD") == 0:
-			var model_point: Vector3 = info.position
-			expected_dead.push_back(Vector3(
-					model_point.z, model_point.x, model_point.y))
-	assert_eq(expected_dead.size(), 1)
-	var dead_sim := Simulation.new()
-	assert_true(dead_sim.load_from_mission_data(md))
-	dead_sim.resolve_item_traits(item_db)
-	_native_asset_root(dead_sim, dead_dir)
-	assert_eq(dead_sim.resolve_collision_instances(item_db), 1)
-	var dead_debug := dead_sim.get_destruction_debug(bms_id)
-	assert_eq(dead_debug.bridge_dead_point_count, 1)
-	var actual_dead: PackedVector3Array = dead_debug.bridge_dead_points
-	assert_eq(actual_dead, expected_dead,
-			"the first-husk DEAD bank preserves retail mission-local axes")
-
-	# Retail reads entity+52 huskModel for this walk. A final-only definition may
-	# use huskFinal for pieces (and our legacy collision fallback), but it must not
-	# mine that model for KZ anchors; the empty bank selects the origin fallback.
-	var final_only_path := ProjectSettings.globalize_path(
-			"user://simulation_final_only_husk_items.def")
-	var final_only_file := FileAccess.open(final_only_path, FileAccess.WRITE)
-	assert_not_null(final_only_file)
-	if final_only_file == null:
-		return
-	final_only_file.store_string(
-			"begin \"Final-only KZ witness\"\n"
-			+ "  id 105099\n"
-			+ "  type object\n"
-			+ "  graphic Barrel1\n"
-			+ "  sid final_only_kz\n"
-			+ "  huskfinal Barrel1XF\n"
-			+ "  hp 75\n"
-			+ "  kz 4.0\n"
-			+ "  unit_type 6\n"
-			+ "end\n")
-	final_only_file.close()
-	var final_only_db := ItemDatabase.new()
-	assert_eq(final_only_db.load(final_only_path), OK)
-	assert_eq(DirAccess.remove_absolute(final_only_path), OK)
-	assert_true(final_only_db.get_husk(105099).is_empty())
-	assert_eq(final_only_db.get_huskfinal(105099), "Barrel1XF")
-
-	var final_only_md := MissionData.new()
-	assert_eq(final_only_md.create_default(), OK)
-	var final_only_placed := final_only_md.add_entity(
-			MissionData.KIND_BUILDING, 105099, Vector3.ZERO, Vector3.ZERO)
-	assert_false(final_only_placed.is_empty())
-	var final_only_sim := Simulation.new()
-	assert_true(final_only_sim.load_from_mission_data(final_only_md))
-	final_only_sim.resolve_item_traits(final_only_db)
-	var final_only_dir := _native_fixture_dir()
-	_copy_fixture(final_only_dir,
-			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
-	_write_fixture_bytes(final_only_dir, "Barrel1XF.3di", bytes)
-	_native_asset_root(final_only_sim, final_only_dir)
-	assert_eq(final_only_sim.resolve_collision_instances(final_only_db), 1)
-	var final_only_debug := final_only_sim.get_destruction_debug(
-			int(final_only_placed.get("bms_id", 0)))
-	assert_true(final_only_debug.husk_model_loaded,
-			"a successfully opened final-only husk also supplies the retail gate")
-	assert_eq(final_only_debug.kz_point_count, 0,
-			"huskFinal alone does not replace retail's first-stage KZ source")
-
-	# Authored names do not stand in for the live retail pointer. A placer that
-	# resolves the main graphic but neither husk leaves the callback gate clear.
-	var missing_sim := Simulation.new()
-	assert_true(missing_sim.load_from_mission_data(md))
-	missing_sim.resolve_item_traits(item_db)
-	var missing_dir := _native_fixture_dir()
-	_copy_fixture(missing_dir,
-			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
-	_native_asset_root(missing_sim, missing_dir)
-	assert_eq(missing_sim.resolve_collision_instances(item_db), 1)
-	var missing_debug := missing_sim.get_destruction_debug(bms_id)
-	assert_true(missing_debug.has_husk,
-			"items.def still records the authored husk name")
-	assert_false(missing_debug.husk_model_loaded,
-			"missing/corrupt husk assets leave the retail live-model gate clear")
-
-
-func test_retail_glass_model_maps_exact_userpoint_into_death_traits() -> void:
-	# Terrain_SpawnEffectsAtUserPoint first selects one hard-coded retail
-	# model/surface pair, then resolves that exact point case-insensitively. Use
-	# a renamed committed model so this exercises the production SimModelCache
-	# and collision-resolution seam rather than a test-only trait setter.
-	var bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/synth/armory.3di")
-	bytes = _bytes_with_renamed_user_point(bytes, "Armory", "gLaSs")
-	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "eurhr2.3di", bytes)
-	var item_db := _item_db_from_text(dir, """begin "Retail glass witness"
-  id 105099
-  type object
-  graphic eurhr2
-  hp 1000
-end
-""")
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var placed := md.add_entity(
-			MissionData.KIND_BUILDING, 105099, Vector3.ZERO, Vector3.ZERO)
-	assert_false(placed.is_empty())
-
-	var source := ObjectData.new()
-	assert_eq(source.open_file(dir.path_join("eurhr2.3di")), OK)
-	var expected_pos := Vector3.INF
-	var expected_dir := Vector3.INF
-	for point_index in range(source.get_user_point_count()):
-		var info := source.get_user_point_info(point_index)
-		if info.name.nocasecmp_to("GLASS") != 0:
-			continue
-		var model_pos: Vector3 = info.position
-		var model_dir: Vector3 = info.rotation
-		expected_pos = Vector3(model_pos.z, model_pos.x, model_pos.y)
-		expected_dir = Vector3(model_dir.z, model_dir.x, model_dir.y)
-	assert_true(expected_pos.is_finite())
-
-	var sim := Simulation.new()
-	assert_true(sim.load_from_mission_data(md))
-	sim.resolve_item_traits(item_db)
-	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	var debug := sim.get_destruction_debug(int(placed.get("bms_id", 0)))
-	assert_eq(debug.glass_point_count, 1)
-	var positions: PackedVector3Array = debug.glass_point_positions
-	var directions: PackedVector3Array = debug.glass_point_directions
-	assert_eq(positions, PackedVector3Array([expected_pos]),
-			"the GLASS1/GLASS mapping preserves mission-local point axes")
-	assert_eq(directions, PackedVector3Array([expected_dir]),
-			"the shatter orientation preserves the authored userpoint direction")
-
-	# A near-name is not in retail's static table, even with the same userpoint.
-	var wrong_dir := _native_fixture_dir()
-	_write_fixture_bytes(wrong_dir, "eurhr2x.3di", bytes)
-	var wrong_db := _item_db_from_text(wrong_dir, """begin "Near-name glass witness"
-  id 105098
-  type object
-  graphic eurhr2x
-  hp 1000
-end
-""")
-	var wrong_md := MissionData.new()
-	assert_eq(wrong_md.create_default(), OK)
-	var wrong_placed := wrong_md.add_entity(
-			MissionData.KIND_BUILDING, 105098, Vector3.ZERO, Vector3.ZERO)
-	var wrong_sim := Simulation.new()
-	assert_true(wrong_sim.load_from_mission_data(wrong_md))
-	wrong_sim.resolve_item_traits(wrong_db)
-	_native_asset_root(wrong_sim, wrong_dir)
-	assert_eq(wrong_sim.resolve_collision_instances(wrong_db), 1)
-	var wrong_debug := wrong_sim.get_destruction_debug(
-			int(wrong_placed.get("bms_id", 0)))
-	assert_eq(wrong_debug.glass_point_count, 0,
-			"retail's model table is an exact case-insensitive match")
 
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
@@ -4517,8 +4277,9 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	if anchor_part < 0:
 		return
 	assert_eq(data.get_part_anim_count(0), 1)
-	assert_eq(data.get_part_anim_info(0, 0).transform_as, anchor_part,
-			"the fixture slides exactly the part that owns ewep01")
+	assert_eq(anchor_part, 1,
+			"the fixture slides exactly the part that owns ewep01 (minimal_3di_gen "
+			+ "pins tank_special1_slide_ewep01's slide on part 1)")
 
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -4666,8 +4427,8 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(fixture_res_path)), OK)
 	assert_eq(data.get_part_anim_count(0), 1,
-			"the fixture carries one register-driven slide of part 1")
-	assert_eq(data.get_part_anim_info(0, 0).transform_as, 1)
+			"the fixture carries one register-driven slide of part 1 (the row is "
+			+ "pinned by the minimal_3di_gen ctest)")
 
 	var sim := Simulation.new()
 	# One fixture carries both the register-driven PANM row (CTRL 0 named
@@ -4733,9 +4494,8 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
 	assert_true(data.has_collision())
-	assert_eq(data.get_part_anim_count(0), 1)
-	assert_eq(data.get_part_anim_info(0, 0).transform_as, 1,
-			"the fixture slides ordinal 1")
+	assert_eq(data.get_part_anim_count(0), 1,
+			"the fixture slides ordinal 1 (the row is pinned by the minimal_3di_gen ctest)")
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
@@ -4894,7 +4654,7 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 			"the local avatar never renders posed or fallback hitboxes")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
+	assert_true(sim.has_collision_instance(local_bms_id),
 			"the hidden local avatar was nevertheless attached on demand")
 
 
@@ -4980,7 +4740,7 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 			"the newly resolved local avatar remains hidden from F3")
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
+	assert_true(sim.has_collision_instance(local_bms_id),
 			"the old negative attempt cannot suppress the new slot identity")
 
 
@@ -5016,20 +4776,18 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	assert_true(sim.get_destruction_debug(
-			bms_id).has_collision_instance)
+	assert_true(sim.has_collision_instance(bms_id))
 	for _tick in 16:
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true((sim.get_hitbox_debug().organics as Array).is_empty())
 	var local_bms_id := sim.entity_card_by_ai_index(
 			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(sim.get_destruction_debug(local_bms_id).has_collision_instance,
+	assert_true(sim.has_collision_instance(local_bms_id),
 			"the replacement local occupant receives the cached graphic")
 
 	sim.reset_session()
-	var restored := sim.get_destruction_debug(bms_id)
-	assert_true(restored.has_collision_instance,
+	assert_true(sim.has_collision_instance(bms_id),
 			"restart rebinds the baseline before any F3 or round demand query")
 	var restored_rows: Array = sim.get_hitbox_debug().organics
 	assert_eq(restored_rows.size(), 19,

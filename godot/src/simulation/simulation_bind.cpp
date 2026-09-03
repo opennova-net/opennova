@@ -8,10 +8,8 @@
 #include "simulation/weather_home_state.h" // the weather home's probe view
 #include "simulation/present_event_records.h" // the per-tick present drain records
 #include "simulation/destruction_events.h" // the destruction drain record
-#include "simulation/debug_pick_card.h" // the F3 entity picker card
-#include "simulation/debug_cards.h" // the WAC / pose-health / destruction cards
-#include "simulation/hitbox_debug_report.h" // the F3 hitbox view payload
-#include "simulation/round_debug_report.h" // the F3 rounds view trail
+#include "simulation/debug_pick_card.h" // the entity picker card
+#include "simulation/hitbox_debug_report.h" // the hitbox oracle payload
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
@@ -336,19 +334,16 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&Simulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &Simulation::get_death_pieces);
-	ClassDB::bind_method(D_METHOD("get_destruction_debug", "bms_id"),
-			&Simulation::get_destruction_debug);
+	ClassDB::bind_method(D_METHOD("has_collision_instance", "bms_id"),
+			&Simulation::has_collision_instance);
 	ClassDB::bind_method(D_METHOD("set_sound_profiles", "sndprof_text"),
 			&Simulation::set_sound_profiles);
 	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &Simulation::set_water_z);
 	ClassDB::bind_method(D_METHOD("drain_slot_sounds"), &Simulation::drain_slot_sounds);
 	ClassDB::bind_method(D_METHOD("drain_sound_emitters"), &Simulation::drain_sound_emitters);
-	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &Simulation::set_wac_program);
-	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &Simulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("run_mission_start_wac"), &Simulation::run_mission_start_wac);
 	ClassDB::bind_method(D_METHOD("seal_mission_start_baseline"),
 			&Simulation::seal_mission_start_baseline);
-	ClassDB::bind_method(D_METHOD("get_wac_state"), &Simulation::get_wac_state);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &Simulation::get_runtime_perf_counters);
 	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
 			&Simulation::set_runtime_profiling_enabled);
@@ -379,8 +374,8 @@ void Simulation::_bind_methods() {
 			&Simulation::get_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
 			&Simulation::debug_set_panm_time_ms);
-	ClassDB::bind_method(D_METHOD("debug_native_pose_stats"),
-			&Simulation::debug_native_pose_stats);
+	ClassDB::bind_method(D_METHOD("get_mounted_graphic_source_count"),
+			&Simulation::get_mounted_graphic_source_count);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &Simulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &Simulation::get_global_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &Simulation::get_music_variables_snapshot);
@@ -468,10 +463,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
 	                              "near", "fog_dist_units", "water_z_units", "force_indoors"),
 	                     &Simulation::run_occlusion_frame);
-	ClassDB::bind_method(D_METHOD("get_building_visibility"),
-	                     &Simulation::get_building_visibility);
-	ClassDB::bind_method(D_METHOD("get_render_culled_bms_ids"),
-	                     &Simulation::get_render_culled_bms_ids);
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_static_method("Simulation", D_METHOD("building_visibility_mask", "packed"),
@@ -494,11 +485,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::reset_occlusion_apply_baseline);
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
-	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
-	ClassDB::bind_method(D_METHOD("set_ray_debug_recording", "enabled"),
-	                     &Simulation::set_ray_debug_recording);
-	ClassDB::bind_method(D_METHOD("set_contact_debug_capture", "enabled"),
-	                     &Simulation::set_contact_debug_capture);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

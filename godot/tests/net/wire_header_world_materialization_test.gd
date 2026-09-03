@@ -270,7 +270,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([VEHICLE_TYPE])))
-	assert_gt(host.debug_native_pose_stats().mounted_graphic_sources, 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the vehicle model source")
 	assert_true(host.load_from_mission_data(mission))
 	host.resolve_item_traits(db)
@@ -374,7 +374,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# the parent seed installs both halves of the designated-G family.
 	assert_true(host.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
-	assert_gt(host.debug_native_pose_stats().mounted_graphic_sources, 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the parent and child model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host, db)

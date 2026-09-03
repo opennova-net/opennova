@@ -61,7 +61,6 @@ add_library(${TARGET_NAME} SHARED
     env/env_file.cpp
     env/env_records.cpp
     env/mission_environment_overrides.cpp
-    env/color_smoother.cpp
     env/mission_environment.cpp
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
@@ -77,7 +76,6 @@ add_library(${TARGET_NAME} SHARED
     env/water.cpp
     env/weather.cpp
     env/precipitation.cpp
-    env/weather_core.cpp
     env/water_core.cpp
     env/star_field.cpp
     env/glare_occlusion.cpp
@@ -119,12 +117,10 @@ add_library(${TARGET_NAME} SHARED
     object/object_data_state.cpp
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
-    object/object_data_panm_inspection.cpp
     object/object_data_runtime_eval.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/item_records.cpp
-    object/model_inspection_records.cpp
     object/model_light.cpp
     object/model_user_point.cpp
     object/weapon_database.cpp
@@ -138,10 +134,8 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_local_view.cpp
     simulation/player_weapon_event.cpp
     simulation/destruction_events.cpp
-    simulation/debug_cards.cpp
     simulation/debug_pick_card.cpp
     simulation/hitbox_debug_report.cpp
-    simulation/round_debug_report.cpp
     simulation/hud_view_records.cpp
     simulation/deploy_rows.cpp
     simulation/player_weapon_view.cpp
@@ -193,6 +187,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
     world/item_effect_director.cpp
+    world/occlusion_frame.cpp
     world/scar_draw_list.cpp
     world/scar_presenter.cpp
     wac/wac_program.cpp

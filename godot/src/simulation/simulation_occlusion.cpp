@@ -1,10 +1,10 @@
 // Simulation — the occlusion runtime (building portals, iris march, sound
-// occlusion), the F3 hitbox/round reports and pick, the debug round spawn,
-// and the ray/contact capture seams the F3 Rays and Physics windows drive.
+// occlusion), the hitbox oracle and the entity pick (the Shift+F6 pick and
+// the entity_pick probe), the debug round spawn, and the ray/contact capture
+// seams the engine's F3 Rays and Physics windows drive natively.
 #include "simulation/simulation_internal.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
-#include "simulation/round_debug_report.h"
 
 #include <runtime/replication/connection_fan.h>
 #include <runtime/world/occlusion_feed.h>
@@ -912,57 +912,6 @@ Ref<DebugPickCard> Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	out->set_name(String(ent->name.c_str()));
 	out->set_position_godot(mission_to_godot(ent->position));
 	out->set_bound_radius(ent->bound_radius);
-	return out;
-}
-
-Ref<RoundDebugReport> Simulation::get_round_debug() const {
-	Ref<RoundDebugReport> out;
-	out.instantiate();
-	if (!kernel_) return out;
-	const opennova::world::RoundSim &rs = kernel_->world.round_sim;
-	static const char *const kKindNames[] = {"organic", "item face", "item sphere",
-	                                         "terrain",  "expired",   "face miss"};
-	// Oldest -> newest so the view can draw newest-last (brightest).
-	const int count = rs.debug_trail_count;
-	int idx = (rs.debug_trail_next - count + opennova::world::RoundSim::kDebugTrailCap *
-	          2) % opennova::world::RoundSim::kDebugTrailCap;
-	for (int i = 0; i < count; ++i, idx = (idx + 1) % opennova::world::RoundSim::kDebugTrailCap) {
-		const opennova::world::RoundDebugEvent &ev =
-		    rs.debug_trail[static_cast<size_t>(idx)];
-		Ref<RoundDebugEvent> d;
-		d.instantiate();
-		d->set_tick(static_cast<int64_t>(ev.tick));
-		d->set_kind(static_cast<int>(ev.kind));
-		d->set_kind_name(String(ev.kind <= 5 ? kKindNames[ev.kind] : "?"));
-		d->set_material(static_cast<int>(ev.material));
-		d->set_section(static_cast<int>(ev.section));
-		d->set_secondary_section(static_cast<int>(ev.secondary_section));
-		d->set_fallback(ev.organic_fallback);
-		d->set_face(static_cast<int>(ev.face));
-		d->set_effect_tag(ev.effect_tag);
-		d->set_effect_tag_name(
-		    (ev.effect_tag >= 0 && ev.effect_tag < opennova::world::kImpactEffectTagCount)
-		        ? String(opennova::world::kImpactEffectTagNames[ev.effect_tag])
-		        : String(""));
-		d->set_entity_handle(static_cast<int>(ev.entity));
-		d->set_shooter_handle(static_cast<int>(ev.shooter));
-		d->set_ammo_index(ev.ammo_index);
-		d->set_husk(ev.husk);
-		d->set_t(ev.t);
-		d->set_p0(mission_to_godot(ev.p0));
-		d->set_p1(mission_to_godot(ev.p1));
-		d->set_hit(mission_to_godot(ev.hit));
-		// The struck entity's item name when it still resolves (wrecks keep
-		// their slot until cleanup) — display sugar for the F3 list.
-		String label;
-		const opennova::world::Entity *te =
-		    kernel_->world.registry.get(opennova::world::EntityHandle{ev.entity});
-		if (te != nullptr && !te->name.empty())
-			label = String(te->name.c_str());
-		d->set_entity_name(label);
-		out->add_event(d);
-	}
-	out->set_tick(static_cast<int64_t>(kernel_->world.logic_tick));
 	return out;
 }
 

@@ -10,7 +10,7 @@ extends RefCounted
 #
 # HOT PATH: GameWorld's one-line leg delegates call straight in here every
 # render frame — plain method calls on a stored direct reference, the
-# OcclusionFramePass pattern. Shared world state (the engine nodes, the
+# OcclusionFrame pattern. Shared world state (the engine nodes, the
 # mission runtime, and every probe/perf counter a staying GameWorld method
 # also reads) stays on GameWorld and is reached through `_world`; only the
 # per-frame latch below lives here.
@@ -70,9 +70,9 @@ func begin_device_frame(camera_pos: Vector3, camera_xform: Transform3D,
 	if _frame_probe_enabled and _world._world_ready:
 		if _frame_skip_occlusion != _world._perf_probe_occlusion_skipped:
 			if _frame_skip_occlusion:
-				_world._occlusion.enter_probe_skip()
+				_world.occlusion_frame().enter_probe_skip()
 			else:
-				_world._occlusion.leave_probe_skip()
+				_world.occlusion_frame().leave_probe_skip()
 		_world._perf_probe_occlusion_skipped = _frame_skip_occlusion
 	elif _frame_probe_enabled:
 		_world._perf_probe_occlusion_skipped = false
@@ -163,7 +163,7 @@ func apply_blink_frame() -> void:
 	# after a batch that ran at least one.
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if _world._world_ready:
-		_world._occlusion.apply_blink_gates(_world._mission_forces_indoors)
+		_world.occlusion_frame().apply_blink_gates(_world._mission_forces_indoors)
 	if _frame_timing:
 		var blink_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
@@ -257,14 +257,21 @@ func apply_scene_environment_frame() -> void:
 		shader_cache.clear_water_plane()
 
 
+# The live camera the imminent render uses (null for a headless world or a
+# viewport without a current camera).
+func _render_camera() -> Camera3D:
+	if _world.is_inside_tree():
+		return _world.get_viewport().get_camera_3d()
+	return null
+
+
 # The view the imminent render uses: the live camera AFTER the local-view leg
 # placed it; the frame-entry stash only when no camera exists (headless
 # worlds/tests) (D-RORD-8).
 func _render_camera_xform() -> Transform3D:
-	if _world.is_inside_tree():
-		var cam := _world.get_viewport().get_camera_3d()
-		if cam != null:
-			return cam.global_transform
+	var cam := _render_camera()
+	if cam != null:
+		return cam.global_transform
 	return _frame_camera_xform
 
 
@@ -277,7 +284,7 @@ func apply_occlusion_frame() -> void:
 	if _world._world_ready:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 		if not _frame_skip_occlusion:
-			_world._occlusion.apply_frame(_render_camera_xform(),
+			_world.occlusion_frame().apply_frame(_render_camera(), _render_camera_xform(),
 					_world._mission_forces_indoors)
 		if _frame_probe_enabled:
 			_world._perf_probe_spans["occl_frame"] = (0 if _frame_skip_occlusion
@@ -643,8 +650,8 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 # compute_ambient_light_along_direction @ 0x5c7a00 — retail re-targets from the
 # local player's view every render pass]. The render-occlusion frame it used
 # to share a section with (blink letter gates + the section-mask/portal apply)
-# lives in occlusion_frame_pass.gd; the iris march stays here as the weather
-# feed.
+# is OcclusionFrame (godot/src/world/occlusion_frame.cpp); the iris march
+# stays here as the weather feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 	var weather: Weather = _world._weather
 	var sim := _world.get_sim()
@@ -686,7 +693,7 @@ func _update_frame_clear_color() -> void:
 	# underwater) is the engine's (environment_state.h carries the witness);
 	# this device classifies the eye and writes the color. The sentinel
 	# generation (-2) forces a recompute on indoors exit.
-	if _world._occlusion.blink_indoors:
+	if _world.occlusion_frame().blink_indoors:
 		if _world._clear_env_generation != -2:
 			_world._clear_env_generation = -2
 			_world._clear_color.environment.background_color = (

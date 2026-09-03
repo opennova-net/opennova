@@ -2,7 +2,6 @@
 // and evaluation plus the whole-content replacement signal.
 #include "object/object_data_internal.h"
 #include "object/model_light.h"
-#include "object/model_inspection_records.h"
 #include "object/model_user_point.h"
 
 using namespace novaobj;
@@ -28,7 +27,6 @@ void ObjectData::_bind_methods() {
 			&ObjectData::find_material_array_index);
 	ClassDB::bind_method(D_METHOD("load_material_slot_texture", "array_index", "slot"),
 			&ObjectData::load_material_slot_texture);
-	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
 	ClassDB::bind_method(D_METHOD("get_light_count"), &ObjectData::get_light_count);
 	ClassDB::bind_method(D_METHOD("get_light_info", "index"), &ObjectData::get_light_info);
@@ -44,8 +42,6 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_live_panm_lod"), &ObjectData::get_live_panm_lod);
 	ClassDB::bind_method(D_METHOD("get_effective_panm_targets", "lod_index"), &ObjectData::get_effective_panm_targets);
 	ClassDB::bind_method(D_METHOD("get_part_anim_count", "lod_index"), &ObjectData::get_part_anim_count);
-	ClassDB::bind_method(D_METHOD("get_part_anim_info", "lod_index", "anim_index"), &ObjectData::get_part_anim_info);
-	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &ObjectData::get_render_lod_info);
 	ClassDB::bind_method(D_METHOD("get_bone_origins", "lod_index"), &ObjectData::get_bone_origins, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_bone_parents", "lod_index"), &ObjectData::get_bone_parents, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count", "native_frame"), &ObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0), DEFVAL(false));

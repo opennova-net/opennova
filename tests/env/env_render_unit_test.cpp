@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -1484,8 +1485,224 @@ int main() {
 		            "no samples serves the outdoor iris form")) return 1;
 	}
 
+	// --- The retired env-core bindings' GUT vectors (ADR 0043 d10) ----------
+	// ColorSmoother (color_smoother_test.gd + env_parity_vectors_test.gd's
+	// smoother/* keys), WeatherCore (iris_march_exposure_test.gd, the
+	// sky_dome_test WeatherCore case, water/uv_state), WaterCore (water/noise)
+	// and GlareOcclusion (celestial/occlusion) served these values to GDScript;
+	// the engine pieces they boxed pin the SAME bytes/floats here.
+	{
+		// The Color -> packed edge the binding took: int(v * 255 + 0.5) per
+		// channel, alpha 255; max_step 255.0 -> 0x0FF00000 (unclamped in
+		// practice), 1.0 -> one byte per tick.
+		auto hex_rgb = [](uint32_t packed, char out[8]) {
+			std::snprintf(out, 8, "%02X%02X%02X", (packed >> 16) & 0xFFu, (packed >> 8) & 0xFFu,
+			              packed & 0xFFu);
+		};
+		auto step_sequence = [&](uint32_t start, uint32_t target, int max_step_fp, int steps,
+		                         const char *const *expected, const char *what) {
+			ColorChannelState state;
+			state.snap_to(start);
+			for (int i = 0; i < steps; ++i) {
+				char hex[8];
+				hex_rgb(state.step(target, max_step_fp), hex);
+				if (std::strcmp(hex, expected[i]) != 0) {
+					std::fprintf(stderr, "FAIL: %s step %d = %s, expected %s\n", what, i, hex,
+					             expected[i]);
+					return false;
+				}
+			}
+			return true;
+		};
+		// smoother/decay: Color(1.0, 0.5, 0.25) toward black, eight eighth-steps.
+		static const char *const kDecay[8] = {"DF7038", "C36231", "AB562B", "954B26",
+		                                       "834221", "72391D", "643219", "582C16"};
+		if (!step_sequence(0xFFFF8040u, 0xFF000000u, 0x0FF00000, 8, kDecay, "smoother/decay")) return 1;
+		// smoother/rise: black toward Color(1.0, 0.75, 0.5).
+		static const char *const kRise[8] = {"201810", "3C2D1E", "543F2A", "6A4F35",
+		                                      "7C5D3E", "8D6947", "9B744E", "A77D54"};
+		if (!step_sequence(0xFF000000u, 0xFFFFBF80u, 0x0FF00000, 8, kRise, "smoother/rise")) return 1;
+		// smoother/clamped: a 1-byte max step caps a full-range decay at one
+		// byte per tick (255 -> 254 -> 253 ...).
+		static const char *const kClamped[4] = {"FE0000", "FD0000", "FC0000", "FB0000"};
+		if (!step_sequence(0xFFFF0000u, 0xFF000000u, 1 << 20, 4, kClamped, "smoother/clamped")) return 1;
+		// smoother/snap_get: a snap lands exactly and a step at the target holds.
+		{
+			ColorChannelState snapper;
+			snapper.snap_to(0xFF336699u);
+			char hex[8];
+			hex_rgb(snapper.step(0xFF336699u, 0x0FF00000), hex);
+			if (!expect(std::strcmp(hex, "336699") == 0, "smoother/snap_get holds the snapped color")) return 1;
+		}
+		// Repeated stepping converges to the target (color_smoother_test.gd).
+		{
+			ColorChannelState climb;
+			climb.snap_to(0xFF000000u);
+			uint32_t packed = 0;
+			for (int i = 0; i < 200; ++i) packed = climb.step(0xFFFFFFFFu, 0x0FF00000);
+			if (!expect(((packed >> 16) & 0xFFu) >= 253u, "200 eighth-steps converge onto the target")) return 1;
+		}
+	}
+	{
+		// The marched iris-exposure combiner at the FULL_01.ENV 0800 keyframes:
+		// sun (159,159,141), sky (84,85,86), ground (41,43,41), fog (98,92,118),
+		// ceiling 70 / floor 10, light dir (0.63, 0.473, 0.615), iris 15% / 1.0,
+		// settled 80 ticks (the modulator chases over 62 [orig:
+		// ColorBlock_SetStepDeltas @ 0x57d940]). The settled render byte / 64 is
+		// ColorSrcGlobalGain [orig: Render_UnpackModulatorToLightScale @ 0x58db30];
+		// the byte itself is pinned here.
+		auto argb = [](unsigned r, unsigned g, unsigned b) {
+			return 0xFF000000u | (r << 16) | (g << 8) | b;
+		};
+		const uint32_t ground = argb(41, 43, 41);
+		const uint32_t sun = argb(159, 159, 141);
+		const uint32_t fog = argb(98, 92, 118);
+		const uint32_t sky = argb(84, 85, 86);
+		const Rgb ceiling{70.0f / 255.0f, 70.0f / 255.0f, 70.0f / 255.0f};
+		const Rgb floor_c{10.0f / 255.0f, 10.0f / 255.0f, 10.0f / 255.0f};
+		auto settled_byte = [&](const int32_t *samples, int count) {
+			WeatherCore core;
+			core.fill_block.snap(ground);
+			core.sun_block.snap(sun);
+			core.fog_block.snap(fog);
+			core.sky_block.snap(sky);
+			core.set_exposure_from_iris_samples(samples, count, ceiling, floor_c, 0.63f, 0.473f,
+			                                    0.615f, 15.0f, 1.0f);
+			for (int i = 0; i < 80; ++i) core.tick(ground, sun, fog, sky, 0xFF000000u, 0.0f);
+			return (core.modulator_chain.render_color() >> 16) & 0xFFu;
+		};
+		const int32_t full_sun[3] = {8, 8, 8};
+		const int32_t all_indoor[3] = {-1, -1, -1};
+		const int32_t no_data[3] = {-2, -2, -2};
+		const int32_t mixed[3] = {8, -1, -2};
+		const int32_t shaded[3] = {5, 5, 5};
+		// Level-8 outdoor samples equal the legacy outdoor fallback: gain 59 (the
+		// value the live play dump serves); no samples fall back to the same.
+		if (!expect(settled_byte(full_sun, 3) == 59u, "outdoor full sun settles gain 59")) return 1;
+		if (!expect(settled_byte(nullptr, 0) == 59u, "empty samples fall back to the outdoor sample")) return 1;
+		// All-indoor: dir zeroed, sky/ground <- ceiling/floor -> m collapses to
+		// the ceiling luminance and the iris opens: gain 71 [orig: the indoor
+		// swap @ 0x5c7660..0x5c76fe].
+		if (!expect(settled_byte(all_indoor, 3) == 71u, "indoor samples dilate via ceiling/floor")) return 1;
+		// Indoor without interior data: the all-zero-inputs clamp 255 [orig:
+		// the pool_entry[12] == 0 skip @ 0x5c7652]; the settled render byte is
+		// 254 — the witnessed 12.20 step chase truncates one LSB short of a 255
+		// target and holds [orig: ColorBlock_SetStepDeltas @ 0x57d940].
+		if (!expect(settled_byte(no_data, 3) == 254u, "indoor-no-data serves the 255 clamp (settles 254)")) return 1;
+		// (59 + 71 + 255) / 3 = 128 truncating [orig: (s0+s1+s2)/3 @ 0x5c7b45].
+		if (!expect(settled_byte(mixed, 3) == 128u, "mixed samples average as ints")) return 1;
+		// Blocked sun rays scale the directional block by level/8, shrinking m
+		// and opening the iris: level 5 serves a strictly higher gain than
+		// level 8 [orig: light_scale = level/8/255 @ 0x5c77e9].
+		if (!expect(settled_byte(shaded, 3) > settled_byte(full_sun, 3), "sun occlusion raises the gain")) return 1;
+	}
+	{
+		// One world-driven tick moves every sky block one eighth-step toward
+		// its target; fog and skyfog smooth in authored bytes and only then take
+		// the saturating x2 render tail (fog doubled; skyfog horizon-blended
+		// then doubled, no blend at fog 1024).
+		auto argb = [](unsigned r, unsigned g, unsigned b) {
+			return 0xFF000000u | (r << 16) | (g << 8) | b;
+		};
+		auto rgb_of = [](uint32_t packed) {
+			return Rgb{static_cast<float>((packed >> 16) & 0xFFu) / 255.0f,
+			           static_cast<float>((packed >> 8) & 0xFFu) / 255.0f,
+			           static_cast<float>(packed & 0xFFu) / 255.0f};
+		};
+		auto units = [](const Rgb &c, int r, int g, int b) {
+			return byte_of(c.r) == r && byte_of(c.g) == g && byte_of(c.b) == b;
+		};
+		auto block_units = [&](uint32_t render, int r, int g, int b) {
+			return units(rgb_of(render), r, g, b);
+		};
+		const uint32_t black = argb(0, 0, 0);
+		WeatherCore core;
+		core.fill_block.snap(black);
+		core.sun_block.snap(black);
+		core.fog_block.snap(black);
+		core.sky_block.snap(black);
+		core.sky_color_blocks.snap({black, black, black, black, black, black, black, black, black, black});
+		core.sky_color_blocks.set_targets({argb(8, 16, 24), argb(16, 32, 48), argb(24, 40, 56),
+		                                   argb(32, 64, 96), argb(40, 72, 104), argb(48, 80, 112),
+		                                   argb(56, 88, 120), argb(64, 96, 128), argb(72, 104, 136),
+		                                   argb(80, 112, 144)});
+		core.tick(black, black, argb(200, 104, 48), black, 0xFFFFFFFFu, 0.0f);
+		const Rgb fog_render = double_saturate(rgb_of(core.fog_block.render_color));
+		if (!expect(units(fog_render, 50, 26, 12), "fog smooths in authored bytes before the saturating x2 render tail")) return 1;
+		const Rgb skyfog_render = double_saturate(horizon_blend_skyfog(
+				rgb_of(core.fog_block.render_color), rgb_of(core.sky_color_blocks.skyfog.render_color),
+				static_cast<uint32_t>(core.scalar_channels.fog_dist_fp), 1024u << 16));
+		if (!expect(units(skyfog_render, 2, 4, 6), "skyfog smooths, horizon-blends, then doubles")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.ceiling.render_color, 2, 4, 6), "ceiling block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.cloud.render_color, 3, 5, 7), "cloud block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.floor.render_color, 4, 8, 12), "floor block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.skybase.render_color, 5, 9, 13), "skybase block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.skybright.render_color, 6, 10, 14), "skybright block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.skyhighlight.render_color, 7, 11, 15), "skyhighlight block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.cloudbase.render_color, 8, 12, 16), "cloudbase block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.cloudhighlight.render_color, 9, 13, 17), "cloudhighlight block ticks")) return 1;
+		if (!expect(block_units(core.sky_color_blocks.cloudedge.render_color, 10, 14, 18), "cloudedge block ticks")) return 1;
+	}
+	{
+		// water/uv_state: the witnessed UV transform (scale, bias, offset_u,
+		// offset_v) after 8 ticks at sky_speed 15 via the weather core's shared
+		// accumulators, camera (100, 200), fog 1024 [orig: render_water_surface
+		// @ 0x5c3348..0x5c33db].
+		WeatherCore scroll;
+		for (int i = 0; i < 8; ++i) scroll.tick_cloud_scroll(15.0f);
+		const WaterUvState uv = water_uv_state(scroll.cloud_scroll, 100.0f, 200.0f, 1024.0f);
+		if (!expect(near(uv.scale, 1.000164866f, 1e-4f) && near(uv.bias, 0.200032964f, 1e-4f) &&
+		            near(uv.offset_u, 1.562694907f, 1e-4f) && near(uv.offset_v, 0.781444907f, 1e-4f),
+		            "water/uv_state after 8 ticks at sky speed 15")) return 1;
+	}
+	{
+		// water/noise: the RGBA8 heads of the noise color texture at counters 0
+		// and 7 and of the DuDv/normal map at 0 (the packed A<<24|R<<16|G<<8|B
+		// words re-ordered R,G,B,A) [orig: Water_GenerateNoiseTextures @ 0x5c0360].
+		const WaterNoiseTables tables = water_init_noise_tables();
+		static uint32_t color0[kWaterNoiseSize * kWaterNoiseSize];
+		static uint32_t color7[kWaterNoiseSize * kWaterNoiseSize];
+		static uint32_t normal0[kWaterNoiseSize * kWaterNoiseSize];
+		water_noise_color_pixels(color0, tables, 0);
+		water_noise_color_pixels(color7, tables, 7);
+		water_noise_normal_pixels(normal0, color0);
+		auto rgba8_head = [](const uint32_t *pixels, char out[17]) {
+			for (int i = 0; i < 2; ++i) {
+				const uint32_t p = pixels[i];
+				std::snprintf(out + i * 8, 9, "%02x%02x%02x%02x", (p >> 16) & 0xFFu, (p >> 8) & 0xFFu,
+				              p & 0xFFu, (p >> 24) & 0xFFu);
+			}
+		};
+		char head0[17];
+		char head7[17];
+		char normal_head[17];
+		rgba8_head(color0, head0);
+		rgba8_head(color7, head7);
+		rgba8_head(normal0, normal_head);
+		if (!expect(std::strcmp(head0, "7d7d7de1707070e7") == 0, "water/noise color head at counter 0")) return 1;
+		if (!expect(std::strcmp(normal_head, "849cff006666ff00") == 0, "water/noise normal head at counter 0")) return 1;
+		if (!expect(std::strcmp(head7, "7c7c7ce1717171e7") == 0, "water/noise color head at counter 7")) return 1;
+	}
+	{
+		// celestial/occlusion: this frame's two ray endpoints (the witnessed
+		// 1024-unit ray [orig: sun_dir << 10 @ 0x5acd71/0x5acde8], jitter
+		// samples index+1 and index+2 in Godot axes: y = +eng z, z = -eng y), the
+		// window fill at fog 1000 (brightness 128 after eight visible pairs) and
+		// the dead-band decay (96 after four dark pairs) [orig: @ 0x5acd9e..0x5acf7f].
+		GlareOcclusionState state;
+		const GlareRayJitter a = glare_ray_jitter(state.jitter_index + 1);
+		const GlareRayJitter b = glare_ray_jitter(state.jitter_index + 2);
+		if (!expect(a.offset_eng_z == -16.0f && -a.offset_eng_y == -8.0f, "jitter a = godot (0, -16, -8)")) return 1;
+		if (!expect(b.offset_eng_z == 16.0f && -b.offset_eng_y == 24.0f, "jitter b = godot (0, 16, 24)")) return 1;
+		for (int i = 0; i < 8; ++i) glare_occlusion_tick(state, true, true, 1000.0f);
+		if (!expect(state.brightness == 128, "eight visible pairs ramp the brightness to 128")) return 1;
+		for (int i = 0; i < 4; ++i) glare_occlusion_tick(state, false, false, 1000.0f);
+		if (!expect(state.brightness == 96, "four dark pairs decay the brightness to 96")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/recip/iris"
-	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip/weathercore\n");
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip/weathercore"
+	    "/retired-binding-vectors\n");
 	return 0;
 }

@@ -231,7 +231,7 @@ Order of operations when you need an engine truth:
      tools (its own run surface is an engine ImGui window on the same pass).
    - `Simulation` introspection: `get_present_snapshot()`, the typed
      `entity_directory()` / `entity_card(handle)` records (`world::inspect`,
-     ADR 0042 d5), `get_fired_events_snapshot()`, `get_wac_state()`,
+     ADR 0042 d5), `get_fired_events_snapshot()`,
      and the mission/global/music variable snapshots.
    - PerfTimeline ring (`godot/game/util/perf_timeline.gd`; its Perf page went
      with the overlay — a dev-tools window is the re-home); recorded baselines

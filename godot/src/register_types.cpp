@@ -21,7 +21,6 @@
 #include "env/env_keyframe.h"
 #include "env/env_file.h"
 #include "env/env_records.h"
-#include "env/color_smoother.h"
 #include "env/mission_environment.h"
 #include "env/celestial.h"
 #include "env/environment_cube_capture.h"
@@ -35,13 +34,8 @@
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
-#include "env/weather_core.h"
-#include "env/glare_occlusion.h"
-#include "env/star_field.h"
-#include "env/water_core.h"
 #include "particle/particle_curve_ref.h"
 #include "particle/particle_effect.h"
-#include "particle/particle_table_handles.h"
 #include "particle/particle_table.h"
 #include "particle/particle_graphic_layer.h"
 #include "particle/particle_def.h"
@@ -60,6 +54,7 @@
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
 #include "world/item_effect_director.h"
+#include "world/occlusion_frame.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
@@ -73,7 +68,6 @@
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
 #include "object/item_records.h"
-#include "object/model_inspection_records.h"
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 #include "object/avatar_records.h"
@@ -88,10 +82,8 @@
 #include "simulation/destruction_events.h"
 #include "simulation/destruction_presenter.h"
 #include "simulation/throwable_presenter.h"
-#include "simulation/debug_cards.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
-#include "simulation/round_debug_report.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/player_weapon_view.h"
@@ -123,7 +115,6 @@
 #include "simulation/present_stats.h"
 #include "simulation/inmatch_session_values.h"
 #include "simulation/simulation.h"
-#include "wac/wac_program.h"
 #include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
 #include "audio/ambient_mixer.h"
@@ -211,7 +202,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvKeyframe);
 	GDREGISTER_CLASS(MissionEnvironmentOverrides);
 	GDREGISTER_CLASS(EnvFile);
-	GDREGISTER_CLASS(ColorSmoother);
 	GDREGISTER_CLASS(MissionEnvironment);
 	GDREGISTER_CLASS(SkyDome);
 	GDREGISTER_CLASS(Water);
@@ -229,10 +219,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(Precipitation);
-	GDREGISTER_CLASS(WeatherCore);
-	GDREGISTER_CLASS(WaterCore);
-	GDREGISTER_CLASS(StarField);
-	GDREGISTER_CLASS(GlareOcclusion);
 	GDREGISTER_CLASS(ObjectData);
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvDayPhase);
@@ -244,13 +230,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectModel);
 	GDREGISTER_CLASS(EntityIndex);
 	GDREGISTER_CLASS(ObjectShaderCache);
-	GDREGISTER_CLASS(MaterialInfo);
-	GDREGISTER_CLASS(PartAnimTrack);
-	GDREGISTER_CLASS(PartAnimInfo);
-	GDREGISTER_CLASS(RenderLodInfo);
-	GDREGISTER_CLASS(BodyBlendState);
-	GDREGISTER_CLASS(WeaponChannelState);
-	GDREGISTER_CLASS(PartAnimChannelState);
 	GDREGISTER_CLASS(ModelLight);
 	GDREGISTER_CLASS(ModelUserPoint);
 	GDREGISTER_CLASS(ItemParticleFx);
@@ -298,11 +277,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HitboxDebugOrganic);
 	GDREGISTER_CLASS(HitboxDebugReport);
 	GDREGISTER_CLASS(DebugPickCard);
-	GDREGISTER_CLASS(WacState);
-	GDREGISTER_CLASS(NativePoseStats);
-	GDREGISTER_CLASS(DestructionDebugCard);
-	GDREGISTER_CLASS(RoundDebugEvent);
-	GDREGISTER_CLASS(RoundDebugReport);
 	GDREGISTER_CLASS(PlayerWeaponEvent);
 	GDREGISTER_CLASS(WeaponKitEntry);
 	GDREGISTER_CLASS(PlayerInventorySlot);
@@ -358,7 +332,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ThrowablePresentStats);
 	GDREGISTER_CLASS(ScarPresentStats);
 	GDREGISTER_CLASS(Simulation);
-	GDREGISTER_CLASS(WacProgram);
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
 	GDREGISTER_CLASS(AmbientMixer);
@@ -387,7 +360,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Process);
 	GDREGISTER_CLASS(ParticleCurveRef);
 	GDREGISTER_CLASS(ParticleEffect);
-	GDREGISTER_CLASS(ParticleTableHandles);
 	GDREGISTER_CLASS(ParticleTable);
 	GDREGISTER_CLASS(ParticleGraphicLayer);
 	GDREGISTER_CLASS(ParticleDef);
@@ -412,6 +384,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectWorld);
 	GDREGISTER_CLASS(ItemEffectDirectorStats);
 	GDREGISTER_CLASS(ItemEffectDirector);
+	GDREGISTER_CLASS(OcclusionFrame);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);
 	GDREGISTER_CLASS(DisplayDecode);

@@ -2,6 +2,7 @@
 
 #include "resource_index/resource_root.h"
 
+#include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include <runtime/wac/compiler.h>
@@ -94,15 +95,4 @@ int WacProgram::get_event_count() const {
 
 int WacProgram::get_code_size() const {
 	return static_cast<int>(program_.code.size());
-}
-
-void WacProgram::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("compile_source", "source"), &WacProgram::compile_source);
-	ClassDB::bind_method(D_METHOD("compile_sources", "sources"), &WacProgram::compile_sources);
-	ClassDB::bind_method(D_METHOD("compile_from_resource_root", "root", "mission_basename"), &WacProgram::compile_from_resource_root);
-	ClassDB::bind_method(D_METHOD("is_ok"), &WacProgram::is_ok);
-	ClassDB::bind_method(D_METHOD("get_error_count"), &WacProgram::get_error_count);
-	ClassDB::bind_method(D_METHOD("get_diagnostics"), &WacProgram::get_diagnostics);
-	ClassDB::bind_method(D_METHOD("get_event_count"), &WacProgram::get_event_count);
-	ClassDB::bind_method(D_METHOD("get_code_size"), &WacProgram::get_code_size);
 }

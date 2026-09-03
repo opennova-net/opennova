@@ -3,6 +3,7 @@
 #include "render/visual_layers.h"
 
 #include <cmath>
+#include <memory>
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -33,7 +34,7 @@ class Weather;
 // witnessed water pieces: the height precedence ladder + per-frame inputs
 // (environment/water_frame.h), the proper-mirror reflection view
 // (environment/water_mirror.h), and the noise/strip math already in
-// engine/formats/env behind the WaterCore binding. This node keeps only
+// engine/formats/env behind the WaterCore device helper. This node keeps only
 // device work: the live ArrayMesh strip upload, the animated noise
 // ImageTexture pair, the reflection SubViewport + mirror Camera3D rig on the
 // SAME World3D (Godot renders SubViewports ahead of the sampling viewport,
@@ -172,7 +173,7 @@ private:
 	ObjectID env_node_id_;
 	ObjectID weather_node_id_;
 	ObjectID cached_cam_id_;
-	Ref<WaterCore> water_core_;
+	std::unique_ptr<WaterCore> water_core_;
 	Ref<Image> noise_color_img_;
 	Ref<Image> noise_normal_img_;
 	Ref<ImageTexture> noise_color_tex_;

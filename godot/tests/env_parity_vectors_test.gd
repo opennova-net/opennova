@@ -70,9 +70,11 @@ extends GutTest
 #   sky/mesh (counts + witnessed winding) byte-identical.
 #   Water leg 2026-07-06 (env #28 fixed / #31 minted-and-closed / #29-#30
 #   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
-#   through WaterCore [orig: Water_GenerateNoiseTextures @ 0x5c0360],
-#   cross-pinned byte-equal to the env_render_unit ctest landmarks) and NEW
-#   water/uv_state [orig: render_water_surface @ 0x5c3348..0x5c33db];
+#   [orig: Water_GenerateNoiseTextures @ 0x5c0360], cross-pinned byte-equal
+#   to the env_render_unit ctest landmarks) and NEW water/uv_state [orig:
+#   render_water_surface @ 0x5c3348..0x5c33db] — both keys moved to the
+#   env_render_unit ctest with the ADR 0043 d10 env-core sweep (the WaterCore
+#   / WeatherCore bindings that served them are C++-only now);
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
 #   the invented waves - the pinned tail is now the u_water_uv Vector4. Every
 #   other water key (mesh, mission-height ladder, snap, per-cell lit colors) stayed
@@ -84,8 +86,9 @@ extends GutTest
 #   the invented dir*2000*height_scale model), celestial/body_alpha (the
 #   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
 #   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
-#   dead-band hysteresis + jitter pattern through GlareOcclusion,
-#   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
+#   dead-band hysteresis + jitter pattern, asset-free [orig:
+#   render_skybox_sun_glow @ 0x5acd00]; the key moved to the env_render_unit
+#   ctest with the ADR 0043 d10 sweep, like the smoother/* ColorSmoother keys).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
 #   #17 CLOSED 2026-07-06 (REN-5, the modulator chain going LIVE): the
@@ -120,7 +123,7 @@ extends GutTest
 # the ONLY two tolerances):
 # - BYTE-EXACT for integer-math outputs: all smoothed/interpolated colors,
 #   lightning intensity, and PRNG/sway-derived values compare via the
-#   int(x * 255.0 + 0.5) idiom (color_smoother_test.gd) or via exact
+#   int(x * 255.0 + 0.5) idiom (the packed-colour edge) or via exact
 #   recovery of the underlying integer (sway amount/phase invert to the
 #   16-bit sway state and the 8-bit ring index). Encoded as hex strings in
 #   EXPECTED_BYTES; compared with assert_eq.
@@ -132,9 +135,9 @@ extends GutTest
 # - Celestial node-level MODEL application (materials/tints on loaded
 #   3DIs): needs a ResourceRoot with retail models (asset-gated; with no
 #   bodies the process path returns before the pushes). The MATH is fully
-#   vectored through the statics + GlareOcclusion (celestial/body_*,
-#   celestial/glow, celestial/occlusion); the terrain ray march itself needs
-#   a loaded terrain (the no-terrain path = unobstructed is the pinned case).
+#   vectored through the statics (celestial/body_*, celestial/glow) and the
+#   env_render_unit ctest (the occlusion window); the terrain ray march itself
+#   needs a loaded terrain (the no-terrain path = unobstructed is the pinned case).
 # - Water terrain-fallback height rung: needs a loaded TerrainData
 #   (asset). The env-driven and mission-override rungs ARE pinned.
 # - Weather internal state (PRNG word, sway rings, fade timers) is
@@ -226,17 +229,12 @@ const EXPECTED_BYTES := {
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
 	"sky/flat": "01 2D3C4B",
 	"sky/mesh": "441 2400 0 22 21 0 1 22 1 23 22 1 2 23",
-	"smoother/clamped": "FE0000 FD0000 FC0000 FB0000",
-	"smoother/decay": "DF7038 C36231 AB562B 954B26 834221 72391D 643219 582C16",
-	"smoother/rise": "201810 3C2D1E 543F2A 6A4F35 7C5D3E 8D6947 9B744E A77D54",
-	"smoother/snap_get": "336699",
 	"wa/k001": "0012 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wa/k004": "035F 04 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wa/k016": "56E5 10 00 00 30362D A7A7A4 96B2FF 525657 30362D A7A7A4 96B2FF",
 	"wa/k064": "7CDE 40 00 00 2E342B A2A29F 92ACFF 505354 2E342B A2A29F 92ACFF",
 	"wa/k256": "9787 00 00 00 2D322A 9C9C99 8CA6FE 4D5152 2D322A 9C9C99 8CA6FE",
 	"water/mesh": "0 180 708 3 0 4 4 0 1 4 1 5 5 1 2",
-	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wb/k016": "429E 10 00 07 30362D A7A7A4 96B2FF 525657 30362D A7A7A4 96B2FF",
 	"wb/k064": "71F1 40 00 00 2E342B A2A29F 92ACFF 505354 2E342B A2A29F 92ACFF",
@@ -285,7 +283,6 @@ const EXPECTED_FLOATS := {
 	"celestial/body_alpha": [1.000000000, 0.500000000, 0.500000000, 1.000000000, 0.500000000, 0.000000000, 0.000000000],
 	"celestial/body_distance": [64.000000000],
 	"celestial/glow": [0.500000000, 0.031250000, 0.250000000, 0.250000000, 0.000000000],
-	"celestial/occlusion": [1024.000000000, 0.000000000, -16.000000000, -8.000000000, 0.000000000, 16.000000000, 24.000000000, 128.000000000, 96.000000000],
 	"dir/t0000": [-0.342010498, -0.939682007, 0.000000000, -0.500000000, 0.866012573, -0.000000076],
 	"dir/t0550": [-0.342010498, -0.040989649, 0.938787580, -0.500000000, 0.037775949, -0.865188301],
 	"dir/t0600": [-0.342010498, 0.000000041, 0.939682007, -0.500000000, -0.000000010, -0.866012573],
@@ -303,7 +300,6 @@ const EXPECTED_FLOATS := {
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/mission_override": [42.500000000, 7.000000000],
 	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
-	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 }
 
 
@@ -722,27 +718,9 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	var p0 := positions[0]
 	var p_last := positions[positions.size() - 1]
 	floats["water/strip"] = [p0.x, p0.y, p0.z, p_last.x, p_last.y, p_last.z]
-
-	# The witnessed noise texture pair, asset-free through WaterCore
-	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
-	# PRNG state @ 0x5c01a0]: first 8 RGBA bytes of each at counters 0 and 7.
-	var core := WaterCore.new()
-	core.update(0)
-	var color_head := core.get_color_rgba8().slice(0, 8)
-	var normal_head := core.get_normal_rgba8().slice(0, 8)
-	core.update(7)
-	var color_head_7 := core.get_color_rgba8().slice(0, 8)
-	bytes["water/noise"] = "%s %s %s" % [
-		color_head.hex_encode(), normal_head.hex_encode(), color_head_7.hex_encode()]
-
-	# The witnessed UV transform (scale, bias, offset_u, offset_v) after 8
-	# ticks at sky_speed 15 [orig: render_water_surface @ 0x5c3348..0x5c33db]
-	# via the weather core's shared accumulators.
-	var scroll := WeatherCore.new()
-	for _i in 8:
-		scroll.tick_cloud_scroll(15.0)
-	var uv_state: Vector4 = scroll.get_water_uv_state(100.0, 200.0, 1024.0)
-	floats["water/uv_state"] = [uv_state.x, uv_state.y, uv_state.z, uv_state.w]
+	# (The noise texture heads and the water UV transform ride the
+	# env_render_unit ctest since the WaterCore / WeatherCore bindings went
+	# C++-only.)
 
 
 func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
@@ -786,51 +764,15 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 		EnvFile.glare_glow_alpha(-0.5, 256, 0.0, 0.0),
 	]
 
-	# The env #14 occlusion state machine, asset-free: window fill/decay and
-	# the dead-band hysteresis at fog 1000, plus this frame's jitter offsets
-	# [orig: @ 0x5acd9e..0x5acf7f].
-	var occ := GlareOcclusion.new()
-	var jitter_a: Vector3 = occ.get_ray_jitter_a()
-	var jitter_b: Vector3 = occ.get_ray_jitter_b()
-	var occ_floats: Array = [occ.get_ray_length(),
-		jitter_a.x, jitter_a.y, jitter_a.z, jitter_b.x, jitter_b.y, jitter_b.z]
-	for _i in 8:
-		occ.tick(true, true, 1000.0)
-	occ_floats.append(float(occ.get_brightness()))
-	for _i in 4:
-		occ.tick(false, false, 1000.0)
-	occ_floats.append(float(occ.get_brightness()))
-	floats["celestial/occlusion"] = occ_floats
+	# (The env #14 occlusion state machine — window fill/decay, the dead-band
+	# hysteresis at fog 1000 and the jitter offsets — rides the env_render_unit
+	# ctest since the GlareOcclusion binding went C++-only.)
 
 
 func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:
-	# ColorSmoother snap/step sequences [orig: interpolate_weather_color
-	# @ 0x57d9e0] — guards the statics' GDScript-visible contract during the
-	# ENG-2 reimpl thinning.
-	var decay := ColorSmoother.new()
-	decay.snap(Color(1.0, 0.5, 0.25))
-	var decay_seq := PackedStringArray()
-	for _i in 8:
-		decay_seq.append(_hex_color_c(decay.step(Color(0.0, 0.0, 0.0), 255.0)))
-	bytes["smoother/decay"] = " ".join(decay_seq)
-
-	var rise := ColorSmoother.new()
-	rise.snap(Color(0.0, 0.0, 0.0))
-	var rise_seq := PackedStringArray()
-	for _i in 8:
-		rise_seq.append(_hex_color_c(rise.step(Color(1.0, 0.75, 0.5), 255.0)))
-	bytes["smoother/rise"] = " ".join(rise_seq)
-
-	var clamped := ColorSmoother.new()
-	clamped.snap(Color(1.0, 0.0, 0.0))
-	var clamped_seq := PackedStringArray()
-	for _i in 4:
-		clamped_seq.append(_hex_color_c(clamped.step(Color(0.0, 0.0, 0.0), 1.0)))
-	bytes["smoother/clamped"] = " ".join(clamped_seq)
-
-	var snapper := ColorSmoother.new()
-	snapper.snap(Color(0.2, 0.4, 0.6))
-	bytes["smoother/snap_get"] = _hex_color_c(snapper.get_current())
+	# (The ColorSmoother snap/step sequences — the smoother/* keys — ride the
+	# env_render_unit ctest over the engine's ColorChannelState since the
+	# binding died with the ADR 0043 d10 sweep.)
 
 	# EnvFile derived-color statics [orig: Environment_UpdateWeatherTick
 	# @ 0x57f0b3..0x57f1b1].

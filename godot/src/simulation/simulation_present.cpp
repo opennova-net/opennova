@@ -5,7 +5,6 @@
 #include "util/color_convert.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/destruction_events.h"
-#include "simulation/debug_cards.h"
 #include "util/axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
@@ -541,65 +540,16 @@ TypedArray<DeathPieceRow> Simulation::get_death_pieces() const {
 	return out;
 }
 
-// Per-entity destruction diagnostics (probe/F3 seam): the gate inputs the
-// damage chain reads, resolved by bms_id. {} = no such entity.
-Ref<DestructionDebugCard> Simulation::get_destruction_debug(int p_bms_id) const {
-	Ref<DestructionDebugCard> out;
-	out.instantiate();
-	if (!kernel_) return out;
+// Whether the collision world holds an instance for the placed entity: the
+// one destruction-gate fact the GUT collision cases read by bms_id.
+bool Simulation::has_collision_instance(int p_bms_id) const {
+	if (!kernel_) return false;
 	const opennova::world::Entity *found = nullptr;
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (found == nullptr && e.bms_id == p_bms_id) found = &e;
 	});
-	if (found == nullptr) return out;
-	out->set_found(true);
-	out->set_bms_id(found->bms_id);
-	out->set_net_id(static_cast<int>(found->net_id));
-	out->set_kind(static_cast<int>(found->kind));
-	out->set_pool(found->handle.pool());
-	out->set_item_id(found->item_id);
-	out->set_health(static_cast<int>(found->health));
-	out->set_health_max(static_cast<int>(found->health_max));
-	out->set_alive(found->alive);
-	out->set_bound_radius(static_cast<float>(found->bound_radius));
-	out->set_engine_flags(static_cast<int64_t>(found->engine_flags));
-	out->set_is_ai_capable(found->is_ai_capable);
-	out->set_has_collision_instance(
-			kernel_->collision.has_instance(kernel_->world, found->handle));
-	const opennova::world::ItemDeathTraits *t =
-			kernel_->world.tables.item_death_traits.get(found->item_id);
-	out->set_has_death_traits(t != nullptr);
-	if (t != nullptr) {
-		out->set_armor_impact(static_cast<int>(t->armor_impact));
-		out->set_armor_blast(static_cast<int>(t->armor_blast));
-		out->set_unit_type(static_cast<int>(t->unit_type));
-		out->set_kz(static_cast<int>(t->kz));
-		out->set_has_husk(t->has_husk);
-		out->set_husk_model_loaded(t->husk_model_loaded);
-		PackedVector3Array kz_points;
-		for (const opennova::world::Vec3 &point : t->kz_points)
-			kz_points.push_back(Vector3(point.x, point.y, point.z));
-		out->set_kz_point_count(static_cast<int>(t->kz_points.size()));
-		out->set_kz_points(kz_points);
-		PackedVector3Array bridge_dead_points;
-		for (const opennova::world::Vec3 &point : t->bridge_dead_points)
-			bridge_dead_points.push_back(Vector3(point.x, point.y, point.z));
-		out->set_bridge_dead_point_count(static_cast<int>(t->bridge_dead_points.size()));
-		out->set_bridge_dead_points(bridge_dead_points);
-		PackedVector3Array glass_positions;
-		PackedVector3Array glass_directions;
-		for (const opennova::world::GlassPointTrait &point : t->glass_points) {
-			glass_positions.push_back(Vector3(
-					point.local_pos.x, point.local_pos.y, point.local_pos.z));
-			glass_directions.push_back(Vector3(
-					point.local_dir.x, point.local_dir.y, point.local_dir.z));
-		}
-		out->set_glass_point_count(static_cast<int>(t->glass_points.size()));
-		out->set_glass_point_positions(glass_positions);
-		out->set_glass_point_directions(glass_directions);
-	}
-	out->set_pos(mission_to_godot(found->position));
-	return out;
+	if (found == nullptr) return false;
+	return kernel_->collision.has_instance(kernel_->world, found->handle);
 }
 
 // The live tracer trail channels for the ribbon layer — see the header note.

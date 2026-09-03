@@ -77,7 +77,6 @@ private:
 	std::vector<int32_t> occlusion_culled_wire_;
 	std::vector<int32_t> occl_apply_culled_wire_last_;
 	std::unordered_map<uint16_t, uint8_t> wire_occlusion_latch_;
-	PackedInt32Array get_wire_render_culled_changes();
 	// Reused probe scratch (cleared per frame, capacity retained).
 	std::vector<opennova::world::EntityHandle> occlusion_probe_handles_;
 	// Delta baselines for the render-occlusion apply path: what the shell last
@@ -106,7 +105,7 @@ private:
 	// The installed script program. Held as a Ref so it survives reset_world();
 	// each (re)load re-applies it onto the fresh kernel WacSystem when the
 	// kernel's own layered load installed none.
-	Ref<WacProgram> wac_program_;
+	std::shared_ptr<WacProgram> wac_program_;
 	// Resource-install invariant only. Public lifecycle is
 	// session_.state(); this prevents partially constructed worlds from
 	// serving data while Loading/Failed transitions are in flight.

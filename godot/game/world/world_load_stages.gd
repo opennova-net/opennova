@@ -311,10 +311,9 @@ func unload() -> void:
 	# Blink frame gates and every occlusion override reset with the mission
 	# [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
 	# indoors must not leave the next mission's terrain/sky/water hidden. The
-	# pass clears the shared present-visibility intent FIRST (the pre-extraction
-	# unload cleared it up top), so its release walk falls back to
-	# sim.entity_present_visible — see OcclusionFramePass.reset.
-	_world._occlusion.reset()
+	# release clears the occlusion-hidden bit, so every node lands on its own
+	# present intent — see OcclusionFrame.reset.
+	_world.occlusion_frame().reset()
 	_world._mission_forces_indoors = false
 	_world.set_local_player_nvg_view(false, 0)
 	if _world._env != null and _world._env.environment_data != null:
@@ -580,8 +579,7 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 	_world._mission_stats = _world._placer.place_entities(records, _world._runtime, options)
 	if _world._runtime != null:
 		_world._runtime.rebind_placed_entities(_world._placer)
-	if _world._occlusion != null:
-		_world._occlusion.rebind_placed_nodes()
+	_world.occlusion_frame().rebind_placed_nodes()
 	# The authored .def item effects and effect lights attached at load against
 	# an empty placer; re-attach against the placed sources (the same pair the
 	# effect-catalog warm-up re-runs).
@@ -761,6 +759,13 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 		else:
 			_world.load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	# The occlusion frame's per-mission members: the sim whose verdicts it
+	# applies, the placed-node index it resolves buildings/entities through,
+	# and the entity presenter carrying the wire render gates + lighting
+	# contexts. Re-handed per load; unload's reset() forgets them.
+	var occlusion_runtime: MissionRoot = _world.get_runtime()
+	_world.occlusion_frame().bind_mission(occlusion_runtime.get_sim(),
+			occlusion_runtime.get_entity_index(), occlusion_runtime.get_entity_presenter())
 	_run_mission_start_environment_boundary()
 	_world._sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or

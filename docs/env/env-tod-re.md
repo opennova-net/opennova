@@ -1468,7 +1468,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   glare, derived colors, BMS overrides) with `env_render_unit_test` and the
   `OPENNOVA_JO_DIR`-gated install sweep.
 - `godot/src`: EnvFile fog/day-phase/glare/override/`to_bytes` surface +
-  `ColorSmoother`; engine-faithful `environment`/`sky`/
+  the color smoother (now engine-only `ColorChannelState`, ADR 0043 slice G9); engine-faithful `environment`/`sky`/
   `water`/`weather`; new `celestial` + two celestial shaders;
   BMS override fields through `MissionData`; runtime apply/clear in
   `game_world`.

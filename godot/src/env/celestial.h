@@ -12,6 +12,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
+#include <memory>
+
 #include <runtime/environment/celestial_frame.h>
 
 #include "env/env_file.h"
@@ -28,7 +30,7 @@ class MissionEnvironment;
 // The celestial applier — the ADR 0033 device leg over the engine's
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
 // fixed-point math already in engine/formats/env (env_celestial.h behind the
-// StarField/GlareOcclusion bindings). Renders the sun/moon/glare 3DI bodies
+// StarField/GlareOcclusion device helpers). Renders the sun/moon/glare 3DI bodies
 // and the 256-instance star field named in the mission .env, attached to the
 // sky at camera + direction * 64. This node keeps only device work: the
 // ObjectModel children with per-surface material installs, the star
@@ -153,8 +155,8 @@ private:
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
 	Ref<ResourceRoot> resource_root_;
-	Ref<GlareOcclusion> glare_occlusion_;
-	Ref<StarField> star_core_;
+	std::unique_ptr<GlareOcclusion> glare_occlusion_;
+	std::unique_ptr<StarField> star_core_;
 	MultiMeshInstance3D *star_mmi_ = nullptr;
 	HashMap<String, Body> bodies_;
 	// name-signature change detection (undo/scrub safe rebuilds).

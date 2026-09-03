@@ -1,7 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -22,15 +20,15 @@ namespace godot {
 // derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360, see docs/env/env-tod-re.md], plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
 // [orig: render_water_strip_detailed @ 0x5c27d0, see docs/env/env-tod-re.md]. All math lives in engine/formats/env
-// (env/env_water_render.h); this binding owns the static tables (built once with
+// (env/env_water_render.h); this C++-only device helper (Water's member — its
+// ClassDB row died with the ADR 0043 d10 env-core sweep; env_render_unit
+// pins the vectors it served GUT) owns the static tables (built once with
 // the witnessed init, from the boot PRNG state), the frame buffers, and the
 // Godot<->render basis conversion for the strip view state. Water updates
 // once per frame, blits the textures into ImageTextures, and rebuilds its
 // ArrayMesh surface from the strip buffers. RE record: docs/env/env-tod-re.md
 // "Water surface".
-class WaterCore : public RefCounted {
-	GDCLASS(WaterCore, RefCounted)
-
+class WaterCore {
 private:
 	opennova::env::WaterNoiseTables tables = opennova::env::water_init_noise_tables();
 	uint32_t color_pixels[opennova::env::kWaterNoiseSize * opennova::env::kWaterNoiseSize] = {};
@@ -46,9 +44,6 @@ private:
 	// march ran at, so reconstructed positions match the lib's plane_y.
 	float strip_plane_height = 0.0f;
 	bool strip_view_set = false;
-
-protected:
-	static void _bind_methods();
 
 public:
 	// Regenerates both textures for the given 62 Hz frame counter
