@@ -379,11 +379,9 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			// authoritative look pitch lives on AiEntity, not world::Entity; retain the zero default
 			// when a non-AI entity is bound. [orig: pose_from_session gss.client_pitch;
 			// entity_wire_bridge ae.pitch >> 16]
-			if (ctx.world->ai != nullptr) {
-				if (const world::AiEntity *ae =
-						ctx.world->ai->for_handle(conn.link.owned_entity)) {
-					p.pitch = static_cast<int16_t>(ae->pitch >> 16);
-				}
+			if (const world::AiEntity *ae =
+					ctx.world->ai.for_handle(conn.link.owned_entity)) {
+				p.pitch = static_cast<int16_t>(ae->pitch >> 16);
 			}
 			p.team = e->team;
 			return p;

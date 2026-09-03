@@ -33,13 +33,17 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/world.h>
+#include <runtime/world/system.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
 
 namespace opennova::world {
+
+class World;
+struct VehicleDriveCmd;
+struct VehicleTraits;
 
 // ----------------------------------------------------------------------------
 // AI state ids. [orig: Entity_LookupAIStateName @0x455cc0 string table.] States

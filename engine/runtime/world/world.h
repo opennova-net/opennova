@@ -17,6 +17,7 @@
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/match.h>
@@ -284,9 +285,6 @@ struct MissionKillStats {
 };
 
 
-class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
-                 // shared command layer can reach an entity's AI component in-engine)
-
 // items.def display names keyed by Entity::item_id (the wire type id), the
 // ItemDeathTraitsTable shape: filled once per distinct id by the item-traits
 // sweep, read by the inspection records (world/inspect.h). Small missions:
@@ -334,8 +332,11 @@ public:
     EffectLog effects;
     CachedFrameState cached;
     EntityCommands commands;
-    AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
-                               // this world, so the AI-change command family can reach brains.
+    // The AI/motor system: every brain plus the infantry and vehicle motors.
+    // Owned here so the command layer, the sims, the wire and the tools reach
+    // brains without a seam; the kernel registers it as the third ISystem
+    // (WAC -> BMS -> AI) and wires its collision/terrain/root-motion links.
+    AiSystem ai;
     // Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in

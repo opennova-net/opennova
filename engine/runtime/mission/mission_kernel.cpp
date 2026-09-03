@@ -62,10 +62,9 @@ MissionKernel::~MissionKernel() {
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.terrain = nullptr;
-	world.ai = nullptr;
-	ai.collision = nullptr;
-	ai.terrain = nullptr;
-	ai.root_motion = nullptr;
+	world.ai.collision = nullptr;
+	world.ai.terrain = nullptr;
+	world.ai.root_motion = nullptr;
 	collision.set_pose_provider(nullptr);
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	if (items_ok) def_free_items(&items);
@@ -150,8 +149,8 @@ void MissionKernel::sync_water_plane() {
 void MissionKernel::wire_terrain() {
 	sync_water_plane();
 	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-	ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-	ai.ground_clearance = w::GroundClearance{};
+	world.ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	world.ai.ground_clearance = w::GroundClearance{};
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	// The footstep surface pick reads the charmap through this view; the
 	// shell's apply_terrain_to_ai calls this and then re-layers its
@@ -164,7 +163,7 @@ void MissionKernel::wire_collision() {
 	collision.set_pose_provider(this);
 	world.collision = &collision;
 	world.pose_provider = this;
-	ai.collision = &collision;
+	world.ai.collision = &collision;
 }
 
 std::function<PromoteOptions::AiProfileDefaults(int32_t)>
@@ -191,7 +190,7 @@ bool MissionKernel::load_mission_into_world() {
 	// Authored display names from the embedder's [PeopleNames] table (D-HUD-20);
 	// promote applies the retail 15-char copy at its cited port site.
 	opts.people_name_resolver = people_name_resolver_;
-	promo = promote_mission(mission, world, ai, opts);
+	promo = promote_mission(mission, world, opts);
 	finish_load();
 	return true;
 }
@@ -199,7 +198,6 @@ bool MissionKernel::load_mission_into_world() {
 void MissionKernel::finish_load() {
 	events.load(mission.events, mission.triggers, mission.actions);
 	world.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
-	world.ai = &ai;
 	// The net half stands its session up here — between the world wiring and
 	// the system registration, exactly where the SP listen host's bring-up
 	// sits inside the load (inmatch::listen_host::bringup)
@@ -216,7 +214,7 @@ void MissionKernel::finish_load() {
 	// registration order only fixes the within-tick sequence.
 	world.add_system(&wac);
 	world.add_system(&events);
-	world.add_system(&ai);
+	world.add_system(&world.ai);
 	world.load_systems();
 	// PreMission events settle initial scripted state before the clock starts.
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
@@ -226,7 +224,7 @@ void MissionKernel::finish_load() {
 
 void MissionKernel::capture_baseline() {
 	baseline = world.snapshot();
-	ai.capture_spawn_baseline();
+	world.ai.capture_spawn_baseline();
 	wac_baseline = wac.capture_runtime_state();
 	have_baseline = true;
 	have_wac_baseline = true;
@@ -262,11 +260,11 @@ void MissionKernel::resolve_new_infantry_adm_ids() {
 	const DefItemsFile *item_rows = items_table();
 	if (!infantry_adm_retained_ || item_rows == nullptr || root_motion.empty()) return;
 	const ResourceIndex *adm_source = adm_index_ != nullptr ? adm_index_ : asset_index();
-	const int count = ai.count();
+	const int count = world.ai.count();
 	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
 		infantry_adm_resolved_ai_count_ = 0;
 	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
-		w::AiEntity *e = ai.at(i);
+		w::AiEntity *e = world.ai.at(i);
 		if (e == nullptr) continue;
 		e->inf.adm_id = 0;
 		if (!e->inf.active) continue;
@@ -287,8 +285,8 @@ void MissionKernel::rearm_infantry_adm(const ResourceIndex *adm_index) {
 	if (adm_index != nullptr) adm_index_ = adm_index;
 	infantry_adm_retained_ = true;
 	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < ai.count(); ++i)
-		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	for (int i = 0; i < world.ai.count(); ++i)
+		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = 0;
 	resolve_new_infantry_adm_ids();
 }
 
@@ -305,7 +303,7 @@ int MissionKernel::install_infantry_anim(const std::string &adm_name,
 	// A source with no clips counts as none: the selector then resolves every
 	// state to "no clip" and soldiers stand, exactly the original's
 	// relationship between motion and clips.
-	ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
+	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
 	if (default_adm == 0) resolve_new_infantry_adm_ids();
 	return default_adm == 0 ? root_motion.clip_count(0) : 0;
 }
@@ -503,7 +501,7 @@ void MissionKernel::collect_attach_labels(std::vector<w::AttachLabel> &out) {
 	// [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4]
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
 	const w::AiEntity *body =
-			world.ai != nullptr ? world.ai->for_handle(world.cached.local_player) : nullptr;
+			world.ai.for_handle(world.cached.local_player);
 	w::collect_attach_labels(world, *player, armory_mode, local_player_can_fire(body), out);
 }
 
@@ -566,7 +564,7 @@ void MissionKernel::apply_player_input_pre_tick() {
 	// gated on the player entity alone [orig: @ 0x4DE590; Game_ProcessMainFrame
 	// @ 0x52674b / @ 0x526774].
 	w::camera_shake_decay(view.shake);
-	w::AiEntity *p = ai.for_handle(world.cached.local_player);
+	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
@@ -598,7 +596,7 @@ void MissionKernel::apply_player_input_pre_tick() {
 void MissionKernel::sync_local_mounted_input_heading() {
 	if (!world.cached.local_player.valid()) return;
 	const w::Entity *player_entity = world.registry.get(world.cached.local_player);
-	const w::AiEntity *body = ai.for_handle(world.cached.local_player);
+	const w::AiEntity *body = world.ai.for_handle(world.cached.local_player);
 	if (player_entity == nullptr || body == nullptr || !body->inf.is_local_player) return;
 	// A post-tick difference from the pre-tick input copy is "the sim wrote
 	// the view this tick" (the mount-attach yaw snap, the ladder legs).
@@ -764,7 +762,7 @@ void MissionKernel::reset_local_player_input(int32_t look_heading_bam) {
 void MissionKernel::reset_local_player_input_to_player_facing() {
 	int32_t heading = 0;
 	if (world.cached.local_player.valid())
-		if (const w::AiEntity *pe = ai.for_handle(world.cached.local_player))
+		if (const w::AiEntity *pe = world.ai.for_handle(world.cached.local_player))
 			heading = pe->heading;
 	reset_local_player_input(heading);
 }
@@ -795,8 +793,8 @@ bool MissionKernel::restore_baseline() {
 	// Re-ground every soldier from scratch: the restored registry may reuse
 	// handles across epochs, so the high-water mark cannot be trusted.
 	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < ai.count(); ++i)
-		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	for (int i = 0; i < world.ai.count(); ++i)
+		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = 0;
 	resolve_new_infantry_adm_ids();
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the
@@ -845,7 +843,7 @@ const w::Entity *MissionKernel::player() const {
 }
 
 w::AiEntity *MissionKernel::player_ai() {
-	return world.cached.local_player.valid() ? ai.for_handle(world.cached.local_player) : nullptr;
+	return world.cached.local_player.valid() ? world.ai.for_handle(world.cached.local_player) : nullptr;
 }
 
 w::Vec3 MissionKernel::player_position() const {
@@ -860,7 +858,7 @@ int32_t MissionKernel::player_health() const {
 
 std::string MissionKernel::player_anim_key() const {
 	const w::AiEntity *e =
-			world.cached.local_player.valid() ? ai.for_handle(world.cached.local_player) : nullptr;
+			world.cached.local_player.valid() ? world.ai.for_handle(world.cached.local_player) : nullptr;
 	if (e == nullptr || !e->inf.active) return std::string();
 	return w::infantry_anim_key(e->inf.anim_state);
 }
@@ -1039,13 +1037,13 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 		return false;
 	}
 	simassets::MountedPoseControlSources sources;
-	if (const w::AiEntity *carrier_ai = ai.for_handle(carrier.handle)) {
+	if (const w::AiEntity *carrier_ai = world.ai.for_handle(carrier.handle)) {
 		sources.part_anim_phase0 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0];
 		sources.part_anim_phase1 = carrier_ai->brain.f[w::AiBrain::kPartAnimPhase0 + 1];
 	}
 	sources.has_heat_glow = w::world_model_heat_glow_for(world, carrier, sources.heat_glow);
 	w::EmplacedWeaponControls emplaced;
-	if (w::emplaced_weapon_controls_for(world, &ai, carrier, emplaced)) {
+	if (w::emplaced_weapon_controls_for(world, carrier, emplaced)) {
 		sources.has_emplaced = true;
 		sources.emplaced_gun_yaw = emplaced.gun_yaw;
 		sources.emplaced_gun_pitch = emplaced.gun_pitch;

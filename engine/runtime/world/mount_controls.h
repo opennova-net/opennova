@@ -91,18 +91,17 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 
 inline bool emplaced_weapon_controls_for(
 		const World &world,
-		AiSystem *ai,
 		const Entity &mount,
 		EmplacedWeaponControls &out) {
 	out = EmplacedWeaponControls{};
-	if (ai == nullptr || !mount.primary_weapon_owner.valid()) return false;
+	if (!mount.primary_weapon_owner.valid()) return false;
 	const Entity *occupant = world.registry.get(mount.primary_weapon_owner);
 	if (occupant == nullptr || !occupant->alive || occupant->health <= 0 ||
 			!occupant->mounted ||
 			occupant->mount_type != SeatType::Gunner ||
 			occupant->mount_target != mount.handle)
 		return false;
-	const AiEntity *gunner = ai->for_handle(occupant->handle);
+	const AiEntity *gunner = world.ai.for_handle(occupant->handle);
 	if (gunner == nullptr) return false;
 
 	// The parent owns the embedded weapon/model while the organic owns live look.

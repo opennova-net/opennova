@@ -755,8 +755,7 @@ std::vector<opennova::world::inspect::EntityRow> Simulation::native_entity_direc
 	if (!kernel_) return {};
 	// A joiner never mixes its non-authoritative tooling AI pool into the
 	// decoded view; the host joins registry rows to their AI cards.
-	return opennova::world::inspect::entity_directory(
-			kernel_->world, joiner_ ? nullptr : &kernel_->ai);
+	return opennova::world::inspect::entity_directory(kernel_->world, /*with_brains=*/!joiner_);
 }
 
 opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle) const {
@@ -765,7 +764,7 @@ opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle
 	// joins the decoded view, so the F3 card shows no AI half for a row the
 	// list beside it calls brainless.
 	return opennova::world::inspect::build_entity_card(
-			kernel_->world, joiner_ ? nullptr : &kernel_->ai,
+			kernel_->world, /*with_brains=*/!joiner_,
 			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); });
 }
@@ -778,7 +777,7 @@ Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 	// The MCP/test card keeps both halves on every role (its joiner readers
 	// diff the tooling pool against the replica section).
 	card->assign(opennova::world::inspect::build_entity_card(
-			kernel_->world, &kernel_->ai, handle,
+			kernel_->world, /*with_brains=*/true, handle,
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
 	// The joiner's decoded replica row for the same handle, when one exists.
 	if (joiner_ && runtime_ != nullptr) {
@@ -790,7 +789,7 @@ Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 
 Ref<EntityCard> Simulation::entity_card_by_ai_index(int p_index) const {
 	if (!kernel_) return Ref<EntityCard>();
-	const AiEntity *e = kernel_->ai.at(p_index);
+	const AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Ref<EntityCard>();
 	return entity_card(static_cast<int>(e->handle.packed));
 }
@@ -817,12 +816,12 @@ int64_t Simulation::infantry_anim_flags(int p_state) {
 }
 
 int Simulation::get_entity_count() const {
-	return kernel_ ? kernel_->ai.count() : 0;
+	return kernel_ ? kernel_->world.ai.count() : 0;
 }
 
 int Simulation::get_entity_kind(int p_index) const {
 	if (!kernel_) return -1;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return -1;
 	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 	if (!ent) return -1;
@@ -831,7 +830,7 @@ int Simulation::get_entity_kind(int p_index) const {
 
 Vector3 Simulation::get_entity_position(int p_index) const {
 	if (!kernel_) return Vector3();
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
 	return Vector3(static_cast<float>(e->pos[0] / kFixed16),
@@ -841,21 +840,21 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
 	if (!kernel_) return 0.0f;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return 0.0f;
 	return static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(e->heading));
 }
 
 int Simulation::get_entity_state(int p_index) const {
 	if (!kernel_) return 0;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return 0;
 	return e->brain.f[AiBrain::kCurState];
 }
 
 int Simulation::get_entity_net_id(int p_index) const {
 	if (!kernel_) return 0;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	return e ? e->net_id : 0;
 }
 
@@ -870,8 +869,8 @@ int Simulation::get_entity_net_id(int p_index) const {
 PackedVector3Array Simulation::get_foliage_mask_anchor_positions() const {
 	PackedVector3Array out;
 	if (!kernel_) return out;
-	for (int i = 0; i < kernel_->ai.count(); ++i) {
-		AiEntity *e = kernel_->ai.at(i);
+	for (int i = 0; i < kernel_->world.ai.count(); ++i) {
+		AiEntity *e = kernel_->world.ai.at(i);
 		if (!e) continue;
 		const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 		if (!ent) continue;
@@ -1012,8 +1011,7 @@ bool Simulation::cache_present_effect_pose(
 			present_effect_poses_by_handle_.end()) {
 		return true;
 	}
-	const AiEntity *ae = kernel_->world.ai != nullptr
-			? kernel_->world.ai->for_handle(p_entity.handle) : nullptr;
+	const AiEntity *ae = kernel_->world.ai.for_handle(p_entity.handle);
 	PresentEffectPose pose;
 	pose.position = Vector3(p_entity.position.x, p_entity.position.z,
 			-p_entity.position.y);
@@ -1169,7 +1167,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 // mission entity / the host's dedicated reservation).
 int Simulation::get_entity_owner_connection_id(int p_index) const {
 	if (!kernel_) return 0;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return 0;
 	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 	return ent ? static_cast<int>(ent->owner_connection_id) : 0;
@@ -1179,7 +1177,7 @@ int Simulation::get_entity_owner_connection_id(int p_index) const {
 // the decoded present's PF_WIRE_HANDLE. Unique per entity (unlike a player's net_id, which is now 0).
 int Simulation::get_entity_wire_handle(int p_index) const {
 	if (!kernel_) return 0;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	return e ? static_cast<int>(e->handle.packed) : 0;
 }
 
@@ -1204,14 +1202,14 @@ int32_t Simulation::decode_present_part_anim_phase(
 
 int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
 	if (!kernel_ || channel < 1 || channel > 2) return 0;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return 0;
 	return e->brain.f[AiBrain::kPartAnimPhase0 + (channel - 1)];
 }
 
 bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
 	if (!kernel_ || channel < 1 || channel > 2) return false;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return false;
 	if (channel == 1 && kernel_ != nullptr) {
 		const opennova::world::Entity *entity =
@@ -1435,7 +1433,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		EmplacedWeaponControls emplaced;
 		if (ent != nullptr) {
 			if (emplaced_weapon_controls_for(
-						kernel_->world, &kernel_->ai, *ent, emplaced))
+						kernel_->world, *ent, emplaced))
 				write_present_emplaced_controls(r, emplaced);
 		}
 		const bool authoritative_attachment_pose =
@@ -1477,8 +1475,8 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// exists; re-deriving the wire pose here would re-clobber the host's
 		// live vehicle attitude with the stale spawn/dead-pose eulers.
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
-		if (kernel_->world.ai && !joiner_) {
-			const AiEntity *ae = kernel_->world.ai->for_handle(h);
+		if (!joiner_) {
+			const AiEntity *ae = kernel_->world.ai.for_handle(h);
 			if (ae != nullptr) {
 				for (int slot = 0; slot < 2; ++slot) {
 					// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
@@ -1594,7 +1592,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		float *r = rows + static_cast<int64_t>(i++) * PF_STRIDE;
 		const opennova::world::EntityHandle h = e.handle;
 		const opennova::EntityClass cls = opennova::replication::entity_class_of(e);
-		const AiEntity *ae = w.ai != nullptr ? w.ai->for_handle(h) : nullptr;
+		const AiEntity *ae = w.ai.for_handle(h);
 		opennova::inmatch::initialize_client_replica_present_row(r);
 
 		// Wire identity + lifecycle, exactly what project_client_replica_present_row
@@ -1717,7 +1715,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 			}
 		}
 		EmplacedWeaponControls emplaced;
-		if (emplaced_weapon_controls_for(w, &kernel_->ai, e, emplaced))
+		if (emplaced_weapon_controls_for(w, e, emplaced))
 			write_present_emplaced_controls(r, emplaced);
 		if (ae == nullptr) return;
 		for (int slot = 0; slot < 2; ++slot) {

@@ -89,8 +89,8 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// and MissionObjectPlacer performs the matching basis conjugation). The shell builds
 	// Godot bases from these with that single-sourced conversion; delta(body class) is
 	// identity by construction.
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return Ref<PlayerAimOverlay>();
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return Ref<PlayerAimOverlay>();
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	const opennova::world::Entity *entity =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (!p || !entity) return Ref<PlayerAimOverlay>();
@@ -419,9 +419,9 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 		bool aimed_shot_available = false;
 		const opennova::world::Entity *local = nullptr;
 		const AiEntity *body = nullptr;
-		if (kernel_ && kernel_->world.ai && kernel_->world.cached.local_player.valid()) {
+		if (kernel_ && kernel_->world.cached.local_player.valid()) {
 			local = kernel_->world.registry.get(kernel_->world.cached.local_player);
-			body = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+			body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 		}
 		if (body != nullptr) {
 			recoil_pitch = body->inf.recoil_pitch;
@@ -498,7 +498,7 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 		if (mount != nullptr &&
 				mount->primary_weapon_owner == local->handle &&
 				emplaced_weapon_controls_for(
-						kernel_->world, &kernel_->ai, *mount, emplaced)) {
+						kernel_->world, *mount, emplaced)) {
 			out->set_emplaced_controls_valid(true);
 			out->set_emplaced_gun_yaw(static_cast<int>(emplaced.gun_yaw));
 			out->set_emplaced_gun_pitch(static_cast<int>(emplaced.gun_pitch));
@@ -537,8 +537,8 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 	out->set_body_anim_blend_weight(1.0f);
 	out->set_body_anim_variant(0);
 	out->set_body_anim_prev_variant(0);
-	if (kernel_ && kernel_->world.ai && kernel_->world.cached.local_player.valid()) {
-		const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (kernel_ && kernel_->world.cached.local_player.valid()) {
+		const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 		const opennova::world::Entity *entity =
 				kernel_->world.registry.get(kernel_->world.cached.local_player);
 		const bool blocked_mount =

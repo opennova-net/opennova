@@ -49,8 +49,8 @@ struct Victim {
 Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &blacklist) {
 	Victim best;
 	const w::Vec3 player = rig.player_position();
-	for (int i = 0; i < rig.ai.count(); ++i) {
-		w::AiEntity *e = rig.ai.at(i);
+	for (int i = 0; i < rig.world.ai.count(); ++i) {
+		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active || blacklist.count(e->handle.packed)) continue;
 		w::Entity *ent = rig.world.registry.get(e->handle);
 		if (ent == nullptr || !ent->alive || ent->mounted || ent->handle.pool() != 0) continue;
@@ -159,7 +159,7 @@ int main() {
 		bool pressed = true;
 		while (seconds < kMaxMissionSeconds) {
 			for (int t = 0; t < 62; ++t) {
-				if (const w::AiEntity *tai = rig.ai.for_handle(target)) {
+				if (const w::AiEntity *tai = rig.world.ai.for_handle(target)) {
 					const w::Vec3 me = rig.player_position();
 					const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
 					w::Vec3 chest = testrig::ai_position(*tai);
@@ -174,7 +174,7 @@ int main() {
 			++seconds;
 			++fire_seconds;
 			const w::Entity *tent = rig.world.registry.get(target);
-			const w::AiEntity *tai = rig.ai.for_handle(target);
+			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			const int hp = tai != nullptr ? tai->health : -1;
 			{
 				const w::RoundSim &rs = rig.world.round_sim;

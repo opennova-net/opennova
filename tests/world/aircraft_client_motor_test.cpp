@@ -38,6 +38,9 @@ struct Rig {
 // so the airborne pick is the local derivation `ground == INT32_MIN ->
 // airborne` [orig: the Flags read @0x491E35 region; boxless stand-in].
 void make_rig(Rig &r) {
+	// A joiner's world: its AiSystem runs non-authoritative, the client motor
+	// path [orig: g_napi_np_ctx.is_authority == 0 on a client].
+	r.world.ai.is_authority = false;
 	r.world.registry.configure_pool(0, 8);
 	r.world.registry.configure_pool(1, 8);
 	w::Entity seed;

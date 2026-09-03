@@ -1078,7 +1078,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		player->health = 100;
 	player->alive = true;
 	if (world::AiEntity *motor =
-			world.ai ? world.ai->for_handle(player->handle) : nullptr;
+			world.ai.for_handle(player->handle);
 			motor != nullptr && motor->inf.active) {
 		const int32_t motor_position[3] = {
 				world::to_fixed(player->position.x),
@@ -2116,9 +2116,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: NapiNPServerMsg_HandleReloadRequest @0x514df0 — the requester
 				//  != local-player gate @0x514efa, WeaponSlot_ReloadAmmo @0x514f03, the
 				//  window stamp entity+0x372 = 80 @0x54173c; consumer @0x4b5e5e..0x4b5e6f]
-				if (world->ai != nullptr &&
-				    conn.link.mode != replication::TransportMode::Loopback) {
-					if (world::AiEntity *peer = world->ai->for_handle(
+				if (conn.link.mode != replication::TransportMode::Loopback) {
+					if (world::AiEntity *peer = world->ai.for_handle(
 					            world::EntityHandle{req.entity_handle}))
 						peer->inf.reload_anim_ticks = 80;
 				}

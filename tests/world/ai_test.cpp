@@ -778,10 +778,9 @@ static void test_world_feed_never_engages_same_team() {
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     AttackEventSource clips;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.root_motion = &clips;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
 
@@ -819,10 +818,9 @@ static void test_berserk_candidate_is_intentional_team_exception() {
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     AttackEventSource clips;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.root_motion = &clips;
-    w->ai = &ai;
     const int npc_index = ai.attach(npc_h);
     const int candidate_index = ai.attach(candidate_h);
     AiEntity &npc = *ai.at(npc_index);
@@ -876,10 +874,9 @@ static void test_damage_hit_sets_retail_alert_state() {
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     AttackEventSource clips;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.root_motion = &clips;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
 
@@ -936,9 +933,8 @@ static void test_remote_player_hit_skips_npc_group_alert() {
     player_seed.engine_flags = 0x100u;
     const EntityHandle player_h = w->registry.spawn(0, player_seed);
 
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
-    w->ai = &ai;
     AiEntity &player = *ai.at(ai.attach(player_h));
     configure_rifleman(player, 0x41, 1);
     player.inf.is_local_player = false;
@@ -998,10 +994,9 @@ static void test_mounted_gunner_acquires_and_fires() {
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     AttackEventSource clips;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.root_motion = &clips;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     w->add_system(&ai);
@@ -1069,9 +1064,8 @@ static void test_infantry_floats_and_splashes_once() {
     seed.eye_offset_z = to_fixed(1.8); // a standing body's stamped eye height
     const EntityHandle h = w->registry.spawn(0, seed);
 
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(h));
     Entity *ent = w->registry.get(h);
 
@@ -1159,9 +1153,8 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     npc_seed.net_id = 0x11;
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     npc.profile.ammo_primary = -1;
@@ -1263,9 +1256,8 @@ static void test_mounted_look_traverses_before_fire_request() {
     npc_seed.net_id = 0x11;
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     npc.inf.combat_target = target_h;
@@ -1313,10 +1305,9 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     AttackEventSource clips;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.root_motion = &clips;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     npc.inf.active = true;
     npc.health = 100;
@@ -1366,10 +1357,9 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     CollisionWorld collision;
-    AiSystem ai;
+    AiSystem &ai = w->ai;
     ai.is_authority = true;
     ai.collision = &collision;
-    w->ai = &ai;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
     CHECK(w->commands.mount(0x10, 0x20));
@@ -1440,8 +1430,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     traits.sound_profile = "SP_JoinerTruck";
     w->vehicle_traits.set(vehicle.item_id, traits);
 
-    AiSystem ai;
-    w->ai = &ai;
+    AiSystem &ai = w->ai;
     w->add_system(&ai);
 
     const Vec3 before = w->registry.get(vehicle_h)->position;

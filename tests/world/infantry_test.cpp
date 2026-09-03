@@ -2952,8 +2952,7 @@ void test_infantry_parity_pins_2026_08_28() {
 void test_pre_attack_wins_when_previously_idle() {
     World w;
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                  anim_state::kIdle2, anim_state::kIdle3, anim_state::kAttack,
@@ -3008,8 +3007,7 @@ void test_combat_fixture_acquires_a_target() {
     // has capacity 0 and the candidate loop never iterates -- no acquisition, with
     // every other gate looking fine.
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
                  anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
@@ -3081,8 +3079,7 @@ void test_combat_fixture_acquires_a_target() {
 void test_out_of_range_enemy_is_approached() {
     World w;
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
                  anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};

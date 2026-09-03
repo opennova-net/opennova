@@ -1453,8 +1453,10 @@ target_compile_features(infantry_test PRIVATE cxx_std_17)
 # Like player_spawn_test below, MSVC coalesces this file's many scoped World
 # fixtures into one Release stack frame. The blend-transition grills add nested
 # motor calls on top of that frame, so leave the test runner deliberate headroom.
+# World owns its AiSystem by value (ADR 0043 slice E4), which lifted this file's
+# largest frame past 8 MB; 16 MB keeps the same headroom.
 if(MSVC)
-    target_link_options(infantry_test PRIVATE "/STACK:8388608")
+    target_link_options(infantry_test PRIVATE "/STACK:16777216")
 endif()
 add_test(NAME infantry COMMAND infantry_test)
 

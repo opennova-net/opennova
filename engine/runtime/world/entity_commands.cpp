@@ -72,9 +72,7 @@ bool EntityCommands::set_entity_health(EntityHandle h, int32_t hp) {
     e->alive = hp > 0;
     // The AI motor's entity+286 mirror follows, or the next infantry tick
     // hydrates the registry row back [orig: the WAC SETHP op writes entity+286].
-    if (world_.ai != nullptr) {
-        if (AiEntity *a = world_.ai->for_handle(h)) a->health = static_cast<int16_t>(hp);
-    }
+    if (AiEntity *a = world_.ai.for_handle(h)) a->health = static_cast<int16_t>(hp);
     return true;
 }
 
@@ -82,12 +80,10 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     Entity *e = world_.registry.get(h);
     if (!e) return false;
     e->position = mission_pos;
-    if (world_.ai != nullptr) {
-        if (AiEntity *a = world_.ai->for_handle(h)) {
-            a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
-            a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
-            a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
-        }
+    if (AiEntity *a = world_.ai.for_handle(h)) {
+        a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
+        a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
+        a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
     }
     return true;
 }
@@ -238,8 +234,7 @@ bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
 
 bool EntityCommands::set_ssn_accuracy(uint16_t ssn, int32_t primary,
                                       int32_t secondary) {
-    if (world_.ai == nullptr) return false;
-    AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
+    AiEntity *ae = world_.ai.for_handle(resolve_ssn(ssn));
     if (ae == nullptr) return false;
     // The two authored values land in reverse slot order.
     // [orig: WacCmd_SetAccuracy @0x4F2070]
@@ -279,15 +274,13 @@ void apply_waypoint_order(World &world, Entity &e, int32_t list, int32_t node) {
     // [orig: Entity_SetWaypointByTeam @0x43cdb4 ->
     // Entity_FindNearestTriggerByType @0x407ea0]
     e.wp_number = node >= 0 ? node : 0;
-    if (world.ai != nullptr) {
-        if (AiEntity *ae = world.ai->for_handle(e.handle)) {
-            world.ai->apply_route_order(*ae, list, node);
-            // Mirror the resolved nearest/clamped node into the registry entity,
-            // which is the script/debug-facing route state.
-            if (ae->brain.f[AiBrain::kWpType] == 1 &&
-                ae->brain.f[AiBrain::kWpChannel] == list)
-                e.wp_number = ae->brain.f[AiBrain::kWpNode];
-        }
+    if (AiEntity *ae = world.ai.for_handle(e.handle)) {
+        world.ai.apply_route_order(*ae, list, node);
+        // Mirror the resolved nearest/clamped node into the registry entity,
+        // which is the script/debug-facing route state.
+        if (ae->brain.f[AiBrain::kWpType] == 1 &&
+            ae->brain.f[AiBrain::kWpChannel] == list)
+            e.wp_number = ae->brain.f[AiBrain::kWpNode];
     }
 }
 
@@ -418,10 +411,10 @@ bool in_pools_01(EntityHandle h) { return h.valid() && h.pool() <= 1; }
 bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
     // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — SSN 0 -> 0 @0x43e787;
     // pools 0-1; aiRuntime (entity+0x68) null -> 0; byte +0x88 == level]
-    if (ssn == 0 || !world_.ai) return false;
+    if (ssn == 0) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!in_pools_01(h)) return false;
-    AiEntity *ae = world_.ai->for_handle(h);
+    AiEntity *ae = world_.ai.for_handle(h);
     if (!ae) return false;
     return ae->slot.bytes()[AiSlot::kAlertByte] == level;
 }
@@ -580,14 +573,13 @@ bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
     if (!trigger_pair_distance(world_, *this, ssn, target_ssn, a, b, dist))
         return false;
     if (dist > static_cast<float>(meters)) return false;
-    if (!world_.ai) return true; // no AI/physics wired: the clear-ray default
     int32_t pa[3];
     los_offset_point(*a, pa);
     int32_t pb[3];
     los_offset_point(*b, pb);
     const CollisionWorld::RayDebugScope ray_scope(
             world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-    return world_.ai->line_of_sight_clear(world_, pa, pb,
+    return world_.ai.line_of_sight_clear(world_, pa, pb,
                                           resolve_ssn(ssn), resolve_ssn(target_ssn));
 }
 
@@ -615,17 +607,15 @@ bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
     if (std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz) >
         static_cast<double>(meters))
         return false;
-    if (world_.ai) {
-        int32_t pa[3];
-        los_offset_point(*a, pa);
-        int32_t pb[3];
-        los_offset_point(*b_ent, pb);
-        const CollisionWorld::RayDebugScope ray_scope(
-                world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
-        if (!world_.ai->line_of_sight_clear(world_, pa, pb, resolve_ssn(ssn),
-                                            resolve_ssn(target_ssn)))
-            return false;
-    }
+    int32_t pa[3];
+    los_offset_point(*a, pa);
+    int32_t pb[3];
+    los_offset_point(*b_ent, pb);
+    const CollisionWorld::RayDebugScope ray_scope(
+            world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
+    if (!world_.ai.line_of_sight_clear(world_, pa, pb, resolve_ssn(ssn),
+                                        resolve_ssn(target_ssn)))
+        return false;
     // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
     // -(2^31/pi); the sign folds out under the cdq-abs below, but the
     // truncation is load-bearing (llround here would drift 1 BAM32 LSB on
@@ -806,8 +796,7 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 // mirror of that pose, so a teleport must land there too or the next motor
 // tick snaps back. net_saved_live_pose is retail's savedLivePose.
 void sync_teleported_ai(World &world, const Entity &entity) {
-    if (world.ai == nullptr) return;
-    AiEntity *ae = world.ai->for_handle(entity.handle);
+    AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
     ae->pos[0] = to_fixed(entity.position.x);
     ae->pos[1] = to_fixed(entity.position.y);
@@ -879,7 +868,6 @@ int EntityCommands::remove_group(int group) {
 int EntityCommands::set_group_accuracy(int group, int32_t primary,
                                        int32_t secondary) {
     // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0] Pool 0 only.
-    if (world_.ai == nullptr) return 0;
     int changed = 0;
     const size_t capacity = world_.registry.pool_capacity(0);
     for (size_t slot = 0; slot < capacity; ++slot) {
@@ -889,7 +877,7 @@ int EntityCommands::set_group_accuracy(int group, int32_t primary,
         if (entity == nullptr || entity->item_id == 0 ||
             static_cast<int>(entity->group_id) != group)
             continue;
-        AiEntity *ae = world_.ai->for_handle(handle);
+        AiEntity *ae = world_.ai.for_handle(handle);
         if (ae == nullptr) continue;
         ae->slot.f[AiSlot::kAimErrorSecondary] =
                 std::max(0, 100 - primary);
@@ -928,10 +916,8 @@ int EntityCommands::set_group_team(int group, int32_t team) {
                 static_cast<int>(entity->group_id) != group)
                 continue;
             entity->team = static_cast<uint8_t>(team);
-            if (world_.ai != nullptr) {
-                if (AiEntity *ae = world_.ai->for_handle(handle))
-                    ae->team = static_cast<uint8_t>(team);
-            }
+            if (AiEntity *ae = world_.ai.for_handle(handle))
+                ae->team = static_cast<uint8_t>(team);
             ++changed;
         }
     }
@@ -955,10 +941,8 @@ int EntityCommands::change_group(int old_group, int new_group) {
             if (pool == 0 && (entity->flags & kEntityFlagDead) != 0)
                 continue;
             entity->group_id = static_cast<uint8_t>(new_group);
-            if (world_.ai != nullptr) {
-                if (AiEntity *ae = world_.ai->for_handle(handle))
-                    ae->relmat_id = static_cast<uint16_t>(new_group);
-            }
+            if (AiEntity *ae = world_.ai.for_handle(handle))
+                ae->relmat_id = static_cast<uint16_t>(new_group);
             ++changed;
         }
     }
@@ -1001,10 +985,8 @@ bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
     Entity *entity = world_.registry.get(handle);
     if (entity == nullptr) return false;
     entity->team = static_cast<uint8_t>(team);
-    if (world_.ai != nullptr) {
-        if (AiEntity *ae = world_.ai->for_handle(handle))
-            ae->team = static_cast<uint8_t>(team);
-    }
+    if (AiEntity *ae = world_.ai.for_handle(handle))
+        ae->team = static_cast<uint8_t>(team);
     return true;
 }
 
@@ -1016,10 +998,8 @@ bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
     Entity *entity = world_.registry.get(handle);
     if (entity == nullptr) return false;
     entity->group_id = static_cast<uint8_t>(group);
-    if (world_.ai != nullptr) {
-        if (AiEntity *ae = world_.ai->for_handle(handle))
-            ae->relmat_id = static_cast<uint16_t>(group);
-    }
+    if (AiEntity *ae = world_.ai.for_handle(handle))
+        ae->relmat_id = static_cast<uint16_t>(group);
     world_.recount_group_live();
     return true;
 }
@@ -1191,11 +1171,9 @@ bool EntityCommands::release_boarding_command(uint16_t occupant_ssn) {
     // to a real item entity that is actually riding something.
     if (!occ || occ->item_type == 0 || !occ->mounted) return false;
     dismount(occupant_ssn); // [orig: Entity_DetachFromVehicleIfServer]
-    if (world_.ai) {
-        if (AiEntity *ae = world_.ai->for_handle(oh)) {
-            ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
-            ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]
-        }
+    if (AiEntity *ae = world_.ai.for_handle(oh)) {
+        ae->slot.f[37] = 0; // [orig: aiRuntime[37] = 0 — clear the board command]
+        ae->slot.f[35] = 0; // [orig: aiRuntime[35] = 0 — clear the has-route flag]
     }
     return true;
 }
@@ -1449,12 +1427,11 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
     Entity *entity = world_.registry.get(handle);
     if (entity == nullptr) return false;
     if (apply_brainless_ai_command(*entity, sub_type, p2)) return true;
-    if (!world_.ai) return false;
-    AiEntity *ae = world_.ai->for_handle(handle);
+    AiEntity *ae = world_.ai.for_handle(handle);
     if (ae == nullptr) return false;
-    note_unported_ai_sub(*world_.ai, sub_type);
+    note_unported_ai_sub(world_.ai, sub_type);
     apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
-    queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
+    queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
 }
@@ -1507,12 +1484,11 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
         Entity *entity = world_.registry.get(h);
         if (entity == nullptr) continue;
         if (apply_brainless_ai_command(*entity, sub_type, p2)) { ++n; continue; }
-        if (!world_.ai) continue;
-        AiEntity *ae = world_.ai->for_handle(h);
+        AiEntity *ae = world_.ai.for_handle(h);
         if (ae != nullptr) {
-            note_unported_ai_sub(*world_.ai, sub_type);
+            note_unported_ai_sub(world_.ai, sub_type);
             apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
+            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }
@@ -1533,12 +1509,11 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
         Entity *entity = world_.registry.get(h);
         if (entity == nullptr || entity->team != static_cast<uint8_t>(team)) continue;
         if (apply_brainless_ai_command(*entity, sub_type, p2)) { ++n; continue; }
-        if (!world_.ai) continue;
-        AiEntity *ae = world_.ai->for_handle(h);
+        AiEntity *ae = world_.ai.for_handle(h);
         if (ae != nullptr) {
-            note_unported_ai_sub(*world_.ai, sub_type);
+            note_unported_ai_sub(world_.ai, sub_type);
             apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
-            queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
+            queue_ai_brain_event(world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }

@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
 	if (rig.root_motion.empty())
 		return retail::skip("E_STAND.adm on the OPENNOVA_JO_DIR mount (infantry cannot locomote without clips)");
 	w::World &world = rig.world;
-	w::AiSystem &ai = rig.ai;
+	w::AiSystem &ai = rig.world.ai;
 	mission::BmsEventSystem &events = rig.events;
 	const bms::File &m = rig.mission;
 	expect(rig.promo.nav_channels > 0, "nav channels promoted");

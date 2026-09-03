@@ -110,8 +110,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	FlatField flat;
 	world.terrain = &flat.field;
 	world.mp_session = true;

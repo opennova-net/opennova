@@ -1119,8 +1119,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
-		world::AiSystem ai;
-		w.ai = &ai;
+		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
 		const PeerAddr peer{0x0100007Fu, 31330};
@@ -1281,8 +1280,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
-		world::AiSystem ai;
-		w.ai = &ai;
+		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
 		const PeerAddr peer{0x0100007Fu, 31332};
@@ -1524,8 +1522,7 @@ bool run_listen_host_lifecycle() {
 // proves two admissions drained before spawn cannot advertise the same identity.
 bool run_post_handshake_slot_is_reserved_until_spawn() {
 	world::World world;
-	world::AiSystem ai;
-	world.ai = &ai;
+	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
 	replication::LoopbackChannel loopback;
@@ -1683,8 +1680,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 // kit. This regression therefore treats UDP boundaries as protocol semantics.
 bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	world::World world;
-	world::AiSystem ai;
-	world.ai = &ai;
+	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
 	replication::LoopbackChannel loopback;
@@ -2483,8 +2479,7 @@ bool run_loadout_envelope_gates() {
 	                        nullptr, settings);
 	world::World world;
 	world.registry.configure_pool(0, 16);
-	world::AiSystem ai;
-	world.ai = &ai; // the §5.2b spawn mounts the infantry motor
+	world::AiSystem &ai = world.ai; // the §5.2b spawn mounts the infantry motor
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30150};

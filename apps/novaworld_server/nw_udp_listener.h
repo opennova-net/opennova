@@ -21,7 +21,6 @@ class UnknownTracker;
 namespace db { class Database; }
 namespace bms { struct File; }
 namespace world {
-class AiSystem;
 class World;
 }
 }
@@ -167,7 +166,6 @@ private:
 	// host_session_pump lifecycle as apps/nw_server. This listener contributes
 	// only UDP protocol demultiplexing; the minimal authoritative World makes
 	// the complete named-spawn stream reachable.
-	std::unique_ptr<world::AiSystem> jo_ai_;
 	std::unique_ptr<world::World> jo_world_;
 	std::unique_ptr<bms::File> jo_mission_;
 	std::unique_ptr<inmatch::HostOwner> jo_owner_;

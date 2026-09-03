@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
 			p0_detail += line;
 			continue;
 		}
-		const bool has_brain = rig.ai.for_handle(veh->handle) != nullptr;
+		const bool has_brain = rig.world.ai.for_handle(veh->handle) != nullptr;
 		const bool ctrl = ctrl_seat_occupied(*veh);
 		std::printf("P0 ssn=%u fam=%s seats=%zu brain=%d ctrl_occupied=%d riders=%d mounted=%d\n",
 				unsigned(row.ssn), row.family, veh->seats.size(), int(has_brain), int(ctrl),
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
 			std::snprintf(buf, sizeof(buf), "ssn=%u pos=(%.1f,%.1f,%.2f)", unsigned(row.ssn), veh->position.x,
 					veh->position.y, veh->position.z);
 			line += buf;
-			if (const w::AiEntity *brain = rig.ai.for_handle(veh->handle)) {
+			if (const w::AiEntity *brain = rig.world.ai.for_handle(veh->handle)) {
 				const int wp_ch = brain->brain.f[w::AiBrain::kWpChannel];
 				const int st = brain->brain.cur_state();
 				std::snprintf(buf, sizeof(buf), " st=%d wp=%d node=%d spd=%d", st, wp_ch,
@@ -263,7 +263,7 @@ int main(int argc, char **argv) {
 		rig.world.registry.for_each([&](const w::Entity &e) {
 			if (e.handle.pool() != 0 || int(e.group_id) != grp) return;
 			++members;
-			if (const w::AiEntity *brain = rig.ai.for_handle(e.handle))
+			if (const w::AiEntity *brain = rig.world.ai.for_handle(e.handle))
 				if (brain->brain.f[w::AiBrain::kWpChannel] == lst) ++redirected;
 			const auto s = start.find(e.handle.packed);
 			if (s != start.end()) max_walk = std::max(max_walk, testrig::distance(e.position, s->second));

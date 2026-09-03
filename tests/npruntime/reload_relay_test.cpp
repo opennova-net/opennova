@@ -98,8 +98,7 @@ bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,
 int main() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));
 	const w::EntityHandle hb = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	const w::EntityHandle hc = w::spawn_remote_player(world, player_spawn(0xFFF2));

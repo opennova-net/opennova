@@ -504,8 +504,7 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	opennova::world::World world;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	const opennova::world::EntityHandle player =
 			opennova::world::spawn_remote_player(
 					world, opennova::world::PlayerSpawn{});
@@ -859,8 +858,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
 	world.registry.configure_pool(3, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::Entity zone;
 	zone.kind = opennova::world::EntityKind::Building;
 	zone.item_id = 0x0500;
@@ -967,8 +965,7 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	opennova::world::World world;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	const opennova::world::EntityHandle player =
 			opennova::world::spawn_remote_player(
 					world, opennova::world::PlayerSpawn{});

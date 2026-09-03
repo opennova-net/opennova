@@ -265,7 +265,7 @@ Entity *resolve_piloting_player(World &world, Entity &veh,
     if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
         !occ->alive || occ->health <= 0)
         return nullptr;
-    const bool is_authority = world.ai != nullptr && world.ai->is_authority;
+    const bool is_authority = world.ai.is_authority;
     if (!is_authority && occ->handle != world.cached.local_player) return nullptr;
     return occ;
 }
@@ -622,11 +622,11 @@ if (traits.family != VehicleFamily::Bike &&
         // [orig: @0x47cc13-0x47ccc1 — sev 1/3: speed -= speed >> (torque+2),
         //  sev 2: speed -= speed >> (torque+1); `sar cl` masks the count mod 32].
         // Our stand-in reports severity 0/3 only (collision.h; D-NET-161).
-        if (world.ai != nullptr && world.ai->collision != nullptr) {
+        if (world.ai.collision != nullptr) {
             const int32_t moved[3] = {px, py, pz};
             int32_t push[2];
             const int32_t sev =
-                    world.ai->collision->resolve_vehicle_hull(world, veh.handle, moved,
+                    world.ai.collision->resolve_vehicle_hull(world, veh.handle, moved,
                                                               prev, push);
             collided = sev != 0;
             if (sev == 3) {

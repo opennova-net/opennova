@@ -110,9 +110,7 @@ void hash_world(Digest &d, const w::World &world) {
 	d.value(world.crt_rand.state);
 	world.registry.for_each([&](const w::Entity &e) {
 		hash_entity(d, e);
-		if (world.ai != nullptr) {
-			if (const w::AiEntity *a = world.ai->for_handle(e.handle)) hash_ai(d, *a);
-		}
+		if (const w::AiEntity *a = world.ai.for_handle(e.handle)) hash_ai(d, *a);
 	});
 	for (int i = 0; i < w::ScriptVarStore::kMissionVars; ++i) d.value(world.vars.get_mission(i));
 	for (int i = 0; i < w::ScriptVarStore::kGlobalVars; ++i) d.value(world.vars.get_global(i));

@@ -1898,8 +1898,7 @@ bool run_roundtrip() {
 	// Server_ProcessPendingPlayerSpawns spawns the joiner's pool-0 entity (binding conn.link.owned_entity).
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.subgoals.won = 0x12u;
 	world.subgoals.lost = 0x24u;
 	world.subgoals.show_win = 0x48u;
@@ -2455,8 +2454,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 	{
 		// A 6002 start marker: the 0xFFFF parameter-0 pick resolves through the
@@ -3190,8 +3188,7 @@ bool run_host_as_client() {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 128);
 	world.registry.configure_pool(2, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 
 	// Spawn the host's own player through the real pipeline (type-2 loopback -> spawn_player ->
@@ -3340,8 +3337,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	w::Entity infantry;
 	infantry.kind = w::EntityKind::Organic;
@@ -3499,8 +3495,7 @@ bool run_host_startup_maps_no_tracers_rule() {
 // ---------------------------------------------------------------------------------------------------
 bool run_host_pump_hook_observes_remote_before_first_tick() {
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
 	inmatch::HostOwner owner;

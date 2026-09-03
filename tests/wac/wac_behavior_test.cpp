@@ -474,8 +474,7 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
 
 static void test_wac_accuracy_guard_speed_and_group_remove() {
     BehaviorWorld w;
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
 
     Entity single{};
     single.net_id = 42;

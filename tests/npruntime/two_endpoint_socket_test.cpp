@@ -103,8 +103,7 @@ int main() {
 	// ---- host: a minimal World (one 6002 start marker => spawn-select + a 0x20 pool-3 record) + a
 	//      minimal in-memory mission (0x0B BMS header). Mirrors initial_state_burst_test. ----
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	{

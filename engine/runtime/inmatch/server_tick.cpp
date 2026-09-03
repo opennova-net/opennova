@@ -119,8 +119,7 @@ PlayerDeathFeed classify_player_death(
 	// [orig: GameEvent_PlayerDeath — victim gate @0x51709C..0x5170B6, killer
 	//  twin @0x5170BE..0x5170DA, branch @0x5170F8..0x517113]
 	auto sees_all = [&world](world::EntityHandle handle) {
-		if (world.ai == nullptr) return false;
-		const world::AiEntity *ai = world.ai->for_handle(handle);
+		const world::AiEntity *ai = world.ai.for_handle(handle);
 		return ai != nullptr && ai->see_all;
 	};
 	if (victim_entity != nullptr && victim_entity->team != 0 &&

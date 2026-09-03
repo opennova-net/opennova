@@ -183,8 +183,7 @@ bool run_roundtrip_to_host_snap() {
 	peer.position = {0.0f, 0.0f, 0.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "host peer spawned")) return false;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 	world.cached.local_player = w::EntityHandle::make(0, 7); // a DIFFERENT handle is the host's own
 
@@ -231,8 +230,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::World source;
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(1, 8);
-	w::AiSystem source_ai_system;
-	source.ai = &source_ai_system;
+	w::AiSystem &source_ai_system = source.ai;
 
 	w::Entity player_seed;
 	player_seed.kind = w::EntityKind::Organic;
@@ -304,8 +302,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::World host;
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(1, 8);
-	w::AiSystem host_ai_system;
-	host.ai = &host_ai_system;
+	w::AiSystem &host_ai_system = host.ai;
 	host.cached.local_player = w::EntityHandle::make(0, 7);
 	const w::EntityHandle host_player_h = host.registry.spawn(0, player_seed);
 	host_ai_system.attach(host_player_h);
@@ -357,8 +354,7 @@ bool run_ground_target_carrier_roundtrip() {
 	w::World source;
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(2, 8);
-	w::AiSystem source_ai_system;
-	source.ai = &source_ai_system;
+	w::AiSystem &source_ai_system = source.ai;
 	w::Entity player_seed;
 	player_seed.kind = w::EntityKind::Organic;
 	player_seed.item_id = 0x14B9;
@@ -405,8 +401,7 @@ bool run_ground_target_carrier_roundtrip() {
 	w::World host;
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(2, 8);
-	w::AiSystem host_ai_system;
-	host.ai = &host_ai_system;
+	w::AiSystem &host_ai_system = host.ai;
 	host.cached.local_player = w::EntityHandle::make(0, 7);
 	const w::EntityHandle host_player_h = host.registry.spawn(0, player_seed);
 	host_ai_system.attach(host_player_h);

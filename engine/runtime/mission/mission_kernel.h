@@ -334,7 +334,6 @@ public:
 	// [orig: Entity_AttachToUseGunSlot @0x546c07].
 	bool session_open = false;
 	world::World world;
-	world::AiSystem ai;
 	BmsEventSystem events;
 	wac::WacSystem wac;
 	bool wac_loaded = false;

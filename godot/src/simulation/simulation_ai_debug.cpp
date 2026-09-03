@@ -8,6 +8,6 @@ bool Simulation::native_ai_debug(
 	// The joiner's tooling AI pool is non-authoritative and never joins the
 	// decoded view (the directory's rule), so a joiner reports nothing.
 	if (!kernel_ || joiner_) return false;
-	r_out = opennova::world::inspect::ai_debug_report(kernel_->world, kernel_->ai);
+	r_out = opennova::world::inspect::ai_debug_report(kernel_->world);
 	return true;
 }

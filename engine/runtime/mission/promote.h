@@ -31,7 +31,6 @@
 #include <utility>
 
 namespace opennova::world {
-class AiSystem;
 class World;
 } // namespace opennova::world
 
@@ -176,10 +175,11 @@ struct PromoteResult {
 };
 
 // Promote a parsed mission into a live world. Populates `world.registry` (entity pools),
-// `ai.nav` (the waypoint channel/node table), and `ai` entities (one AI brain per organic).
-// Does NOT register `ai` as a World system or tick it — the caller wires + drives the sim.
+// `world.ai.nav` (the waypoint channel/node table), and the `world.ai` brains (one per
+// organic). Does NOT register the AI as a World system or tick it — the caller wires +
+// drives the sim.
 PromoteResult promote_mission(const bms::File &mission, world::World &world,
-                              world::AiSystem &ai, const PromoteOptions &opts = {});
+                              const PromoteOptions &opts = {});
 
 // The mission's loadout/availability chunks -> plain world rows, with retail's
 // own atol truncation semantics on the string tuples (a non-numeric prefix
