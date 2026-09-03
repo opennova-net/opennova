@@ -1,4 +1,4 @@
-// inmatch::listen_host over the mission kernel (ADR 0042 d3), ungated: the
+// inmatch::HostRole over the mission kernel (ADR 0043 d3), ungated: the
 // synthetic mission mission_kernel_test boots, driven through the net half
 // every host embedder shares -- the SP listen bring-up (the in-process
 // loopback carrying the host's own dcb-2 client, the auto-spawned local
@@ -8,7 +8,7 @@
 // drain (a reload request is consumed by the server dispatcher while every
 // other datagram stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
-#include <runtime/inmatch/listen_host.h>
+#include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -99,6 +99,14 @@ int local_loopback_connections(const inmatch::ListenHostState &state) {
 	return count;
 }
 
+// One tick's input with the renderer viewport height a listen host wraps its
+// S2C 0x68 cursor against.
+inmatch::TickInput tick_input(int32_t viewport_height) {
+	inmatch::TickInput in;
+	in.viewport_height = viewport_height;
+	return in;
+}
+
 } // namespace
 
 int main() {
@@ -107,11 +115,13 @@ int main() {
 	// --- the SP listen bring-up and the per-tick frame ----------------------
 	{
 		ms::MissionKernel kernel;
-		inmatch::ListenHostState host;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { inmatch::listen_host::bringup(kernel, host); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		CHECK(error.empty());
@@ -143,14 +153,15 @@ int main() {
 		// through the loopback fold; a headless embedder leaves the viewport
 		// seam at 0 and a windowed one stamps its height.
 		testrig::NullDatagramSocket socket;
+		role.set_socket(&socket);
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
 		// Pin the single-owner invariant at one frame, then across a short run.
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
+		role.run_tick(tick_input(0));
 		CHECK(kernel.world.logic_tick == tick0 + 1);
 		CHECK(host.host_owner.now_tick == now0 + 1);
 		for (int i = 0; i < 7; ++i)
-			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
+			role.run_tick(tick_input(0));
 		CHECK(kernel.world.logic_tick == tick0 + 8);
 		CHECK(host.host_owner.now_tick == now0 + 8);
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 0u);
@@ -158,7 +169,7 @@ int main() {
 			CHECK(host.client_runtime->state().frames_applied > 0);
 			CHECK(!host.client_runtime->state().entities.empty());
 		}
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/768);
+		role.run_tick(tick_input(768));
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
 
@@ -172,27 +183,29 @@ int main() {
 		reload.reload_param = 0;
 		host.host_loop.client_send(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload));
 		CHECK(host.host_loop.c2s_pending() == 2);
-		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);
+		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 1);
 		replication::Datagram preserved;
 		CHECK(host.host_loop.host_recv(preserved));
 		CHECK(preserved.tag == c2s::MOUNTED_WEAPON_SLOT_SELECT);
 		CHECK(!host.host_loop.host_recv(preserved));
-		std::printf("listen_host: the reload drain staged %zu S2C reply datagram(s)\n",
+		std::printf("host_role: the reload drain staged %zu S2C reply datagram(s)\n",
 				host.host_loop.s2c_pending() - s2c_before);
 		// A drain with nothing queued is a no-op.
-		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);
+		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// The next frame's Server_TickUpdate drains what the local drain left.
 		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
-		inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
+		role.run_tick(tick_input(0));
 		CHECK(host.host_loop.c2s_pending() == 0);
 	}
 
 	// --- the dedicated (HostOnly) bring-up -----------------------------------
 	{
 		ms::MissionKernel kernel;
-		inmatch::ListenHostState host;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.playable = false; // a dedicated host has no player of its own
@@ -204,7 +217,7 @@ int main() {
 			cfg.config.game_type = options.game_type;
 			cfg.socket_mode = inmatch::SocketMode::Lan;
 			cfg.serve_and_play = true; // the dedicated bring-up forces this OFF
-			inmatch::listen_host::bringup_dedicated(kernel, host, cfg);
+			role.bring_up_dedicated(cfg);
 		};
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -228,14 +241,14 @@ int main() {
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
 		for (int i = 0; i < 4; ++i)
-			inmatch::listen_host::frame(kernel, host, socket, /*viewport_height=*/0);
+			role.run_tick(tick_input(0));
 		CHECK(kernel.world.logic_tick == tick0 + 4);
 		CHECK(host.host_owner.now_tick == now0 + 4);
-		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);
+		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		CHECK(!kernel.local.has_local_player());
 	}
 
-	if (failures == 0) std::printf("listen_host: all checks passed\n");
+	if (failures == 0) std::printf("host_role: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

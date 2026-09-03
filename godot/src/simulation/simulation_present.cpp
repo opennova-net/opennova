@@ -925,7 +925,7 @@ void Simulation::ensure_present_effect_pose_cache() const {
 	const opennova::replication::ClientState &client = runtime_->state();
 	const uint32_t logic_tick = kernel_->world.logic_tick;
 	if (present_effect_pose_cache_valid_ &&
-			present_effect_pose_cache_runtime_ == runtime_.get() &&
+			present_effect_pose_cache_runtime_ == runtime_ &&
 			present_effect_pose_cache_logic_tick_ == logic_tick &&
 			present_effect_pose_cache_client_frame_ == client.frames_applied) {
 		return;
@@ -941,7 +941,7 @@ void Simulation::ensure_present_effect_pose_cache() const {
 	present_effect_missing_origins_.clear();
 	present_effect_pose_cache_logic_tick_ = logic_tick;
 	present_effect_pose_cache_client_frame_ = client.frames_applied;
-	present_effect_pose_cache_runtime_ = runtime_.get();
+	present_effect_pose_cache_runtime_ = runtime_;
 	present_effect_pose_cache_valid_ = true;
 }
 

@@ -79,8 +79,9 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 		item_replication_catalog_db_ = p_item_db;
 		item_replication_catalog_revision_ = p_item_db->get_revision();
 	}
-	opennova::simassets::resolve_item_traits(
-			kernel_->world, p_item_db->native_items(),
+	// The kernel runs the sweep over the table installed above and re-runs it
+	// inside every baseline restore (the baseline predates these traits).
+	kernel_->resolve_item_traits(
 			[catalog = item_replication_catalog_](int def_id) {
 				// The same immutable profile supplies the host stamp and the
 				// client decode width. Missing/ambiguous definitions fail
@@ -96,11 +97,15 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 }
 
 void Simulation::install_item_class_resolver() {
-	if (!runtime_ || !item_replication_catalog_) return;
-	runtime_->view().set_item_class_resolver(
+	if (!item_replication_catalog_) return;
+	opennova::replication::ClientReplicaPipeline::ItemClassResolver resolver =
 			[catalog = item_replication_catalog_](uint16_t type_id) {
 				return catalog->resolve_wire_entity_class(type_id);
-			});
+			};
+	// The host role retains it for every HostClient view it rebuilds (the
+	// baseline restore); the live runtime takes it now.
+	host_role_.set_item_class_resolver(resolver);
+	if (runtime_) runtime_->view().set_item_class_resolver(std::move(resolver));
 }
 
 void Simulation::install_charattr_challenge_table() {

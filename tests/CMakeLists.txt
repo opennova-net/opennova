@@ -11,8 +11,8 @@ endfunction()
 # The retail-mission rig the asset-gated world/mission ctests share
 # (common/retail_mission_files.h): one real mission booted through the
 # engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
-# listen frame (inmatch::listen_host) or the kernel's bare no-net path; this
-# pair supplies only the retail terrain documents and the TickTarget adapter.
+# listen frame (inmatch::HostRole) or the local role's bare no-net tick; this
+# pair supplies only the retail terrain documents and the tick roles.
 add_library(opennova_test_rig STATIC common/retail_mission_files.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
@@ -1841,14 +1841,14 @@ target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 
-# inmatch::listen_host over the kernel (ADR 0042 d3), ungated: the SP listen
+# inmatch::HostRole over the kernel (ADR 0043 d3), ungated: the SP listen
 # bring-up and its per-tick frame over a null socket, the local C2S gameplay
 # drain, and the dedicated (HostOnly) bring-up.
-add_executable(listen_host_test mission/listen_host_test.cpp)
-target_link_libraries(listen_host_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(listen_host_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(listen_host_test PRIVATE cxx_std_17)
-add_test(NAME listen_host COMMAND listen_host_test)
+add_executable(host_role_test mission/host_role_test.cpp)
+target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(host_role_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(host_role_test PRIVATE cxx_std_17)
+add_test(NAME host_role COMMAND host_role_test)
 
 # The tick digest (ADR 0043): the per-tick state hash a structural slice must
 # leave unchanged. The ctest leg is the synthetic mission (committed chain,

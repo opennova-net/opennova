@@ -2,7 +2,7 @@
 
 A thin headless C++ binary that boots a loose mission through the engine's one
 `mission::MissionKernel` (ADR 0042 d3) and stands up the `engine/runtime/inmatch`
-in-match host through `inmatch::listen_host` (the witnessed dedicated
+in-match host through `inmatch::HostRole` (the witnessed dedicated
 host-only shape, a real UDP socket, the original 62 Hz cadence) so the net
 iteration harness can produce golden-comparable sessions: host a mission, let
 opennova or retail clients join, capture with dumpcap, and diff against the

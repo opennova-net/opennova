@@ -7,6 +7,7 @@
 // that compiles with a warning loads under the game's policy and refuses the
 // boot under the dedicated host's), and the no-terrain path (no field, no
 // grounding, the teleport seams still work).
+#include <runtime/inmatch/local_role.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <cmath>
@@ -80,6 +81,14 @@ bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= 
 
 } // namespace
 
+// The bare no-net tick: the local role over the kernel (ADR 0043 d3; the
+// kernel itself owns no tick).
+static void tick_no_net(opennova::mission::MissionKernel &kernel) {
+	opennova::inmatch::LocalRole role;
+	role.bind(kernel);
+	role.run_tick(opennova::inmatch::TickInput{});
+}
+
 int main() {
 	// --- the ordering guards ---------------------------------------------------
 	{
@@ -114,7 +123,7 @@ int main() {
 		// The boot's own baseline is the post-PreMission point; the embedders
 		// re-seal it once the spawn and the eager WAC have settled (the
 		// shell's seal_mission_start_baseline). Seal here, then mutate.
-		kernel.tick_no_net();
+		tick_no_net(kernel);
 		kernel.capture_baseline();
 		const w::Vec3 spawn_pos = kernel.local.player_position();
 		const int32_t spawn_health = kernel.local.player_health();
@@ -122,8 +131,8 @@ int main() {
 		const w::EntityHandle player_h = kernel.local.player()->handle;
 		CHECK(spawn_health > 0);
 
-		kernel.tick_no_net();
-		kernel.tick_no_net();
+		tick_no_net(kernel);
+		tick_no_net(kernel);
 		kernel.local.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
 		kernel.world.commands.set_entity_health(player_h, 37);
 		kernel.world.script.vars.set_mission(3, 99);
@@ -148,7 +157,7 @@ int main() {
 		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
 		CHECK(kernel.world.registry.by_net_id(31) != nullptr);
 		// The restored world ticks on from the sealed point.
-		kernel.tick_no_net();
+		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == sealed_tick + 1);
 		// A second restore rewinds again (the SP round restart).
 		CHECK(kernel.restore_baseline());
@@ -216,12 +225,12 @@ int main() {
 		// The frame legs run without a field: the clock advances and the
 		// teleport seam still writes both stores.
 		const uint32_t tick0 = kernel.world.logic_tick;
-		kernel.tick_no_net();
+		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == tick0 + 1);
 		kernel.local.teleport_local_player(w::Vec3{7.0f, 8.0f, 9.0f}, 0.0, 0.0);
 		CHECK(near_equal(kernel.local.player_position().z, 9.0f, 0.001f));
 		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[2] == 9 << 16);
-		kernel.tick_no_net();
+		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == tick0 + 2);
 	}
 

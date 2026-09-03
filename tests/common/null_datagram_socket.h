@@ -1,6 +1,6 @@
 // The socketless in-match host the headless ctests drive: no datagrams in or
 // out (the loopback carries the host's own client; a dedicated test host has
-// no peers). One definition for every test that pumps inmatch::listen_host or
+// no peers). One definition for every test that pumps inmatch::HostRole or
 // inmatch::host_session_pump over a null wire.
 #ifndef OPENNOVA_TEST_NULL_DATAGRAM_SOCKET_H
 #define OPENNOVA_TEST_NULL_DATAGRAM_SOCKET_H

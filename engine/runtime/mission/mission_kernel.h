@@ -3,7 +3,7 @@
 // The engine's ONE mission boot + state + no-net authoritative tick (ADR 0042
 // d3): the promoted body of the retail-mission test rig, now the single
 // implementation every embedder drives — the Godot Simulation binding (the
-// shell TickTarget, which owns a kernel), the dedicated host, and the ctests
+// shell's session roles, which bind a kernel), the dedicated host, and the ctests
 // (tests/common/retail_mission_files supplies retail paths only). It owns the
 // world and its systems (AI, WAC, BMS events, collision, occlusion), the sim
 // asset caches (models, collision pose, root motion, clip index), the seat
@@ -15,7 +15,7 @@
 // Deliberately NOTHING net: the no-net tick has headless consumers that must
 // not link the wire stack (the group order — runtime never includes net). The
 // net half — the SP listen bring-up, the local C2S drain, the per-tick
-// session frame — is inmatch::listen_host (engine/runtime/inmatch/listen_host.h),
+// session frame — is inmatch::HostRole (engine/runtime/inmatch/host_role.h),
 // which drives this kernel through the public per-tick legs below and
 // interposes at boot through the bringup_net_session hook.
 
@@ -30,6 +30,7 @@
 #include <runtime/simassets/adm_clip_index.h>
 #include <runtime/simassets/adm_root_motion.h>
 #include <runtime/simassets/collision_resolve.h>
+#include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/mounted_pose.h>
 #include <runtime/simassets/sim_pose_provider.h>
 #include <runtime/simassets/sim_model_cache.h>
@@ -87,7 +88,7 @@ struct KernelBootOptions {
 	// Authored display names for promote's name_index resolve (the embedder's
 	// parsed [PeopleNames] STRNAME%03i table; D-HUD-20). Empty = no names.
 	std::function<std::string(int32_t)> people_name_resolver;
-	// The net half's session bring-up (inmatch::listen_host::bringup, or
+	// The net half's session bring-up (inmatch::HostRole::bring_up_singleplayer, or
 	// bringup_dedicated for a HostOnly embedder),
 	// invoked between the world wiring and the system registration — exactly
 	// where the SP listen host stands up inside the load
@@ -132,6 +133,13 @@ public:
 		return items_override_ != nullptr ? items_override_
 										  : (items_ok ? &items : nullptr);
 	}
+	// The embedder's item-trait sweep over items_table() (simassets
+	// resolve_item_traits with the embedder's wire-class classifier: the
+	// callback class and health every registry row carries). The baseline is
+	// captured before the embedder supplies these traits, so restore_baseline
+	// re-runs the sweep with the retained classifier before any view is
+	// rebuilt from the restored rows.
+	void resolve_item_traits(simassets::ItemWireClassFn wire_class);
 	// The S9 boot (runtime_boot.h) over the opened mission — the ONE filler
 	// of run_mission_boot's step table. The embedder builds terrain_store
 	// FIRST when it has terrain (terrain_field_store_build over its parsed
@@ -139,11 +147,6 @@ public:
 	// ADR 0020 seam); has_terrain is terrain_store.valid().
 	bool boot(const KernelBootOptions &options, std::string &error);
 
-	// One bare no-net authoritative logic tick between the local-player pumps
-	// (the AI-path and convoy drives; a live session orders the same legs
-	// around its session pump — inmatch::listen_host::frame). The tick's phase
-	// attribution lands on `profile`.
-	void tick_no_net();
 
 	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
 	// The retail weather tick after the logic tick [orig:
@@ -346,6 +349,9 @@ private:
 	// The embedder source overrides (set_asset_index / set_items_table).
 	const ResourceIndex *external_index_ = nullptr;
 	const DefItemsFile *items_override_ = nullptr;
+	// The embedder's trait sweep classifier (resolve_item_traits); unset until
+	// the embedder ran the sweep, so a restore re-stamps only what it stamped.
+	simassets::ItemWireClassFn item_wire_class_;
 	bool own_mounted_ = false;
 	// The index the infantry .adm registrations resolve through (the install/
 	// re-arm seam's; defaults to the asset index).

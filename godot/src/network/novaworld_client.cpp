@@ -744,7 +744,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 
 // The NWJoin handshake has resolved the in-match host:port. Hand that off to the game layer and
 // stop — the panel routes joined_game into Simulation's joiner (load_mission_as_joiner ->
-// enable_join), which owns the SINGLE in-match ClientHello (joiner_pump's runtime_->start(), the
+// enable_join), which owns the SINGLE in-match ClientHello (the joiner role's runtime_->start(), the
 // witnessed CNapiGameSession_InitNPConnection path). We deliberately do NOT send our own in-match
 // hello here: that would be a second, conflicting handshake on a third socket (the old "send one
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge

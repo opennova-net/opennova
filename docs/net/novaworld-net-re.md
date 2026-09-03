@@ -3989,7 +3989,7 @@ pump ordering, ADR 0011) — null on every live host, so the seam stayed 0 and a
 live listen host behaved like a dedicated one for `0x68` exactly (the rest of
 the quartet was unaffected). Surfaced by the retail-LAN parity OR gate (the
 run's only gaps: S2C `0x68` 0-vs-5 and the reply-conditioned C2S `0x3D`
-0-vs-5). `host_pump` now resolves the render viewport the way retail's
+0-vs-5). The Godot shell (`Simulation::renderer_viewport_height`, fed to `HostRole::run_tick` per tick) now resolves the render viewport the way retail's
 `CEffectWorld_GetViewportDimensions @0x5b1560` query does — own viewport when
 in tree, else the SceneTree root window when the DisplayServer is drawable —
 and headless stays suppressed (the dedicated analogue). The live wiring's
@@ -6536,8 +6536,8 @@ it gets its per-frame 0x0A.
 
 **D-NET-123** [reimpl divergence, **FIXED 2026-09-01**] **`Server_TickUpdate` owns the logic tick.**
 The production role router now makes that ownership exclusive: `Simulation::advance_world_tick`
-returns after `listen_host::frame` for a listen/dedicated host, returns after the client pump for a
-joiner, and reaches `MissionKernel::tick_no_net` only for offline play. The focused listen-host
+returns after `HostRole::run_tick` for a listen/dedicated host, returns after the client pump for a
+joiner, and reaches `LocalRole::run_tick` only for offline play. The focused host-role
 regression pins one frame to exactly one world tick and one host-owner tick, so the binding cannot
 fall through into a second `run_logic_tick`. `[orig: net-before-logic, Game_ProcessMainFrame @0x5263f0]`
 

@@ -1,5 +1,7 @@
 #include <runtime/inmatch/session.h>
 
+#include <runtime/mission/mission_kernel.h>
+
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -14,31 +16,35 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-struct TickProbe final : TickTarget {
+// A probe role over a bare kernel: records every tick input, counts the
+// session's reset/close calls, and can report the session lost.
+struct TickProbe final : Role {
+	opennova::mission::MissionKernel kernel;
 	std::vector<TickInput> inputs;
 	int32_t logic_tick = 100;
 	int reset_calls = 0;
 	int close_calls = 0;
 	TickStatus next_status = TickStatus::Ran;
+	RoleKind probe_kind = RoleKind::SinglePlayer;
 
-	TickOutcome advance_mission_tick(const TickInput &input) override {
+	TickProbe() { bind(kernel); kernel.world.logic_tick = 100; }
+	RoleKind kind() const override { return probe_kind; }
+	void run_tick(const TickInput &input) override {
 		inputs.push_back(input);
-		TickOutcome out;
-		out.status = next_status;
-		if (next_status == TickStatus::Ran) out.logic_tick = ++logic_tick;
-		if (next_status == TickStatus::SessionLost) {
-			out.error = {SessionErrorCode::SessionLost, "peer left"};
-		}
-		return out;
+		if (next_status == TickStatus::Ran) kernel.world.logic_tick = static_cast<uint32_t>(++logic_tick);
 	}
-
-	bool reset_mission_to_baseline(SessionError &) override {
-		++reset_calls;
-		logic_tick = 100;
+	bool session_lost(SessionError &error) const override {
+		if (next_status != TickStatus::SessionLost) return false;
+		error = {SessionErrorCode::SessionLost, "peer left"};
 		return true;
 	}
-
-	void close_mission() override { ++close_calls; }
+	bool reset_to_baseline(SessionError &) override {
+		++reset_calls;
+		logic_tick = 100;
+		kernel.world.logic_tick = 100;
+		return true;
+	}
+	void close() override { ++close_calls; }
 };
 
 bool load(Session &session) {
@@ -160,7 +166,8 @@ int main() {
 	// Network roles cannot pause, step, or reset.
 	{
 		TickProbe target;
-		Session session(target, Role::ListenHost);
+		target.probe_kind = RoleKind::ListenHost;
+		Session session(target);
 		if (!load(session)) return 1;
 		if (!expect(session.pause().code == TransitionCode::RejectedForNetworkRole,
 				"network role rejects pause")) return 1;
@@ -179,7 +186,8 @@ int main() {
 	// Joiners expose their pre-load connection state.
 	{
 		TickProbe target;
-		Session session(target, Role::Joiner);
+		target.probe_kind = RoleKind::Joiner;
+		Session session(target);
 		if (!expect(session.begin_connect().applied() &&
 				session.state() == State::Connecting,
 				"joiner enters Connecting")) return 1;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/tick_accumulator.h>
 
@@ -7,7 +8,13 @@
 #include <string>
 #include <vector>
 
+namespace opennova::mission {
+class MissionKernel;
+}
+
 namespace opennova::inmatch {
+
+class ClientRuntime;
 
 enum class State : uint8_t {
 	Unloaded = 0,
@@ -19,7 +26,7 @@ enum class State : uint8_t {
 	Failed,
 };
 
-enum class Role : uint8_t {
+enum class RoleKind : uint8_t {
 	SinglePlayer = 0,
 	ListenHost,
 	Joiner,
@@ -82,6 +89,7 @@ struct FrameInput {
 	double delta_seconds = 0.0;
 	CameraSample camera;
 	InputPacket player;
+	int32_t viewport_height = 0;
 };
 
 struct TickInput {
@@ -90,6 +98,9 @@ struct TickInput {
 	// True only until the first successful tick in an outer frame. Targets use
 	// this to consume edge-triggered actions exactly once across catch-up.
 	bool consume_one_shots = false;
+	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
+	// against (0 = headless / no renderer, the seam left unset).
+	int32_t viewport_height = 0;
 };
 
 enum class TickStatus : uint8_t {
@@ -102,6 +113,8 @@ enum class TickStatus : uint8_t {
 struct TickOutcome {
 	TickStatus status = TickStatus::Declined;
 	int32_t logic_tick = 0;
+	int64_t tick_us = 0; // the role's tick alone (no input prologue, no observer)
+	int64_t net_us = 0;  // the tick's wire leg, as the role measured it
 	SessionError error;
 
 	bool ran() const { return status == TickStatus::Ran; }
@@ -138,25 +151,89 @@ struct FrameOutcome {
 
 // The session's one real internal seam. Godot and the headless server both
 // provide an adapter; callers never see the former semantic callback lattice.
-class TickTarget {
+// The shell's per-tick observer. after_tick runs after every tick that ran
+// (the shell's per-tick device gates); accept_tick then offers the outcome of
+// a tick that did not lose the session, and a false return ends the frame's
+// batch as SessionLost (the shell's presentation pipeline declined to go on).
+class TickObserver {
 public:
-	virtual ~TickTarget() = default;
-	virtual TickOutcome advance_mission_tick(const TickInput &input) = 0;
-	virtual bool reset_mission_to_baseline(SessionError &error) = 0;
-	virtual void close_mission() = 0;
+	virtual ~TickObserver() = default;
+	virtual void after_tick() {}
+	virtual bool accept_tick(const TickOutcome &tick) { (void)tick; return true; }
 };
+
+// One role's tick over the kernel it binds: the SP/no-net frame, the listen
+// or dedicated host frame, or the joiner frame -- each the leg order it was
+// witnessed with, line for line (ADR 0043 d3). Session::run_one_tick applies
+// the frame's input through the role first (the spectator gate and the
+// medic-call send are the role's facts), then runs the role's tick.
+class Role {
+public:
+	virtual ~Role() = default;
+	virtual RoleKind kind() const = 0;
+	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
+	void unbind() { kernel_ = nullptr; }
+	mission::MissionKernel *kernel() const { return kernel_; }
+	// A spectating joiner drives no body: movement, look and fire are dropped.
+	virtual bool spectator() const { return false; }
+	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
+	// and cooldown gates are the shared prologue's. False = nothing sent.
+	virtual bool send_medic_request() { return false; }
+	virtual void run_tick(const TickInput &input) = 0;
+	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
+	virtual bool reset_to_baseline(SessionError &error) = 0;
+	virtual void close() = 0;
+	// The client-side replica runtime this role folds (the HostClient's or the
+	// joiner's); null for the bare local role and a dedicated host.
+	virtual ClientRuntime *client_runtime() { return nullptr; }
+	// The last tick's wire leg, for the shell's stats board.
+	virtual int64_t last_net_us() const { return 0; }
+
+	// The frame's input onto the local player, shared by every role: movement
+	// keys, mouse look, the fire/reload bits and the medic edge [orig: the
+	// per-frame input dispatch feeding Player_PackInputStateToEntity @0x4df450
+	// and Input_HandleActionBinding case 217 @0x49b4b4].
+	void apply_input(const TickInput &input);
+	// The medic call past the session/entity gates: a dead local player with
+	// the cooldown at zero sends through the role and stamps the cooldown.
+	bool request_medic();
+	// What the view arbiter reads from the session (death screen, end round,
+	// the death camera), as plain values off the role's replica runtime.
+	static world::LocalViewSessionInputs view_session_inputs_for(
+			const ClientRuntime *runtime, bool joiner, bool local_dead);
+
+protected:
+	mission::MissionKernel *kernel_ = nullptr;
+};
+
+// The held / pressed action bits of InputPacket, the retail action rows the
+// frame input carries besides the movement keys.
+enum HeldAction : uint32_t {
+	HELD_FIRE = 1u << 0,
+};
+enum PressedAction : uint32_t {
+	PRESSED_FIRE = 1u << 0,
+	PRESSED_RELOAD = 1u << 1,
+	// The dead player's medic call edge (the MedicReq action row; retail
+	// Input_HandleActionBinding case 217 @0x49b4b4).
+	PRESSED_MEDIC_REQUEST = 1u << 2,
+};
+
 
 class Session {
 public:
-	explicit Session(TickTarget &target,
-			Role role = Role::SinglePlayer);
-
+	// A session without a role can only hold state; configure_role binds the
+	// strategy the ticks run through.
+	Session() = default;
+	explicit Session(Role &role);
 	State state() const { return state_; }
-	Role role() const { return role_; }
+	RoleKind kind() const { return kind_; }
+	Role *role() const { return role_; }
+	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
 
-	TransitionResult configure_role(Role role);
+	TransitionResult configure_role(Role &role);
 	TransitionResult begin_connect();
 	TransitionResult begin_load();
 	TransitionResult complete_load();
@@ -183,10 +260,12 @@ private:
 	void latch_input(const FrameInput &input);
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
+	TickOutcome run_one_tick(const TickInput &input);
 	static int64_t now_us();
 
-	TickTarget &target_;
-	Role role_;
+	Role *role_ = nullptr;
+	RoleKind kind_ = RoleKind::SinglePlayer;
+	TickObserver *observer_ = nullptr;
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
 	InputPacket pending_input_;

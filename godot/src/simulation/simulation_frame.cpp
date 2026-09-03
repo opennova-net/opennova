@@ -4,7 +4,12 @@
 // presentation devices consume a tick before the next catch-up tick runs.
 #include "simulation/simulation_internal.h"
 
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 
 using namespace sim_internal;
 
@@ -20,14 +25,26 @@ Ref<MissionFrameOutcome> godot_outcome(
 
 } // namespace
 
-opennova::inmatch::Role Simulation::configured_session_role() const {
-	if (joiner_) return opennova::inmatch::Role::Joiner;
+// The engine role this sim's mode runs its ticks through (ADR 0043 d3): the
+// joiner's, the host's (the SP listen server keeps the SinglePlayer kind so
+// the session's pause/step/reset stay available; a LAN host is ListenHost or
+// DedicatedHost by serve_and_play), else the bare local role.
+opennova::inmatch::Role &Simulation::configured_session_role() {
+	using RoleKind = opennova::inmatch::RoleKind;
+	if (joiner_) return joiner_role_;
 	if (host_listen_) {
-		return host_serve_and_play_
-				? opennova::inmatch::Role::ListenHost
-				: opennova::inmatch::Role::DedicatedHost;
+		host_role_.set_kind(host_serve_and_play_ ? RoleKind::ListenHost : RoleKind::DedicatedHost);
+		return host_role_;
 	}
-	return opennova::inmatch::Role::SinglePlayer;
+	if (listen_server_) {
+		host_role_.set_kind(RoleKind::SinglePlayer);
+		return host_role_;
+	}
+	return local_role_;
+}
+
+opennova::inmatch::Role &Simulation::active_role() {
+	return session_.role() != nullptr ? *session_.role() : configured_session_role();
 }
 
 bool Simulation::begin_session_load() {
@@ -55,7 +72,7 @@ void Simulation::complete_session_load() {
 	if (!session_.complete_load().applied()) return;
 	// Direct/local simulations historically start paused. Live GameFramePipeline
 	// resumes them after presentation setup; network roles must keep pumping.
-	if (session_.role() == opennova::inmatch::Role::SinglePlayer) {
+	if (session_.kind() == opennova::inmatch::RoleKind::SinglePlayer) {
 		(void)session_.pause();
 	}
 }
@@ -85,6 +102,7 @@ bool Simulation::resume_session() {
 
 bool Simulation::reset_session() {
 	const opennova::inmatch::TransitionResult out = session_.reset_to_baseline();
+	if (out.applied()) restore_world_baseline();
 	return out.applied();
 }
 
@@ -92,90 +110,53 @@ void Simulation::close_session() {
 	(void)session_.close();
 }
 
-void Simulation::close_mission() {
-	leave_net_session();
-}
-
-bool Simulation::reset_mission_to_baseline(
-		opennova::inmatch::SessionError &r_error) {
-	if (!world_installed_ || !kernel_->have_baseline) {
-		r_error = {opennova::inmatch::SessionErrorCode::TickFailed,
-				"mission baseline is unavailable"};
-		return false;
-	}
-	restore_world_baseline();
-	return true;
-}
-
-opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
-		const opennova::inmatch::TickInput &p_input) {
-	const bool spectator = is_local_spectator();
-	const opennova::world::PlayerInput no_movement{};
-	const opennova::world::PlayerInput &movement =
-			spectator ? no_movement : p_input.player.movement;
-	set_player_input(movement.forward, movement.back, movement.left,
-			movement.right, movement.lean_left, movement.lean_right,
-			movement.jump);
-	if (!spectator && (p_input.player.look_delta_x != 0.0f ||
-			p_input.player.look_delta_y != 0.0f)) {
-		add_local_player_look(p_input.player.look_delta_x,
-				p_input.player.look_delta_y);
-	}
-	set_local_player_weapon_input(
-			!spectator &&
-					(p_input.player.held_action_bits & MissionFrameInput::HELD_FIRE) != 0,
-			!spectator &&
-					(p_input.player.pressed_action_bits &
-							MissionFrameInput::PRESSED_FIRE) != 0,
-			!spectator &&
-					(p_input.player.pressed_action_bits &
-							MissionFrameInput::PRESSED_RELOAD) != 0);
-	// The medic-call edge is an action binding, not weapon state: it fires
-	// its request immediately like retail's binding dispatch (the gates and
-	// cooldown live in request_local_player_medic).
-	if (!spectator && (p_input.player.pressed_action_bits &
-				MissionFrameInput::PRESSED_MEDIC_REQUEST) != 0) {
-		request_local_player_medic();
-	}
-
-	const bool profiling = runtime_profiling_enabled_;
-	const int64_t sim_start =
-			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
-	const bool did_tick = advance_world_tick();
-	if (profiling) {
-		frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
-		frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
-	}
-	if (!did_tick) return {};
-	// The dead-player map-mode clear rides every advanced tick — retail's
-	// render-frame gate, observed before the presenters read the mode.
-	tick_hud_map_death_gate();
-	if (is_session_lost()) {
-		return {opennova::inmatch::TickStatus::SessionLost,
-				static_cast<int32_t>(get_logic_tick()),
-				{opennova::inmatch::SessionErrorCode::SessionLost,
-						std::string(get_session_loss_reason().utf8().get_data())}};
-	}
-
-	opennova::inmatch::TickOutcome tick;
-	tick.status = opennova::inmatch::TickStatus::Ran;
-	tick.logic_tick = static_cast<int32_t>(get_logic_tick());
-	if (session_tick_sink_.is_valid()) {
-		Ref<MissionTickOutcome> value;
-		value.instantiate();
-		value->assign(tick);
-		const int64_t sink_start =
-				profiling ? Time::get_singleton()->get_ticks_usec() : 0;
-		const Variant accepted = session_tick_sink_.call(value);
-		if (profiling)
-			frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
-		if (accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted)) {
-			tick.status = opennova::inmatch::TickStatus::SessionLost;
-			tick.error = {opennova::inmatch::SessionErrorCode::SessionLost,
-					"Godot frame pipeline cancelled the tick batch"};
+// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
+// and wraps against the current renderer viewport height [orig:
+// Server_SendRandomSeedSync @ 0x511360 -- CEffectWorld_GetViewportDimensions
+// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render window
+// the way retail's CEffectWorld query does: the live window (the runtime
+// owns this node without parenting it into the tree, so get_viewport() alone
+// is null on every production host). A headless DisplayServer has no
+// renderer (the dedicated-host analogue); a missing/non-drawable viewport
+// hands the host role 0 and npruntime suppresses 0x68 instead of inventing
+// a screen size (D-NET-206).
+int32_t Simulation::renderer_viewport_height() const {
+	Viewport *viewport = get_viewport();
+	if (viewport == nullptr) {
+		DisplayServer *display = DisplayServer::get_singleton();
+		if (display != nullptr && display->get_name() != "headless") {
+			SceneTree *tree = Object::cast_to<SceneTree>(
+					Engine::get_singleton()->get_main_loop());
+			if (tree != nullptr)
+				viewport = tree->get_root();
 		}
 	}
-	return tick;
+	return viewport != nullptr ? static_cast<int32_t>(viewport->get_visible_rect().size.y) : 0;
+}
+
+void Simulation::after_tick() {
+	// The dead-player map-mode clear rides every advanced tick -- retail's
+	// render-frame gate, observed before the presenters read the mode.
+	tick_hud_map_death_gate();
+}
+
+bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
+	const bool profiling = runtime_profiling_enabled_;
+	last_net_tick_us_ = static_cast<uint64_t>(p_tick.net_us);
+	if (profiling) {
+		frame_sim_us_ += p_tick.tick_us;
+		frame_net_us_ += p_tick.net_us;
+	}
+	if (!session_tick_sink_.is_valid()) return true;
+	Ref<MissionTickOutcome> value;
+	value.instantiate();
+	value->assign(p_tick);
+	const int64_t sink_start =
+			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
+	const Variant accepted = session_tick_sink_.call(value);
+	if (profiling)
+		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+	return !(accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted));
 }
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
@@ -191,6 +172,7 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
+	input.viewport_height = renderer_viewport_height();
 	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
 	session_tick_sink_ = Callable();
@@ -211,6 +193,7 @@ Ref<MissionFrameOutcome> Simulation::step_session_frame(
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
+	input.viewport_height = renderer_viewport_height();
 	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.step_once(input);
 	session_tick_sink_ = Callable();
@@ -228,10 +211,11 @@ bool Simulation::step() {
 	opennova::inmatch::FrameInput input;
 	input.player.movement = kernel_->local.input;
 	input.player.held_action_bits = kernel_->local.weapon.fire_held
-			? MissionFrameInput::HELD_FIRE : 0u;
+			? opennova::inmatch::HELD_FIRE : 0u;
 	input.player.pressed_action_bits =
-			(kernel_->local.weapon.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
-			(kernel_->local.weapon.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
+			(kernel_->local.weapon.fire_pressed ? opennova::inmatch::PRESSED_FIRE : 0u) |
+			(kernel_->local.weapon.reload_pressed ? opennova::inmatch::PRESSED_RELOAD : 0u);
+	input.viewport_height = renderer_viewport_height();
 	return session_.drive_one(input).ticks_run() == 1;
 }
 

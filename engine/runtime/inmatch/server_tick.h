@@ -63,7 +63,7 @@ std::vector<uint8_t> Server_DisarmPlayerTickSeed(
 //
 // OWNERSHIP INVARIANT: this IS the C2S drain AND it owns the logic tick. Production role routing is
 // mutually exclusive: listen/dedicated hosts call this path, joiners call the client path, and
-// offline play calls tick_no_net. The drain/emit primitives are invoked only here over
+// offline play runs the local role's tick. The drain/emit primitives are invoked only here over
 // connection_list; the parallel NetSystem-as-ISystem owner was removed at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx);
 

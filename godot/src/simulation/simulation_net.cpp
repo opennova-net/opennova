@@ -63,23 +63,6 @@ void Simulation::bringup_host_runtime() {
 	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
 	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].
 	const bool serve_and_play = host_listen_ ? host_serve_and_play_ : true;
-	host_owner_ = inmatch::HostOwner{};
-	host_owner_.host_loopback = &host_loop_;
-	host_owner_.serve_and_play = serve_and_play;
-	ctx_.world = &kernel_->world;
-	ctx_.mission = &kernel_->mission;
-	ctx_.terrain_til_data = terrain_til_data_; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
-	ctx_.mission_text_loaded = mission_text_loaded_;
-	ctx_.mission_briefing3 = mission_briefing3_;
-	ctx_.mission_briefing2 = mission_briefing2_;
-	inmatch::install_mission_location_names(ctx_, kernel_->mission, mission_location_texts_);
-	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
-	// separate net ISystem (retired P8).
-
-	// The ONE consolidated GameConfig for create_session (ADR 0013): a LAN host takes its lobby name /
-	// gametype / mission + the §5.1 reply slice from the GDScript-configured host_session_config_; SP is
-	// the faithful "SINGLEPLAYERGAME" / 1 player. game_type (g_GameType) now feeds BOTH the S2C 0x08
-	// block dword[3] AND the 0x7B/0x60 bodies (§6.9; NapiNPMsg_0x7B_BuildPayload @0x507740).
 	inmatch::GameConfig host_config;
 	if (host_listen_) {
 		host_config = host_session_config_; // mission/player/spawn + game_type/mp_attributes from the UI
@@ -88,63 +71,22 @@ void Simulation::bringup_host_runtime() {
 	} else {
 		host_config.server_name = "SINGLEPLAYERGAME";
 		host_config.max_players = 1;
-		// SP has no host dialog: g_GameType is the mission's own mode word (no multiplayer
-		// bit -> stock Co-op 0x10020). The auto-spawn below resolves the retail marker chain
-		// by this word — left at the default 0 it walks the DM 6095/6002 chain, finds none
-		// of a campaign mission's 6001 starts, and parks the player at the origin.
-		// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
-		// see docs/net/novaworld-net-re.md 5.2c]
 		host_config.game_type = mission_game_type();
 	}
-	if (kernel_) {
-		kernel_->world.rules.fat_bullets = host_config.fat_bullets;
-		kernel_->world.rules.one_shot_kill = host_config.one_shot_kill;
-	}
-
-	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
-	// (mode 3 -> set_transport_mode -> create_session(&host_loop_) [connection reset +
-	// Server_InitNewRoundState]; then, when serve_and_play, FAITHFUL auto-spawn of the host's own player
-	// at the start marker + latch its loopback in-match so Server_TickUpdate fans it the per-frame
-	// whole-world 0x0A its local view renders from). host_owner_.host_loopback / .serve_and_play + ctx_.world
-	// were set above; this replaces the copy that had drifted out of the helper. [orig: SinglePlayer_StartMission
-	// @0x561af0]. The one GameConfig carries the §5.1 reactive-reply config for the joiner replies too.
-	inmatch::HostConfig host_cfg;
-	host_cfg.config = host_config;
-	host_cfg.socket_mode = host_listen_ ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
-	host_cfg.serve_and_play = serve_and_play;
-	// The shell's resolved PLAYER_INFO selection for the host's own player; the
-	// HostConfig default is the stock fresh-profile seed until one is installed.
+	inmatch::HostBringup bringup;
+	bringup.host_cfg.config = host_config;
+	bringup.host_cfg.socket_mode = host_listen_ ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
+	bringup.host_cfg.serve_and_play = serve_and_play;
 	if (local_character_vars_set_) {
-		host_cfg.local_character_vars = local_character_vars_;
+		bringup.host_cfg.local_character_vars = local_character_vars_;
 	}
-	inmatch::start_host_session(host_owner_, host_cfg);
-	kernel_->world.rules.session_open = true; // the retail is_in_session fact
-	if (serve_and_play) {
-		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
-		// each frame into the ClientState the present pass reads.
-		runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(host_loop_);
-		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-		// Phase-3 0x0A objective width is gated by the same g_GameType
-		// carried to remote clients in 0x7B extra; the local loopback has no
-		// handshake, so seed its view directly from the consolidated config.
-		runtime_->view().set_game_type(host_config.game_type);
-		// The 0x1D header-form session half: the loopback replica stands in
-		// world.rules.mp_session for the retail is_in_session (SP listen stays the
-		// 7-byte team form). [orig: NapiNPClientMsg_0x01D @0x43086c]
-		runtime_->view().set_mp_session(kernel_ != nullptr && kernel_->world.rules.mp_session);
-
-		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
-		// motor drives entity Yaw from kernel_->local.input.look_heading each frame, else input snaps it to 0).
-		kernel_->local.reset_local_player_input_to_player_facing();
-	} else {
-		// Dedicated (UI "serve only"). The witnessed original makes this a true host-only session
-		// [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1), is_host=1/is_client=0; HostDialog
-		// read @0x555940, dispatch @0x556d00, mode switch @0x4c49f0]. start_host_session now selects
-		// that exact HostOnly row, passes no type-2 loopback to create_session, and creates no local
-		// player. There is therefore no local replica pipeline: runtime_ stays null, and host_pump's fold
-		// plus the present snapshot both guard on it (D-NET-131 fixed 2026-07-24).
-		runtime_.reset();
-	}
+	bringup.terrain_til_data = terrain_til_data_; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
+	bringup.mission_text_loaded = mission_text_loaded_;
+	bringup.mission_briefing3 = mission_briefing3_;
+	bringup.mission_briefing2 = mission_briefing2_;
+	bringup.mission_location_texts = mission_location_texts_;
+	host_role_.bring_up(bringup);
+	runtime_ = host_role_.client_runtime();
 }
 
 namespace {
@@ -190,75 +132,7 @@ private:
 // longer drift. Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
-void Simulation::host_pump() {
-	namespace inmatch = opennova::inmatch;
-	const bool profiling = runtime_profiling_enabled_;
-	const uint64_t prep_start = profiling ? opennova::io::perf_now_us() : 0;
-	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
-	// and wraps against the current renderer viewport height [orig:
-	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
-	// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render
-	// window the way retail's CEffectWorld query does — the live window (the
-	// runtime owns this node without parenting it into the tree, so
-	// get_viewport() alone is null on every production host). A headless
-	// DisplayServer has no renderer (the dedicated-host analogue); a missing/
-	// non-drawable viewport hands listen_host::frame 0 and npruntime
-	// suppresses 0x68 instead of inventing a screen size (D-NET-206).
-	Viewport *viewport = get_viewport();
-	if (viewport == nullptr) {
-		DisplayServer *display = DisplayServer::get_singleton();
-		if (display != nullptr && display->get_name() != "headless") {
-			SceneTree *tree = Object::cast_to<SceneTree>(
-					Engine::get_singleton()->get_main_loop());
-			if (tree != nullptr)
-				viewport = tree->get_root();
-		}
-	}
-	const double viewport_height = viewport != nullptr
-			? viewport->get_visible_rect().size.y : 0.0;
-	const uint32_t now = host_owner_.now_tick;
-	// What the view arbiter reads from the session (death screen, end round,
-	// the death camera): sampled pre-fold, exactly the value the old inline
-	// view tick consumed at this point in the frame.
-	kernel_->local.view_session_inputs = local_view_session_inputs();
-	UdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
-	if (profiling)
-		kernel_->profile.add(opennova::devtools::Slot::SIM_HOST_PREP,
-				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start));
-	// The ONE listen frame (ADR 0042 d3): the local C2S drain, the pre-tick
-	// input apply, host_session_pump (Server_TickUpdate's owner loop), the
-	// local view/weapon pumps, and the new-soldier .adm ground — over this
-	// sim's kernel and host state; its phases land on the kernel's profile.
-	// [orig: Game_ProcessMainFrame @0x5263f0]
-	opennova::inmatch::listen_host::frame(*kernel_, host_state_, sock,
-			static_cast<int32_t>(viewport_height));
-	kernel_->local.tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
-	// The kernel pump's wire-facing reload outcome relays onto the loopback so
-	// the shared dispatcher broadcasts the S2C 0x49 to every client next frame
-	// (the authority already performed WeaponSlot_ReloadAmmo inside the pump;
-	// the server handler's local-connection gate prevents a second refill).
-	if (kernel_->local.last_reload.valid && host_owner_.serve_and_play) {
-		opennova::WeaponReload reload;
-		reload.entity_handle = kernel_->local.last_reload.entity_handle;
-		reload.reload_param = kernel_->local.last_reload.reload_param;
-		host_loop_.client_send(0x25, opennova::encode_weapon_reload(reload));
-		kernel_->local.last_reload = opennova::world::LocalWeaponReloadWire{};
-	}
-	// The host's measurable net leg for the F3 Stats board: the ClientState
-	// fold. The S2C serialize/emit half rides inside inmatch::host_session_pump
-	// (fused with the logic tick) and stays inside the Sim step number until
-	// npruntime grows a phase seam.
-	const uint64_t net_start = profiling ? opennova::io::perf_now_us() : 0;
-	if (runtime_)
-		runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState
-	if (profiling) {
-		last_net_tick_us_ = opennova::io::perf_now_us() - net_start;
-		kernel_->profile.add(opennova::devtools::Slot::SIM_NET,
-				static_cast<int64_t>(last_net_tick_us_));
-	}
-}
-
-// host_pump's dispatch_event + admit_peer were promoted into engine/runtime/inmatch (inmatch::dispatch_event /
+// The host frame's dispatch_event + admit_peer were promoted into engine/runtime/inmatch (inmatch::dispatch_event /
 // inmatch::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
 // the Godot binding and the headless server can no longer drift.
 
@@ -385,34 +259,15 @@ PackedInt32Array Simulation::take_retired_placement_ids() {
 	return out;
 }
 
-void Simulation::joiner_pump() {
-	if (!runtime_) {
-		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
-		return;
-	}
-	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
-	// uplink ship, ending where the local (non-authority) world work begins.
-	// The bridge fires on_wire_leg_complete at exactly that boundary.
-	const uint64_t net_start =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-	// The frame itself — provider wiring, hello, recv-fold + uplink + folds,
-	// the decoded-consequence application, the local World tick, and the
-	// post-tick recompose — lives in the engine bridge (S10a, ADR 0028). This
-	// binding supplies the shell legs: the socket, the render-coupled asset
-	// resolution, the loadout profile seams (S7b disposition), device input,
-	// the view/weapon pumps shared with the host path, and the clocks.
-	opennova::inmatch::JoinerWorldBridge::PumpContext ctx{
-			kernel_->world, *runtime_, kernel_->local.weapon, kernel_->local.loadout,
-			kernel_->local.inventory, kernel_->local.inventory_valid, kernel_->seat_specs,
-			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
+// The bridge's shell-side legs, installed once on the joiner role (E8a keeps
+// the hook table; E8b splits it into engine legs and typed events): the
+// socket, the render-coupled asset resolution, the loadout profile seams,
+// device input, the view/weapon pumps shared with the host path, the clocks.
+void Simulation::install_joiner_hooks() {
 	opennova::inmatch::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
 	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };
 	hooks.resolve_row_adm_ids = [this] { resolve_client_row_adm_ids(); };
-	if (runtime_profiling_enabled_)
-		hooks.on_wire_leg_complete = [this, net_start] {
-			last_net_tick_us_ = opennova::io::perf_now_us() - net_start;
-		};
 	hooks.apply_authoritative_loadout =
 			[this] { apply_joiner_authoritative_loadout(); };
 	hooks.reseed_kit_on_side_change =
@@ -450,12 +305,12 @@ void Simulation::joiner_pump() {
 		kernel_->local.tick_medic_cooldown(local_player_dead());
 	};
 	hooks.tick_weather = [this] { kernel_->tick_weather(); };
-	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
 	// World's per-class ATTRIBUTES words follow it the same frame [orig: the
 	// HUD reads g_CharAttr directly, AnimMap_IsSlotActive @0x4125e0, so the
 	// clear is visible on the next draw; see docs/interface/hud-re.md].
-	sync_class_attribute_flags();
+	hooks.after_pump = [this] { sync_class_attribute_flags(); };
+	joiner_role_.hooks = std::move(hooks);
 }
 
 // Deposit received framed datagrams for this frame's recv pump.
@@ -674,9 +529,15 @@ bool Simulation::enable_host_listen(int p_port) {
 	}
 	if (!bound) {
 		host_listen_ = false;
+		host_role_.set_socket(nullptr);
+		host_socket_.reset();
 		return false;
 	}
 	host_listen_ = true;
+	// The host role reads and writes the bound pump through the adapter from
+	// now on (the SP/test host never installs one and stays socketless).
+	host_socket_ = std::make_unique<UdpPumpDatagramSocket>(pump_.ptr());
+	host_role_.set_socket(host_socket_.get());
 	if (kernel_) {
 		kernel_->world.rules.projectile_authority = true;
 		kernel_->world.rules.mp_session = true;
@@ -873,8 +734,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
 	// Validate the lifecycle transition before opening a socket. Re-dialing a
 	// live mission is rejected without partially replacing its transport.
-	const opennova::inmatch::TransitionResult role = session_.configure_role(
-			opennova::inmatch::Role::Joiner);
+	const opennova::inmatch::TransitionResult role = session_.configure_role(joiner_role_);
 	if (role.code != opennova::inmatch::TransitionCode::Applied &&
 			role.code != opennova::inmatch::TransitionCode::NoOp) {
 		return false;
@@ -894,9 +754,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			std::string(p_spectator_password.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); each (re)load's role hook rebuilds it fresh.
-	runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(joiner_player_name_);
-	runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-	runtime_->set_join_request(join_role_, join_spectator_password_);
+	runtime_ = &joiner_role_.create_runtime(joiner_player_name_, join_role_, join_spectator_password_);
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();
@@ -1000,7 +858,7 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 bool Simulation::poll_join_preload() {
 	if (!joiner_ || !runtime_) return false;
 
-	// This is the pre-mission subset of joiner_pump: the same UDP socket and
+	// This is the pre-mission subset of the joiner role's frame: the same UDP socket and
 	// ClientRuntime advance the retail connect exchange, but no World exists yet
 	// to tick and the runtime's world-ready gate suppresses the load/spawn drive.
 	// The hello latch and the per-frame clock are the bridge's, shared with the
@@ -1345,10 +1203,6 @@ int Simulation::get_joiner_self_handle() const {
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of
 // 0x46 disconnect packets (SendDisconnectPacket @0x61f2a0) before the key material clears; the
 // host's non-timeout teardown fires only on that opcode (Nwu_HandleClientGoodbye @0x624250)]
-void Simulation::leave_net_session() {
-	if (!joiner_ || runtime_ == nullptr) return;
-	for (const std::vector<uint8_t> &dg : runtime_->disconnect()) ship_to_host(dg);
-}
 
 
 void Simulation::ship_to_host(const std::vector<uint8_t> &dg) {
@@ -1359,7 +1213,7 @@ void Simulation::ship_to_host(const std::vector<uint8_t> &dg) {
 	pump_->send_to_host(bytes);
 }
 
-// (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through joiner_pump
+// (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through the joiner role
 //  over an inmatch::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
