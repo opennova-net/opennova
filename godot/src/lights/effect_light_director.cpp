@@ -55,10 +55,43 @@ EffectLightDirector::EffectLightDirector() {
 void EffectLightDirector::setup(Node *p_world, const Callable &p_static_sources,
 		const Callable &p_static_draw_sources, const Callable &p_static_draw_source_revision) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	provider_ = nullptr;
 	static_sources_ = p_static_sources;
 	static_draw_sources_ = p_static_draw_sources;
 	static_draw_source_revision_ = p_static_draw_source_revision;
 	static_rows_revision_ = -1;
+}
+
+void EffectLightDirector::setup_with_provider(Node *p_world, StaticSourceProvider *p_provider) {
+	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	provider_ = p_provider;
+	static_sources_ = Callable();
+	static_draw_sources_ = Callable();
+	static_draw_source_revision_ = Callable();
+	static_rows_revision_ = -1;
+}
+
+Array EffectLightDirector::_static_sources() const {
+	if (provider_ != nullptr) {
+		return provider_->static_item_effect_sources();
+	}
+	return static_sources_.is_valid() ? Array(static_sources_.call()) : Array();
+}
+
+Array EffectLightDirector::_static_draw_sources() const {
+	if (provider_ != nullptr) {
+		return provider_->static_light_draw_sources();
+	}
+	return static_draw_sources_.is_valid() ? Array(static_draw_sources_.call()) : Array();
+}
+
+int64_t EffectLightDirector::_static_draw_source_revision() const {
+	if (provider_ != nullptr) {
+		return static_cast<int64_t>(provider_->static_light_draw_source_revision());
+	}
+	return static_draw_source_revision_.is_valid()
+			? static_cast<int64_t>(static_draw_source_revision_.call())
+			: 0;
 }
 
 Node *EffectLightDirector::_world() const {
@@ -146,7 +179,7 @@ void EffectLightDirector::reattach() {
 			on_wire_node_spawned(node, -1, 0);
 		}
 	}
-	static_sources_snapshot_ = static_sources_.is_valid() ? Array(static_sources_.call()) : Array();
+	static_sources_snapshot_ = _static_sources();
 	static_rows_revision_ = -1;
 	// Build every BMS identity before resolving any blink containment. A
 	// static item can spawn inside a batched building that appears later in
@@ -409,9 +442,7 @@ Vector3 EffectLightDirector::light_gain() const {
 // the RGBAF payload consumed through INSTANCE_CUSTOM.x.
 void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weather *p_weather,
 		int p_time_ms) {
-	const int64_t revision = static_draw_source_revision_.is_valid()
-			? static_cast<int64_t>(static_draw_source_revision_.call())
-			: 0;
+	const int64_t revision = _static_draw_source_revision();
 	if (revision != static_rows_revision_) {
 		_rebuild_static_light_rows();
 		static_rows_revision_ = revision;
@@ -423,7 +454,7 @@ void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weath
 }
 
 void EffectLightDirector::_rebuild_static_light_rows() {
-	const Array descriptors = static_draw_sources_.is_valid() ? Array(static_draw_sources_.call()) : Array();
+	const Array descriptors = _static_draw_sources();
 	int row_count = 0;
 	for (int64_t i = 0; i < descriptors.size(); ++i) {
 		const Ref<StaticLightDrawSource> descriptor = descriptors[i];

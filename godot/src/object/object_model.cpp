@@ -812,7 +812,7 @@ void ObjectModel::on_object_changed() {
 
 // The shared awake set: every model with live per-frame work. One driver
 // (ObjectModel::advance_awake_frame) walks it per render frame — the game from
-// GameFramePipeline's render_material_frame leg, the menu shell and ONED from
+// GameWorld's render_material_frame leg, the menu shell and ONED from
 // their one process loop. There is no per-node _process, so nothing self-clocks
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;

@@ -6,7 +6,6 @@ extends GutTest
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 # The packed shell recipe (the retail-shaped archive layout, the baked Tmap
 # terrain, the lifecycle-only weapon.def) lives on WorldFixture.boot_shell.
 
@@ -240,22 +239,28 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 			"the retained water graph owns its live color ImageTexture")
 	assert_not_null(weak_water_normal.get_ref(),
 			"the retained water graph owns its live normal ImageTexture")
-	VegAssetsScript.list_graphics(resource_root, true)
+	# The vegetation asset caches are the world's foliage dispatcher's own
+	# state (they die with the world); the shell's exit leg empties them
+	# explicitly, observed here through the idempotent leg EXIT_TREE runs.
+	var world := _shell.get_node("World") as GameWorld
+	var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
+	dispatcher.list_graphics(resource_root, true)
 	var weak_texture: WeakRef = weakref(texture)
 	texture = null
 	assert_not_null(weak_texture.get_ref(),
 			"the runtime root retains the decoded texture")
-	assert_gt(VegAssetsScript.cache_entry_count(), 0,
-			"the process-static vegetation registry is populated before exit")
+	assert_gt(dispatcher.asset_cache_entry_count(), 0,
+			"the world's vegetation asset caches are populated before exit")
 
+	_shell.finish_runtime_shutdown()
+	assert_eq(dispatcher.asset_cache_entry_count(), 0,
+			"MainGame exit clears the world's vegetation asset caches")
 	_shell.queue_free()
 	_shell = null
 	await get_tree().process_frame
 
 	assert_true(resource_root.get_root_dir().is_empty(),
 			"MainGame exit clears the mounted root before extension deinitialization")
-	assert_eq(VegAssetsScript.cache_entry_count(), 0,
-			"MainGame exit clears the process-static renderer resource cache")
 	assert_null(weak_texture.get_ref(),
 			"the cached ImageTexture dies while RenderingServer is still alive")
 	assert_null(weak_cursor.get_ref(),

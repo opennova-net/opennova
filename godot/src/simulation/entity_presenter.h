@@ -121,7 +121,7 @@ public:
 	// loading/DEATH hold). The budget caps cold builds per presentation call
 	// so a large cold topology cannot occupy the SceneTree thread; four keeps
 	// tiny dynamic cohorts atomic while yielding hundreds-row streamed loads
-	// promptly. NetSessionDrive holds the join-admission edge until
+	// promptly. SessionDrive holds the join-admission edge until
 	// pending_spawn_count() drains to zero, so the revealed world is fully
 	// materialized, like retail's.
 	static constexpr int DEFAULT_COLD_SPAWN_BUDGET = 4;

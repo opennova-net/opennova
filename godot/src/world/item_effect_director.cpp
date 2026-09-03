@@ -54,8 +54,26 @@ void ItemEffectDirectorStats::_bind_methods() {
 void ItemEffectDirector::setup(Node *p_world, const Callable &p_static_sources,
 		const Callable &p_item_db_source) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	provider_ = nullptr;
 	static_sources_ = p_static_sources;
 	item_db_source_ = p_item_db_source;
+}
+
+void ItemEffectDirector::setup_with_provider(Node *p_world, StaticSourceProvider *p_provider) {
+	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	provider_ = p_provider;
+	static_sources_ = Callable();
+	item_db_source_ = Callable();
+}
+
+Array ItemEffectDirector::_static_sources() const {
+	if (provider_ != nullptr) {
+		return provider_->static_item_effect_sources();
+	}
+	if (static_sources_.is_valid()) {
+		return static_sources_.call();
+	}
+	return Array();
 }
 
 Node *ItemEffectDirector::_world() const {
@@ -81,6 +99,9 @@ MissionRoot *ItemEffectDirector::_runtime() const {
 // The placer's item database through the lent seam (null before a mission /
 // with no placer).
 Ref<ItemDatabase> ItemEffectDirector::_resolve_item_db() const {
+	if (provider_ != nullptr) {
+		return provider_->static_source_item_db();
+	}
 	if (!item_db_source_.is_valid()) {
 		return Ref<ItemDatabase>();
 	}
@@ -232,8 +253,8 @@ void ItemEffectDirector::reattach() {
 			attached += _attach_item_effect_to_node(node, ref->get_kind(), ref->get_item_id(), item_db);
 		}
 	}
-	if (static_sources_.is_valid()) {
-		const Array static_sources = static_sources_.call();
+	{
+		const Array static_sources = _static_sources();
 		for (int64_t source_index = 0; source_index < static_sources.size(); ++source_index) {
 			const Ref<StaticEffectSource> source = static_sources[source_index];
 			attached += _attach_item_effect_to_static(source, static_cast<int>(source_index), item_db);

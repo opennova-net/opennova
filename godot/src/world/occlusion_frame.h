@@ -30,8 +30,8 @@ class Water;
 // and the unload reset. Owned by GameWorld as _occlusion — constructed in
 // the world's _init, wired to the retained scene nodes in _ready (setup),
 // re-handed the mission runtime's sim / entity index / entity presenter on
-// every load (bind_mission) and released on unload (reset). WorldDeviceFrame
-// and WorldLoadStages reach it through the world's occlusion_frame()
+// every load (bind_mission) and released on unload (reset). GameWorld's
+// frame and load legs reach it through occlusion_frame()
 // accessor.
 //
 // HOT PATH: GameWorld's device frame calls apply_blink_gates()/apply_frame()
@@ -53,11 +53,11 @@ class Water;
 // ORDER, preserved from the GDScript pass:
 //  * present THEN occlude: the entity presenter's placed walk runs inside
 //    advance_session_frame (MissionRoot presents once per session frame) and
-//    WorldDeviceFrame.apply_occlusion_frame runs AFTER it, so present's base
+//    GameWorld's occlusion leg runs AFTER it, so present's base
 //    visibility is re-asserted first each frame and this frame's hides land
-//    on top. The driver (GameFramePipeline) keeps that order; nothing here
+//    on top. The leg table keeps that order; nothing here
 //    reorders it.
-//  * water.visible has TWO writers in one frame: WorldDeviceFrame.
+//  * water.visible has TWO writers in one frame: GameWorld.
 //    render_water_frame reads LAST frame's blink-water verdict
 //    (Water.set_blink_water_visible, exactly as retail reads it — the
 //    terrain_setup_view_and_lighting 0x60fe40 witness cited on that leg),
@@ -124,7 +124,7 @@ public:
 	// for a headless world): fov/near come off it and the aspect off its
 	// viewport, else the 70 deg / 0.05 / 16:9 defaults. (The marched
 	// iris-exposure weather feed that renders alongside stays on
-	// WorldDeviceFrame — _stamp_iris_samples.)
+	// GameWorld's frozen-pose iris stamp.)
 	void apply_frame(Camera3D *p_camera, const Transform3D &p_camera_xform,
 			bool p_forces_indoors);
 

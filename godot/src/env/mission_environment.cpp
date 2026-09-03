@@ -250,7 +250,7 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "TOD_DAY_FIXED24",
 			opennova::env::EnvironmentState::kTodDayFixed24);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"DEFAULT_MINUTES_PER_DAY", 1440);
+			"DEFAULT_MINUTES_PER_DAY", DEFAULT_MINUTES_PER_DAY);
 	ClassDB::bind_integer_constant(get_class_static(), "", "DEFAULT_START_HOUR",
 			12);
 }

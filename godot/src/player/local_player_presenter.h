@@ -171,7 +171,7 @@ public:
 			bool p_gameplay_input_active = true);
 	void after_world_tick();
 	// Present one simulation tick's weapon batch before EffectWorld advances
-	// that same tick (the ex fixed-tick consumer: WorldEffectRouter calls it
+	// that same tick (the ex fixed-tick consumer: GameWorld's effect fan-out calls it
 	// directly through the world's local view presenter). Updating only the
 	// local camera/avatar/viewmodel here gives action user points their
 	// production-tick pose; mission/vehicle Nodes retain the

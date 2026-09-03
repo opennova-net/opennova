@@ -179,7 +179,7 @@ the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
 interpolation (faithful to §1.6). `MissionRoot.tick()` survives as the
 deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
-the same session state machine. `MainGame` → `GameWorld` → `GameFramePipeline` is
+the same session state machine. `MainGame` → `GameWorld` (its frame-leg table) is
 the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
 ONED's Run OpenNova loose action launches the standalone game against the
 selected loose assets. The portable `engine/runtime/world` per-tick

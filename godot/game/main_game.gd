@@ -11,7 +11,6 @@ extends GameShell
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
-const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
 const ShellMenuFrontendScript := preload("res://game/shell_menu_frontend.gd")
@@ -189,7 +188,12 @@ func finish_runtime_shutdown() -> void:
 		_world.release_runtime_renderer_resources()
 	if _root != null:
 		_root.clear()
-	VegAssetsScript.clear_cache()
+	# The vegetation asset caches live on the world's foliage dispatcher for
+	# the world's whole life; the shell's exit empties them here.
+	if _world != null:
+		var dispatcher: FoliageDispatcher = _world.get_foliage_dispatcher()
+		if dispatcher != null:
+			dispatcher.clear_asset_cache()
 	if _debug_adapter != null:
 		_debug_adapter.release_shell()
 
@@ -263,6 +267,15 @@ func _ready() -> void:
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
+	# The one interactive-music context is the shell's (MusicService); the
+	# world names the mission-start open, the mission-end teardown and the
+	# per-frame gamemus var pump through these three signals.
+	_world.music_context_opened.connect(MusicService.open_game_context)
+	_world.music_context_closed.connect(MusicService.stop_context)
+	_world.music_var_changed.connect(MusicService.set_var)
+	# The persisted resource settings behind the world's own mount (the game
+	# path with no injected root).
+	_world.set_resource_root_resolver(SettingsResourceRootResolver.new())
 	_hud_presenter = GameHudPresenter.new()
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
@@ -745,7 +758,8 @@ func _begin_world_load() -> void:
 
 func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
-	# calls MusicService.open_game_context, so every live mission entry path
+	# emits music_context_opened into MusicService.open_game_context, so every
+	# live mission entry path
 	# gets the same music); nothing to do here for audio. The witnessed release
 	# then reveals the world + HUD at the tail
 	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final

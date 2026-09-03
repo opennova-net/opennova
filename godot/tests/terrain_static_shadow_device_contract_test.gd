@@ -173,15 +173,15 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 
 
 func test_game_world_attaches_and_detaches_the_mission_shadow_source() -> void:
-	# The stage bodies live in the world's load-stages lane (world_load_stages.gd).
-	var source := _source("res://game/world/world_load_stages.gd")
-	var placed := source.find(".place(mission, _world, options)")
-	var attached := source.find("set_static_shadow_placer(_world")
+	# The load plan lives in the native world (game_world_load.cpp).
+	var source := _source("res://src/world/game_world_load.cpp")
+	var placed := source.find("placer_->place(p_mission, get_runtime(), options)")
+	var attached := source.find("set_static_shadow_placer(placer_)")
 	assert_gt(attached, placed,
 		"Only successfully placed ObjectData/transform sources may enter the page collector.")
-	var unload := source.find("func unload() -> void:")
-	var detached := source.find("set_static_shadow_placer(null)", unload)
-	var release := source.find("_placer = null", unload)
+	var unload := source.find("void GameWorld::unload()")
+	var detached := source.find("set_static_shadow_placer(Ref<MissionObjectPlacer>())", unload)
+	var release := source.find("placer_.unref()", unload)
 	assert_gt(detached, unload)
 	assert_gt(release, detached,
 		"Terrain must release its Ref before GameWorld drops the mission placer.")
@@ -219,7 +219,7 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 	var terrain_source := _source("res://src/terrain/terrain.cpp")
 	var device_header := _source(
 		"res://src/terrain/terrain_tile_cache_device.h")
-	var world := _source("res://game/world/game_world.gd")
+	var world := _source("res://src/world/game_world.cpp")
 	var session := _source(
 		"res://probes/render/shadow_attribution_capture_session.gd")
 	assert_true(terrain_header.contains("set_static_terrain_shadow_enabled("))

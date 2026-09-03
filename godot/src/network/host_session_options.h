@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <net/npwire/net_ports.h>
 #include <runtime/inmatch/game_config.h>
 
 namespace godot {
@@ -29,6 +30,14 @@ class HostSessionOptions : public RefCounted {
 	bool serve_and_play_ = true;
 	bool game_type_auto_ = false;
 	String game_root_;
+	// The request-only facts the world's host entry reads (ADR 0043 slice
+	// G10: the ex HostSessionConfig fields the net-session drive consumed):
+	// the resource-dir override, and the NovaWorld gate registration row.
+	String dir_;
+	String nw_gate_host_;
+	int nw_gate_port_ = opennova::kNovaWorldGatePort;
+	String region_ = "us";
+	String advertise_;
 
 protected:
 	static void _bind_methods();
@@ -122,8 +131,24 @@ public:
 	void set_game_type_auto(bool p_value) { game_type_auto_ = p_value; }
 	String get_game_root() const { return game_root_; }
 	void set_game_root(const String &p_root) { game_root_ = p_root; }
+	// Resource-dir override (dev/tests); empty = the persisted directory.
+	String get_dir() const { return dir_; }
+	void set_dir(const String &p_dir) { dir_ = p_dir; }
+	// NovaWorld gate registration (the "NovaWorld" channel): where the world
+	// registers the browsable listen host. An empty gate host means pure LAN,
+	// nothing is registered.
+	String get_nw_gate_host() const { return nw_gate_host_; }
+	void set_nw_gate_host(const String &p_host) { nw_gate_host_ = p_host; }
+	int get_nw_gate_port() const { return nw_gate_port_; }
+	void set_nw_gate_port(int p_port) { nw_gate_port_ = p_port; }
+	String get_region() const { return region_; }
+	void set_region(const String &p_region) { region_ = p_region; }
+	// Explicit advertised-IP override for the gate row.
+	String get_advertise() const { return advertise_; }
+	void set_advertise(const String &p_advertise) { advertise_ = p_advertise; }
 
-	// The MCP status boundary's JSON shape (one key per field).
+	// The MCP status boundary's JSON shape (one key per live-session field;
+	// the request-only fields above stay out of it).
 	Dictionary to_json_value() const;
 };
 

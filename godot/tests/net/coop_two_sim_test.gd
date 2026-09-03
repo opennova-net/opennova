@@ -2749,7 +2749,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# NOTE deliberately NO joiner seat-spec install (and no asset root): the
 	# live header-only joiner only gains seat specs when GameWorld's
 	# admission-boundary prewarm runs install_seat_specs_for_type_ids over the
-	# streamed types (game_world.gd) — this test pins what the present must do
+	# streamed types (GameWorld) — this test pins what the present must do
 	# for a carrier whose spec has not been installed.
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")

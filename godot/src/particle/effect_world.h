@@ -186,7 +186,7 @@ public:
 	bool has_no_owner_bindings() const;
 	// The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
 	void advance_fixed_tick(double p_delta);
-	// Explicit GameFramePipeline device leg. Attachment poses and the
+	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.
 	void render_frame();

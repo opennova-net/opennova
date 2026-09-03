@@ -12,7 +12,7 @@ class SimView:
 	extends WorldView
 	var sim_value: Simulation = null
 
-	func sim() -> Simulation:
+	func _sim() -> Simulation:
 		return sim_value
 
 

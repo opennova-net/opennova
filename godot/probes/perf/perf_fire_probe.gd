@@ -331,18 +331,13 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]
 	var world := _ctx.world()
 	if world != null and not _world_skipped:
-		var gg := world.get_perf_probe_spans()
-		if not gg.is_empty():
-			spans += " gw{occl_r=%.1f occl_f=%.1f iris=%.1f weather=%.1f blink=%.1f}" % [
-					float(gg.get("occl_restore", 0)) / 1000.0,
-					float(gg.get("occl_frame", 0)) / 1000.0,
-					float(gg.get("iris", 0)) / 1000.0,
-					float(gg.get("weather", 0)) / 1000.0,
-					float(gg.get("blink", 0)) / 1000.0]
-		var pc := world.get_runtime_perf_counters()
+		# The per-leg world spans (occlusion, iris, weather, blink) are the F3
+		# Stats board's WORLD_* rows now (the leg table banks them); the typed
+		# tick counters stay on the world.
+		var pc: RuntimePerfCounters = world.get_runtime_perf_counters()
 		spans += " gwtick{total=%.1f foliage=%.1f runtime=%.1f audio=%.1f}" % [
-				float(pc.get("tick_us", 0)) / 1000.0, float(pc.get("foliage_us", 0)) / 1000.0,
-				float(pc.get("runtime_us", 0)) / 1000.0, float(pc.get("audio_us", 0)) / 1000.0]
+				float(pc.tick_us) / 1000.0, float(pc.foliage_us) / 1000.0,
+				float(pc.runtime_us) / 1000.0, float(pc.audio_us) / 1000.0]
 		var sim := world.get_sim()
 		if sim != null:
 			var sc: Dictionary = sim.get_runtime_perf_counters()

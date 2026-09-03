@@ -1,13 +1,10 @@
-[gd_scene load_steps=3 format=3]
-
-[ext_resource type="Script" path="res://game/world/game_world.gd" id="1_world"]
+[gd_scene load_steps=2 format=3]
 
 [sub_resource type="Environment" id="Environment_clear"]
 background_mode = 1
 ambient_light_source = 1
 
-[node name="GameWorld" type="Node3D"]
-script = ExtResource("1_world")
+[node name="GameWorld" type="GameWorld"]
 
 [node name="ClearColor" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_clear")

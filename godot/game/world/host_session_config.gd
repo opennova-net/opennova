@@ -128,12 +128,22 @@ static func game_type_for_mission_mode(mode: int) -> int:
 
 
 ## The session slice for Simulation.configure_host_session as the typed record
-## the sim takes (the record NetSessionDrive stages as
+## the sim takes (the record SessionDrive stages as
 ## MissionSetupOptions.host_session). The mission root resolves game_type_auto
 ## and stamps the mission-derived identity (mission_name / mission_file /
 ## spawn_names / game_root) on top before handing it to the sim.
 func to_session_options() -> HostSessionOptions:
 	var options := HostSessionOptions.new()
+	# The load-side identity the world's host entry consumes (the .bms the
+	# rotation's first pick names, the dev/test dir override) and the NovaWorld
+	# gate registration the session drive performs for the NovaWorld channel.
+	options.mission_file = mission if not mission.is_empty() \
+			else (missions[0] if not missions.is_empty() else "")
+	options.dir = dir
+	options.nw_gate_host = nw_gate_host
+	options.nw_gate_port = nw_gate_port
+	options.region = region
+	options.advertise = advertise
 	options.server_name = server_name
 	options.player_name = player_name
 	options.custom_text = custom_text

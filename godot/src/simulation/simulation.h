@@ -394,7 +394,7 @@ public:
 	// The input and outcomes are typed values. The one temporary tick sink
 	// (simulation/tick_sink.h, installed by the presentation owner around its
 	// own frame call) keeps per-tick Godot presentation synchronous during
-	// catch-up without installing a persistent callback bus; GameFramePipeline
+	// catch-up without installing a persistent callback bus; the GameWorld leg table
 	// orders concrete devices around this call.
 	Ref<MissionFrameOutcome> advance_session_frame(
 			const Ref<MissionFrameInput> &p_input);

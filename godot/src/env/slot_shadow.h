@@ -59,7 +59,7 @@ class Weather;
 // slot direction (the RenderingDevice depth band of advance_frame, D-RLIT-10)
 // where retail renders the entity at the origin of a rotation-only view.
 //
-// Driven once per display frame by GameFramePipeline through
+// Driven once per display frame by the GameWorld leg table through
 // GameWorld.render_slot_shadow_frame(), after the light select has pushed
 // this frame's LightScene and context into it — never self-clocked.
 class SlotShadow : public Node3D {

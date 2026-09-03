@@ -50,6 +50,9 @@ public:
 	// (the TOD WAC / the debug row move it through Simulation.
 	// command_time_of_day_minutes), this state's standalone home otherwise
 	// (previews, fixtures) — configure/advance act on the standalone home.
+	// The mission clock's default day length in minutes (the script-visible
+	// DEFAULT_MINUTES_PER_DAY constant binds from it).
+	static constexpr int DEFAULT_MINUTES_PER_DAY = 1440;
 	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
 	static double mission_start_time_hhmm(int p_start_time_q8_8);
 	void advance_mission_clock(int p_ticks);

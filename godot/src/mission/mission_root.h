@@ -158,7 +158,7 @@ public:
 	// Wire-presentation counters (spawned/unresolved/live; empty before setup).
 	Ref<WirePresentStats> get_wire_present_stats() const;
 	// Cold wire rows the presentation budget still owes. Zero before setup;
-	// NetSessionDrive keys the join-admission edge on this drain.
+	// SessionDrive keys the join-admission edge on this drain.
 	int join_wire_present_pending() const;
 	// Load-time warm hook: compile the fire-presentation pipelines (the
 	// tracer ribbon materials) behind the loading screen; see GameWorld's
@@ -208,7 +208,7 @@ public:
 	// ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful
 	// fixed-62.5 Hz accumulator, with a zero-tick frame still presenting current render-only entity
 	// rows (camera and local attach/detach change between fixed ticks). The native
-	// session owns bank/clamp, input retention, and per-tick order; GameFramePipeline
+	// session owns bank/clamp, input retention, and per-tick order; the GameWorld leg table
 	// owns the concrete Godot device order [orig: Game_MainLoop @ 0x52b630].
 	Ref<MissionFrameOutcome> advance_session_frame(const Ref<MissionFrameInput> &p_input);
 	// The probe counters (built per call; the sim's own counters nest under

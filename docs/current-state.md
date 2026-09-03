@@ -42,7 +42,7 @@ MoveCB/non-Powerup contact stream; the former gameplay radius scan is deleted
 request now carries every mode's rule inputs
 (including flag limit/return time, KOTH delta, and two/four-side selection),
 with an explicit Flag Me route for retail's otherwise-unreachable task-12
-launch branch. `godot/game/world/game_frame_pipeline.gd` remains the
+launch branch. `godot/src/world/game_world_frame.cpp`'s leg table (ADR 0043 slice G10) is the
 device-order owner, superseding ADR 0033's R1 callback-bus design; PR #468 moved local-player camera placement plus
 the ObjectModel material loop onto pipeline legs. The P1 rewrite queue that
 followed (env/weather, placer,

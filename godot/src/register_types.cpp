@@ -55,6 +55,12 @@
 #include "render/q3_source_registry.h"
 #include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
+#include "world/game_world.h"
+#include "world/load_timeline.h"
+#include "world/loading_screen_info.h"
+#include "world/resource_root_resolver.h"
+#include "world/runtime_perf_counters.h"
+#include "world/world_view.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
@@ -94,6 +100,7 @@
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
 #include "hud/feed_row.h"
+#include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
 #include "devtools/imgui_pass_node.h"
@@ -196,6 +203,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainFoliageDef);
 	GDREGISTER_CLASS(TerrainFoliageMap);
 	GDREGISTER_CLASS(FoliageFrameStats);
+	GDREGISTER_CLASS(VegGraphicRow);
 	GDREGISTER_CLASS(FoliageDispatcher);
 	GDREGISTER_CLASS(TerrainTileEntry);
 	GDREGISTER_CLASS(TerrainTileInfo);
@@ -304,6 +312,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(FeedRow);
+	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
@@ -385,6 +394,20 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ItemEffectDirectorStats);
 	GDREGISTER_CLASS(ItemEffectDirector);
 	GDREGISTER_CLASS(OcclusionFrame);
+	// The world (ADR 0043 slice G10): the world node, its two view interfaces
+	// (the live implementations are internal), the resource-root resolver
+	// hook, the load timeline, the loading-screen record and the typed perf
+	// counters.
+	GDREGISTER_CLASS(ResourceRootResolver);
+	GDREGISTER_CLASS(LoadTimelineSpan);
+	GDREGISTER_CLASS(LoadTimeline);
+	GDREGISTER_CLASS(LoadingScreenInfo);
+	GDREGISTER_CLASS(RuntimePerfCounters);
+	GDREGISTER_CLASS(WorldView);
+	GDREGISTER_CLASS(ArmoryWorldView);
+	GDREGISTER_INTERNAL_CLASS(LiveWorldView);
+	GDREGISTER_INTERNAL_CLASS(LiveArmoryWorldView);
+	GDREGISTER_CLASS(GameWorld);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);
 	GDREGISTER_CLASS(DisplayDecode);

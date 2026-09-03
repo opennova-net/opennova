@@ -105,7 +105,7 @@ func _player_classes(profile: CharacterJoinProfile) -> Array[int]:
 
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var db := _load_db()
-	var profile := NetSessionDrive.character_join_profile_from_database(db)
+	var profile := db.character_join_profile()
 
 	# The first combo of each alignment in table order (N00 D00 combo 1; N04 D00
 	# combo 1). The shipped table yields 0x8207 there (its first evil entry is N07).
@@ -135,7 +135,7 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 			{"player_class": 6},
 		],
 	}
-	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
+	var profile := db.character_join_profile(selected)
 	var combo := db.get_combo(0, 0, 1)
 
 	assert_eq(profile.get_character_id(0), 0x0400,
@@ -173,7 +173,7 @@ func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
 			},
 		],
 	}
-	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
+	var profile := db.character_join_profile(selected)
 	assert_eq(_character_ids(profile), [0x0400, 0x8407],
 			"assignment to either team receives that side's persisted character")
 	assert_eq(_player_classes(profile), [5, 9],
