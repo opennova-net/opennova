@@ -12,8 +12,8 @@ extends RefCounted
 ##   extra files written on top. Tests remove it with TestFs.remove_dir_recursive.
 ## - boot_minimal(): the packaged game_world.tscn in the tree with mnml.bms
 ##   loaded from that root (the typed MissionData path: nothing but a real
-##   MissionPresentation can result).
-## - boot_mission_data(): a MissionPresentation over an in-memory MissionData
+##   MissionRoot can result).
+## - boot_mission_data(): a MissionRoot over an in-memory MissionData
 ##   (the entity-registry/discovery recipe), no VFS involved.
 
 const MINIMAL_ASSETS_DIR := "res://../assets"
@@ -149,13 +149,13 @@ static func boot_minimal(test: GutTest, root_dir := "",
 	return world
 
 
-## A MissionPresentation in the tree over an in-memory mission: the container
+## A MissionRoot in the tree over an in-memory mission: the container
 ## and the runtime are parented under the test; `options` reach setup() as is.
 static func boot_mission_data(test: GutTest, mission: MissionData,
-		options: MissionSetupOptions = null) -> MissionPresentation:
+		options: MissionSetupOptions = null) -> MissionRoot:
 	var container := Node3D.new()
 	test.add_child_autofree(container)
-	var runtime := MissionPresentation.new()
+	var runtime := MissionRoot.new()
 	test.add_child_autofree(runtime)
 	if options != null:
 		runtime.setup(mission, container, options)

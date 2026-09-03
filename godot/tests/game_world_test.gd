@@ -2,7 +2,6 @@ extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const FirstPersonArmsWitness := preload(
 		"res://game/world/first_person_arms_witness.gd")
 
@@ -16,8 +15,8 @@ func after_each() -> void:
 
 # (The Node runtime/sim doubles that used to live here — TransportRuntimeStub,
 # ProfilingRuntimeStub, FxRuntimeStub, ItemPoseRuntimeStub, the anchor/blink/
-# occlusion/joiner stubs — are gone: GameWorld._runtime is typed MissionPresentation
-# and MissionPresentation._sim is typed Simulation, so every runtime-consuming
+# occlusion/joiner stubs — are gone: GameWorld._runtime is typed MissionRoot
+# and MissionRoot._sim is typed Simulation, so every runtime-consuming
 # test now boots the REAL stack through the public load path. The presentation
 # doubles followed (ADR 0043 rule 11): the viewmodel/prewarm placer stubs and
 # their GameWorld harnesses, the FxWorldStub/ImpactAudioStub recording sinks,
@@ -192,7 +191,7 @@ func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -
 func _placed_node(world: GameWorld, placed: Dictionary) -> ObjectModel:
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0, "the authored entity carries a BMS id")
-	var node := world.get_runtime().get_registry().resolve_single(bms_id) as ObjectModel
+	var node := world.get_runtime().get_entity_index().resolve_single(bms_id) as ObjectModel
 	assert_not_null(node, "the authored entity placed a real ObjectModel")
 	return node
 
@@ -397,7 +396,7 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 	world.set_perf_probe_enabled(true)
 	assert_true(bool(sim.get_runtime_perf_counters().get("runtime_profiling_enabled", false)),
-			"GameWorld forwards consumer intent through MissionPresentation's public seam")
+			"GameWorld forwards consumer intent through MissionRoot's public seam")
 	world.set_perf_probe_enabled(false)
 	assert_false(bool(sim.get_runtime_perf_counters().get("runtime_profiling_enabled", true)),
 			"disabling the probe releases the native timer through the same seam")
@@ -449,7 +448,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
 	# (before it, play()/pause() were inert in the game).
 	var world := WorldFixture.boot_minimal(self)
-	var runtime: MissionPresentation = world.get_runtime()
+	var runtime: MissionRoot = world.get_runtime()
 	var sim := world.get_sim()
 	assert_not_null(sim)
 
@@ -520,7 +519,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	_tick_until_impact(world)
 	# The fixed ticks the presenting frame banked (a 0.02 s frame banks one,
 	# every fourth frame two): the same-frame particle advance ran once per tick.
-	var ticks_in_frame := int(world.get_runtime().get_perf_counters().get("ticks", 0))
+	var ticks_in_frame := int(world.get_runtime().get_perf_counters().ticks)
 
 	var rows := effects.get_debug_group_report()
 	assert_eq(rows.size(), 1,
@@ -723,7 +722,7 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 		MissionEffect.make("round_end", 2),
 	]
 	# The runtime's drained batch is the router's only input: raise it through
-	# the same signal MissionPresentation emits once per tick.
+	# the same signal MissionRoot emits once per tick.
 	world.get_runtime().effects_drained.emit(rows)
 	assert_signal_emitted_with_parameters(world, "mission_effects", [rows])
 
@@ -1393,7 +1392,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	expected_clock.advance_mission_clock(8)
 	assert_almost_eq(advanced, expected_clock.time_of_day, 0.000001,
 			"the mission clock advances once per simulation tick")
-	assert_eq(int(world.get_runtime().get_perf_counters().get("ticks", 0)), 8,
+	assert_eq(int(world.get_runtime().get_perf_counters().ticks), 8,
 			"mission simulation retains its 62.5 Hz cadence")
 	expected_clock.free()
 
@@ -1435,7 +1434,7 @@ func _world_driven_weather_state_after(deltas: Array) -> Array:
 	var sim_ticks := 0
 	for delta in deltas:
 		world.tick(Vector3.ZERO, Transform3D(), float(delta))
-		sim_ticks += int(world.get_runtime().get_perf_counters().get("ticks", 0))
+		sim_ticks += int(world.get_runtime().get_perf_counters().ticks)
 	var env := world.get_node("MissionEnvironment") as MissionEnvironment
 	var weather := world.get_node("Weather") as Weather
 	var state := [
@@ -2862,7 +2861,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 
 
 func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
-	# The REAL MissionPresentation pose chain: before the first completed logic tick
+	# The REAL MissionRoot pose chain: before the first completed logic tick
 	# there is no present snapshot (the authored Node seeds the spawn); once a
 	# tick completes, the owner follows the sim's client-view value pose; an
 	# identity absent from the snapshot detaches (null). The old runtime double
@@ -3005,7 +3004,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
-	var building := world.get_runtime().get_registry().resolve_single(bms_id) as Node3D
+	var building := world.get_runtime().get_entity_index().resolve_single(bms_id) as Node3D
 	assert_not_null(building, "the authored building placed a real ObjectModel")
 	if building == null:
 		return
@@ -3056,7 +3055,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			func(mission: MissionData) -> void:
 				placed.merge(mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
-	var building := world.get_runtime().get_registry().resolve_single(
+	var building := world.get_runtime().get_entity_index().resolve_single(
 			int(placed.get("bms_id", 0))) as Node3D
 	assert_not_null(building)
 	if building == null:

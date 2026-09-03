@@ -92,10 +92,10 @@ void Simulation::_bind_methods() {
 			&Simulation::tick_dt);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),
 			&Simulation::ticks_from_ms);
-	ClassDB::bind_method(D_METHOD("advance_session_frame", "input", "tick_sink"),
-			&Simulation::advance_session_frame, DEFVAL(Callable()));
-	ClassDB::bind_method(D_METHOD("step_session_frame", "input", "tick_sink"),
-			&Simulation::step_session_frame, DEFVAL(Callable()));
+	ClassDB::bind_method(D_METHOD("advance_session_frame", "input"),
+			&Simulation::advance_session_frame);
+	ClassDB::bind_method(D_METHOD("step_session_frame", "input"),
+			&Simulation::step_session_frame);
 	ClassDB::bind_method(D_METHOD("pause_session"), &Simulation::pause_session);
 	ClassDB::bind_method(D_METHOD("resume_session"), &Simulation::resume_session);
 	ClassDB::bind_method(D_METHOD("reset_session"), &Simulation::reset_session);

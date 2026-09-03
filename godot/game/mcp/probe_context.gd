@@ -38,8 +38,8 @@ func world() -> GameWorld:
 	return _live(shell.get_world() if shell != null else null) as GameWorld
 
 
-func runtime() -> MissionPresentation:
-	return _live(shell.get_runtime() if shell != null else null) as MissionPresentation
+func runtime() -> MissionRoot:
+	return _live(shell.get_runtime() if shell != null else null) as MissionRoot
 
 
 func sim() -> Simulation:

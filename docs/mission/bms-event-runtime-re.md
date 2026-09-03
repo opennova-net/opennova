@@ -177,7 +177,7 @@ at low FPS).
 runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
 the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
-interpolation (faithful to §1.6). `MissionPresentation.tick()` survives as the
+interpolation (faithful to §1.6). `MissionRoot.tick()` survives as the
 deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
 the same session state machine. `MainGame` → `GameWorld` → `GameFramePipeline` is
 the sole live real-time route. ADR 0025 retired the old ONED embedded preview;

@@ -211,9 +211,12 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
 	var container := Node3D.new()
 	container.name = "MissionObjects"
-	world.add_child(container)
+	root.add_child(container)
 	var node := ObjectModel.new()
 	container.add_child(node)
 	node.set_object_data(_fixture_object_data("shed.3di"))
@@ -661,9 +664,12 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
 	var container := Node3D.new()
 	container.name = "MissionObjects"
-	world.add_child(container)
+	root.add_child(container)
 	# armory with its LGHT 0 authored onto ROBJ 1 at (0.25, 0.5, -0.75), a
 	# 1000-wu radius and light objects enabled.
 	var data := _synthetic_object_data(SYN_ARMRY_LGHT0_SUB1)
@@ -742,9 +748,12 @@ func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> v
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
 	var container := Node3D.new()
 	container.name = "MissionObjects"
-	world.add_child(container)
+	root.add_child(container)
 	var node := ObjectModel.new()
 	container.add_child(node)
 	node.set_object_data(_fixture_object_data("shed.3di"))

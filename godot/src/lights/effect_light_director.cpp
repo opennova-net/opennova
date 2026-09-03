@@ -1,5 +1,7 @@
 #include "lights/effect_light_director.h"
 
+#include "mission/mission_root.h"
+
 #include "env/mission_environment.h"
 #include "env/water.h"
 #include "env/weather.h"
@@ -35,7 +37,9 @@ using namespace godot;
 
 namespace {
 
-constexpr const char *kMissionObjectsPath = "MissionObjects";
+// The placer's container lives under the per-mission subtree (MissionRoot,
+// ADR 0043 d9); a bare-scene test builds the same two-level shape.
+constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
 constexpr const char *kCoronaShaderPath = "res://shaders/light_corona.gdshader";
 
 int now_ms() {
@@ -61,20 +65,20 @@ Node *EffectLightDirector::_world() const {
 	return Object::cast_to<Node>(ObjectDB::get_instance(world_id_));
 }
 
-Object *EffectLightDirector::_runtime() const {
+MissionRoot *EffectLightDirector::_runtime() const {
 	Node *world = _world();
 	if (world == nullptr) {
 		return nullptr;
 	}
-	return static_cast<Object *>(world->call("get_runtime"));
+	return Object::cast_to<MissionRoot>(static_cast<Object *>(world->call("get_runtime")));
 }
 
 Ref<Simulation> EffectLightDirector::_sim() const {
-	Object *runtime = _runtime();
+	MissionRoot *runtime = _runtime();
 	if (runtime == nullptr) {
 		return Ref<Simulation>();
 	}
-	return Ref<Simulation>(runtime->call("get_sim"));
+	return runtime->get_sim();
 }
 
 MissionEnvironment *EffectLightDirector::_environment() const {
@@ -376,8 +380,8 @@ int64_t EffectLightDirector::_owner_id_for_bms(int p_bms_id) {
 		return *cached;
 	}
 	int64_t owner = 0;
-	if (Object *runtime = _runtime()) {
-		const Ref<EntityIndex> registry = runtime->call("get_registry");
+	if (MissionRoot *runtime = _runtime()) {
+		const Ref<EntityIndex> registry = runtime->get_entity_index();
 		if (registry.is_valid()) {
 			if (ObjectModel *node = registry->resolve_single(p_bms_id)) {
 				owner = owner_id_for_node(node);

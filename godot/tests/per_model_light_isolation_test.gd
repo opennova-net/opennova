@@ -72,13 +72,16 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
-	# The world creates MissionObjects during mission load; a bare scene test
-	# provides the same container shape itself.
-	var container: Node = world.get_node_or_null("MissionObjects")
+	# The world creates MissionRoot/MissionObjects during mission load; a bare
+	# scene test provides the same two-level container shape itself.
+	var container: Node = world.get_node_or_null("MissionRoot/MissionObjects")
 	if container == null:
+		var root := MissionRoot.new()
+		root.name = "MissionRoot"
+		world.add_child(root)
 		container = Node3D.new()
 		container.name = "MissionObjects"
-		world.add_child(container)
+		root.add_child(container)
 	assert_not_null(container)
 	var owner_model := _placed_model(container, Vector3(0.0, 0.0, 0.0))
 	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 77)
@@ -160,11 +163,14 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
-	var container: Node = world.get_node_or_null("MissionObjects")
+	var container: Node = world.get_node_or_null("MissionRoot/MissionObjects")
 	if container == null:
+		var root := MissionRoot.new()
+		root.name = "MissionRoot"
+		world.add_child(root)
 		container = Node3D.new()
 		container.name = "MissionObjects"
-		world.add_child(container)
+		root.add_child(container)
 	var owner_model := _placed_model(container, Vector3.ZERO)
 	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 0)
 	var bystander := _placed_model(container, Vector3(3.0, 0.0, 0.0))
@@ -202,11 +208,14 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
-	var container: Node = world.get_node_or_null("MissionObjects")
+	var container: Node = world.get_node_or_null("MissionRoot/MissionObjects")
 	if container == null:
+		var root := MissionRoot.new()
+		root.name = "MissionRoot"
+		world.add_child(root)
 		container = Node3D.new()
 		container.name = "MissionObjects"
-		world.add_child(container)
+		root.add_child(container)
 	# house.3di carries no light records: these draws only ever see what the
 	# static source spawns.
 	var model_a := _placed_model(container, Vector3(0.0, 0.0, 0.0))

@@ -10,7 +10,6 @@ extends RefCounted
 ## WorldDeviceFrame pattern. This is not a second load coordinator: the shell's
 ## WorldLoadCoordinator owns the operation and its cancel/settle edges.
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
@@ -113,6 +112,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
 	_world._mission_forces_indoors = (mission.get_info().attrib_flags & MissionData.ATTRIB_FORCE_INDOORS) != 0
 	timeline.span("objects")
+	_start_mission_root()
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
 	_world.load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_RUNTIME))
@@ -124,7 +124,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 		unload()
 		return runtime_error
 	# The non-foliage loaded-.3DI page freezes once here (the load plan's
-	# freeze witness): MissionPresentation.setup has now resolved the placed/wire
+	# freeze witness): MissionRoot.setup has now resolved the placed/wire
 	# mission models (including collision/husk definitions); late network spawns
 	# must not change this page.
 	var challenge_sim: Simulation = _world._runtime.get_sim()
@@ -177,8 +177,28 @@ func _mount_runtime_root(dir: String) -> ResourceRoot:
 	return resource_root
 
 
-# Populate the world with the mission's placed objects under a MissionObjects node.
-# Uses the same shell-agnostic placer as every other mission load path.
+# The per-mission subtree (ADR 0043 d9): MissionRoot owns the placed
+# MissionObjects container the placer fills next, the Entities presenter and,
+# after _start_runtime, the sim. It exists before placement so the container
+# parents under it; unload() frees the container's nodes BEFORE the root's
+# own teardown legs, exactly the order the world-parented container had.
+func _start_mission_root() -> void:
+	# A same-frame reload (a test's unload + load) still finds the previous
+	# root queued for deletion under the world: queue_free is deferred to the
+	# frame flush. Detach it now so the new root owns the "MissionRoot" name
+	# and the directors' MissionRoot/MissionObjects lookups resolve the live
+	# subtree, never the dying one. Its own teardown runs on that detach; the
+	# shipped game reloads across frames and never reaches this leg.
+	var stale := _world.get_node_or_null(NodePath("MissionRoot"))
+	if stale != null:
+		_world.remove_child(stale)
+	_world._runtime = MissionRoot.new()
+	_world._runtime.name = "MissionRoot"
+	_world.add_child(_world._runtime)
+
+
+# Populate the world with the mission's placed objects under the mission root's
+# MissionObjects node. Uses the same shell-agnostic placer as every other mission load path.
 func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null) -> void:
 	if _world._resource_root == null or mission == null:
 		return
@@ -201,7 +221,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
 	# pool-0 organics arrive in 0x0C and every live pose advances through 0x0A.
-	# MissionPresentation presents those decoded rows directly instead of deferring them
+	# MissionRoot presents those decoded rows directly instead of deferring them
 	# onto nonexistent local BMS placements (D-NET-194). Explicit-mission/debug
 	# joins still use their complete document.
 	if timeline != null:
@@ -210,7 +230,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# object stage's constant value (the load plan's per-model pulse witness).
 	options["progress"] = func() -> void: _world.load_progress.emit(
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
-	_world._mission_stats = _world._placer.place(mission, _world, options)
+	_world._mission_stats = _world._placer.place(mission, _world._runtime, options)
 	_world._apply_occlusion_culling_policy()
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building
@@ -267,7 +287,16 @@ func unload() -> void:
 	if _world._terrain != null:
 		_world._terrain.set_static_shadow_placer(null)
 	_world._apply_occlusion_culling_policy()
-	var container := _world.get_node_or_null(NodePath("MissionObjects"))
+	# The MissionObjects container is the MissionRoot's child (ADR 0043 d9) and
+	# is queued for deletion FIRST, before the root's own queue_free below: the
+	# delete queue keeps that order, so the container's nodes (the wire bodies,
+	# husk grafts, throwable models, scar meshes) are gone before
+	# MissionRoot._exit_tree runs EntityPresenter.teardown -- exactly as when the
+	# container was the world's own child. A root that never reached
+	# _start_runtime has no sim; its container still frees the same way.
+	var runtime := _world.get_runtime()
+	var container := runtime.get_node_or_null(NodePath("MissionObjects")) \
+			if runtime != null else null
 	if container != null:
 		container.queue_free()
 	# Per-item attached-effect owner keys reference nodes in that container —
@@ -295,7 +324,7 @@ func unload() -> void:
 	_world._loaded_mission = null
 	_world._loaded_mission_file = ""
 	if _world._runtime != null:
-		_world._runtime.queue_free()  # drops its sim too (MissionPresentation._exit_tree)
+		_world._runtime.queue_free()  # drops its sim too (MissionRoot._exit_tree, after the container above)
 	_world._runtime = null
 	if _world._effect_world != null:
 		_world._effect_world.release_runtime_renderer_resources()
@@ -558,7 +587,7 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 	if records.is_empty():
 		return
 	var options := {"skip_kinds": [MissionData.KIND_ORGANIC]}
-	_world._mission_stats = _world._placer.place_entities(records, _world, options)
+	_world._mission_stats = _world._placer.place_entities(records, _world._runtime, options)
 	if _world._runtime != null:
 		_world._runtime.rebind_placed_entities(_world._placer)
 	if _world._occlusion != null:
@@ -584,7 +613,7 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 ## deferred-spawn queue drains behind the loading/DEATH hold. Trivially true
 ## with no runtime or no wire presenter.
 func is_join_wire_present_drained() -> bool:
-	var runtime := _world._runtime as MissionPresentation
+	var runtime := _world.get_runtime()
 	return runtime == null or runtime.join_wire_present_pending() == 0
 
 
@@ -672,18 +701,16 @@ func _configure_foliage() -> void:
 			)
 
 
-# Start the shared mission runtime driver: it promotes the mission, builds the present index over the
+# Start the shared mission runtime (the MissionRoot _start_mission_root created before
+# placement): it promotes the mission, builds the present index over the
 # placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
 # drives it explicitly from tick(); its drained side effects route through
 # the router's on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: MissionData, bms_name: String) -> int:
-	var container := _world.get_node_or_null(NodePath("MissionObjects"))
-	_world._runtime = MissionPresentation.new()
-	_world._runtime.name = "MissionPresentation"
-	_world.add_child(_world._runtime)
-	if _world._frame_stats != null:
-		_world._runtime.set_frame_stats(_world._frame_stats)
+	var container := _world.get_runtime().get_node_or_null(NodePath("MissionObjects"))
+	# A null board is a no-op on the root (its own board is null too).
+	_world._runtime.set_frame_stats(_world._frame_stats)
 	var mission_file := bms_name.get_file()
 	if mission_file.is_empty():
 		mission_file = bms_name
@@ -718,7 +745,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	opts.playable = _world._playable and not _world._net_drive.pending_dedicated()
 	# Stamp the staged net-session request (typed record + derived staging +
 	# the surrendered preload sim, consumed once per load) onto the runtime's
-	# options — MissionPresentation alone adopts opts.simulation (ADR 0011/0012).
+	# options — MissionRoot alone adopts opts.simulation (ADR 0011/0012).
 	_world._net_drive.stage_runtime_options(opts)
 	# The placer + environment node let the wire present pass resolve + light its
 	# remote-entity avatars (build_player_animated_model): every remote row on a
@@ -734,7 +761,9 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 		# Free before emitting: a load_failed handler may synchronously tear
 		# the world down (the game shell returns to the menu via unload()),
 		# and unload() frees _runtime — emitting first turned this leg into a
-		# null-instance free on reentry.
+		# null-instance free on reentry. The free is IMMEDIATE on purpose (not
+		# queue_free) and takes the root's MissionObjects child with it: nothing
+		# may present a half-built mission before the handler runs.
 		_world._runtime.free()
 		_world._runtime = null
 		if lan_bind_failure:
@@ -930,7 +959,7 @@ func _start_effect_world() -> void:
 	# _start_runtime and before the first session frame presents anything,
 	# so no wire body exists yet and nothing needs replaying (a subscriber
 	# that connects after the first present replays wire_nodes() itself).
-	var wire_runtime: MissionPresentation = _world.get_runtime()
+	var wire_runtime: MissionRoot = _world.get_runtime()
 	var presenter: EntityPresenter = wire_runtime.get_entity_presenter() \
 			if wire_runtime != null else null
 	if presenter != null and _world._light_director != null:

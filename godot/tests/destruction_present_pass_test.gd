@@ -17,7 +17,6 @@ extends GutTest
 # equivalent without native pose injection and is covered there by the sim's
 # authoritative initial pose plus the yaw-only tilt-retention leg.
 
-const MissionPresentation := preload('res://game/world/mission_presentation.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
 const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
@@ -426,9 +425,12 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child(world)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
 	var container := Node3D.new()
 	container.name = "MissionObjects"
-	world.add_child(container)
+	root.add_child(container)
 	var intact := ObjectModel.new()
 	container.add_child(intact)
 	var intact_data := ObjectData.new()
@@ -704,7 +706,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 
 func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	# The REAL pose chain: an authored building boots into a real Simulation
-	# (through MissionPresentation, the production owner), and the node-less batched
+	# (through MissionRoot, the production owner), and the node-less batched
 	# husk graft plus its owned wreck anchor land on the sim's authoritative
 	# present-effect pose — the origin-keyed leg — rather than the carved batch
 	# transform. The authored yaw-only entity pose additionally pins the
@@ -719,7 +721,7 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	mission.add_entity(3, 0, Vector3(12, 3, -7), Vector3(0, 40, 0))  # KIND_ORGANIC
 	var boot_container := Node3D.new()
 	add_child_autofree(boot_container)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(mission, boot_container)
 	var sim := rt.get_sim()

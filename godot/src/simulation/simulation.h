@@ -149,6 +149,7 @@ class SkeletalAnim;
 class ItemDatabase;
 class AvatarDatabase;
 class ResourceRoot;
+class TickSink;
 
 // The Godot adapter for one portable in-match tick target. It owns the World
 // and logic systems (WAC VM, BMS evaluator, AI); inmatch::Session owns
@@ -338,6 +339,9 @@ public:
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name,
 			int p_join_role = 0, const String &p_spectator_password = String());
 	bool is_joiner() const { return joiner_; }
+	// Placed identities retired since the last take (the slot vanished or was
+	// re-typed): the mission root hides their placed representation.
+	PackedInt32Array take_retired_placement_ids();
 	// Live player-slot spectator state: joiner = S2C 0x75 latch; authority = Server_SetPlayerSpectator.
 	bool is_local_spectator() const;
 	bool set_local_spectator(bool p_spectator);
@@ -391,15 +395,19 @@ public:
 	}
 
 	// --- Portable session frame (ADR 0035) --------------------------------
-	// The input and outcomes are typed values. The one temporary tick sink keeps
-	// per-tick Godot presentation synchronous during catch-up without installing
-	// a persistent callback bus; GameFramePipeline orders concrete devices around this call.
+	// The input and outcomes are typed values. The one temporary tick sink
+	// (simulation/tick_sink.h, installed by the presentation owner around its
+	// own frame call) keeps per-tick Godot presentation synchronous during
+	// catch-up without installing a persistent callback bus; GameFramePipeline
+	// orders concrete devices around this call.
 	Ref<MissionFrameOutcome> advance_session_frame(
-			const Ref<MissionFrameInput> &p_input,
-			const Callable &p_tick_sink = Callable());
+			const Ref<MissionFrameInput> &p_input);
 	Ref<MissionFrameOutcome> step_session_frame(
-			const Ref<MissionFrameInput> &p_input,
-			const Callable &p_tick_sink = Callable());
+			const Ref<MissionFrameInput> &p_input);
+	// The C++ per-tick sink: MissionRoot IS the sink and binds itself for the
+	// duration of each advance/step call (null between calls, so a direct
+	// step() or a stray holder of this sim never reaches a dead owner).
+	void set_tick_sink(TickSink *p_sink) { session_tick_sink_ = p_sink; }
 	bool pause_session();
 	bool resume_session();
 	bool reset_session();
@@ -1340,7 +1348,7 @@ public:
 	// Wire the terrain the AI grounds on (the shell's loaded TerrainData). Copies the depth
 	// buffer + sector layout so the portable height field outlives the source and survives reload.
 	// Null/unloaded clears grounding (entities keep their authored Z). GameWorld
-	// and direct test/tooling fixtures call this through MissionPresentation.setup().
+	// and direct test/tooling fixtures call this through MissionRoot.setup().
 	void set_terrain_height_field(const Ref<TerrainData> &p_terrain);
 	// S16 (ADR 0028): the seat/mount table installs through the NATIVE
 	// extractor (simassets::extract_item_seat_specs) over the retained def

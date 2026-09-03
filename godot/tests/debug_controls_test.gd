@@ -2,7 +2,7 @@ extends GutTest
 
 # DebugControls is the typed debug-control table (ADR 0042 d5) shared by the
 # MCP game_debug plane. These tests drive the real table over a shell fake
-# answering REAL MissionPresentation runtimes (each over an in-memory default
+# answering REAL MissionRoot runtimes (each over an in-memory default
 # mission, so its Simulation is the engine row owner): rows resolve their
 # owners live per call, typed argument checks refuse bad input before any
 # engine call, and nothing replays across an owner swap (a fresh mission gets
@@ -73,9 +73,9 @@ const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 class RuntimeShell:
 	extends GameShell
 
-	var runtime: MissionPresentation = null
+	var runtime: MissionRoot = null
 
-	func get_runtime() -> MissionPresentation:
+	func get_runtime() -> MissionRoot:
 		return runtime
 
 	func shell_state_name() -> String:
@@ -92,14 +92,14 @@ class AuthorityAdapter:
 
 
 var _sim: Simulation
-var _runtime: MissionPresentation
+var _runtime: MissionRoot
 var _shell: RuntimeShell
 var _adapter: AuthorityAdapter
 var _controls: DebugControls
 
 
 func before_each() -> void:
-	# A real MissionPresentation over an in-memory default mission: its
+	# A real MissionRoot over an in-memory default mission: its
 	# Simulation is the engine row owner the table resolves per call.
 	_runtime = WorldFixture.boot_mission_data(self, WorldFixture.default_mission(0))
 	_sim = _runtime.get_sim()
@@ -343,7 +343,7 @@ func test_reads_are_live_and_nothing_replays_across_an_owner_swap() -> void:
 
 	# A fresh mission: a second real runtime (its own Simulation) behind the
 	# same shell.
-	var replacement_runtime: MissionPresentation = WorldFixture.boot_mission_data(
+	var replacement_runtime: MissionRoot = WorldFixture.boot_mission_data(
 			self, WorldFixture.default_mission(0))
 	var replacement: Simulation = replacement_runtime.get_sim()
 	_shell.runtime = replacement_runtime

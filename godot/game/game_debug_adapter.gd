@@ -524,7 +524,7 @@ func _current_world() -> GameWorld:
 	return _shell.get_world() if _shell != null else null
 
 
-func _current_runtime() -> MissionPresentation:
+func _current_runtime() -> MissionRoot:
 	if _shell == null:
 		return null
 	var value := _shell.get_runtime()

@@ -128,9 +128,10 @@ static func game_type_for_mission_mode(mode: int) -> int:
 
 
 ## The session slice for Simulation.configure_host_session as the typed record
-## the sim takes. The mission runtime stamps the mission-derived identity
-## (mission_name / mission_file / spawn_names / game_root) on top before handing
-## it to the sim.
+## the sim takes (the record NetSessionDrive stages as
+## MissionSetupOptions.host_session). The mission root resolves game_type_auto
+## and stamps the mission-derived identity (mission_name / mission_file /
+## spawn_names / game_root) on top before handing it to the sim.
 func to_session_options() -> HostSessionOptions:
 	var options := HostSessionOptions.new()
 	options.server_name = server_name
@@ -139,6 +140,7 @@ func to_session_options() -> HostSessionOptions:
 	options.expansion = expansion
 	options.integrity_profile = integrity_profile
 	options.game_type = game_type
+	options.game_type_auto = game_type_auto
 	options.class_allow_mask = class_allow_mask
 	options.channel = channel
 	options.lan_mode = lan_mode

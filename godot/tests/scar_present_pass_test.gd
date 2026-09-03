@@ -14,7 +14,6 @@ extends GutTest
 #  through the owner's section matrix at draw time — the section-node parent
 #  here; docs/world/world-wac-ai-re.md §24.9]
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 const MODEL_GRAPHIC := "armory"
 const MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
@@ -418,7 +417,7 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	assert_eq(mission.create_default(), OK)
 	var boot_container := Node3D.new()
 	add_child_autofree(boot_container)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(mission, boot_container)
 	var sim := rt.get_sim()

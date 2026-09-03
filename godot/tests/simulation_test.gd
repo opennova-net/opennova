@@ -543,7 +543,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	stats.set_capture_active(true)
 	var frame_input := MissionFrameInput.new()
 	frame_input.delta_seconds = Simulation.tick_dt()
-	var frame_outcome := sim.step_session_frame(frame_input, Callable())
+	var frame_outcome := sim.step_session_frame(frame_input)
 	assert_not_null(frame_outcome)
 	var window := stats.drain()
 	var samples: PackedInt32Array = window.get_sample_frames()
@@ -581,7 +581,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(counters)
 	assert_false(bool(counters.get("trace_profiling_enabled", true)))
 	stats.set_capture_active(true)
-	frame_outcome = sim.step_session_frame(frame_input, Callable())
+	frame_outcome = sim.step_session_frame(frame_input)
 	assert_not_null(frame_outcome)
 	assert_eq(frame_outcome.get_ticks_run(), 1,
 			"the tick accounting is exported with profiling closed")
@@ -1570,7 +1570,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# could pass (the compensating-error pair the fp_impact probe pinned;
 	# ledger D-WPN-18).
 	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
-	# then resolve traits through the same production seam as MissionPresentation. Retail
+	# then resolve traits through the same production seam as MissionRoot. Retail
 	# returns before projectile damage when the struck entity has no ItemDef.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
@@ -2331,7 +2331,7 @@ func test_infantry_anim_map_failure_paths() -> void:
 
 func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 	# The listen host's player is captured in AiSystem's baseline before the
-	# MissionPresentation per-entity ADM sweep. Stop/Restart replaces the live AI rows
+	# MissionRoot per-entity ADM sweep. Stop/Restart replaces the live AI rows
 	# with that baseline at the same count, so a count-only late-spawn resolver
 	# must explicitly repopulate the restored rows.
 	var md := MissionData.new()
@@ -2372,7 +2372,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	if RetailData.def_root().is_empty():
 		pending(RetailData.fixture_pending_text("def/weapon.def"))
 		return
-	# MissionPresentation resolves per-entity ADMs once after the host player spawn. A
+	# MissionRoot resolves per-entity ADMs once after the host player spawn. A
 	# joiner's local L and host-admitted remote players spawn later; they must still
 	# receive US01 rather than retaining the default E_STAND/soldier map. Otherwise
 	# B50 phrase_set 4 cannot select anim_emplaced_5 and silently uses the generic

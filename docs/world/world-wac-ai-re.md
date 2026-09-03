@@ -431,7 +431,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `capsule_bottom`/`capsule_top` (godot `InfantryRootMotion` emits them from the `.bad` bottom/top
     tracks); `tick_infantry` — player AND AI, the player via `InfantryState::is_local_player` — floors
     `pos[2] = ground_cache + frame.capsule_bottom` (`engine/runtime/world/infantry.cpp`). The shared
-    `ai_->root_motion` is loaded from `E_STAND.adm` at mission load (`mission_presentation.gd`), so every
+    `ai_->root_motion` is loaded from `E_STAND.adm` at mission load (`godot/src/mission/mission_root.cpp`), so every
     motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
     is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
@@ -5178,7 +5178,7 @@ tags, `ClientReplicaPipeline::apply_entity_death` folds them (row Health=0 +
 a once-drained record), the joiner world bridge (`engine/runtime/inmatch/joiner_role.cpp`) runs
 `destruction_notify_item_damage(world, twin, 4)` on the materialized world
 row, `World::run_logic_tick` runs the explosion/dead-settle/piece drains
-under the MP visual-client predicate, and `mission_presentation.gd` builds the
+under the MP visual-client predicate, and `godot/src/mission/mission_root.cpp` builds the
 destruction present pass for joiners. Named deferrals: the pool-0 organic
 0x13 leg (presentation stays on the compact dead bit), the 0x13
 local-player camera-lerp/scope leg, vehicle (is_ai_capable) victims (their

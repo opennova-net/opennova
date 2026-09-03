@@ -51,7 +51,7 @@ system shared and abstract only the data source behind a sampler seam.
 
 ### Mission execution — one standalone runtime
 
-`godot/game/world/mission_presentation.gd` has one live owner: `GameWorld`, entered
+`godot/src/mission/mission_root.cpp` (`MissionRoot`) has one live owner: `GameWorld`, entered
 through `MainGame`. ONED does not self-tick a mission, create a local-player
 presenter, or open the dev tools (F3). This removes the editor-specific transport
 and lifecycle state that could make an apparently shared simulation behave

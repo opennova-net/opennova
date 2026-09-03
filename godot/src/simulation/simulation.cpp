@@ -729,7 +729,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	if (p_resource_root.is_valid() &&
 			load_score_config(p_resource_root, "score.ini") != OK)
 		UtilityFunctions::push_warning(
-				"MissionPresentation: score.ini not loaded — kill scoring inert (no 0x81)");
+				"MissionRoot: score.ini not loaded — kill scoring inert (no 0x81)");
 	// In a live session the resident kit buffer is the assigned side's profile
 	// page (retail's Game_StartMission copy into restrictionData
 	// [orig: @0x525813]); the kernel's table load built the pool from the

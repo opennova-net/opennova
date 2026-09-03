@@ -112,6 +112,10 @@
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
+#include "mission/mission_perf_counters.h"
+#include "mission/mission_root.h"
+#include "mission/mission_setup_options.h"
+#include "network/join_target.h"
 #include "simulation/entity_card.h"
 #include "simulation/end_round_state.h"
 #include "simulation/entity_row.h"
@@ -333,8 +337,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EntityCardSeat);
 	GDREGISTER_CLASS(EntityCard);
 	GDREGISTER_CLASS(MissionFrameInput);
-	GDREGISTER_CLASS(MissionTickOutcome);
 	GDREGISTER_CLASS(MissionFrameOutcome);
+	GDREGISTER_CLASS(MissionSetupOptions);
+	GDREGISTER_CLASS(MissionPerfCounters);
+	GDREGISTER_CLASS(MissionRoot);
 	GDREGISTER_CLASS(WirePresentStats);
 	GDREGISTER_CLASS(ScarDrawList);
 	GDREGISTER_CLASS(ScarPresenterStats);
@@ -421,6 +427,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);
+	GDREGISTER_CLASS(JoinTarget);
 	GDREGISTER_CLASS(NovaWorldServerRow);
 	GDREGISTER_CLASS(NovaWorldServerTotals);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);

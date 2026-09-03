@@ -211,7 +211,7 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
 11. **Tests drive real fixtures.** A test never subclasses a production Node
     or world-layer class to override behavior; it boots a real fixture through
     public load seams (`godot/tests/support/world_fixture.gd`: the packaged
-    world over the minimal pack, an in-memory MissionPresentation, the packed
+    world over the minimal pack, an in-memory MissionRoot, the packed
     shell; `hud_fixture.gd`: a real HudOverlay) and reads public seams, or it
     fakes a GDScript INTERFACE class by overriding public verbs (`GameShell`,
     the null shell the tooling depends on; `WorldView` / `ArmoryWorldView`,

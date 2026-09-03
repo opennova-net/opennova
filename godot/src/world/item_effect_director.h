@@ -27,6 +27,7 @@
 namespace godot {
 
 class EffectWorld;
+class MissionRoot;
 
 // Value-only census of ItemEffectDirector's per-item effect bookkeeping (the
 // F3/GUT read seam, ADR 0018): how many placed nodes and static sources hold
@@ -168,7 +169,7 @@ private:
 
 	Node *_world() const;
 	EffectWorld *_effect_world() const;
-	Object *_runtime() const;
+	MissionRoot *_runtime() const;
 	Ref<ItemDatabase> _resolve_item_db() const;
 	void _control_node_aliases(ObjectModel *p_node, std::vector<std::string> &r_out) const;
 	bool _control_node_is_active(const ControlNode &p_entry) const;

@@ -32,7 +32,7 @@ MainGame._process
   GameWorld.tick(camera, delta, MissionFrameInput)
     GameFramePipeline.advance
       begin device frame
-      MissionPresentation.advance_session_frame
+      MissionRoot.advance_session_frame
         Simulation.advance_session_frame
           inmatch::Session.advance           state + bank + input retention
             0..N Simulation mission ticks   net pump + World.run_logic_tick
@@ -128,7 +128,7 @@ texture closes the workspace). Release, headless and addon-less runs hand
 `MainGame` to the tree directly instead (ADR 0039; the `runtime_root_window`
 and `window_fullscreen` probes pin both arrangements).
 
-`MissionPresentation` owns the placed and wire present passes, entity index,
+`MissionRoot` owns the placed and wire present passes, entity index,
 effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through
 `inmatch::Session::step_once`; it is not a second loop.
@@ -294,7 +294,7 @@ Focused local coverage pins:
   `tests/world/match_test.cpp`, `tests/npruntime/round_end_test.cpp`, and
   `tests/npruntime/client_runtime_test.cpp`;
 - typed Godot session/presentation behavior in
-  `godot/tests/mission_presentation_test.gd`;
+  `godot/tests/mission_root_test.gd`;
 - concrete device ordering and cancellation in
   `godot/tests/game_frame_pipeline_test.gd`, plus the real GameWorld stack's
   tick integration in `godot/tests/game_world_test.gd`;

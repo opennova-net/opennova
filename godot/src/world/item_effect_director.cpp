@@ -1,5 +1,7 @@
 #include "world/item_effect_director.h"
 
+#include "mission/mission_root.h"
+
 #include "object/item_records.h"
 #include "object/model_user_point.h"
 #include "object/object_data.h"
@@ -20,7 +22,9 @@ using opennova::to_std;
 
 namespace {
 
-constexpr const char *kMissionObjectsPath = "MissionObjects";
+// The placer's container lives under the per-mission subtree (MissionRoot,
+// ADR 0043 d9); a bare-scene test builds the same two-level shape.
+constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
 constexpr const char *kControlStarted = "vehicle_control_started";
 constexpr const char *kControlStopped = "vehicle_control_stopped";
 
@@ -66,12 +70,12 @@ EffectWorld *ItemEffectDirector::_effect_world() const {
 	return Object::cast_to<EffectWorld>(static_cast<Object *>(world->call("get_effect_world")));
 }
 
-Object *ItemEffectDirector::_runtime() const {
+MissionRoot *ItemEffectDirector::_runtime() const {
 	Node *world = _world();
 	if (world == nullptr) {
 		return nullptr;
 	}
-	return static_cast<Object *>(world->call("get_runtime"));
+	return Object::cast_to<MissionRoot>(static_cast<Object *>(world->call("get_runtime")));
 }
 
 // The placer's item database through the lent seam (null before a mission /
@@ -169,14 +173,14 @@ Variant ItemEffectDirector::resolve_owner_transform(const Variant &p_owner_key) 
 		}
 		if (node != nullptr && node->is_inside_tree()) {
 			const Ref<EntityRef> *entity_ref = item_fx_owner_refs_.getptr(owner_key);
-			Object *pose_runtime = _runtime();
+			MissionRoot *pose_runtime = _runtime();
 			if (entity_ref != nullptr && entity_ref->is_valid() && pose_runtime != nullptr &&
-					static_cast<bool>(pose_runtime->call("has_current_present_effect_snapshot"))) {
+					pose_runtime->has_current_present_effect_snapshot()) {
 				// Null here means the identity left THIS tick's replica
 				// set. Do not fall back to the one-frame-old Node or the
 				// group would emit once more from stale state before the
 				// batched present frees it.
-				return pose_runtime->call("presented_entity_effect_transform", *entity_ref);
+				return pose_runtime->presented_entity_effect_transform(*entity_ref);
 			}
 			return node->get_global_transform();
 		}
@@ -184,8 +188,8 @@ Variant ItemEffectDirector::resolve_owner_transform(const Variant &p_owner_key) 
 		item_fx_owner_refs_.erase(owner_key);
 		return Variant();
 	}
-	if (Object *ssn_runtime = _runtime()) {
-		return ssn_runtime->call("entity_effect_transform_for_ssn", p_owner_key);
+	if (MissionRoot *ssn_runtime = _runtime()) {
+		return ssn_runtime->entity_effect_transform_for_ssn(static_cast<int>(p_owner_key));
 	}
 	return Variant();
 }

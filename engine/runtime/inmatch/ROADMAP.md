@@ -345,7 +345,7 @@ runtime, the binding owns sockets/signals only.
   owner helpers: `inmatch::mark_host_client_in_match`, `inmatch::admit_synthetic_peer` (the no-handshake test
   admit), `ClientRuntime::spawn_pose()`.
 - **Present unified on the listen server — DONE** (`942bddc5`): the no-net AI-pool present is retired;
-  `MissionPresentation` always stands up the listen server (editor preview included). The editor in-place
+  `MissionRoot` (ex MissionPresentation) always stands up the listen server (editor preview included). The editor in-place
   Simulate + the debug-overlay live entity-list are degraded/un-tested (accepted — editor sim de-scoped;
   the ~24 sim-coupled editor/debug tests were deleted/updated). Scalar `get_entity_*` getters stay.
 - **B1 — `engine/net/novaworld/http_flow` DONE** (`e4036223`): `LobbyHttpFlow` owns the EPASK login / GSB /

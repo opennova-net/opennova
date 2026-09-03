@@ -43,6 +43,7 @@ add_library(${TARGET_NAME} SHARED
     network/lan_server_row.cpp
     network/net_protocol.cpp
     network/net_session_policy.cpp
+    network/join_target.cpp
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp
     terrain/terrain_static_shadow_rasterizer.cpp
@@ -161,6 +162,9 @@ add_library(${TARGET_NAME} SHARED
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
     mission/mission_info.cpp
+    mission/mission_perf_counters.cpp
+    mission/mission_root.cpp
+    mission/mission_setup_options.cpp
     simulation/entity_presenter.cpp
     simulation/entity_presenter_wire.cpp
     simulation/fire_presenter.cpp

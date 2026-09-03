@@ -23,7 +23,6 @@ const VegAssets := preload("res://game/terrain/veg_assets.gd")
 # a shader that declares instance uniforms; see _instance_uniform_geometry_estimate.
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const FirstPersonArmsWitness := preload(
 		"res://game/world/first_person_arms_witness.gd")
 
@@ -111,7 +110,7 @@ var _mission_clock_minutes_per_day: int = MissionEnvironment.DEFAULT_MINUTES_PER
 # The BMS argument that completed the active mission load. This is runtime
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
-var _runtime: MissionPresentation = null  # the one mission runtime driver (sim + present pass + index), DIVIDED cadence
+var _runtime: MissionRoot = null  # the one mission root (sim + present pass + index + the MissionObjects container), DIVIDED cadence
 var _panm_clock := PanmClock.new()
 var _frame_pipeline: GameFramePipeline
 var _mission_stats: MissionPlacementStats = null
@@ -121,7 +120,7 @@ var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP v
 var _local_weapon: WeaponDef = null  # the resolved weapon.def row (the viewmodel/HUD slices decode it)
 var _mission_audio: MissionAudio
 var _effect_world: EffectWorld  # the runtime .ptl effect world (render-only, per mission)
-# GameWorld-owned first-person presentation seam. MissionPresentation invokes GameWorld
+# GameWorld-owned first-person presentation seam. MissionRoot invokes GameWorld
 # once per completed fixed tick; this callback consumes that tick's weapon
 # events before EffectWorld advances, matching retail's action -> particle-pass
 # order without coupling the simulation to LocalPlayerPresenter Nodes.
@@ -581,7 +580,7 @@ func last_load_timeline() -> PerfTimeline:
 	return _last_load_timeline
 
 
-func get_runtime() -> MissionPresentation:
+func get_runtime() -> MissionRoot:
 	return _runtime
 
 
@@ -698,9 +697,9 @@ func _sample_panm_clock() -> void:
 
 
 ## The Godot per-frame order, faithful to the original main loop's server-tick-then-client-render:
-## foliage coverage around the viewer, then the mission runtime (MissionPresentation.tick advances the
+## foliage coverage around the viewer, then the mission runtime (MissionRoot.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
-## effects), then the audio render pass. Effects come back through MissionPresentation.effects_drained.
+## effects), then the audio render pass. Effects come back through MissionRoot.effects_drained.
 var _perf_probe_enabled := false
 var _perf_probe_spans: Dictionary = {}
 var _perf_probe_skip_occl := false
@@ -715,7 +714,7 @@ var _frame_stats: FrameStats = null
 
 
 ## The game shell hands its FrameStats here; the world re-hands it to
-## every MissionPresentation it creates and feeds its own tick legs.
+## every MissionRoot it creates and feeds its own tick legs.
 func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
