@@ -31,11 +31,10 @@ namespace {
 // A world with one live local organic, the shape the view cluster ticks over.
 struct LocalWorld {
     World w;
-    AiSystem ai;
+    AiSystem &ai = w.ai;
     EntityHandle local;
 
     LocalWorld() {
-        w.ai = &ai;
         w.registry.configure_pool(0, 8);
         Entity seed;
         seed.kind = EntityKind::Organic;

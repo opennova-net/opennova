@@ -1736,8 +1736,7 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	opennova::world::Entity old_player;
 	old_player.item_id = 0x2222u;
@@ -1846,8 +1845,7 @@ bool check_global_scoreboard_integrity_phase() {
 	opennova::world::World world;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
 	const opennova::world::EntityHandle player =
 			opennova::world::spawn_remote_player(world, spawn);
@@ -1998,8 +1996,7 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 	opennova::world::World world;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
 	const opennova::world::EntityHandle player =
 			opennova::world::spawn_remote_player(world, spawn);
@@ -2163,8 +2160,7 @@ bool check_listen_host_receives_targeted_maintenance() {
 	opennova::world::World world;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 8);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn spawn;
 	const opennova::world::EntityHandle player =
 			opennova::world::spawn_remote_player(world, spawn);
@@ -2230,8 +2226,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	world.prng16_state = 1;
 	world.mp_session = true;
 	world.registry.configure_pool(0, 64);
-	opennova::world::AiSystem ai;
-	world.ai = &ai;
+	opennova::world::AiSystem &ai = world.ai;
 	opennova::world::PlayerSpawn player_spawn;
 	player_spawn.net_id = 0xFFF1;
 	const opennova::world::EntityHandle player =
@@ -3230,10 +3225,9 @@ bool check_timed_capture_host_wire_transaction() {
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
 	opennova::world::CollisionWorld collision;
-	opennova::world::AiSystem ai;
+	opennova::world::AiSystem &ai = world.ai;
 	world.mp_session = true;
 	world.collision = &collision;
-	world.ai = &ai;
 	ai.collision = &collision;
 	world.add_system(&ai);
 	ctx.world = &world;

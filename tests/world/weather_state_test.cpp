@@ -328,8 +328,7 @@ void test_sun_fade_extreme_argument_keeps_the_spring_defined() {
 
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::Entity soldier;

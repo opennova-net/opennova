@@ -75,6 +75,9 @@ struct RampField {
 };
 
 void make_rig(Rig &r) {
+	// A joiner's world: its AiSystem runs non-authoritative, the client motor
+	// path [orig: g_napi_np_ctx.is_authority == 0 on a client].
+	r.world.ai.is_authority = false;
 	r.world.registry.configure_pool(0, 8);
 	r.world.registry.configure_pool(1, 8);
 	r.world.env.water_z = 10 << 16; // afloat everywhere (no terrain field)
@@ -1660,8 +1663,7 @@ bool run_physicsless_air_dispatches_directly() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
 	world.env.water_z = 0;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	w::Entity air_seed;
 	air_seed.kind = w::EntityKind::Item;
@@ -1737,8 +1739,7 @@ bool run_client_family_sound_dispatch_scope() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
 	world.env.water_z = 0;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	auto spawn_vehicle = [&](int item_id, float x) {
 		w::Entity seed;

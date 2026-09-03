@@ -74,8 +74,8 @@ static void test_bms_record_index_is_pool_slot() {
     m.organics[0].id = 31;
 
     auto w = std::make_unique<World>();
-    auto ai = std::make_unique<AiSystem>();
-    const mission::PromoteResult r = mission::promote_mission(m, *w, *ai, {});
+    AiSystem *ai = &w->ai;
+    const mission::PromoteResult r = mission::promote_mission(m, *w, {});
     CHECK(r.spawned == 3);
     CHECK(r.dropped == 0);
     const EntityHandle h21 = w->registry.find_by_net_id(21);
@@ -130,9 +130,9 @@ static void test_emplacement_attachments() {
     co.item_seat_specs.push_back(gun_item);
 
     auto cw = std::make_unique<World>();
-    auto cai = std::make_unique<AiSystem>();
+    AiSystem *cai = &cw->ai;
     const mission::PromoteResult cr =
-            mission::promote_mission(cm, *cw, *cai, co);
+            mission::promote_mission(cm, *cw, co);
     CHECK(cr.spawned == 4);
     CHECK(cw->registry.live_count() == 4);
     const EntityHandle parent_h = cw->registry.find_by_net_id(11);
@@ -334,8 +334,8 @@ static void test_friendly_tag_names_and_gather() {
         return idx == 5 ? std::string("123456789012345XYZ") : std::string();
     };
     auto w = std::make_unique<World>();
-    auto ai = std::make_unique<AiSystem>();
-    mission::promote_mission(m, *w, *ai, o);
+    AiSystem *ai = &w->ai;
+    mission::promote_mission(m, *w, o);
 
     Entity *named = w->registry.get(w->registry.find_by_net_id(21));
     Entity *unnamed = w->registry.get(w->registry.find_by_net_id(22));
@@ -483,9 +483,9 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
     helo1.data.type = 1;
     opts.ai_profiles.push_back(helo1);
     World world;
-    AiSystem ai;
+    AiSystem &ai = world.ai;
     ai.is_authority = true;
-    const mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
+    const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
     CHECK(ai.count() == 1);
     CHECK(ai.at(0) != nullptr && ai.at(0)->profile.type == 1);
@@ -545,7 +545,7 @@ int main() {
     m.markers[2].id = 12;
 
     World world;
-    AiSystem ai;
+    AiSystem &ai = world.ai;
     ai.is_authority = true;
 
     mission::PromoteOptions opts;
@@ -567,7 +567,7 @@ int main() {
     zode.data.priority_organics = 100;
     zode.data.priority_decorations = 0;
     opts.ai_profiles.push_back(zode);
-    mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
+    mission::PromoteResult r = mission::promote_mission(m, world, opts);
 
     // ---- promotion populated entities + brains + nav ----
     CHECK(r.nav_nodes == 3);
@@ -665,8 +665,8 @@ int main() {
         ma.organics[0].id = 1;
         ma.organics[1].id = 2;
         World wz;
-        AiSystem aiz;
-        mission::promote_mission(ma, wz, aiz);
+        AiSystem &aiz = wz.ai;
+        mission::promote_mission(ma, wz);
         CHECK(wz.registry.area(0) != nullptr);  // the zone populated the table (was empty before)
         CHECK(wz.commands.ssn_in_area(1, 0));    // organic at origin is inside zone 0
         CHECK(!wz.commands.ssn_in_area(2, 0));   // organic at x=100 is outside
@@ -690,8 +690,8 @@ int main() {
         radii.markers.back().type_id = 2044;
 
         World radius_world;
-        AiSystem radius_ai;
-        mission::promote_mission(radii, radius_world, radius_ai);
+        AiSystem &radius_ai = radius_world.ai;
+        mission::promote_mission(radii, radius_world);
         std::array<float, 3> promoted_radii{};
         radius_world.registry.for_each([&](const Entity &entity) {
             if (entity.handle.pool() != 3) return;
@@ -731,8 +731,8 @@ int main() {
         wm.waypoint_records[2] = blue;
 
         World ww;
-        AiSystem wai;
-        mission::promote_mission(wm, ww, wai);
+        AiSystem &wai = ww.ai;
+        mission::promote_mission(wm, ww);
         CHECK(ww.waypoints.entries.size() == 2);    // the blue route only
         CHECK(ww.waypoints.show);                    // visible by default
         CHECK(ww.waypoints.current == -1);           // no selection until the tick
@@ -750,10 +750,10 @@ int main() {
     // a non-routed entity option: with patrol_on_spawn=false the brain stays in state 0.
     {
         World w2;
-        AiSystem ai2;
+        AiSystem &ai2 = w2.ai;
         mission::PromoteOptions o2;
         o2.patrol_on_spawn = false;
-        mission::promote_mission(m, w2, ai2, o2);
+        mission::promote_mission(m, w2, o2);
         CHECK(ai2.at(0)->brain.f[AiBrain::kCurState] == 0); // faithful init, no auto-patrol
     }
 
@@ -792,8 +792,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
 
         const EntityHandle vh = cw.registry.find_by_net_id(11);
         const EntityHandle oh = cw.registry.find_by_net_id(1);
@@ -831,8 +831,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
 
         Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
@@ -869,8 +869,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
 
         Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
         Entity *o0 = cw.registry.get(cw.registry.find_by_net_id(1));
@@ -910,8 +910,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
         run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
@@ -944,8 +944,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
         run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
@@ -976,8 +976,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
         run_ai(cai, cw, 46); // driver seat point 1u away: inside the 2u arrival ring
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
@@ -1075,8 +1075,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr && !occ->mounted); // spawns ON FOOT — no load-time shortcut
 
@@ -1122,8 +1122,8 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
-        AiSystem cai;
-        mission::promote_mission(cm, cw, cai, co);
+        AiSystem &cai = cw.ai;
+        mission::promote_mission(cm, cw, co);
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr && !occ->mounted);
 

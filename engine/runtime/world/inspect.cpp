@@ -352,8 +352,9 @@ SeatRow seat_row(const Seat &seat, int32_t index) {
 	return row;
 }
 
-std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) {
+std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 	std::vector<EntityRow> out;
+	const AiSystem *ai = with_brains ? &world.ai : nullptr;
 
 	// AI handle -> pool index, once (the join key; a brain's wire identity IS
 	// its packed EntityHandle).
@@ -453,9 +454,10 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 	return out;
 }
 
-EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle handle,
+EntityCard build_entity_card(World &world, bool with_brains, EntityHandle handle,
 		const std::function<std::string(int32_t)> &adm_name_resolver) {
 	EntityCard card;
+	const AiSystem *ai = with_brains ? &world.ai : nullptr;
 	if (!handle.valid()) return card;
 	card.handle = handle.packed;
 	if (const Entity *ent = world.registry.get(handle)) {
@@ -473,8 +475,9 @@ EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle hand
 	return card;
 }
 
-AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
+AiDebugReport ai_debug_report(World &world) {
 	AiDebugReport report;
+	const AiSystem &ai = world.ai;
 
 	// Follower counts over the WHOLE pool (the row cap below never hides a
 	// route's traffic). Channel 0 is "no channel" (ai_waypoint_update_target's

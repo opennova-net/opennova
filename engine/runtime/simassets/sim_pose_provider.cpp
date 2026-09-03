@@ -373,7 +373,7 @@ bool SimPoseProvider::eval_entity_pose(world::World &world,
 		anim::AimOverlayInputs &r_inputs, const world::Entity *&r_entity,
 		world::AiEntity *&r_ai) const {
 	const AdmSkeletalClips *rig = source.rig.get();
-	r_ai = world.ai != nullptr ? world.ai->for_handle(entity) : nullptr;
+	r_ai = world.ai.for_handle(entity);
 	r_entity = world.registry.get(entity);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid() ||
 			r_ai == nullptr || r_entity == nullptr)
@@ -543,7 +543,7 @@ bool SimPoseProvider::panm_part_matrices(world::World &world,
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
 	const world::Entity *e = world.registry.get(entity);
 	world::AiEntity *ai_entity =
-			world.ai != nullptr ? world.ai->for_handle(entity) : nullptr;
+			world.ai.for_handle(entity);
 	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail
 	// VEHICLE_SPECIAL1/2 registers. A brainless static still evaluates
 	// free-running PANM with zero phase values. SPECIAL1 alone is suppressed
@@ -572,7 +572,7 @@ bool SimPoseProvider::panm_part_matrices(world::World &world,
 	// the pair).
 	if (e != nullptr) {
 		world::EmplacedWeaponControls emplaced;
-		if (world::emplaced_weapon_controls_for(world, world.ai, *e, emplaced)) {
+		if (world::emplaced_weapon_controls_for(world, *e, emplaced)) {
 			ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] =
 					static_cast<int32_t>(emplaced.gun_yaw);
 			ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =

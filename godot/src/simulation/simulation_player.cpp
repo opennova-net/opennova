@@ -13,7 +13,7 @@
 using namespace sim_internal;
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
-	if (!world_installed_ || !kernel_->world.ai) return false;
+	if (!world_installed_) return false;
 	// P7: the npruntime listen server auto-spawns the host's own player at bring-up (the faithful §5.0
 	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
 	// caller (no auto-spawn) still spawn at the requested pose below.
@@ -115,8 +115,8 @@ Vector3 Simulation::get_local_player_position() const {
 }
 
 bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return false;
-	const AiEntity *body = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return false;
+	const AiEntity *body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (body == nullptr) return false;
 	r_pos[0] = body->pos[0];
 	r_pos[1] = body->pos[1];
@@ -125,8 +125,8 @@ bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
 }
 
 int64_t Simulation::get_local_player_heading_bam() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *player = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 0;
+	const AiEntity *player = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	return player != nullptr ? static_cast<int64_t>(player->heading) : 0;
 }
 
@@ -172,16 +172,16 @@ bool Simulation::get_hud_map_flip_180() const {
 }
 
 float Simulation::get_local_player_yaw_deg() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0.0f;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 0.0f;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return 0.0f;
 	// Engine heading (BAM32) -> mission yaw degrees, the (90 - heading) convention.
 	return static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(p->heading));
 }
 
 float Simulation::get_local_player_pitch_deg() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0.0f;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 0.0f;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return 0.0f;
 	return static_cast<float>(static_cast<double>(p->pitch) * opennova::world::kDegreesPerBam);
 }
@@ -201,8 +201,8 @@ String Simulation::get_local_player_anim_key() const {
 	// stance + jump (anim_idle_crouch / anim_walk_prone_forward / anim_jump_loop / ...), so
 	// main_game drives the 3rd-person avatar via play_body_clip(key) for full stance fidelity.
 	// [orig: off_8135F0 names ARE the .adm keys without the "anim_" prefix]
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return String();
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return String();
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return String();
 	return infantry_anim_key(p->inf.anim_state);
 }
@@ -211,34 +211,34 @@ Simulation::Stance Simulation::get_local_player_stance() const {
 	// [orig: HUD_BuildEntityInfo @0x4b860c — entity+300 flags 0x200=crouch -> 1,
 	// 0x100=prone -> 2]; InfantryState::Stance already carries the icon order
 	// (kStand 0 / kCrouch 1 / kProne 2).
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return STANCE_STAND;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return STANCE_STAND;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return STANCE_STAND;
 	return static_cast<Stance>(static_cast<int>(p->inf.stance));
 }
 
 int Simulation::get_local_player_anim_phase_ticks() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 0;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	return p ? p->inf.clip_phase : 0;
 }
 
 String Simulation::get_local_player_anim_source_key() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return String();
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return String();
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p || !p->inf.body_blend_active()) return String();
 	return infantry_anim_key(p->inf.anim_prev);
 }
 
 int Simulation::get_local_player_anim_source_phase_ticks() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 0;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	return p ? p->inf.anim_prev_clip_phase : 0;
 }
 
 float Simulation::get_local_player_anim_blend_weight() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 1.0f;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 1.0f;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	return p ? p->inf.anim_blend_weight : 1.0f;
 }
 
@@ -253,8 +253,8 @@ int Simulation::get_local_player_health() const {
 }
 
 int Simulation::get_local_player_max_health() const {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 100;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return 100;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p || p->inf.max_health <= 0) return 100;
 	return p->inf.max_health;
 }

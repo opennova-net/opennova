@@ -644,12 +644,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const int32_t rel_move = rl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(rl);
             const int32_t pusher_move = pl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(pl);
             bool berserk = false;
-            if (world.ai != nullptr) {
-                const AiEntity *pa = world.ai->for_handle(pusher);
-                const AiEntity *va = world.ai->for_handle(source);
-                berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
-                          (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
-            }
+            const AiEntity *pa = world.ai.for_handle(pusher);
+            const AiEntity *va = world.ai.for_handle(source);
+            berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
+                      (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
             const uint32_t vflags = ent->flags | ent->engine_flags;
             if (run_over_kill_applies(p->item_type == 1, ent->ground_target == pusher,
                                       (p->flags & kEntityFlagDead) != 0, health,

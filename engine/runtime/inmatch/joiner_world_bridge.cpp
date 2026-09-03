@@ -129,11 +129,10 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
 	// final same-frame transform so the camera/view never trails its seat by one
 	// mover tick. Remote riders were recomposed in ClientState just above.
-	if (!preround_active && ctx.world.ai != nullptr &&
-			ctx.world.cached.local_player.valid()) {
+	if (!preround_active && ctx.world.cached.local_player.valid()) {
 		if (world::AiEntity *local_ai =
-				ctx.world.ai->for_handle(ctx.world.cached.local_player)) {
-			ctx.world.ai->refresh_mounted_pose(*local_ai, ctx.world);
+				ctx.world.ai.for_handle(ctx.world.cached.local_player)) {
+			ctx.world.ai.refresh_mounted_pose(*local_ai, ctx.world);
 		}
 	}
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
@@ -208,12 +207,12 @@ void JoinerWorldBridge::wire_frame_providers(
 	// whose shared tail calls the resolver ungated [orig: calls @0x4B7CF4 /
 	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
 	// (replica_resolve_states_) across pumps.
-	if (ctx.world.ai != nullptr && ctx.world.ai->collision != nullptr) {
+	if (ctx.world.ai.collision != nullptr) {
 		ctx.runtime.view().set_replica_contact_resolver(
 				[this](replication::ClientReplicaPipeline::ReplicaContactQuery
 								&q) -> int32_t {
 					using world::CollisionWorld;
-					CollisionWorld *col = world_->ai->collision;
+					CollisionWorld *col = world_->ai.collision;
 					CollisionWorld::ResolveState &st =
 							replica_resolve_states_[q.row_handle];
 					// Bridge-member scratch: this resolver runs per armed
@@ -323,12 +322,11 @@ JoinerWorldBridge::FrameSignals JoinerWorldBridge::run_client_net_frame(
 			ctx.runtime.state().objective_updates_applied;
 	const bool local_existed_before_net = local_spawned_;
 	std::vector<std::vector<uint8_t>> outs;
-	const bool have_L = local_spawned_ && ctx.world.ai &&
-			ctx.world.cached.local_player.valid();
+	const bool have_L = local_spawned_ && ctx.world.cached.local_player.valid();
 	const world::Entity *e =
 			have_L ? ctx.world.registry.get(ctx.world.cached.local_player) : nullptr;
 	const world::AiEntity *ae =
-			have_L ? ctx.world.ai->for_handle(ctx.world.cached.local_player) : nullptr;
+			have_L ? ctx.world.ai.for_handle(ctx.world.cached.local_player) : nullptr;
 	// A release can arrive during this recv pump. Do not let that newly-opened
 	// runtime gate transmit the corpse/stale pre-deploy pose in the same frame;
 	// L resumes uplinking only after the simulation has consumed the release and
@@ -504,7 +502,7 @@ void JoinerWorldBridge::materialize_replica_world(
 // wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
 void JoinerWorldBridge::spawn_and_arm_local_player(
 		const PumpContext &ctx, const PumpHooks &hooks) {
-	if (ctx.runtime.in_match() && !local_spawned_ && ctx.world.ai) {
+	if (ctx.runtime.in_match() && !local_spawned_) {
 		self_wire_handle_ = ctx.runtime.self_handle();
 		const JoinerConnection::SelfSpawn &sp = ctx.runtime.spawn_pose();
 		const world::PlayerSpawn spawn = spawn_from_self(sp);
@@ -586,7 +584,7 @@ void JoinerWorldBridge::apply_authoritative_health(
 		const world::EntityHandle local_h = ctx.world.cached.local_player;
 		world::Entity *local = ctx.world.registry.get(local_h);
 		world::AiEntity *local_ai =
-				ctx.world.ai ? ctx.world.ai->for_handle(local_h) : nullptr;
+				ctx.world.ai.for_handle(local_h);
 		if (local != nullptr && local_ai != nullptr) {
 			// ClientRuntime latches authoritative spawn closed on a decoded zero
 			// tail, even if a later packet in this recv pump carries stale positive
@@ -1012,7 +1010,7 @@ void JoinerWorldBridge::mirror_predicted_vehicles(const PumpContext &ctx) {
 // entity or an H->L owner mapping.
 void JoinerWorldBridge::refresh_wire_collision_proxies(
 		const PumpContext &ctx, const PumpHooks &hooks) {
-	if (ctx.world.ai == nullptr || ctx.world.ai->collision == nullptr) return;
+	if (ctx.world.ai.collision == nullptr) return;
 	std::vector<world::WirePersonCollisionProxy> person_proxies;
 	std::vector<world::WireDynamicCollisionProxy> dynamic_proxies;
 	uint16_t self_wire_handle = world::EntityHandle::kInvalid;
@@ -1087,7 +1085,7 @@ void JoinerWorldBridge::refresh_wire_collision_proxies(
 	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers
 	// and a destroyed vehicle's shell keeps blocking (husk-model substitution for
 	// wire proxies is a tracked residual).
-	ctx.world.ai->collision->replace_wire_collision_proxies(
+	ctx.world.ai.collision->replace_wire_collision_proxies(
 			std::move(person_proxies), std::move(dynamic_proxies),
 			self_wire_handle);
 }
@@ -1262,9 +1260,7 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 			}
 		}
 		++ctx.weapon.reload_applied_serial;
-		world::AiEntity *player = ctx.world.ai
-				? ctx.world.ai->for_handle(ctx.world.cached.local_player)
-				: nullptr;
+		world::AiEntity *player = ctx.world.ai.for_handle(ctx.world.cached.local_player);
 		if (player != nullptr && player->inf.active)
 			player->inf.reload_anim_ticks = 80;
 	}

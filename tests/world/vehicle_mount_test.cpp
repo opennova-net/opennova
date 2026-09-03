@@ -48,13 +48,12 @@ VehicleTraits truck_traits() {
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
     World &w = *wp;
-    AiSystem sys;
+    AiSystem &sys = w.ai;
     EntityHandle veh_h, player_h;
 
     explicit Rig(float player_dx = 2.0f) {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
-        w.ai = &sys;
 
         Entity veh;
         veh.net_id = 11; // 00TRa's DTruck1 SSN
@@ -128,8 +127,8 @@ struct HeadingMountedPoseProvider final : IPoseProvider {
 
     bool resolve_mounted_pose(World &world, const Entity &carrier, const Seat &,
                               MountedPose &out) override {
-        if (world.ai == nullptr || !carrier.primary_weapon_owner.valid()) return false;
-        const AiEntity *gunner = world.ai->for_handle(carrier.primary_weapon_owner);
+        if (!carrier.primary_weapon_owner.valid()) return false;
+        const AiEntity *gunner = world.ai.for_handle(carrier.primary_weapon_owner);
         if (gunner == nullptr) return false;
         headings.push_back(gunner->heading);
         pitches.push_back(gunner->pitch);
@@ -165,8 +164,7 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
 // [orig: Entity_RequestVehicleAttach @0x4364a0, its UseGun leg @0x43656c]
 void test_usegun_attach_presnaps_local_look() {
     World w;
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
 
@@ -221,8 +219,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
     const SeatType control_types[] = {SeatType::Driver, SeatType::Controller};
     for (const SeatType control_type : control_types) {
         World w;
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
 
@@ -328,8 +325,7 @@ void test_live_pose_provider_and_static_fallback() {
         World w;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         FakeMountedPoseProvider provider;
         provider.pose = {{11.0f, 12.0f, 13.0f}, 21, -8, 9};
         w.pose_provider = &provider;
@@ -383,8 +379,7 @@ void test_live_pose_provider_and_static_fallback() {
         World w;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         HeadingMountedPoseProvider provider;
         w.pose_provider = &provider;
 
@@ -710,9 +705,8 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
 // USE and attach labels disappear just after spawning.
 void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     World w;
-    AiSystem ai;
+    AiSystem &ai = w.ai;
     CollisionWorld cw;
-    w.ai = &ai;
     w.collision = &cw;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 8);
@@ -1785,9 +1779,8 @@ void test_local_player_drive_mirror() {
 void test_player_spawn_group() {
     std::unique_ptr<World> wp = std::make_unique<World>();
     World &w = *wp;
-    AiSystem sys;
+    AiSystem &sys = w.ai;
     w.registry.configure_pool(0, 8);
-    w.ai = &sys;
     PlayerSpawn s;
     s.net_id = 0xFFF0;
     s.position = {10.0f, 10.0f, 5.0f};

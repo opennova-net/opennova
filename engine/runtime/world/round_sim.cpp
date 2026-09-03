@@ -290,8 +290,7 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
                                    int32_t bone, int32_t death_anim_state,
                                    bool was_alive) {
     const uint32_t cut_mask = dismemberment_mask_for_bone(bone);
-    if (!was_alive || cut_mask == 0 || world.ai == nullptr ||
-        victim.handle.pool() != 0 || victim.dismemberment_piece ||
+    if (!was_alive || cut_mask == 0 || victim.handle.pool() != 0 || victim.dismemberment_piece ||
         (victim.flags & kEntityFlagPlayer) != 0 ||
         (victim.engine_flags & kEntityFlagPlayer) != 0 ||
         victim.player_class != 0 ||
@@ -299,7 +298,7 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
         victim.health > 0 || victim.health > (victim.health_max >> 1))
         return;
 
-    const AiEntity *source = world.ai->for_handle(victim.handle);
+    const AiEntity *source = world.ai.for_handle(victim.handle);
     if (source == nullptr) return;
 
     Entity piece = make_dismemberment_piece_seed(
@@ -315,7 +314,7 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
         round_velocity_q16.y >> 8,
         0,
     };
-    world.ai->attach_dismemberment_piece(piece_handle, *source, impulse_q16);
+    world.ai.attach_dismemberment_piece(piece_handle, *source, impulse_q16);
 
     // Deliberate divergence (docs/divergence-ledger.md D-AI-9): the original
     // commits the victim mask BEFORE the clone call (sectionMask |= newBoneBits
@@ -640,7 +639,7 @@ RoundSourceState resolve_round_source(World &world,
     source.scope_raised = (flags & kEntityFlagScopeRaised) != 0;
     source.underwater = (flags & kEntityFlagDrowning) != 0;
 
-    AiEntity *body = world.ai != nullptr ? world.ai->for_handle(params.owner) : nullptr;
+    AiEntity *body = world.ai.for_handle(params.owner);
     const int32_t source_z =
             body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
     // The below-water classifier projects the per-tick EYE height (the shared
@@ -1501,9 +1500,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                         // consume the SAME hit-record bone (hitRecord[14]);
                         // death_section is our preserved copy of that record
                         // field. [orig: @0x40755e / @0x4075f6 / @0x407483]
-                        AiEntity *victim_body = world.ai != nullptr
-                            ? world.ai->for_handle(target->handle)
-                            : nullptr;
+                        AiEntity *victim_body = world.ai.for_handle(target->handle);
                         if (target_was_alive) {
                             apply_death_body_roll(
                                 victim_body, death_section, quadrant);

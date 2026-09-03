@@ -172,8 +172,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		// Retail's infantry compact writer reads entity+0x2EC (target heading)
 		// and entity+0x2D0 (aim pitch). In the port those animation-owned fields
 		// live on AiEntity, so lift them at the one world-to-wire snapshot seam.
-		if (s.entity_class == EntityClass::Infantry && w.ai != nullptr) {
-			if (const world::AiEntity *ai = w.ai->for_handle(e.handle)) {
+		if (s.entity_class == EntityClass::Infantry) {
+			if (const world::AiEntity *ai = w.ai.for_handle(e.handle)) {
 				s.infantry_target_heading_bam = ai->inf.target_heading;
 				s.infantry_aim_pitch_bam = ai->inf.aim_pitch;
 			}
@@ -183,8 +183,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		// carrier pitch on Entity while preserving the gunner's live look on
 		// AiEntity. Rejoin only that split here; snapshot_of's witnessed integer
 		// yaw conversion deliberately retains its distinct truncation behavior.
-		if (s.entity_class == EntityClass::Player && w.ai != nullptr) {
-			if (const world::AiEntity *ai = w.ai->for_handle(e.handle)) {
+		if (s.entity_class == EntityClass::Player) {
+			if (const world::AiEntity *ai = w.ai.for_handle(e.handle)) {
 				s.pitch_bam = ai->pitch;
 			}
 		}
@@ -733,54 +733,52 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	//    (the host does not re-simulate a read-applied peer). [orig: case 4 staging +0x234/
 	//    240/244 @0x4c2042-0x4c205e, live +4/+0x10/+0x14 mirror, progress +0x27C=0 @0x4c20a9;
 	//    motor skip @0x4b9a03.] No AiEntity (peer not AI-attached) -> registry snap stands alone.
-	if (world.ai != nullptr) {
-		if (world::AiEntity *ae = world.ai->for_handle(ent->handle)) {
-			ae->net_is_remote_peer = true;
-			ae->pos[0] = wire_x; // live +4/+8/+0xC (world — the grounded branch already lifted)
-			ae->pos[1] = wire_y;
-			ae->pos[2] = wire_z;
-			ae->heading = heading_bam; // live +0x10 (carrier-composed when grounded)
-			ae->pitch = pitch_bam;     // live +0x14
-			ae->net_smooth_target[0] = wire_x; // +0x234
-			ae->net_smooth_target[1] = wire_y; // +0x238
-			ae->net_smooth_target[2] = wire_z; // +0x23C
-			ae->net_smooth_heading = heading_bam;    // +0x240
-			ae->net_smooth_pitch = pitch_bam;        // +0x244
-			ae->net_interp_progress = 0;             // +0x27C reset
+	if (world::AiEntity *ae = world.ai.for_handle(ent->handle)) {
+		ae->net_is_remote_peer = true;
+		ae->pos[0] = wire_x; // live +4/+8/+0xC (world — the grounded branch already lifted)
+		ae->pos[1] = wire_y;
+		ae->pos[2] = wire_z;
+		ae->heading = heading_bam; // live +0x10 (carrier-composed when grounded)
+		ae->pitch = pitch_bam;     // live +0x14
+		ae->net_smooth_target[0] = wire_x; // +0x234
+		ae->net_smooth_target[1] = wire_y; // +0x238
+		ae->net_smooth_target[2] = wire_z; // +0x23C
+		ae->net_smooth_heading = heading_bam;    // +0x240
+		ae->net_smooth_pitch = pitch_bam;        // +0x244
+		ae->net_interp_progress = 0;             // +0x27C reset
 
-			// The 0x0C state byte contains only the entity Flags LOW byte; the
-			// in-air bit (0x2000) is not a hidden high-bit wire field. Reconstruct
-			// that authority state from the pose every uplink, using the same
-			// capsule-bottom clearance and hysteresis as the local player motor.
-			// This makes a held jump from a falling peer fail the retail gate and
-			// makes the next grounded sample produce the real landing edge. Water
-			// transitions remain authority-world state (D-INF-3), not C2S flags.
-			bool clear_airborne = grounded || ent->mounted;
-			bool set_airborne = false;
-			if (!clear_airborne && world.terrain != nullptr && world.terrain->valid()) {
-				world::GroundClearance clearance = world.ai->ground_clearance;
-				clearance.has_physics = ae->has_physics;
-				clearance.use_dead = ent->health <= 0;
-				const int32_t ground = world::calc_average_ground_height(
-						*world.terrain, ae->pos, 0, clearance);
-				if (ground != INT32_MIN) {
-					ae->inf.ground_cache = ground;
-					ae->inf.ground_cache_valid = true;
-					const int64_t foot_clearance = static_cast<int64_t>(wire_z) -
-							static_cast<int64_t>(ae->inf.prev_capsule_bottom) - ground;
-					set_airborne = foot_clearance > world::kInfantryAirborneGap;
-					clear_airborne = foot_clearance <= 0;
-				}
+		// The 0x0C state byte contains only the entity Flags LOW byte; the
+		// in-air bit (0x2000) is not a hidden high-bit wire field. Reconstruct
+		// that authority state from the pose every uplink, using the same
+		// capsule-bottom clearance and hysteresis as the local player motor.
+		// This makes a held jump from a falling peer fail the retail gate and
+		// makes the next grounded sample produce the real landing edge. Water
+		// transitions remain authority-world state (D-INF-3), not C2S flags.
+		bool clear_airborne = grounded || ent->mounted;
+		bool set_airborne = false;
+		if (!clear_airborne && world.terrain != nullptr && world.terrain->valid()) {
+			world::GroundClearance clearance = world.ai.ground_clearance;
+			clearance.has_physics = ae->has_physics;
+			clearance.use_dead = ent->health <= 0;
+			const int32_t ground = world::calc_average_ground_height(
+					*world.terrain, ae->pos, 0, clearance);
+			if (ground != INT32_MIN) {
+				ae->inf.ground_cache = ground;
+				ae->inf.ground_cache_valid = true;
+				const int64_t foot_clearance = static_cast<int64_t>(wire_z) -
+						static_cast<int64_t>(ae->inf.prev_capsule_bottom) - ground;
+				set_airborne = foot_clearance > world::kInfantryAirborneGap;
+				clear_airborne = foot_clearance <= 0;
 			}
-			if (set_airborne) {
-				ae->inf.airborne = true;
-				ent->flags |= world::kEntityFlagInAir;
-				ent->engine_flags |= world::kEntityFlagInAir;
-			} else if (clear_airborne) {
-				ae->inf.airborne = false;
-				ent->flags &= ~world::kEntityFlagInAir;
-				ent->engine_flags &= ~world::kEntityFlagInAir;
-			}
+		}
+		if (set_airborne) {
+			ae->inf.airborne = true;
+			ent->flags |= world::kEntityFlagInAir;
+			ent->engine_flags |= world::kEntityFlagInAir;
+		} else if (clear_airborne) {
+			ae->inf.airborne = false;
+			ent->flags &= ~world::kEntityFlagInAir;
+			ent->engine_flags &= ~world::kEntityFlagInAir;
 		}
 	}
 	return true;

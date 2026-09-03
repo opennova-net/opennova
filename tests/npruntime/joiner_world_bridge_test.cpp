@@ -40,7 +40,7 @@ constexpr uint32_t kSessionId = 0x0FE0E112u;
 
 struct Harness {
 	w::World world;
-	w::AiSystem ai;
+	w::AiSystem &ai = world.ai;
 	w::LocalPlayerWeapon weapon;
 	w::LocalPlayerLoadout loadout;
 	w::WeaponInventory inventory;
@@ -57,7 +57,6 @@ struct Harness {
 	bool inventory_valid = false;
 
 	Harness() {
-		world.ai = &ai;
 		world.registry.configure_pool(0, 16);
 	}
 

@@ -481,9 +481,9 @@ void Simulation::joiner_deposit_inbound() {
 void Simulation::print_joiner_net_diagnostic_sample() {
 	if (!is_joiner_network_diagnostics_enabled() || !runtime_) return;
 	String local_state = " L=none";
-	if (joiner_bridge_.local_spawned() && kernel_ && kernel_->world.ai) {
+	if (joiner_bridge_.local_spawned() && kernel_) {
 		const opennova::world::AiEntity *lae =
-				kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+				kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 		const opennova::world::Entity *le =
 				kernel_->world.registry.get(kernel_->world.cached.local_player);
 		if (lae != nullptr)
@@ -1363,7 +1363,7 @@ void Simulation::ship_to_host(const std::vector<uint8_t> &dg) {
 //  over an inmatch::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
-	if (!host_listen_ || !kernel_->world.ai) return false;
+	if (!host_listen_) return false;
 	opennova::world::PlayerSpawn spawn;
 	// Godot (x,y,z) -> mission (x,-z,y), the inverse of the present remap (same as spawn_local_player).
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),

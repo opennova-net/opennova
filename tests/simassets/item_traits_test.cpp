@@ -443,8 +443,7 @@ int main() {
     CHECK(w.registry.get(tank_h)->health == -25536);
 
     // ---- resolve_ai_weapons: the D-AI-5 seed + sound-profile bind ----
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     const int rifle_ai = ai.attach(rifle_h);
     const int player_ai = ai.attach(player_h);
     CHECK(w.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);

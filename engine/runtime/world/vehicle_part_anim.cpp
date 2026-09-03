@@ -19,9 +19,8 @@ namespace {
 // `== 1` twin inside @0x48FA70]. A row with no brain has no profile to read;
 // its family stands in (vehicle_part_anim.h).
 RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &traits) {
-	if (world.ai != nullptr)
-		if (const AiEntity *ai = world.ai->for_handle(veh.handle))
-			return rotor_machine_for_profile(ai->profile.type);
+	if (const AiEntity *ai = world.ai.for_handle(veh.handle))
+		return rotor_machine_for_profile(ai->profile.type);
 	return (traits.family == VehicleFamily::Helicopter ||
 	        traits.family == VehicleFamily::Plane)
 			? RotorMachine::Helo

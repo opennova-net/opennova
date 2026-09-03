@@ -20,7 +20,6 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // The infantry motor (mounted below) requires an AiSystem. Bail BEFORE allocating a pool-0
     // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
-    if (world.ai == nullptr) return EntityHandle{};
 
     // Spawn at FULL health [orig: Entity_InitFromItemDef @0x49e550 — Health = healthMax]: the
     // items.def Player hp when the host's traits sweep resolved it (class-8 Player = 150), else
@@ -96,8 +95,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
     // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
     // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
-    const int idx = world.ai->attach(h);
-    AiEntity &ae = *world.ai->at(idx);
+    const int idx = world.ai.attach(h);
+    AiEntity &ae = *world.ai.at(idx);
     ae.pos[0] = to_fixed(spawn.position.x);
     ae.pos[1] = to_fixed(spawn.position.y);
     ae.pos[2] = to_fixed(spawn.position.z);

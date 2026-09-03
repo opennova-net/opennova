@@ -474,8 +474,7 @@ bool test_retail_random_spread_vectors() {
 bool test_spawn_spread_then_recoil() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	w::PlayerSpawn seed;
 	seed.net_id = 41;
 	seed.equipped_adm_index = 1;
@@ -606,14 +605,13 @@ bool test_spawn_spread_then_recoil() {
 
 struct DismembermentRig {
 	w::World world;
-	w::AiSystem ai;
+	w::AiSystem &ai = world.ai;
 	w::CollisionWorld collision;
 	w::EntityHandle shooter;
 	w::EntityHandle victim;
 
 	explicit DismembermentRig(size_t pool_capacity, uint32_t victim_attrib = 0) {
 		world.registry.configure_pool(0, pool_capacity);
-		world.ai = &ai;
 		world.projectile_authority = true;
 
 		w::Entity shooter_seed;
@@ -826,11 +824,10 @@ int main() {
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
+	w::AiSystem &ai = world.ai;
 	DeathAnimSource death_clips;
 	ai.is_authority = true;
 	ai.root_motion = &death_clips;
-	world.ai = &ai;
 	world.player_item_hp = 150; // items.def Player hp (D-NET-144)
 
 	// Host player down-range past the victim on the same +X line; shooter at the origin.

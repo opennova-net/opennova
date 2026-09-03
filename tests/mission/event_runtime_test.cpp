@@ -345,9 +345,8 @@ static void test_playpartanim_mutates_brain() {
     org.alive = true;
     world::EntityHandle h = w.registry.spawn(0, org);
 
-    world::AiSystem ai;
+    world::AiSystem &ai = w.ai; // the AI-change family reaches the brain through World::ai
     ai.attach(h);
-    w.ai = &ai; // the AI-change family reaches the brain through World::ai
 
     bms::Event e = simple_event(bms::EventFlags::None, 0);
     bms::Action act{};
@@ -400,7 +399,7 @@ static void test_redirect_actions_preserve_authored_node() {
     second.position = {10.0f, 0.0f, 0.0f}; // nearest node is 0
     const world::EntityHandle second_h = w.registry.spawn(0, second);
 
-    world::AiSystem ai;
+    world::AiSystem &ai = w.ai;
     const int first_ai_index = ai.attach(first_h);
     const int second_ai_index = ai.attach(second_h);
     world::AiEntity &first_ai = *ai.at(first_ai_index);
@@ -414,7 +413,6 @@ static void test_redirect_actions_preserve_authored_node() {
     ai.nav.nodes.resize(2);
     ai.nav.nodes[0] = world::NavEntry{{1 << 16, 0, 0, 0, 0}};
     ai.nav.nodes[1] = world::NavEntry{{1 << 16, 100 << 16, 0, 0, 0}};
-    w.ai = &ai;
 
     bms::Event e = simple_event(bms::EventFlags::None, 0);
     e.action_count = 2;
@@ -1029,9 +1027,8 @@ static void test_single_alert_triggers() {
     org.net_id = 43; // second member, no AI component
     w.registry.spawn(0, org);
 
-    world::AiSystem ai;
+    world::AiSystem &ai = w.ai;
     ai.attach(h);
-    w.ai = &ai;
     mission::BmsEventSystem sys;
     sys.load({}, {}, {});
     w.add_system(&sys);
@@ -1461,8 +1458,7 @@ static void test_change_ai_command_family() {
     entity.alive = true;
     const world::EntityHandle handle = w.registry.spawn(0, entity);
 
-    world::AiSystem ai;
-    w.ai = &ai;
+    world::AiSystem &ai = w.ai;
     world::AiEntity &ae = *ai.at(ai.attach(handle));
     ae.profile.type = 2; // GROUND
     ae.brain.f[world::AiBrain::kCurState] = world::kAiGroundFollowWp;
@@ -1643,8 +1639,7 @@ static void test_structural_bms_actions() {
     const world::EntityHandle pool3_h =
             w.registry.spawn_from(3, 1, removable);
 
-    world::AiSystem ai;
-    w.ai = &ai;
+    world::AiSystem &ai = w.ai;
     world::AiEntity &pool1_ai = *ai.at(ai.attach(pool1_h));
 
     mission::BmsEventSystem events;

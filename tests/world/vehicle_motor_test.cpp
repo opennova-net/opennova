@@ -843,10 +843,9 @@ void test_hull_collision_clears_motion_lanes_and_forces_full_idle() {
     r.drv().player_class = 0;
     r.mount();
 
-    AiSystem ai;
+    AiSystem &ai = r.w.ai;
     CollisionWorld collision;
     ai.collision = &collision;
-    r.w.ai = &ai;
     r.w.registry.configure_pool(2, 4);
 
     Entity wall;
@@ -1006,9 +1005,8 @@ static void test_helo_waits_for_its_boarders() {
     World w;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 4);
-    AiSystem ai;
+    AiSystem &ai = w.ai;
     ai.is_authority = true;
-    w.ai = &ai;
 
     Entity helo{};
     helo.net_id = 420;

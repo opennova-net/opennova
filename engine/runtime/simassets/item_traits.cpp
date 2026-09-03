@@ -338,7 +338,6 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 // [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
 // docs/divergence-ledger.md D-AI-5]
 int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
-    if (world.ai == nullptr) return 0;
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     int armed = 0;
     // Bind every body's sound-profile pair first — persons AND vehicles carry
@@ -368,8 +367,8 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
             world.organic_sound_profiles.set(
                     def.id - mission::kItemIdOffset, op);
         }
-        for (int i = 0; i < world.ai->count(); ++i) {
-            world::AiEntity *ae = world.ai->at(i);
+        for (int i = 0; i < world.ai.count(); ++i) {
+            world::AiEntity *ae = world.ai.at(i);
             if (ae == nullptr) continue;
             const world::Entity *e = world.registry.get(ae->handle);
             if (e == nullptr) continue;
@@ -386,8 +385,8 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
         }
     }
     if (world.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
-    for (int i = 0; i < world.ai->count(); ++i) {
-        world::AiEntity *ae = world.ai->at(i);
+    for (int i = 0; i < world.ai.count(); ++i) {
+        world::AiEntity *ae = world.ai.at(i);
         if (ae == nullptr) continue;
         const world::Entity *e = world.registry.get(ae->handle);
         if (e == nullptr) continue;
@@ -408,8 +407,8 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     // resolves at parse time through the ammo-def registry [orig:
     // AIProfile_ParseProperty -> AmmoDef_LookupByName -> profile+148/+180];
     // our parse keeps the name because the table loads after promotion.
-    for (int i = 0; i < world.ai->count(); ++i) {
-        world::AiEntity *ae = world.ai->at(i);
+    for (int i = 0; i < world.ai.count(); ++i) {
+        world::AiEntity *ae = world.ai.at(i);
         if (ae == nullptr) continue;
         for (world::AiProfile::WeaponFire *wf : {&ae->profile.fire_a, &ae->profile.fire_b}) {
             if (wf->ammo_name.empty()) continue;

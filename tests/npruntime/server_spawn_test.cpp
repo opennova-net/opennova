@@ -41,8 +41,7 @@ bool expect(bool cond, const char *msg) {
 
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
 // and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
-void make_world(w::World &world, w::AiSystem &ai) {
-	world.ai = &ai;
+void make_world(w::World &world) {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	w::Entity start;
@@ -64,8 +63,8 @@ const w::Entity *pool0_player(const w::World &world, uint16_t want_dcb) {
 
 int main() {
 	w::World world;
-	w::AiSystem ai;
-	make_world(world, ai);
+	w::AiSystem &ai = world.ai;
+	make_world(world);
 
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.
 	ns::LoopbackChannel loopback;
@@ -126,7 +125,7 @@ int main() {
 			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, true),
 			"authority enters spectator mode for a live player")) return 1;
 	w::Entity *spectator = world.registry.get(joiner_handle);
-	w::AiEntity *spectator_ai = world.ai->for_handle(joiner_handle);
+	w::AiEntity *spectator_ai = world.ai.for_handle(joiner_handle);
 	if (!expect(
 			joiner_conn.link.spectator && spectator != nullptr &&
 			spectator->team == 0 && (spectator->flags & 1u) != 0 &&
@@ -186,8 +185,8 @@ int main() {
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
 	{
 		w::World many_world;
-		w::AiSystem many_ai;
-		make_world(many_world, many_ai);
+		w::AiSystem &many_ai = many_world.ai;
+		make_world(many_world);
 		many_world.registry.configure_pool(0, 32);
 
 		inmatch::NapiNPServerCtx many_ctx;
@@ -230,8 +229,8 @@ int main() {
 	// [orig: Server_PlayerAdd @0x51cbc0 writes the first free dword_A87048 player slot]
 	{
 		w::World slot_world;
-		w::AiSystem slot_ai;
-		make_world(slot_world, slot_ai);
+		w::AiSystem &slot_ai = slot_world.ai;
+		make_world(slot_world);
 
 		inmatch::NapiNPServerCtx slot_ctx;
 		inmatch::GameConfig settings;
@@ -308,8 +307,8 @@ int main() {
 	// @0x4FE51A..0x4FE587]
 	{
 		auto team_world = std::make_unique<w::World>();
-		auto team_ai = std::make_unique<w::AiSystem>();
-		make_world(*team_world, *team_ai);
+		w::AiSystem &team_ai = team_world->ai;
+		make_world(*team_world);
 
 		auto reserve_sequence = [&](inmatch::GameConfig config,
 				std::initializer_list<uint8_t> requests) {
@@ -393,8 +392,8 @@ int main() {
 	// entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
 	{
 		w::World cw;
-		w::AiSystem cai;
-		make_world(cw, cai);
+		w::AiSystem &cai = cw.ai;
+		make_world(cw);
 
 		ns::LoopbackChannel cloop;
 		inmatch::NapiNPServerCtx cctx;
@@ -496,8 +495,6 @@ int main() {
 	{
 		auto sp_spawn_position = [](uint32_t game_type, w::Vec3 &out) {
 			auto sp_world = std::make_unique<w::World>();
-			auto sp_ai = std::make_unique<w::AiSystem>();
-			sp_world->ai = sp_ai.get();
 			sp_world->registry.configure_pool(0, 16);
 			sp_world->registry.configure_pool(3, 16);
 			w::Entity start;

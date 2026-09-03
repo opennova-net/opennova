@@ -45,8 +45,8 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 	const w::Vec3 player = rig.player_position();
 	const w::AiEntity *self = rig.player_ai();
 	const uint8_t own_team = self != nullptr ? self->team : 1;
-	for (int i = 0; i < rig.ai.count(); ++i) {
-		w::AiEntity *e = rig.ai.at(i);
+	for (int i = 0; i < rig.world.ai.count(); ++i) {
+		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active) continue;
 		if ((e->slot.f[1] & 1) != 0 || e->team == 0 || e->team == own_team) continue;
 		const w::Entity *ent = rig.world.registry.get(e->handle);
@@ -134,7 +134,7 @@ int main() {
 			const w::AiProfile &pr = here.ai->profile;
 			std::printf("threat: npc see_all=%d profile_type=%d prio=%d authority=%d in_session=%d team=%d slot_class=[%d %d %d %d] class_priority=[%d %d %d %d] fov=%d/%d flags100=0x%x\n",
 					int(here.ai->see_all), pr.type, here.ai->brain.f[w::AiBrain::kPriorityTarget],
-					int(rig.ai.is_authority), int(rig.ai.is_in_session), int(here.ai->team),
+					int(rig.world.ai.is_authority), int(rig.world.ai.is_in_session), int(here.ai->team),
 					pr.slot_class[0], pr.slot_class[1], pr.slot_class[2], pr.slot_class[3],
 					pr.class_priority[0], pr.class_priority[1], pr.class_priority[2], pr.class_priority[3],
 					pr.fov_primary, pr.fov_secondary, unsigned(pr.flags100));
@@ -143,9 +143,9 @@ int main() {
 			std::printf("\n");
 			if (pe != nullptr) {
 				int32_t sa[3], sb[3];
-				rig.ai.weapon_aim_origin(rig.world, *here.ai, sa);
-				rig.ai.weapon_aim_origin(rig.world, *pe, sb);
-				const bool los = rig.ai.line_of_sight_clear(rig.world, sa, sb, here.ai->handle, pe->handle);
+				rig.world.ai.weapon_aim_origin(rig.world, *here.ai, sa);
+				rig.world.ai.weapon_aim_origin(rig.world, *pe, sb);
+				const bool los = rig.world.ai.line_of_sight_clear(rig.world, sa, sb, here.ai->handle, pe->handle);
 				std::printf("threat: npc slot1=0x%x aim npc=(%.2f, %.2f, %.2f) player=(%.2f, %.2f, %.2f) player eye_offset=(%.2f, %.2f, %.2f) los_clear=%d ground under player=%.2f\n",
 						unsigned(here.ai->slot.f[1]), sa[0] / 65536.0f, sa[1] / 65536.0f, sa[2] / 65536.0f,
 						sb[0] / 65536.0f, sb[1] / 65536.0f, sb[2] / 65536.0f, pe->eye_offset_x / 65536.0f,
@@ -183,7 +183,7 @@ int main() {
 					npc.ai != nullptr ? int(npc.ai->slot.bytes()[w::AiSlot::kAlertByte]) : -1,
 					npc.ai != nullptr ? int(npc.ai->inf.combat_target.valid()) : -1,
 					npc.ai != nullptr ? int(npc.ai->team) : -1, self != nullptr ? int(self->team) : -1,
-					rig.ai.find_target_calls, fires);
+					rig.world.ai.find_target_calls, fires);
 		}
 	}
 	std::fprintf(stderr, "FAIL: player hp=%d after %ds (damaged_at=%d) — no kill observed\n",

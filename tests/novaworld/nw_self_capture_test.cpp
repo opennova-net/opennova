@@ -121,8 +121,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// (spawn-select + a 0x20 pool-3 record) and a pool-2 building so the 0x10
 	// static page carries a real record; a minimal in-memory 0x0B BMS mission.
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);

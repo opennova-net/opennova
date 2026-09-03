@@ -161,9 +161,7 @@ NwUdpListener::NwUdpListener(ConnectionManager &manager) : manager_(manager) {}
 NwUdpListener::~NwUdpListener() { stop(); }
 
 void NwUdpListener::initialize_jo_host() {
-	jo_ai_ = std::make_unique<world::AiSystem>();
 	jo_world_ = std::make_unique<world::World>();
-	jo_world_->ai = jo_ai_.get();
 	jo_world_->registry.configure_pool(0, 64);
 	jo_world_->registry.configure_pool(3, 4);
 
@@ -219,7 +217,6 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 	jo_owner_.reset();
 	jo_mission_.reset();
 	jo_world_.reset();
-	jo_ai_.reset();
 }
 
 void NwUdpListener::observe_jo_event(

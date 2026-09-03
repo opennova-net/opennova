@@ -190,7 +190,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     // it unless free-looking, a look write the client owns — D-NET-161). The
     // smoke/fire emitters and the every-64th-tick fire sound are presentation
     // seams. A dead hull takes none of it.
-    const bool motor_is_authority = world.ai != nullptr && world.ai->is_authority;
+    const bool motor_is_authority = world.ai.is_authority;
     if (motor_is_authority && veh.health > 0) {
         const bool cadence64 =
                 ((world.logic_tick + 9u * static_cast<uint32_t>(veh.net_id)) & 0x3Fu) == 0;

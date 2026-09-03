@@ -412,7 +412,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	if (conn.link.spectator == spectator) return true;
 
 	world::AiEntity *ai =
-			world.ai != nullptr ? world.ai->for_handle(player->handle) : nullptr;
+			world.ai.for_handle(player->handle);
 	world::entity_detach_from_vehicle(world, player->handle);
 	// The deploy-hold bit is untouched on ENTERING spectator mode (retail's
 	// runtime conversion @0x519e76 leaves slot+89912 alone — a deployed

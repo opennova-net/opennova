@@ -229,8 +229,7 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
                                     const Entity &vehicle, const Seat &seat) {
     const int16_t seat_yaw = mounted_pose_yaw(vehicle, seat);
     occupant.yaw = seat_yaw;
-    if (world.ai == nullptr) return;
-    AiEntity *body = world.ai->for_handle(occupant.handle);
+    AiEntity *body = world.ai.for_handle(occupant.handle);
     if (body == nullptr) return;
 
     const int32_t seat_heading =
@@ -335,11 +334,9 @@ static void pose_emplacement_attachments(World &world) {
             snapshot.mount_seat < 0 ||
             snapshot.mount_seat >= static_cast<int>(target->seats.size()))
             return;
-        if (world.ai != nullptr) {
-            if (AiEntity *body = world.ai->for_handle(snapshot.handle)) {
-                world.ai->pose_if_mounted(*body, world);
-                return;
-            }
+        if (AiEntity *body = world.ai.for_handle(snapshot.handle)) {
+            world.ai.pose_if_mounted(*body, world);
+            return;
         }
         pose_mounted_occupant(
                 world, *occupant, *target, target->seats[snapshot.mount_seat]);
@@ -414,7 +411,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
             // The AI system's own phases lap onto the SIM_AI_* rows inside its
             // tick; every other registered system is an authored script.
             const devtools::ProfileScope system_scope(
-                    profile, s == ai ? devtools::Slot::SIM_WORLD_AI
+                    profile, s == &ai ? devtools::Slot::SIM_WORLD_AI
                                      : devtools::Slot::SIM_WORLD_SCRIPTS);
             s->tick(*this, ctx);
         }
@@ -433,7 +430,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // These presentation events describe only the current authoritative tick.
     if (is_authority && gameplay) {
         throwables.events.clear();
-        throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
+        throwables.tick(*this, ai.collision, terrain);
     }
     // The precipitation fall: while it rains every drop slot lowers by the
     // kind's per-tick amount, once per ENTITY update — retail runs it inside
@@ -459,8 +456,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // PreRound even though its spawned projectile cannot move until gameplay.
     // PreMission remains outside the frame pump entirely.
     // [orig: Game_ProcessMainFrame @0x52672C..0x526786]
-    if (phase != TickPhase::PreMission && ai != nullptr)
-        ai->pump_mounted_weapon_slots(*this, logic_tick);
+    if (phase != TickPhase::PreMission)
+        ai.pump_mounted_weapon_slots(*this, logic_tick);
     lap.mark(devtools::Slot::SIM_WORLD_WEAPONS);
     // Live rounds step on the host and on an explicitly configured MP
     // non-authority client. The latter is the retail tag-2 visual re-sim path;
@@ -470,7 +467,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority)))
-        round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
+        round_sim.tick(*this, terrain, ai.collision);
     lap.mark(devtools::Slot::SIM_WORLD_PROJECTILES);
     if (gameplay &&
         (is_authority || (mp_session && !projectile_authority))) {
@@ -495,7 +492,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         // [orig: Env_WaterHeightFixed @0x26c6454].
         const float water_z =
                 env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
-        explosions.process(*this, ai != nullptr ? ai->collision : nullptr, terrain,
+        explosions.process(*this, ai.collision, terrain,
                            water_z, destruction);
         destruction_tick_dead_items(*this, terrain, water_z, destruction);
         death_pieces.tick(*this, terrain, water_z, destruction);

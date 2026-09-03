@@ -116,12 +116,10 @@ w::CollisionModel contact_box(int32_t type) {
 	return model;
 }
 
-void install_collision_system(w::World &world, w::CollisionWorld &collision,
-		w::AiSystem &ai) {
+void install_collision_system(w::World &world, w::CollisionWorld &collision) {
 	world.collision = &collision;
-	world.ai = &ai;
-	ai.collision = &collision;
-	world.add_system(&ai);
+	world.ai.collision = &collision;
+	world.add_system(&world.ai);
 }
 
 w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
@@ -638,8 +636,8 @@ void test_coop_script_producers_share_round_wire() {
 void test_aas_events_use_spawn_registry_index() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
@@ -715,8 +713,8 @@ void test_aas_events_use_spawn_registry_index() {
 void test_ctf_pickup_and_capture_wire_transaction() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.mp_session = true;
@@ -892,8 +890,8 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 void test_flag_timeout_wire_transaction() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.mp_session = true;
@@ -1022,8 +1020,7 @@ int main() {
 	test_end_round_row_flags_word_is_field_11();
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	// The host player + NPC victims across the witnessed classification axes.
 	w::PlayerSpawn ps;

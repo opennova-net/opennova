@@ -763,8 +763,7 @@ inmatch::NapiNPConnection make_in_match_conn(uint32_t id, int type, ns::ISession
 bool run_host_answers_the_sweep_request() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	w::PlayerSpawn spawn;
 	spawn.position = {0, 0, 0};

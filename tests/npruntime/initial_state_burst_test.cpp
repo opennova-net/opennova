@@ -63,8 +63,7 @@ int main_impl() {
 	// A World with the host player spawned + one 6002 marker (both the spawn-select start AND a
 	// pool-3 spawn-marker the 0x20 batch streams).
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
@@ -386,8 +385,7 @@ int main_impl() {
 	// signal). This drives a fresh host loopback (unspawned) so tick_connections runs the full burst. ---
 	{
 		w::World w2;
-		w::AiSystem ai2;
-		w2.ai = &ai2;
+		w::AiSystem &ai2 = w2.ai;
 		w2.registry.configure_pool(0, 16);
 		w2.registry.configure_pool(3, 16);
 		{
@@ -478,8 +476,7 @@ int main_impl() {
 	// game-start would land together and the client couldn't send 0x2F between them. ---
 	{
 		w::World w3;
-		w::AiSystem ai3;
-		w3.ai = &ai3;
+		w::AiSystem &ai3 = w3.ai;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
 		{

@@ -227,9 +227,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     gun.seats[0].bone_index = 7;
     const EntityHandle target = w.registry.spawn(1, gun);
 
-    auto ai_fixture = std::make_unique<AiSystem>();
-    AiSystem &ai = *ai_fixture;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     const int mounted_ai_index = ai.attach(mounted);
     AiEntity *mounted_ai = ai.at(mounted_ai_index);
 
@@ -523,8 +521,7 @@ int main() {
         w.registry.configure_pool(1, 16);
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 10.f, 20.f, 5.f, 0));
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -571,10 +568,9 @@ int main() {
         w.registry.get(gh)->emplaced_config_valid = true;
         w.registry.get(gh)->emplaced_config = 3;
 
-        AiSystem ai;
+        AiSystem &ai = w.ai;
         ClipSource clips;
         ai.root_motion = &clips;
-        w.ai = &ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -616,9 +612,7 @@ int main() {
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        auto aip = std::make_unique<AiSystem>();
-        AiSystem &ai = *aip;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         AiEntity *ae = ai.at(idx);
         ae->inf.active = true;
@@ -677,9 +671,7 @@ int main() {
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        auto aip = std::make_unique<AiSystem>();
-        AiSystem &ai = *aip;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         AiEntity *ae = ai.at(idx);
         ae->inf.active = true;
@@ -736,8 +728,7 @@ int main() {
         vehicle.seats.push_back(passenger);
         const EntityHandle vh = w.registry.spawn(1, vehicle);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;

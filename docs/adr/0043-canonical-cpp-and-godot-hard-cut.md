@@ -61,11 +61,14 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    `Entity` stays a POD row owned by `EntityRegistry`; behavior moves onto the
    SYSTEM that owns the state it mutates, never onto `Entity` (retail's
    `Entity_*` functions mutate several rows at once). `Entity` gains only pure
-   predicates and `ai_index`. `World` is the one aggregate whose invariants are
+   predicates. `World` is the one aggregate whose invariants are
    ORDER (`run_logic_tick`) and IDENTITY (non-copyable); its public members
    regroup by lifetime (`script`, `tables`, `rules`, `out`; the sim members
-   stay flat). `AiSystem` is owned BY VALUE on `World`; the handle-to-index
-   table dies for `Entity::ai_index`. `EntityCommands` stays the one script/
+   stay flat). `AiSystem` is owned BY VALUE on `World`; its per-slot
+   handle-to-index table STAYS (slice E4, 2026-09-02): a per-row
+   `Entity::ai_index` would change which brain a reused pool slot resolves
+   to, and retail's entity+100 init on respawn is unwitnessed, so that move
+   waits for a grill. `EntityCommands` stays the one script/
    tool command layer. New systems own what free functions used to reach
    through `World &`: `VehicleSystem`, `ZoneSystem`, `LocalPlayer`. The
    feed builders stay free functions under `world/feeds/`. `MissionKernel` is

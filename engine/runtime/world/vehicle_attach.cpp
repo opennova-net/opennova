@@ -345,7 +345,6 @@ namespace {
 // residual), kept at the call site now that line_of_sight_clear takes exact
 // endpoints — deliberately not the muzzle seam: a USE scan is not a fire origin.
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &sp) {
-    if (world.ai == nullptr) return true;
     constexpr int32_t kEyeLift = 0xE666; // 0.9 u
     const int32_t a[3] = {static_cast<int32_t>(player.position.x * 65536.0f),
                           static_cast<int32_t>(player.position.y * 65536.0f),
@@ -353,7 +352,7 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
     const int32_t b[3] = {static_cast<int32_t>(sp.x * 65536.0f),
                           static_cast<int32_t>(sp.y * 65536.0f),
                           static_cast<int32_t>(sp.z * 65536.0f) + kEyeLift};
-    return world.ai->line_of_sight_clear(world, a, b, player.handle, cand.handle);
+    return world.ai.line_of_sight_clear(world, a, b, player.handle, cand.handle);
 }
 
 // The shared per-entity reject set of the scan and the label pass

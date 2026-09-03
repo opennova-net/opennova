@@ -380,12 +380,10 @@ void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
         const int32_t dh = static_cast<int32_t>((16u * rand) >> 7);
         e.position.x += static_cast<float>(dx) / 65536.0f;
         e.position.y += static_cast<float>(dy) / 65536.0f;
-        if (world.ai != nullptr) {
-            if (AiEntity *a = world.ai->for_handle(e.handle)) {
-                a->pos[0] += dx;
-                a->pos[1] += dy;
-                if (heading_bam == nullptr) a->heading += dh;
-            }
+        if (AiEntity *a = world.ai.for_handle(e.handle)) {
+            a->pos[0] += dx;
+            a->pos[1] += dy;
+            if (heading_bam == nullptr) a->heading += dh;
         }
         if (heading_bam != nullptr) *heading_bam += dh;
         rand = core.oscillator.reroll() & 0xFFFu;

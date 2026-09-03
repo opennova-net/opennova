@@ -1004,7 +1004,7 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	Dictionary out;
 	out["loaded"] = is_loaded();
 	out["listen_server"] = listen_server_;
-	out["ai_count"] = kernel_ ? kernel_->ai.count() : 0;
+	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
 	out["present_entity_count"] = last_present_entity_count_;
 	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
 	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
@@ -1060,7 +1060,7 @@ Error Simulation::debug_kill_player_entity(int p_handle) {
 // without bypassing the damage/death chain under test.
 Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	if (!kernel_) return ERR_UNAVAILABLE;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
 	return kernel_->world.commands.set_entity_health(e->handle, p_hp)
 			? OK
@@ -1114,7 +1114,7 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 // the player when the mission geography defeats straight-line navigation.
 Error Simulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
 	if (!kernel_) return ERR_UNAVAILABLE;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
 	return kernel_->world.commands.set_entity_position(e->handle,
 				   opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y,
@@ -1142,7 +1142,7 @@ int Simulation::debug_kill_group(int p_group) {
 
 Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
                                                   float p_yaw_deg, float p_pitch_deg) {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) {
+	if (!kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
 	if (kernel_->player() == nullptr || kernel_->player_ai() == nullptr) {
@@ -1301,9 +1301,9 @@ PackedByteArray Simulation::get_fired_events_snapshot() const {
 }
 
 void Simulation::set_loco_scale(int p_scale) {
-	if (kernel_) kernel_->ai.loco_scale = p_scale;
+	if (kernel_) kernel_->world.ai.loco_scale = p_scale;
 }
 
 int Simulation::get_loco_scale() const {
-	return kernel_ ? kernel_->ai.loco_scale : 0;
+	return kernel_ ? kernel_->world.ai.loco_scale : 0;
 }

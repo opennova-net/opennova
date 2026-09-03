@@ -125,8 +125,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle shooter =
 			w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "mounted-route shooter spawned")) return false;
@@ -253,8 +252,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 bool check_duplicate_c2s_session_does_not_refire() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "session replay shooter spawned")) return false;
 
@@ -352,8 +350,7 @@ int main() {
 
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));        // host
 	const w::EntityHandle hb = w::spawn_remote_player(world, player_spawn(0xFFF1)); // shooter
 	const w::EntityHandle hc = w::spawn_remote_player(world, player_spawn(0xFFF2)); // target

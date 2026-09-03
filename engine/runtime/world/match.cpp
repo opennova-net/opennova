@@ -205,9 +205,7 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
 // exempts it from the team-kill arm.
 // [orig: GameEvent_PlayerDeath see-all gates @0x51709C..0x5170DA]
 bool ai_sees_all(const World &world, EntityHandle handle) {
-    if (world.ai == nullptr)
-        return false;
-    const AiEntity *ai = world.ai->for_handle(handle);
+    const AiEntity *ai = world.ai.for_handle(handle);
     return ai != nullptr && ai->see_all;
 }
 

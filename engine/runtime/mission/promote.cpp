@@ -415,8 +415,9 @@ void init_infantry(AiEntity &ae, const bms::Entity &e) {
 
 } // namespace
 
-PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
+PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
+    AiSystem &ai = world.ai;
     PromoteResult r;
 
     // Pools (pools 0..3 = actors searched by net id, pool 4 = static props),

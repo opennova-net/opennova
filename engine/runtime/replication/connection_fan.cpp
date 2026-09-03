@@ -631,8 +631,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			// [orig: gate @0x50eac5, call @0x50eadb].
 			bool los = false;
 			if (angle > 128 && g_view_distance_units > 0 &&
-					distance_tiles < g_view_distance_units && w.ai != nullptr &&
-					self != nullptr) {
+					distance_tiles < g_view_distance_units && self != nullptr) {
 				// The 0.9 u lift both ends keeps this ray off the ground plane
 				// (@0x53b130's own endpoint recipe is the tracked follow-up above)
 				// — explicit at the call site since line_of_sight_clear takes
@@ -646,7 +645,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				// LOS_SECTOR rows inside the cached raycast.
 				const devtools::ProfileScope los_scope(
 						w.profile, devtools::Slot::SIM_REPLICATION_ENTITY_LOS);
-				los = w.ai->line_of_sight_clear_cached(
+				los = w.ai.line_of_sight_clear_cached(
 						const_cast<world::World &>(w), a3, b3, conn.owned_entity,
 						world::EntityHandle{e.wire_handle});
 			}

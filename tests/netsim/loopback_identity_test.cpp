@@ -988,8 +988,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	w::Entity soldier;
 	soldier.kind = w::EntityKind::Organic;
@@ -1181,8 +1180,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 
 	// The engine-frame mirror. AiSystem is wired (so apply mirrors it) but NOT ticked —
 	// this isolates the host read-apply from the motor.
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 
 	// A DIFFERENT handle is the local player, so the read-apply guard does not reject the peer.
@@ -1244,8 +1242,7 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.terrain = &terrain.field;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.terrain = &terrain.field;
 	world.add_system(&ai);
 
@@ -1334,8 +1331,7 @@ bool run_apply_rejects_own_player() {
 	peer.item_id = 0x14B9;
 	peer.position = {1.0f, 2.0f, 3.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 
 	// Make the peer the local player -> the read-apply must reject it.
@@ -1365,8 +1361,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.add_system(&ai);
 
 	w::Entity peer;
@@ -1450,8 +1445,7 @@ bool run_motor_skips_net_peer() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9;
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 	w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "peer AiEntity")) return false;

@@ -954,14 +954,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// other anim side effect drives the .3di control registers)
 		// [orig: WeaponAction_Fire @ 0x542bbc..0x542bea; ActionSlot_TryAllocCtrlRegAnim
 		//  @ 0x401f00 -> dword_83FCE8].
-		AiEntity *p = world.ai != nullptr
-				? world.ai->for_handle(world.cached.local_player)
-				: nullptr;
+		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) {
 			const int stamped = w.attack_kind == 1 ? anim_state::kKnifeAttack
 					: w.attack_kind == 2 ? anim_state::kGrenadeAttack : -1;
-			const int ring = (stamped >= 0 && world.ai->root_motion != nullptr)
-					? world.ai->root_motion->variant_count(p->inf.adm_id, stamped) : 1;
+			const int ring = (stamped >= 0 && world.ai.root_motion != nullptr)
+					? world.ai.root_motion->variant_count(p->inf.adm_id, stamped) : 1;
 			infantry_weapon_attack_stamp(p->inf, w.attack_kind, ring);
 		}
 		// Local/SP fire already passed the same FSM/ammo authority that the remote
@@ -1143,9 +1141,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// locked clip plays to its end). In the original the stamp lives inside the
 		// refill itself; the SP/listen-host loopback applies it at reload start.
 		// [orig: WeaponSlot_ReloadAmmo @ 0x54173c; world-wac-ai-re.md §14.8.5]
-		AiEntity *p = world.ai != nullptr
-				? world.ai->for_handle(world.cached.local_player)
-				: nullptr;
+		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) p->inf.reload_anim_ticks = 80;
 	}
 	// --- the slot-pool bridge: the pool model is authoritative for ammo -------------

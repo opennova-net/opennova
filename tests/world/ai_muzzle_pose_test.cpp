@@ -58,8 +58,8 @@ int main() {
 
 	// --- Every live foot NPC resolves a muzzle inside the rifle envelope.
 	int persons = 0, stamped = 0, good = 0, misses = 0, head_height = 0;
-	for (int i = 0; i < rig.ai.count(); ++i) {
-		const w::AiEntity *e = rig.ai.at(i);
+	for (int i = 0; i < rig.world.ai.count(); ++i) {
+		const w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active) continue;
 		const w::Entity *ent = rig.world.registry.get(e->handle);
 		if (ent == nullptr || !ent->alive || ent->mounted || ent->item_type != kItemTypePerson) continue;

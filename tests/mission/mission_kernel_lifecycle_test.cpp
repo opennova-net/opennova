@@ -210,7 +210,7 @@ int main() {
 		CHECK(!kernel.has_terrain());
 		CHECK(!kernel.terrain_store.valid());
 		CHECK(kernel.world.terrain == nullptr);
-		CHECK(kernel.ai.terrain == nullptr);
+		CHECK(kernel.world.ai.terrain == nullptr);
 		CHECK(kernel.world.collision == nullptr);
 		CHECK(kernel.collision_attached == 0);
 		// The frame legs run without a field: the clock advances and the

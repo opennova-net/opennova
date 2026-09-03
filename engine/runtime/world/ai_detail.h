@@ -8,6 +8,7 @@
 // and combat legs all reach for.
 
 #include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdint>

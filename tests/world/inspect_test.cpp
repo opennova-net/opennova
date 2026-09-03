@@ -53,8 +53,7 @@ int main() {
         World world;
         world.registry.configure_pool(0, 8);
         world.registry.configure_pool(1, 4);
-        AiSystem ai;
-        world.ai = &ai;
+        AiSystem &ai = world.ai;
 
         const EntityHandle organic =
                 spawn_entity(world, 0, 5311, 101, "alpha", Vec3{1, 2, 3});
@@ -79,7 +78,7 @@ int main() {
         ai.at(vaporized_ai)->pos[2] = 2 << 16;
         world.registry.despawn(vaporized);
 
-        const auto rows = inspect::entity_directory(world, &ai);
+        const auto rows = inspect::entity_directory(world, /*with_brains=*/true);
         // organic + vehicle presented; defless + vaporized appended.
         CHECK(rows.size() == 4);
         CHECK(rows[0].index == 0 && rows[3].index == 3);
@@ -123,7 +122,7 @@ int main() {
 
         // A joiner passes no AI system: the decoded view never mixes the
         // non-authoritative tooling pool in.
-        const auto joiner_rows = inspect::entity_directory(world, nullptr);
+        const auto joiner_rows = inspect::entity_directory(world, /*with_brains=*/false);
         CHECK(joiner_rows.size() == 2);
         CHECK(joiner_rows[0].ai_index == -1 && !joiner_rows[0].editable);
 
@@ -149,7 +148,7 @@ int main() {
         // The despawned entity keeps a stable AI card shape with typed
         // registry defaults.
         const inspect::EntityCard despawned =
-                inspect::build_entity_card(world, &ai, vaporized);
+                inspect::build_entity_card(world, /*with_brains=*/true, vaporized);
         CHECK(despawned.valid && !despawned.has_world && despawned.has_ai);
         CHECK(despawned.ai.kind == -1 && despawned.ai.source_index == -1);
         CHECK(despawned.ai.pool == -1);
@@ -159,20 +158,19 @@ int main() {
 
         // A brainless vehicle yields the world half only.
         const inspect::EntityCard veh_card =
-                inspect::build_entity_card(world, &ai, vehicle);
+                inspect::build_entity_card(world, /*with_brains=*/true, vehicle);
         CHECK(veh_card.valid && veh_card.has_world && !veh_card.has_ai);
         CHECK(veh_card.ai_index == -1);
         CHECK(veh_card.world.name == "buggy");
 
-        CHECK(!inspect::build_entity_card(world, &ai, EntityHandle{}).valid);
+        CHECK(!inspect::build_entity_card(world, /*with_brains=*/true, EntityHandle{}).valid);
     }
 
     // --- the EntityCommands both-store mutators -----------------------------
     {
         World world;
         world.registry.configure_pool(0, 4);
-        AiSystem ai;
-        world.ai = &ai;
+        AiSystem &ai = world.ai;
         const EntityHandle h =
                 spawn_entity(world, 0, 5311, 44, "target", Vec3{0, 0, 0});
         const int ai_index = ai.attach(h);
@@ -193,7 +191,7 @@ int main() {
         CHECK(ai.at(ai_index)->pos[2] == 7 << 16);
 
         // Round-trip through the card: both mirrors show the write.
-        const inspect::EntityCard card = inspect::build_entity_card(world, &ai, h);
+        const inspect::EntityCard card = inspect::build_entity_card(world, /*with_brains=*/true, h);
         CHECK(card.ai.ai_health == 0 && card.world.health == 0);
         CHECK(std::fabs(card.ai.mission_position.z - 7.0f) < 1e-6f);
         CHECK(std::fabs(card.world.mission_position.z - 7.0f) < 1e-6f);
@@ -210,8 +208,7 @@ int main() {
     {
         World world;
         world.registry.configure_pool(0, 4);
-        AiSystem ai;
-        world.ai = &ai;
+        AiSystem &ai = world.ai;
         world.item_names.set(5311, "Rifleman");
         const EntityHandle h =
                 spawn_entity(world, 0, 5311, 45, "rifle", Vec3{0, 0, 0});
@@ -233,13 +230,13 @@ int main() {
         CHECK(!e->is_capture_trigger && e->item_attrib2 == 0u);
 
         // The card and the directory row carry the new fields.
-        const inspect::EntityCard card = inspect::build_entity_card(world, &ai, h);
+        const inspect::EntityCard card = inspect::build_entity_card(world, /*with_brains=*/true, h);
         CHECK(card.has_world);
         CHECK(card.world.item_attrib ==
                 static_cast<int64_t>(kItemAttribAIData | kItemAttribSpawnPoint | kItemAttribLeaveCorpse));
         CHECK(card.world.health_max == 120);
         CHECK(card.world.item_name == "Rifleman");
-        const auto rows = inspect::entity_directory(world, &ai);
+        const auto rows = inspect::entity_directory(world, /*with_brains=*/true);
         CHECK(rows.size() == 1 && rows[0].item_name == "Rifleman");
 
         // No registry slot -> refused.
@@ -251,8 +248,7 @@ int main() {
     {
         World world;
         world.registry.configure_pool(0, 8);
-        AiSystem ai;
-        world.ai = &ai;
+        AiSystem &ai = world.ai;
         TestMuzzleProvider muzzle;
         world.pose_provider = &muzzle;
 
@@ -341,7 +337,7 @@ int main() {
         ai.scheduler.budget = 128;
 
         const inspect::AiDebugReport report =
-                inspect::ai_debug_report(world, ai);
+                inspect::ai_debug_report(world);
         CHECK(report.rows.size() == 3);
 
         const inspect::AiOverlayRow &rr = report.rows[0];
@@ -395,7 +391,7 @@ int main() {
 
         // The deep card carries the new brain/profile/slot/infantry fields.
         const inspect::EntityCard card =
-                inspect::build_entity_card(world, &ai, router);
+                inspect::build_entity_card(world, /*with_brains=*/true, router);
         CHECK(card.ai.target_valid &&
                 card.ai.target_handle == static_cast<int32_t>(idle.packed));
         CHECK(card.ai.target_name == "idler");
@@ -415,7 +411,7 @@ int main() {
         CHECK(card.ai.profile_approach_cap == 30 << 16);
         CHECK(card.ai.slot_control_bits == 0x200);
         const inspect::EntityCard shooter_card =
-                inspect::build_entity_card(world, &ai, shooter);
+                inspect::build_entity_card(world, /*with_brains=*/true, shooter);
         CHECK(shooter_card.ai.aim_valid && shooter_card.ai.aim_heading == 0x4000);
         CHECK(shooter_card.ai.damage_timer == 6);
         CHECK(shooter_card.ai.same_target_ticks == 4);
@@ -426,8 +422,7 @@ int main() {
     {
         World world;
         world.registry.configure_pool(0, 4);
-        AiSystem ai;
-        world.ai = &ai;
+        AiSystem &ai = world.ai;
         ai.nav.channels.resize(2);
         ai.nav.channels[1].count = 1;
         ai.nav.channels[1].entries[0] = 0;
@@ -437,7 +432,7 @@ int main() {
             ai.at(idx)->brain.f[AiBrain::kWpChannel] = 1;
         }
         const inspect::AiDebugReport report =
-                inspect::ai_debug_report(world, ai);
+                inspect::ai_debug_report(world);
         CHECK(static_cast<int>(report.rows.size()) ==
                 inspect::AiDebugReport::kMaxRows);
         CHECK(report.channels.size() == 1 && report.channels[0].followers == 260);
