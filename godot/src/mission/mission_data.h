@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <runtime/mission/mission_load_plan.h>
 
@@ -24,16 +25,20 @@ class MissionInfo;
 
 class ResourceRoot;
 
-// Thin GDExtension wrapper over opennova::mission::MissionDocument (engine/runtime/mission).
-// Parses a NovaLogic .bms/.mis mission file and exposes its header (terrain/env refs,
-// metadata) and its placed entities as Godot dictionaries. The read surface is
-// loading + getters; the mutate surface (Phase 1 authoring) is set_entity_transform
-// + save, calling the already byte-faithful writer in engine/runtime/mission.
+// The mission document binding: it holds the parsed bms::File (engine/formats/mission)
+// and the document facts (source path, last error, loaded / wire-header-only),
+// exposes the header (terrain/env refs, metadata) and the placed entities as Godot
+// dictionaries, and edits the file through the bms_edit free functions (ADR 0043
+// slice E11: no facade twin of the file). The save paths call the byte-faithful
+// writers in engine/formats/mission.
 class MissionData : public RefCounted {
 	GDCLASS(MissionData, RefCounted)
 
 private:
-	opennova::mission::MissionDocument document;
+	opennova::bms::File file_;
+	bool loaded_ = false;
+	// A wire S2C 0x0B header view: metadata only, never a complete mission to save.
+	bool header_only_ = false;
 	String source_path;
 	String last_error;
 	// True once an in-memory mutation lands and before the next successful save/load.
@@ -43,7 +48,10 @@ private:
 	// heights can never leak onto a different document or a later save.
 	PackedInt32Array mis_base_heights;
 
-	Dictionary entity_to_dictionary(const opennova::mission::EntityRecord &record) const;
+	// The edit-error bridge: the engine's error text becomes last_error.
+	bool edit_failed(const std::string &error);
+	Dictionary entity_to_dictionary(const opennova::bms::Entity &entity,
+			opennova::mission::EntityKind kind, size_t index) const;
 	Dictionary waypoint_path_to_dictionary(const opennova::mission::WaypointPath &path) const;
 	Dictionary area_trigger_to_dictionary(const opennova::mission::AreaTriggerRecord &record) const;
 	Dictionary weapon_loadout_to_dictionary(const opennova::mission::WeaponLoadoutEntry &entry, int index) const;
@@ -185,7 +193,7 @@ public:
 	// "name2" (AI script / ai_textfile). Same seed-then-overwrite-one model as the int setter;
 	// the value is truncated to the format's 8-byte slot. Sets the dirty flag on success.
 	bool set_entity_property_string(EntityKind kind, int index, const String &property, const String &value);
-	// Set one mission-header field, mirroring MissionDocument::set_header_*. String fields:
+	// Set one mission-header field, mirroring mission::set_header_*. String fields:
 	// mission_name|designer|briefing|terrain|environment. Int fields: climate|weather|mission_type|
 	// attrib_flags|start_time|minutes_per_day|player_health|max_saves|music|reverb|wind_speed|wind_direction.
 	// set_header_flag toggles one ATTRIB_* bit; set_header_float takes "map_zoom". Dirty on success.
@@ -317,7 +325,7 @@ public:
 	bool remove_event_action(int event_index, int local_index);
 	bool move_event_action(int event_index, int local_index, int delta);
 
-	const opennova::mission::MissionDocument &native_document() const { return document; }
+	const opennova::bms::File &native_file() const { return file_; }
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and

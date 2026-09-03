@@ -23,7 +23,9 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_mis.h>
 
 namespace {
 
@@ -65,9 +67,11 @@ int check(const std::string &path) {
 	using namespace opennova::mission;
 	namespace bms = opennova::bms;
 
-	MissionDocument doc;
-	TEST_EXPECT(doc.load_bms_file(path));
-	const bms::File &source = doc.bms_file();
+	bms::File doc;
+	std::string error;
+	TEST_EXPECT(bms::parse_file(path, doc, error));
+	sync_counts(doc);
+	const bms::File &source = doc;
 	const std::vector<bms::Entity> *source_pools[4] = {
 			&source.items, &source.buildings, &source.markers, &source.organics};
 	const size_t total = source.items.size() + source.buildings.size() +
@@ -116,17 +120,18 @@ int check(const std::string &path) {
 	TEST_EXPECT(!spots.empty());
 
 	std::string gen1;
-	TEST_EXPECT(doc.write_mis_text(gen1));
+	TEST_EXPECT(write_mis_text(doc, gen1, error));
 	TEST_EXPECT(!gen1.empty());
 	// Every BMS-sourced item block declares its z absolute (D-MIS-4)
 	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
 	TEST_EXPECT(gen1.find("  height_lock 1\r\n") != std::string::npos);
 
-	MissionDocument reparsed;
-	TEST_EXPECT(reparsed.load_mis_text(gen1, resolver));
+	bms::File reparsed;
+	TEST_EXPECT(parse_mis_text(gen1, resolver, reparsed, error));
+	sync_counts(reparsed);
 	// D-MIS-1 classification: every pool round-trips at its source size (total conserved by
 	// construction).
-	const bms::File &back = reparsed.bms_file();
+	const bms::File &back = reparsed;
 	const std::vector<bms::Entity> *back_pools[4] = {
 			&back.items, &back.buildings, &back.markers, &back.organics};
 	for (int pool = 0; pool < 4; ++pool) {
@@ -143,7 +148,7 @@ int check(const std::string &path) {
 	}
 
 	std::string gen2;
-	TEST_EXPECT(reparsed.write_mis_text(gen2));
+	TEST_EXPECT(write_mis_text(reparsed, gen2, error));
 	TEST_EXPECT(texts_equal(gen1, gen2));
 
 	return 0;

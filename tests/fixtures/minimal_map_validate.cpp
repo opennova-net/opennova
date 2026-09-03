@@ -11,6 +11,8 @@
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
 #include <formats/env/env.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include <algorithm>
@@ -93,28 +95,29 @@ int main() {
 			return fail == 0 ? 0 : 1;
 		}
 
-		opennova::mission::MissionDocument doc;
-		CHECK(doc.load_bms_bytes(committed.data(), committed.size()), "committed .bms parses");
+		opennova::bms::File doc;
+		std::string parse_error;
+		CHECK(opennova::bms::parse(committed.data(), committed.size(), doc, parse_error),
+				"committed .bms parses");
 
-		const size_t markers = doc.entity_count(opennova::mission::EntityKind::Marker);
 		int player_starts = 0;
 		int blue_starts = 0;
 		int red_starts = 0;
-		for (size_t i = 0; i < markers; ++i) {
-			opennova::mission::EntityRecord rec{};
-			if (!doc.get_entity(opennova::mission::EntityKind::Marker, i, rec)) continue;
-			if (rec.item_id == kPlayerStartItemId) ++player_starts;
-			if (rec.item_id == kBlueTeamStartItemId) ++blue_starts;
-			if (rec.item_id == kRedTeamStartItemId) ++red_starts;
+		for (const opennova::bms::Entity &rec : doc.markers) {
+			const int item_id = opennova::mission::entity_item_id(rec);
+			if (item_id == kPlayerStartItemId) ++player_starts;
+			if (item_id == kBlueTeamStartItemId) ++blue_starts;
+			if (item_id == kRedTeamStartItemId) ++red_starts;
 		}
 		// A mission without one loads completely and then strands you with nowhere to spawn;
 		// retail's own missions carry exactly one (00TRa.bms: 1331 entities, one 106001).
 		CHECK(player_starts == 1, "the map places exactly one 106001 player start");
 		CHECK(blue_starts >= 1, "the map places a Blue Team start (106003) for host/join");
 		CHECK(red_starts >= 1, "the map places a Red Team start (106004) for host/join");
-		CHECK(doc.info().terrain == kMapBase, "the header points at the minimal terrain");
+		const opennova::mission::MissionInfo info = opennova::mission::mission_info(doc);
+		CHECK(info.terrain == kMapBase, "the header points at the minimal terrain");
 
-		const int start_hour = doc.info().start_time / kQ8_8Hour;
+		const int start_hour = info.start_time / kQ8_8Hour;
 		CHECK(start_hour >= kDaylightFirstHour && start_hour <= kDaylightLastHour,
 		      "the mission starts in daylight (start_time is Q8.8 HOURS; 0 means midnight, and "
 		      "the header overrides the .env's own curtime)");

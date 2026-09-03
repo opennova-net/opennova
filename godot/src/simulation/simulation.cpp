@@ -660,7 +660,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		kernel_->set_items_table(&p_item_db->native_items());
 	}
 	joiner_role_.set_wire_header_world(p_mission->is_wire_header_only());
-	kernel_->open_document(p_mission->native_document().bms_file(),
+	kernel_->open_document(p_mission->native_file(),
 			std::string(p_mission_file_basename.utf8().get_data()), files);
 	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
 	// exactly the ctest embedder's order; the D-SND-15 .TSD tile table rides
@@ -753,7 +753,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with NO file source: the file-fed boot steps skip and
 	// this stays the bare promote + systems + role bring-up path.
-	kernel_->open_document(p_mission->native_document().bms_file(),
+	kernel_->open_document(p_mission->native_file(),
 			std::string(), opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)

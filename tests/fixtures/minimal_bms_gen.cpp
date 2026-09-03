@@ -1,5 +1,5 @@
 // Generator + guard for fixtures/bms/synth_dense.bms: a synthetic mission
-// authored through MissionDocument (the same seam ONED writes with) and
+// authored through the bms_edit free functions (the same seam ONED writes with) and
 // serialized by bms::write, dense the way the shipped missions are — every
 // entity pool populated (items, buildings, markers, organics; a few hundred
 // records on a grid, one item id per pool so the .mis pool classification
@@ -16,6 +16,7 @@
 #include "common/test_paths.h"
 
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include <cstdint>
@@ -36,12 +37,11 @@ bool expect(bool cond, const char *msg) {
 
 using opennova::mission::EntityKind;
 using opennova::mission::EntityTransform;
-using opennova::mission::MissionDocument;
 
 // One pool: `count` entities of `item_id` (an id the authored
 // fixtures/def/items.def carries) laid out on a grid from `origin`, yaw
 // stepping around the compass.
-void add_pool(MissionDocument &doc, EntityKind kind, int item_id, int count, float origin_x, float origin_y,
+void add_pool(opennova::bms::File &doc, EntityKind kind, int item_id, int count, float origin_x, float origin_y,
               float spacing) {
 	for (int i = 0; i < count; ++i) {
 		EntityTransform t;
@@ -51,7 +51,7 @@ void add_pool(MissionDocument &doc, EntityKind kind, int item_id, int count, flo
 		t.yaw = (i * 45) % 360;
 		t.pitch = 0;
 		t.roll = 0;
-		expect(doc.add_entity(kind, item_id, t), "add_entity");
+		(void)opennova::mission::add_entity(doc, kind, item_id, t);
 	}
 }
 
@@ -60,11 +60,15 @@ void add_pool(MissionDocument &doc, EntityKind kind, int item_id, int count, flo
 // three waypoint paths, then every seeded per-entity default zeroed so the
 // records carry the zero-valued fields the shipped missions do.
 bool build(std::vector<uint8_t> &bytes, std::string &err) {
-	MissionDocument doc;
-	doc.create_default();
-	if (!doc.set_header_string("mission_name", "Synthetic Dense") ||
-	    !doc.set_header_string("designer", "OpenNova") || !doc.set_header_string("terrain", "Tmap") ||
-	    !doc.set_header_string("environment", "synth_full") || !doc.set_header_int("minutes_per_day", 1440)) {
+	namespace mission = opennova::mission;
+	opennova::bms::File doc;
+	mission::make_default(doc);
+	std::string edit_error;
+	if (!mission::set_header_string(doc, "mission_name", "Synthetic Dense", edit_error) ||
+	    !mission::set_header_string(doc, "designer", "OpenNova", edit_error) ||
+	    !mission::set_header_string(doc, "terrain", "Tmap", edit_error) ||
+	    !mission::set_header_string(doc, "environment", "synth_full", edit_error) ||
+	    !mission::set_header_int(doc, "minutes_per_day", 1440, edit_error)) {
 		err = "header authoring failed";
 		return false;
 	}
@@ -85,16 +89,16 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 			t.y = 100.0f + static_cast<float>(path) * 40.0f;
 			t.z = 0.0f;
 			t.yaw = i * 30;
-			opennova::mission::EntityRecord marker;
-			if (!doc.add_waypoint_marker(path, 100001, t, -1, &marker, &authored)) {
+			if (!mission::add_waypoint_marker(doc, path, 100001, t, -1, edit_error)) {
 				err = "add_waypoint_marker failed";
 				return false;
 			}
 		}
+		(void)mission::waypoint_path(doc, path, authored);
 		const int flags = path == 2 ? static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
 		                                  static_cast<int>(opennova::bms::WaypointFlags::BlueTeam)
 		                            : 0;
-		if (!doc.set_waypoint_path(path, authored.marker_indices, flags)) {
+		if (!mission::set_waypoint_path(doc, path, authored.marker_indices, flags, edit_error)) {
 			err = "set_waypoint_path failed";
 			return false;
 		}
@@ -114,7 +118,7 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 			entry.flags = i == 2 ? "1" : "-1";
 			kit.push_back(entry);
 		}
-		if (!doc.set_weapon_loadout(kit)) {
+		if (!mission::set_weapon_loadout(doc, kit, edit_error)) {
 			err = "set_weapon_loadout failed";
 			return false;
 		}
@@ -126,11 +130,7 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 		opennova::mission::MissionEventRecord event;
 		event.flags = 0;
 		event.delay = i * 5;
-		opennova::mission::MissionEventRecord added;
-		if (!doc.add_event(event, &added)) {
-			err = "add_event failed";
-			return false;
-		}
+		const size_t added = mission::add_event(doc, event);
 		for (int t = 0; t <= i; ++t) {
 			opennova::mission::MissionTriggerRecord trigger;
 			trigger.condition_flags = 0;
@@ -139,7 +139,7 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 			    static_cast<int>(opennova::bms::MissionVariableTriggerType::MissionVariableIsGreaterThan);
 			trigger.param1 = i + 1;
 			trigger.param2 = t * 10;
-			if (!doc.insert_event_trigger(added.index, static_cast<size_t>(t), trigger)) {
+			if (!mission::insert_event_trigger(doc, added, static_cast<size_t>(t), trigger, edit_error)) {
 				err = "insert_event_trigger failed";
 				return false;
 			}
@@ -147,13 +147,13 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 		opennova::mission::MissionActionRecord action;
 		action.action_type = static_cast<int>(opennova::bms::ActionType::ResetEvent);
 		action.param1 = (i + 1) % 3;
-		if (!doc.insert_event_action(added.index, 0, action)) {
+		if (!mission::insert_event_action(doc, added, 0, action, edit_error)) {
 			err = "insert_event_action failed";
 			return false;
 		}
 	}
 
-	opennova::bms::File file = doc.bms_file();
+	opennova::bms::File file = doc;
 	std::vector<opennova::bms::Entity> *pools[4] = {&file.items, &file.buildings, &file.markers, &file.organics};
 	uint8_t team = 0;
 	for (std::vector<opennova::bms::Entity> *pool : pools) {

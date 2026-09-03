@@ -160,10 +160,16 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    `height_field_apply_trn` (amends ADR 0020 d3).
 
 8. **`formats/mission` is `bms::File` plus free functions.** `MissionDocument`
-   (the 90-method pimpl with string-keyed setters) retires; its capabilities
-   become `bms.h` (parse/write/header-only/default), `mis.h`, `bms_edit.h`,
-   `bms_names.h`. `formats/wac` vs `runtime/wac` and `formats/particle` vs
-   `runtime/particle` stay (file format vs execution).
+   (the 90-method pimpl with string-keyed setters) retired (E11); its
+   capabilities are `bms.h` (parse/write/header blob), `bms_edit.h` (every
+   edit operation and typed view as a free function over `bms::File`, the
+   mutators taking `std::string &error`; `sync_counts`, `make_default`),
+   `mission_mis.h` (`parse_mis_text`/`write_mis_text`) and `mission_names.h`
+   (the enum display tables). A `File` carries no loaded/header-only state:
+   that state lives on the one stateful consumer, the Godot `MissionData`
+   (which refuses to save a wire-header view). `formats/wac` vs `runtime/wac`
+   and `formats/particle` vs `runtime/particle` stay (file format vs
+   execution).
 
 9. **The Godot world is C++ Nodes with real ownership.** Everything under the
    world node is C++ under `godot/src`: `GameWorld` (the load plan, the frame

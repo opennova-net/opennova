@@ -2,7 +2,7 @@
 #
 # Source of truth: the authored probe2.bms (designer "OpenNova RE"), saved to the
 # retail JO game root and read back field-for-field from the live ONED mission
-# model (the same MissionDocument the libs/mission writer serializes). It is the
+# model (the same bms::File the formats/mission writer serializes). It is the
 # successor to dvxi5_manifest.txt, moved from Advance & Secure to TEAM DEATHMATCH
 # (Header.attrib_flags = 0x20000000) on a different terrain (Dvxi3, coastal island)
 # and environment (FULL_03), to force in-match tags the dvxi5 probe never emitted:

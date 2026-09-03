@@ -72,51 +72,14 @@ struct EntityTransform {
 	int roll = 0;
 };
 
-struct EntityRecord {
-	EntityKind kind = EntityKind::Item;
-	size_t index = 0;
-	int item_id = 0;
-	int bms_type_id = 0;
-	int bms_id = 0;
-	EntityTransform transform;
-	int group_id = 0;
-	int waypoint_id = 0;
-	int wp_number = 0;
-	int team = 0;
-	int ai_flags = 0;
-	int perception = 0;
-	int accuracy = 0;
-	int alert_state = 0;
-	int min_engagement_distance = 0;
-	int max_engagement_distance = 0;
-	int max_attack_distance = 0;
-	int spawn_count = 0;
-	int max_simultaneous = 0;  // = no_more_than (byte 74); paired with the RemoveIfMoreThan AI flag
-	int no_less_than = 0;      // byte 75; paired with the RemoveIfLessThan AI flag
-	int map_symbol = 0;        // byte 81; tactical-map icon
-	std::string name1;         // bytes 104..111 (iai_name): AI class name
-	std::string name2;         // bytes 112..119 (ai_textfile): AI script file
-};
-
-struct EntityProperties {
-	int group_id = 0;
-	int waypoint_id = 0;
-	int wp_number = 0;
-	int team = 0;
-	int ai_flags = 0;
-	int perception = 0;
-	int accuracy = 0;
-	int alert_state = 0;
-	int min_engagement_distance = 0;
-	int max_engagement_distance = 0;
-	int max_attack_distance = 0;
-	int spawn_count = 0;
-	int max_simultaneous = 0;  // = no_more_than (byte 74)
-	int no_less_than = 0;      // byte 75
-	int map_symbol = 0;        // byte 81
-	std::string name1;         // iai_name (8 bytes)
-	std::string name2;         // ai_textfile (8 bytes)
-};
+// (The entity itself is bms::Entity — no record twin, ADR 0043 slice E11:
+// bms_edit.h reads it through entity_item_id / entity_transform /
+// entity_name1/2 and edits it per named property. The editable byte
+// meanings: max_simultaneous = no_more_than (byte 74, paired with the
+// RemoveIfMoreThan AI flag), no_less_than (byte 75, RemoveIfLessThan),
+// map_symbol (byte 81, the tactical-map icon), name1 = bytes 104..111
+// (iai_name, the AI class), name2 = bytes 112..119 (ai_textfile, the AI
+// script).)
 
 struct WaypointSummary {
 	size_t index = 0;
@@ -259,135 +222,8 @@ struct MissionLogicSummary {
 	size_t diagnostic_count = 0;
 };
 
-class MissionDocument {
-public:
-	MissionDocument();
-	~MissionDocument();
-
-	MissionDocument(MissionDocument &&) noexcept;
-	MissionDocument &operator=(MissionDocument &&) noexcept;
-
-	MissionDocument(const MissionDocument &) = delete;
-	MissionDocument &operator=(const MissionDocument &) = delete;
-
-	bool load_bms_file(const std::string &path);
-	bool load_bms_bytes(const uint8_t *data, size_t size);
-	// Load only the exact header carried by retail S2C 0x0B. The resulting
-	// document is a read-only metadata view for a network join and intentionally
-	// contains no locally-authored entities, events, or other BMS body sections.
-	bool load_bms_header_bytes(const uint8_t *data, size_t size);
-	// Load the .mis text form. `resolve_item_type` classifies each `begin item`
-	// record into its BMS pool by items.def TYPE (see MisItemTypeResolver above);
-	// pass {} when no items.def is loaded (all records land in the item pool).
-	bool load_mis_file(const std::string &path, const MisItemTypeResolver &resolve_item_type);
-	bool load_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type);
-	bool save_bms_file(const std::string &path);
-	bool write_bms_bytes(std::vector<uint8_t> &out);
-	// The .mis writer. `base_heights` (optional): editor-sampled terrain heights under each entity,
-	// 16.16 fixed-point, FLAT in WRITE ORDER (items, buildings, markers, organics). When provided,
-	// each in-range entry is emitted as that entity's `extra_bheight` (the baked base height the
-	// original editor subtracts from the height-locked absolute z); out-of-range / absent entries
-	// fall back to the entity's own mis_extra_bheight. See docs/mission/mis-format-re.md (D-MIS-4).
-	bool save_mis_file(const std::string &path, const std::vector<int32_t> *base_heights = nullptr);
-	bool write_mis_text(std::string &out, const std::vector<int32_t> *base_heights = nullptr);
-	void clear();
-	// Build a minimal, valid, empty mission in memory (no file). Resets to the loaded state
-	// with a correct magic + version and the fixed waypoint/group/layer tables backfilled via
-	// sync_counts(), so write_bms_bytes() produces a buffer parse() accepts. Always succeeds.
-	void create_default();
-
-	bool is_loaded() const;
-	bool is_header_only() const;
-	const std::string &source_path() const;
-	const std::string &last_error() const;
-
-	MissionInfo info() const;
-
-	// Mission-header editing. Field names match the MissionInfo members above.
-	bool set_header_string(const std::string &field, const std::string &value);
-	bool set_header_int(const std::string &field, int value);
-	bool set_header_flag(int bit, bool on);              // single attrib_flags bit
-	bool set_header_float(const std::string &field, float value);
-
-	size_t entity_count(EntityKind kind) const;
-	bool get_entity(EntityKind kind, size_t index, EntityRecord &out) const;
-	bool set_entity_transform(EntityKind kind, size_t index, const EntityTransform &transform);
-	bool set_entity_properties(EntityKind kind, size_t index, const EntityProperties &properties, EntityRecord *out = nullptr);
-	// Edit a single named property of an entity (mirrors set_header_int/set_header_string). The
-	// name->member mapping lives in mission.cpp, so callers do not re-derive it. Unknown name -> false
-	// with last_error set; out-of-range index -> false.
-	bool set_entity_property_int(EntityKind kind, size_t index, const std::string &name, int value);
-	bool set_entity_property_string(EntityKind kind, size_t index, const std::string &name, const std::string &value);
-	bool add_entity(EntityKind kind, int item_id, const EntityTransform &transform, EntityRecord *out = nullptr);
-	bool remove_entity(EntityKind kind, size_t index);
-	std::vector<WaypointSummary> waypoint_summaries() const;
-	size_t waypoint_path_count() const;
-	bool get_waypoint_path(size_t index, WaypointPath &out) const;
-	bool set_waypoint_path(size_t index, const std::vector<int> &marker_indices, int flags, WaypointPath *out = nullptr);
-	bool clear_waypoint_path(size_t index, WaypointPath *out = nullptr);
-	bool add_waypoint_marker(size_t path_index,
-	                         int marker_item_id,
-	                         const EntityTransform &transform,
-	                         int insert_index = -1,
-	                         EntityRecord *out_marker = nullptr,
-	                         WaypointPath *out_path = nullptr);
-	size_t area_trigger_count() const;
-	bool get_area_trigger(size_t index, AreaTriggerRecord &out) const;
-	std::vector<AreaTriggerRecord> area_triggers() const;
-	bool add_area_trigger(const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
-	bool set_area_trigger(size_t index, const AreaTriggerRecord &record, AreaTriggerRecord *out = nullptr);
-	bool remove_area_trigger(size_t index);
-	// Weapon / restriction loadout (mission-global). weapon_loadout() returns the public three-field view;
-	// set_weapon_loadout() writes canonical four-field BMS records and refreshes weapon_loadout_chunk_len.
-	std::vector<WeaponLoadoutEntry> weapon_loadout() const;
-	bool set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &entries);
-	// The .bms secondary chunk's per-map weapon rules; read-only runtime view (the
-	// editor round-trips the chunk bytes through the writer unchanged).
-	std::vector<ItemAvailabilityEntry> item_availability() const;
-	// Groups: a fixed array of 64 modeled records. field0 is the 2-bit flags value, field8 is the editable
-	// value, and field12 must be the canonical constant 10.
-	size_t group_count() const;
-	bool get_group(size_t index, GroupFields &out) const;
-	std::vector<GroupFields> groups() const;
-	bool set_group(size_t index, int field0, int field8, int field12);
-	size_t event_count() const;
-	bool get_event(size_t index, MissionEventRecord &out) const;
-	std::vector<MissionEventRecord> events() const;
-	bool set_event(size_t index, const MissionEventRecord &record, MissionEventRecord *out = nullptr);
-	size_t trigger_count() const;
-	bool get_trigger(size_t index, MissionTriggerRecord &out) const;
-	std::vector<MissionTriggerRecord> triggers() const;
-	bool set_trigger(size_t index, const MissionTriggerRecord &record, MissionTriggerRecord *out = nullptr);
-	size_t action_count() const;
-	bool get_action(size_t index, MissionActionRecord &out) const;
-	std::vector<MissionActionRecord> actions() const;
-	bool set_action(size_t index, const MissionActionRecord &record, MissionActionRecord *out = nullptr);
-	bool get_event_chain(size_t index, MissionEventChain &out) const;
-	bool insert_event_trigger(size_t event_index, size_t local_index, const MissionTriggerRecord &record, MissionEventChain *out = nullptr);
-	bool remove_event_trigger(size_t event_index, size_t local_index, MissionEventChain *out = nullptr);
-	bool move_event_trigger(size_t event_index, size_t local_index, int delta, MissionEventChain *out = nullptr);
-	bool insert_event_action(size_t event_index, size_t local_index, const MissionActionRecord &record, MissionEventChain *out = nullptr);
-	bool remove_event_action(size_t event_index, size_t local_index, MissionEventChain *out = nullptr);
-	bool move_event_action(size_t event_index, size_t local_index, int delta, MissionEventChain *out = nullptr);
-	// Whole-event add / remove (the only scripting mutators the engine's loader implies but that the
-	// insert/remove_event_* helpers above did not cover). add_event appends a fresh empty event (no
-	// triggers/actions; the caller fills them via insert_event_trigger/action), applies author-facing flags
-	// and confirmed internal bits from record.flags, and returns its index via `out`. remove_event drains
-	// the event's trigger and action ranges through the single-element removers (so every other event's
-	// trigger_index/action_index stays correct), repairs ResetEvent action references (param1 = event index:
-	// decremented past the hole; an exact hit is set to -1 = dangling, which get_event_chain then flags),
-	// erases the event, and re-syncs the header counts.
-	bool add_event(const MissionEventRecord &record, MissionEventRecord *out = nullptr);
-	bool remove_event(size_t index);
-	MissionLogicSummary logic_summary() const;
-
-	const bms::File &bms_file() const;
-	bms::File &bms_file();
-	void sync_counts();
-
-private:
-	struct Impl;
-	std::unique_ptr<Impl> impl_;
-};
+// The document's edit operations and the readers over these views are the
+// free functions of bms_edit.h (ADR 0043 slice E11); the .mis text form is
+// mission_mis.h.
 
 } // namespace opennova::mission

@@ -16,6 +16,7 @@
 #include <runtime/inmatch/loopback_channel.h>
 
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
@@ -107,15 +108,17 @@ int main_impl() {
 	// A valid loaded mission whose source loadout chunk has two ignored bytes after
 	// its terminator. The parser sanitizes that chunk to a shorter canonical model,
 	// while retail's 0x0B sender memcpy's the original loaded 0x268-byte header.
-	opennova::mission::MissionDocument authored_mission;
-	authored_mission.create_default();
-	auto &loadout = authored_mission.bms_file().loadout.entries.emplace_back();
+	opennova::bms::File authored_mission;
+	opennova::mission::make_default(authored_mission);
+	auto &loadout = authored_mission.loadout.entries.emplace_back();
 	loadout.name = "WPN_PARITY_TEST";
 	loadout.ammo_primary = "1";
 	loadout.ammo_secondary = "2";
 	loadout.flags = "-1";
+	opennova::mission::sync_counts(authored_mission);
 	std::vector<uint8_t> source_mission;
-	if (!expect(authored_mission.write_bms_bytes(source_mission),
+	std::string authored_error;
+	if (!expect(opennova::bms::write(authored_mission, source_mission, authored_error),
 	            "authored BMS fixture serializes")) return 1;
 	constexpr std::size_t kLoadoutLenOffset =
 			offsetof(opennova::bms::Header, weapon_loadout_chunk_len);

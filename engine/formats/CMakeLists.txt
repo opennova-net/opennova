@@ -53,7 +53,7 @@ add_library(opennova_formats STATIC
     # sets (the ADR 0029 acyclicity fold; directory home since ADR 0030).
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission.cpp          # MissionDocument — the document and its edit operations
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms_edit.cpp         # the document's edit operations + typed views over bms::File
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_names.cpp    # BMS event-logic enum display names
