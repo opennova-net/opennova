@@ -20,10 +20,9 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/match.h>
-#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
-#include <runtime/world/net_command_sink.h>
 #include <runtime/world/system.h>
 #include <runtime/world/trigger_relations.h>
 #include <runtime/world/round_ring.h>
@@ -314,10 +313,10 @@ struct ItemNameTable {
 class World {
 public:
     World() : commands(*this) {}
-    // World has stable identity: commands binds this object, net defaults to
-    // its local_sink member, and registered systems retain mission-lifetime
-    // relationships. Memberwise copy/move would preserve pointers/references
-    // into the source World and create a split simulation.
+    // World has stable identity: commands binds this object and registered
+    // systems retain mission-lifetime relationships. Memberwise copy/move
+    // would preserve pointers/references into the source World and create a
+    // split simulation.
     World(const World &) = delete;
     World &operator=(const World &) = delete;
     World(World &&) = delete;
@@ -334,8 +333,6 @@ public:
     WeatherState weather;
     EffectLog effects;
     CachedFrameState cached;
-    LocalSink local_sink;
-    INetCommandSink *net = &local_sink;
     EntityCommands commands;
     AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
                                // this world, so the AI-change command family can reach brains.
@@ -361,10 +358,8 @@ public:
     // The one tick-profile collector (ADR 0043 d5): non-owning, the kernel's.
     // Null or inactive costs every span one branch; the embedder drains it.
     devtools::TickProfile *profile = nullptr;
-    IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
-                                                           // null/false keeps static geometry.
-    IMuzzlePoseProvider *muzzle_pose_provider = nullptr; // non-owning authored muzzle seam;
-                                                         // null/false keeps stamp fallback.
+    IPoseProvider *pose_provider = nullptr; // non-owning: the embedder's live seat-bone, muzzle
+                                            // and userpoint seam; null/false keeps static geometry.
 
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.

@@ -596,32 +596,7 @@ struct ContactResult {
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, LadderContact &ladder, ContactResult &out);
 
-// Embedder/model callback for the final world-space matrix array consumed by every
-// collision walk. Matrix slot i corresponds to COBJ/collision section i by
-// ordinal; COBJ::parent_subobject_index is hierarchy metadata, not a selector.
-// [orig: model+168 callback -> one 16-dword matrix per COBJ, consumed in lockstep
-// by Physics_RaycastAgainstBoneCollision @ 0x4e4cb0.]
-class ICollisionSectionMatrixProvider {
-public:
-    virtual ~ICollisionSectionMatrixProvider() = default;
-    // An embedder may learn about dynamic entities after its mission-start model
-    // sweep (notably the local player deploy). Give query callers one shared,
-    // idempotent way to attach that entity before choosing an unresolved
-    // fallback. Returning true means the provider attached a usable instance.
-    virtual bool ensure_collision_instance(World &world, EntityHandle entity) {
-        (void)world;
-        (void)entity;
-        return false;
-    }
-    // View construction may cache this result. Implementations must treat the
-    // queried CollisionWorld's model/instance/pose state as read-only here;
-    // late attachment belongs in ensure_collision_instance().
-    virtual bool build_section_matrices(World &world, EntityHandle entity,
-                                        int32_t model_id,
-                                        const CollisionMatrix &entity_world,
-                                        const CollisionModel &model,
-                                        std::vector<CollisionMatrix> &out) = 0;
-};
+class IPoseProvider; // runtime/world/pose_provider.h: the embedder's live pose seam
 
 // ---------------------------------------------------------------------------
 // Projectile trace shared by authoritative and explicitly visual-only rounds.
@@ -940,9 +915,9 @@ public:
     void remove_entity_instance(EntityHandle h);
     // Attach the husk-stage collision model (swapped in while Flags & 4).
     void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
-    // Install the model-animation callback that supplies final per-section
+    // Install the embedder's pose seam that supplies final per-section
     // matrices. Null restores the static shared-entity-matrix fallback.
-    void set_section_matrix_provider(ICollisionSectionMatrixProvider *provider);
+    void set_pose_provider(IPoseProvider *provider);
     // Resolve an embedder-owned late-spawn instance on demand. Existing instances
     // never call the provider, so repeated round/F3 queries are idempotent.
     bool ensure_entity_instance(World &world, EntityHandle h);
@@ -1620,7 +1595,7 @@ private:
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
-    ICollisionSectionMatrixProvider *section_matrix_provider_ = nullptr; // non-owning host seam
+    IPoseProvider *pose_provider_ = nullptr; // non-owning embedder seam
 
     std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;

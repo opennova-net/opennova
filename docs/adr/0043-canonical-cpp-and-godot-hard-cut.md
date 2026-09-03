@@ -71,7 +71,10 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    feed builders stay free functions under `world/feeds/`. `MissionKernel` is
    boot + state, owns no tick, inherits no provider interface; one
    `IPoseProvider` with one `simassets::SimPoseProvider` replaces the three
-   provider interfaces. `runtime/world` gains subdirectories per subsystem as
+   provider interfaces; the dead seams go outright (`INetCommandSink` /
+   `LocalSink` / `SerializingSink`, an unwitnessed 0x23 payload with no
+   caller; `mission_systems.h`; the kernel's registry and command
+   forwarders). `runtime/world` gains subdirectories per subsystem as
    slices touch them; leg-split TUs fold back into their owner.
    `AiEntity`'s 16.16 pose mirror STAYS: unifying it with the float
    `Entity::position` is behavior-bearing and is a ledgered follow-up.

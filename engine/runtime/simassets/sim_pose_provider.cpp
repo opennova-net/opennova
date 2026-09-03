@@ -4,7 +4,7 @@
 // identity on every matrix entry the collision applier reads, so the PANM leg
 // hands the evaluator's matrices straight through; the skeletal leg composes
 // the same FK/deformation in native rows.
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 
 #include <runtime/simassets/pose_inputs.h>
 
@@ -115,7 +115,7 @@ bool model_bone_table(const Threedi3di3 &model,
 	return true;
 }
 
-void SimCollisionPoseProvider::clear() {
+void SimPoseProvider::clear() {
 	generic_models_.clear();
 	userpoint_models_.clear();
 	skeletal_sources_.clear();
@@ -124,13 +124,13 @@ void SimCollisionPoseProvider::clear() {
 	muzzle_resolves_ = 0;
 }
 
-void SimCollisionPoseProvider::register_generic_model(int32_t model_id,
+void SimPoseProvider::register_generic_model(int32_t model_id,
 		const Threedi3di3 *model) {
 	if (model == nullptr) return;
 	generic_models_[model_id] = model;
 }
 
-bool SimCollisionPoseProvider::register_skeletal_entity(
+bool SimPoseProvider::register_skeletal_entity(
 		world::EntityHandle entity, uint64_t registry_spawn_id,
 		int32_t model_id, const std::string &rig_key,
 		const std::string &adm_name, const Threedi3di3 *model,
@@ -185,11 +185,11 @@ bool SimCollisionPoseProvider::register_skeletal_entity(
 	return true;
 }
 
-void SimCollisionPoseProvider::remove_entity(world::EntityHandle entity) {
+void SimPoseProvider::remove_entity(world::EntityHandle entity) {
 	skeletal_sources_.erase(entity.packed);
 }
 
-void SimCollisionPoseProvider::register_userpoint_model(int32_t model_id,
+void SimPoseProvider::register_userpoint_model(int32_t model_id,
 		const Threedi3di3 *model) {
 	if (model == nullptr || model_id < 0) return;
 	userpoint_models_[model_id] = model;
@@ -203,7 +203,7 @@ void SimCollisionPoseProvider::register_userpoint_model(int32_t model_id,
 // [orig: Entity_ComputeUserpointWorldTransform @0x545c60 (placement
 //  @0x545d91..0x545dec) -> Userpoint_ComputeWorldTransform @0x56c420 (part
 //  pose @0x56c4dd, point @0x56c4f2..0x56c513, euler @0x56c604)]
-bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
+bool SimPoseProvider::resolve_userpoint_transform(world::World &world,
 		world::EntityHandle entity, int userpoint_index, int32_t out[6]) {
 	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
 		return false;
@@ -236,7 +236,7 @@ bool SimCollisionPoseProvider::resolve_userpoint_transform(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::resolve_userpoint_rigid(world::World &world,
+bool SimPoseProvider::resolve_userpoint_rigid(world::World &world,
 		world::EntityHandle entity, int userpoint_index, int32_t out[3]) {
 	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
 		return false;
@@ -256,12 +256,12 @@ bool SimCollisionPoseProvider::resolve_userpoint_rigid(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::has_skeletal_entity(
+bool SimPoseProvider::has_skeletal_entity(
 		world::EntityHandle entity) const {
 	return skeletal_sources_.find(entity.packed) != skeletal_sources_.end();
 }
 
-bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
+bool SimPoseProvider::build_section_matrices(world::World &world,
 		world::EntityHandle entity, int32_t model_id,
 		const world::CollisionMatrix &entity_world,
 		const world::CollisionModel &model,
@@ -282,7 +282,7 @@ bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
 			model, out);
 }
 
-bool SimCollisionPoseProvider::resolve_muzzle_pose(world::World &world,
+bool SimPoseProvider::resolve_muzzle_pose(world::World &world,
 		world::EntityHandle entity, int32_t out[3]) {
 	++muzzle_queries_;
 	if (out == nullptr) return false;
@@ -367,7 +367,7 @@ bool SimCollisionPoseProvider::resolve_muzzle_pose(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
+bool SimPoseProvider::eval_entity_pose(world::World &world,
 		const SkeletalSource &source, world::EntityHandle entity,
 		std::vector<anim::PoseBone> &r_pose, anim::AimOverlayAngles *r_angles,
 		anim::AimOverlayInputs &r_inputs, const world::Entity *&r_entity,
@@ -459,7 +459,7 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::build_skeletal(world::World &world,
+bool SimPoseProvider::build_skeletal(world::World &world,
 		const SkeletalSource &source, world::EntityHandle entity,
 		const world::CollisionMatrix &entity_world,
 		const world::CollisionModel &model,
@@ -527,7 +527,7 @@ bool SimCollisionPoseProvider::build_skeletal(world::World &world,
 	return true;
 }
 
-bool SimCollisionPoseProvider::panm_part_matrices(world::World &world,
+bool SimPoseProvider::panm_part_matrices(world::World &world,
 		const Threedi3di3 &model3di, world::EntityHandle entity,
 		std::vector<ThreediMatrix4x4> &r_part_matrices) const {
 	// Retail Generic collision always transforms the canonical first RLOD. It
@@ -586,7 +586,7 @@ bool SimCollisionPoseProvider::panm_part_matrices(world::World &world,
 			r_part_matrices, nullptr);
 }
 
-bool SimCollisionPoseProvider::build_generic(world::World &world,
+bool SimPoseProvider::build_generic(world::World &world,
 		const Threedi3di3 &model3di, world::EntityHandle entity,
 		const world::CollisionMatrix &entity_world,
 		const world::CollisionModel &model,

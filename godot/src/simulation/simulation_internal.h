@@ -44,7 +44,6 @@
 
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
-#include <runtime/mission/mission_systems.h>
 #include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type / kPlayerVisualItemId
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <base/io/bam.h>           // bam_add/bam_sar: the FP roll term composition

@@ -27,9 +27,10 @@ static constexpr double kMountRadius = 20.0;
 
 // ----------------------------------------------------------------------------
 // EntityCommands — the shared Entity_* primitive layer.
-// In this foundational core, commands mutate the clean Entity model directly.
-// (Replication routing through World::net is the deferred MP seam; LocalSink
-// makes single-player run everything locally.)
+// Commands mutate the Entity model directly and locally. [orig: entity-targeted
+// commands serialize to a NAPI payload and NapiNPServer_SendFiltered(..., 0x23,
+// ...) to the owner when the target is not local] -- that 0x23 body is
+// unwitnessed and has no caller yet, so no outbound seam exists for it.
 // ----------------------------------------------------------------------------
 
 // Script SSN -> entity handle, with the retail PLAYER mapping. Mission scripts

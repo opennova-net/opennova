@@ -125,7 +125,7 @@ int main() {
 		kernel.tick_no_net();
 		kernel.tick_no_net();
 		kernel.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
-		kernel.set_entity_health(player_h, 37);
+		kernel.world.commands.set_entity_health(player_h, 37);
 		kernel.world.vars.set_mission(3, 99);
 		CHECK(kernel.world.logic_tick == sealed_tick + 2);
 		CHECK(kernel.player_health() == 37);
@@ -145,8 +145,8 @@ int main() {
 			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
 		}
 		CHECK(kernel.world.vars.get_mission(3) == 0);
-		CHECK(kernel.by_net_id(21) != nullptr);
-		CHECK(kernel.by_net_id(31) != nullptr);
+		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
+		CHECK(kernel.world.registry.by_net_id(31) != nullptr);
 		// The restored world ticks on from the sealed point.
 		kernel.tick_no_net();
 		CHECK(kernel.world.logic_tick == sealed_tick + 1);

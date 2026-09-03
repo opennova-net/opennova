@@ -1,5 +1,5 @@
 // S3/S4 native soak (ADR 0028) on the retail data: 00TRg boots with the sim's
-// own asset root (the native SimCollisionPoseProvider + the native mounted
+// own asset root (the native SimPoseProvider + the native mounted
 // resolver are AUTHORITATIVE) plus the seat-spec table, then runs an extended
 // live-shaped load: thousands of 62.5 Hz ticks with the mission's AI thinking,
 // walking, and command-mounted on the 50cals (bms 37 -> SSN 65, 51 -> 64), a

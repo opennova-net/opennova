@@ -103,7 +103,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/model_builders.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/mounted_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/seat_spec_extract.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_collision_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_pose_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_model_cache.cpp
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
@@ -227,7 +227,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/connection_fan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/replication/serializing_sink.cpp
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports

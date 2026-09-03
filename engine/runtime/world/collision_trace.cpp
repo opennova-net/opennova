@@ -1,4 +1,5 @@
 #include <runtime/world/collision.h>
+#include <runtime/world/pose_provider.h>
 #include <base/io/fixed.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
@@ -80,9 +81,9 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     bool live_pose = instance->section_matrices.size() == m->sections.size();
     if (live_pose) {
         mats = instance->section_matrices;
-    } else if (section_matrix_provider_ != nullptr) {
+    } else if (pose_provider_ != nullptr) {
         mats.clear();
-        live_pose = section_matrix_provider_->build_section_matrices(
+        live_pose = pose_provider_->build_section_matrices(
                 const_cast<World &>(world), h, model_id, world_mat, *m, mats) &&
             mats.size() == m->sections.size();
     }

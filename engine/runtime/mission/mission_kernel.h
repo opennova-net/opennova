@@ -31,7 +31,7 @@
 #include <runtime/simassets/adm_root_motion.h>
 #include <runtime/simassets/collision_resolve.h>
 #include <runtime/simassets/mounted_pose.h>
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 #include <runtime/simassets/sim_model_cache.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
@@ -88,15 +88,14 @@ struct KernelBootOptions {
 	std::function<std::string(int32_t)> people_name_resolver;
 	// The net half's session bring-up (inmatch::listen_host::bringup, or
 	// bringup_dedicated for a HostOnly embedder),
-	// invoked between the world wiring and register_mission_systems — exactly
+	// invoked between the world wiring and the system registration — exactly
 	// where the SP listen host stands up inside the load
 	// [orig: SinglePlayer_StartMission @0x561af0]. Null = the bare no-net
 	// kernel (the AI-path/convoy drives).
 	std::function<void()> bringup_net_session;
 };
 
-class MissionKernel : public world::IMountedPoseProvider,
-					  public world::ICollisionSectionMatrixProvider {
+class MissionKernel : public world::IPoseProvider {
 public:
 	MissionKernel();
 	~MissionKernel() override;
@@ -304,14 +303,6 @@ public:
 	// down [orig: Player_UpdatePerFrame @0x4de736..0x4de744; @0x4b4d06].
 	void tick_medic_cooldown(bool local_dead);
 
-	// --- entities ------------------------------------------------------------
-	world::Entity *by_net_id(uint16_t ssn);
-	world::Entity *by_bms_id(int32_t bms_id);
-	world::AiEntity *ai_for(world::EntityHandle h);
-	// Both stores: the registry position and the AI 16.16 mirror.
-	void set_entity_position(world::EntityHandle h, const world::Vec3 &mission_pos);
-	void set_entity_health(world::EntityHandle h, int32_t hp);
-
 	// --- terrain queries -----------------------------------------------------
 	bool has_terrain() const { return terrain_store.valid(); }
 	// The renderer-accurate column height under a mission x/y, world units.
@@ -349,7 +340,7 @@ public:
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
 	world::OcclusionWorld occlusion;
-	simassets::SimCollisionPoseProvider collision_pose;
+	simassets::SimPoseProvider collision_pose;
 	simassets::SimModelCache models;
 	simassets::CollisionResolveState collision_state;
 	simassets::AdmRootMotion root_motion;
@@ -433,15 +424,21 @@ public:
 	// mount-change edges (the joiner's authoritative attach echo).
 	void sync_local_mounted_input_heading();
 
-	// world::IMountedPoseProvider
+	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
+	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
 	bool resolve_mounted_pose(world::World &w, const world::Entity &carrier,
 			const world::Seat &seat, world::MountedPose &out) override;
-	// world::ICollisionSectionMatrixProvider
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
 	bool build_section_matrices(world::World &w, world::EntityHandle entity,
 			int32_t model_id, const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) override;
+	bool resolve_muzzle_pose(world::World &w, world::EntityHandle entity,
+			int32_t out[3]) override;
+	bool resolve_userpoint_transform(world::World &w, world::EntityHandle entity,
+			int userpoint_index, int32_t out[6]) override;
+	bool resolve_userpoint_rigid(world::World &w, world::EntityHandle entity,
+			int userpoint_index, int32_t out[3]) override;
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;

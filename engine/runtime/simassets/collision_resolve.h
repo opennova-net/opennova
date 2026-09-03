@@ -9,7 +9,7 @@
 
 #include <formats/def/def.h>
 #include <runtime/mission/placement_traits.h> // the visual-item policy home
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 #include <runtime/simassets/sim_model_cache.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
@@ -94,7 +94,7 @@ struct CollisionResolveState {
 struct CollisionResolveDeps {
 	world::CollisionWorld &collision;
 	world::OcclusionWorld &occlusion;
-	SimCollisionPoseProvider &pose;
+	SimPoseProvider &pose;
 	SimModelCache &models;
 };
 

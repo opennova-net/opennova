@@ -97,7 +97,7 @@ struct Rig {
     Entity &player() { return *w.registry.get(player_h); }
 };
 
-struct FakeMountedPoseProvider final : IMountedPoseProvider {
+struct FakeMountedPoseProvider final : IPoseProvider {
     bool available = true;
     MountedPose pose;
 
@@ -109,7 +109,7 @@ struct FakeMountedPoseProvider final : IMountedPoseProvider {
     }
 };
 
-struct StubCollisionMatrixProvider final : ICollisionSectionMatrixProvider {
+struct StubCollisionMatrixProvider final : IPoseProvider {
     int calls = 0;
 
     bool build_section_matrices(World &, EntityHandle, int32_t,
@@ -122,7 +122,7 @@ struct StubCollisionMatrixProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
-struct HeadingMountedPoseProvider final : IMountedPoseProvider {
+struct HeadingMountedPoseProvider final : IPoseProvider {
     std::vector<int32_t> headings;
     std::vector<int32_t> pitches;
 
@@ -283,7 +283,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
 // World seam. Every attach entry point consumes it immediately, and mounted AI
 // consumes a newly evaluated frame on its next tick. A missing/declining host
 // retains the portable static seat geometry.
-void test_live_mounted_pose_provider_and_static_fallback() {
+void test_live_pose_provider_and_static_fallback() {
     // EntityCommands mount consumes the host pose on the attach edge.
     {
         World w;
@@ -291,7 +291,7 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         w.registry.configure_pool(1, 4);
         FakeMountedPoseProvider provider;
         provider.pose = {{101.25f, -42.5f, 8.75f}, 37, -12, 17};
-        w.mounted_pose_provider = &provider;
+        w.pose_provider = &provider;
 
         Entity vehicle;
         vehicle.net_id = 200;
@@ -332,7 +332,7 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         w.ai = &ai;
         FakeMountedPoseProvider provider;
         provider.pose = {{11.0f, 12.0f, 13.0f}, 21, -8, 9};
-        w.mounted_pose_provider = &provider;
+        w.pose_provider = &provider;
 
         Entity vehicle;
         vehicle.net_id = 200;
@@ -386,7 +386,7 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         AiSystem ai;
         w.ai = &ai;
         HeadingMountedPoseProvider provider;
-        w.mounted_pose_provider = &provider;
+        w.pose_provider = &provider;
 
         Entity vehicle;
         vehicle.net_id = 200;
@@ -532,7 +532,7 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         FakeMountedPoseProvider provider;
         provider.available = false;
         provider.pose = {{999.0f, 999.0f, 999.0f}, -1, -2, -3};
-        w.mounted_pose_provider = &provider;
+        w.pose_provider = &provider;
         occupant = Entity{};
         pose_mounted_occupant(w, occupant, vehicle, seat);
         check_pose(occupant, expected);
@@ -675,7 +675,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
         Rig r(2.0f);
         CollisionWorld cw;
         StubCollisionMatrixProvider provider;
-        cw.set_section_matrix_provider(&provider);
+        cw.set_pose_provider(&provider);
         r.w.collision = &cw;
         cw.build_tick_tables(r.w);
         CHECK(cw.tick_tables_ready());
@@ -2169,7 +2169,7 @@ int main() {
     test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();
     test_remote_player_control_seat_preserves_wire_look();
-    test_live_mounted_pose_provider_and_static_fallback();
+    test_live_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
     test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();

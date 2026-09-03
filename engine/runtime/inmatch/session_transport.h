@@ -24,7 +24,7 @@ struct Datagram {
 };
 
 // The byte transport between the authoritative host and one client, abstracted so the
-// in-match net core (the connection-fan primitives / ClientReplicaPipeline / SerializingSink) stays
+// in-match net core (the connection-fan primitives / ClientReplicaPipeline) stays
 // transport-agnostic. The host's own local client is a LoopbackChannel — the witnessed
 // socketless transport mode 1; a remote LAN/MP peer is a UDP-backed transport of the
 // SAME shape (modes 2/3/4) [orig: CNapiNetwork_SetTransportMode @ 0x4c8750;

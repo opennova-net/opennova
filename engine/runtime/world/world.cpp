@@ -245,8 +245,8 @@ void presnap_vehicle_attach_heading(World &world, Entity &occupant,
 void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
                            const Seat &seat) {
     MountedPose live;
-    if (world.mounted_pose_provider != nullptr &&
-        world.mounted_pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
+    if (world.pose_provider != nullptr &&
+        world.pose_provider->resolve_mounted_pose(world, vehicle, seat, live)) {
         occ.position = live.position;
         occ.yaw = live.yaw;
         occ.pitch = live.pitch;

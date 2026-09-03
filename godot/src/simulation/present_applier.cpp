@@ -12,7 +12,7 @@
 #include <algorithm>
 
 #include <runtime/mission/placement_traits.h>
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 
 #include "simulation/present_stats.h"
 #include "simulation/simulation.h"
@@ -231,7 +231,7 @@ namespace {
 
 // The held weapon placement — the calibration and the full derivation live at
 // pivot nudge in raw def units, X negated into the render frame — the values
-// engine simassets/sim_collision_pose.h (the sim-side muzzle shares them)
+// engine simassets/sim_pose_provider.h (the sim-side muzzle shares them)
 // [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
 constexpr int kHeldWeaponBoneIndex = opennova::simassets::kHeldWeaponBoneIndex;
 const Vector3 kHeldWeaponAttachNudge(opennova::simassets::kHeldWeaponAttachNudgeX,
@@ -975,7 +975,7 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 		}
 		// Unsubmitted models (hidden, occlusion-held, off-screen) skip skeletal
 		// writes: the simulation resolves AI fire origins from its own pose
-		// (world/muzzle_pose.h), never from a presented skeleton.
+		// (world/pose_provider.h), never from a presented skeleton.
 		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && submitted) {
 			if (p_profile != nullptr) {
 				++p_profile->body_rows;

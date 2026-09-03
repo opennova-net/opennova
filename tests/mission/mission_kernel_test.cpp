@@ -95,8 +95,8 @@ int main() {
 	// (no start marker in the synthetic mission), the baseline capture.
 	CHECK(kernel.promo.spawned == 2);
 	CHECK(kernel.promo.dropped == 0);
-	CHECK(kernel.by_net_id(21) != nullptr);
-	CHECK(kernel.by_net_id(31) != nullptr);
+	CHECK(kernel.world.registry.by_net_id(21) != nullptr);
+	CHECK(kernel.world.registry.by_net_id(31) != nullptr);
 	CHECK(kernel.events.events().size() == 1);
 	CHECK(kernel.wac_loaded);
 	CHECK(kernel.wac.vm().loaded());
@@ -150,17 +150,17 @@ int main() {
 	}
 
 	// set_entity_position / set_entity_health round-trip the same dual store.
-	kernel.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
+	kernel.world.commands.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
 	CHECK(near_equal(kernel.player_position().x, 50.0f, 0.001f));
 	if (const w::AiEntity *body = kernel.player_ai()) CHECK(body->pos[1] == 60 << 16);
-	kernel.set_entity_health(player_h, 37);
+	kernel.world.commands.set_entity_health(player_h, 37);
 	CHECK(kernel.player_health() == 37);
 	CHECK(kernel.player()->alive);
 	if (const w::AiEntity *body = kernel.player_ai()) CHECK(body->health == 37);
-	kernel.set_entity_health(player_h, 0);
+	kernel.world.commands.set_entity_health(player_h, 0);
 	CHECK(kernel.player_health() == 0);
 	CHECK(!kernel.player()->alive);
-	kernel.set_entity_health(player_h, 100);
+	kernel.world.commands.set_entity_health(player_h, 100);
 
 	// The CanFire verdict on the spawned player: no weapon table was loaded
 	// (no weapon.def in the source), so the local weapon is inactive and the

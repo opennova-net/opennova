@@ -24,12 +24,6 @@ struct MountedPose {
     int16_t roll = 0;
 };
 
-struct IMountedPoseProvider {
-    virtual ~IMountedPoseProvider() = default;
-    virtual bool resolve_mounted_pose(World &world, const Entity &carrier,
-                                      const Seat &seat, MountedPose &out) = 0;
-};
-
 // Seat-type pose/channel predicates (moved beside the mount surface, S7a):
 // control seats suppress the on-foot upper-body weapon channel; passengers
 // keep it. [orig: the parentSlot {2,3,5} gates @ 0x4b14a7 / @ 0x4dcc44]

@@ -69,7 +69,7 @@ int main() {
 	rig.tick(62);
 	if (!camera_check(rig, "on_foot", false)) return 1;
 
-	w::Entity *truck = rig.by_net_id(kTruckSsn);
+	w::Entity *truck = rig.world.registry.by_net_id(kTruckSsn);
 	if (!expect(truck != nullptr, "truck SSN 11 is in the world")) return 1;
 	std::printf("ride: truck pos=(%.1f, %.1f, %.1f) seats=%zu\n", truck->position.x, truck->position.y,
 			truck->position.z, truck->seats.size());
@@ -80,7 +80,7 @@ int main() {
 	// Bring the player to the truck (the spawn point sits inside the barracks;
 	// the motor pool is open ground and the truck's list-2 route starts there).
 	const w::Vec3 tpos = truck->position;
-	rig.set_entity_position(player_handle, w::Vec3{tpos.x + 1.6f, tpos.y, tpos.z});
+	rig.world.commands.set_entity_position(player_handle, w::Vec3{tpos.x + 1.6f, tpos.y, tpos.z});
 	rig.tick(31);
 
 	// --- Toggle mount: the player must end up seated on SSN 11.
@@ -104,15 +104,15 @@ int main() {
 
 	// --- THE RIDE: the instructor drives the redirected truck; the seated
 	// player must be carried along.
-	const w::Vec3 t0 = rig.by_net_id(kTruckSsn)->position;
+	const w::Vec3 t0 = rig.world.registry.by_net_id(kTruckSsn)->position;
 	float ride_dist = 0.0f;
 	for (int i = 0; i < 30; ++i) {
 		rig.tick(62);
-		ride_dist = testrig::distance(rig.by_net_id(kTruckSsn)->position, t0);
+		ride_dist = testrig::distance(rig.world.registry.by_net_id(kTruckSsn)->position, t0);
 		if (ride_dist > 8.0f) break;
 	}
 	const w::Vec3 rider = rig.player_position();
-	const w::Vec3 truck_now = rig.by_net_id(kTruckSsn)->position;
+	const w::Vec3 truck_now = rig.world.registry.by_net_id(kTruckSsn)->position;
 	const float carry_gap = testrig::distance(rider, truck_now);
 	std::printf("ride: truck drove %.1fu; rider gap %.1fu\n", ride_dist, carry_gap);
 	if (!expect(ride_dist >= 8.0f, "the ride moved (the AI driver leg)")) return 1;
@@ -123,7 +123,7 @@ int main() {
 	// teleported away (the seat carry snaps it back) — park the TRUCK far away so
 	// the toggle's scan runs dry and DETACHES [orig: @0x4369c7], then bring the
 	// ATV to the dismounted player.
-	w::Entity *atv = rig.by_net_id(kAtvSsn);
+	w::Entity *atv = rig.world.registry.by_net_id(kAtvSsn);
 	if (atv == nullptr) {
 		std::printf("ride: ATV SSN %u missing; drive leg skipped\n", unsigned(kAtvSsn));
 		std::printf("vehicle_ride_00tra: mount + event 2 + AI ride + carry\n");
@@ -131,7 +131,7 @@ int main() {
 	}
 	const w::EntityHandle atv_handle = atv->handle;
 	const w::Vec3 here = rig.player_position();
-	rig.set_entity_position(truck_handle, w::Vec3{here.x + 200.0f, here.y, here.z});
+	rig.world.commands.set_entity_position(truck_handle, w::Vec3{here.x + 200.0f, here.y, here.z});
 	rig.tick(19);
 	rig.toggle_mount(); // seat scan dry (the truck left) -> detach
 	rig.tick(19);
@@ -143,7 +143,7 @@ int main() {
 	std::printf("ride: dismounted (scan-dry toggle)\n");
 	if (!camera_check(rig, "dismounted", false)) return 1;
 	const w::Vec3 here2 = rig.player_position();
-	rig.set_entity_position(atv_handle, w::Vec3{here2.x + 1.5f, here2.y, here2.z});
+	rig.world.commands.set_entity_position(atv_handle, w::Vec3{here2.x + 1.5f, here2.y, here2.z});
 	rig.tick(19);
 	rig.toggle_mount(); // mount the ATV
 	rig.tick(31);

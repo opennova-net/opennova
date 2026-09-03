@@ -1,4 +1,5 @@
 #include <runtime/world/collision.h>
+#include <runtime/world/pose_provider.h>
 #include <base/io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
@@ -88,10 +89,9 @@ void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
     invalidate_trace_view(h);
 }
 
-void CollisionWorld::set_section_matrix_provider(
-        ICollisionSectionMatrixProvider *provider) {
-    if (section_matrix_provider_ == provider) return;
-    section_matrix_provider_ = provider;
+void CollisionWorld::set_pose_provider(IPoseProvider *provider) {
+    if (pose_provider_ == provider) return;
+    pose_provider_ = provider;
     invalidate_trace_views();
 }
 
@@ -204,8 +204,8 @@ bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
         if (h.pool() == 2) statics_dirty_ = true;
         invalidate_trace_view(h);
     }
-    if (section_matrix_provider_ == nullptr) return false;
-    if (!section_matrix_provider_->ensure_collision_instance(world, h)) return false;
+    if (pose_provider_ == nullptr) return false;
+    if (!pose_provider_->ensure_collision_instance(world, h)) return false;
     return has_instance(world, h);
 }
 

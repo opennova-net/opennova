@@ -3,7 +3,7 @@
 Grill session 2026-06-10, IDB `Jointops.exe.kong.i64` (imagebase 0x400000).
 Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`), mission→world
 promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
-(`engine/runtime/mission/mission_systems.h`, `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
+(`engine/runtime/mission/mission_kernel.cpp` (`finish_load`), `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
 **Verdict: MATCHING**, with the tracked deviations D-EVT-1..4 below. Every behavioral
 claim in this record was read from the decompilation this session; addresses cited inline.
@@ -154,7 +154,7 @@ yet witnessed (D-EVT-4).
 | `wac/vm`: WAC time base = completed executions (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks — decoupled from the engine tick | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
-| `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
+| the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
 | engine: Simulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a render frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,

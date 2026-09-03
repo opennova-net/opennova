@@ -1,6 +1,9 @@
 # ADR 0011 — Single-player is the in-process listen server (network-shaped from day one)
 
-Status: accepted
+Status: accepted. Amended by [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02): the
+`INetCommandSink` / `LocalSink` / `SerializingSink` seam is deleted. The 0x23 entity-command payload is
+unwitnessed and the sink never had a caller; every entity command runs locally through `EntityCommands`,
+and an outbound seam is ported once a witnessed caller exists.
 
 ## Context
 

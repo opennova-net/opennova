@@ -85,7 +85,7 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
 #include <runtime/simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
-#include <runtime/simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
+#include <runtime/simassets/sim_pose_provider.h> // the engine-side pose provider (S3, ADR 0028)
 #include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <runtime/inmatch/session.h>
@@ -161,7 +161,7 @@ class ResourceRoot;
 // 16th (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live
 // owner for this path; focused tests and non-gameplay tools may instantiate it
 // directly: promote a parsed BMS mission into the world (mission/promote.h),
-// register the systems in the faithful order (mission/mission_systems.h), run
+// register the systems in the faithful order (MissionKernel::finish_load), run
 // a pre-mission pass, then tick. Entity transforms (mission -> Godot space)
 // and the part-anim phase are exposed for a scene/renderer to draw;
 // presentation side effects (text/dialog/win) drain out of the World EffectLog
