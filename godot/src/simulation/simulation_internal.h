@@ -121,55 +121,9 @@ using opennova::inmatch::wire_carrier_exclusion_for;
 // The installed-table probe lives beside the extraction now (ADR 0031).
 using opennova::simassets::item_seat_spec_for_type;
 
-inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
-inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
 inline constexpr char kVehicleSpecial1Register[] = "VEHICLE_SPECIAL1";
 inline constexpr char kVehicleSpecial2Register[] = "VEHICLE_SPECIAL2";
 inline constexpr char kHeatGlowRegister[] = "HEAT_GLOW";
-
-// The HEAT_GLOW derivation and the emplaced turret CTRL sources moved to the
-// engine (ADR 0028): engine/runtime/world mount_controls.h. The using
-// declarations keep this header's call sites unchanged.
-using opennova::world::world_model_heat_glow_for;
-
-inline void write_present_world_model_heat_glow(float *record,
-		const opennova::world::World &world,
-		const opennova::world::Entity &entity) {
-	int32_t heat_glow = 0;
-	if (!world_model_heat_glow_for(world, entity, heat_glow)) return;
-	record[Simulation::PF_WORLD_HEAT_GLOW_VALID] = 1.0f;
-	record[Simulation::PF_WORLD_HEAT_GLOW] = static_cast<float>(heat_glow);
-}
-
-inline void write_present_vehicle_motion_controls(float *record,
-		const opennova::world::World &world,
-		const opennova::world::Entity &entity) {
-	// This is the modeled ground-vehicle/cveh scope, not a heuristic over every
-	// moving item. Only the authority owns the full steer and currentSpeed
-	// fields; ClientEntityState carries neither and must leave VALID clear.
-	if (entity.handle.pool() != 1 ||
-			world.vehicles.traits.get(entity.item_id) == nullptr)
-		return;
-	const opennova::world::VehicleCtrlRegisters controls =
-			opennova::world::vehicle_ctrl_registers(entity.veh);
-	record[Simulation::PF_VEHICLE_MOTION_VALID] = 1.0f;
-	record[Simulation::PF_VEHICLE_STEERING] =
-			static_cast<float>(controls.steering);
-	record[Simulation::PF_VEHICLE_SPEED] =
-			static_cast<float>(controls.speed);
-	// The part-animation words ride the same valid bit: the rotor angle
-	// accumulator's high word (HELO_ROTOR / HELO_TAILROTOR) and the wheel
-	// phase's (VEHICLE_WHEELS), published by the same cveh callback
-	// [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the +0x466 read
-	// @0x492ACA..0x492ADE, the +0x2BA read @0x4929B4; the accumulators are
-	// world/vehicle_part_anim.h's].
-	record[Simulation::PF_VEHICLE_ROTOR] =
-			static_cast<float>(controls.rotor);
-	record[Simulation::PF_VEHICLE_TAIL_ROTOR] =
-			static_cast<float>(controls.tail_rotor);
-	record[Simulation::PF_VEHICLE_WHEELS] =
-			static_cast<float>(controls.wheels);
-}
 
 using opennova::world::EmplacedWeaponControls;
 using opennova::world::emplaced_weapon_controls_for;
@@ -208,93 +162,6 @@ inline std::string dictionary_string(const Dictionary &d, const char *key, const
 // declarations keep this header's call sites unchanged.
 using opennova::simassets::model_bound_radius_from_3di;
 
-
-// S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
-// resolver the host authority runs (simassets::resolve_model_mounted_pose) —
-// one mounted matrix path; the adapter's Dictionary evaluate_panm twin is
-// gone. The model resolves through the sim cache by the installed spec's
-// graphic key, exactly like the host-side resolver.
-inline bool resolve_client_eweap_attachment_pose(
-		const opennova::replication::ClientEntityState &child,
-		const opennova::replication::ClientState &state,
-		const std::vector<opennova::mission::ItemSeatSpec> &specs,
-		const std::unordered_map<int32_t, std::string> &graphics_by_type,
-		opennova::simassets::SimModelCache &models,
-		uint32_t time_ms, opennova::world::MountedPose &out) {
-	if (child.parent_handle == opennova::world::EntityHandle::kInvalid) return false;
-	const opennova::replication::ClientEntityState *parent =
-			client_entity_for_handle(state, child.parent_handle);
-	if (parent == nullptr) return false;
-	const opennova::mission::ItemSeatSpec *parent_spec =
-			item_seat_spec_for_type(specs, parent->type_id);
-	if (parent_spec == nullptr) return false;
-
-	// The 0x0D relation names only the parent, not the authored attachment slot.
-	// Reconstruct only when the child type selects exactly one authored row and
-	// that row resolves a userpoint; duplicate same-type rows are intentionally
-	// left on the rigid fallback.
-	const opennova::mission::ItemEmplacementAttachmentSpec *attachment = nullptr;
-	for (const opennova::mission::ItemEmplacementAttachmentSpec &candidate :
-			parent_spec->emplacement_attachments) {
-		if (candidate.child_type_id != static_cast<int32_t>(child.type_id))
-			continue;
-		if (attachment != nullptr) return false;
-		attachment = &candidate;
-	}
-	if (attachment == nullptr || !attachment->anchor_found ||
-			attachment->anchor.bone_index == 0)
-		return false;
-	const auto graphic_found = graphics_by_type.find(parent->type_id);
-	if (graphic_found == graphics_by_type.end() || !models.has_index())
-		return false;
-	const Threedi3di3 *model_ptr = models.model_for(graphic_found->second);
-	if (model_ptr == nullptr) return false;
-
-	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
-	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
-	// articulated family: the decoded mounted gunner already determines both
-	// semantic controls through the witnessed parent-minus-occupant relationship.
-	EmplacedWeaponControls emplaced;
-	if (!emplaced_weapon_controls_for_client(
-				*parent, state, specs, emplaced))
-		return false;
-	const Threedi3di3 &model = *model_ptr;
-	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
-		return false;
-	bool has_eweap_control = false;
-	for (uint32_t slot = 0; slot < model.ctrl.count; ++slot) {
-		const String name = String::utf8(model.ctrl.registers[slot].name);
-		if (name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
-				name.nocasecmp_to(kEmplacedGunPitchRegister) == 0) {
-			has_eweap_control = true;
-			break;
-		}
-	}
-	if (!has_eweap_control) return false;
-	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
-	ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] =
-			static_cast<int32_t>(emplaced.gun_yaw);
-	ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =
-			static_cast<int32_t>(emplaced.gun_pitch);
-
-	opennova::world::Entity carrier;
-	carrier.item_id = static_cast<int32_t>(parent->type_id);
-	carrier.position = {
-			static_cast<float>(parent->x / kFixed16),
-			static_cast<float>(parent->y / kFixed16),
-			static_cast<float>(parent->z / kFixed16)};
-	carrier.yaw = static_cast<int16_t>(std::lround(
-			opennova::world::mission_yaw_deg_from_bam_heading(
-					parent->heading_bam)));
-	carrier.pitch = static_cast<int16_t>(std::lround(
-			static_cast<double>(parent->pitch_bam) *
-				opennova::world::kDegreesPerBam));
-	carrier.roll = static_cast<int16_t>(std::lround(
-			static_cast<double>(parent->roll_bam) *
-				opennova::world::kDegreesPerBam));
-	return opennova::simassets::resolve_model_mounted_pose(
-			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
-}
 
 // Coordinate converter shared by the debug reports and present getters.
 // Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
