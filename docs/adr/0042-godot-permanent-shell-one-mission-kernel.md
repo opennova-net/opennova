@@ -1,6 +1,14 @@
 # ADR 0042: Godot is the permanent shell; one mission kernel; engine facts through engine functions
 
 - **Status**: accepted (2026-08-28; maintainer directive — the boundary exploration)
+- **Amended**: [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)
+  amends d2 (no sanctioned untyped seam; the frame pipeline is C++), d3 (the
+  kernel owns no tick; a `Session` owning a `Role` replaces `TickTarget` +
+  `listen_host::frame` + `tick_no_net`; the "no runtime class" clause is
+  superseded by that consolidation), d5 (the debug-control table is C++ in
+  `godot/src/devtools`), d7 (`godot_orig_cites` is one gauge over the whole
+  Godot side) and takes d8 (netsim/npruntime/inmatch move under `runtime/`).
+  d1, d4, d6 stand.
 - **Owners**: runtime architecture, the Godot layer, tooling (MCP/F3)
 - **Supersedes/updates**: closes ADR 0033's R4 rung and supersedes its d1 device triad; updates
   ADR 0016 (fully historical), ADR 0020 d4 (the terrain-field provider), ADR 0035 (d5 made

@@ -1,5 +1,17 @@
 # Tests exercise public seams; a test that needs a private is an API bug report
 
+- **Amended**: [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)
+  closes the loophole this rule left open: "a public seam" was met by
+  subclassing the concrete production class and overriding its methods, which
+  made production types `Object`/`Variant` and its call style
+  `_world.<name>()` for the doubles' sake. A test never subclasses a
+  production Node to override behavior; it boots a real fixture through a
+  public load seam (`godot/tests/support/world_fixture.gd`) or fakes a
+  GDScript interface (`ShellScreen`). Overriding a PUBLIC verb of a GDScript
+  shell class stays acceptable; overriding a private never is. The
+  `test_private_pokes` ratchet stands; `gd_foreign_private_accesses` is its
+  shipping-code twin.
+
 The GUT suite reaches into `_underscore` members of other objects on ~1,300
 lines. The worst files poke sub-inspectors and their child widgets
 (`._scripting`, `._sc_trigger_params`), call private methods as entry points

@@ -6,6 +6,9 @@
   seam, the device boundary. The census, the §3 dispositions, and the
   push-down record remain valid history; the five bands are no longer a live
   rule, and the citation ratchet survives only as ADR 0033's transition gauge.
+  **Historical since [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md)
+  (2026-09-02)**, the one current-architecture record; the citation gauge is
+  now `godot_orig_cites`, one count over the whole Godot side.
 - **Owners**: shell adapter layout
 - **Supersedes/updates**: nothing becomes false. Extends ADR 0028 decision 5
   (whose standing rule is scoped to *GDScript* in the adapter) to the

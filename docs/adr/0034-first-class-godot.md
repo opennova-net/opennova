@@ -3,6 +3,13 @@
 - **Status**: accepted (2026-08-09; maintainer directive)
 - **Amended**: ADR 0035 replaces the transitional frame-hook registration
   described below with a typed native session and direct Godot frame pipeline.
+  [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02) executes
+  decision 6's C++ rewrite queue (the world, the present passes, effects,
+  audio, lights, the local-player presenter) and DELETES the practice that
+  grew under decision 1 of invoking overridable names as `_world.<name>()`
+  so GUT subclass-doubles keep binding: a test never subclasses a production
+  Node. Decision 6's list of what stays GDScript (MCP tooling, the fly
+  camera, shell UI) stands.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) narrows ONED from an
   authoring front-end to run controls; Godot remains first-class.
   [ADR 0040](0040-the-engine-is-one-namespace.md) finishes decision 5 (the
