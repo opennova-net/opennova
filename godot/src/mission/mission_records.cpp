@@ -100,6 +100,29 @@ void MissionAreaTrigger::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(MissionAreaTrigger, Variant::BOOL, active)
 	OPENNOVA_RECORD_READ_ONLY(MissionAreaTrigger, Variant::BOOL, constrain_z)
 	OPENNOVA_RECORD_READ_ONLY(MissionAreaTrigger, Variant::INT, raw_flags)
+	ClassDB::bind_static_method("MissionAreaTrigger",
+			D_METHOD("make", "index", "id", "min", "max", "active", "constrain_z"),
+			&MissionAreaTrigger::make, DEFVAL(true), DEFVAL(false));
+}
+
+Ref<MissionAreaTrigger> MissionAreaTrigger::make(int p_index, int p_id, const Vector3 &p_min,
+		const Vector3 &p_max, bool p_active, bool p_constrain_z) {
+	opennova::mission::AreaTriggerRecord v;
+	v.index = static_cast<size_t>(p_index < 0 ? 0 : p_index);
+	v.wp_number = p_id;
+	v.min_x = p_min.x;
+	v.min_y = p_min.y;
+	v.min_z = p_min.z;
+	v.max_x = p_max.x;
+	v.max_y = p_max.y;
+	v.max_z = p_max.z;
+	v.active = p_active;
+	v.constrain_z = p_constrain_z;
+	v.reserved = (p_active ? 0x01 : 0) | (p_constrain_z ? 0x02 : 0);
+	Ref<MissionAreaTrigger> out;
+	out.instantiate();
+	out->assign(v);
+	return out;
 }
 
 // --- MissionWeaponLoadoutEntry ----------------------------------------------

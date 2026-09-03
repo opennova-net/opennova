@@ -90,10 +90,9 @@ func test_resolve_zone_by_position() -> void:
 	# Mission-space positions: BMS x/y are the horizontal plane, z is vertical.
 	var inside := _entry(container, 1, 0, 0, Vector3(10, 10, 5))
 	var outside := _entry(container, 2, 0, 0, Vector3(100, 100, 5))
-	var triggers := [{
-		"min": Vector3(0, 0, 0), "max": Vector3(50, 50, 50),
-		"constrain_z": false,
-	}]
+	var triggers: Array[MissionAreaTrigger] = [
+		MissionAreaTrigger.make(0, 0, Vector3(0, 0, 0), Vector3(50, 50, 50), true, false),
+	]
 	var index := EntityIndex.new()
 	index.build([inside, outside], triggers)
 	var z0 := index.resolve_zone(0)
@@ -108,10 +107,9 @@ func test_resolve_zone_constrain_z() -> void:
 	add_child_autofree(container)
 	var low := _entry(container, 1, 0, 0, Vector3(10, 10, 5))
 	var high := _entry(container, 2, 0, 0, Vector3(10, 10, 500))
-	var triggers := [{
-		"min": Vector3(0, 0, 0), "max": Vector3(50, 50, 50),
-		"constrain_z": true,
-	}]
+	var triggers: Array[MissionAreaTrigger] = [
+		MissionAreaTrigger.make(0, 0, Vector3(0, 0, 0), Vector3(50, 50, 50), true, true),
+	]
 	var index := EntityIndex.new()
 	index.build([low, high], triggers)
 	var z0 := index.resolve_zone(0)

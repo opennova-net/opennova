@@ -150,6 +150,11 @@ protected:
 
 public:
 	void assign(const opennova::mission::AreaTriggerRecord &p_value) { value_ = p_value; }
+	const opennova::mission::AreaTriggerRecord &value() const { return value_; }
+	// The one authoring seam (ADR 0043 d10): a test builds a zone by hand for
+	// EntityIndex.build; the document path fills the record from the .bms.
+	static Ref<MissionAreaTrigger> make(int p_index, int p_id, const Vector3 &p_min,
+			const Vector3 &p_max, bool p_active = true, bool p_constrain_z = false);
 
 	int get_index() const { return static_cast<int>(value_.index); }
 	int get_id() const { return value_.wp_number; }
