@@ -16,7 +16,7 @@
 #include <net/npwire/ingame_message_id.h>
 
 using namespace opennova;
-using namespace opennova::netsim;
+using namespace opennova::replication;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \

@@ -9,7 +9,7 @@
 
 namespace {
 
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 using opennova::EntityClass;
 
 bool expect(bool condition, const char *message) {

@@ -33,7 +33,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 constexpr uint16_t kHullHandle = 0x1006; // pool 1 slot 6 (the buggy)
 constexpr uint16_t kGunHandle = 0x1017;  // pool 1 slot 23 (its mounted 50cal)

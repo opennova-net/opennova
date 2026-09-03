@@ -13,7 +13,7 @@
 
 #include <unordered_map>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -399,4 +399,4 @@ uint32_t minimap_team_argb(uint8_t team) {
 	return argb;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

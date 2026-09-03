@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <runtime/session/game_config.h>
+#include <runtime/inmatch/game_config.h>
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/wire_handle.h>
@@ -24,7 +24,7 @@ namespace godot {
 //   engine/net/npwire/net_ports.h      — the retail LAN port range + gate port
 //   engine/net/npwire/wire_handle.h    — the pool<<12|slot handle layout
 //   engine/net/npwire/session_hello.h  — the ClientAuth character_id bit-pack
-//   engine/runtime/session/game_config.h — the 1..65 lobby player cap
+//   engine/runtime/inmatch/game_config.h — the 1..65 lobby player cap
 class NetProtocol : public RefCounted {
 	GDCLASS(NetProtocol, RefCounted)
 
@@ -62,7 +62,7 @@ public:
 
 		// The lobby player-cap ceiling (npruntime game_config.h) and the wire
 		// callsign cap (Name[16] cstring; npwire game_type.h).
-		MAX_PLAYERS_CAP = opennova::np::kMaxPlayersCap,
+		MAX_PLAYERS_CAP = opennova::inmatch::kMaxPlayersCap,
 		MAX_CALLSIGN_LENGTH = opennova::game_rules::kMaxCallsignLength,
 
 		// The Config_SetDefaults session-rule baseline (npwire game_type.h).

@@ -4,19 +4,19 @@
 // real lifecycle (set_connection_mode -> set_transport_mode -> create_session). After this the host
 // is_in_session + (when authority) host_running, so the gated handshake legs admit a join.
 
-#include <runtime/session/napi_np_protocol.h>
-#include <runtime/session/server_session.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_session.h>
 
-#include <runtime/session/session_transport.h>
+#include <runtime/inmatch/session_transport.h>
 
-namespace opennova::np::test {
+namespace opennova::inmatch::test {
 
 // Bring a listen/dedicated host fully up. `host_key` is seeded onto the host (and advertised in
 // ServerHello.hk / checked against ClientAuth.hk); `local_client`, when non-null with HostClient,
 // registers the host's own type-2 loopback connection.
 inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode socket,
                           uint32_t host_key = 0,
-                          netsim::ISessionTransport *local_client = nullptr,
+                          replication::ISessionTransport *local_client = nullptr,
                           const GameConfig &config = GameConfig{}) {
 	set_connection_mode(ctx, mode);
 	set_transport_mode(ctx, socket);
@@ -31,4 +31,4 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	}
 }
 
-} // namespace opennova::np::test
+} // namespace opennova::inmatch::test

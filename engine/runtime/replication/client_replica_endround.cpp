@@ -47,7 +47,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void ClientReplicaPipeline::apply_end_round_header(
 		const std::vector<uint8_t> &body) {
@@ -104,4 +104,4 @@ void ClientReplicaPipeline::apply_end_round_stats_chunk(
 	}
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

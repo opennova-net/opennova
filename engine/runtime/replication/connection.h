@@ -5,9 +5,9 @@
 
 #include <runtime/world/entity.h> // EntityHandle
 
-#include <runtime/session/session_transport.h> // ISessionTransport
+#include <runtime/inmatch/session_transport.h> // ISessionTransport
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // The witnessed transport mode a connection carries [orig: CGameSession_SetConnectionMode
 // @0x4c49f0 -> g_napi_np_ctx.transport_mode +0x50; CNapiNetwork_SetTransportMode @0x4c8750
@@ -177,4 +177,4 @@ struct Connection {
 	bool last_deploy_tick_valid = false;
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

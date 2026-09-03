@@ -13,7 +13,7 @@
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/end_round_statistics.h>
 #include <runtime/hud/feed_format.h>
-#include <runtime/session/stat_screen_feed.h>
+#include <runtime/inmatch/stat_screen_feed.h>
 #include <base/gameprofile/game_type.h>
 
 #include <algorithm>
@@ -40,7 +40,7 @@ opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gam
 // (present + non-empty, else the "!..." fallback stripped); the key-less NAME
 // / Squad columns show their fallback stripped.
 String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
-		const opennova::np::StatScreenColumn &c) {
+		const opennova::inmatch::StatScreenColumn &c) {
 	std::string text = c.header_fallback;
 	if (!c.header_key.empty()) {
 		std::string value;
@@ -61,7 +61,7 @@ Ref<EndRoundState> Simulation::get_end_round_state() const {
 	record.instantiate();
 	EndRoundState::Value v;
 	if (runtime_) {
-		const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
+		const opennova::replication::ClientEndRoundStats &er = runtime_->state().end_round;
 		v.header_known = er.header_known;
 		v.board_known = er.known;
 		v.game_type = runtime_->game_type();
@@ -100,7 +100,7 @@ bool Simulation::is_mp_session() const {
 opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const {
 	opennova::hud::EndRoundOverlayInput in;
 	if (!runtime_) return in;
-	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
+	const opennova::replication::ClientEndRoundStats &er = runtime_->state().end_round;
 	in.game_type = runtime_->game_type();
 	in.draw = er.header.draw != 0;
 	in.winner_team = er.header.winner_team;
@@ -161,11 +161,11 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 		const Ref<RtxtStringFile> &p_gametext) const {
 	TypedArray<EndRoundColumn> out;
 	if (!runtime_) return out;
-	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
+	const opennova::replication::ClientEndRoundStats &er = runtime_->state().end_round;
 	if (!er.known) return out;
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
-	for (const opennova::np::StatScreenColumn &c :
-			opennova::np::stat_screen_columns(er.board, false, p_table_width)) {
+	for (const opennova::inmatch::StatScreenColumn &c :
+			opennova::inmatch::stat_screen_columns(er.board, false, p_table_width)) {
 		Ref<EndRoundColumn> column;
 		column.instantiate();
 		column->set_header(resolve_column_header(lookup, c));
@@ -185,13 +185,13 @@ TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
 	// header's board index, resolved to a connection slot below.
 	TypedArray<EndRoundRow> out;
 	if (!runtime_) return out;
-	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::replication::ClientState &cs = runtime_->state();
 	if (!cs.end_round.known) return out;
-	std::vector<opennova::np::StatScreenPlayer> players;
+	std::vector<opennova::inmatch::StatScreenPlayer> players;
 	for (size_t i = 0; i < cs.roster.size(); ++i) {
-		const opennova::netsim::ClientRosterSlot &slot = cs.roster[i];
+		const opennova::replication::ClientRosterSlot &slot = cs.roster[i];
 		if (!slot.bound) continue;
-		opennova::np::StatScreenPlayer p;
+		opennova::inmatch::StatScreenPlayer p;
 		p.slot = static_cast<uint8_t>(i);
 		p.team = slot.team;
 		p.name = slot.name;
@@ -212,11 +212,11 @@ TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
 					cs.end_round.board.players.size()) {
 		local_slot = cs.end_round.board.players[header_index].slot;
 	}
-	for (const opennova::np::StatScreenRow &r :
-			opennova::np::stat_screen_rows(cs.end_round.board, players, false, local_slot)) {
+	for (const opennova::inmatch::StatScreenRow &r :
+			opennova::inmatch::stat_screen_rows(cs.end_round.board, players, false, local_slot)) {
 		// The tab filter (the engine's stat_screen_row_visible; its witness is
 		// stat_screen_feed.h's).
-		if (!opennova::np::stat_screen_row_visible(p_tab, r.team)) continue;
+		if (!opennova::inmatch::stat_screen_row_visible(p_tab, r.team)) continue;
 		Ref<EndRoundRow> row;
 		row.instantiate();
 		row->set_slot(static_cast<int>(r.slot));

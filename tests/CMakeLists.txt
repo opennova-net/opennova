@@ -1057,7 +1057,7 @@ add_test(NAME client_minimap_overlay COMMAND client_minimap_overlay_test)
 
 # The Tab board's folded lanes (the 0x16 scoreboard + the 0x46 roster join —
 # empty lists CLEAR and removals WIPE, the witnessed parser shape) plus the
-# draw-time projection (netsim::project_scoreboard).
+# draw-time projection (replication::project_scoreboard).
 add_executable(client_replica_scoreboard_test netsim/client_replica_scoreboard_test.cpp)
 target_link_libraries(client_replica_scoreboard_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(client_replica_scoreboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2412,7 +2412,7 @@ add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_
 target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
 
-# ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
+# ADR 0013: the shared byte-budget spawn/world-stream chunker (inmatch::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
 target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_runtime)
@@ -2522,7 +2522,7 @@ target_link_libraries(npruntime_lan_probe_client_test
     PRIVATE opennova_lan_probe_client opennova_net opennova_app_common)
 add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test)
 
-# P5 — the headless CLIENT runtime (np::ClientRuntime / Client_ProcessNetworkFrame). Always-on
+# P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
 # plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)

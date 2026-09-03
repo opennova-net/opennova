@@ -15,7 +15,7 @@ int NetSessionPolicy::decide_expansion(const String &p_host_expansion,
 	for (int i = 0; i < p_installed.size(); ++i) {
 		installed.push_back(to_std(p_installed[i]));
 	}
-	decision_ = opennova::np::decide_join_expansion(
+	decision_ = opennova::inmatch::decide_join_expansion(
 			to_std(p_host_expansion), to_std(p_mounted_expansion), installed);
 	return static_cast<int>(decision_.action);
 }
@@ -35,7 +35,7 @@ String NetSessionPolicy::describe_installed(const PackedStringArray &p_installed
 		installed.push_back(to_std(p_installed[i]));
 	}
 	return String::utf8(
-			opennova::np::describe_installed_expansions(installed).c_str());
+			opennova::inmatch::describe_installed_expansions(installed).c_str());
 }
 
 void NetSessionPolicy::arm_preload(int64_t p_now_ms) {

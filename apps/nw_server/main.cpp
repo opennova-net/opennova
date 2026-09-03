@@ -23,11 +23,11 @@
 #include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
 #include <formats/trn/trn.h>
 #include <formats/trn/trn_io.h>
-#include <runtime/session/listen_host.h>
-#include <runtime/session/session.h>
-#include <runtime/session/host_session.h>
-#include <runtime/session/napi_np_server_ctx.h>
-#include <runtime/session/session_status.h>
+#include <runtime/inmatch/listen_host.h>
+#include <runtime/inmatch/session.h>
+#include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/session_status.h>
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <runtime/environment/weather_seed.h>
@@ -35,7 +35,7 @@
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/world/tick_accumulator.h>
 
-#include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
+#include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
 
 #include <atomic>
@@ -232,7 +232,7 @@ class DedicatedTickTarget final : public opennova::inmatch::TickTarget {
 public:
 	DedicatedTickTarget(opennova::mission::MissionKernel &kernel,
 			opennova::inmatch::ListenHostState &host,
-			opennova::netsim::IDatagramSocket &socket)
+			opennova::IDatagramSocket &socket)
 			: kernel_(kernel), host_(host), socket_(socket) {}
 
 	opennova::inmatch::TickOutcome advance_mission_tick(
@@ -254,7 +254,7 @@ public:
 private:
 	opennova::mission::MissionKernel &kernel_;
 	opennova::inmatch::ListenHostState &host_;
-	opennova::netsim::IDatagramSocket &socket_;
+	opennova::IDatagramSocket &socket_;
 };
 
 } // namespace
@@ -367,7 +367,7 @@ int main(int argc, char **argv) {
 	// --- The consolidated HostConfig: identity, the mission-derived (or
 	//     overridden) g_GameType, the fresh-host rule defaults, the flag
 	//     overrides, and the optional loose score.ini overlay. ---
-	np::HostConfig host_cfg;
+	inmatch::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
 	host_cfg.config.mission_name = kernel.mission.get_mission_name();
@@ -376,7 +376,7 @@ int main(int argc, char **argv) {
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	// The harness has no host-options UI, so install the same fresh-host rule
 	// defaults the retail config path would have applied before mission start.
-	np::apply_fresh_host_rule_defaults(host_cfg.config);
+	inmatch::apply_fresh_host_rule_defaults(host_cfg.config);
 	// The BMS task vocabulary has no authored Flag Me bit even though retail's
 	// Game_StartMission retains its type-12 -> g_GameType 8 branch. The harness
 	// therefore accepts an explicit numeric code so every witnessed wire mode
@@ -414,7 +414,7 @@ int main(int argc, char **argv) {
 	if (index.has_file("score.ini")) {
 		std::vector<uint8_t> score_bytes;
 		if (!index.read_file("score.ini", score_bytes) ||
-				!np::load_session_score_config(host_cfg.config,
+				!inmatch::load_session_score_config(host_cfg.config,
 						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
 								score_bytes.size()))) {
 			std::fprintf(stderr, "nw-server: invalid score config 'score.ini' under '%s'\n",
@@ -422,7 +422,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
-	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
+	host_cfg.socket_mode = inmatch::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
 	host_cfg.serve_and_play = false;            // headless dedicated host: no local-player registration
 
 	// The "Server" chat strings: retail reads GameText("Server", key) from the
@@ -487,9 +487,9 @@ int main(int argc, char **argv) {
 	// terrain-tile source and the "Server" gametext table.
 	host.host_owner.ctx.terrain_til_data = std::move(terrain_til_bytes);
 	if (medic_request_format) {
-		np::ServerTextTable server_text;
+		inmatch::ServerTextTable server_text;
 		server_text.medic_request_format = std::move(*medic_request_format);
-		np::set_server_text(host.host_owner.ctx, std::move(server_text));
+		inmatch::set_server_text(host.host_owner.ctx, std::move(server_text));
 	}
 
 	// --- Open the UDP socket. ---

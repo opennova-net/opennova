@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <runtime/session/client_replica_card.h>
+#include <runtime/inmatch/client_replica_card.h>
 #include <runtime/world/inspect.h>
 
 namespace godot {
@@ -41,21 +41,21 @@ public:
 
 // The full per-entity debug card (world::inspect::EntityCard, ADR 0042 d5):
 // the registry/world half, the AI half, and — on a joiner — the decoded
-// replica section (np::ClientReplicaCard). Typed getters prefer the AI half
+// replica section (inmatch::ClientReplicaCard). Typed getters prefer the AI half
 // when present, matching the old per-shape Dictionary getters; to_json_value()
 // exists for the MCP boundary and carries the card key sets docs/mcp.md names.
 class EntityCard : public RefCounted {
 	GDCLASS(EntityCard, RefCounted)
 
 	opennova::world::inspect::EntityCard value_;
-	opennova::np::ClientReplicaCard replica_;
+	opennova::inmatch::ClientReplicaCard replica_;
 
 protected:
 	static void _bind_methods();
 
 public:
 	void assign(const opennova::world::inspect::EntityCard &p_value) { value_ = p_value; }
-	void assign_replica(const opennova::np::ClientReplicaCard &p_value) { replica_ = p_value; }
+	void assign_replica(const opennova::inmatch::ClientReplicaCard &p_value) { replica_ = p_value; }
 	bool native_valid() const { return value_.valid || replica_.valid; }
 
 	bool has_ai() const { return value_.has_ai; }

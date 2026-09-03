@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void collect_roster_tags(const ClientState &state, uint16_t self_handle,
                          uint8_t local_team, bool death_screen,
@@ -69,4 +69,4 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 	}
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

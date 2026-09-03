@@ -160,7 +160,7 @@ The two stable in-match boundaries and the gameplay model (ADR 0036). The **wire
 codec** (`engine/net/npwire`, ADR 0019) is the retail compatibility contract and
 encodes/decodes the byte stream; its message catalog is the single source of
 truth (ADR 0013). The **in-match session**
-(`opennova::inmatch::Session`, `engine/runtime/session`) owns lifecycle, role,
+(`opennova::inmatch::Session`, `engine/runtime/inmatch`) owns lifecycle, role,
 fixed cadence, retained input, and tick outcomes. The authoritative **Match**
 (`world::Match`) owns rules, player/team statistics, clock, winner evaluation,
 and the frozen end-round result. `npruntime` and `netsim` are implementation
@@ -194,7 +194,7 @@ controls no Person. Signed capacity and an optional password live on
 the join decides Player vs Spectator before ClientAuth; the authority still
 allocates a roster slot and a hidden, damage-disabled team-0 body while S2C
 0x75 drives the client's free-fly camera, the 0x16 row rides the spectator
-trailer, and the canonical bit is `netsim::Connection::spectator`
+trailer, and the canonical bit is `replication::Connection::spectator`
 (`slot+100567`). The retail deploy-hold bit covers spectators in the priority
 build; the record is `docs/net/novaworld-net-re.md` §5.0e.
 _Avoid_: observer, ghost, "dead player" (a spectator never deployed);

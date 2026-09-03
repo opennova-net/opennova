@@ -12,7 +12,7 @@
 #include <base/io/fixed.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <runtime/session/server_tick.h> // Server_RearmMinimapInitialScan (restart)
+#include <runtime/inmatch/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -557,7 +557,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// discard the witnessed pre-load session. Direct-loaded callers have
 			// not started yet and retain the historical fresh-runtime reset.
 			if (!joiner_bridge_.started() || !runtime_) {
-				runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+				runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(joiner_player_name_);
 				runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 				runtime_->set_join_request(
 						join_role_, join_spectator_password_);
@@ -867,26 +867,26 @@ void Simulation::restore_world_baseline() {
 		// witnessed stream order, so restored runtime identities materialize now
 		// instead of inheriting a prior play epoch's rows and handle caches.
 		host_loop_.clear();
-		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		runtime_ = std::make_unique<opennova::inmatch::ClientRuntime>(host_loop_);
 		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 		install_item_class_resolver();
-		opennova::netsim::ClientReplicaPipeline &view = runtime_->view();
+		opennova::replication::ClientReplicaPipeline &view = runtime_->view();
 		view.apply(0x10, opennova::encode_static_entity_batch(
-				opennova::netsim::build_pool2_static_batch(kernel_->world)));
+				opennova::replication::build_pool2_static_batch(kernel_->world)));
 		view.apply(0x0D, opennova::encode_pool_spawn_batch(
-				opennova::netsim::build_pool1_spawn_batch(kernel_->world)));
+				opennova::replication::build_pool1_spawn_batch(kernel_->world)));
 		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				opennova::netsim::build_pool0_organic_batch(
+				opennova::replication::build_pool0_organic_batch(
 						kernel_->world, kernel_->world.cached.local_player)));
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
-				opennova::netsim::build_pool3_marker_batch(kernel_->world)));
+				opennova::replication::build_pool3_marker_batch(kernel_->world)));
 		// The restart resets every client view to EMPTY retained map banks,
 		// but each connection's minimap initial scan is a one-shot latch the
 		// first epoch already consumed. Re-arm it so the producer re-sends
 		// the persistent pool-2 building/zone markers to every in-match
 		// connection (the loopback view above and remote joiners alike);
 		// SpawnPoint rows and the pool-1 phase walk re-cover the rest.
-		opennova::np::Server_RearmMinimapInitialScan(ctx_);
+		opennova::inmatch::Server_RearmMinimapInitialScan(ctx_);
 	}
 	if (collision_item_db_.is_valid())
 		resolve_collision_instances(collision_item_db_);

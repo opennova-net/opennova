@@ -29,7 +29,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 	GameEventRecord rec;
@@ -77,4 +77,4 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	pending_chat_lines_.push_back(std::move(line));
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

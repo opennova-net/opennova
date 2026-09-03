@@ -317,7 +317,7 @@ namespace opennova::game_rules {
 // S2C 0x08 block (retail frame 146). These seed a fresh host's rule globals;
 // the live wire fields they default live in the session GameConfig (which keeps
 // zeros so a dev host stays inert). [orig: Config_SetDefaults; the g_* rule
-// globals @ 0x24D2140.. — engine/runtime/session game_config.h names each]
+// globals @ 0x24D2140.. — engine/runtime/inmatch game_config.h names each]
 inline constexpr uint32_t kDefaultRespawnTime = 30;
 inline constexpr uint32_t kDefaultTimeLimitMinutes = 10;
 inline constexpr uint32_t kDefaultReplayEnabled = 1;

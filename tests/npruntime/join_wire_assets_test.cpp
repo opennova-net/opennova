@@ -1,4 +1,4 @@
-#include <runtime/session/client_runtime.h>
+#include <runtime/inmatch/client_runtime.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -14,7 +14,7 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 
 bool expect(bool condition, const char *message) {
 	if (condition) return true;
@@ -34,7 +34,7 @@ std::vector<uint8_t> frame_server_session(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(payload));
 }
 
-bool feed(np::ClientRuntime &runtime, SessionSequencing &server_tx,
+bool feed(inmatch::ClientRuntime &runtime, SessionSequencing &server_tx,
 		const std::string &server_scrk, uint8_t tag,
 		std::vector<uint8_t> body, uint32_t tick) {
 	const std::vector<uint8_t> datagram = frame_server_session(
@@ -91,8 +91,8 @@ std::vector<uint8_t> make_til(
 
 struct TerrainFixture {
 	std::string server_scrk = "SERVER-TERRAIN-ASSET-SCRK";
-	np::ClientRuntime runtime{"TerrainAssetJoiner"};
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	inmatch::ClientRuntime runtime{"TerrainAssetJoiner"};
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	uint32_t tick = 0;
 
 	TerrainFixture() {
@@ -110,11 +110,11 @@ struct TerrainFixture {
 bool run_exact_bms_header_is_retained_and_reset() {
 	const std::string client_scrk = "CLIENT-WIRE-ASSET-SCRK";
 	const std::string server_scrk = "SERVER-WIRE-ASSET-SCRK";
-	np::ClientRuntime runtime("WireAssetJoiner");
+	inmatch::ClientRuntime runtime("WireAssetJoiner");
 	runtime.seed_session(
 			0x10203040u, 1u, client_scrk, server_scrk,
 			1u, 0u, 0x0002u, 0x14B9u);
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 
 	if (!expect(!runtime.has_mission_header() &&
 				runtime.mission_header_bytes().empty(),
@@ -165,7 +165,7 @@ bool run_paged_terrain_is_reassembled_exactly_and_reset() {
 	const std::vector<uint8_t> til = make_til(3u, 3u);
 
 	if (!expect(fixture.runtime.terrain_til_state() ==
-				np::TerrainTilState::Absent &&
+				inmatch::TerrainTilState::Absent &&
 				!fixture.runtime.has_terrain_til() &&
 				fixture.runtime.terrain_til_bytes().empty(),
 			"fresh runtime has no complete S2C 0x45 terrain image"))
@@ -174,7 +174,7 @@ bool run_paged_terrain_is_reassembled_exactly_and_reset() {
 	if (!fixture.send(make_terrain_header_page(til, 2u)))
 		return expect(false, "frame first S2C 0x45 page");
 	if (!expect(fixture.runtime.terrain_til_state() ==
-				np::TerrainTilState::Receiving &&
+				inmatch::TerrainTilState::Receiving &&
 				!fixture.runtime.has_terrain_til() &&
 				fixture.runtime.terrain_til_bytes().empty(),
 			"partial terrain stream is not exposed as a complete .til"))
@@ -183,7 +183,7 @@ bool run_paged_terrain_is_reassembled_exactly_and_reset() {
 	if (!fixture.send(make_terrain_continuation(til, 2u, 3u)))
 		return expect(false, "frame final S2C 0x45 page");
 	if (!expect(fixture.runtime.terrain_til_state() ==
-				np::TerrainTilState::Complete &&
+				inmatch::TerrainTilState::Complete &&
 				fixture.runtime.has_terrain_til() &&
 				fixture.runtime.terrain_til_bytes() == til,
 			"paged S2C 0x45 stream reconstructs exact .til bytes"))
@@ -193,7 +193,7 @@ bool run_paged_terrain_is_reassembled_exactly_and_reset() {
 			"terrain reconnect emits ClientHello"))
 		return false;
 	return expect(fixture.runtime.terrain_til_state() ==
-				np::TerrainTilState::Absent &&
+				inmatch::TerrainTilState::Absent &&
 				!fixture.runtime.has_terrain_til() &&
 				fixture.runtime.terrain_til_bytes().empty(),
 			"reconnect clears the completed S2C 0x45 terrain image");
@@ -203,7 +203,7 @@ bool run_invalid_terrain_streams_fail_closed_and_reset() {
 	const std::vector<uint8_t> til = make_til(3u, 3u);
 	auto expect_invalid = [](const TerrainFixture &fixture, const char *message) {
 		return expect(fixture.runtime.terrain_til_state() ==
-					np::TerrainTilState::Invalid &&
+					inmatch::TerrainTilState::Invalid &&
 					!fixture.runtime.has_terrain_til() &&
 					fixture.runtime.terrain_til_bytes().empty(), message);
 	};
@@ -215,7 +215,7 @@ bool run_invalid_terrain_streams_fail_closed_and_reset() {
 			return false;
 		if (!expect(!fixture.runtime.start().empty() &&
 					fixture.runtime.terrain_til_state() ==
-						np::TerrainTilState::Absent,
+						inmatch::TerrainTilState::Absent,
 				"reconnect resets an Invalid terrain stream to Absent"))
 			return false;
 	}
@@ -283,7 +283,7 @@ bool run_invalid_terrain_streams_fail_closed_and_reset() {
 		const std::vector<uint8_t> one = make_til(1u, 1u);
 		if (!fixture.send(make_terrain_header_page(one, 1u)) ||
 				fixture.runtime.terrain_til_state() !=
-					np::TerrainTilState::Complete ||
+					inmatch::TerrainTilState::Complete ||
 				!fixture.send(make_terrain_header_page(one, 1u)) ||
 				!expect_invalid(fixture,
 						"a semantic page after completion is Invalid"))

@@ -35,7 +35,7 @@ below its two real embedders.
 
 ## Decision
 
-1. `opennova::np::MissionSession` is the portable owner of one mission's
+1. `opennova::inmatch::MissionSession` is the portable owner of one mission's
    lifecycle, network-role policy, fixed cadence, input deposit, and typed
    tick/frame results. Its single internal seam, `MissionTickTarget`, owns the
    concrete mission kernel; Godot's target owns `World`/WAC/BMS/AI/network

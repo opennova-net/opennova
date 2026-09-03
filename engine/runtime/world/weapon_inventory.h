@@ -7,7 +7,7 @@
 // @ 0x24D4E00, the availability table g_armoryWeaponAvailability @ 0x24D5600) and one
 // per-player copy server-side (slot+464 table / +94408 buffer / +88664 pools). This port
 // gathers the local-player instance into value types; the server-side copy stays in
-// engine/runtime/session (D-NET-152 shape).
+// engine/runtime/inmatch (D-NET-152 shape).
 // [witness record: docs/net/novaworld-net-re.md §5.57/§5.58 + the loadout grill 2026-07-18]
 #ifndef OPENNOVA_WORLD_WEAPON_INVENTORY_H
 #define OPENNOVA_WORLD_WEAPON_INVENTORY_H

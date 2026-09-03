@@ -11,7 +11,7 @@
 
 struct DefItemsFile;
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // A tag-1 S2C 0x0A record uses exactly one of these fixed-width bodies. Guided
 // entities use a separate variable-length path and therefore have None here.
@@ -174,4 +174,4 @@ private:
 	std::vector<ItemCatalogIssue> issues_;
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

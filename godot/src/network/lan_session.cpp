@@ -31,7 +31,7 @@ PackedByteArray to_packed_bytes(const std::vector<uint8_t> &bytes) {
 	return out;
 }
 
-Ref<LanServerRow> row_record(const opennova::np::LanDiscoveryRow &row) {
+Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	// Retail hosts advertise the typed server name in the host's single-byte
 	// codepage (cp1252), never UTF-8.
 	Ref<LanServerRow> out = LanServerRow::make(
@@ -173,7 +173,7 @@ void LanSession::poll_replies() {
 		const std::string source_ip(socket_->get_packet_ip().utf8().get_data());
 		const int source_port = static_cast<int>(socket_->get_packet_port());
 		if (browser_.accept_reply(packet.ptr(), static_cast<size_t>(packet.size()),
-					source_ip, source_port) != opennova::np::LanRowChange::kNone)
+					source_ip, source_port) != opennova::LanRowChange::kNone)
 			changed = true;
 	}
 	if (changed) rebuild_rows();
@@ -181,7 +181,7 @@ void LanSession::poll_replies() {
 
 void LanSession::rebuild_rows() {
 	servers_.clear();
-	for (const opennova::np::LanDiscoveryRow &row : browser_.servers())
+	for (const opennova::LanDiscoveryRow &row : browser_.servers())
 		servers_.push_back(row_record(row));
 	emit_signal("servers_changed", get_servers());
 }

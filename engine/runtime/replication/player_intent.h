@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // Wire-shaped player input — the field map of the C2S 0x0C extended uplink (§5.10,
 // [orig: Player_BuildTag0CInputBody @ 0x42A550]). ONE struct serves both transports
@@ -40,4 +40,4 @@ struct PlayerIntent {
 	uint32_t buttons = 0;             // fire / action bitmask
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

@@ -4,10 +4,10 @@
 // reconstructed packet 1 back through the receiver so its queued packet 2 drains. The tests also
 // pin key validation, malformed-body rejection, current-ACK retransmit headers, and ACK retirement.
 
-#include <runtime/session/joiner_connection.h>
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_protocol.h>
-#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/ingame_message_id.h>
@@ -23,7 +23,7 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 
 constexpr PeerAddr kPeer{0x0100007Fu, 30124};
 constexpr uint32_t kClientKey = 1;
@@ -37,13 +37,13 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-void seed_host(np::NapiNPServerCtx &ctx) {
+void seed_host(inmatch::NapiNPServerCtx &ctx) {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
-	np::NapiNPConnection conn;
+	inmatch::NapiNPConnection conn;
 	conn.connection_id = 3;
 	conn.type = 1;
-	conn.phase = np::ConnectionPhase::InMatch;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
 	conn.peer = kPeer;
 	conn.client_scrk = kClientScrk;
 	conn.server_scrk = kServerScrk;
@@ -94,7 +94,7 @@ bool frame_test_session_datagram(SessionSequencing &sequencing,
 bool check_session_header_key_validation() {
 	// Host: a correctly encrypted packet addressed to a different server-local SK must be dropped
 	// before its sequence or ACK can enter this connection.
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
 	SessionSequencing client_tx{1, 0};
 	std::vector<uint8_t> wrong_c2s;
@@ -104,7 +104,7 @@ bool check_session_header_key_validation() {
 			{make_protocol_message(0x34, {0xA1})}, wrong_c2s),
 	            "frame C2S packet for a different server session"))
 		return false;
-	const np::HandleResult host_drop = np::handle_server_datagram(
+	const inmatch::HandleResult host_drop = inmatch::handle_server_datagram(
 			ctx, kPeer, wrong_c2s.data(), wrong_c2s.size(), 1);
 	if (!expect(host_drop.outbound.empty() && host_drop.events.empty() &&
 	                    ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 0 &&
@@ -113,7 +113,7 @@ bool check_session_header_key_validation() {
 		return false;
 
 	// Joiner mirror: S2C headers are addressed to its client-local CK.
-	np::JoinerConnection joiner("KeyValidation");
+	inmatch::JoinerConnection joiner("KeyValidation");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9);
 	SessionSequencing server_tx{1, 0};
@@ -124,7 +124,7 @@ bool check_session_header_key_validation() {
 			{make_protocol_message(0x49, {0xC5})}, wrong_s2c),
 	            "frame S2C packet for a different client session"))
 		return false;
-	const np::JoinerConnection::PollResult joiner_drop =
+	const inmatch::JoinerConnection::PollResult joiner_drop =
 			joiner.handle_datagram(wrong_s2c.data(), wrong_s2c.size());
 	return expect(joiner_drop.inbound_gameplay.empty() &&
 	                      joiner_drop.inbound_0a.empty() &&
@@ -137,7 +137,7 @@ bool check_session_header_key_validation() {
 bool check_reordered_same_batch_closes_gap_without_nack() {
 	// Joiner receive batch: frontier=1, then S2C seq3 arrives before seq2. Both datagrams are
 	// consumed before pump(), so seq2 admits and drains seq3 before the missing latch is resolved.
-	np::JoinerConnection joiner("SameBatch");
+	inmatch::JoinerConnection joiner("SameBatch");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 1, 0x0001, 0x14B9);
 	SessionSequencing server_tx{2, 0};
@@ -157,7 +157,7 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 			s2c3.data(), s2c3.size()).inbound_gameplay.empty(),
 	            "joiner queues the future S2C packet"))
 		return false;
-	const np::JoinerConnection::PollResult joiner_close =
+	const inmatch::JoinerConnection::PollResult joiner_close =
 			joiner.handle_datagram(s2c2.data(), s2c2.size());
 	if (!expect(joiner_close.inbound_gameplay.size() == 2 &&
 	                    joiner.connection().seq.queued_inbound.empty(),
@@ -178,7 +178,7 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 		return false;
 
 	// Host mirror: frontier=1, then C2S seq3 before seq2 in one socket drain.
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
 	ctx.np_protocol.connection_list[0].seq.last_inbound_seq = 1;
 	SessionSequencing client_tx{2, 0};
@@ -194,16 +194,16 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 			{make_protocol_message(0x34, {0x03})}, c2s3),
 	            "frame reordered same-batch C2S packets"))
 		return false;
-	if (!expect(np::handle_server_datagram(
+	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, c2s3.data(), c2s3.size(), 1).outbound.empty(),
 	            "host queues the future C2S packet"))
 		return false;
-	if (!expect(np::handle_server_datagram(
+	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, c2s2.data(), c2s2.size(), 1).outbound.empty() &&
 	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
 	            "later C2S packet in the batch closes and drains the gap"))
 		return false;
-	if (!expect(np::flush_server_missing_requests(ctx).empty() &&
+	if (!expect(inmatch::flush_server_missing_requests(ctx).empty() &&
 	                    !ctx.np_protocol.connection_list[0].seq.missing_request_pending,
 	            "host batch boundary suppresses a NACK after same-batch recovery"))
 		return false;
@@ -211,30 +211,30 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 }
 
 bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
-	np::JoinerConnection joiner("LossRecovery");
+	inmatch::JoinerConnection joiner("LossRecovery");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9);
 
 	if (!expect(ctx.np_protocol.connection_list[0].seq.outbound_message_limit ==
-	                    np::JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX,
+	                    inmatch::JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX,
 	            "JO game host connection opts into retail's bounded reliable-message retention"))
 		return false;
 	if (!expect(joiner.connection().seq.outbound_message_limit ==
-	                    np::JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX,
+	                    inmatch::JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX,
 	            "JO game joiner connection opts into retail's bounded reliable-message retention"))
 		return false;
 
 	// Give the host an admitted C2S sequence before its first S2C packet, then advance that ACK once
 	// more after framing. The retransmit must carry ACK=2 even though the original carried ACK=1.
 	const std::vector<uint8_t> c2s1 = joiner.frame_inner(0x34, {});
-	np::handle_server_datagram(ctx, kPeer, c2s1.data(), c2s1.size(), 1);
+	inmatch::handle_server_datagram(ctx, kPeer, c2s1.data(), c2s1.size(), 1);
 
 	std::vector<uint8_t> first;
 	std::vector<uint8_t> second;
-	if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x49, {0xC5}, first) &&
-	                    np::frame_in_match_s2c(ctx, kPeer, 0x49, {0xC6}, second),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {0xC5}, first) &&
+	                    inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {0xC6}, second),
 	            "host frames two retained S2C packets"))
 		return false;
 	ProtocolPacketHeader first_header;
@@ -247,12 +247,12 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 		return false;
 
 	const std::vector<uint8_t> c2s2 = joiner.frame_inner(0x34, {});
-	np::handle_server_datagram(ctx, kPeer, c2s2.data(), c2s2.size(), 2);
+	inmatch::handle_server_datagram(ctx, kPeer, c2s2.data(), c2s2.size(), 2);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2,
 	            "host ACK advances before handling the resend request"))
 		return false;
 
-	const np::JoinerConnection::PollResult gap =
+	const inmatch::JoinerConnection::PollResult gap =
 			joiner.handle_datagram(second.data(), second.size());
 	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty(),
 	            "joiner queues S2C sequence two without NACKing before the batch boundary"))
@@ -271,7 +271,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	const uint32_t next_before_bad = ctx.np_protocol.connection_list[0].seq.next_outbound_seq;
 	const std::vector<uint8_t> wrong_key = make_resend_datagram(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey + 1, {1});
-	if (!expect(np::handle_server_datagram(
+	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, wrong_key.data(), wrong_key.size(), 3).outbound.empty() &&
 		            ctx.np_protocol.connection_list[0].seq.next_outbound_seq ==
 		                    next_before_bad,
@@ -279,12 +279,12 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 		return false;
 	const std::vector<uint8_t> malformed =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, {0x88, 0x77, 0x66});
-	if (!expect(np::handle_server_datagram(
+	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, malformed.data(), malformed.size(), 4).outbound.empty(),
 	            "host ignores a resend-list body shorter than its key"))
 		return false;
 
-	const np::HandleResult resend = np::handle_server_datagram(
+	const inmatch::HandleResult resend = inmatch::handle_server_datagram(
 			ctx, kPeer, gap_nacks[0].data(), gap_nacks[0].size(), 5);
 	if (!expect(resend.outbound.size() == 1,
 	            "valid client 0x44 makes the host emit one reconstructed packet"))
@@ -300,7 +300,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	            "host reconstructs old S2C records with its current ACK"))
 		return false;
 
-	const np::JoinerConnection::PollResult recovered =
+	const inmatch::JoinerConnection::PollResult recovered =
 			joiner.handle_datagram(resend.outbound[0].data(), resend.outbound[0].size());
 	if (!expect(recovered.inbound_gameplay.size() == 2 &&
 	                    recovered.inbound_gameplay[0].second ==
@@ -315,12 +315,12 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 		return false;
 
 	const std::vector<uint8_t> c2s_ack = joiner.frame_inner(0x34, {});
-	np::handle_server_datagram(ctx, kPeer, c2s_ack.data(), c2s_ack.size(), 6);
+	inmatch::handle_server_datagram(ctx, kPeer, c2s_ack.data(), c2s_ack.size(), 6);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.retained_outbound.empty(),
 	            "joiner's admitted ACK retires the host's recovered S2C records"))
 		return false;
 	std::vector<uint8_t> final_server_ack;
-	if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x34, {}, final_server_ack),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, final_server_ack),
 	            "host frames final ACK-bearing S2C packet"))
 		return false;
 	joiner.handle_datagram(final_server_ack.data(), final_server_ack.size());
@@ -329,9 +329,9 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 }
 
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
-	np::JoinerConnection joiner("LossRecovery");
+	inmatch::JoinerConnection joiner("LossRecovery");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9);
 
@@ -347,7 +347,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 		return false;
 
 	std::vector<uint8_t> server_packet;
-	if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_packet),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_packet),
 	            "host frames one S2C packet to advance the joiner's current ACK"))
 		return false;
 	joiner.handle_datagram(server_packet.data(), server_packet.size());
@@ -355,15 +355,15 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	            "joiner ACK advances before it handles the resend request"))
 		return false;
 
-	const np::HandleResult gap =
-			np::handle_server_datagram(ctx, kPeer, second.data(), second.size(), 10);
+	const inmatch::HandleResult gap =
+			inmatch::handle_server_datagram(ctx, kPeer, second.data(), second.size(), 10);
 	if (!expect(gap.events.empty() && gap.outbound.empty(),
 	            "host queues C2S sequence two without NACKing before the batch boundary"))
 		return false;
-	const std::vector<np::TickOut> gap_nacks =
-			np::flush_server_missing_requests(ctx);
+	const std::vector<inmatch::TickOut> gap_nacks =
+			inmatch::flush_server_missing_requests(ctx);
 	if (!expect(gap_nacks.size() == 1 && gap_nacks[0].outbound.size() == 1 &&
-	                    np::flush_server_missing_requests(ctx).empty(),
+	                    inmatch::flush_server_missing_requests(ctx).empty(),
 	            "host emits exactly one NACK after the persistent-gap receive batch"))
 		return false;
 	std::vector<uint32_t> requested;
@@ -388,7 +388,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	            "joiner ignores a resend-list body shorter than its key"))
 		return false;
 
-	const np::JoinerConnection::PollResult resend =
+	const inmatch::JoinerConnection::PollResult resend =
 			joiner.handle_datagram(
 					gap_nacks[0].outbound[0].data(),
 					gap_nacks[0].outbound[0].size());
@@ -406,7 +406,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	            "joiner reconstructs old C2S records with its current ACK"))
 		return false;
 
-	np::handle_server_datagram(
+	inmatch::handle_server_datagram(
 			ctx, kPeer, resend.outbound[0].data(), resend.outbound[0].size(), 11);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2 &&
 	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
@@ -414,7 +414,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 		return false;
 
 	std::vector<uint8_t> server_ack;
-	if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_ack),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_ack),
 	            "host frames ACK for the recovered C2S frontier"))
 		return false;
 	joiner.handle_datagram(server_ack.data(), server_ack.size());
@@ -422,7 +422,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	            "host ACK retires both recovered joiner records"))
 		return false;
 	const std::vector<uint8_t> client_ack = joiner.frame_inner(0x34, {});
-	np::handle_server_datagram(ctx, kPeer, client_ack.data(), client_ack.size(), 12);
+	inmatch::handle_server_datagram(ctx, kPeer, client_ack.data(), client_ack.size(), 12);
 	return expect(ctx.np_protocol.connection_list[0].seq.retained_outbound.empty(),
 	              "joiner ACK retires the host's ACK-bearing session records");
 }
@@ -434,23 +434,23 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 // @ 0x62367a]. Three retained records requested in one 0x44 come back as
 // three reconstructed packets, each under its old sequence, in request order.
 bool check_multi_sequence_resend_request_reconstructs_each() {
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
-	np::JoinerConnection joiner("MultiNack");
+	inmatch::JoinerConnection joiner("MultiNack");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9);
 
 	std::vector<uint8_t> framed;
 	const uint8_t payloads[3] = {0xD1, 0xD2, 0xD3};
 	for (uint8_t byte : payloads) {
-		if (!expect(np::frame_in_match_s2c(ctx, kPeer, 0x49, {byte}, framed),
+		if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {byte}, framed),
 		            "host frames and retains three S2C packets"))
 			return false;
 	}
 
 	const std::vector<uint8_t> nack = make_resend_datagram(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {1, 2, 3});
-	const np::HandleResult resent = np::handle_server_datagram(
+	const inmatch::HandleResult resent = inmatch::handle_server_datagram(
 			ctx, kPeer, nack.data(), nack.size(), 3);
 	if (!expect(resent.outbound.size() == 3,
 	            "one 0x44 carrying three requested sequences reconstructs three packets"))
@@ -476,7 +476,7 @@ bool check_multi_sequence_resend_request_reconstructs_each() {
 // physical FIRST record is not a gameplay message: only the completed payload
 // at FINAL may cross the host's public in-match event seam.
 bool check_c2s_fragments_dispatch_once_after_final() {
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
 	SessionSequencing client_tx{1, 0};
 
@@ -501,17 +501,17 @@ bool check_c2s_fragments_dispatch_once_after_final() {
 			"frame C2S FIRST and FINAL records"))
 		return false;
 
-	const np::HandleResult first_result = np::handle_server_datagram(
+	const inmatch::HandleResult first_result = inmatch::handle_server_datagram(
 			ctx, kPeer, first.data(), first.size(), 20);
 	if (!expect(first_result.events.empty() && first_result.outbound.empty(),
 			"host does not dispatch or reply to an incomplete C2S FIRST record"))
 		return false;
 
-	const np::HandleResult final_result = np::handle_server_datagram(
+	const inmatch::HandleResult final_result = inmatch::handle_server_datagram(
 			ctx, kPeer, final.data(), final.size(), 21);
 	if (!expect(final_result.events.size() == 1 &&
 	                    final_result.events[0].kind ==
-						np::HostAcceptEvent::Kind::PeerC2SInMatch &&
+						inmatch::HostAcceptEvent::Kind::PeerC2SInMatch &&
 	                    final_result.events[0].in_match_c2s.size() == 1,
 			"host dispatches exactly one semantic C2S message at FINAL"))
 		return false;

@@ -9,7 +9,7 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
 
-#include <runtime/session/charattr_challenge.h>
+#include <runtime/inmatch/charattr_challenge.h>
 
 #include <cstdio>
 #include <cstring>
@@ -76,11 +76,11 @@ EntityHandle spawn_organic(World &w, uint8_t team, uint8_t player_class,
 } // namespace
 
 int main() {
-    opennova::np::CharAttrChallengeTable table;
-    CHECK(opennova::np::parse_charattr_challenge_table(
+    opennova::inmatch::CharAttrChallengeTable table;
+    CHECK(opennova::inmatch::parse_charattr_challenge_table(
             reinterpret_cast<const uint8_t *>(kFixture), sizeof(kFixture) - 1,
             table));
-    const auto rows = opennova::np::charattr_class_attribute_rows(table);
+    const auto rows = opennova::inmatch::charattr_class_attribute_rows(table);
     // The WHOLE word per class, index = class - 1.
     CHECK(rows[0] == 0x1u);  // CHARACTER1: AutoScope
     CHECK(rows[1] == 0x0u);  // NULL names no attribute
@@ -122,8 +122,8 @@ int main() {
     CHECK(saw_medic && saw_rifle);
 
     // S2C 0x41 property 0 blanks every row's word: the plates go with it.
-    opennova::np::clear_charattr_challenge_property(table, 0);
-    w.class_attribute_flags = opennova::np::charattr_class_attribute_rows(table);
+    opennova::inmatch::clear_charattr_challenge_property(table, 0);
+    w.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
     CHECK(!w.class_has_attribute(5, World::kCharAttrMedic));
     CHECK(!w.class_has_attribute(1, 0x1u));
     tags.clear();
@@ -132,16 +132,16 @@ int main() {
     for (const FriendlyTagSource &t : tags) CHECK(!t.medic);
 
     // A property clear that is NOT id 0 leaves the words alone.
-    opennova::np::CharAttrChallengeTable again;
-    CHECK(opennova::np::parse_charattr_challenge_table(
+    opennova::inmatch::CharAttrChallengeTable again;
+    CHECK(opennova::inmatch::parse_charattr_challenge_table(
             reinterpret_cast<const uint8_t *>(kFixture), sizeof(kFixture) - 1,
             again));
-    opennova::np::clear_charattr_challenge_property(again, 3); // HPBONUS
-    CHECK(opennova::np::charattr_class_attribute_rows(again)[4] == 0x8u);
+    opennova::inmatch::clear_charattr_challenge_property(again, 3); // HPBONUS
+    CHECK(opennova::inmatch::charattr_class_attribute_rows(again)[4] == 0x8u);
 
     // An unloaded table (a missing charattr.def) reads as no attribute at all.
-    w.class_attribute_flags = opennova::np::charattr_class_attribute_rows(
-            opennova::np::CharAttrChallengeTable{});
+    w.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(
+            opennova::inmatch::CharAttrChallengeTable{});
     for (uint8_t c = 0; c < 32; ++c) CHECK(!w.class_has_attribute(c, 0xFFFFFFFFu));
 
     if (failures == 0) std::printf("charattr_flags_test: ok\n");

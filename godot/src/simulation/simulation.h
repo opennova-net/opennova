@@ -88,7 +88,7 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
-#include <runtime/session/session.h>
+#include <runtime/inmatch/session.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/inspect.h> // the typed entity inspection API (ADR 0042 d5)
 #include <runtime/world/tick_accumulator.h>
@@ -115,21 +115,21 @@ class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_rep
 #include <runtime/devtools/rays_snapshot.h>
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
-#include <runtime/session/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
-#include <runtime/session/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
+#include <runtime/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
+#include <runtime/inmatch/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
 #include <runtime/replication/item_replication_catalog.h> // canonical items.def replication traits
 #include <runtime/replication/client_world_materializer.h> // header-only joiner pools 1..3
-#include <runtime/session/udp_session_transport.h>     // PeerLink::transport (the LAN per-peer transport)
+#include <runtime/inmatch/udp_session_transport.h>     // PeerLink::transport (the LAN per-peer transport)
 
 #include <net/npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
 #include "network/udp_pump.h"
 
 #include <formats/mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
-#include <runtime/session/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
-#include <runtime/session/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
-#include <runtime/session/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
-#include <runtime/session/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
-#include <runtime/session/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
+#include <runtime/inmatch/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
+#include <runtime/inmatch/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
+#include <runtime/inmatch/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
+#include <runtime/inmatch/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
+#include <runtime/inmatch/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/inmatch_session_values.h"
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
@@ -248,7 +248,7 @@ public:
 	// A dying joiner sim ships the retail goodbye burst before the socket drops — retail sends
 	// its disconnect packets from the connection teardown that Destroy also runs, so freeing the
 	// sim (ESC abort, watchdog abort, return-to-menu) must not leak an admitted peer on the host.
-	// (engine: runtime/session/client_runtime.cpp)
+	// (engine: runtime/inmatch/client_runtime.cpp)
 	~Simulation() override;
 
 	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
@@ -348,7 +348,7 @@ public:
 	// session socket, so the Play/Step/Stop transport locks out (retail MP has no pause; a
 	// stopped listen host reaps every joiner at cs_dir0.timeout_ms (engine: net/novaworld/client_session.h)). The single home for the rule — F3 transport, MCP, and ESC pause read it.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
-	// The portable session's live role/state records (runtime/session/session.h),
+	// The portable session's live role/state records (runtime/inmatch/session.h),
 	// re-exported so the debug/MCP shell derives authority and role labels from
 	// the session instead of re-deriving them from the transport flags. The
 	// role values mirror inmatch::Role (the assignments make drift impossible);
@@ -535,7 +535,7 @@ public:
 	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
-	// (engine: runtime/session/client_runtime.h)
+	// (engine: runtime/inmatch/client_runtime.h)
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
@@ -605,7 +605,7 @@ public:
 	// position (net-re §5.2c). A stock SP mission resolves the Co-op 6094 -> 6001 chain. Call AFTER a
 	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
 	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
-	// (engine: runtime/session/server_message_dispatch.cpp)
+	// (engine: runtime/inmatch/server_message_dispatch.cpp)
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
@@ -632,7 +632,7 @@ public:
 	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
 	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
-	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: runtime/session/client_runtime.h)
+	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: runtime/inmatch/client_runtime.h)
 	bool request_local_player_stance(Stance p_stance);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
@@ -728,7 +728,7 @@ public:
 	                                         bool p_preserve_slot_state = false);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
-	// queued presentation (engine: runtime/session/joiner_world_bridge.cpp).
+	// queued presentation (engine: runtime/inmatch/joiner_world_bridge.cpp).
 	void rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 	                                const Dictionary &p_clip_seconds,
 	                                bool p_preserve_slot_state = false);
@@ -848,12 +848,12 @@ public:
 	TypedArray<FeedRow> drain_feed_events();
 	// The folded Tab board's HEADER (netsim ClientScoreboard counts + the
 	// session strings): known/team_mode/timed, the witnessed players count
-	// (accepted rows minus the spectator trailer, netsim::scoreboard_header),
+	// (accepted rows minus the spectator trailer, replication::scoreboard_header),
 	// in_game/spectators, game_type, server and mission names. The rows no
 	// longer round-trip through script — HudOverlay pulls them natively via fill_scoreboard_rows.
 	Ref<ScoreboardHeader> get_scoreboard() const;
 	// The native Tab-board row handoff: fills the drawer's entries via the
-	// netsim projection (netsim::project_scoreboard — wire order, the server
+	// netsim projection (replication::project_scoreboard — wire order, the server
 	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
 	// calls it through this typed seam. Returns false (rows cleared) when no runtime exists.
 	bool fill_scoreboard_rows(
@@ -911,7 +911,7 @@ public:
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
 	// (engine: runtime/world/weapon_inventory.h).
 	int get_weapon_availability(const String &p_weapon_name) const;
-	// The armory ACCEPT apply (engine: runtime/session/loadout_submit.cpp): the accepted kit becomes the spawn kit, the slot pool refills from it
+	// The armory ACCEPT apply (engine: runtime/inmatch/loadout_submit.cpp): the accepted kit becomes the spawn kit, the slot pool refills from it
 	// (sub-weapons expanded), pools reseed + clips recalc, and the equipped slot
 	// re-selects. Rows whose weapon is availability-banned are refused (the server
 	// 0x2F validation shape, availability 2 requires the armory zone the ACCEPT is
@@ -947,7 +947,7 @@ public:
 	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
 	static String weapon_profile_relpath(const String &p_expansion_name);
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
-	// fp_viewmodel_spec (engine: runtime/session/joiner_world_bridge.cpp)). `character_arms` is the local
+	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_world_bridge.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
 	// has_def=false is the bring-up path; an empty gun on a resolved def means
@@ -994,7 +994,7 @@ public:
 	// names). The kit array is the SELECTED page — the one the class byte picks.
 	Ref<WeaponProfileSummary> get_weapon_profile_summary() const;
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
-	// default — the Player_InitPlayer weapon leg (engine: runtime/session/host_session.h). Runs automatically after load_weapon_table; call
+	// default — the Player_InitPlayer weapon leg (engine: runtime/inmatch/host_session.h). Runs automatically after load_weapon_table; call
 	// again on respawn.
 	void respawn_local_player_loadout();
 	// The category keys (engine: runtime/controls/controls.h). Category 1..9 =
@@ -1198,7 +1198,7 @@ public:
 	// themselves and runs only at the MCP boundary (to_json_value). A joiner's
 	// directory carries no AI join (the non-authoritative tooling pool never
 	// mixes into the decoded view), and its cards ride the decoded replica
-	// section (np::client_replica_card).
+	// section (inmatch::client_replica_card).
 	TypedArray<EntityRow> entity_directory() const;
 	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
 	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
@@ -1642,7 +1642,7 @@ public:
 	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
 	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
 	// the file onto them, writing the file out when it is absent
-	// (engine: runtime/session/game_config.h).
+	// (engine: runtime/inmatch/game_config.h).
 	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
 	// score_rules !valid (every award a no-op) where retail would still score from its
 	// defaults. The shipped file is the retail-parity path.

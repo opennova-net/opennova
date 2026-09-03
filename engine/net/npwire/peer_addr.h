@@ -10,7 +10,7 @@ namespace opennova {
 // Identifies a remote UDP peer. NovaLogic protocol is IPv4-only on the wire.
 //
 // This is the in-match transport-address key. It lives in its own lean header (no <mutex>,
-// no matchmaking registry) so the in-match net core (engine/runtime/replication, engine/runtime/session) and the
+// no matchmaking registry) so the in-match net core (engine/runtime/replication, engine/runtime/inmatch) and the
 // socket owners (apps/nw_server, godot/src) can key peers by address without pulling the
 // NovaWorld matchmaking ConnectionRegistry (novaworld/connection/registry.h, which includes
 // this header for the same two types).

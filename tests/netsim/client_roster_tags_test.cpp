@@ -13,7 +13,7 @@
 #include <runtime/replication/client_state.h>
 
 using namespace opennova;
-using namespace opennova::netsim;
+using namespace opennova::replication;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \

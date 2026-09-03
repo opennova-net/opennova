@@ -8,10 +8,10 @@
 // drain (a reload request is consumed by the server dispatcher while every
 // other datagram stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
-#include <runtime/session/listen_host.h>
-#include <runtime/session/client_runtime.h>
-#include <runtime/session/host_session.h>
-#include <runtime/session/napi_np_connection.h>
+#include <runtime/inmatch/listen_host.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/napi_np_connection.h>
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -94,7 +94,7 @@ uint32_t mission_game_type(const bms::File &mission) {
 
 int local_loopback_connections(const inmatch::ListenHostState &state) {
 	int count = 0;
-	for (const np::NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+	for (const inmatch::NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
 		if (conn.type == 2 && conn.link.transport == &state.host_loop) ++count;
 	return count;
 }
@@ -131,7 +131,7 @@ int main() {
 		CHECK(host.host_owner.ctx.config.game_type == options.game_type);
 		CHECK(host.client_runtime != nullptr);
 		if (host.client_runtime) {
-			CHECK(host.client_runtime->role() == np::ClientRuntime::Role::HostClient);
+			CHECK(host.client_runtime->role() == inmatch::ClientRuntime::Role::HostClient);
 			CHECK(host.client_runtime->is_authority());
 		}
 		CHECK(local_loopback_connections(host) == 1);
@@ -174,7 +174,7 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 2);
 		inmatch::listen_host::drain_host_client_gameplay_requests(kernel, host);
 		CHECK(host.host_loop.c2s_pending() == 1);
-		netsim::Datagram preserved;
+		replication::Datagram preserved;
 		CHECK(host.host_loop.host_recv(preserved));
 		CHECK(preserved.tag == c2s::MOUNTED_WEAPON_SLOT_SELECT);
 		CHECK(!host.host_loop.host_recv(preserved));
@@ -198,11 +198,11 @@ int main() {
 		options.playable = false; // a dedicated host has no player of its own
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
-			np::HostConfig cfg;
+			inmatch::HostConfig cfg;
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
-			cfg.socket_mode = np::SocketMode::Lan;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
 			cfg.serve_and_play = true; // the dedicated bring-up forces this OFF
 			inmatch::listen_host::bringup_dedicated(kernel, host, cfg);
 		};

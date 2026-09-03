@@ -3,11 +3,11 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
-#include <runtime/session/join_character_profile.h>
+#include <runtime/inmatch/join_character_profile.h>
 
 namespace godot {
 
-// The joiner's profile-to-wire projection (runtime/session/join_character_profile.h):
+// The joiner's profile-to-wire projection (runtime/inmatch/join_character_profile.h):
 // per side the packed Avatars.def character id (CI0/CI1), the class byte
 // (CTA/CTB) and the avatar byte (VCA/VCB, the selected combo's head voice),
 // plus the side request the companion fills (-1 = assign me). Produced by

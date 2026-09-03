@@ -11,7 +11,7 @@
   seam and whitelists `terrain_query/terrain_field_build.h` for
   `engine/runtime/mission` ONLY, so the mission kernel loads its own terrain
   store and the embedders stop pre-building it; after the net move the seam
-  trees are `runtime/session` and `runtime/replication` instead of
+  trees are `runtime/inmatch` and `runtime/replication` instead of
   `engine/net`.
 - **Owners**: maturity program LIBS track
 - **Supersedes/updates**: executes the LIBS-1 slice of the maturity

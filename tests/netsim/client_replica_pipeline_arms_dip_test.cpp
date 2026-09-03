@@ -26,7 +26,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 bool expect(bool ok, const char *what) {
 	if (!ok) std::printf("FAIL: %s\n", what);

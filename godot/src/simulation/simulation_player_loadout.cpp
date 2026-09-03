@@ -7,7 +7,7 @@
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
 
-#include <runtime/session/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
+#include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
@@ -264,7 +264,7 @@ TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
 	const opennova::world::PlayerSlotLookup authority_slot_lookup =
 			[this](opennova::world::EntityHandle entity,
 					opennova::world::PlayerSlotFacts &facts) {
-				for (const opennova::np::NapiNPConnection &conn :
+				for (const opennova::inmatch::NapiNPConnection &conn :
 						ctx_.np_protocol.connection_list) {
 					if (conn.link.owned_entity != entity) continue;
 					facts.revive_seconds = static_cast<uint8_t>(
@@ -280,7 +280,7 @@ TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
 		// A joiner's players are decoded rows, not World twins: the roster walk
 		// over ClientState supplies them (netsim/client_roster_tags.h).
 		const int32_t player_hp = kernel_->world.player_item_hp;
-		opennova::netsim::collect_roster_tags(runtime_->state(),
+		opennova::replication::collect_roster_tags(runtime_->state(),
 				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
 				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
 				[player_hp](uint16_t) { return player_hp; });
@@ -423,7 +423,7 @@ void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 }
 
 bool Simulation::seed_session_kit_from_profile() {
-	// The composition is engine code now (np::seed_session_kit_from_profile,
+	// The composition is engine code now (inmatch::seed_session_kit_from_profile,
 	// ADR 0031 PR E — the Game_StartMission copy semantics live there). This
 	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
 	// well as a joiner, so single player and the editor keep the mission's
@@ -432,7 +432,7 @@ bool Simulation::seed_session_kit_from_profile() {
 	if (!host_listen_ && !joiner_) return false;
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	return opennova::np::seed_session_kit_from_profile(kernel_->world,
+	return opennova::inmatch::seed_session_kit_from_profile(kernel_->world,
 			weapon_profile_, assigned, kernel_->loadout,
 			weapon_profile_seeded_side_);
 }
@@ -442,7 +442,7 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	if (!kernel_) return false;
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	if (!opennova::np::reseed_session_kit_on_side_change(kernel_->world,
+	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
 			weapon_profile_, assigned, kernel_->loadout,
 			weapon_profile_seeded_side_))
 		return false;
@@ -452,7 +452,7 @@ bool Simulation::reseed_session_kit_on_side_change() {
 
 void Simulation::push_joiner_loadout_kit() {
 	// The C2S 0x2F submission content builder is engine code now
-	// (np::build_joiner_loadout_kit, ADR 0031 PR E — the one-class-integer
+	// (inmatch::build_joiner_loadout_kit, ADR 0031 PR E — the one-class-integer
 	// rule, the resident-buffer rows, and both side blocks live there, with
 	// their witnesses). This binding keeps the seam wiring: the role gate,
 	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
@@ -467,8 +467,8 @@ void Simulation::push_joiner_loadout_kit() {
 	// latch keeps that one-way (a push must never drive a rebuild back into itself).
 	if (pushing_joiner_loadout_kit_) return;
 	pushing_joiner_loadout_kit_ = true;
-	opennova::np::JoinerConnection::LoadoutKit wire_kit;
-	opennova::np::build_joiner_loadout_kit(kernel_->world, weapon_profile_,
+	opennova::inmatch::JoinerConnection::LoadoutKit wire_kit;
+	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, weapon_profile_,
 			runtime_->assigned_team(), kernel_->loadout,
 			kernel_->inventory_valid ? kernel_->inventory.equipped_combo : -1,
 			kernel_->inventory_valid ? &kernel_->inventory : nullptr,
@@ -653,10 +653,10 @@ void Simulation::apply_joiner_authoritative_loadout() {
 	if (revision == 0 || revision <= joiner_applied_loadout_revision_) return;
 
 	// The grant -> kit-row conversion (name resolve + SIGNED clip reinterpret)
-	// is np::kit_from_authoritative_grant's.
+	// is inmatch::kit_from_authoritative_grant's.
 	const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
 	std::vector<opennova::world::WeaponKitEntry> kit;
-	opennova::np::kit_from_authoritative_grant(kernel_->world.weapons, grant, kit);
+	opennova::inmatch::kit_from_authoritative_grant(kernel_->world.weapons, grant, kit);
 	// Do not echo an authoritative grant back as a new C2S 0x2F request. The
 	// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
 	// inside still re-arms the seam, but its ROWS come from the profile page, never

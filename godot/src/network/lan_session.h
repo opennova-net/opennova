@@ -42,7 +42,7 @@ private:
 	void rebuild_rows();
 	void emit_error(const String &message);
 
-	opennova::np::LanDiscoveryBrowser browser_;
+	opennova::LanDiscoveryBrowser browser_;
 	Ref<PacketPeerUDP> socket_;
 	TypedArray<LanServerRow> servers_;
 	String browse_target_;

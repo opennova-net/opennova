@@ -10,7 +10,7 @@
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <runtime/world/guided_missile_flight.h> // the stng pursuit integrator (D-NET-64)
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // One connection-slot roster binding, folded from S2C 0x46 player-sync. This
 // is the scoreboard's NAME-JOIN table, keyed by CONNECTION SLOT — a different
@@ -812,4 +812,4 @@ bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
 //  g_minimap_overlay_color_table @0x840A10]
 uint32_t minimap_team_argb(uint8_t team);
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

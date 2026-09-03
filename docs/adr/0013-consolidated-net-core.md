@@ -85,7 +85,7 @@ path); `player_slot` (roster order, not stored on the entity) stays a field rega
 ### 3. One host bring-up, folded to the shared helper
 
 The witnessed §5.0 host bring-up lives once in
-`np::start_host_session(HostOwner&, HostConfig&)`: serve-and-play selects mode 3 and
+`inmatch::start_host_session(HostOwner&, HostConfig&)`: serve-and-play selects mode 3 and
 passes the type-2 loopback into `create_session`; serve-only selects mode 1 and passes
 no local client. Both continue through `set_transport_mode` → `create_session`; that true session
 boundary resets the connection table, stores the consolidated config, starts the server, runs

@@ -21,7 +21,7 @@
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/replication/client_state.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 struct ClientScoreboardHeader {
 	bool known = false;
@@ -45,4 +45,4 @@ ClientScoreboardHeader scoreboard_header(const ClientState &state);
 // (The game-type label rung lives with the rest of the game-type key maps:
 // npwire game_type.h overlay_label_key [orig: @0x5b8680].)
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

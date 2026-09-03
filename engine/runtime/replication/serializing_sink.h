@@ -4,9 +4,9 @@
 
 #include <runtime/world/net_command_sink.h>
 
-#include <runtime/session/session_transport.h>
+#include <runtime/inmatch/session_transport.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // Replaces world::LocalSink for the SP in-process listen server. The host is
 // authoritative for every entity (is_authority stays true), but send_command — the
@@ -19,8 +19,8 @@ namespace opennova::netsim {
 // STAGED, NOT WIRED (2026-08-27 tidy): no production World points its `net` here
 // yet — `World::local_sink` stays the SP default and send_command is a structural
 // no-op, because the `0x23` entity-command body is unwitnessed and the sink has zero
-// callers (engine/runtime/session/ROADMAP.md, P8: never invent bytes). The live owner is
-// the in-match session's host role (engine/runtime/session/session.*), which installs this
+// callers (engine/runtime/inmatch/ROADMAP.md, P8: never invent bytes). The live owner is
+// the in-match session's host role (engine/runtime/inmatch/session.*), which installs this
 // sink in place of LocalSink once `NapiNPServer_SendFiltered` 0x23 is grilled and the
 // serialize leg ported. tests/netsim/loopback_identity_test.cpp pins the seam shape.
 struct SerializingSink : world::INetCommandSink {
@@ -34,4 +34,4 @@ private:
 	ISessionTransport &channel_;
 };
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

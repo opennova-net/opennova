@@ -70,7 +70,7 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
       the native walks (`present_applier.{h,cpp}` 10, the wire walk +
       cold path `godot/src/simulation/present_applier_wire.cpp`, the
-      held-weapon reference math `engine/runtime/session/client_replica_present.h`) —
+      held-weapon reference math `engine/runtime/inmatch/client_replica_present.h`) —
       but the native `EntityIndex` (`godot/src/object/entity_index.cpp` —
       the registry's successor) still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
@@ -150,7 +150,7 @@ hardening, and project health. Divergences from the original engine belong in
       (ROADMAP Wave 3); what remains is the host-specific seed values the golden byte-diff
       still shows (the 0x81 `CI` host-node index, the 0x82 `MI` host dcb, the identity
       strings) and the ~8 §5.2a initial-state serializers `log_deferred_once` skips
-      (`engine/runtime/session/server_initial_state.cpp`, "emitted as nothing pending the
+      (`engine/runtime/inmatch/server_initial_state.cpp`, "emitted as nothing pending the
       grill wave"), which stay unemitted-and-logged rather than faked. Witness each at the
       addresses cited there -> `ingame_encode`, land the record via `re-doc`. Detail:
-      `engine/runtime/session/ROADMAP.md`.
+      `engine/runtime/inmatch/ROADMAP.md`.

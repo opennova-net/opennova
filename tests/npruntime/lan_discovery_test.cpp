@@ -45,7 +45,7 @@ std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
 }
 
 void test_begin_validates_the_range_and_fixes_one_identity() {
-    np::LanDiscoveryBrowser b;
+    opennova::LanDiscoveryBrowser b;
     CHECK(!b.begin(7, 0, 100));
     CHECK(!b.begin(7, 32768, 32760));
     CHECK(!b.begin(7, 1, 70000));
@@ -57,11 +57,11 @@ void test_begin_validates_the_range_and_fixes_one_identity() {
     bool due = false;
     b.advance(1.0, due);
     CHECK(b.probe() == first); // the identity holds across the window
-    CHECK(b.probe() == np::build_lan_discovery_probe(7));
+    CHECK(b.probe() == opennova::build_lan_discovery_probe(7));
 }
 
 void test_window_and_announce_cadence() {
-    np::LanDiscoveryBrowser b;
+    opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax));
     bool due = false;
     int announces = 0;
@@ -80,7 +80,7 @@ void test_window_and_announce_cadence() {
 }
 
 void test_announce_clock_restarts_from_zero_not_the_overshoot() {
-    np::LanDiscoveryBrowser b;
+    opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax));
     bool due = false;
     CHECK(b.advance(2.9, due));
@@ -94,18 +94,18 @@ void test_announce_clock_restarts_from_zero_not_the_overshoot() {
 }
 
 void test_replies_are_filtered_and_upserted_by_endpoint() {
-    np::LanDiscoveryBrowser b;
+    opennova::LanDiscoveryBrowser b;
     CHECK(b.begin(1, 32768, 32775));
     const std::vector<uint8_t> alpha = server_reply("Alpha", 3, 32);
     // Outside the browsed range, an unusable source, or a foreign packet: no row.
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32776) == np::LanRowChange::kNone);
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "0.0.0.0", 32768) == np::LanRowChange::kNone);
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "", 32768) == np::LanRowChange::kNone);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32776) == opennova::LanRowChange::kNone);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "0.0.0.0", 32768) == opennova::LanRowChange::kNone);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "", 32768) == opennova::LanRowChange::kNone);
     const std::vector<uint8_t> junk = {1, 2, 3};
-    CHECK(b.accept_reply(junk.data(), junk.size(), "192.168.1.10", 32768) == np::LanRowChange::kNone);
+    CHECK(b.accept_reply(junk.data(), junk.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kNone);
     CHECK(b.servers().empty());
     // A first announce adds the row.
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == np::LanRowChange::kAdded);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kAdded);
     CHECK(b.servers().size() == 1);
     CHECK(b.servers()[0].host_ip == "192.168.1.10");
     CHECK(b.servers()[0].port == 32768);
@@ -115,23 +115,23 @@ void test_replies_are_filtered_and_upserted_by_endpoint() {
     CHECK(b.servers()[0].server.gametype == 2);
     CHECK(b.servers()[0].server.expansion == "revx02");
     // The same host re-announcing unchanged: no change reported.
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == np::LanRowChange::kNone);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kNone);
     // Live state moved (a player joined): refreshed in place, first-seen order kept.
     const std::vector<uint8_t> alpha4 = server_reply("Alpha", 4, 32);
     const std::vector<uint8_t> bravo = server_reply("Bravo", 0, 16, 5);
-    CHECK(b.accept_reply(bravo.data(), bravo.size(), "192.168.1.11", 32768) == np::LanRowChange::kAdded);
-    CHECK(b.accept_reply(alpha4.data(), alpha4.size(), "192.168.1.10", 32768) == np::LanRowChange::kUpdated);
+    CHECK(b.accept_reply(bravo.data(), bravo.size(), "192.168.1.11", 32768) == opennova::LanRowChange::kAdded);
+    CHECK(b.accept_reply(alpha4.data(), alpha4.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kUpdated);
     CHECK(b.servers().size() == 2);
     CHECK(b.servers()[0].server.server_name == "Alpha");
     CHECK(b.servers()[0].server.current_players == 4);
     CHECK(b.servers()[1].server.server_name == "Bravo");
     CHECK(b.servers()[1].server.gametype == 5);
     // The same host on another port is another endpoint.
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32769) == np::LanRowChange::kAdded);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32769) == opennova::LanRowChange::kAdded);
     CHECK(b.servers().size() == 3);
     // A stopped browser accepts nothing; a new window starts empty.
     b.stop();
-    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == np::LanRowChange::kNone);
+    CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kNone);
     CHECK(b.begin(2, 32768, 32775));
     CHECK(b.servers().empty());
 }

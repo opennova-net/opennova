@@ -3,7 +3,7 @@
 - **Status**: accepted (2026-08-22; full cutover). **Superseded in full by
   [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)**: the
   session's banking, state machine and input retention survive unchanged as
-  `session::Session`, which now OWNS a `Role` (Local/Host/Joiner) instead of
+  `inmatch::Session`, which now OWNS a `Role` (Local/Host/Joiner) instead of
   driving a `TickTarget`; `netsim`/`npruntime`/`inmatch` move under
   `runtime/` so `net/` means wire (ADR 0042 d8 taken). The witnessed frame
   order and every retail-wire requirement remain in force there.
@@ -14,7 +14,7 @@
   the one implementation.
 - **Owners**: runtime architecture, in-match networking, gameplay
 - **Supersedes**: ADR 0009 decisions 1-2 as a public module topology and ADR
-  0035 decision 1's `opennova::np::MissionSession` name/location. The witnessed
+  0035 decision 1's `opennova::inmatch::MissionSession` name/location. The witnessed
   frame order and all retail-wire requirements remain in force.
 
 ## Context
@@ -37,7 +37,7 @@ the code harder to change without helping a retail peer.
    decoders, message catalogue, signedness, field order, chunk sizes, and
    transaction order are proved against original-engine witnesses and exact
    bytes. OpenNova-to-OpenNova consistency never substitutes for that proof.
-2. `opennova::inmatch::Session` in `engine/runtime/session/session.*` is the one
+2. `opennova::inmatch::Session` in `engine/runtime/inmatch/session.*` is the one
    public owner of an active match's lifecycle, role policy, fixed cadence,
    retained input, and typed tick/frame outcomes. Its one inversion point is
    `inmatch::TickTarget`, implemented by the Godot simulation and headless host.

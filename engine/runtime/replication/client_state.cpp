@@ -7,7 +7,7 @@
 #include <runtime/replication/client_state.h>
 #include <cstdint>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // ---- ClientState lookup -----------------------------------------------------
 
@@ -42,4 +42,4 @@ void ClientState::clear_anim_pulses() {
 	for (ClientEntityState &e : entities) e.anim_state_pulse = -1;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

@@ -7,7 +7,7 @@
 #include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
 #include <base/io/bam.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 // [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
@@ -72,4 +72,4 @@ void ClientReplicaPipeline::tick_recoil() {
 	}
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

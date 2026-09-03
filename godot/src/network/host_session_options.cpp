@@ -26,11 +26,11 @@ HOST_SESSION_TEXT_IMPL(spectator_password)
 
 String HostSessionOptions::get_channel() const {
 	switch (config_.session_channel) {
-		case opennova::np::GameSessionChannel::NovaWorld:
+		case opennova::inmatch::GameSessionChannel::NovaWorld:
 			return "NovaWorld";
-		case opennova::np::GameSessionChannel::Lan:
+		case opennova::inmatch::GameSessionChannel::Lan:
 			return "LAN";
-		case opennova::np::GameSessionChannel::SinglePlayer:
+		case opennova::inmatch::GameSessionChannel::SinglePlayer:
 			return "SinglePlayer";
 		default:
 			return String();
@@ -39,13 +39,13 @@ String HostSessionOptions::get_channel() const {
 
 void HostSessionOptions::set_channel(const String &p_channel) {
 	if (p_channel.nocasecmp_to("NovaWorld") == 0) {
-		config_.session_channel = opennova::np::GameSessionChannel::NovaWorld;
+		config_.session_channel = opennova::inmatch::GameSessionChannel::NovaWorld;
 	} else if (p_channel.nocasecmp_to("SinglePlayer") == 0) {
-		config_.session_channel = opennova::np::GameSessionChannel::SinglePlayer;
+		config_.session_channel = opennova::inmatch::GameSessionChannel::SinglePlayer;
 	} else if (p_channel.is_empty()) {
-		config_.session_channel = opennova::np::GameSessionChannel::Automatic;
+		config_.session_channel = opennova::inmatch::GameSessionChannel::Automatic;
 	} else {
-		config_.session_channel = opennova::np::GameSessionChannel::Lan;
+		config_.session_channel = opennova::inmatch::GameSessionChannel::Lan;
 	}
 }
 

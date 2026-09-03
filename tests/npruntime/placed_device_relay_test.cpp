@@ -2,13 +2,13 @@
 // retail S2C lifecycle seam. The conversion tick broadcasts 0x59 to every
 // in-match remote (never the host loopback); the removal tick broadcasts 0x12.
 
-#include <runtime/session/napi_np_connection.h>
-#include <runtime/session/napi_np_server_ctx.h>
-#include <runtime/session/server_tick.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_tick.h>
 
-#include <runtime/session/loopback_channel.h>
-#include <runtime/session/session_transport.h>
-#include <runtime/session/udp_session_transport.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -31,8 +31,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 constexpr int32_t kBaseItem = 1891;
@@ -67,10 +67,10 @@ w::PlayerSpawn player_spawn(uint16_t net_id, uint8_t team) {
 	return spawn;
 }
 
-np::NapiNPConnection make_conn(uint32_t id, int type,
+inmatch::NapiNPConnection make_conn(uint32_t id, int type,
 		ns::ISessionTransport *transport, ns::TransportMode mode,
 		w::EntityHandle owned, bool spawned) {
-	np::NapiNPConnection conn;
+	inmatch::NapiNPConnection conn;
 	conn.connection_id = id;
 	conn.type = type;
 	conn.link.transport = transport;
@@ -79,8 +79,8 @@ np::NapiNPConnection make_conn(uint32_t id, int type,
 	conn.burst.spawned = spawned;
 	conn.spawned_announced = spawned;
 	conn.phase = spawned
-			? np::ConnectionPhase::InMatch
-			: np::ConnectionPhase::New;
+			? inmatch::ConnectionPhase::InMatch
+			: inmatch::ConnectionPhase::New;
 	return conn;
 }
 
@@ -158,7 +158,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	ns::UdpSessionTransport remote_owner(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport remote_observer(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport pending_peer(ns::UdpSessionTransport::Role::Host);
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -189,7 +189,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	round.parent = carrier;
 	round.parent_spawn_id = world.registry.get(carrier)->registry_spawn_id;
 
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	if (!expect(world.throwables.devices.size() == 1,
 			"the conversion tick creates one placed-device lifetime"))
 		return false;
@@ -258,7 +258,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	if (!expect(world.round_sim.spawn(world, cap_params) >= 0,
 			"the fourth satchel enters the projectile pool"))
 		return false;
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	int active_devices = 0;
 	for (const w::PlacedDevice &candidate : world.throwables.devices)
 		if (candidate.active) ++active_devices;

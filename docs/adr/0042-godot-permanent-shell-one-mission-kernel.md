@@ -67,7 +67,7 @@ and rejected on evidence, not on precedent.
    specs, ai-profile defaults, the weapon/ammo/score tables, and the local-player frame (the
    cited CanFire verdict, the pre/post-tick pumps, the stance latch, the look accumulator). It is
    the ONE filler of `run_mission_boot`'s functor table (the table stays as the ctest-locked
-   order). `inmatch::listen_host` (`engine/runtime/session/listen_host.*`) is the host bring-up /
+   order). `inmatch::listen_host` (`engine/runtime/inmatch/listen_host.*`) is the host bring-up /
    request drain / per-tick frame over a kernel, an `IDatagramSocket&` and plain arguments — the
    one cited `Game_ProcessMainFrame` order. The embedders are `Simulation` (the Godot
    `TickTarget`, which OWNS a kernel), `apps/nw_server` (DedicatedHost), and the ctests

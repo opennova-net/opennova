@@ -1,7 +1,7 @@
 extends GutTest
 
 # The NetSessionPolicy binding contract — the joiner session-drive policy
-# NetSessionDrive executes (engine/runtime/session join_session_policy). The
+# NetSessionDrive executes (engine/runtime/inmatch join_session_policy). The
 # machine itself is pinned by the npruntime_join_session_policy ctest; these
 # pins cover the binding round trip on the surfaces the drive consumes: the
 # D-NET-178 expansion reconcile decision (host x mounted x installed), the

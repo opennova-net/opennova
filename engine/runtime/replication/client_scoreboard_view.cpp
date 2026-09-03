@@ -1,6 +1,6 @@
 #include <runtime/replication/client_scoreboard_view.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -54,4 +54,4 @@ ClientScoreboardHeader scoreboard_header(const ClientState &state) {
 	return header_of(state.scoreboard);
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

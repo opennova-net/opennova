@@ -5,10 +5,10 @@
 
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr
 
-namespace opennova::netsim {
+namespace opennova {
 
 // The real-socket seam. A minimal datagram-socket abstraction the in-match owner loop (the
-// engine/runtime/session host/client per-frame loops) pumps, so the loop itself holds NO socket — libs
+// engine/runtime/inmatch host/client per-frame loops) pumps, so the loop itself holds NO socket — libs
 // stay socket-free (engine/CLAUDE.md). The socket owners provide the adapter: apps/nw_server wraps
 // net::Socket (apps/common/net_datagram_socket.h), godot/src wraps UdpPump. This is the
 // ONE owner-loop implementation's only door to the wire — drift between the headless server and
@@ -33,4 +33,4 @@ public:
 	virtual void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) = 0;
 };
 
-} // namespace opennova::netsim
+} // namespace opennova

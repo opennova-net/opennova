@@ -163,7 +163,7 @@ std::string feed_camp_wpname_key(uint8_t level_index);
 inline constexpr bool kMpVerboseDefault = true;
 
 // One folded 0x1E game event as the feed reads it: the wire slots plus the
-// GameEventKind byte (netsim::ClientGameEvent, minus the position, without
+// GameEventKind byte (replication::ClientGameEvent, minus the position, without
 // the net include).
 struct FeedEventInput {
 	uint8_t event_type = 0;

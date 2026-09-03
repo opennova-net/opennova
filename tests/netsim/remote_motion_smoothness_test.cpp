@@ -47,7 +47,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kVehicleType = 0x054F;

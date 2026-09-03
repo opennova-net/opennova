@@ -17,7 +17,7 @@
 #include <functional>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // The def hit-point lookup for a decoded row's type, the joiner's item-table
 // stand-in for entity->itemDef + Entity_GetMaxHealthWithDifficulty. 0 = NO
@@ -41,4 +41,4 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
                          std::vector<world::FriendlyTagSource> &out,
                          const RosterTagMaxHealth &max_health = {});
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

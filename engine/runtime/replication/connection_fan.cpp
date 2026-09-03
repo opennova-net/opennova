@@ -20,7 +20,7 @@
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
 #include <base/io/fixed.h>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 namespace {
 
@@ -1129,4 +1129,4 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	return true;
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

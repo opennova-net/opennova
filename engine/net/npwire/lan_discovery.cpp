@@ -6,7 +6,7 @@
 
 #include <utility>
 
-namespace opennova::np {
+namespace opennova {
 
 std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index) {
 	// Retail LAN enumeration uses the ordinary JO game-session identity built
@@ -139,4 +139,4 @@ LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
 	return LanRowChange::kAdded;
 }
 
-} // namespace opennova::np
+} // namespace opennova

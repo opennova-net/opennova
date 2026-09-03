@@ -1,6 +1,6 @@
 // Simulation's first-class Godot adapter to the portable inmatch::Session.
 // Lifecycle, input deposit, fixed cadence, catch-up, and cancellation stay in
-// engine/runtime/session. Godot supplies one synchronous typed tick sink so its
+// engine/runtime/inmatch. Godot supplies one synchronous typed tick sink so its
 // presentation devices consume a tick before the next catch-up tick runs.
 #include "simulation/simulation_internal.h"
 

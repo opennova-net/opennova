@@ -21,7 +21,7 @@ inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 // slots — a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the listen host's own player at
 // slot 0 and the joiner at slot 1 (roster slot N -> entity slot N when the mission has no pool-0 AI).
 // The prior value 4 (a mistaken "low slots reserved" assumption) offset every player by +4 vs retail.
-// Canonical home for both the npruntime host (np::kRetailPlayerMinEntitySlot re-exports this) and the
+// Canonical home for both the npruntime host (inmatch::kRetailPlayerMinEntitySlot re-exports this) and the
 // Godot listen host (simulation.cpp). [orig: §5.2b spawn placement; Server_PlayerAdd @0x51cbc0]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 

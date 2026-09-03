@@ -14,7 +14,7 @@ namespace opennova {
 // tests share this one game-state model; the runtime never reaches back into a transport layer.
 //
 // The §5.1/§5.2a reply BUILDERS that used to live here were retired with game_session.cpp (P8, net-re
-// §5.45 / D-NET-127): the reactive reply bodies moved to engine/runtime/session/server_message_dispatch.cpp,
+// §5.45 / D-NET-127): the reactive reply bodies moved to engine/runtime/inmatch/server_message_dispatch.cpp,
 // and the per-frame S2C 0x0A frame builder (build_0a_frame) into engine/runtime/replication/connection_fan.cpp. Only the
 // shared POD structs remain here.
 

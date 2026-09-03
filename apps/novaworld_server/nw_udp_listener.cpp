@@ -119,7 +119,7 @@ NapiMessage make_server_verify_failure(const std::string &message) {
 // receive stream. This listener also serves lobby traffic on the same OS
 // socket, so demultiplexed JO datagrams are queued here while sends go
 // straight back through that socket.
-class QueuedJoSocket final : public netsim::IDatagramSocket {
+class QueuedJoSocket final : public opennova::IDatagramSocket {
 public:
 	explicit QueuedJoSocket(opennova::net::Socket &socket) : sender_(socket) {}
 
@@ -181,16 +181,16 @@ void NwUdpListener::initialize_jo_host() {
 	jo_mission_->header.magic[2] = 'S';
 	jo_mission_->header.magic[3] = static_cast<char>(bms::kMinVersion);
 
-	jo_owner_ = std::make_unique<np::HostOwner>();
+	jo_owner_ = std::make_unique<inmatch::HostOwner>();
 	jo_owner_->ctx.world = jo_world_.get();
 	jo_owner_->ctx.mission = jo_mission_.get();
 
-	np::HostConfig config;
+	inmatch::HostConfig config;
 	config.config.server_name = "OpenNova";
 	config.config.max_players = 64;
-	config.socket_mode = np::SocketMode::Lan;
+	config.socket_mode = inmatch::SocketMode::Lan;
 	config.serve_and_play = false;
-	np::start_host_session(*jo_owner_, config);
+	inmatch::start_host_session(*jo_owner_, config);
 }
 
 void NwUdpListener::reset_per_run_state(const char *reason) {
@@ -223,8 +223,8 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 }
 
 void NwUdpListener::observe_jo_event(
-		void *context, const np::HostAcceptEvent &event) {
-	if (event.kind != np::HostAcceptEvent::Kind::PeerGoodbye) return;
+		void *context, const inmatch::HostAcceptEvent &event) {
+	if (event.kind != inmatch::HostAcceptEvent::Kind::PeerGoodbye) return;
 	auto &listener = *static_cast<NwUdpListener *>(context);
 	if (!listener.jo_owner_) {
 		listener.jo_peers_.erase(event.peer);
@@ -235,7 +235,7 @@ void NwUdpListener::observe_jo_event(
 	const bool replacement_exists = std::any_of(
 			listener.jo_owner_->ctx.np_protocol.connection_list.begin(),
 			listener.jo_owner_->ctx.np_protocol.connection_list.end(),
-			[&event](const np::NapiNPConnection &connection) {
+			[&event](const inmatch::NapiNPConnection &connection) {
 				return connection.type == 1 && connection.peer == event.peer;
 			});
 	if (!replacement_exists) listener.jo_peers_.erase(event.peer);
@@ -354,7 +354,7 @@ void NwUdpListener::run_loop() {
 			const auto now = PumpClock::now();
 			if (now >= next_pump) {
 				if (jo_owner_) {
-					np::host_session_pump(
+					inmatch::host_session_pump(
 							*jo_owner_, jo_socket, nullptr, nullptr,
 							&NwUdpListener::observe_jo_event, this);
 				}

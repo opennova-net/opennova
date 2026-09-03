@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::netsim {
+namespace opennova::replication {
 
 // Shared 0x13/0x26 fold: the retail handler gates (not the 0xFFFF sentinel,
 // pool nibble < 5, slot < that pool's capacity), zeroes row health, and
@@ -115,4 +115,4 @@ void ClientReplicaPipeline::apply_score_delta_sound(
 	state_.mark_changed();
 }
 
-} // namespace opennova::netsim
+} // namespace opennova::replication

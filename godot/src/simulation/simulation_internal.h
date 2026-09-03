@@ -30,11 +30,11 @@
 #include <net/npwire/entity_class.h> // class_from_tag (§5.10b *_function -> wire class)
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
-#include <runtime/session/client_replica_present.h> // the client-replica present composition (ADR 0031)
-#include <runtime/session/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
-#include <runtime/session/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
-#include <runtime/session/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
-#include <runtime/session/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <runtime/inmatch/client_replica_present.h> // the client-replica present composition (ADR 0031)
+#include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
+#include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
+#include <runtime/inmatch/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
+#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
 #include <runtime/world/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
@@ -115,10 +115,10 @@ using opennova::simassets::aim_overlay_inputs_for;
 
 // The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
 // the engine with the joiner bridge (S10a, ADR 0028):
-// engine/runtime/session joiner_world_bridge.h. The using declarations keep this
+// engine/runtime/inmatch joiner_world_bridge.h. The using declarations keep this
 // family's call sites unchanged.
-using opennova::np::client_entity_for_handle;
-using opennova::np::wire_carrier_exclusion_for;
+using opennova::inmatch::client_entity_for_handle;
+using opennova::inmatch::wire_carrier_exclusion_for;
 // The installed-table probe lives beside the extraction now (ADR 0031).
 using opennova::simassets::item_seat_spec_for_type;
 
@@ -176,10 +176,10 @@ using opennova::world::EmplacedWeaponControls;
 using opennova::world::emplaced_weapon_controls_for;
 
 // The client-replica present composition helpers moved to the engine
-// (ADR 0031): engine/runtime/session client_replica_present.h. The using
+// (ADR 0031): engine/runtime/inmatch client_replica_present.h. The using
 // declarations keep this family's call sites unchanged.
-using opennova::np::emplaced_weapon_controls_for_client;
-using opennova::np::write_present_emplaced_controls;
+using opennova::inmatch::emplaced_weapon_controls_for_client;
+using opennova::inmatch::write_present_emplaced_controls;
 
 inline double bam_to_radians(int32_t value) {
 	return static_cast<double>(value) *
@@ -190,13 +190,13 @@ inline double bam_to_radians(int32_t value) {
 // npruntime client_replica_present.h).
 inline Vector3 mission_euler_from_overlay(
 		const opennova::anim::AimOverlayAngles &angles) {
-	const opennova::np::MissionEulerDeg e =
-			opennova::np::mission_euler_from_overlay(angles);
+	const opennova::inmatch::MissionEulerDeg e =
+			opennova::inmatch::mission_euler_from_overlay(angles);
 	return Vector3(e.pitch, e.yaw, e.roll);
 }
 
-using opennova::np::write_present_held_weapon;
-using opennova::np::write_present_overlay;
+using opennova::inmatch::write_present_held_weapon;
+using opennova::inmatch::write_present_overlay;
 
 inline std::string dictionary_string(const Dictionary &d, const char *key, const std::string &fallback) {
 	if (!d.has(key)) return fallback;
@@ -216,14 +216,14 @@ using opennova::simassets::model_bound_radius_from_3di;
 // gone. The model resolves through the sim cache by the installed spec's
 // graphic key, exactly like the host-side resolver.
 inline bool resolve_client_eweap_attachment_pose(
-		const opennova::netsim::ClientEntityState &child,
-		const opennova::netsim::ClientState &state,
+		const opennova::replication::ClientEntityState &child,
+		const opennova::replication::ClientState &state,
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
 		const std::unordered_map<int32_t, std::string> &graphics_by_type,
 		opennova::simassets::SimModelCache &models,
 		uint32_t time_ms, opennova::world::MountedPose &out) {
 	if (child.parent_handle == opennova::world::EntityHandle::kInvalid) return false;
-	const opennova::netsim::ClientEntityState *parent =
+	const opennova::replication::ClientEntityState *parent =
 			client_entity_for_handle(state, child.parent_handle);
 	if (parent == nullptr) return false;
 	const opennova::mission::ItemSeatSpec *parent_spec =

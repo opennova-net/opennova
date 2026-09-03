@@ -3,8 +3,8 @@
 // active-send interval instead emits a NEW header-only sequence; the resulting gap makes the peer
 // request reconstruction of the retained semantic packet through 0x44/0x84.
 
-#include <runtime/session/client_runtime.h>
-#include <runtime/session/napi_np_protocol.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
@@ -20,7 +20,7 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 
 bool expect(bool condition, const char *message) {
 	if (condition) return true;
@@ -64,15 +64,15 @@ bool run_dropped_hello_and_auth_recover() {
 	constexpr uint64_t kHandshakeRetryMs = 1000;
 	const PeerAddr peer{0x0100007Fu, 32769};
 
-	np::NapiNPServerCtx host;
+	inmatch::NapiNPServerCtx host;
 	uint64_t now_ms = 0;
-	np::ClientRuntime client("RetryJoiner", [&now_ms] { return now_ms; });
+	inmatch::ClientRuntime client("RetryJoiner", [&now_ms] { return now_ms; });
 	const std::vector<uint8_t> first_hello = client.start();
 	if (!expect(is_opcode(first_hello, SESSION_OPCODE_CLIENT_HELLO),
 			"start emits retail ClientHello 0x41")) {
 		return false;
 	}
-	const np::HandleResult cold_result = np::handle_server_datagram(
+	const inmatch::HandleResult cold_result = inmatch::handle_server_datagram(
 			host, peer, first_hello.data(), first_hello.size(), 0);
 	if (!expect(cold_result.outbound.empty(),
 			"cold host drops the initial ClientHello")) {
@@ -88,8 +88,8 @@ bool run_dropped_hello_and_auth_recover() {
 		return false;
 	}
 
-	np::test::bring_up_host(host, np::ConnectionMode::HostClient,
-			np::SocketMode::Socketless, 0x0FE0E112u);
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E112u);
 	now_ms = kHandshakeRetryMs;
 	const std::vector<std::vector<uint8_t>> hello_retry =
 			client.Client_ProcessNetworkFrame(7);
@@ -98,7 +98,7 @@ bool run_dropped_hello_and_auth_recover() {
 		return false;
 	}
 
-	const np::HandleResult hello_result = np::handle_server_datagram(
+	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
 			host, peer, hello_retry[0].data(), hello_retry[0].size(), 1);
 	if (!expect(hello_result.outbound.size() == 1 &&
 				is_opcode(hello_result.outbound[0], SESSION_OPCODE_SERVER_HELLO),
@@ -129,7 +129,7 @@ bool run_dropped_hello_and_auth_recover() {
 		return false;
 	}
 
-	const np::HandleResult auth_result = np::handle_server_datagram(
+	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
 			host, peer, auth_retry[0].data(), auth_retry[0].size(), 2);
 	if (!expect(!auth_result.outbound.empty(),
 			"real host accepts the retried ClientAuth")) {
@@ -139,7 +139,7 @@ bool run_dropped_hello_and_auth_recover() {
 		client.receive(reply.data(), reply.size());
 	const std::vector<std::vector<uint8_t>> post_auth =
 			client.Client_ProcessNetworkFrame(300);
-	if (!expect(client.phase() == np::JoinerConnection::Phase::Driving,
+	if (!expect(client.phase() == inmatch::JoinerConnection::Phase::Driving,
 			"retried pre-session handshake reaches the in-match drive")) {
 		return false;
 	}
@@ -158,7 +158,7 @@ bool run_client_active_probe_recovers_join() {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	const std::string server_scrk = "SERVER-ACTIVE-PROBE-SCRK";
 	uint64_t now_ms = 0;
-	np::JoinerConnection joiner("ClientProbe", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection joiner("ClientProbe", [&now_ms] { return now_ms; });
 
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -175,7 +175,7 @@ bool run_client_active_probe_recovers_join() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	if (!expect(hello_result.outbound.size() == 1,
 			"active-probe ServerHello emits ClientAuth")) {
@@ -197,7 +197,7 @@ bool run_client_active_probe_recovers_join() {
 	server_auth.mi = 3;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const np::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
 			server_auth_datagram.data(), server_auth_datagram.size());
 	if (!expect(auth_result.outbound.empty(),
 			"ServerAuth alone has no retained session record to probe")) {
@@ -209,7 +209,7 @@ bool run_client_active_probe_recovers_join() {
 		return false;
 	}
 
-	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	std::vector<uint8_t> settings_body;
 	if (!expect(frame_session_packet(
 				server_seq, SessionCrypto{server_scrk, {}, client_auth.ck}, {
@@ -229,7 +229,7 @@ bool run_client_active_probe_recovers_join() {
 	}
 	const std::vector<uint8_t> settings_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(settings_body));
-	const np::JoinerConnection::PollResult settings_result =
+	const inmatch::JoinerConnection::PollResult settings_result =
 			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 			"settings emit ACK plus retained JOIN")) {
@@ -283,7 +283,7 @@ bool run_client_active_probe_recovers_join() {
 	}
 	const std::vector<uint8_t> resend_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
-	const np::JoinerConnection::PollResult recovered = joiner.handle_datagram(
+	const inmatch::JoinerConnection::PollResult recovered = joiner.handle_datagram(
 			resend_datagram.data(), resend_datagram.size());
 	return expect(recovered.outbound.size() == 1 &&
 				recovered.outbound[0] == join_datagram,
@@ -292,13 +292,13 @@ bool run_client_active_probe_recovers_join() {
 
 bool run_server_active_probe_recovers_settings() {
 	const PeerAddr peer{0x0100007Fu, 32769};
-	np::NapiNPServerCtx host;
-	np::test::bring_up_host(host, np::ConnectionMode::HostClient,
-			np::SocketMode::Socketless, 0x0FE0E112u);
-	np::ClientRuntime client("SettingsProbe");
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E112u);
+	inmatch::ClientRuntime client("SettingsProbe");
 
 	const std::vector<uint8_t> hello = client.start();
-	const np::HandleResult hello_result = np::handle_server_datagram(
+	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
 	if (!expect(hello_result.outbound.size() == 1,
 			"settings recovery host emits ServerHello")) {
@@ -309,7 +309,7 @@ bool run_server_active_probe_recovers_settings() {
 			client.Client_ProcessNetworkFrame(0);
 	if (!expect(auth.size() == 1, "settings recovery client emits ClientAuth"))
 		return false;
-	const np::HandleResult auth_result = np::handle_server_datagram(
+	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
 			host, peer, auth[0].data(), auth[0].size(), 0);
 	if (!expect(auth_result.outbound.size() == 2 &&
 				is_opcode(auth_result.outbound[0], SESSION_OPCODE_SERVER_AUTH) &&
@@ -326,16 +326,16 @@ bool run_server_active_probe_recovers_settings() {
 		return false;
 	}
 
-	if (!expect(np::tick_connections(host, 10000, 0).empty(),
+	if (!expect(inmatch::tick_connections(host, 10000, 0).empty(),
 			"server does not active-probe at exactly 10000 ms")) {
 		return false;
 	}
-	const std::vector<np::TickOut> ticks = np::tick_connections(host, 1, 0);
+	const std::vector<inmatch::TickOut> ticks = inmatch::tick_connections(host, 1, 0);
 	if (!expect(ticks.size() == 1 && ticks[0].outbound.size() == 1,
 			"retained settings make the server active-probe after 10000 ms")) {
 		return false;
 	}
-	const np::NapiNPConnection &connection =
+	const inmatch::NapiNPConnection &connection =
 			host.np_protocol.connection_list.front();
 	ProtocolPacketHeader probe_header;
 	std::vector<ProtocolMessage> probe_messages;
@@ -360,7 +360,7 @@ bool run_server_active_probe_recovers_settings() {
 			"client requests missing server settings sequence 1")) {
 		return false;
 	}
-	const np::HandleResult recovered = np::handle_server_datagram(
+	const inmatch::HandleResult recovered = inmatch::handle_server_datagram(
 			host, peer, missing[0].data(), missing[0].size(), 0);
 	if (!expect(recovered.outbound.size() == 1 &&
 				recovered.outbound[0] == settings_datagram,
@@ -372,7 +372,7 @@ bool run_server_active_probe_recovers_settings() {
 	const std::vector<std::vector<uint8_t>> post_settings =
 			client.Client_ProcessNetworkFrame(0);
 	return expect(post_settings.size() == 2 &&
-				client.phase() == np::JoinerConnection::Phase::Driving,
+				client.phase() == inmatch::JoinerConnection::Phase::Driving,
 			"recovered settings resume the retail ACK plus JOIN sequence");
 }
 
@@ -389,7 +389,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 	const std::string server_scrk = "SERVER-IDLE-KEEPALIVE-SCRK";
 	// A non-zero start so the seeded anchor is distinguishable from "never sent".
 	uint64_t now_ms = 1000;
-	np::JoinerConnection joiner("IdleKeepalive", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection joiner("IdleKeepalive", [&now_ms] { return now_ms; });
 	// Seed a live in-match session with NOTHING retained and nothing queued — the exact
 	// state a joiner parked at the deploy pick (or dead, uplink gate shut) sits in, and
 	// the state the ACTIVE interval deliberately ignores.
@@ -426,7 +426,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 	}
 	// The whole point: a stock peer reaps at the production timeout, and the cadence pinned above
 	// (the mint lands at kIdleIntervalMs + 1) keeps the gap between transmissions well inside it.
-	return expect(2 * kIdleIntervalMs < np::JO_GAME_SESSION_TIMEOUT_MS,
+	return expect(2 * kIdleIntervalMs < inmatch::JO_GAME_SESSION_TIMEOUT_MS,
 			"idle: two keepalive intervals still fit inside the retail connection timeout");
 }
 

@@ -28,7 +28,7 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
 	client_row_adm_by_type_.clear();
 	if (runtime_ != nullptr && joiner_) {
-		for (opennova::netsim::ClientEntityState &es :
+		for (opennova::replication::ClientEntityState &es :
 				runtime_->state().entities) {
 			if (es.rm_adm_id != -2) {
 				es.rm_adm_id = -2;
@@ -73,8 +73,8 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 		// duplicate definition ids so the catalog can classify them as
 		// ambiguous and fail closed.
 		item_replication_catalog_ =
-				std::make_shared<const opennova::netsim::ItemReplicationCatalog>(
-						opennova::netsim::ItemReplicationCatalog::from_items_def(
+				std::make_shared<const opennova::replication::ItemReplicationCatalog>(
+						opennova::replication::ItemReplicationCatalog::from_items_def(
 								p_item_db->native_items()));
 		item_replication_catalog_db_ = p_item_db;
 		item_replication_catalog_revision_ = p_item_db->get_revision();
@@ -85,7 +85,7 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 				// The same immutable profile supplies the host stamp and the
 				// client decode width. Missing/ambiguous definitions fail
 				// closed as Unknown.
-				const opennova::netsim::ItemReplicationProfile *replication =
+				const opennova::replication::ItemReplicationProfile *replication =
 						catalog->by_definition_id(def_id);
 				return static_cast<uint8_t>(replication != nullptr
 						? replication->wire_entity_class()
@@ -121,12 +121,12 @@ void Simulation::sync_class_attribute_flags() {
 	// the all-zero table -- no class carries an attribute, retail's failed-load
 	// state [orig: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
 	// AnimMap_IsSlotActive @0x4125e0; see docs/interface/hud-re.md].
-	const opennova::np::CharAttrChallengeTable *live =
+	const opennova::inmatch::CharAttrChallengeTable *live =
 			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
-	const opennova::np::CharAttrChallengeTable &table =
+	const opennova::inmatch::CharAttrChallengeTable &table =
 			live != nullptr ? *live : charattr_challenge_table_;
 	kernel_->world.class_attribute_flags =
-			opennova::np::charattr_class_attribute_rows(table);
+			opennova::inmatch::charattr_class_attribute_rows(table);
 }
 
 void Simulation::install_character_join_vars() {
