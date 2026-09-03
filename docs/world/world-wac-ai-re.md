@@ -5175,7 +5175,7 @@ pools: `Entity_UpdateAllEntities @ 0x4c2100` drains `DeathPiece_TickAll`
 UNCONDITIONALLY on every peer, so the death chain's kz blasts detonate and
 the pieces fly on a pure client too. Ported: JoinerConnection surfaces both
 tags, `ClientReplicaPipeline::apply_entity_death` folds them (row Health=0 +
-a once-drained record), the joiner world bridge (`engine/runtime/inmatch/joiner_world_bridge.cpp`) runs
+a once-drained record), the joiner world bridge (`engine/runtime/inmatch/joiner_role.cpp`) runs
 `destruction_notify_item_damage(world, twin, 4)` on the materialized world
 row, `World::run_logic_tick` runs the explosion/dead-settle/piece drains
 under the MP visual-client predicate, and `mission_presentation.gd` builds the

@@ -59,7 +59,7 @@ int Simulation::get_local_player_wire_handle() const {
 	// own pool and collides with a host-side slot (e.g. the host player), so excluding L
 	// from the wire present would wrongly hide a remote entity. On the host, the local
 	// player's own pool-0 handle IS its wire handle.
-	if (joiner_) return static_cast<int>(joiner_bridge_.self_wire_handle());
+	if (joiner_) return static_cast<int>(joiner_role_.self_wire_handle());
 	return (kernel_ && kernel_->world.cached.local_player.valid())
 			? static_cast<int>(kernel_->world.cached.local_player.packed) : 0;
 }
@@ -100,8 +100,8 @@ bool Simulation::request_local_player_stance(Stance p_stance) {
 	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e]
 	if (joiner_ && runtime_) {
 		static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
-		ship_to_host(runtime_->send_stance_change(
-				kStanceActionIds[static_cast<size_t>(p_stance)]));
+		joiner_role_.send_stance_change(
+				kStanceActionIds[static_cast<size_t>(p_stance)]);
 	}
 	return true;
 }
@@ -289,7 +289,7 @@ int Simulation::get_local_player_character_id() const {
 	// vars, a joiner's from its named 0x0C record — the one word every observer
 	// keys the composed head/body (and the local first-person arms) on, so the
 	// shell never re-derives side-by-team itself (the stamp's witness lives at
-	// server_spawn.cpp / joiner_world_bridge.cpp; the reader side is
+	// server_spawn.cpp / joiner_role.cpp; the reader side is
 	// docs/playerinfo/avatars-re.md, TEX_CAMO section).
 	if (kernel_ && kernel_->world.cached.local_player.valid()) {
 		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);

@@ -6,6 +6,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
@@ -18,16 +19,6 @@
 namespace opennova::inmatch {
 
 namespace {
-
-// The socketless host: every datagram dropped (the SP listen server, the
-// headless test rigs).
-class NullDatagramSocket final : public opennova::IDatagramSocket {
-public:
-	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
-	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
-};
-
-NullDatagramSocket g_null_socket;
 
 // host_session_pump's before-server-tick hook: ground every soldier the tick
 // spawns before its first authoritative update.
@@ -175,7 +166,10 @@ bool HostRole::send_medic_request() {
 // [orig: Game_ProcessMainFrame @0x5263f0]
 void HostRole::run_tick(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
-	opennova::IDatagramSocket &socket = socket_ != nullptr ? *socket_ : g_null_socket;
+	// The socketless host (the SP listen server, the headless test rigs):
+	// every datagram dropped.
+	opennova::IDatagramSocket &socket =
+			socket_ != nullptr ? *socket_ : null_datagram_socket();
 	const int64_t prep_start = static_cast<int64_t>(io::perf_now_us());
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): sampled pre-fold, exactly the value the old inline

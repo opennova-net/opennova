@@ -87,7 +87,7 @@ opennova::bms::File make_demo_mission() {
 
 Simulation::Simulation() {
 	session_.set_tick_observer(this);
-	install_joiner_hooks();
+	install_joiner_kit_seams();
 	reset_world();
 	set_process(false);
 }
@@ -105,7 +105,7 @@ void Simulation::reset_world() {
 	// The drawer's last-camera latch is mission-scoped: a stale one would
 	// hand the next mission's first rain frame a bogus (clamped) streak.
 	precipitation_draw_ = opennova::renderer::PrecipitationDrawState{};
-	joiner_bridge_.reset_world_stream();
+	joiner_role_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
 	// dead/respawn mirrors cannot tell the next mission's occupant apart
@@ -169,12 +169,8 @@ void Simulation::reset_world() {
 	// the world (the boot re-supplies them).
 	collision_item_db_.unref();
 	item_traits_db_.unref();
-	wire_collision_shape_by_type_.clear();
 	infantry_adm_resource_root_.unref();
 	infantry_adm_item_db_.unref();
-	// The decoded-row adm cache indexes the kernel's root-motion registry,
-	// which just died with it.
-	client_row_adm_by_type_.clear();
 	occlusion_culled_bms_.clear();
 	minimap_snapshot_valid_ = false;
 	// Rebuild the kernel's terrain store from the retained TerrainData (the
@@ -561,17 +557,17 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// runtime/socket; rebuilding it here would silently reconnect and
 			// discard the witnessed pre-load session. Direct-loaded callers have
 			// not started yet and retain the historical fresh-runtime reset.
-			if (!joiner_bridge_.started() || !runtime_) {
+			if (!joiner_role_.started() || !runtime_) {
 				runtime_ = &joiner_role_.create_runtime(joiner_player_name_, join_role_,
 						join_spectator_password_);
-				joiner_bridge_.reset_for_runtime_rebuild();
+				joiner_role_.reset_for_runtime_rebuild();
 				install_charattr_challenge_table();
 				install_character_join_vars();
 				install_join_integrity_profile();
 				install_expansion_version_root();
 			}
 			runtime_->set_world_ready(true);
-			joiner_bridge_.reset_for_load(runtime_->deployment_release_revision());
+			joiner_role_.reset_for_load(runtime_->deployment_release_revision());
 			joiner_applied_loadout_revision_ = 0;
 			kernel_->local.loadout.pending_player_class = -1; // the shell re-applies the kit after each load
 			deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
@@ -663,7 +659,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		item_traits_db_ = p_item_db;
 		kernel_->set_items_table(&p_item_db->native_items());
 	}
-	joiner_bridge_.set_wire_header_world(p_mission->is_wire_header_only());
+	joiner_role_.set_wire_header_world(p_mission->is_wire_header_only());
 	kernel_->open_document(p_mission->native_document().bms_file(),
 			std::string(p_mission_file_basename.utf8().get_data()), files);
 	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
@@ -750,7 +746,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
 	// Only the production 616-byte S2C header needs wire-time materialization.
-	joiner_bridge_.set_wire_header_world(p_mission->is_wire_header_only());
+	joiner_role_.set_wire_header_world(p_mission->is_wire_header_only());
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with NO file source: the file-fed boot steps skip and
 	// this stays the bare promote + systems + role bring-up path.
@@ -804,7 +800,7 @@ void Simulation::restore_world_baseline() {
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
 	minimap_snapshot_valid_ = false;
-	if (joiner_bridge_.wire_header_world()) {
+	if (joiner_role_.wire_header_world()) {
 		// ClientState survives Stop/Start, while the body-empty baseline removes
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and

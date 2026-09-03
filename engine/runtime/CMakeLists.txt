@@ -243,7 +243,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_world_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp

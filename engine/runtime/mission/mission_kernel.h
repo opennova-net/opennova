@@ -140,6 +140,42 @@ public:
 	// re-runs the sweep with the retained classifier before any view is
 	// rebuilt from the restored rows.
 	void resolve_item_traits(simassets::ItemWireClassFn wire_class);
+	// Re-run the embedder's sweep with the retained classifier (a streamed
+	// topology change, the baseline restore); no-op before the embedder ran it.
+	void resweep_item_traits();
+	// The embedder's world-object collision instance sweep (BVOL/BPLN) over
+	// items_table() [orig: the movement collision resolver @0x4b2bd0 + the
+	// query set; §15]; returns the attached count. refresh_collision_instances
+	// re-runs it for rows that appeared since (a joiner's streamed world), and
+	// stays a no-op until the embedder ran the sweep once — exactly the gate
+	// the wire collision shapes below sit behind.
+	int resolve_collision_instances();
+	int refresh_collision_instances();
+	// The authored collision shape for one decoded runtime type id (items.def
+	// graphic -> the parse-once model cache): model, exact effective
+	// bound/scale and bbox center stay inseparable for movement, projectiles
+	// and lighting. Cached per type; the default shape before the embedder's
+	// collision sweep ran.
+	world::ResolvedCollisionShape wire_collision_shape_for_type(uint16_t type_id);
+	// Retire a streamed row's collision/occlusion instances and pose caches
+	// (a topology change dropped the row). A later allocation at the same
+	// packed handle may already have had its caches rebuilt; the retired
+	// lifetime never erases those.
+	void retire_replica_entity(const world::EntityLifetime &lifetime);
+	// The mission-start portal init over the static prox tables [orig:
+	// Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission @ 0x525e11;
+	// the tables must exist before the register pass walks the building prefix].
+	void occlusion_init_mission();
+	// The .adm registry id a decoded Player/Infantry row of `type_id` grounds
+	// on (items.def anim_def through the infantry adm index) — the netsim twin
+	// of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn half
+	// [orig: @0x40bb60]); -1 = no adm (the row stays chase-only), 0 = the
+	// default set when the model names none. Cached per type so late-joining
+	// peers and respawns cost one map lookup; -1 before the infantry sources
+	// are armed (rearm_infantry_adm) so nothing is stamped early.
+	int adm_id_for_runtime_type(uint16_t type_id);
+	// The cached id only (no registration): -1 when the type never resolved.
+	int cached_adm_id_for_runtime_type(uint16_t type_id) const;
 	// The S9 boot (runtime_boot.h) over the opened mission — the ONE filler
 	// of run_mission_boot's step table. The embedder builds terrain_store
 	// FIRST when it has terrain (terrain_field_store_build over its parsed
@@ -352,6 +388,11 @@ private:
 	// The embedder's trait sweep classifier (resolve_item_traits); unset until
 	// the embedder ran the sweep, so a restore re-stamps only what it stamped.
 	simassets::ItemWireClassFn item_wire_class_;
+	// The embedder's collision sweep ran (resolve_collision_instances): the
+	// gate for the re-sweeps and the wire collision shapes.
+	bool collision_items_resolved_ = false;
+	std::unordered_map<uint16_t, world::ResolvedCollisionShape> wire_collision_shape_by_type_;
+	std::unordered_map<uint16_t, int> adm_by_runtime_type_;
 	bool own_mounted_ = false;
 	// The index the infantry .adm registrations resolve through (the install/
 	// re-arm seam's; defaults to the asset index).
