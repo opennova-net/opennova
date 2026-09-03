@@ -14,6 +14,7 @@ const MCP_ENTITY_LIMIT_MAX := 128
 ## debug / Mod Tools capability). The class name never appears in this
 ## script, so it parses in every flavour.
 const RUNTIME_MCP_SERVICE_PATH := "res://game/mcp/game_mcp_service.gd"
+const RUNTIME_RENDER_CAPTURE_PATH := "res://game/mcp/game_render_capture.gd"
 
 
 ## The debug-control table's shell seam (DebugShellHost, ADR 0043 d12): every
@@ -279,12 +280,25 @@ func capture_mcp_render_bundle(
 		return {"error": "%s render capture is unavailable in this game shell." \
 				% presentation_mode.capitalize()}
 
+	# The capture utility lives with the MCP transport (excluded from the
+	# Runtime export, ADR 0043 d12): reached by path like the service, so this
+	# shipped script never names the class.
+	var capture_script: Variant = _render_capture_script()
+	if capture_script == null:
+		return {"error": "Render capture is unavailable in this build (the MCP transport is not shipped)."}
+	var capture_options: Dictionary = capture_script.get_script_constant_map()
 	var capture_args := args.duplicate(false)
 	if presentation_mode != "full_frame":
-		capture_args[GameRenderCapture.PRESENTATION_BEGIN_OPTION] = presentation_begin
-		capture_args[GameRenderCapture.PRESENTATION_FINISH_OPTION] = presentation_finish
-	return await GameRenderCapture.capture(
+		capture_args[capture_options["PRESENTATION_BEGIN_OPTION"]] = presentation_begin
+		capture_args[capture_options["PRESENTATION_FINISH_OPTION"]] = presentation_finish
+	return await capture_script.capture(
 			viewport, diagnostics_source, capture_args, cancel_requested)
+
+
+func _render_capture_script() -> Variant:
+	if not ResourceLoader.exists(RUNTIME_RENDER_CAPTURE_PATH):
+		return null
+	return load(RUNTIME_RENDER_CAPTURE_PATH)
 
 
 ## Bounded MCP counterpart to F3's entity discovery, over the engine's typed
