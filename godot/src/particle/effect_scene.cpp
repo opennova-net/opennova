@@ -22,9 +22,7 @@ using opennova::to_gd;
 
 namespace {
 
-using opennova::particle::Color3;
 using opennova::particle::CurveRef;
-using opennova::particle::EffectBounds;
 using opennova::particle::EffectPose;
 using opennova::particle::EffectSpawnStatus;
 using opennova::particle::GraphicLayer;
@@ -86,30 +84,10 @@ Transform3D godot_pose(const EffectPose &value) noexcept {
 	return Transform3D(basis, godot_vector(value.position));
 }
 
-Color godot_color(Color3 value, std::uint8_t alpha = 255) noexcept {
-	return Color(
-			static_cast<float>(value.r) / 255.0f,
-			static_cast<float>(value.g) / 255.0f,
-			static_cast<float>(value.b) / 255.0f,
-			static_cast<float>(alpha) / 255.0f);
-}
-
 std::size_t capacity_from_option(const Dictionary &options,
 		const char *key, int64_t fallback) {
 	const int64_t value = options.get(key, fallback);
 	return value > 0 ? static_cast<std::size_t>(value) : 0;
-}
-
-Dictionary bounds_dictionary(const EffectBounds &bounds) {
-	Dictionary result;
-	result["valid"] = bounds.valid;
-	result["minimum"] = godot_vector(bounds.minimum);
-	result["maximum"] = godot_vector(bounds.maximum);
-	if (bounds.valid) {
-		const Vector3 minimum = godot_vector(bounds.minimum);
-		result["aabb"] = AABB(minimum, godot_vector(bounds.maximum) - minimum);
-	}
-	return result;
 }
 
 String spawn_status_name(EffectSpawnStatus status) {
@@ -170,101 +148,6 @@ bool valid_kill_plane(int value) noexcept {
 			value <= EffectScene::KILL_PLANE_AT_OR_BELOW;
 }
 
-// The inspect() diagnostic embed of the scene's retained load counters.
-Dictionary load_report_dictionary(const opennova::particle::EffectLoadReport &report) {
-	Dictionary result;
-	result["document_count"] = static_cast<int64_t>(report.document_count);
-	result["effect_count"] = static_cast<int64_t>(report.effect_count);
-	result["particle_definition_count"] =
-			static_cast<int64_t>(report.particle_definition_count);
-	result["table_definition_count"] =
-			static_cast<int64_t>(report.table_definition_count);
-	result["duplicate_effect_count"] =
-			static_cast<int64_t>(report.duplicate_effect_count);
-	result["duplicate_particle_count"] =
-			static_cast<int64_t>(report.duplicate_particle_count);
-	result["unresolved_particle_reference_count"] =
-			static_cast<int64_t>(report.unresolved_particle_reference_count);
-	return result;
-}
-
-Dictionary debug_dictionary(
-		const opennova::particle::EffectDebugSnapshot &debug) {
-	Dictionary result;
-	result["load"] = load_report_dictionary(debug.load);
-	result["interned_effect_count"] =
-			static_cast<int64_t>(debug.interned_effect_count);
-	result["live_group_count"] =
-			static_cast<int64_t>(debug.live_group_count);
-	result["live_emitter_count"] =
-			static_cast<int64_t>(debug.live_emitter_count);
-	result["live_particle_count"] =
-			static_cast<int64_t>(debug.live_particle_count);
-	result["group_pool_high_water"] =
-			static_cast<int64_t>(debug.group_pool_high_water);
-	result["emitter_pool_high_water"] =
-			static_cast<int64_t>(debug.emitter_pool_high_water);
-
-	result["suppressed_spawn_count"] =
-			static_cast<int64_t>(debug.suppressed_spawn_count);
-	result["rejected_spawn_count"] =
-			static_cast<int64_t>(debug.rejected_spawn_count);
-	result["capacity_rejection_count"] =
-			static_cast<int64_t>(debug.capacity_rejection_count);
-
-	Array groups;
-	groups.resize(static_cast<int64_t>(debug.groups.size()));
-	for (std::size_t i = 0; i < debug.groups.size(); ++i) {
-		const auto &group = debug.groups[i];
-		Dictionary value;
-		value["group_id"] = token_to_godot(group.id.value);
-		value["effect_handle"] = static_cast<int64_t>(group.effect.value);
-		value["effect_name"] = to_gd(group.effect_name);
-		value["source"] = to_gd(group.source);
-		value["admission"] = static_cast<int>(group.admission);
-		value["binding"] = static_cast<int>(group.binding);
-		value["render_domain"] = static_cast<int>(group.render_domain);
-		value["slot_token"] = token_to_godot(group.slot.value);
-		value["owner_token"] = token_to_godot(group.owner.value);
-		value["detached"] = group.detached;
-		value["transform"] = godot_pose(group.pose);
-		value["source_tick"] = token_to_godot(group.source_tick);
-		value["source_order"] = token_to_godot(group.source_order);
-		value["bounds"] = bounds_dictionary(group.bounds);
-
-		Array emitters;
-		emitters.resize(static_cast<int64_t>(group.emitters.size()));
-		for (std::size_t j = 0; j < group.emitters.size(); ++j) {
-			const auto &emitter = group.emitters[j];
-			Dictionary emitter_value;
-
-			emitter_value["emitter_id"] = token_to_godot(emitter.id);
-			emitter_value["ordinal"] =
-					static_cast<int64_t>(emitter.ordinal);
-			emitter_value["definition_index"] =
-					static_cast<int64_t>(emitter.definition_index);
-			emitter_value["definition_name"] =
-					to_gd(emitter.definition_name);
-			emitter_value["definition_flags"] =
-					static_cast<int64_t>(emitter.definition_flags);
-			emitter_value["alive_particle_count"] =
-					static_cast<int64_t>(emitter.alive_particle_count);
-			emitter_value["emitting"] = emitter.emitting;
-			emitter_value["position"] = godot_vector(emitter.position);
-			emitter_value["forward"] = godot_vector(emitter.forward);
-			emitter_value["age"] = emitter.age;
-			emitter_value["kill_plane"] = static_cast<int>(emitter.kill_plane);
-			emitter_value["kill_plane_y"] = emitter.kill_plane_y;
-			emitter_value["bounds"] = bounds_dictionary(emitter.bounds);
-			emitters[static_cast<int64_t>(j)] = emitter_value;
-		}
-		value["emitters"] = emitters;
-		groups[static_cast<int64_t>(i)] = value;
-	}
-	result["groups"] = groups;
-	return result;
-}
-
 } // namespace
 
 EffectScene::EffectScene() = default;
@@ -299,10 +182,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
 			&EffectScene::advance_in_place);
-	ClassDB::bind_method(D_METHOD("get_live_counts"),
-			&EffectScene::get_live_counts);
-	ClassDB::bind_method(D_METHOD("inspect", "include_bounds"),
-			&EffectScene::inspect, DEFVAL(true));
 
 	BIND_ENUM_CONSTANT(ADMISSION_ALWAYS);
 	BIND_ENUM_CONSTANT(ADMISSION_REPLACE_OWNED);
@@ -491,19 +370,6 @@ void EffectScene::advance_in_place(double p_delta_seconds) {
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	scene_.advance_simulation(request);
 	snapshot_dirty_ = true;
-}
-
-Dictionary EffectScene::get_live_counts() const {
-	const opennova::particle::EffectLiveCounts counts = scene_.live_counts();
-	Dictionary result;
-	result["group_count"] = static_cast<int64_t>(counts.group_count);
-	result["emitter_count"] = static_cast<int64_t>(counts.emitter_count);
-	result["particle_count"] = static_cast<int64_t>(counts.particle_count);
-	return result;
-}
-
-Dictionary EffectScene::inspect(bool p_include_bounds) const {
-	return debug_dictionary(scene_.inspect(p_include_bounds));
 }
 
 const opennova::particle::ParticleFrameSnapshot &

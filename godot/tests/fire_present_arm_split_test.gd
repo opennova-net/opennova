@@ -96,11 +96,10 @@ func _event(adm_arm: bool) -> FirePresentationEvent:
 
 
 # The emitter position of one group report row (the spawn point of a transient).
-func _emitter_position(row: Dictionary) -> Vector3:
-	var emitters: Array = row.get("emitters", [])
-	if emitters.is_empty():
+func _emitter_position(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
 		return Vector3.INF
-	return (emitters[0] as Dictionary).get("position", Vector3.INF)
+	return (row.emitters[0] as EffectEmitterReport).position
 
 
 func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
@@ -108,8 +107,8 @@ func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 	var groups := _fx.get_debug_group_report()
 	assert_eq(groups.size(), 1, "the ammo arm spawns exactly one effect")
 	if groups.size() == 1:
-		var group := groups[0] as Dictionary
-		assert_eq(String(group.get("name", "")), "AMMO_EFFECT",
+		var group := groups[0] as EffectGroupReport
+		assert_eq(group.name, "AMMO_EFFECT",
 				"the ammo arm uses the AMMO def's effect")
 		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
 				"the ammo arm spawns at the wire position, unmoved")
@@ -120,8 +119,8 @@ func test_adm_arm_uses_the_fire_row_at_the_weapon_anchor() -> void:
 	var groups := _fx.get_debug_group_report()
 	assert_eq(groups.size(), 1, "the adm arm still spawns exactly one effect")
 	if groups.size() == 1:
-		var group := groups[0] as Dictionary
-		assert_eq(String(group.get("name", "")), "EFFECT_M16MF",
+		var group := groups[0] as EffectGroupReport
+		assert_eq(group.name, "EFFECT_M16MF",
 				"the adm arm uses the FIRE action row's effect, not the ammo def's")
 		assert_true(_emitter_position(group).is_equal_approx(MUZZLE),
 				"the adm arm spawns at the weapon anchor, NOT the wire eye position")
@@ -143,8 +142,8 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 	var groups := _fx.get_debug_group_report()
 	assert_eq(groups.size(), 1)
 	if groups.size() == 1:
-		var group := groups[0] as Dictionary
-		assert_eq(String(group.get("name", "")), "EFFECT_M16MF",
+		var group := groups[0] as EffectGroupReport
+		assert_eq(group.name, "EFFECT_M16MF",
 				"the row choice does not depend on the anchor provider")
 		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
 				"with no provider at all the wire value is the only origin there is")

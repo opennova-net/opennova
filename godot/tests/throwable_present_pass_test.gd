@@ -90,46 +90,51 @@ func _make_fx(anchors: ItemEffectDirector) -> EffectWorld:
 
 
 # The live (still attached) group report row owned by `key`, or {} when none.
-func _live_owned_row(fx: EffectWorld, key: String) -> Dictionary:
+func _live_owned_row(fx: EffectWorld, key: String) -> EffectGroupReport:
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if row.get("owner_key") == key and not bool(row.get("detached", false)):
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key and not row.detached:
 			return row
-	return {}
+	return null
 
 
 # Every group report row owned by `key`, attached or detached.
 func _owned_rows(fx: EffectWorld, key: String) -> Array:
 	var out: Array = []
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if row.get("owner_key") == key:
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key:
 			out.append(row)
 	return out
 
 
 # The group report row with `group_id` (a released owner drops its key from
 # the row, so retired groups are found by id), or {} once swept.
-func _row_by_id(fx: EffectWorld, group_id: int) -> Dictionary:
+func _row_by_id(fx: EffectWorld, group_id: int) -> EffectGroupReport:
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if int(row.get("id", 0)) == group_id:
+		var row := row_v as EffectGroupReport
+		if int(row.id) == group_id:
 			return row
-	return {}
+	return null
 
 
-func _emitter_position(row: Dictionary) -> Vector3:
-	var emitters: Array = row.get("emitters", [])
-	if emitters.is_empty():
+# Whether the group with `group_id` is detached; `swept` once the report no
+# longer lists it.
+func _row_detached(fx: EffectWorld, group_id: int, swept: bool = false) -> bool:
+	var row := _row_by_id(fx, group_id)
+	return swept if row == null else row.detached
+
+
+func _emitter_position(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
 		return Vector3.INF
-	return (emitters[0] as Dictionary).get("position", Vector3.INF)
+	return (row.emitters[0] as EffectEmitterReport).position
 
 
-func _emitter_forward(row: Dictionary) -> Vector3:
-	var emitters: Array = row.get("emitters", [])
-	if emitters.is_empty():
+func _emitter_forward(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
 		return Vector3.INF
-	return (emitters[0] as Dictionary).get("forward", Vector3.INF)
+	return (row.emitters[0] as EffectEmitterReport).forward
 
 
 # One visual row shaped like Simulation::get_throwable_visuals emits.
@@ -184,11 +189,11 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 
 	presenter.present_visuals([row])
 	var live := _live_owned_row(fx, owner_key)
-	assert_false(live.is_empty(), "the live round spawns one move group")
+	assert_not_null(live, "the live round spawns one move group")
 	assert_eq(_owned_rows(fx, owner_key).size(), 1)
-	assert_eq(String(live.get("name", "")), MOVE_EFFECT)
+	assert_eq(live.name, MOVE_EFFECT)
 	assert_eq(presenter.get_stats().move_effects, 1)
-	var group_id := int(live.get("id", 0))
+	var group_id := int(live.id)
 	assert_true(anchors.has_effect_anchor(owner_key), "the live group has a pose resolver")
 	var first_transform: Variant = anchors.resolve_owner_transform(owner_key)
 	assert_true(first_transform is Transform3D)
@@ -222,7 +227,7 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 	presenter.present_visuals([])
 	assert_eq(presenter.get_stats().move_effects, 0)
 	assert_false(anchors.has_effect_anchor(owner_key), "round removal retires its anchor")
-	assert_true(bool(_row_by_id(fx, group_id).get("detached", false)),
+	assert_true(_row_detached(fx, group_id),
 			"round removal stops emission on the exact spawned group")
 	assert_false(fx.has_owner_binding(owner_key),
 			"round removal releases its generation-scoped effect identity")
@@ -246,13 +251,13 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	presenter.present_visuals([row])
 	var owner_key := "throwable-move:3075"
 	var first := _live_owned_row(fx, owner_key)
-	assert_false(first.is_empty(), "a live emitter spawns its group")
-	var first_id := int(first.get("id", 0))
+	assert_not_null(first, "a live emitter spawns its group")
+	var first_id := int(first.id)
 
 	row.move_effect_live = false
 	row.pos = Vector3(3, -1, 2)
 	presenter.present_visuals([row])
-	assert_true(bool(_row_by_id(fx, first_id).get("detached", false)),
+	assert_true(_row_detached(fx, first_id),
 			"the released emitter stops its group while the round stays live")
 	assert_false(fx.has_owner_binding(owner_key),
 			"the release drops the effect identity so the handle is forgotten")
@@ -265,9 +270,9 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	row.pos = Vector3(3, 1.5, 2)
 	presenter.present_visuals([row])
 	var resumed_row := _live_owned_row(fx, owner_key)
-	assert_false(resumed_row.is_empty(),
+	assert_not_null(resumed_row,
 			"surfacing acquires a FRESH group for the same round")
-	var second_id := int(resumed_row.get("id", 0))
+	var second_id := int(resumed_row.id)
 	assert_ne(second_id, first_id, "the stopped group is never revived")
 	assert_eq(int(presenter.get_stats().move_effects), 1)
 	assert_true(anchors.has_effect_anchor(owner_key))
@@ -277,7 +282,7 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 		assert_eq((resumed as Transform3D).origin, Vector3(3, 1.5, 2))
 
 	presenter.present_visuals([])
-	assert_true(bool(_row_by_id(fx, second_id).get("detached", false)),
+	assert_true(_row_detached(fx, second_id),
 			"round removal stops the second group")
 	assert_true(fx.has_no_owner_bindings())
 	presenter.teardown()
@@ -303,11 +308,11 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	var owner_b := "throwable-move:2059"
 	var row_a := _live_owned_row(fx, owner_a)
 	var row_b := _live_owned_row(fx, owner_b)
-	assert_false(row_a.is_empty())
-	assert_false(row_b.is_empty())
+	assert_not_null(row_a)
+	assert_not_null(row_b)
 	assert_eq(fx.get_debug_group_report().size(), 2, "one owned group per round")
-	var id_a := int(row_a.get("id", 0))
-	var id_b := int(row_b.get("id", 0))
+	var id_a := int(row_a.id)
+	var id_b := int(row_b.id)
 	var transform_a: Variant = anchors.resolve_owner_transform(owner_a)
 	var transform_b: Variant = anchors.resolve_owner_transform(owner_b)
 	assert_true(transform_a is Transform3D)
@@ -343,15 +348,15 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	transform_b = anchors.resolve_owner_transform(owner_b)
 	if transform_b is Transform3D:
 		assert_eq((transform_b as Transform3D).origin, next_b)
-	assert_true(bool(_row_by_id(fx, id_a).get("detached", false)),
+	assert_true(_row_detached(fx, id_a),
 			"only the first round's emitter group stops")
-	assert_false(bool(_row_by_id(fx, id_b).get("detached", true)),
+	assert_false(_row_detached(fx, id_b, true),
 			"the second round's group stays attached")
 	assert_false(fx.has_owner_binding(owner_a))
 	assert_true(fx.has_owner_binding(owner_b))
 
 	presenter.present_visuals([])
-	assert_true(bool(_row_by_id(fx, id_b).get("detached", false)))
+	assert_true(_row_detached(fx, id_b))
 	assert_true(fx.has_no_owner_bindings(),
 			"both retired rounds released their effect identities")
 	presenter.teardown()
@@ -372,14 +377,14 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	presenter.present_visuals([
 		_row(1024, 1883, Vector3(1, 0, 0), Vector3.ZERO, MOVE_EFFECT)])
 	var outgoing := _live_owned_row(fx, "throwable-move:1024")
-	assert_false(outgoing.is_empty())
-	var outgoing_id := int(outgoing.get("id", 0))
+	assert_not_null(outgoing)
+	var outgoing_id := int(outgoing.id)
 	presenter.present_visuals([
 		_row(2048, 1883, Vector3(20, 0, 0), Vector3.ZERO, MOVE_EFFECT)])
 
 	assert_eq(fx.get_debug_group_report().size(), 2,
 			"same-slot replacement starts a fresh effect lifetime")
-	assert_true(bool(_row_by_id(fx, outgoing_id).get("detached", false)),
+	assert_true(_row_detached(fx, outgoing_id),
 			"the outgoing generation stops instead of teleporting")
 	assert_false(fx.has_owner_binding("throwable-move:1024"),
 			"the outgoing generation drops its effect-world token mappings")
@@ -387,8 +392,8 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	assert_false(anchors.has_effect_anchor("throwable-move:1024"))
 	assert_true(anchors.has_effect_anchor("throwable-move:2048"))
 	var replacement := _live_owned_row(fx, "throwable-move:2048")
-	assert_false(replacement.is_empty(), "the incoming generation owns a live group")
-	assert_ne(int(replacement.get("id", 0)), outgoing_id)
+	assert_not_null(replacement, "the incoming generation owns a live group")
+	assert_ne(int(replacement.id), outgoing_id)
 	var replacement_transform: Variant = anchors.resolve_owner_transform("throwable-move:2048")
 	assert_true(replacement_transform is Transform3D)
 	if replacement_transform is Transform3D:

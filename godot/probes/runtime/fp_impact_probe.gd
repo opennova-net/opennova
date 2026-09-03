@@ -75,21 +75,21 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.log("live groups = %d" % report.size())
 	var emitters: Array = []
 	for group_v in report:
-		var group: Dictionary = group_v
-		for em_v in group.get("emitters", []):
-			var em: Dictionary = em_v
-			var bounds: AABB = em.get("bounds", AABB())
+		var group: EffectGroupReport = group_v
+		for em_v in group.emitters:
+			var em: EffectEmitterReport = em_v
+			var bounds: AABB = em.bounds
 			ctx.log("group=%d %-28s alive=%d pos=%s bounds_center=%s valid=%s" % [
-					int(group.get("group_id", 0)), String(em.get("name", "?")),
-					int(em.get("alive", 0)), str(em.get("position", Vector3.ZERO)),
-					str(bounds.get_center()), str(em.get("bounds_valid", false))])
+					int(group.id), em.name,
+					em.alive, str(em.position),
+					str(bounds.get_center()), str(em.bounds_valid)])
 			emitters.append({
-				"group_id": int(group.get("group_id", 0)),
-				"name": String(em.get("name", "?")),
-				"alive": int(em.get("alive", 0)),
-				"position": em.get("position", Vector3.ZERO),
+				"group_id": int(group.id),
+				"name": em.name,
+				"alive": em.alive,
+				"position": em.position,
 				"bounds_center": bounds.get_center(),
-				"bounds_valid": bool(em.get("bounds_valid", false)),
+				"bounds_valid": em.bounds_valid,
 			})
 	var capture_path := out_dir.path_join("impact_scene.png")
 	var captured := await ProbeCapture.save_viewport_png(ctx.viewport(), capture_path)

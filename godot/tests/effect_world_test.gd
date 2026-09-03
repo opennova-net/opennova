@@ -6,7 +6,6 @@ extends GutTest
 # names to stable 1-based handles (case-insensitive); SpawnEmitterAtPosition
 # @ 0x5f6df0 spawns by handle or name.
 
-const EffectWorldScript = preload("res://game/world/effect_world.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 var _root_dir := ""
@@ -44,21 +43,21 @@ func after_each() -> void:
 
 
 func _make_world() -> EffectWorld:
-	var world: EffectWorld = add_child_autofree(EffectWorldScript.new())
+	var world: EffectWorld = add_child_autofree(EffectWorld.new())
 	return world
 
 
-func _single_group(world: EffectWorld, index: int = 0) -> Dictionary:
+func _single_group(world: EffectWorld, index: int = 0) -> EffectGroupReport:
 	var groups := world.get_debug_group_report()
 	assert_gt(groups.size(), index, "requested debug group exists")
-	return groups[index] as Dictionary
+	return groups[index] as EffectGroupReport
 
 
-func _single_emitter(world: EffectWorld, group_index: int = 0) -> Dictionary:
+func _single_emitter(world: EffectWorld, group_index: int = 0) -> EffectEmitterReport:
 	var group := _single_group(world, group_index)
-	var emitters := group.get("emitters", []) as Array
+	var emitters := group.emitters
 	assert_eq(emitters.size(), 1, "synthetic effect has one emitter")
-	return emitters[0] as Dictionary
+	return emitters[0] as EffectEmitterReport
 
 
 func _make_root() -> ResourceRoot:
@@ -388,16 +387,16 @@ func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(4, 5, 6), Vector3.UP), 0)
 	var groups := world.get_debug_group_report()
 	assert_eq(groups.size(), 2)
-	assert_true(bool((groups[0] as Dictionary).detached),
+	assert_true((groups[0] as EffectGroupReport).detached,
 			"replacement stops and detaches the old FOREVEREMIT group")
-	assert_false(bool((groups[1] as Dictionary).detached),
+	assert_false((groups[1] as EffectGroupReport).detached,
 			"the replacement remains attached")
 
 	positions.state = Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(9, 8, 7))
 	world.advance_fixed_tick(0.0)
 	groups = world.get_debug_group_report()
-	var old_emitter := ((groups[0] as Dictionary).emitters as Array)[0] as Dictionary
-	var new_emitter := ((groups[1] as Dictionary).emitters as Array)[0] as Dictionary
+	var old_emitter := (groups[0] as EffectGroupReport).emitters[0] as EffectEmitterReport
+	var new_emitter := (groups[1] as EffectGroupReport).emitters[0] as EffectEmitterReport
 	assert_eq(old_emitter.position, Vector3(1, 2, 3),
 			"the detached old group drains at its last position")
 	assert_eq(new_emitter.position, Vector3(9, 8, 7),
@@ -484,17 +483,17 @@ func test_debug_group_report_shapes() -> void:
 	assert_gt(world.interned_count(), 0, "the spawn interned its handle")
 	var report := world.get_debug_group_report()
 	assert_eq(report.size(), world.live_group_count(), "one report row per live group")
-	var group: Dictionary = report[0]
-	assert_eq(String(group.get("name", "")), "puff", "the group names its interned effect")
-	assert_eq((group.get("emitters", []) as Array).size(), 1, "one emitter row")
-	var emitter: Dictionary = (group.get("emitters", []) as Array)[0]
-	assert_true(emitter.has("alive") and emitter.has("rendered")
-			and emitter.has("bounds") and emitter.has("emitter_id"),
+	var group: EffectGroupReport = report[0]
+	assert_eq(group.name, "puff", "the group names its interned effect")
+	assert_eq(group.emitters.size(), 1, "one emitter row")
+	var emitter: EffectEmitterReport = group.emitters[0]
+	assert_true(emitter.alive >= 0 and emitter.rendered >= 0
+			and emitter.bounds is AABB and emitter.emitter_id > 0,
 			"emitter rows carry stable value diagnostics for the box view")
-	assert_false(emitter.has("node"),
+	assert_null(emitter.get("node"),
 			"debug reports do not leak renderer Nodes")
 	var unresolved_names := world.get_unresolved_texture_names()
-	assert_false(group.has("unresolved"),
+	assert_null(group.get("unresolved"),
 			"catalog-wide missing frames are not falsely attributed to this group")
 	assert_true(unresolved_names is PackedStringArray,
 			"unresolved texture names use the catalog-level value query")
@@ -526,8 +525,8 @@ func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
 	assert_eq(warm_groups.size(), 9,
 			"catalog warming must not duplicate every effect into FirstPerson")
 	for group_v in warm_groups:
-		var group := group_v as Dictionary
-		assert_eq(int(group.get("render_domain", -1)),
+		var group := group_v as EffectGroupReport
+		assert_eq(group.render_domain,
 				EffectWorld.RENDER_DOMAIN_WORLD,
 				"catalog values warm through the uncapped World draw list")
 	assert_gt(world.active_entry_count(), 0, "warm spawns occupy live entries")

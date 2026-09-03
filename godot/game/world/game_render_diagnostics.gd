@@ -431,7 +431,7 @@ static func _lights_state(root: Node) -> Dictionary:
 			directional += 1
 	# The EffectWorld point lights are shader-fed pool instances, not Light3D
 	# nodes — the omni node census above must stay 0 while this sibling block
-	# reports the hosted table (effect_light_director.gd).
+	# reports the hosted table (EffectLightDirector, godot/src/lights).
 	var effectworld: Dictionary = {}
 	var world := root as GameWorld
 	if world != null:

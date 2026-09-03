@@ -1110,6 +1110,50 @@ int main() {
     expect(LightScene::kDeathFlashFadeMode == 2 && LightScene::kDeathFlashFadeTicks == 31,
            "death flash mode 2 / 31 ticks");
 
+    // The static atlas row's group pair: a building row is its own interior
+    // group at section 0 with the owner section re-scoped to its ROBJ; any
+    // other row is owned by its static owner and carries the blink interior
+    // its placement origin resolved (empty outdoors).
+    {
+        using opennova::renderer::StaticLightRowInputs;
+        using opennova::renderer::static_light_row_groups;
+        StaticLightRowInputs building;
+        building.is_building = true;
+        building.static_owner = 0x2000000000000005ull;
+        building.robj_index = 3;
+        building.blink_hit = true;
+        building.blink_owner_entity = 99;
+        building.blink_section = 4;
+        const auto b = static_light_row_groups(building);
+        expect(b.owner_group_entity == 0 && b.owner_group_section == 3,
+               "a building row re-scopes the owner section to its ROBJ");
+        expect(b.interior_group_entity == building.static_owner &&
+                       b.interior_group_section == 0,
+               "a building row is its own interior group at section zero");
+        StaticLightRowInputs indoors;
+        indoors.static_owner = 0x2000000000000007ull;
+        indoors.robj_index = 9;
+        indoors.blink_hit = true;
+        indoors.blink_owner_entity = 99;
+        indoors.blink_section = 4;
+        const auto i = static_light_row_groups(indoors);
+        expect(i.owner_group_entity == indoors.static_owner && i.owner_group_section == 0,
+               "a non-building row is owned by its static owner at section 0");
+        expect(i.interior_group_entity == 99 && i.interior_group_section == 4,
+               "a non-building row carries the blink interior group");
+        StaticLightRowInputs outdoors = indoors;
+        outdoors.blink_hit = false;
+        const auto o = static_light_row_groups(outdoors);
+        expect(o.interior_group_entity == 0 && o.interior_group_section == 0,
+               "outdoors the interior group stays empty");
+    }
+    // The light_move round glow lifts its spawn half a radius and follows at
+    // the raw round position.
+    expect(nearly_equal(opennova::renderer::round_glow_spawn_lift(8.0f), 4.0f),
+           "the round glow spawns radius/2 above the round");
+    expect(opennova::renderer::kRoundGlowFollowLift == 0.0f,
+           "the per-tick follow re-centers at the raw round position");
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }

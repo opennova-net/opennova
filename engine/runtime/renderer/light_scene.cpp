@@ -829,6 +829,29 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs) {
 	return owner;
 }
 
+LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs) {
+	LightActiveGroups groups;
+	if (inputs.is_building) {
+		// A building declares itself as interior section zero and re-scopes
+		// the owner section to this exact ROBJ [orig: @ 0x5d8ff7].
+		groups.owner_group_entity = 0;
+		groups.owner_group_section = inputs.robj_index;
+		groups.interior_group_entity = inputs.static_owner;
+		groups.interior_group_section = 0;
+		return groups;
+	}
+	groups.owner_group_entity = inputs.static_owner;
+	groups.owner_group_section = 0;
+	// The blink query at the placement origin names the containing building
+	// + section [orig: Lighting_SetInteriorLightGroup @ 0x5a90e0]; no hit
+	// leaves the interior group empty.
+	if (inputs.blink_hit && inputs.blink_owner_entity != 0) {
+		groups.interior_group_entity = inputs.blink_owner_entity;
+		groups.interior_group_section = inputs.blink_section;
+	}
+	return groups;
+}
+
 int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,
 		const LightFlickerInputs &flicker) {
 	// [orig: Light_TickGenBlock @ 0x5a8ae0 — index = (z >> 15) + (y >> 14) +

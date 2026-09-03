@@ -49,8 +49,9 @@ private:
 
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
-// Godot values to the portable interface and converts snapshots back to
-// value-only Dictionaries for runtime/debug consumers.
+// Godot values to the portable interface; the value-only debug read model
+// (EffectWorld.get_debug_group_report) and the renderer read the portable
+// snapshots through the native seams below.
 class EffectScene : public RefCounted {
 	GDCLASS(EffectScene, RefCounted)
 
@@ -128,12 +129,15 @@ public:
 	// or serializing one into a throwaway Dictionary. The renderer lazily builds
 	// one retained snapshot after a fixed-tick catch-up batch.
 	void advance_in_place(double p_delta_seconds);
-	Dictionary get_live_counts() const;
-	Dictionary inspect(bool p_include_bounds = true) const;
 
 	// Native renderer adapters use the same immutable frame without a
 	// Dictionary round trip. This is intentionally not bound to Godot.
 	const opennova::particle::ParticleFrameSnapshot &native_frame_snapshot() const;
+	// The portable scene itself for the C++ EffectWorld: live counts, the
+	// active owner tokens and the debug snapshot (particle::EffectScene::
+	// live_counts / active_owner_tokens / inspect) without a Variant round
+	// trip. Not bound to Godot.
+	const opennova::particle::EffectScene &native_scene() const { return scene_; }
 };
 
 } // namespace godot

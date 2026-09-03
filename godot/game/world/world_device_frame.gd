@@ -412,7 +412,7 @@ func render_particle_frame() -> void:
 
 ## The EffectWorld point-light device leg: per visible model, select the
 ## witnessed <= 4 pool lights for that draw context and write them as
-## per-instance shader parameters (effect_light_director.gd carries the seam
+## per-instance shader parameters (godot/src/lights/effect_light_director carries the seam
 ## notes). The viewmodel parts ride along with the local player as owner so
 ## first-person self-lights gate correctly.
 func render_light_frame() -> void:

@@ -79,20 +79,20 @@ func _make_fx(anchors: ItemEffectDirector) -> EffectWorld:
 
 
 # The live (still attached) group report row owned by `key`, or {} when none.
-func _live_owned_row(fx: EffectWorld, key: String) -> Dictionary:
+func _live_owned_row(fx: EffectWorld, key: String) -> EffectGroupReport:
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if row.get('owner_key') == key and not bool(row.get('detached', false)):
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key and not row.detached:
 			return row
-	return {}
+	return null
 
 
 # Every group report row owned by `key`, attached or detached.
 func _owned_rows(fx: EffectWorld, key: String) -> Array:
 	var out: Array = []
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if row.get('owner_key') == key:
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key:
 			out.append(row)
 	return out
 
@@ -101,33 +101,38 @@ func _owned_rows(fx: EffectWorld, key: String) -> Array:
 func _transient_rows(fx: EffectWorld) -> Array:
 	var out: Array = []
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if row.get('owner_key') == null:
+		var row := row_v as EffectGroupReport
+		if row.owner_key == null:
 			out.append(row)
 	return out
 
 
 # The group report row with `group_id`, or {} once swept.
-func _row_by_id(fx: EffectWorld, group_id: int) -> Dictionary:
+func _row_by_id(fx: EffectWorld, group_id: int) -> EffectGroupReport:
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
-		if int(row.get('id', 0)) == group_id:
+		var row := row_v as EffectGroupReport
+		if int(row.id) == group_id:
 			return row
-	return {}
+	return null
 
 
-func _emitter_position(row: Dictionary) -> Vector3:
-	var emitters: Array = row.get('emitters', [])
-	if emitters.is_empty():
+# Whether the group with `group_id` is detached; `swept` once the report no
+# longer lists it.
+func _row_detached(fx: EffectWorld, group_id: int, swept: bool = false) -> bool:
+	var row := _row_by_id(fx, group_id)
+	return swept if row == null else row.detached
+
+
+func _emitter_position(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
 		return Vector3.INF
-	return (emitters[0] as Dictionary).get('position', Vector3.INF)
+	return (row.emitters[0] as EffectEmitterReport).position
 
 
-func _emitter_forward(row: Dictionary) -> Vector3:
-	var emitters: Array = row.get('emitters', [])
-	if emitters.is_empty():
+func _emitter_forward(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
 		return Vector3.INF
-	return (emitters[0] as Dictionary).get('forward', Vector3.INF)
+	return (row.emitters[0] as EffectEmitterReport).forward
 
 
 # A REAL wire presenter with injected per-handle avatars (native methods
@@ -216,10 +221,10 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var key := 'piece:7'
 	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
 	var first := _live_owned_row(fx, key)
-	assert_false(first.is_empty(), 'a new piece spawns its trail as one owned group')
+	assert_not_null(first, 'a new piece spawns its trail as one owned group')
 	assert_eq(_owned_rows(fx, key).size(), 1)
-	assert_eq(String(first.get('name', '')), 'Effect_VexpM')
-	var first_id := int(first.get('id', 0))
+	assert_eq(first.name, 'Effect_VexpM')
+	var first_id := int(first.id)
 	presenter.present_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
 	assert_eq(_owned_rows(fx, key).size(), 1, 'the same generation never respawns')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(4, 5, 6))
@@ -229,10 +234,10 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	presenter.present_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
 	assert_eq(_owned_rows(fx, key).size(), 2, 'a new generation spawns a fresh incarnation')
 	var replacement := _live_owned_row(fx, key)
-	assert_false(replacement.is_empty())
-	assert_eq(String(replacement.get('name', '')), 'Effect_VexpS')
-	assert_ne(int(replacement.get('id', 0)), first_id)
-	assert_true(bool(_row_by_id(fx, first_id).get('detached', false)),
+	assert_not_null(replacement)
+	assert_eq(replacement.name, 'Effect_VexpS')
+	assert_ne(int(replacement.id), first_id)
+	assert_true(_row_detached(fx, first_id),
 			'the replaced incarnation is detached, never re-posed')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(8, 9, 10))
 	presenter.teardown()
@@ -255,7 +260,7 @@ func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
 	var rows := _owned_rows(fx, key)
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
-		assert_true(bool((rows[0] as Dictionary).get('detached', false)),
+		assert_true((rows[0] as EffectGroupReport).detached,
 				'the old owner is detached instead of riding the reused slot')
 	presenter.teardown()
 
@@ -267,7 +272,7 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var key := 'piece:13'
 	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
 	assert_eq(_owned_rows(fx, key).size(), 1)
-	var first_id := int(_live_owned_row(fx, key).get('id', 0))
+	var first_id := int(_live_owned_row(fx, key).id)
 	presenter.present_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
 	assert_eq(_owned_rows(fx, key).size(), 1, 'settling never respawns the incarnation')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(1, 0, 2))
@@ -277,9 +282,9 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	presenter.present_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
 	assert_eq(_owned_rows(fx, key).size(), 2)
 	var replacement := _live_owned_row(fx, key)
-	assert_false(replacement.is_empty())
-	assert_eq(String(replacement.get('name', '')), 'Effect_VexpS')
-	assert_true(bool(_row_by_id(fx, first_id).get('detached', false)),
+	assert_not_null(replacement)
+	assert_eq(replacement.name, 'Effect_VexpS')
+	assert_true(_row_detached(fx, first_id),
 			'the settled incarnation is replaced, not revived')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(9, 3, 5))
 	presenter.teardown()
@@ -318,9 +323,9 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_eq(_husk_models(self).size(), 1)
 	assert_true(anchors.has_effect_anchor('wreck:91:2'))
 	assert_true(anchors.has_effect_anchor('piece:5'))
-	assert_false(_live_owned_row(fx, 'wreck:91:2').is_empty(),
+	assert_not_null(_live_owned_row(fx, 'wreck:91:2'),
 			'the fire family spawned its owned wreck group')
-	assert_false(_live_owned_row(fx, 'piece:5').is_empty(),
+	assert_not_null(_live_owned_row(fx, 'piece:5'),
 			'the piece spawned its owned trail group')
 	var graft: ObjectModel = _husk_models(self)[0]
 	assert_true(graft.is_static_shadow_caster_enabled(),
@@ -340,9 +345,9 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	# Retired anchors resolve nothing: the next fixed-tick owner sync detaches
 	# both owned groups from the prior incarnation.
 	fx.advance_fixed_tick(0.0)
-	assert_true(_live_owned_row(fx, 'wreck:91:2').is_empty(),
+	assert_null(_live_owned_row(fx, 'wreck:91:2'),
 			'the retired wreck group no longer follows an owner')
-	assert_true(_live_owned_row(fx, 'piece:5').is_empty(),
+	assert_null(_live_owned_row(fx, 'piece:5'),
 			'the retired piece group no longer follows an owner')
 	# The old call-count ledger has no public read; the idempotence pin is that
 	# a second reset leaves the restored state exactly as it was.
@@ -645,14 +650,14 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 
 	var owned := 0
 	for row_v in fx.get_debug_group_report():
-		if (row_v as Dictionary).get('owner_key') != null:
+		if (row_v as EffectGroupReport).owner_key != null:
 			owned += 1
 	assert_eq(owned, 6,
 			'all attached death/fire/other banks stay owned for zero-net children')
 	var transients := _transient_rows(fx)
 	assert_eq(transients.size(), 1, 'family-zero effects remain transient')
 	if transients.size() == 1:
-		assert_eq(String((transients[0] as Dictionary).get('name', '')), 'Effect_Transient')
+		assert_eq((transients[0] as EffectGroupReport).name, 'Effect_Transient')
 		assert_almost_eq(_emitter_position(transients[0]), Vector3(20, 30, 40), POSITION_EPS)
 	for wire_handle in [0x1004, 0x1005]:
 		var node: Node3D = resolver.resolve_wire_handle(wire_handle)
@@ -660,7 +665,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
 			assert_true(anchors.has_effect_anchor(key),
 					'each sibling/family pair owns a distinct effect group')
-			assert_false(_live_owned_row(fx, key).is_empty(),
+			assert_not_null(_live_owned_row(fx, key),
 					'%s holds its own live owned group' % key)
 			assert_eq(anchors.resolve_owner_transform(key), node.global_transform)
 		var fire_key := 'wreck:wire:%d:2' % wire_handle
@@ -780,13 +785,13 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 	assert_eq(transients.size(), 2)
 	assert_eq(fx.get_debug_group_report().size(), 2, 'both resolved rows spawn unowned transients')
 	if transients.size() == 2:
-		var foliage := transients[0] as Dictionary
-		var glass := transients[1] as Dictionary
-		assert_eq(String(foliage.get('name', '')), 'Effect_TreeFoliageExp')
+		var foliage := transients[0] as EffectGroupReport
+		var glass := transients[1] as EffectGroupReport
+		assert_eq(foliage.name, 'Effect_TreeFoliageExp')
 		assert_almost_eq(_emitter_position(foliage), Vector3.ZERO, POSITION_EPS,
 				'world origin is a valid authored triangle centroid')
 		assert_almost_eq(_emitter_forward(foliage), Vector3.RIGHT, POSITION_EPS)
-		assert_eq(String(glass.get('name', '')), 'Effect_BldGlassExp')
+		assert_eq(glass.name, 'Effect_BldGlassExp')
 		assert_almost_eq(_emitter_position(glass), Vector3(1, 2, 3), POSITION_EPS)
 		assert_almost_eq(_emitter_forward(glass), Vector3.UP, POSITION_EPS)
 	presenter.teardown()

@@ -166,24 +166,24 @@ func _catalog_file() -> ParticleFile:
 # known (a released owner drops its key from the row, so a retired group is
 # only reachable by id), else the first row owned by a throwable-move key.
 # {} when there is none or it was swept.
-func _round_move_group(fx: EffectWorld, group_id: int) -> Dictionary:
+func _round_move_group(fx: EffectWorld, group_id: int) -> EffectGroupReport:
 	for row_v in fx.get_debug_group_report():
-		var row := row_v as Dictionary
+		var row := row_v as EffectGroupReport
 		if group_id > 0:
-			if int(row.get("id", 0)) == group_id:
+			if int(row.id) == group_id:
 				return row
 		else:
-			var owner: Variant = row.get("owner_key")
+			var owner: Variant = row.owner_key
 			if owner is String and (owner as String).begins_with("throwable-move:"):
 				return row
-	return {}
+	return null
 
 
 # Every report row still owned by a throwable-move key (the live spawn census).
 func _round_move_rows(fx: EffectWorld) -> Array:
 	var out: Array = []
 	for row_v in fx.get_debug_group_report():
-		var owner: Variant = (row_v as Dictionary).get("owner_key")
+		var owner: Variant = (row_v as EffectGroupReport).owner_key
 		if owner is String and (owner as String).begins_with("throwable-move:"):
 			out.append(row_v)
 	return out
@@ -662,18 +662,18 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 		var group_id := int(probe["group_id"])
 		if group_id > 0 and (probe["stops_after_advance"] as Array).is_empty():
 			var before := _round_move_group(effect_world, group_id)
-			if before.is_empty() or bool(before.get("detached", false)):
+			if before == null or before.detached:
 				(probe["stops_after_advance"] as Array).append(int(probe["advances"]))
 		effect_world.advance_fixed_tick(Simulation.tick_dt())
 		probe["advances"] = int(probe["advances"]) + 1
 		var after := _round_move_group(effect_world, group_id)
-		if after.is_empty() or bool(after.get("detached", false)):
+		if after == null or after.detached:
 			return
-		probe["group_id"] = int(after.get("id", 0))
+		probe["group_id"] = int(after.id)
 		(probe["active_tick_numbers"] as Array).append(int(probe["advances"]))
-		var emitters: Array = after.get("emitters", [])
+		var emitters: Array = after.emitters
 		(probe["active_poses"] as Array).append(
-				(emitters[0] as Dictionary).get("position", Vector3.INF))
+				(emitters[0] as EffectEmitterReport).position)
 	)
 	rt.play()
 

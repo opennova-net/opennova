@@ -170,7 +170,7 @@ var _playable := true
 # net_session_drive.gd). The session signals live on THIS node — the shell
 # contract pins them here — and the drive emits them through its world reference.
 var _net_drive: NetSessionDrive
-# The per-item ITEMS.DEF effect director (item_effect_director.gd): the
+# The per-item ITEMS.DEF effect director (ItemEffectDirector, godot/src/world): the
 # attached/static/controller item emitters, the effect-anchor resolvers, and
 # the retail master particle switch, on the same internal pattern (plain
 # RefCounted — it owns no Nodes). Public delegates below keep the shell-facing
@@ -1159,7 +1159,7 @@ func get_render_diagnostics(
 ## spawned (e.g. the local muzzle flash riding the viewmodel userpoint). The
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
-## One-line delegates into the item-effect director (item_effect_director.gd):
+## One-line delegates into the item-effect director (ItemEffectDirector, godot/src/world):
 ## the names stay on GameWorld — LocalPlayerPresenter and the present passes
 ## register through the world.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:

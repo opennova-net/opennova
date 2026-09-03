@@ -638,6 +638,43 @@ struct ModelLightOwner {
 // world [orig: Entity_SpawnGlowEffects @ 0x56c89f / @ 0x56c8bd].
 ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 
+// The two witnessed groups one retained static atlas row declares for the
+// per-draw select — the same interior/owner pair the live-model pass stamps
+// per draw context (LightActiveGroups). A BUILDING row is its own interior
+// group at section zero and re-scopes the owner section to the exact ROBJ it
+// draws [orig: Terrain_RenderSectorModels pushes building/section 0 and
+// collect_render_objects_for_batch @ 0x5d8ff7 -> Lighting_SetOwnerLightGroup
+// (0, robjIndex) moves the owner section between the walks]; every other
+// static row is owned by its tagged static owner (section 0) and carries the
+// interior group the blink query at its placement origin resolved — the
+// building it stands inside plus that blink volume's section, the second
+// witnessed group [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+// Lighting_SetInteriorLightGroup @ 0x5a90e0]; outdoors (no hit) both
+// interior words stay zero.
+struct StaticLightRowInputs {
+	bool is_building = false;
+	uint64_t static_owner = 0;        // the row's tagged static owner id
+	int32_t robj_index = 0;           // the ROBJ this row draws (buildings)
+	bool blink_hit = false;           // the placement-origin blink query hit
+	uint64_t blink_owner_entity = 0;  // slot 0's containing building
+	int32_t blink_section = 0;        // and that volume's section
+};
+
+LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs);
+
+// The light_move round glow [orig: RoundData_SpawnRound @ 0x4ec8da — mode 1 /
+// duration -1, terrain disabled (flag 1024), handle at round+0x1B4]: the
+// spawn rides half a radius ABOVE the round [orig: @ 0x4ec8d6], while the
+// per-tick follow re-centers the SAME instance at the RAW round position
+// [orig: the SetPositionAndBounds follow @ 0x4eaa9f -> @ 0x5a9070], and
+// Projectile_ReleaseEffects clears it. Both as the lift along the world up
+// axis, in the presenter's float world units.
+inline constexpr float kRoundGlowSpawnLiftRadiusFraction = 0.5f;
+inline float round_glow_spawn_lift(float radius) {
+	return radius * kRoundGlowSpawnLiftRadiusFraction;
+}
+inline constexpr float kRoundGlowFollowLift = 0.0f;
+
 // The witnessed flicker register value for one light: the position hash into
 // the weather wave ring [orig: Light_TickGenBlock @ 0x5a8ae0 -> the global
 // FLICKER ctrl slot 0x83FD00 = 0x83FCE8 + 8 * 3].
