@@ -3,7 +3,7 @@ extends RefCounted
 
 const WeatherRows := preload("res://game/debug/debug_controls_weather_rows.gd")
 ## The typed debug-control table (ADR 0042 d5): every F3/MCP debug knob as one
-## Row with typed read/write/invoke closures over the GameShellSeams suppliers
+## Row with typed read/write/invoke closures over the GameShell suppliers
 ## and the Simulation typed API. Reflective StringName dispatch (the retired
 ## DebugSession/DebugCatalog/DebugTarget family) is gone: a row's closures
 ## resolve their live owner INSIDE the closure on every call, so a world
@@ -170,20 +170,20 @@ class Row:
 		return "unknown"
 
 
-var _seams: GameShellSeams = null
-var _shell: GameDebugAdapter = null
+var _shell: GameShell = null
+var _adapter: GameDebugAdapter = null
 var _rows: Dictionary = {}
 var _order: Array[StringName] = []
 
 
-## The shipping table is built over the shell's seams record and its debug
+## The shipping table is built over the game shell and its debug
 ## adapter (audio buses, transport, viewport, authority). The rows register
 ## regardless (nothing reads an owner until a row is read or invoked), so a
 ## test stub subclass constructed with neither still carries the real rows
 ## and their arg schemas while overriding the public surface.
-func _init(seams: GameShellSeams = null, shell: GameDebugAdapter = null) -> void:
-	_seams = seams
+func _init(shell: GameShell = null, adapter: GameDebugAdapter = null) -> void:
 	_shell = shell
+	_adapter = adapter
 	_register_option_rows()
 	_register_terrain_rows()
 	_register_rendering_rows()
@@ -216,8 +216,8 @@ func clear() -> void:
 		row.invoke = Callable()
 	_rows.clear()
 	_order.clear()
+	_adapter = null
 	_shell = null
-	_seams = null
 
 
 ## JSON-safe definitions paired with a live state, suitable for MCP.
@@ -340,8 +340,8 @@ func capture_snapshot(
 		filter_text: String = "",
 		allow_authority: bool = false) -> Variant:
 	var runtime: Variant = {}
-	if _shell != null:
-		runtime = DebugControlState._json_value(_shell.runtime_status())
+	if _adapter != null:
+		runtime = DebugControlState._json_value(_adapter.runtime_status())
 	return {
 		"runtime": runtime,
 		"edit_unlocked": false,
@@ -397,7 +397,7 @@ func _policy_reason(row: Row, allow_authority: bool) -> String:
 ## Authority is the session-role fact the adapter reads from
 ## Simulation.session_role(): ROLE_JOINER is the one non-authoritative role.
 func _has_host_authority() -> bool:
-	return _shell != null and _shell.has_debug_authority()
+	return _adapter != null and _adapter.has_debug_authority()
 
 
 func _invoke_result(
@@ -796,36 +796,36 @@ func _register_audio_actions() -> void:
 						AUDIO_BUS_VOLUME_MIN_DB, AUDIO_BUS_VOLUME_MAX_DB),
 			])
 	volume.invoke = func(args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.debug_set_audio_bus_volume(args[0], args[1]))
+		return _action_error(_adapter.debug_set_audio_bus_volume(args[0], args[1]))
 
 	var mute := _action(&"set_audio_bus_mute", &"Audio", "Set bus mute",
 			"Set one named audio bus mute state.",
 			TARGET_GAME_SHELL, OWNER_DEVICE,
 			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("muted")])
 	mute.invoke = func(args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.debug_set_audio_bus_mute(args[0], args[1]))
+		return _action_error(_adapter.debug_set_audio_bus_mute(args[0], args[1]))
 
 	var solo := _action(&"set_audio_bus_solo", &"Audio", "Set bus solo",
 			"Set one named audio bus solo state.",
 			TARGET_GAME_SHELL, OWNER_DEVICE,
 			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("soloed")])
 	solo.invoke = func(args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.debug_set_audio_bus_solo(args[0], args[1]))
+		return _action_error(_adapter.debug_set_audio_bus_solo(args[0], args[1]))
 
 	var bypass := _action(&"set_audio_bus_bypass", &"Audio", "Set bus effect bypass",
 			"Set one named audio bus effect bypass state.",
 			TARGET_GAME_SHELL, OWNER_DEVICE,
 			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("bypassed")])
 	bypass.invoke = func(args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.debug_set_audio_bus_bypass(args[0], args[1]))
+		return _action_error(_adapter.debug_set_audio_bus_bypass(args[0], args[1]))
 
 
 func _register_runtime_rows() -> void:
@@ -835,17 +835,17 @@ func _register_runtime_rows() -> void:
 			[DebugArgSpec.text("action").one_of(["resume", "pause", "step"])])
 	_authoritative(transport)
 	transport.invoke = func(args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.mcp_game_control(args[0]))
+		return _action_error(_adapter.mcp_game_control(args[0]))
 
 	var return_to_menu := _action(&"runtime_return_to_menu", &"Sim", "Return to menu",
 			"Leave the current world locally and return to the game menu.",
 			TARGET_GAME_SHELL, OWNER_DEVICE)
 	return_to_menu.invoke = func(_args: Array) -> Dictionary:
-		if _shell == null:
+		if _adapter == null:
 			return _action_error(ERR_UNAVAILABLE)
-		return _action_error(_shell.debug_return_to_menu())
+		return _action_error(_adapter.debug_return_to_menu())
 
 	var scripts_paused := _check(&"runtime_wac_paused", &"Sim", "Pause mission scripts",
 			"Pause WAC scripts while the rest of the world continues.",
@@ -1029,10 +1029,10 @@ func _register_automation_actions() -> void:
 
 
 func _runtime() -> MissionPresentation:
-	if _seams == null or not _seams.runtime_source.is_valid():
+	if _shell == null:
 		return null
-	var value: Variant = _seams.runtime_source.call()
-	if value is MissionPresentation and is_instance_valid(value):
+	var value := _shell.get_runtime()
+	if value != null and is_instance_valid(value):
 		return value
 	return null
 
@@ -1043,21 +1043,21 @@ func _sim() -> Simulation:
 
 
 func _world() -> GameWorld:
-	if _seams == null or not _seams.world_source.is_valid():
+	if _shell == null:
 		return null
-	var value: Variant = _seams.world_source.call()
+	var value := _shell.get_world()
 	# The world rows draw over a LOADED mission: the shell's GameWorld node
 	# outlives the mission, so an unloaded one reads as no world.
-	if value is GameWorld and is_instance_valid(value) and value.is_loaded():
+	if value != null and is_instance_valid(value) and value.is_loaded():
 		return value
 	return null
 
 
 func _player() -> LocalPlayerPresenter:
-	if _seams == null or not _seams.presenter_source.is_valid():
+	if _shell == null:
 		return null
-	var value: Variant = _seams.presenter_source.call()
-	if value is LocalPlayerPresenter and is_instance_valid(value):
+	var value := _shell.get_player_presenter()
+	if value != null and is_instance_valid(value):
 		return value
 	return null
 
@@ -1073,9 +1073,9 @@ func _weather() -> Weather:
 
 
 func _viewport() -> Viewport:
-	if _shell == null or not _shell.is_inside_tree():
+	if _adapter == null or not _adapter.is_inside_tree():
 		return null
-	return _shell.get_viewport()
+	return _adapter.get_viewport()
 
 
 func _availability_for(target: String) -> Callable:
@@ -1120,7 +1120,7 @@ func _viewport_availability() -> String:
 
 
 func _shell_availability() -> String:
-	return "" if _shell != null else "The game shell is not available."
+	return "" if _adapter != null else "The game shell is not available."
 
 
 func _environment_availability() -> String:

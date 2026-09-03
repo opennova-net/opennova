@@ -76,7 +76,7 @@ func _wait_hud(ctx: ProbeContext) -> HudOverlay:
 	while not ctx.cancelled and Time.get_ticks_msec() < deadline:
 		var presenter := ctx.hud_presenter()
 		if presenter != null:
-			var hud := presenter.get_hud() as HudOverlay
+			var hud := presenter.get_game_hud()
 			if hud != null:
 				return hud
 		await ctx.tree.process_frame

@@ -66,30 +66,32 @@ end
 """
 
 
-class EntityShellHarness:
-	extends "res://game/main_game.gd"
+# The shell the entity-discovery adapter reads: a GameShell answering one real
+# MissionPresentation (rule 11's sanctioned fake: public verbs only).
+class EntityRuntimeShell:
+	extends GameShell
 
-	# A real MissionPresentation over an in-memory mission: two authored organics
-	# plus the auto-spawned host player supply the AI/registry rows the
-	# discovery pages walk (the sim-double era ended when discovery became the
-	# engine's typed Simulation.entity_directory()).
 	var runtime: MissionPresentation = null
 
-	func ensure_runtime(parent: Node) -> void:
-		if runtime != null:
-			return
-		var mission := MissionData.new()
-		assert(mission.create_default() == OK)
-		mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
-		mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
-		var container := Node3D.new()
-		parent.add_child(container)
-		runtime = MissionPresentation.new()
-		parent.add_child(runtime)
-		runtime.setup(mission, container)
-
-	func _current_runtime():
+	func get_runtime() -> MissionPresentation:
 		return runtime
+
+
+# A real MissionPresentation over an in-memory mission: two authored organics
+# plus the auto-spawned host player supply the AI/registry rows the discovery
+# pages walk (the sim-double era ended when discovery became the engine's typed
+# Simulation.entity_directory()).
+func _entity_runtime(parent: Node) -> MissionPresentation:
+	var mission := MissionData.new()
+	assert(mission.create_default() == OK)
+	mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
+	mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
+	var container := Node3D.new()
+	parent.add_child(container)
+	var runtime := MissionPresentation.new()
+	parent.add_child(runtime)
+	runtime.setup(mission, container)
+	return runtime
 
 
 var _saved_config := PackedByteArray()
@@ -137,16 +139,9 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 	# adapter's match arms are its implementation. An action added to the catalog
 	# without an adapter arm would fall through to ERR_INVALID_PARAMETER here.
 	var adapter: GameDebugAdapter = add_child_autofree(GameDebugAdapter.new())
-	var seams := GameShellSeams.new()
-	seams.runtime_source = func(): return null
-	seams.world_source = func(): return null
-	seams.presenter_source = func(): return null
-	seams.shell_state_source = func(): return "menu"
-	seams.world_loading_source = func(): return false
-	seams.dev_tools_open_source = func(): return false
-	seams.resume_action = func(): pass
-	seams.quit_action = func(): pass
-	adapter.configure(seams)
+	# The null shell (GameShell's base) answers "menu"-less unavailability for
+	# every supplier; the catalog contract only needs the arms to exist.
+	adapter.configure(autofree(GameShell.new()))
 	for action in GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS:
 		assert_ne(adapter.mcp_game_control(action), ERR_INVALID_PARAMETER,
 				"the adapter recognizes cataloged action '%s'" % action)
@@ -156,11 +151,12 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
-	# The shell stays OFF-tree (its _process expects the packaged scene's
-	# children); the runtime + container mount under the test instead.
-	var shell: EntityShellHarness = autofree(EntityShellHarness.new())
-	shell.ensure_runtime(self)
-	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
+	# The runtime + container mount under the test; the adapter reads them
+	# through a GameShell fake, no MainGame instance involved.
+	var shell: EntityRuntimeShell = autofree(EntityRuntimeShell.new())
+	shell.runtime = _entity_runtime(self)
+	var debug_adapter: GameDebugAdapter = autofree(GameDebugAdapter.new())
+	debug_adapter.configure(shell)
 
 	var page: Dictionary = debug_adapter.get_mcp_game_entities(0, 64)
 
@@ -348,9 +344,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"the bound JoinTarget enters the two-frame loading-screen barrier")
 	target = null
 
-	var retained_seams: GameShellSeams = _shell.get_game_debug_adapter().get_shell_seams()
-	assert_true(retained_seams.world_loading_source.is_valid(),
-			"the configured debug seam captures MainGame before shutdown")
+	assert_same(_shell.get_game_debug_adapter().get_shell(), _shell,
+			"the configured debug adapter holds MainGame before shutdown")
 	var load_operation: WorldLoadOperation = _shell.begin_runtime_shutdown()
 	assert_not_null(load_operation)
 	if not load_operation.is_settled():
@@ -365,13 +360,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"finish_runtime_shutdown leaves the frame unconfigured")
 	assert_null(weak_cursor.get_ref(),
 			"the cooperative shutdown path drops its global custom cursor before exit")
-	assert_null(_shell.get_game_debug_adapter().get_shell_seams(),
-			"shutdown releases every Callable edge back into MainGame")
-	for property in retained_seams.get_property_list():
-		if property["type"] == TYPE_CALLABLE:
-			var callable: Callable = retained_seams.get(property["name"])
-			assert_false(callable.is_valid(),
-					"shutdown invalidates retained seam %s" % property["name"])
+	assert_null(_shell.get_game_debug_adapter().get_shell(),
+			"shutdown releases the shell from the debug adapter")
 
 
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:

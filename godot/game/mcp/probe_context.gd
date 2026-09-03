@@ -19,7 +19,7 @@ var artifact_dir := ""
 ## Set by the runner (cancel, watchdog); long waits must check it.
 var cancelled := false
 var tree: SceneTree = null
-var seams: GameShellSeams = null
+var shell: GameShell = null
 
 var _line_sink := Callable()
 var _artifacts: Array[Dictionary] = []
@@ -28,18 +28,18 @@ var _progress: Dictionary = {}
 var _finished := false
 
 
-# --- live seams -----------------------------------------------------------------
+# --- live suppliers (the GameShell surface) -----------------------------------------------------------------
 
 func game() -> MainGame:
-	return _supply(seams.game_source if seams != null else Callable()) as MainGame
+	return _live(shell) as MainGame
 
 
 func world() -> GameWorld:
-	return _supply(seams.world_source if seams != null else Callable()) as GameWorld
+	return _live(shell.get_world() if shell != null else null) as GameWorld
 
 
 func runtime() -> MissionPresentation:
-	return _supply(seams.runtime_source if seams != null else Callable()) as MissionPresentation
+	return _live(shell.get_runtime() if shell != null else null) as MissionPresentation
 
 
 func sim() -> Simulation:
@@ -48,35 +48,35 @@ func sim() -> Simulation:
 
 
 func presenter() -> LocalPlayerPresenter:
-	return _supply(seams.presenter_source if seams != null else Callable()) as LocalPlayerPresenter
+	return _live(shell.get_player_presenter() if shell != null else null) as LocalPlayerPresenter
 
 
 func hud_presenter() -> GameHudPresenter:
-	return _supply(seams.hud_presenter_source if seams != null else Callable()) as GameHudPresenter
+	return _live(shell.get_hud_presenter() if shell != null else null) as GameHudPresenter
 
 
 func menu_shell() -> MenuShell:
-	return _supply(seams.menu_shell_source if seams != null else Callable()) as MenuShell
+	return _live(shell.get_menu_shell() if shell != null else null) as MenuShell
 
 
 func armory_presenter() -> ArmoryPresenter:
-	return _supply(seams.armory_presenter_source if seams != null else Callable()) as ArmoryPresenter
+	return _live(shell.get_armory_presenter() if shell != null else null) as ArmoryPresenter
 
 
 func deploy_presenter() -> DeployScreenPresenter:
-	return _supply(seams.deploy_presenter_source if seams != null else Callable()) as DeployScreenPresenter
+	return _live(shell.get_deploy_presenter() if shell != null else null) as DeployScreenPresenter
 
 
 func dev_tools() -> DevTools:
-	return _supply(seams.dev_tools_source if seams != null else Callable()) as DevTools
+	return _live(shell.get_dev_tools() if shell != null else null) as DevTools
 
 
 func frame_stats() -> FrameStats:
-	return _supply(seams.frame_stats_source if seams != null else Callable()) as FrameStats
+	return _live(shell.get_frame_stats() if shell != null else null) as FrameStats
 
 
 func viewport() -> Viewport:
-	return _supply(seams.viewport_source if seams != null else Callable()) as Viewport
+	return _live(shell.get_viewport() if shell != null else null) as Viewport
 
 
 func camera() -> Camera3D:
@@ -85,7 +85,7 @@ func camera() -> Camera3D:
 
 
 func resource_root() -> ResourceRoot:
-	return _supply(seams.resource_root_source if seams != null else Callable()) as ResourceRoot
+	return _live(shell.current_resource_root() if shell != null else null) as ResourceRoot
 
 
 func effect_world() -> EffectWorld:
@@ -94,7 +94,7 @@ func effect_world() -> EffectWorld:
 
 
 func adapter() -> GameMcpAdapter:
-	return _supply(seams.adapter_source if seams != null else Callable()) as GameMcpAdapter
+	return _live(shell.get_game_debug_adapter() if shell != null else null) as GameMcpAdapter
 
 
 # --- waits ------------------------------------------------------------------------
@@ -148,21 +148,21 @@ func wait_world_ready(timeout_ms := LOCAL_PLAYER_TIMEOUT_MS) -> bool:
 # --- mission verbs -------------------------------------------------------------------
 
 func start_mission(bms_name: String) -> Error:
-	if seams == null or not seams.start_mission.is_valid():
+	if shell == null:
 		return ERR_UNAVAILABLE
-	return seams.start_mission.call(bms_name)
+	return shell.start_mission(bms_name)
 
 
 func start_saved_mission(saved_path: String, bms_name: String, profile: Dictionary = {}) -> Error:
-	if seams == null or not seams.start_saved_mission.is_valid():
+	if shell == null:
 		return ERR_UNAVAILABLE
-	return seams.start_saved_mission.call(saved_path, bms_name, profile)
+	return shell.start_saved_mission(saved_path, bms_name, profile)
 
 
 func return_to_menu() -> Error:
-	if seams == null or not seams.return_to_menu.is_valid():
+	if shell == null:
 		return ERR_UNAVAILABLE
-	return seams.return_to_menu.call()
+	return shell.return_to_menu()
 
 
 ## The saved-BMS boot the capture probes share: leave a loaded world, start
@@ -317,10 +317,7 @@ func set_line_sink(sink: Callable) -> void:
 	_line_sink = sink
 
 
-func _supply(source: Callable) -> Variant:
-	if not source.is_valid():
-		return null
-	var value: Variant = source.call()
+func _live(value: Variant) -> Variant:
 	if value is Object and not is_instance_valid(value):
 		return null
 	return value

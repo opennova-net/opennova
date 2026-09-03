@@ -13,8 +13,8 @@ const KEEP_RUNS := 8
 const DEFAULT_UNRESPONSIVE_GRACE_MS := 5000
 const RUNS_DIR := "user://probe-runs"
 
-## The shell seams handed to every context (null in pure tests).
-var seams: GameShellSeams = null
+## The game shell handed to every context (null in pure tests).
+var shell: GameShell = null
 ## How long after cancellation a run may keep running before it is reaped.
 var unresponsive_grace_ms := DEFAULT_UNRESPONSIVE_GRACE_MS
 
@@ -98,7 +98,7 @@ func start(name: String, raw_args: Variant) -> Dictionary:
 	ctx.args = validated.values
 	ctx.artifact_dir = run.artifact_dir
 	ctx.tree = get_tree()
-	ctx.seams = seams
+	ctx.shell = shell
 	ctx.set_line_sink(run.add_line)
 
 	_runs.append(run)
@@ -238,7 +238,7 @@ func _find(run_id: String) -> ProbeRun:
 
 
 func _live_world() -> GameWorld:
-	if seams == null or not seams.world_source.is_valid():
+	if shell == null:
 		return null
-	var value: Variant = seams.world_source.call()
-	return value as GameWorld if value is Object and is_instance_valid(value) else null
+	var value := shell.get_world()
+	return value if value != null and is_instance_valid(value) else null

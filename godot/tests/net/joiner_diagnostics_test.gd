@@ -30,16 +30,23 @@ class RuntimeStub:
 		return stub_sim
 
 
+class RuntimeShell:
+	extends GameShell
+
+	var runtime: MissionPresentation = null
+
+	func get_runtime() -> MissionPresentation:
+		return runtime
+
+
 func test_the_debug_control_table_exposes_the_switch_as_a_net_check() -> void:
 	var sim: Simulation = autofree(Simulation.new())
 	var runtime: RuntimeStub = autofree(RuntimeStub.new())
 	runtime.stub_sim = sim
-	var seams := GameShellSeams.new()
-	seams.runtime_source = func(): return runtime
-	seams.world_source = func(): return null
-	seams.presenter_source = func(): return null
+	var shell: RuntimeShell = autofree(RuntimeShell.new())
+	shell.runtime = runtime
 	var adapter: GameDebugAdapter = autofree(GameDebugAdapter.new())
-	adapter.configure(seams)
+	adapter.configure(shell)
 	var controls := adapter.get_debug_controls()
 	var state := controls.get_control_state(&"net_joiner_diagnostics")
 	assert_true(state.available)
