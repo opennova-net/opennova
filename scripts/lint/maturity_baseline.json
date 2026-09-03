@@ -54,6 +54,7 @@
     "probe_runner.gd|func start(",
     "probe_runner.gd|func status(",
     "probe_runner.gd|func cancel(",
-    "perf_probe_switches.gd|var spans: Dictionary"
+    "perf_probe_switches.gd|var spans: Dictionary",
+    "render_fixture_contract.gd|static func teleport_comparison_player("
   ]
 }
