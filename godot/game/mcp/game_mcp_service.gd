@@ -7,6 +7,9 @@ extends Node
 ## and starts nothing. The endpoint lives as long as the game: `game_control
 ## quit` is the stop. ONED runs no MCP of its own (ADR 0037); this is the
 ## runtime's, driven from outside by agents and the scripts/mcp clients.
+## GameDebugAdapter.start_runtime_endpoint loads this script BY PATH: the
+## transport (godot/game/mcp/) leaves the Runtime export (ADR 0043 d12), so
+## no shell script names its class.
 
 var server: McpServer = null
 var log_hub: McpLogHub = null
@@ -46,6 +49,9 @@ func setup(adapter: GameMcpAdapter, port: int) -> Error:
 	probe_runner = ProbeRunner.new()
 	probe_runner.name = "ProbeRunner"
 	probe_runner.shell = adapter.get_shell()
+	# The probe model ships without the transport (ADR 0043 d12), so the
+	# runner's log lines reach the hub through this sink, never by name.
+	probe_runner.log_sink = _on_probe_log
 	add_child(probe_runner)
 	tools = GameMcpTools.new(self, game_adapter)
 	tools.register_all(server.registry)
@@ -78,6 +84,11 @@ func _on_script_log(text: String) -> void:
 func _on_server_log(text: String) -> void:
 	if log_hub != null:
 		log_hub.note_server(text)
+
+
+func _on_probe_log(text: String) -> void:
+	if log_hub != null:
+		log_hub.note("probe", "info", text)
 
 
 func _exit_tree() -> void:

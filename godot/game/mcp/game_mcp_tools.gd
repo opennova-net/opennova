@@ -182,15 +182,20 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var confirmed := _authority_confirmed(args)
 	match op:
 		"list":
-			return {"controls": controls.list_controls(
+			# The typed rows (each carrying this caller's live state) reach the
+			# wire through their own to_json_value().
+			var rows: Array = []
+			for row in controls.list_controls(
 					StringName(String(args.get("page", ""))),
 					String(args.get("filter", "")),
-					confirmed)}
+					confirmed):
+				rows.append((row as DebugControlRow).to_json_value())
+			return {"controls": rows}
 		"get":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
 				return McpToolResult.error("game_debug op=get requires id.")
-			return controls.get_control_state(id, confirmed).to_json_value()
+			return controls.get_state(id, confirmed).to_json_value()
 		"set":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty() or not args.has("value"):
@@ -198,11 +203,10 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 						"game_debug op=set requires id and value.")
 			if _automation_confirmation_required(controls, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
-			var err: Error = controls.set_control_value(
-					id, args["value"], confirmed)
+			var err: Error = controls.set_value(id, args["value"], confirmed)
 			if err != OK:
 				return McpToolResult.error(_debug_error(id, err))
-			return controls.get_control_state(id, confirmed).to_json_value()
+			return controls.get_state(id, confirmed).to_json_value()
 		"invoke":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
@@ -211,26 +215,20 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
 			# The row's own arg schema marshals the JSON (by-name object,
 			# positional array or one scalar) and names the refused field.
-			var call_args: Variant = controls.marshal_invoke_args(id, args.get("args"))
-			if call_args is String:
-				return McpToolResult.error(call_args)
-			var outcome: Variant = controls.invoke_control(
-					id,
-					call_args,
-					confirmed)
-			if not (outcome is Dictionary):
-				return McpToolResult.error(
-						"Debug control '%s' returned an invalid result." % id)
-			var err := int(outcome.get("error", FAILED))
-			if err != OK:
-				return McpToolResult.error(_debug_error(id, err))
-			return outcome
+			var marshalled: DebugMarshalResult = controls.marshal_invoke_args(
+					id, args.get("args"))
+			if marshalled.refused:
+				return McpToolResult.error(marshalled.reason)
+			var outcome: DebugInvokeResult = controls.invoke(id, marshalled.args, confirmed)
+			if outcome.error != OK:
+				return McpToolResult.error(_debug_error(id, outcome.error as Error))
+			return outcome.to_json_value()
 		"snapshot":
+			# The table's JSON snapshot plus the shell's runtime block: the
+			# op=snapshot wire shape.
 			var snapshot: Dictionary = controls.capture_snapshot(
 					String(args.get("filter", "")), confirmed)
-			if snapshot.is_empty():
-				return McpToolResult.error(
-						"Start a playable mission before capturing a debug snapshot.")
+			snapshot["runtime"] = adapter.runtime_status()
 			return snapshot
 		_:
 			return McpToolResult.error(
@@ -374,14 +372,14 @@ static func _authority_confirmed(args: Dictionary) -> bool:
 ## own policy repeats the refusal (and reports it in state rows); the
 ## precheck keeps the boundary's refusal order stable.
 static func _automation_confirmation_required(
-		controls: DebugControls,
+		controls: DebugControlTable,
 		id: StringName) -> bool:
 	if controls == null:
 		return false
-	var row: DebugControls.Row = controls.control(id)
+	var row: DebugControlRow = controls.control(id)
 	return row != null and (
 			row.requires_confirm
-			or row.authority == DebugControls.Authority.HOST_ONLY)
+			or row.authority == DebugControlRow.HOST_ONLY)
 
 
 static func _finite_number(value: Variant) -> Variant:

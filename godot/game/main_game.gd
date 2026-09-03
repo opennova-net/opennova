@@ -195,6 +195,7 @@ func finish_runtime_shutdown() -> void:
 		if dispatcher != null:
 			dispatcher.clear_asset_cache()
 	if _debug_adapter != null:
+		_dev_tools.set_debug_control_table(null)
 		_debug_adapter.release_shell()
 
 
@@ -236,6 +237,10 @@ func _ready() -> void:
 	var debug_adapter := get_game_debug_adapter()
 	add_child(debug_adapter)
 	debug_adapter.start_runtime_endpoint()
+	# F3 drives the SAME debug-control table MCP's game_debug does (ADR 0043
+	# d12): the windows' control requests drain into it with the shell's
+	# local authority.
+	_dev_tools.set_debug_control_table(debug_adapter.get_debug_controls())
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# owner decides what it means).
 	if not _camera.escape_pressed.is_connected(_on_camera_escape):

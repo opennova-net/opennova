@@ -442,7 +442,7 @@ public:
 	// The dev tools' Particles seams (the existing get_effect_world() is the
 	// data source; these are the two debug toggles). Delegates to the
 	// item-effect director; the name stays on GameWorld for the typed
-	// debug-control table (DebugControls) + probe calls.
+	// debug-control table (DebugControlTable) + probe calls.
 	void set_particles_hidden(bool p_hidden);
 	bool is_particles_hidden() const;
 	// Hide foliage (the dev tools' "Hide foliage"). The dispatcher renders

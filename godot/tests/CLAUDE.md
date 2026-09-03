@@ -8,8 +8,9 @@
   there while its open state (F3, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
 - No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
-  (`docs/mcp.md`, ADR 0041): registered in `ProbeCatalog`, driven through the game's
-  MCP endpoint with typed arguments, judged by their verdict. Their GUT companions
+  (`docs/mcp.md`, ADR 0041): registered in `ProbeDef.definitions()`
+  (`godot/game/probe/`), driven through the game's MCP endpoint with typed
+  arguments, judged by their verdict. Their GUT companions
   (the catalog contract, the render-fixture and foliage-capture contracts, the
   parity-joiner contract) live in `godot/tests/probes/`. An assertion over the
   portable engine is a ctest under `tests/<domain>/`, gated on the retail roots

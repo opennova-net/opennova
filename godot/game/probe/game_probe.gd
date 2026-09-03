@@ -2,7 +2,7 @@ class_name GameProbe
 extends RefCounted
 
 ## The base of every runtime probe (docs/mcp.md, ADR 0041). A probe is a
-## script under res://probes/ registered in ProbeCatalog; game_probe op=run
+## script under res://probes/ registered in ProbeDef.definitions(); game_probe op=run
 ## instantiates it and awaits run(). The probe reads its typed args from the
 ## context, observes and drives the live game through the context's seams,
 ## logs through ctx.log (never print), captures into ctx.artifact_dir, undoes

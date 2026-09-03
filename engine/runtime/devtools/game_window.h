@@ -3,6 +3,7 @@
 // viewport binding; the window policy itself is engine-owned.
 #pragma once
 
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/imgui_pass.h>
 
 #include <deque>
@@ -14,12 +15,12 @@ enum class GameInputMode {
 	Play,
 };
 
+// The window's own input-mode policy requests; the spectator toggle is a
+// debug-control row (local_spectator) and leaves as a ControlRequest instead.
 enum class GameWindowRequest {
 	EnterPlay,
 	EnterInteract,
 	CloseTools,
-	EnableSpectator,
-	DisableSpectator,
 };
 
 // The only seam between the engine-owned window and a rendering device. The
@@ -48,10 +49,14 @@ public:
 	void set_spectator_state(bool available, bool active);
 	bool spectator_available() const { return spectator_available_; }
 	bool spectator_active() const { return spectator_active_; }
+	// The spectator checkbox: one local_spectator control request (the
+	// debug-control table's row, so the same authority gate as MCP decides),
+	// queued only while the shell reports the transition available.
 	void request_spectator(bool active);
 	void request_enter_play();
 	void request_escape();
 	bool take_request(GameWindowRequest &request);
+	bool take_control_request(ControlRequest &request);
 	void reset_input_mode();
 	void draw(ImGuiPass &pass, uint64_t frame_index) override;
 
@@ -63,6 +68,7 @@ private:
 	bool spectator_active_ = false;
 	bool escape_already_handled_ = false;
 	std::deque<GameWindowRequest> requests_;
+	std::deque<ControlRequest> control_requests_;
 };
 
 }  // namespace opennova::devtools

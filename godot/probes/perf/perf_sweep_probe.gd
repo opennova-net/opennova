@@ -10,7 +10,7 @@ extends GameProbe
 # The MCP transport that carries this very probe: disabling its _process would
 # stall the runner's watchdog and the client's polling, so its groups are not
 # part of the sweep.
-const TRANSPORT_SCRIPT_PREFIXES := ["res://game/mcp/", "res://game/game_mcp_service.gd"]
+const TRANSPORT_SCRIPT_PREFIXES := ["res://game/mcp/", "res://game/probe/"]
 # The imgui-godot bridge: its helper runs ImGui::NewFrame at the lowest process
 # priority and its controller renders at the highest. Switching one half off
 # leaves every frame un-ended (IM_ASSERT spam in the log) and says nothing

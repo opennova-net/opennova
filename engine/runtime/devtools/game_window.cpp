@@ -1,5 +1,7 @@
 #include <runtime/devtools/game_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
+
 #include <imgui.h>
 
 namespace opennova::devtools {
@@ -29,8 +31,7 @@ void GameWindow::request_spectator(bool active) {
 	if (!spectator_available_ || active == spectator_active_) {
 		return;
 	}
-	requests_.push_back(active ? GameWindowRequest::EnableSpectator
-	                           : GameWindowRequest::DisableSpectator);
+	control_requests_.push_back({control_id::kLocalSpectator, {ControlArg::boolean(active)}});
 }
 
 void GameWindow::request_escape() {
@@ -49,10 +50,20 @@ bool GameWindow::take_request(GameWindowRequest &request) {
 	return true;
 }
 
+bool GameWindow::take_control_request(ControlRequest &request) {
+	if (control_requests_.empty()) {
+		return false;
+	}
+	request = control_requests_.front();
+	control_requests_.pop_front();
+	return true;
+}
+
 void GameWindow::reset_input_mode() {
 	input_mode_ = GameInputMode::Interact;
 	escape_already_handled_ = false;
 	requests_.clear();
+	control_requests_.clear();
 }
 
 void GameWindow::draw(ImGuiPass &pass, uint64_t frame_index) {

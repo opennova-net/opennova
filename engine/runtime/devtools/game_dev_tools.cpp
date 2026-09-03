@@ -1,6 +1,7 @@
 #include <runtime/devtools/game_dev_tools.h>
 
 #include <runtime/devtools/ai_window.h>
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/demo_window.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
@@ -108,8 +109,10 @@ bool GameDevTools::needs_entity_directory() const {
 	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
 }
 
-bool GameDevTools::take_debug_request(DebugRequest &request) {
-	return entities_window_->take_request(request);
+bool GameDevTools::take_control_request(ControlRequest &request) {
+	return game_window_->take_control_request(request) ||
+			entities_window_->take_request(request) ||
+			environment_window_->take_request(request);
 }
 
 void GameDevTools::select_entity(uint16_t handle) {
@@ -166,10 +169,6 @@ void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot)
 
 bool GameDevTools::needs_environment_snapshot() const {
 	return pass_.is_open() && environment_window_->open;
-}
-
-bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
-	return environment_window_->take_request(request);
 }
 
 void GameDevTools::set_ai_debug(AiDebugSnapshot snapshot) {

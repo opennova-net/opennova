@@ -372,6 +372,14 @@ bool Simulation::command_fog_type(int p_type) { OPENNOVA_WEATHER_COMMAND(set_fog
 bool Simulation::command_lightning_flash() { OPENNOVA_WEATHER_COMMAND(lightning_flash()); }
 bool Simulation::command_lightning_far_flash() { OPENNOVA_WEATHER_COMMAND(lightning_far_flash()); }
 bool Simulation::command_wind_scale(int p_value) { OPENNOVA_WEATHER_COMMAND(set_wind_scale(p_value)); }
+bool Simulation::command_sky_height(int p_height_raw) { OPENNOVA_WEATHER_COMMAND(set_sky_height(p_height_raw)); }
+bool Simulation::command_sun_fade(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(sun_fade(p_percent, p_seconds)); }
+bool Simulation::command_color_fade(int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_color_fade(p_seconds)); }
+bool Simulation::command_weather_color(int p_target, int p_rgb) {
+	OPENNOVA_WEATHER_COMMAND(set_weather_color(
+			static_cast<opennova::world::WeatherColorTarget>(p_target), static_cast<uint32_t>(p_rgb)));
+}
+bool Simulation::command_lightning_color(int p_rgb) { OPENNOVA_WEATHER_COMMAND(set_lightning_color(static_cast<uint32_t>(p_rgb))); }
 
 #undef OPENNOVA_WEATHER_COMMAND
 

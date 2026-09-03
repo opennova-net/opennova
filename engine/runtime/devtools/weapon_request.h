@@ -1,9 +1,10 @@
 // A typed mutation the F3 Weapon window queues for its embedder to drain (ADR
-// 0042 d6; the DebugRequest pattern). The window never touches the FSM itself —
-// the embedder routes each request into the engine's own weapon seams, and
-// every trigger goes through the real input seam and its real gate, never a
-// hand-rolled state write. Nothing here reaches the filesystem: edits are
-// live-only.
+// 0042 d6). The window never touches the FSM itself — the embedder routes each
+// request into the engine's own weapon seams, and every trigger goes through
+// the real input seam and its real gate, never a hand-rolled state write.
+// Nothing here reaches the filesystem: edits are live-only. A window-local
+// seam: the dope-sheet edits have no debug-control row, so they stay beside
+// the ControlRequest channel rather than in it.
 #pragma once
 
 #include <cstdint>

@@ -33,7 +33,7 @@ func test_catalog_lists_the_three_joiner_probes_with_their_required_args() -> vo
 		"parity_joiner_state": [],
 	}
 	for name in expected:
-		var def := ProbeCatalog.definition(name)
+		var def := ProbeDef.definition(name)
 		assert_not_null(def, "%s is in the catalog" % name)
 		if def == null:
 			continue
@@ -46,7 +46,7 @@ func test_catalog_lists_the_three_joiner_probes_with_their_required_args() -> vo
 			assert_eq(props["topology"].get("enum", []), ["RO", "OO"])
 		if props.has("readiness_mode"):
 			assert_eq(props["readiness_mode"].get("enum", []), ["in_match", "deploy_hold"])
-	assert_true(ProbeCatalog.definition("parity_joiner_motion").needs_mission,
+	assert_true(ProbeDef.definition("parity_joiner_motion").needs_mission,
 			"the motion exercise runs on the joined world")
 
 

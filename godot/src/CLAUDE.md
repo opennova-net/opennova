@@ -36,8 +36,10 @@ on any increase. Shipping GDScript has no size ratchet; it has
 object's `_privates` is a method annex, not a class, and the count only falls.
 
 The game-level GDScript runtime (world, debug, mission, object, terrain,
-ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
-there that is really engine behavior is the C++ rewrite queue.
+ui, avatar, probe, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
+there that is really engine behavior is the C++ rewrite queue. The debug-control
+table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
+windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
 ONED scripts go to `godot/modtools/`.

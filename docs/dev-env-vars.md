@@ -73,7 +73,7 @@ option.
 
 ## Debug controls that replaced post-boot hooks
 
-The typed debug-control table (`DebugControls`, driven as `game_debug` over MCP) carries the actions the old env
+The typed debug-control table (`DebugControlTable`, driven as `game_debug` over MCP) carries the actions the old env
 hooks performed after boot: `teleport_local_player {position, yaw_deg,
 pitch_deg}` (the debug pose), `deploy_pick {zone}` (the auto-deploy hook),
 `set_viewmodel_weapon {weapon}` / `clear_viewmodel_weapon` (the viewmodel

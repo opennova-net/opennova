@@ -42,11 +42,12 @@ in maturity_baseline.json:
                         boundary (ADR 0043). Non-increasing; target zero.
   mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
                         the typed debug-control table
-                        (godot/game/debug/debug_controls.gd, ADR 0042 d5). An
-                        ABSOLUTE zero floor, not baseline-relative (ADR 0042
-                        d7): the MCP boundary converts typed records to JSON,
-                        and a converter that needs a witness cite is
-                        re-deriving. No baseline key exists for it.
+                        (godot/src/devtools/debug_control_table.{h,cpp},
+                        ADR 0043 d12). An ABSOLUTE zero floor, not
+                        baseline-relative (ADR 0042 d7): the MCP boundary
+                        converts typed records to JSON, and a converter that
+                        needs a witness cite is re-deriving. No baseline key
+                        exists for it.
   godot_node_meta_sites Object metadata calls (set_meta / get_meta / has_meta /
                         remove_meta) anywhere under godot/ (bindings, game
                         scripts, modtools, probes, tests). An ABSOLUTE zero
@@ -59,8 +60,11 @@ in maturity_baseline.json:
                         never saw headers).
   gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
                         code lines of the shipping GDScript (godot/game,
-                        godot/modtools), excluding godot/game/mcp -- the
-                        sanctioned JSON transport edge. Each is a record that
+                        godot/modtools), excluding godot/game/mcp (the
+                        sanctioned JSON transport edge) and godot/game/probe
+                        (the probe model: its arguments are JSON Schema and
+                        its status pages are the game_probe wire by design,
+                        ADR 0041 / ADR 0043 d12). Each is a record that
                         crosses untyped (ADR 0017); typed records burn it down.
   godot_src_dictionary_returns
                         Binding methods declared to return Dictionary or
@@ -254,11 +258,14 @@ def count_godot_orig_cites() -> int:
     return count
 
 
-# The debug-control table (ADR 0042 d5) shares the boundary floor: its rows
-# forward into engine functions, and a row needing a witness cite would be
-# re-deriving engine behavior instead of calling it.
+# The debug-control table (ADR 0043 d12, the C++ pair) shares the boundary
+# floor: its rows forward into engine functions through typed owners, and a
+# row needing a witness cite would be re-deriving engine behavior instead of
+# calling it. These files must exist: a missing one fails the run loudly
+# rather than leaving the floor vacuous.
 MCP_BOUNDARY_EXTRA_FILES = (
-    Path("godot") / "game" / "debug" / "debug_controls.gd",
+    Path("godot") / "src" / "devtools" / "debug_control_table.h",
+    Path("godot") / "src" / "devtools" / "debug_control_table.cpp",
 )
 
 
@@ -269,14 +276,15 @@ def count_mcp_boundary_cites() -> int:
     to JSON; a converter that needs a witness cite is re-deriving engine
     facts at the boundary."""
     count = 0
-    paths = list((REPO / "godot" / "game" / "mcp").rglob("*.gd"))
-    paths += [REPO / extra for extra in MCP_BOUNDARY_EXTRA_FILES]
-    for path in paths:
+    for path in (REPO / "godot" / "game" / "mcp").rglob("*.gd"):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         count += text.count("[orig:")
+    for extra in MCP_BOUNDARY_EXTRA_FILES:
+        # No OSError swallow: the table pair is the floor's subject.
+        count += (REPO / extra).read_text(encoding="utf-8", errors="replace").count("[orig:")
     return count
 
 
@@ -353,8 +361,9 @@ HAS_METHOD_GUARD = re.compile(r"(?<!\w)has_method\s*\(")
 
 
 def count_has_method_guards() -> int:
-    """Duck-type guards in the shipping godot layer (W4-2): the floor is the
-    documented kept set (harness seams and dynamic dispatch), not zero.
+    """Duck-type guards in the shipping godot layer (W4-2): the floor is zero
+    (ADR 0043 d12 typed the last kept set, the render-fixture contract's
+    Object/Node parameters, to their production classes).
     class_has_method is excluded by the word boundary.
     Covers the native binding layer too (godot/src *.cpp/*.h) - a C++
     has_method() probe is the same duck dispatch, just invisible to GDScript
@@ -452,18 +461,20 @@ GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
 
 def count_gd_dict_key_sites() -> int:
     """Dictionary-keyed reads in the shipping GDScript (godot/game and
-    godot/modtools; godot/game/mcp excluded as the sanctioned JSON edge):
-    `row["key"]` and `.get("key"` on code lines. Each site is a record
-    crossing a seam untyped (ADR 0017); a typed RefCounted row removes its
-    sites. The floor is the documented transport edges (the dict-contract
-    allowlist in this file's baseline)."""
+    godot/modtools; godot/game/mcp excluded as the sanctioned JSON transport
+    edge, godot/game/probe as the probe model whose arguments are JSON Schema
+    and whose status pages are the game_probe wire by design): `row["key"]`
+    and `.get("key"` on code lines. Each site is a record crossing a seam
+    untyped (ADR 0017); a typed RefCounted row removes its sites. The floor
+    is the documented transport edges (the dict-contract allowlist in this
+    file's baseline)."""
     count = 0
     for sub in ("game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
                 continue
-            if sub == "game" and len(parts) > 2 and parts[2] == "mcp":
+            if sub == "game" and len(parts) > 2 and parts[2] in ("mcp", "probe"):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
