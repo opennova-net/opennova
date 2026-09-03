@@ -77,7 +77,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.log("frame wall: avg=%.2fms (%.0f fps) over %d frames" % [float(frame["avg_us"]) / 1000.0, fps, _frame_us.size()])
 	var audio := ctx.world().get_mission_audio()
 	if audio != null:
-		data["mission_audio_counters"] = audio.get_perf_counters()
+		data["mission_audio_counters"] = audio.get_perf_counters().to_json_value()
 	return ProbeVerdict.passed("%d frames sampled at %.0f fps" % [_frame_us.size(), fps], data)
 
 

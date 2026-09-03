@@ -55,7 +55,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var container := Node3D.new()
 	container.name = "DialogVsAmbientProbe"
 	ctx.tree.root.add_child(container)
-	var audio := MissionAudio.new(root, item_db)
+	var audio := MissionAudio.create(root, item_db)
 	ctx.defer_restore(func() -> void:
 		audio.teardown()
 		if is_instance_valid(container):
@@ -65,8 +65,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		# "ambient disabled" arm.
 		audio.set_ambient_markers_enabled(false)
 	var stats := audio.setup(mission, mission_name, container)
-	ctx.log("setup: %s" % str(stats.to_dict()))
-	data["setup"] = stats.to_dict()
+	ctx.log("setup: %s" % str(stats.to_json_value()))
+	data["setup"] = stats.to_json_value()
 
 	# The listener parks at the player start when the sim arm resolved one
 	# (the play-test position), else at the origin. A current Camera3D is the

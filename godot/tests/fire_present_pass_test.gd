@@ -41,7 +41,7 @@ func _staged_audio(container: Node3D) -> MissionAudio:
 	assert_eq(root.set_root_dir(_root_dir), OK, "the staged root mounts")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	_audio = MissionAudio.new(root, null)
+	_audio = MissionAudio.create(root, null)
 	var stats := _audio.setup(mission, "fire.bms", container)
 	assert_eq(int(stats.banks_loaded), 1, "the staged mission bank loads")
 	return _audio
@@ -128,7 +128,8 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	# (The sim's own seed applies the same local filter to the sound queue —
 	# the fire_sound ctest pins that half; the drain-consumption itself is the
 	# native queue's contract, exercised by present() over the typed sim.)
-	var audio := MissionAudio.new(null, null)
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
 	var presenter := _make_pass(audio)
 	var local := _event(Vector3(1, 0, 0), 11)
 	local.is_local_player = true
@@ -148,7 +149,8 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 	# A live stdred channel (style 1, 4 points along +X) must produce ONE additive
 	# triangle-strip surface: pairs at points 0..count-2 (the newest point steers
 	# direction only), 2 verts per pair [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0].
-	var audio := MissionAudio.new(null, null)
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var presenter := FirePresentPass.new()
@@ -179,7 +181,8 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 	# A rocket channel (style 3) draws on the smoke surface: alpha blend + scene fog
 	# [orig: style +0 additive flag 0 -> SetFogAndBlendMode mode 0].
-	var audio := MissionAudio.new(null, null)
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var presenter := FirePresentPass.new()
@@ -264,7 +267,7 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	audio.tick(idle.pos, 0.2)
 	var ids := audio.active_ambient_candidate_ids()
 	assert_eq(ids.size(), 1, "the idle lane registers one voice in the shared emitter mix")
-	assert_eq(int(audio.get_perf_counters().get("active_channels", -1)), 1)
+	assert_eq(int(audio.get_perf_counters().active_channels), 1)
 	if ids.size() == 1:
 		var voice := audio.ambient_player_for_candidate(ids[0])
 		assert_not_null(voice, "the registered lane holds a physical channel")

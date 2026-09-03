@@ -341,6 +341,25 @@ add_executable(bank_chain_test audio/bank_chain_test.cpp)
 target_link_libraries(bank_chain_test PRIVATE opennova_runtime)
 add_test(NAME audio_bank_chain COMMAND bank_chain_test)
 
+# The loaded-bank set index (case-insensitive, first bank wins) and the 3D
+# one-shot fire decision (set-range cull, occlusion inflate + recheck, the
+# per-layer member pick and fire-time volume), pushed down from the Godot
+# sound bank (godot/src/audio/sound_bank; ADR 0043 slice G7).
+add_executable(oneshot_play_test audio/oneshot_play_test.cpp)
+target_link_libraries(oneshot_play_test PRIVATE opennova_runtime)
+target_include_directories(oneshot_play_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(oneshot_play_test PRIVATE cxx_std_17)
+add_test(NAME audio_oneshot_play COMMAND oneshot_play_test)
+
+# The serialized dialog queue, the PlayWavList dialog-id resolution through
+# the co-named .DBF and the WAC scripted-voice channel reset, pushed down from
+# the Godot mission audio (godot/src/audio/mission_audio; ADR 0043 slice G7).
+add_executable(dialog_queue_test audio/dialog_queue_test.cpp)
+target_link_libraries(dialog_queue_test PRIVATE opennova_runtime)
+target_include_directories(dialog_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(dialog_queue_test PRIVATE cxx_std_17)
+add_test(NAME audio_dialog_queue COMMAND dialog_queue_test)
+
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)

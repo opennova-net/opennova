@@ -173,15 +173,19 @@ int64_t AmbientMixer::occlusion_trampoline(void *ctx, const float listener[3],
 	return dist_q16;
 }
 
-PackedFloat32Array AmbientMixer::mix(const Vector3 &listener) {
+const std::vector<opennova::audio::AmbientCandidate> &AmbientMixer::mix_rows(
+		const Vector3 &listener) {
 	const float l[3] = { static_cast<float>(listener.x),
 		static_cast<float>(listener.y), static_cast<float>(listener.z) };
 	// Resolve the provider fresh each mix: a freed provider silently degrades to
 	// the unoccluded mix instead of dangling.
 	sim_ = Object::cast_to<Simulation>(ObjectDB::get_instance(provider_id_));
 	const bool has_provider = sim_ != nullptr || occlusion_override_.is_valid();
-	const std::vector<opennova::audio::AmbientCandidate> &out = mixer_.mix(
-			l, has_provider ? &AmbientMixer::occlusion_trampoline : nullptr, this);
+	return mixer_.mix(l, has_provider ? &AmbientMixer::occlusion_trampoline : nullptr, this);
+}
+
+PackedFloat32Array AmbientMixer::mix(const Vector3 &listener) {
+	const std::vector<opennova::audio::AmbientCandidate> &out = mix_rows(listener);
 	PackedFloat32Array rows;
 	rows.resize(static_cast<int64_t>(out.size()) * 6);
 	float *w = rows.ptrw();

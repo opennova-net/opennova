@@ -123,6 +123,10 @@
 #include "lwf/wav_loader.h"
 #include "audio/ambient_mixer.h"
 #include "audio/sound_selector.h"
+#include "audio/ambient_layer.h"
+#include "audio/sound_bank.h"
+#include "audio/mission_audio_records.h"
+#include "audio/mission_audio.h"
 #include "dbf/dbf_data.h"
 #include "cbin/cbin_credits_resource.h"
 #include "cbin/credits_player.h"
@@ -339,6 +343,17 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AmbientMixer);
 	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
+	GDREGISTER_CLASS(AmbientLayer);
+	GDREGISTER_CLASS(SoundBank);
+	GDREGISTER_CLASS(MissionAudioMarker);
+	GDREGISTER_CLASS(MissionAudioChannel);
+	GDREGISTER_CLASS(MissionAudioCandidateBinding);
+	GDREGISTER_CLASS(MissionAudioCandidate);
+	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
+	GDREGISTER_CLASS(MissionAudioStats);
+	GDREGISTER_CLASS(MissionAudioPerf);
+	GDREGISTER_CLASS(FiredSoundset);
+	GDREGISTER_CLASS(MissionAudio);
 	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
 	GDREGISTER_CLASS(CbinTextEntry);
 	GDREGISTER_CLASS(CbinNewlineEntry);

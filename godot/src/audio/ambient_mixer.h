@@ -8,6 +8,8 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <vector>
+
 #include <runtime/audio/ambient_mixer.h>
 
 namespace godot {
@@ -17,15 +19,15 @@ class Simulation;
 // Thin Godot binding over opennova::audio::AmbientMixer: the placed-marker ambient
 // emitter system at the witnessed split cadence — staggered tick&7 eval/registration
 // on the logic-tick clock, per-frame live-slot mix (docs/audio/lwf-dbf-sound-re.md
-// §driver cadence, D-SND-16). The GDScript mission audio (mission_audio.gd)
+// §driver cadence, D-SND-16). The mission audio (audio/mission_audio)
 // feeds resolved marker/layer data at setup, pumps the clocks, and binds the ranked
 // result to its persistent AudioStreamPlayer3D channels; occlusion routes to the
 // Simulation natively (tests inject a Callable override — the typed seam).
 //
-// The curve family is exposed as statics so the GDScript sound bank keeps its
-// public seams (calc_distance_volume / emitter_layer_volume) as one-line
-// delegates; the time-of-day region and the crossfade byte are consumed
-// natively (ctest ambient_mixer pins them) and are not bound.
+// The curve family is exposed as statics (the sound bank's pinned seams
+// calc_distance_volume / emitter_layer_volume read the same engine functions);
+// the time-of-day region and the crossfade byte are consumed natively (ctest
+// ambient_mixer pins them) and are not bound.
 class AmbientMixer : public RefCounted {
 	GDCLASS(AmbientMixer, RefCounted)
 
@@ -72,13 +74,17 @@ public:
 
 	// Ranked candidates: [candidate_id, vol, pitch_q16, x, y, z], stride 6.
 	PackedFloat32Array mix(const Vector3 &listener);
+	// C++-side seam (not bound): the same ranked mix as the engine's own rows
+	// (audio/mission_audio binds them to its channels without the float
+	// transport).
+	const std::vector<opennova::audio::AmbientCandidate> &mix_rows(const Vector3 &listener);
 
 	int live_slot_count() const;
 	int64_t clock_tick() const;
 	int marker_count() const;
 
 	// The witnessed curve family (see engine/runtime/audio/ambient_mixer.h for the [orig]
-	// map); statics so sound_bank.gd's pinned seams delegate here.
+	// map); statics so the GUT pins over the curve keep a bound home.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);
 	static int oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,

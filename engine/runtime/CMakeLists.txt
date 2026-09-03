@@ -15,7 +15,9 @@ add_library(opennova_runtime STATIC
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # devtools — the ImGui pass, ONED's run surface and the frame-stats board

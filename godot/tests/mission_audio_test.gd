@@ -23,26 +23,38 @@ class OcclusionRecorder:
 		return raw_distance_q16
 
 
+# One placed marker record: `layers_by_set` maps a set name to its
+# AmbientLayer rows (set order = the mixer's slot-key index order).
 func _marker(pos: Vector3, slot_sets: PackedStringArray,
-		layers_by_set: Dictionary, stagger_slot := 0, source_bms_id := 0) -> MissionAudio.Marker:
-	return MissionAudio.Marker.new(pos, source_bms_id, slot_sets, stagger_slot, layers_by_set)
+		layers_by_set: Dictionary, stagger_slot := 0, source_bms_id := 0) -> MissionAudioMarker:
+	var marker := MissionAudioMarker.new()
+	marker.pos = pos
+	marker.source_bms_id = source_bms_id
+	marker.slot_sets = slot_sets
+	marker.stagger_slot = stagger_slot
+	for set_name in layers_by_set:
+		var layers: Array[AmbientLayer] = []
+		layers.assign(layers_by_set[set_name])
+		marker.set_layers(String(set_name), layers)
+	return marker
 
 
-func _layer(falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> Dictionary:
+# One layer descriptor with an injected in-memory stream (no bank resolve).
+func _layer(falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> AmbientLayer:
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate = 22050
 	var samples := PackedByteArray()
 	samples.resize(32)
 	stream.data = samples
-	return {
-		"stream": stream,
-		"falloff_radius": falloff,
-		"min_distance": min_dist,
-		"volume": volume,
-		"clamp_volume": clamp_vol,
-		"base_pitch": 1.0,
-	}
+	var layer := AmbientLayer.new()
+	layer.stream = stream
+	layer.falloff_radius = falloff
+	layer.min_distance = min_dist
+	layer.volume = volume
+	layer.clamp_volume = clamp_vol
+	layer.base_pitch = 1.0
+	return layer
 
 
 func _players(container: Node) -> Array[AudioStreamPlayer3D]:
@@ -75,7 +87,7 @@ func test_native_mixer_rows_carry_pitch() -> void:
 
 
 func test_only_the_loudest_eight_candidates_mix() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers: Array = []
@@ -101,7 +113,7 @@ func test_only_the_loudest_eight_candidates_mix() -> void:
 
 
 func test_beyond_falloff_radius_is_hard_silent() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	audio.set_markers([_marker(
@@ -115,7 +127,7 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 	# Two active layers on one audible marker share one two-ray result. A second
 	# active marker is already silent by raw falloff and must not spend a query.
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var provider := OcclusionRecorder.new()
 	audio.set_occlusion_override(provider.occlude)
 	var holder := Node3D.new()
@@ -138,7 +150,7 @@ func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 
 
 func test_time_of_day_slot_selects_the_active_set() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	# Night-only marker (a flourescent light): soundloop_4 filled, 1..3 empty.
@@ -157,7 +169,7 @@ func test_time_of_day_slot_selects_the_active_set() -> void:
 
 
 func test_region_crossfade_scales_volume() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers := [_marker(
@@ -179,7 +191,7 @@ func test_region_crossfade_scales_volume() -> void:
 
 
 func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
@@ -199,7 +211,7 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 
 
 func test_tick_writes_only_on_change() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	audio.set_markers([_marker(
@@ -207,27 +219,27 @@ func test_tick_writes_only_on_change() -> void:
 		{"amb": [_layer(500)]})], holder)
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "first tick writes the voice on")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "first tick writes the voice on")
 	var p := _players(holder)[0]
 	var first_stream := p.stream
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "unchanged mix writes nothing")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 0, "unchanged mix writes nothing")
 	assert_eq(_players(holder)[0], p, "the incumbent keeps its physical channel")
 	assert_eq(_players(holder)[0].stream, first_stream, "the incumbent playback is not restarted")
 
 	audio.tick(Vector3(2000, 0, 0), 0.2)  # walk out of range
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "leaving range writes the silence once")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "leaving range writes the silence once")
 	assert_eq(p.volume_db, SILENT_DB)
 	assert_null(p.stream, "a dropout releases its bound stream")
 	assert_eq(p.process_mode, Node.PROCESS_MODE_DISABLED,
 		"an unused physical channel leaves SceneTree processing")
 
 	audio.tick(Vector3(2000, 0, 0), 0.2)
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "steady silence writes nothing")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 0, "steady silence writes nothing")
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1,
+	assert_eq(int(audio.get_perf_counters().voice_writes), 1,
 		"re-entering the mix binds and restarts the voice once")
 	assert_eq(_players(holder)[0], p, "the bounded pool reuses its free channel")
 	assert_ne(_players(holder)[0].stream, first_stream,
@@ -236,12 +248,12 @@ func test_tick_writes_only_on_change() -> void:
 		"an audible entrant returns the physical channel to processing")
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0,
+	assert_eq(int(audio.get_perf_counters().voice_writes), 0,
 		"the resumed steady mix stays write-free")
 
 
 func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
-	var audio = MissionAudio.new(null, null)
+	var audio = MissionAudio.create(null, null)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var markers: Array = []
@@ -294,7 +306,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, null)
+	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "vehicle_probe.bms", container)
 
 	# Dynamic engine voices share retail's loudest-eight emitter budget with
@@ -370,7 +382,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, null)
+	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "vehicle_catchup.bms", container)
 
 	audio.apply_sound_emitters([_emitter_row(77, Vector3(40, 0, 0), 0x10000, 0xFFFF, 1)])
@@ -444,7 +456,7 @@ end
 	mission.add_entity(MissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, item_db)
+	var audio = MissionAudio.create(root, item_db)
 	var provider := OcclusionRecorder.new()
 	audio.set_occlusion_override(provider.occlude)
 	var stats := audio.setup(mission, "probe.bms", container)
@@ -513,7 +525,7 @@ end
 		MissionData.KIND_BUILDING, 100002, Vector3(10, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, item_db)
+	var audio = MissionAudio.create(root, item_db)
 	var stats := audio.setup(mission, "probe.bms", container)
 
 	assert_eq(int(stats.ambient_candidates), 2)
@@ -551,7 +563,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	mission.create_default()
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, null)
+	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "first.bms", container)
 	assert_eq(audio.resolve_dialog_set(1), "SynR100")
 	assert_true(audio.play_dialog(1))
@@ -592,7 +604,7 @@ func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
 	mission.set_header_int("reverb", 1)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = MissionAudio.new(root, null)
+	var audio = MissionAudio.create(root, null)
 	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
 	assert_gte(ambient_bus, 0)
 	audio.setup(mission, "reverb_probe.bms", container)

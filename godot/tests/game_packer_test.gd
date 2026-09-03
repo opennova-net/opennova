@@ -244,9 +244,9 @@ func test_stage_retail_fails_when_the_runtime_is_incomplete() -> void:
 	var root := _make_root({ "items.def": "defs" })
 	var retail := OS.get_user_data_dir().path_join("retail_%d" % Time.get_ticks_usec())
 	_write_files(retail, { "Jointops.exe": "exe", "binkw32_.dll": "bink" })
-	var result: Dictionary = PackerScript.stage_retail(root, retail)
-	assert_false(result["ok"], "an incomplete retail runtime does not stage")
-	assert_true(String(result["error"]).contains("game.cfg"), "and names the missing file: %s" % result["error"])
+	var result: RetailStageResult = PackerScript.stage_retail(root, retail)
+	assert_false(result.ok, "an incomplete retail runtime does not stage")
+	assert_true(result.error.contains("game.cfg"), "and names the missing file: %s" % result.error)
 	assert_true(PackerScript.retail_install_error(retail).contains("game.cfg"),
 			"readiness reports the same actionable problem before launch")
 
@@ -256,10 +256,10 @@ func test_stage_retail_stages_every_runtime_file() -> void:
 	var retail := OS.get_user_data_dir().path_join("retail_%d" % Time.get_ticks_usec())
 	_write_files(retail, { "Jointops.exe": "exe", "binkw32_.dll": "real bink",
 			"binkw32.dll": "hook shim", "game.cfg": "cfg" })
-	var result: Dictionary = PackerScript.stage_retail(root, retail)
-	assert_true(result["ok"], "staging succeeded: %s" % result.get("error", ""))
+	var result: RetailStageResult = PackerScript.stage_retail(root, retail)
+	assert_true(result.ok, "staging succeeded: %s" % result.error)
 	var out := ProjectSettings.globalize_path("user://packed")
-	assert_eq(String(result["exe"]), out.path_join("Jointops.exe"), "the exe to launch is the staged copy")
+	assert_eq(result.exe, out.path_join("Jointops.exe"), "the exe to launch is the staged copy")
 	assert_eq(FileAccess.get_file_as_string(out.path_join("binkw32.dll")), "real bink",
 			"the underscored real Bink is staged under the name retail loads, not the hook shim")
 	assert_true(FileAccess.file_exists(out.path_join("game.cfg")), "game.cfg is staged")

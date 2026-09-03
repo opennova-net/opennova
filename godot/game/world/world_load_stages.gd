@@ -273,8 +273,10 @@ func unload() -> void:
 	# Per-item attached-effect owner keys reference nodes in that container —
 	# never let a reload's provider resolve against freed instances.
 	_world._item_fx.reset()
-	if _world._mission_audio != null:
-		_world._mission_audio.teardown()
+	var mission_audio := _world._mission_audio
+	if mission_audio != null:
+		mission_audio.teardown()
+		mission_audio.queue_free()  # the node is the audio root; the world owned it
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	MusicService.stop_context()
@@ -819,7 +821,7 @@ func _load_player_weapon_profile() -> void:
 # voices. Reuses the placer's item database for the item_id -> soundloop_1..4 lookup.
 func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 	var item_db: ItemDatabase = _world._placer.get_item_db() if _world._placer != null else null
-	_world._mission_audio = MissionAudio.new(_world._resource_root, item_db)
+	_world._mission_audio = MissionAudio.create(_world._resource_root, item_db)
 	# Sound occlusion runs LOS through the sim's collision world + terrain
 	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix
 	# unoccluded.
