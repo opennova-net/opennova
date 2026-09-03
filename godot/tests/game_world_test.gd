@@ -368,11 +368,11 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 			"the reason names the installed expansion set")
 
 
-# The env presenters hand their clocks to GameFramePipeline at _ready: their
+# The env presenters hand their clocks to the world's leg table at _ready: their
 # idle callbacks stay off under a live world, or their cost leaves the
 # measured WORLD_ENV_NODES/WORLD_WATER legs for the unmeasured
 # process-callbacks window and the advance races the camera placement
-# (game_world.gd's _env_presenters_world_driven handoff; D-RORD-8's ordering).
+# (GameWorld's env-presenters-world-driven handoff; D-RORD-8's ordering).
 func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 	var world := WorldFixture.make_world(self)
 	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water", "SunShadow"]:
@@ -402,15 +402,14 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 func test_perf_counters_estimate_the_retained_instance_uniform_geometry() -> void:
 	var world := WorldFixture.make_world(self)
-	var idle: Dictionary = world.get_runtime_perf_counters().get(
-			"instance_uniform_geometry_estimate", {})
-	assert_eq(int(idle.get("budget", 0)),
+	var idle: RuntimePerfCounters = world.get_runtime_perf_counters()
+	assert_eq(int(idle.estimate_budget),
 			int(ProjectSettings.get_setting(
 					"rendering/limits/global_shader_variables/buffer_size", 0)) / 16,
 			"the budget is the project's buffer_size in 16-value geometry slots")
-	assert_eq(int(idle.get("total", -1)),
-			int(idle.get("foliage_pool", 0)) + int(idle.get("static_populations", 0))
-			+ int(idle.get("object_geometry", 0)),
+	assert_eq(int(idle.estimate_total),
+			int(idle.estimate_foliage_pool) + int(idle.estimate_static_populations)
+			+ int(idle.estimate_object_geometry),
 			"the total is the sum of the three shell-owned terms")
 
 	# An authored building places a real ObjectModel (house.3di as GuardTwr1):
@@ -421,19 +420,18 @@ func test_perf_counters_estimate_the_retained_instance_uniform_geometry() -> voi
 			func(mission: MissionData) -> void:
 				mission.add_entity(
 						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)), OK)
-	var loaded: Dictionary = world.get_runtime_perf_counters().get(
-			"instance_uniform_geometry_estimate", {})
-	var placement: Dictionary = world.get_runtime_perf_counters().get(
-			"mission_placement", {})
-	assert_eq(int(loaded.get("static_populations", -1)),
-			int(placement.get("batches", 0)) + int(placement.get("static_shadow_batches", 0)),
+	var loaded: RuntimePerfCounters = world.get_runtime_perf_counters()
+	var placement: MissionPlacementStats = loaded.mission_placement
+	assert_not_null(placement, "a placed mission carries its placement stats")
+	assert_eq(int(loaded.estimate_static_populations),
+			int(placement.get_batches()) + int(placement.get_static_shadow_batches()),
 			"static populations count the placer's visible batches and shadow twins")
-	assert_gt(int(loaded.get("object_geometry", 0)), before_load,
+	assert_gt(int(loaded.estimate_object_geometry), before_load,
 			"the placed building's ObjectModel retains instance-uniform geometry")
-	assert_eq(int(loaded.get("object_geometry", -1)),
+	assert_eq(int(loaded.estimate_object_geometry),
 			int(ObjectModel.get_live_geometry_instance_count()),
 			"the object term is the live ObjectModel surface-instance count")
-	assert_lte(int(loaded.get("total", 0)), int(loaded.get("budget", 0)),
+	assert_lte(int(loaded.estimate_total), int(loaded.estimate_budget),
 			"the minimal mission stays inside the instance-uniform budget")
 	world.unload()
 	await get_tree().process_frame
@@ -488,7 +486,7 @@ func test_round_light_move_rows_reach_world_selected_output() -> void:
 	assert_gte(int(world.get_sim().debug_spawn_round(
 			camera.position, Vector3.RIGHT, "AM_556MM")), 0)
 	world.tick(camera.position, camera.global_transform, ONE_TICK_DELTA)
-	world.device_frame().render_light_frame()
+	world.render_light_frame()
 	var report := world.get_effect_light_report()
 	var report_contract: Variant = report
 	assert_true(report_contract is EffectLightReport,
@@ -562,7 +560,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	camera.position = Vector3(16, 60, -16)
 	world.add_child(camera)
 	camera.make_current()
-	world.device_frame().render_light_frame()
+	world.render_light_frame()
 	assert_eq(world.get_effect_light_report().selected, 1,
 			"the impact flash reaches camera-global object output")
 
@@ -767,7 +765,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
-	assert_true(world is GameWorld, "the root carries the GameWorld script")
+	assert_true(world is GameWorld, "the root is the native GameWorld")
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
 			"SunShadow", "SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
@@ -1091,7 +1089,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"below-water particle visibility follows water murk")
 	assert_eq(int(particle_fog.get("type", -1)), 1,
 			"below-water particle submissions use linear fog")
-	# Weather writes shader globals from its GameFramePipeline leg (the env
+	# Weather writes shader globals from its world leg (the env
 	# nodes advance after the scene-environment classify, before terrain) in a
 	# live frame. Drive that leg explicitly in this paused harness and prove it
 	# cannot replace the selected shared payload with dry fog. The portable
@@ -1331,7 +1329,7 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 		effect_world.advance_fixed_tick(0.016)
 	camera.global_position = Vector3(2.0, 1.5, 12.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
-	world.device_frame().render_particle_frame()
+	world.render_particle_frame()
 	var before: Dictionary = effect_world.get_debug_draw_list_report().get(
 			"world_camera_side", {})
 	assert_gt(int(before.get("rendered_quad_count", 0)), 0,
@@ -1526,11 +1524,13 @@ func test_injected_root_bypasses_settings_mount() -> void:
 
 # Typed net-session request builders (the records GameWorld's host/joiner entries
 # consume; expansion/game_type ride the record defaults: "" + GAME_TYPE_COOP).
-func _lan_host_config(mission: String, bind_port: int) -> HostSessionConfig:
+# The host entry takes the sim-shaped HostSessionOptions the host screen's
+# config projects (HostSessionConfig.to_session_options).
+func _lan_host_config(mission: String, bind_port: int) -> HostSessionOptions:
 	var config := HostSessionConfig.new()
 	config.mission = mission
 	config.bind_port = bind_port
-	return config
+	return config.to_session_options()
 
 
 func _join_target(host_ip: String, port: int, mission := "", player_name := "Joiner") -> JoinTarget:
@@ -1820,7 +1820,7 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
 
-	var timeline: PerfTimeline = world.last_load_timeline()
+	var timeline: LoadTimeline = world.last_load_timeline()
 	assert_not_null(timeline, "a failed environment stage still retains its timeline")
 	if timeline == null:
 		return
@@ -1856,7 +1856,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
 
-	var timeline: PerfTimeline = world.last_load_timeline()
+	var timeline: LoadTimeline = world.last_load_timeline()
 	assert_not_null(timeline, "a failed terrain stage still retains its timeline")
 	if timeline == null:
 		return
@@ -2363,7 +2363,7 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
 		"the authoritative basename is normalized for mission/text-table naming")
 	world.unload()
-	# The admission watchdog used to be a coroutine owned by NetSessionDrive.
+	# The admission watchdog used to be a coroutine owned by the session drive.
 	# Freeing its sole GameWorld owner while it awaited process_frame made Godot
 	# resume a method whose class instance was already gone on the next frame.
 	world.free()
@@ -2970,13 +2970,17 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	# [orig: render_main_scene @ 0x5c1353 (PolyTrn skip), the skybox skip
 	# @ 0x5ca84f]. Driven end-to-end through the REAL sim by the mission's
 	# force-indoors attribute [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]; the
-	# outdoors edge flips the same mission flag the load latched. The water
-	# letter legs (accum bit 0x8) are gone with the sim doubles: letters
-	# accumulate only inside authored blink boxes, which no fixture model
-	# carries — the water gate keeps its witness in the [orig] cites of
-	# OcclusionFrame (godot/src/world/occlusion_frame.cpp).
-	var world := WorldFixture.boot_minimal(self, "", func(mission: MissionData) -> void:
-		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true)))
+	# attribute is mission state the load latches, so the outdoors edge is the
+	# next load of the same pack without it. The water letter legs (accum bit
+	# 0x8) are gone with the sim doubles: letters accumulate only inside
+	# authored blink boxes, which no fixture model carries — the water gate
+	# keeps its witness in the [orig] cites of OcclusionFrame
+	# (godot/src/world/occlusion_frame.cpp).
+	var root_dir := WorldFixture.stage_minimal_root("blink_gates")
+	var world := WorldFixture.make_world(self)
+	var indoors := func(mission: MissionData) -> void:
+		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true))
+	assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION, indoors), OK)
 	var sky := world.get_node("SkyDome") as Node3D
 	var water := world.get_node("Water") as Node3D
 	var terrain := world.get_node("Terrain") as Node3D
@@ -2986,16 +2990,18 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	assert_false(sky.visible, "indoors skips the skybox pass")
 	assert_true(water.visible, "the indoors bit alone leaves water on")
 
-	# The outdoors edge: clear the mission attribute the load latched (the same
-	# private the probe-skip test drives) and the letter gates restore.
-	world.set("_mission_forces_indoors", false)
+	# The outdoors edge: the next mission carries no force-indoors attribute
+	# and the letter gates restore.
+	world.unload()
+	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_true(terrain.visible, "outdoors restores the terrain")
 	assert_true(sky.visible, "outdoors restores the sky")
 	assert_true(water.visible, "outdoors leaves the water on")
 
 	# An unload while indoors must not leach into the next mission.
-	world.set("_mission_forces_indoors", true)
+	world.unload()
+	assert_eq(WorldFixture.load_mission(world, root_dir, WorldFixture.MINIMAL_MISSION, indoors), OK)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(sky.visible, "back indoors before the unload")
 	world.unload()
@@ -3087,9 +3093,13 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 	assert_false(building.visible, "occlusion claims the behind-camera building")
 	assert_eq(weather.iris_samples.size(), 3,
 			"the real sim marches three iris samples into the weather node")
-	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
-			"normal frames do not pay for or retain probe spans")
 
+	# The per-leg spans land on the F3 Stats board (the leg table's LegScope
+	# and OcclusionFrame.apply_frame's own split): a skipped occlusion frame
+	# banks no apply sample while the iris leg keeps banking.
+	var board := FrameStats.new()
+	world.set_frame_stats(board)
+	board.set_capture_active(true)
 	world.set_perf_probe_enabled(true)
 	world.set_perf_probe_skip_occlusion(true)
 	weather.iris_samples = PackedInt32Array()
@@ -3098,17 +3108,19 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			"entering the skip releases the occlusion claim onto present intent")
 	assert_eq(weather.iris_samples.size(), 3,
 			"iris exposure still samples while occlusion is skipped")
-	var spans: Dictionary = world.get("_perf_probe_spans")
-	assert_eq(int(spans.get("occl_frame", -1)), 0,
-			"a skipped phase reports zero rather than a stale prior span")
-	assert_true(spans.has("iris"), "enabled probe frames publish the live iris span")
+	var skipped := board.drain().sample_frames
+	assert_eq(skipped[FrameStats.OCCL_APPLY], 0,
+			"a skipped occlusion frame banks no apply span rather than a stale prior one")
+	assert_gt(skipped[FrameStats.WORLD_IRIS], 0,
+			"probe frames still bank the live iris span")
 
 	world.set_perf_probe_skip_occlusion(false)
 	world.tick(eye, away, ONE_TICK_DELTA)
 	assert_false(building.visible,
 			"leaving the skip re-emits the claim from the sim's delta baseline")
-	assert_gt(int((world.get("_perf_probe_spans") as Dictionary).get("occl_frame", -1)), -1,
+	assert_gt(board.drain().sample_frames[FrameStats.OCCL_APPLY], 0,
 			"leaving the skip resumes the render-occlusion frame span")
+	world.set_frame_stats(null)
 
 
 func test_tick_never_emits_session_lost_for_a_non_joiner() -> void:

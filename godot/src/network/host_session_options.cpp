@@ -179,6 +179,11 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::BOOL, serve_and_play)
 	HOST_SESSION_PROPERTY(Variant::BOOL, game_type_auto)
 	HOST_SESSION_PROPERTY(Variant::STRING, game_root)
+	HOST_SESSION_PROPERTY(Variant::STRING, dir)
+	HOST_SESSION_PROPERTY(Variant::STRING, nw_gate_host)
+	HOST_SESSION_PROPERTY(Variant::INT, nw_gate_port)
+	HOST_SESSION_PROPERTY(Variant::STRING, region)
+	HOST_SESSION_PROPERTY(Variant::STRING, advertise)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
 }

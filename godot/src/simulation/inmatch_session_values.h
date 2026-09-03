@@ -12,7 +12,7 @@
 namespace godot {
 
 // Typed Godot values for the portable in-match Session. They carry
-// data only: GameFramePipeline owns Godot device ordering and Simulation owns the
+// data only: the GameWorld leg table owns Godot device ordering and Simulation owns the
 // conversion to/from the native session records.
 class MissionFrameInput : public RefCounted {
 	GDCLASS(MissionFrameInput, RefCounted)

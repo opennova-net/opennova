@@ -22,8 +22,8 @@ namespace godot {
 
 // Typed record for MissionRoot.setup() (ADR 0017/0042): every input the
 // composition hands the mission root, replacing the old options Dictionary.
-// WorldLoadStages._start_runtime builds one per load and
-// NetSessionDrive.stage_runtime_options stamps the staged net-session request
+// GameWorld's runtime stage builds one per load and
+// SessionDrive::stage_runtime_options stamps the staged net-session request
 // onto the same record; isolated tests fill only the fields they exercise. An
 // unset reference reads null/empty and means "not provided", exactly as the
 // old absent keys did. Ported from mission_setup_options.gd (ADR 0043 slice
@@ -33,7 +33,7 @@ class MissionSetupOptions : public RefCounted {
 
 public:
 	// The already-connected simulation to adopt: a remote join owns the live
-	// socket + NP session before the wire-header world load (NetSessionDrive
+	// socket + NP session before the wire-header world load (SessionDrive
 	// surrenders it here). Null = setup creates a fresh Simulation. MissionRoot
 	// is the one adopter either way (ADR 0011/0012).
 	Ref<Simulation> get_simulation() const { return simulation_; }
@@ -104,7 +104,7 @@ public:
 	void set_placer(const Ref<MissionObjectPlacer> &p_value) { placer_ = p_value; }
 
 	// --- Net staging read DOWNSTREAM of setup(): GameWorld's LAN bind-failure
-	//     report and NetSessionDrive's NovaWorld gate registration. ---
+	//     report and SessionDrive's NovaWorld gate registration. ---
 	// "lan" for a staged host, "lan-join" for a staged joiner, "" for a local
 	// start.
 	String get_net_transport() const { return net_transport_; }

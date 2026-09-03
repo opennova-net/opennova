@@ -19,8 +19,8 @@
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 1,
-    "gd_dict_key_sites": 202,
-    "gd_foreign_private_accesses": 547,
+    "gd_dict_key_sites": 177,
+    "gd_foreign_private_accesses": 53,
     "gd_prints_outside_debug": 0,
     "gd_test_production_subclasses": 21,
     "godot_orig_cites": 1038,
@@ -56,8 +56,6 @@
     "probe_runner.gd|func start(",
     "probe_runner.gd|func status(",
     "probe_runner.gd|func cancel(",
-    "game_world.gd|func get_perf_probe_spans(",
-    "world_device_frame.gd|func get_runtime_perf_counters()",
     "perf_probe_switches.gd|var spans: Dictionary"
   ]
 }

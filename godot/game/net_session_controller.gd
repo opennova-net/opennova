@@ -112,7 +112,7 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 			_resolve_mission_title(config.mission), config.game_type, config.custom_text)
 	_shell.start_world_load(
 		load_info,
-		_world.load_mission_as_host.bind(config))
+		_world.load_mission_as_host.bind(config.to_session_options()))
 
 
 ## Public entry for "join this server" — the seam behind the LAN browser's
@@ -428,7 +428,7 @@ func _restore_menu_after_novaworld() -> void:
 # The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
 # available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
 # the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + the NovaWorld channel,
-# so net_session_drive._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+# so SessionDrive::maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
@@ -448,7 +448,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	_shell.start_world_load(
 			LoadingScreenInfo.make(mission, true, config.server_name,
 					_resolve_mission_title(mission), config.game_type, config.custom_text),
-			_world.load_mission_as_host.bind(config))
+			_world.load_mission_as_host.bind(config.to_session_options()))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match

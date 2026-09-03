@@ -5,7 +5,7 @@ GDExtension classes binding `engine/` to Godot. Register new classes in
 `register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
 line here earns its place only as a device leg (marshalling, nodes, servers,
 input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
-Godot's `GameFramePipeline`, or a documented seam bridge — format/runtime logic
+the `GameWorld` frame-leg table, or a documented seam bridge — format/runtime logic
 and every witnessed behavior belong in `engine/`. The engine's formats never touch
 Godot's resource system
 (documents self-read/write via `load_from_path`/`save_to_path`).

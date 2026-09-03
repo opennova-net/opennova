@@ -630,7 +630,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	rt.get_sim().resolve_item_traits(item_db)
 	assert_gte(rt.get_sim().debug_spawn_round(
 			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
-	# The per-tick observation (the GameFramePipeline leg): advance the real
+	# The per-tick observation (the GameWorld leg): advance the real
 	# effect world after each fixed tick and read the round-bound group from
 	# the public report. A group the tick's throwable sync retired is already
 	# detached BEFORE that advance (the release timing pinned below); the

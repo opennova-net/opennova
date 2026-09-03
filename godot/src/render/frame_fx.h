@@ -145,7 +145,7 @@ public:
 	static void invalidate_q3_source(GeometryInstance3D *p_source);
 	static void invalidate_q3_instances(GeometryInstance3D *p_source);
 
-	// Ordered device leg, driven from GameFramePipeline immediately after the
+	// Ordered device leg, driven from the GameWorld leg table immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node
 	// process callback races the pipeline's camera producer, and a Q3 frame
 	// compiled from last frame's pose composites stale glow over the

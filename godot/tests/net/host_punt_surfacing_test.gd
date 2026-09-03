@@ -56,16 +56,16 @@ var _shell: Node = null
 
 
 # The screen's narrow world view, faked over the loopback joiner sim and the
-# staged menu root (rule 11: a fake of a GDScript interface, public verbs only).
+# staged menu root (rule 11: a fake of the WorldView interface through its virtual hooks).
 class FakeWorldView:
 	extends WorldView
 	var root: ResourceRoot
 	var sim_value: Simulation
 
-	func sim() -> Simulation:
+	func _sim() -> Simulation:
 		return sim_value
 
-	func resource_root() -> ResourceRoot:
+	func _resource_root() -> ResourceRoot:
 		return root
 
 

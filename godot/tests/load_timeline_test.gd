@@ -1,13 +1,13 @@
 extends GutTest
 
-# PerfTimeline (engine/util/perf_timeline.gd): span nesting, unbalanced-span
-# recovery, the retained ring, and the summary/brief lines. The class has no
-# global cost between operations — these tests exercise the whole surface the
-# mission-load instrumentation and the future overlay perf pane rely on.
+# LoadTimeline (godot/src/world/load_timeline): span nesting, unbalanced-span
+# recovery, and the summary/brief lines. The class has no global cost between
+# operations — these tests exercise the whole surface the mission-load
+# instrumentation relies on.
 
 
 func test_spans_nest_and_measure() -> void:
-	var timeline := PerfTimeline.begin("op")
+	var timeline := LoadTimeline.begin("op")
 	timeline.span("outer")
 	timeline.span("inner")
 	timeline.end_span()
@@ -23,7 +23,7 @@ func test_spans_nest_and_measure() -> void:
 
 
 func test_finish_closes_unbalanced_spans() -> void:
-	var timeline := PerfTimeline.begin("op")
+	var timeline := LoadTimeline.begin("op")
 	timeline.span("left_open")
 	timeline.finish()
 	assert_true(timeline.spans()[0].end_us > 0,
@@ -31,14 +31,14 @@ func test_finish_closes_unbalanced_spans() -> void:
 
 
 func test_end_span_without_open_is_inert() -> void:
-	var timeline := PerfTimeline.begin("op")
+	var timeline := LoadTimeline.begin("op")
 	timeline.end_span()
 	timeline.finish()
 	assert_eq(timeline.spans().size(), 0)
 
 
 func test_brief_lists_top_level_spans_without_label() -> void:
-	var timeline := PerfTimeline.begin("op")
+	var timeline := LoadTimeline.begin("op")
 	timeline.span("alpha")
 	timeline.end_span()
 	timeline.span("beta")
@@ -52,7 +52,7 @@ func test_brief_lists_top_level_spans_without_label() -> void:
 
 
 func test_span_names_and_ms() -> void:
-	var timeline := PerfTimeline.begin("op")
+	var timeline := LoadTimeline.begin("op")
 	timeline.span("stage")
 	timeline.end_span()
 	timeline.finish()

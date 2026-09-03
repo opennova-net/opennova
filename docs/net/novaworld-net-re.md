@@ -4519,7 +4519,7 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   reconcile decision — is native `inmatch::JoinSessionPolicy`
   (`engine/runtime/inmatch/join_session_policy.cpp`, bound as `NetSessionPolicy`); the
   admission frame ORDERING (loss > abort > settle > window > edges) is locked by the
-  `npruntime_join_session_policy` ctest, and `net_session_drive.gd` keeps only signals,
+  `npruntime_join_session_policy` ctest, and `godot/src/world/session_drive.cpp` keeps only signals,
   lifetime, and the shell actions the policy's edges name.
 - Self-identification, active-session/gameplay state, and the deploy UI are separate. With spawn
   zones, the initial loadout grants open gameplay once H is known while the player-paced UI stays

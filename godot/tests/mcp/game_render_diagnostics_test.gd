@@ -10,7 +10,7 @@ func test_project_uses_the_retail_reference_anisotropy() -> void:
 func test_render_snapshot_reports_the_active_anisotropy() -> void:
 	var world := preload("res://game/world/game_world.tscn").instantiate() as GameWorld
 	add_child_autofree(world)
-	var value: Dictionary = world.get_render_diagnostics().to_json_value()
+	var value: Dictionary = GameRenderDiagnostics.sample(world).to_json_value()
 	var anisotropy := value["renderer"]["default_anisotropy"] as Dictionary
 	assert_eq(int(anisotropy["level"]), 4)
 	assert_eq(int(anisotropy["samples"]), 16)
@@ -29,7 +29,7 @@ func test_render_snapshot_carries_the_live_terrain_surface_inputs() -> void:
 	data.set_detail_density2(11)
 	assert_true(terrain.get_surface_inputs().rebuild(data))
 
-	var value: Dictionary = world.get_render_diagnostics().to_json_value()
+	var value: Dictionary = GameRenderDiagnostics.sample(world).to_json_value()
 	var terrain_state := value["terrain"] as Dictionary
 	assert_true(bool(terrain_state["available"]))
 	assert_eq(terrain_state["tile_cache"], terrain.get_tile_cache_diagnostics(),
@@ -69,7 +69,7 @@ func test_game_world_exposes_an_exact_json_safe_render_snapshot() -> void:
 	world.add_child(hidden_light)
 	await get_tree().process_frame
 
-	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
+	var snapshot: GameRenderDiagnostics = GameRenderDiagnostics.sample(world, camera)
 	var value: Dictionary = snapshot.to_json_value()
 	assert_eq(value["schema"], "OpenNovaRenderDiagnosticsV1")
 	assert_eq(value["frame"]["process"], Engine.get_process_frames())

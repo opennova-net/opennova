@@ -657,7 +657,7 @@ static func comparison_spawn_profile(contract: Dictionary) -> Dictionary:
 	profile["side_profiles"] = [
 		# Retail profile slot 0 in the comparison install: blue Australia /
 		# SASR combo 002 (bare IndoArms), red Kopassus combo 001. These are
-		# Avatars.def tree indices; NetSessionDrive is still the authority that
+		# Avatars.def tree indices; SessionDrive is still the authority that
 		# resolves and packs them for spawn admission.
 		{
 			"team": COMPARISON_BLUE_TEAM,

@@ -94,7 +94,8 @@ func get_mcp_game_state() -> Variant:
 		"player": player,
 		"mission": (world.get_mission_stats().to_json_value()
 				if world != null and world.get_mission_stats() != null else {}),
-		"performance": world.get_runtime_perf_counters() if world != null else {},
+		"performance": (world.get_runtime_perf_counters().to_json_value()
+				if world != null else {}),
 		"audio_buses": _audio_bus_state(),
 	}
 
@@ -141,7 +142,7 @@ func get_mcp_render_diagnostics() -> Variant:
 		return {}
 	var viewport := _current_viewport()
 	var camera := viewport.get_camera_3d() if viewport != null else null
-	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
+	var snapshot: GameRenderDiagnostics = GameRenderDiagnostics.sample(world, camera)
 	var value := snapshot.to_json_value()
 	value["shell"] = {
 		"state": _shell.shell_state_name() if _shell != null else "",

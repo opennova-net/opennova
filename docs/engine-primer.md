@@ -233,7 +233,7 @@ Order of operations when you need an engine truth:
      `entity_directory()` / `entity_card(handle)` records (`world::inspect`,
      ADR 0042 d5), `get_fired_events_snapshot()`,
      and the mission/global/music variable snapshots.
-   - PerfTimeline ring (`godot/game/util/perf_timeline.gd`; its Perf page went
+   - LoadTimeline ring (`godot/src/world/load_timeline.h`; its Perf page went
      with the overlay — a dev-tools window is the re-home); recorded baselines
      in `docs/perf/`.
    - Runtime probes: `game_probe` tools under `godot/probes/`, driven through the

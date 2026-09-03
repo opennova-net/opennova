@@ -92,7 +92,7 @@ func _on_frame() -> void:
 	var runtime := _ctx.runtime()
 	if world == null or runtime == null:
 		return
-	var world_counters: Dictionary = world.get_runtime_perf_counters()
+	var world_counters: Dictionary = world.get_runtime_perf_counters().to_json_value()
 	var audio_counters: Dictionary = world_counters.get("audio", {})
 	var runtime_counters: Dictionary = runtime.get_perf_counters().to_json_value()
 	for key in _samples:

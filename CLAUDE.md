@@ -117,9 +117,10 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - The in-match session owns lifecycle, role policy, fixed-tick banking, and
   input consumption in portable C++ (`engine/runtime/inmatch/session.*`; ADR 0036,
   superseding ADR 0035's old name/location). An `inmatch::Role` (Local / Host / Joiner,
-  ADR 0043 d3) runs the tick over the kernel it binds. Godot's first-class `GameFramePipeline` samples one
+  ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
-  work once per display frame. A `godot/` line earns its place only as that device
+  work once per display frame through ONE static frame-leg table
+  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
   work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
   NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
@@ -185,7 +186,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
   it plus the ADRs before touching `godot/src/mission/mission_root.cpp`,
-  `game_frame_pipeline.gd`, the native present appliers
+  `godot/src/world/game_world_frame.cpp` (the frame-leg table), the native present appliers
   (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — ONED,
   retail staging, and hidden release pack command.

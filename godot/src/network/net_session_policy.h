@@ -12,7 +12,7 @@ namespace godot {
 // Thin wrapper over inmatch::JoinSessionPolicy + inmatch::decide_join_expansion — the
 // joiner session-drive policy (the two 0xEA60 reachable-analog windows, the
 // S2C 0x7B promote validation, the admission/deploy/loss edge machine, the
-// D-NET-178 expansion reconcile decision). One instance per NetSessionDrive;
+// D-NET-178 expansion reconcile decision). One instance per SessionDrive;
 // the drive reads simulation state, forwards it here, and executes exactly
 // what the returned flags say (signal emission, the settle call, the mount
 // switch). Every decision, window, latch, and reason text lives in

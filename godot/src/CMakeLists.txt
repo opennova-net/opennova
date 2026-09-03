@@ -148,6 +148,7 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_draw_list_stats.cpp
     hud/hud_overlay.cpp
     hud/feed_row.cpp
+    hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/imgui_pass_node.cpp
     devtools/dev_tools.cpp
@@ -188,6 +189,16 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_hud_feeds.cpp
     world/item_effect_director.cpp
     world/occlusion_frame.cpp
+    world/game_world.cpp
+    world/game_world_frame.cpp
+    world/game_world_load.cpp
+    world/game_world_effects.cpp
+    world/session_drive.cpp
+    world/world_view.cpp
+    world/load_timeline.cpp
+    world/loading_screen_info.cpp
+    world/runtime_perf_counters.cpp
+    world/resource_root_resolver.cpp
     world/scar_draw_list.cpp
     world/scar_presenter.cpp
     wac/wac_program.cpp

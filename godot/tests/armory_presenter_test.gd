@@ -30,7 +30,7 @@ func should_skip_script():
 
 # The armory's world view, faked over a REAL spawned simulation and the staged
 # retail menu root; the viewmodel verbs record what ACCEPT drove (rule 11: a
-# fake of a GDScript interface, public verbs only).
+# fake of the ArmoryWorldView interface through its virtual hooks).
 class FakeArmoryView:
 	extends ArmoryWorldView
 	var root: ResourceRoot
@@ -39,21 +39,21 @@ class FakeArmoryView:
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
-	func sim() -> Simulation:
+	func _sim() -> Simulation:
 		return sim_value
 
-	func resource_root() -> ResourceRoot:
+	func _resource_root() -> ResourceRoot:
 		return root
 
-	func weapon_database() -> WeaponDatabase:
+	func _weapon_database() -> WeaponDatabase:
 		return weapons
 
-	func set_local_player_weapon_by_name(weapon_name: String,
-			_preserve_slot_state: bool = false) -> bool:
+	func _set_local_player_weapon_by_name(weapon_name: String,
+			_preserve_slot_state: bool) -> bool:
 		set_weapon_calls.append(weapon_name)
 		return true
 
-	func clear_local_player_weapon() -> void:
+	func _clear_local_player_weapon() -> void:
 		clear_calls += 1
 
 

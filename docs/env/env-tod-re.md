@@ -1191,7 +1191,7 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   @ 0x610cd9..0x610ce0`; `Terrain_RenderWaterPass @ 0x610640`). Reimpl:
   `TerrainFrameCompiler` tracks the same bounds (`track_visible_bounds`,
   `TerrainDrawList::visible_bounds`), the terrain leg now precedes the water leg
-  in `GameFramePipeline`, and `Water::is_water_pass_active()` gates the strip,
+  in the `GameWorld` leg table, and `Water::is_water_pass_active()` gates the strip,
   the noise pair and the mirror SubViewport; a world with no tracked bounds
   (no terrain in view) keeps the pass live.
 - **Reflection pipeline (#30 internals witnessed at REN-6, 2026-07-06).** The

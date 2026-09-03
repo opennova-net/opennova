@@ -23,6 +23,17 @@ static func from_world(
 	return snapshot
 
 
+## The world's one typed render snapshot for MCP, visual probes, and
+## comparison tooling: the world viewport's current camera when none is
+## given. Keeping camera/environment/water/shadow/pass sampling together
+## guarantees every consumer sees the same fields and frame semantics.
+static func sample(world: GameWorld, camera: Camera3D = null) -> GameRenderDiagnostics:
+	var viewport := world.get_viewport() if world.is_inside_tree() else null
+	if camera == null and viewport != null:
+		camera = viewport.get_camera_3d()
+	return from_world(world, camera, viewport)
+
+
 func to_json_value() -> Dictionary:
 	return _value.duplicate(true)
 
@@ -75,7 +86,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 		},
 		"renderer": _renderer_state(viewport),
 		"runtime": {
-			"performance": world.get_runtime_perf_counters(),
+			"performance": world.get_runtime_perf_counters().to_json_value(),
 		},
 	}
 

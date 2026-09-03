@@ -71,7 +71,7 @@ bool Simulation::begin_session_load() {
 void Simulation::complete_session_load() {
 	if (session_.state() != opennova::inmatch::State::Loading) return;
 	if (!session_.complete_load().applied()) return;
-	// Direct/local simulations historically start paused. Live GameFramePipeline
+	// Direct/local simulations historically start paused. The live GameWorld frame
 	// resumes them after presentation setup; network roles must keep pumping.
 	if (session_.kind() == opennova::inmatch::RoleKind::SinglePlayer) {
 		(void)session_.pause();

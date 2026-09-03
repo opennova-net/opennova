@@ -588,7 +588,7 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			"glow_on_aligned", "glow_off_away", "glow_on_away"]
 	for state in states:
 		frame_renderer.visible = state in ["nopass_on", "glow_on_aligned", "glow_on_away"]
-		# In play GameFramePipeline compiles focused Q3 from the final beauty
+		# In play the GameWorld leg table compiles focused Q3 from the final beauty
 		# camera every frame; this stage drives that leg explicitly.
 		frame_renderer.advance_frame()
 		var aligned: bool = not state.ends_with("_away")

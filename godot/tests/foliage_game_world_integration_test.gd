@@ -4,7 +4,6 @@ extends GutTest
 # Tmap terrain plus real 3DI geometry under both authored vegetation names,
 # then drives GameWorld exactly through its public load/tick surface.
 
-const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const MODEL_FIXTURE := "res://../fixtures/threedi/synth/crate.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
@@ -20,11 +19,9 @@ const FOLIAGE_MATCH := 254
 
 func before_each() -> void:
 	_cleanup_dir(_fixture_root())
-	VegAssets.clear_cache()
 
 
 func after_each() -> void:
-	VegAssets.clear_cache()
 	_cleanup_dir(_fixture_root())
 
 
@@ -100,7 +97,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 
 	var defs: Array = data.get_foliage_defs()
 	assert_eq(defs.size(), 2, "Tmap should retain both authored foliage definitions.")
-	var meshes := VegAssets.resolve_slot_meshes(resource_root, defs)
+	var meshes := dispatcher.resolve_slot_meshes(resource_root, defs)
 	assert_eq(meshes.size(), defs.size())
 	for slot in range(defs.size()):
 		var mesh := meshes[slot] as Mesh

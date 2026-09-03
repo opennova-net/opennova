@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "mission/static_source_provider.h"
 #include "mission/static_source_records.h"
 #include "object/entity_ref.h"
 #include "object/item_database.h"
@@ -85,6 +86,9 @@ class ItemEffectDirector : public RefCounted {
 
 public:
 	void setup(Node *p_world, const Callable &p_static_sources, const Callable &p_item_db_source);
+	// The C++ world's wiring (ADR 0043 slice G10): the same two seams as typed
+	// reads off the world's StaticSourceProvider, no Callables lent.
+	void setup_with_provider(Node *p_world, StaticSourceProvider *p_provider);
 	// The retail master particle switch (the dev tools' "Hide particles"),
 	// delegated from the world: flips the effect world's spawn facade and,
 	// on re-enable, retries the deferred persistent item effects exactly
@@ -171,6 +175,9 @@ private:
 	EffectWorld *_effect_world() const;
 	MissionRoot *_runtime() const;
 	Ref<ItemDatabase> _resolve_item_db() const;
+	// The placer's static item-effect sources: the provider's when the C++
+	// world wired one, else the lent Callable's (empty without either).
+	Array _static_sources() const;
 	void _control_node_aliases(ObjectModel *p_node, std::vector<std::string> &r_out) const;
 	bool _control_node_is_active(const ControlNode &p_entry) const;
 	bool _register_control_node(ObjectModel *p_node, int p_kind, int p_item_id);
@@ -190,6 +197,8 @@ private:
 
 	// The GameWorld whose entities carry the effects (public surface only).
 	ObjectID world_id_;
+	// The C++ world's typed source seam (null for a Callable-wired harness).
+	StaticSourceProvider *provider_ = nullptr;
 	Callable static_sources_;  // () -> Array (the placer's static item-effect sources)
 	Callable item_db_source_;  // () -> ItemDatabase or null (the placer's db, lent by the world)
 	// Debug: hide every particle effect (the dev tools' "Hide particles" —

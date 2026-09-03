@@ -24,6 +24,7 @@
 
 #include "lights/effect_light_report.h"
 #include "lights/light_scene.h"
+#include "mission/static_source_provider.h"
 #include "object/model_light.h"
 #include "object/object_model.h"
 
@@ -71,6 +72,9 @@ public:
 	void setup(Node *p_world, const Callable &p_static_sources,
 			const Callable &p_static_draw_sources,
 			const Callable &p_static_draw_source_revision = Callable());
+	// The C++ world's wiring (ADR 0043 slice G10): the same three seams as
+	// typed reads off the world's StaticSourceProvider, no Callables lent.
+	void setup_with_provider(Node *p_world, StaticSourceProvider *p_provider);
 	// Mission teardown: disconnect live node retirement hooks, retire every
 	// pool lease, and synchronously clear the shader-global output.
 	void reset();
@@ -108,7 +112,7 @@ public:
 	// shadow device's dominant-light pick reads the same LightScene).
 	Ref<LightScene> scene() const;
 	Vector3 light_gain() const;
-	// The per-frame device leg (GameFramePipeline, after iris, before the
+	// The per-frame device leg (the GameWorld leg table, after iris, before the
 	// material frame): one draw context per visible ObjectModel near the
 	// camera (owner group = that model's entity id) plus the first-person
 	// viewmodel parts (owner = the local player, so its own muzzle glow
@@ -183,6 +187,11 @@ private:
 	Node *_world() const;
 	MissionRoot *_runtime() const;
 	Ref<Simulation> _sim() const;
+	// The placer's three source reads: the provider's when the C++ world
+	// wired one, else the lent Callables' (empty / 0 without either).
+	Array _static_sources() const;
+	Array _static_draw_sources() const;
+	int64_t _static_draw_source_revision() const;
 	MissionEnvironment *_environment() const;
 	Weather *_weather() const;
 	Node *_mission_objects() const;
@@ -211,6 +220,8 @@ private:
 	Ref<ImageTexture> _corona_texture();
 
 	ObjectID world_id_;
+	// The C++ world's typed source seam (null for a Callable-wired harness).
+	StaticSourceProvider *provider_ = nullptr;
 	Callable static_sources_;
 	Callable static_draw_sources_;
 	Callable static_draw_source_revision_;

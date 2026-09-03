@@ -421,8 +421,8 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var avatar_db := AvatarDatabase.new()
 	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/avatars/synth_avatars.def")), OK)
-	var join_profile := NetSessionDrive.character_join_profile_from_database(
-			avatar_db, RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
+	var join_profile := avatar_db.character_join_profile(
+			RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
 	assert_eq([join_profile.get_character_id(0), join_profile.get_character_id(1)],
 			[0x0402, 0x8207],
 			"the staged tree selections resolve to retail slot 0's character IDs")

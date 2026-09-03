@@ -38,7 +38,7 @@ behavior is summarized and cited.
 |---|---|
 | [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |
 | [`engine-primer.md`](engine-primer.md) | Start here for engine work: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
-| [`runtime-architecture.md`](runtime-architecture.md) | How a match runs under ADR 0036: the portable `inmatch::Session` tick and the `GameFramePipeline` device-leg order, mapped onto the original main loop |
+| [`runtime-architecture.md`](runtime-architecture.md) | How a match runs under ADR 0036: the portable `inmatch::Session` tick and the `GameWorld` frame-leg table's device order, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |

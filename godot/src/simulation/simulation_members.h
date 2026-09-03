@@ -248,7 +248,10 @@ private:
 	// entity dictionaries MissionObjectPlacer.place_entities consumes (kind,
 	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
 	// Empty on a host or before the world stream's static pools completed.
+public:
 	Array get_streamed_placement_records() const;
+
+private:
 	// The env-gated ~1 Hz tripwire print (the role owns the sampled state and
 	// raises the one-shot the observer's after_tick consumes).
 	void print_joiner_net_diagnostic_sample();

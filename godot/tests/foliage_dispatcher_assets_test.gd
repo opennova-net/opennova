@@ -1,25 +1,32 @@
 extends GutTest
 
-const VegAssetsScript = preload("res://game/terrain/veg_assets.gd")
+# The vegetation asset resolver on FoliageDispatcher (the former veg_assets.gd,
+# folded into the dispatcher as instance state): the *veg*.3di listing, the
+# LOD0 mesh aggregate, the :fd texture bake, the network-challenge foliage
+# mark, and the per-root+instance cache keys.
+
 const SOURCE_OBJECT := "res://../fixtures/threedi/synth/bird.3di"
 const OVERRIDE_OBJECT := "res://../fixtures/threedi/synth/house.3di"
+
+var _dispatcher: FoliageDispatcher = null
 
 
 func before_each() -> void:
 	_cleanup_dir(_fixture_root())
-	VegAssetsScript.clear_cache()
+	_dispatcher = FoliageDispatcher.new()
+	add_child_autofree(_dispatcher)
 	ObjectData.reset_network_challenge_model_registry()
 
 
 func after_each() -> void:
-	VegAssetsScript.clear_cache()
+	_dispatcher = null
 	ObjectData.reset_network_challenge_model_registry()
 	_cleanup_dir(_fixture_root())
 
 
 func test_list_graphics_preserves_actual_model_path_case() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsScript.list_graphics(resource_root, true)
+	var graphics := _dispatcher.list_graphics(resource_root, true)
 	var mveg6_path := ""
 	for entry in graphics:
 		if String(entry.basename) == "mveg6":
@@ -35,11 +42,11 @@ func test_list_graphics_preserves_actual_model_path_case() -> void:
 
 func test_list_graphics_cache_returns_caller_safe_copy() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := VegAssetsScript.list_graphics(resource_root, true)
+	var graphics := _dispatcher.list_graphics(resource_root, true)
 	assert_gt(graphics.size(), 0, "Vegetation asset lookup should find configured .3di graphics.")
 
 	graphics.clear()
-	var cached_again := VegAssetsScript.list_graphics(resource_root)
+	var cached_again := _dispatcher.list_graphics(resource_root)
 
 	assert_gt(cached_again.size(), 0, "Callers should not be able to mutate the shared vegetation graphics cache.")
 
@@ -49,7 +56,7 @@ func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 	var def := TerrainFoliageDef.new()
 	def.graphic = "Mveg6.3di"
 
-	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, [null, def])
+	var meshes := _dispatcher.resolve_slot_meshes(resource_root, [null, def])
 
 	assert_eq(meshes.size(), 2, "Resolver should preserve the foliage slot array shape.")
 	assert_null(meshes[0], "Null foliage defs should remain null mesh slots.")
@@ -60,7 +67,7 @@ func test_foliage_model_is_sticky_excluded_from_network_challenge_snapshot() -> 
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
 	ObjectData.reset_network_challenge_model_registry()
 
-	assert_not_null(VegAssetsScript.load_mesh(resource_root, "Mveg6"))
+	assert_not_null(_dispatcher.load_mesh(resource_root, "Mveg6"))
 	assert_eq(ObjectData.network_challenge_model_count(), 0,
 		"foliage geometry loads normally but its model-def row is excluded")
 
@@ -76,16 +83,16 @@ func test_cached_foliage_hit_restores_marker_after_mission_registry_reset() -> v
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
 	ObjectData.reset_network_challenge_model_registry()
 
-	var first_mesh := VegAssetsScript.load_mesh(resource_root, "Mveg6")
+	var first_mesh := _dispatcher.load_mesh(resource_root, "Mveg6")
 	assert_not_null(first_mesh)
 	assert_eq(ObjectData.network_challenge_model_count(), 0)
 
 	# Game_StartMission destroys the logical loaded-definition registry, while
-	# MainGame keeps the mounted resource root and VegAssets renderer cache alive.
-	# The next mission's cache hit must therefore recreate the model-def's sticky
-	# foliage mark without reparsing or rebuilding its mesh.
+	# the world keeps the mounted resource root and the dispatcher's renderer
+	# cache alive. The next mission's cache hit must therefore recreate the
+	# model-def's sticky foliage mark without reparsing or rebuilding its mesh.
 	ObjectData.reset_network_challenge_model_registry()
-	var cached_mesh := VegAssetsScript.load_mesh(resource_root, "mVEG6.3di")
+	var cached_mesh := _dispatcher.load_mesh(resource_root, "mVEG6.3di")
 	assert_same(cached_mesh, first_mesh, "the second mission takes the real mesh-cache hit")
 
 	var ordinary := ObjectData.new()
@@ -124,7 +131,7 @@ func test_resolve_slot_meshes_loads_graphic_resident_only_in_runtime_pff() -> vo
 
 	var def := TerrainFoliageDef.new()
 	def.graphic = 'Mveg6'
-	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, [def])
+	var meshes := _dispatcher.resolve_slot_meshes(resource_root, [def])
 
 	assert_true(resource_root.has_file('Mveg6.3di'),
 		'The fixture model must be served by the packed runtime VFS.')
@@ -153,8 +160,8 @@ func test_mesh_cache_does_not_alias_base_and_expansion_mounts_of_same_directory(
 	assert_eq(base_root.mount_runtime(root_dir), OK)
 	assert_eq(expansion_root.mount_runtime(root_dir, 'jox01'), OK)
 
-	var base_mesh: Mesh = VegAssetsScript.load_mesh(base_root, 'Mveg6')
-	var expansion_mesh: Mesh = VegAssetsScript.load_mesh(expansion_root, 'Mveg6')
+	var base_mesh: Mesh = _dispatcher.load_mesh(base_root, 'Mveg6')
+	var expansion_mesh: Mesh = _dispatcher.load_mesh(expansion_root, 'Mveg6')
 
 	assert_not_null(base_mesh)
 	assert_not_null(expansion_mesh)
@@ -173,13 +180,11 @@ func test_installed_dvxi5_foliage_assets_enable_every_authored_slot() -> void:
 	assert_eq(terrain.load_from_resource_root(resource_root, 'Dvxi5.trn'), OK)
 	var defs: Array = terrain.get_foliage_defs()
 	assert_gt(defs.size(), 0, 'Dvxi5 must contain authored foliage definitions.')
-	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, defs)
-	var textures := VegAssetsScript.resolve_slot_fd_textures(resource_root, defs)
-	var dispatcher := FoliageDispatcher.new()
-	add_child_autofree(dispatcher)
-	dispatcher.configure_slots(defs, meshes, textures)
+	var meshes := _dispatcher.resolve_slot_meshes(resource_root, defs)
+	var textures := _dispatcher.resolve_slot_fd_textures(resource_root, defs)
+	_dispatcher.configure_slots(defs, meshes, textures)
 
-	var diagnostics: Array = dispatcher.get_slot_diagnostics()
+	var diagnostics: Array = _dispatcher.get_slot_diagnostics()
 	for slot in range(defs.size()):
 		assert_true(meshes[slot] is Mesh,
 			'Installed foliage graphic must resolve for authored slot %d.' % slot)
@@ -187,7 +192,7 @@ func test_installed_dvxi5_foliage_assets_enable_every_authored_slot() -> void:
 			'Installed foliage diffuse must produce :fd texture for slot %d.' % slot)
 		assert_eq(String(diagnostics[slot].status), 'enabled',
 			'Installed authored foliage slot %d must reach the renderer.' % slot)
-	var stats := dispatcher.get_frame_stats()
+	var stats := _dispatcher.get_frame_stats()
 	assert_eq(int(stats.enabled_slots), defs.size())
 	assert_eq(int(stats.disabled_slots), 0)
 
@@ -199,7 +204,7 @@ func test_lod0_aggregation_keeps_every_submesh_surface() -> void:
 	var second := ArrayMesh.new()
 	_add_triangle_surface(second, 20.0)
 
-	var aggregate: ArrayMesh = VegAssetsScript.aggregate_lod0_submeshes([
+	var aggregate: ArrayMesh = FoliageDispatcher.aggregate_lod0_submeshes([
 		{"mesh": first, "material_index": 3},
 		{"mesh": second, "material_index": 9},
 	])
@@ -227,8 +232,8 @@ func test_cache_epoch_is_monotonic_and_bumped_by_mount() -> void:
 
 func test_caches_self_clear_when_epoch_moves() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	VegAssetsScript.list_graphics(resource_root, true)
-	assert_gt(VegAssetsScript.cache_entry_count(), 0,
+	_dispatcher.list_graphics(resource_root, true)
+	assert_gt(_dispatcher.asset_cache_entry_count(), 0,
 		"Listing should fill the graphics cache.")
 
 	# Any mount/rescan/clear in this process bumps the global epoch; the next
@@ -237,9 +242,24 @@ func test_caches_self_clear_when_epoch_moves() -> void:
 	ResourceRoot.bump_cache_epoch()
 	# A root-less listing is the cheapest public access: it runs the epoch
 	# check (the self-clear) and refills nothing.
-	VegAssetsScript.list_graphics(null)
-	assert_eq(VegAssetsScript.cache_entry_count(), 0,
+	_dispatcher.list_graphics(null)
+	assert_eq(_dispatcher.asset_cache_entry_count(), 0,
 		"An epoch move should drop every cache (listing and mesh) on next access.")
+
+
+func test_clear_asset_cache_drops_every_entry() -> void:
+	var resource_root := _prepare_veg_fixture("Mveg6.3di")
+	_dispatcher.list_graphics(resource_root, true)
+	assert_not_null(_dispatcher.load_mesh(resource_root, "Mveg6"))
+	assert_gt(_dispatcher.asset_cache_entry_count(), 0,
+		"Listing and loading fill the dispatcher's asset caches.")
+
+	# The caches are instance state keyed by root + graphic; beside the epoch
+	# self-clear above, the shell's exit (MainGame) empties them explicitly
+	# and they die with the dispatcher.
+	_dispatcher.clear_asset_cache()
+	assert_eq(_dispatcher.asset_cache_entry_count(), 0,
+		"clear_asset_cache drops every cache (listing, path, mesh and :fd).")
 
 
 func _prepare_veg_fixture(filename: String) -> ResourceRoot:
@@ -267,7 +287,7 @@ func _add_triangle_surface(mesh: ArrayMesh, x_offset: float) -> void:
 
 
 func _fixture_root() -> String:
-	return OS.get_cache_dir().path_join("opennova_veg_assets_test")
+	return OS.get_cache_dir().path_join("opennova_foliage_dispatcher_assets_test")
 
 
 func _copy_file(src: String, dst: String) -> void:

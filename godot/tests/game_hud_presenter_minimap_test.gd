@@ -16,7 +16,7 @@ func test_world_build_publishes_even_an_empty_water_mask() -> void:
 	var world: GameWorld = autofree(GameWorld.new())
 	watch_signals(world)
 
-	world.load_stages().build_minimap_water_mask()
+	world.build_minimap_water_mask()
 
 	assert_signal_emitted_with_parameters(
 			world, "minimap_water_changed", [null])

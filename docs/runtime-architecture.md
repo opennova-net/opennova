@@ -30,7 +30,7 @@ between one portable session module and one first-class Godot pipeline:
 MainGame._process
   sample player input once
   GameWorld.tick(camera, delta, MissionFrameInput)
-    GameFramePipeline.advance
+    GameWorld.advance_frame          the static leg table (godot/src/world/game_world_frame.cpp)
       begin device frame
       MissionRoot.advance_session_frame
         Simulation.advance_session_frame
@@ -62,7 +62,7 @@ MainGame._process
 ```
 
 A terminal `MissionFrameOutcome` stops catch-up and returns immediately from
-`GameFramePipeline`, so later device phases cannot run against a lost or failed
+the leg loop (`session` and `network` are the two stopping rows of `kFrameLegs`), so later device phases cannot run against a lost or failed
 session. There is no callback lattice and no second legacy frame sequence.
 
 ## Ownership and seams
@@ -133,7 +133,7 @@ effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through
 `inmatch::Session::step_once`; it is not a second loop.
 
-`GameFramePipeline` owns the concrete Godot device order. It deliberately names
+`GameWorld`'s static leg table (`kFrameLegs` in `godot/src/world/game_world_frame.cpp`, its literal order pinned by `frame_leg_names()`) owns the concrete Godot device order. It deliberately names
 the renderer, audio, particle, environment, and presentation operations we
 ship. We do not add a generic renderer interface for a hypothetical backend.
 
@@ -184,7 +184,7 @@ The proven deep render modules remain unchanged:
 These modules own traversal, ordering, and typed draw records. Godot owns asset
 upload and draw application. Particle rendering, per-model material eval, and
 the local-player view placement are all explicitly invoked by
-`GameFramePipeline` (`render_particle_frame`, `render_material_frame`, and the
+the leg table (`render_particle_frame`, `render_material_frame`, and the
 `present_local_view_frame` leg); `ParticleRenderer`, `EffectWorld`,
 `ObjectModel`, and `GameWorld` no longer run independent process loops. The
 per-model advance is one static driver over a shared awake set
@@ -296,7 +296,7 @@ Focused local coverage pins:
 - typed Godot session/presentation behavior in
   `godot/tests/mission_root_test.gd`;
 - concrete device ordering and cancellation in
-  `godot/tests/game_frame_pipeline_test.gd`, plus the real GameWorld stack's
+  `godot/tests/world_frame_order_test.gd` (the literal leg names, the replay list, the stopping legs), plus the real GameWorld stack's
   tick integration in `godot/tests/game_world_test.gd`;
 - load cancellation and settlement in
   `godot/tests/game/main_game_lifecycle_test.gd`;

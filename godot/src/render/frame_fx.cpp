@@ -1251,7 +1251,7 @@ void FrameFx::_notification(int p_what) {
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
 		// still boots with coherent views; the live per-frame sync is the
-		// ordered GameFramePipeline leg, never a process callback.
+		// ordered GameWorld leg, never a process callback.
 		advance_frame();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		shutdown();
