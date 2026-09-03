@@ -392,8 +392,8 @@ void Water::_exit_tree() {
 }
 
 void Water::_ready() {
-	if (water_core_.is_null()) {
-		water_core_.instantiate();
+	if (!water_core_) {
+		water_core_ = std::make_unique<WaterCore>();
 	}
 	_recompute_terrain_water_fallback();
 	_apply_environment_water_height();
@@ -435,8 +435,8 @@ void Water::build() {
 		mesh_instance_ = nullptr;
 	}
 	built_ = false;
-	if (water_core_.is_null()) {
-		water_core_.instantiate();
+	if (!water_core_) {
+		water_core_ = std::make_unique<WaterCore>();
 	}
 	water_material_.instantiate();
 	Ref<Shader> shader = ResourceLoader::get_singleton()->load(
@@ -448,7 +448,7 @@ void Water::build() {
 	water_material_->set_render_priority(opennova::renderer::kRungWater);
 
 	// The witnessed screen-marched strip mesh is LIVE (env #29): every frame
-	// rebuilds the surface from WaterCore.strip_build, so the mesh starts
+	// rebuilds the surface from WaterCore::strip_build, so the mesh starts
 	// empty. Remaining variants: the LOW tier (water detail <= 1 sin-table Y
 	// displacement) and the nightvision redraw.
 	Ref<ArrayMesh> mesh;
@@ -474,7 +474,7 @@ void Water::build() {
 	built_ = true;
 
 	// The witnessed per-frame noise texture pair (created once, updated per
-	// frame; math behind the WaterCore binding).
+	// frame; math behind the WaterCore device helper).
 	const int size = water_core_->get_texture_size();
 	water_core_->update(0);
 	noise_color_img_ = Image::create_from_data(size, size, false,

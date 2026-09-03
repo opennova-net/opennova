@@ -2974,7 +2974,7 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	# letter legs (accum bit 0x8) are gone with the sim doubles: letters
 	# accumulate only inside authored blink boxes, which no fixture model
 	# carries — the water gate keeps its witness in the [orig] cites of
-	# occlusion_frame_pass.gd.
+	# OcclusionFrame (godot/src/world/occlusion_frame.cpp).
 	var world := WorldFixture.boot_minimal(self, "", func(mission: MissionData) -> void:
 		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true)))
 	var sky := world.get_node("SkyDome") as Node3D
@@ -3091,7 +3091,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			"normal frames do not pay for or retain probe spans")
 
 	world.set_perf_probe_enabled(true)
-	world.set("_perf_probe_skip_occl", true)
+	world.set_perf_probe_skip_occlusion(true)
 	weather.iris_samples = PackedInt32Array()
 	world.tick(eye, away, ONE_TICK_DELTA)
 	assert_true(building.visible,
@@ -3103,7 +3103,7 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			"a skipped phase reports zero rather than a stale prior span")
 	assert_true(spans.has("iris"), "enabled probe frames publish the live iris span")
 
-	world.set("_perf_probe_skip_occl", false)
+	world.set_perf_probe_skip_occlusion(false)
 	world.tick(eye, away, ONE_TICK_DELTA)
 	assert_false(building.visible,
 			"leaving the skip re-emits the claim from the sim's delta baseline")

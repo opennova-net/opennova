@@ -3,7 +3,6 @@
 // Ported verbatim from object_model.gd (2026-08-09 de-scripting).
 
 #include "object/object_model.h"
-#include "object/model_inspection_records.h"
 #include "object/model_light.h"
 
 #include <cmath>
@@ -1884,17 +1883,19 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_part_phase", "channel"),
 			&ObjectModel::clear_part_phase);
 	ClassDB::bind_method(D_METHOD("clear_part_anims"), &ObjectModel::clear_part_anims);
-	ClassDB::bind_method(D_METHOD("get_active_part_anims"),
-			&ObjectModel::get_active_part_anims);
-	ClassDB::bind_method(D_METHOD("get_active_part_anim", "register"),
-			&ObjectModel::get_active_part_anim);
+	ClassDB::bind_method(D_METHOD("get_active_part_anim_registers"),
+			&ObjectModel::get_active_part_anim_registers);
 	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks",
 								 "prev_key", "prev_phase_ticks", "blend_weight",
 								 "variant", "prev_variant"),
 			&ObjectModel::set_weapon_channel, DEFVAL(String()), DEFVAL(0),
 			DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("get_weapon_channel"),
-			&ObjectModel::get_weapon_channel);
+	ClassDB::bind_method(D_METHOD("has_weapon_channel"),
+			&ObjectModel::has_weapon_channel);
+	ClassDB::bind_method(D_METHOD("get_weapon_channel_key"),
+			&ObjectModel::get_weapon_channel_key);
+	ClassDB::bind_method(D_METHOD("get_weapon_channel_phase_ticks"),
+			&ObjectModel::get_weapon_channel_phase_ticks);
 	ClassDB::bind_method(D_METHOD("set_aim_overlay", "deltas"),
 			&ObjectModel::set_aim_overlay);
 	ClassDB::bind_method(D_METHOD("get_aim_overlay"),
@@ -1903,8 +1904,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_right_hand_collapsed);
 	ClassDB::bind_method(D_METHOD("is_right_hand_collapsed"),
 			&ObjectModel::is_right_hand_collapsed);
-	ClassDB::bind_method(D_METHOD("get_body_blend"),
-			&ObjectModel::get_body_blend);
+	ClassDB::bind_method(D_METHOD("has_body_blend"),
+			&ObjectModel::has_body_blend);
+	ClassDB::bind_method(D_METHOD("get_body_blend_source_key"),
+			&ObjectModel::get_body_blend_source_key);
+	ClassDB::bind_method(D_METHOD("get_body_blend_source_time"),
+			&ObjectModel::get_body_blend_source_time);
+	ClassDB::bind_method(D_METHOD("get_body_blend_weight"),
+			&ObjectModel::get_body_blend_weight);
 	ClassDB::bind_method(D_METHOD("advance_body_animation", "delta", "write_pose"),
 			&ObjectModel::advance_body_animation, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),

@@ -656,12 +656,12 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1)
 	assert_eq(model.get_active_body_clip(), "anim_walk_forward")
-	var blend := model.get_body_blend()
-	assert_eq(blend.source_key, "anim_idle",
+	assert_true(model.has_body_blend())
+	assert_eq(model.get_body_blend_source_key(), "anim_idle",
 			"placed NPCs consume the authority's exact primary blend tuple")
-	assert_almost_eq(blend.source_time,
+	assert_almost_eq(model.get_body_blend_source_time(),
 			_clip_time(model, "anim_idle", 17), 0.0001)
-	assert_almost_eq(blend.weight, 0.2, 0.000001)
+	assert_almost_eq(model.get_body_blend_weight(), 0.2, 0.000001)
 
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1,
@@ -681,8 +681,8 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 4,
 			"the outgoing semantic state participates in the retained pose stamp")
-	assert_eq(model.get_body_blend().source_key, "anim_reset")
-	assert_almost_eq(model.get_body_blend().source_time,
+	assert_eq(model.get_body_blend_source_key(), "anim_reset")
+	assert_almost_eq(model.get_body_blend_source_time(),
 			_clip_time(model, "anim_reset", 18), 0.0001)
 
 	snap.entities[0]["aim_angles"] = PackedVector3Array([Vector3(4.0, 5.0, 6.0)])
@@ -706,9 +706,9 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 7,
 			"reenabling the body channel cold-applies the full latest tuple")
-	assert_almost_eq(model.get_body_blend().source_time,
+	assert_almost_eq(model.get_body_blend_source_time(),
 			_clip_time(model, "anim_reset", 19), 0.0001)
-	assert_almost_eq(model.get_body_blend().weight,
+	assert_almost_eq(model.get_body_blend_weight(),
 			0.4, 0.000001)
 
 	snap.entities[0]["hidden"] = 1
@@ -722,9 +722,9 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 8,
 			"becoming visible catches up with the full latest blend tuple")
-	assert_almost_eq(model.get_body_blend().source_time,
+	assert_almost_eq(model.get_body_blend_source_time(),
 			_clip_time(model, "anim_reset", 20), 0.0001)
-	assert_almost_eq(model.get_body_blend().weight,
+	assert_almost_eq(model.get_body_blend_weight(),
 			0.5, 0.000001)
 
 

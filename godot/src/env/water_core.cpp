@@ -6,12 +6,6 @@
 
 using namespace godot;
 
-void WaterCore::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("update", "frame_counter"), &WaterCore::update);
-	ClassDB::bind_method(D_METHOD("get_color_rgba8"), &WaterCore::get_color_rgba8);
-	ClassDB::bind_method(D_METHOD("get_normal_rgba8"), &WaterCore::get_normal_rgba8);
-}
-
 void WaterCore::update(int p_frame_counter) {
 	opennova::env::water_noise_color_pixels(color_pixels, tables,
 			static_cast<uint32_t>(p_frame_counter));

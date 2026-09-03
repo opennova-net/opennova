@@ -1,7 +1,7 @@
 // Internal header for the ObjectData translation-unit family
 // (object_data*.cpp) ONLY — one class, several TUs, split along the
 // file's concern seams (load / bind / inspection / materials / geometry /
-// PANM inspection / runtime eval). Carries the family's common includes plus every
+// runtime eval). Carries the family's common includes plus every
 // helper more than one TU uses, in namespace novaobj (each TU opens it with
 // `using`). Not part of the engine's public include surface.
 #pragma once

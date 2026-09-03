@@ -61,6 +61,15 @@ target_link_libraries(threedi_userpoint_test PRIVATE opennova_formats)
 target_include_directories(threedi_userpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint COMMAND threedi_userpoint_test)
 
+# Asset-gated (OPENNOVA_JO_DIR): the retail MTRL facts (Scrate1's constant
+# AlphaGen on an opaque, non-alpha-tested FF_ST_OP row) the projected-shadow
+# GUT witness keys on, read through the engine's 3DI3 parser.
+add_executable(threedi_retail_material_facts_test threedi/retail_material_facts_test.cpp)
+target_link_libraries(threedi_retail_material_facts_test PRIVATE opennova_base opennova_formats)
+target_include_directories(threedi_retail_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_retail_material_facts_test PRIVATE cxx_std_17)
+opennova_add_gated_test(threedi_retail_material_facts COMMAND threedi_retail_material_facts_test)
+
 add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
 target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1459,6 +1468,24 @@ target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
 
+# The collision sweep's death-trait mining (simassets/collision_resolve ->
+# world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
+# and missing-husk gates, and the retail GLASS userpoint table, over
+# byte-patched synthetic fixtures in a loose temp root (ADR 0043 d10).
+add_executable(item_death_traits_resolve_test world/item_death_traits_resolve_test.cpp)
+target_link_libraries(item_death_traits_resolve_test PRIVATE opennova_runtime opennova_base)
+target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
+add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
+
+# Asset-gated (OPENNOVA_JO_ASSETS fixtures): the RoundSim debug trail over the
+# shipped ammo.def — a grenadehe dies by its fuse, never by an impact.
+add_executable(round_debug_trail_test world/round_debug_trail_test.cpp)
+target_link_libraries(round_debug_trail_test PRIVATE opennova_runtime)
+target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
+opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
+
 # Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
 # grenade bounce/fuse, satchel place/detonator, claymore cone + fan, AV-mine
 # data-dead proximity, owner-death cleanup.
@@ -1817,6 +1844,15 @@ add_test(NAME wac_behavior COMMAND wac_behavior_test)
 # The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
+
+# The WAC program surface the retired WacProgram / WacState bindings served
+# (ADR 0043 d10): the compile surface, the layered load, and an installed
+# program's 62-tick execution, pause gate, eager start and restart rewind.
+add_executable(wac_program_surface_test wac/wac_program_surface_test.cpp)
+target_link_libraries(wac_program_surface_test PRIVATE opennova_runtime)
+target_include_directories(wac_program_surface_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_program_surface_test PRIVATE cxx_std_17)
+add_test(NAME wac_program_surface COMMAND wac_program_surface_test)
 
 # The layered game.wac/server.wac/<mission>.wac load every mission boot walks
 # (runtime/wac/wac_layered_load): retail layer order as one program, the

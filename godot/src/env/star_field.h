@@ -1,33 +1,30 @@
 #pragma once
 
-#include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/env/env_celestial.h>
+
+#include <cstdint>
 
 namespace godot {
 
 // The 256-instance star field (env #33): the witnessed instance table +
 // per-frame twinkle, generated and ticked in engine/formats/env
 // [orig: Star_GenerateInstanceTable @ 0x5ac850; render_star_field @ 0x5ad9c0, see docs/env/env-tod-re.md].
-// The binding serves GODOT-space data (the engine->render basis
+// This C++-only device helper (Celestial's member — its ClassDB row died
+// with the ADR 0043 d10 env-core sweep; env_render_unit pins the table and
+// twinkle) serves GODOT-space data (the engine->render basis
 // godot = (-engY, engZ, engX) / 65536, the Math_FixedPointToFloat3_YNegated
 // convention); Celestial owns the billboards. Like the water noise
 // field, the retail table content depends on the shared PRNG's call history
 // at load — the reimpl generates from a documented seed for a deterministic
 // witnessed-faithful instance.
-class StarField : public RefCounted {
-	GDCLASS(StarField, RefCounted)
-
+class StarField {
 private:
 	opennova::env::StarInstance stars[opennova::env::kStarInstanceCount];
 	uint32_t prng_state = 1u;
 	bool generated = false;
-
-protected:
-	static void _bind_methods();
 
 public:
 	// (Re)generate the 256-entry table [orig: sole caller

@@ -989,13 +989,13 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 
 	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_walk_forward")
-	var blend := model.get_body_blend()
-	assert_eq(blend.source_key, "anim_idle",
+	assert_true(model.has_body_blend())
+	assert_eq(model.get_body_blend_source_key(), "anim_idle",
 			"host-loopback consumes authority rather than reconstructing a blend")
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
-	assert_almost_eq(blend.source_time,
+	assert_almost_eq(model.get_body_blend_source_time(),
 			18.0 / (2.0 * fps), 0.0001)
-	assert_almost_eq(blend.weight, 0.3, 0.000001)
+	assert_almost_eq(model.get_body_blend_weight(), 0.3, 0.000001)
 
 
 func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
@@ -1019,12 +1019,12 @@ func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
 	_present(p, snap)
 	assert_true(model.remote_body_needs_fixed_tick(),
 			"an accepted state edge arms the fixed-tick transition latch")
-	var weight_armed := model.get_body_blend().weight
+	var weight_armed := model.get_body_blend_weight()
 
 	# Render-only presents at the same fixed tick must not accelerate the blend.
 	_present(p, snap)
 	_present(p, snap)
-	assert_almost_eq(model.get_body_blend().weight,
+	assert_almost_eq(model.get_body_blend_weight(),
 			weight_armed, 0.000001,
 			"duplicate presents at one logic tick do not advance a fixed-tick blend")
 
@@ -1033,13 +1033,12 @@ func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
 	sim.step()
 	sim.step()
 	_present(p, snap)
-	var caught_up := model.get_body_blend()
-	var finished := caught_up == null
-	var advanced := caught_up.weight if caught_up != null else 1.0
+	var finished := not model.has_body_blend()
+	var advanced := model.get_body_blend_weight() if not finished else 1.0
 	assert_true(finished or advanced > weight_armed,
 			"a three-tick catch-up advances the transition weight")
 	_present(p, snap)
-	assert_eq(model.get_body_blend() == null, finished,
+	assert_eq(not model.has_body_blend(), finished,
 			"a repeated presentation of the catch-up result is idempotent")
 
 
@@ -1303,15 +1302,15 @@ func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
 	}]
 	_present(p, snap)
 	var model: ObjectModel = p.resolve_wire_handle(0x1004)
-	var channel := model.get_weapon_channel()
-	assert_eq(channel.key, Simulation.infantry_anim_key(51),
+	assert_true(model.has_weapon_channel())
+	assert_eq(model.get_weapon_channel_key(), Simulation.infantry_anim_key(51),
 			"the state id resolves to the pistol hold clip key")
-	assert_eq(channel.phase_ticks, -1)
+	assert_eq(model.get_weapon_channel_phase_ticks(), -1)
 
 	# The peer stows its weapon: the channel goes away and the pose must clear.
 	snap.entities[0]["wpn_anim_state"] = -1
 	_present(p, snap)
-	assert_true(model.get_weapon_channel() == null,
+	assert_false(model.has_weapon_channel(),
 			"a -1 state clears the hold pose rather than leaving the last one posed")
 
 

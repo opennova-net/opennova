@@ -3,7 +3,6 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
-#include "simulation/debug_cards.h"
 #include "simulation/weather_home_state.h" // the weather home's probe/test view
 #include "util/axes.h"
 
@@ -533,7 +532,7 @@ void Simulation::finish_kernel_boot() {
 	// The score row keys off the mission's game-mode bit, so re-resolve it now
 	// that the flags are known (the config may load before OR after the boot).
 	refresh_score_rules();
-	if (!kernel_->wac_loaded && wac_program_.is_valid() && wac_program_->is_ok())
+	if (!kernel_->wac_loaded && wac_program_ && wac_program_->is_ok())
 		kernel_->wac.set_program(wac_program_->native_program());
 }
 
@@ -816,12 +815,12 @@ void Simulation::restore_world_baseline() {
 	invalidate_present_effect_pose_cache();
 }
 
-void Simulation::set_wac_program(const Ref<WacProgram> &p_program) {
-	wac_program_ = p_program;
+void Simulation::set_wac_program(std::shared_ptr<WacProgram> p_program) {
+	wac_program_ = std::move(p_program);
 	if (!world_installed_) {
 		return; // the next kernel boot applies it (finish_kernel_boot)
 	}
-	if (wac_program_.is_valid() && wac_program_->is_ok()) {
+	if (wac_program_ && wac_program_->is_ok()) {
 		kernel_->wac.set_program(wac_program_->native_program());
 	} else {
 		kernel_->wac.set_program(opennova::wac::Program());
@@ -843,12 +842,11 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	opennova::wac::CompileEnv env;
 	env.registry = &kernel_->world.registry;
 	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
-	Ref<WacProgram> holder;
-	holder.instantiate();
+	auto holder = std::make_shared<WacProgram>();
 	// Adopt the registry-compiled program into the holder so the retained
 	// WacProgram carries its diagnostics either way.
 	holder->adopt(std::move(program));
-	wac_program_ = holder;
+	wac_program_ = std::move(holder);
 	if (!wac_program_->is_ok()) {
 		return false;
 	}
@@ -864,18 +862,6 @@ bool Simulation::run_mission_start_wac() {
 void Simulation::seal_mission_start_baseline() {
 	if (!world_installed_ || joiner_) return;
 	kernel_->capture_baseline();
-}
-
-Ref<WacState> Simulation::get_wac_state() const {
-	Ref<WacState> out;
-	out.instantiate();
-	if (kernel_ == nullptr) return out;
-	out->set_loaded(kernel_->wac.vm().loaded());
-	out->set_paused(kernel_->wac.paused);
-	out->set_runs(static_cast<int64_t>(kernel_->wac.runs()));
-	out->set_event_count(static_cast<int>(kernel_->wac.program().event_count));
-	out->set_code_size(static_cast<int>(kernel_->wac.program().code.size()));
-	return out;
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {

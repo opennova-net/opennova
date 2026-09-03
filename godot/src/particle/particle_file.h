@@ -4,6 +4,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <vector>
+
 #include <formats/particle/parser.h>
 #include <formats/particle/particle.h>
 
@@ -25,7 +27,8 @@ private:
 	TypedArray<ParticleEffect> effects;
 	TypedArray<ParticleDef> particles;
 	TypedArray<ParticleTable> tables;
-	TypedArray<ParticleTableHandles> table_handles;
+	// The [tabledef] authoring handles carried through load/save (C++-only).
+	std::vector<ParticleTableHandles> table_handles;
 
 protected:
 	static void _bind_methods();

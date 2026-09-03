@@ -844,6 +844,15 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	}
 	// The per-variant read-back guards of the old minting probe.
 	if (name == "mount") expect(p.live(0) && !std::strcmp(p.reg(0), "HEAT_GLOW") && !std::strcmp(p.reg(1), "EWEAP_GUNYAW"), name + ": registers/live");
+	// The first LOD0 track on register 1 (the cradle's yaw: row 1, rotation x,
+	// part 1) — object_data_ctrl_bus_test.gd keys its poses on these facts.
+	if (base == "mount" && name != "mount_heat_glow_slide_part1")
+		expect(p.rows(0) == 3 && p.row(0, 1).subobject_index == 1 &&
+						p.row(0, 0).rotation_x.control != THREEDI_PANM_STYLE_CONTROL_REGISTER &&
+						p.row(0, 1).rotation_x.control_param == 1 &&
+						(name == "mount_yaw_style114" || name == "mount_ctrl1_lod_frac_yaw_style114" ||
+								p.row(0, 1).rotation_x.control == THREEDI_PANM_STYLE_CONTROL_REGISTER),
+				name + ": cradle yaw row");
 	if (name == "mount_ctrl1_heat_glow") expect(!std::strcmp(p.reg(1), "HEAT_GLOW"), name + ": ctrl1");
 	if (name == "mount_ctrl1_not_retail") expect(!std::strcmp(p.reg(1), "NOT_RETAIL"), name + ": ctrl1");
 	if (name == "mount_yaw_style114" || name == "mount_ctrl1_lod_frac_yaw_style114")

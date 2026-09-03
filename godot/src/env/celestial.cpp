@@ -130,11 +130,11 @@ Ref<EnvFile> Celestial::_env_data() {
 }
 
 void Celestial::_ready() {
-	if (glare_occlusion_.is_null()) {
-		glare_occlusion_.instantiate();
+	if (!glare_occlusion_) {
+		glare_occlusion_ = std::make_unique<GlareOcclusion>();
 	}
-	if (star_core_.is_null()) {
-		star_core_.instantiate();
+	if (!star_core_) {
+		star_core_ = std::make_unique<StarField>();
 	}
 	_rebuild_if_needed();
 }
@@ -555,7 +555,7 @@ void Celestial::advance_frame(double p_delta) {
 	// by the world's veil leg into Weather.
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
-	if (bodies_.has("sun") && glare_occlusion_.is_valid() && cam != nullptr) {
+	if (bodies_.has("sun") && glare_occlusion_ != nullptr && cam != nullptr) {
 		const int sun_dim_fixed =
 				opennova::io::float_to_fp16_16(state.sun_dim_pct());
 		const int overcast_fixed =
@@ -625,7 +625,7 @@ void Celestial::_set_body_parameter(const Body &p_body,
 // env #33: the star field owner — one MultiMesh of camera-facing quads under
 // the additive celestial shader, textured with the star 3DI's diffuse. The
 // witnessed placement, near-light cull, and twinkle accumulator run in
-// engine/formats/env behind the StarField binding.
+// engine/formats/env behind the StarField device helper.
 void Celestial::_build_star_field(const String &p_star_name) {
 	if (p_star_name.strip_edges().is_empty() || resource_root_.is_null()) {
 		return;
@@ -706,8 +706,8 @@ void Celestial::_update_star_field(const Vector3 &p_light_dir) {
 }
 
 int Celestial::settle_glare_occlusion(int p_max_frames) {
-	if (glare_occlusion_.is_null()) {
-		glare_occlusion_.instantiate();
+	if (!glare_occlusion_) {
+		glare_occlusion_ = std::make_unique<GlareOcclusion>();
 	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
@@ -758,7 +758,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 Dictionary Celestial::get_diagnostics() const {
 	Dictionary diag;
 	Dictionary glare;
-	if (glare_occlusion_.is_valid()) {
+	if (glare_occlusion_ != nullptr) {
 		glare["brightness"] = glare_occlusion_->get_brightness();
 		glare["window"] = glare_occlusion_->get_window();
 		glare["ray_length"] = glare_occlusion_->get_ray_length();

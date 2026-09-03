@@ -68,12 +68,8 @@ class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
-class HitboxDebugReport; // the F3 hitbox view payload (simulation/hitbox_debug_report.h)
-class DebugPickCard;     // the F3 entity picker's card (simulation/debug_pick_card.h)
-class WacState;          // the WAC VM state card (simulation/debug_cards.h)
-class NativePoseStats;   // the native pose-path health card (simulation/debug_cards.h)
-class DestructionDebugCard; // the per-entity destruction gate card (simulation/debug_cards.h)
-class RoundDebugReport;  // the F3 rounds view trail (simulation/round_debug_report.h)
+class HitboxDebugReport; // the hitbox oracle payload (simulation/hitbox_debug_report.h)
+class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card.h)
 }
 
 #include "wac/wac_program.h"
@@ -1021,13 +1017,15 @@ public:
 	TypedArray<WeaponKitEntry> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
-	// Install a compiled program on the script VM (WacProgram). Applied now if
-	// loaded and re-applied on every (re)load. Pass null to uninstall.
-	void set_wac_program(const Ref<WacProgram> &p_program);
+	// Install a compiled program on the script VM (WacProgram, C++-only since
+	// the ADR 0043 d10 sweep). Applied now if loaded and re-applied on every
+	// (re)load. Pass null to uninstall.
+	void set_wac_program(std::shared_ptr<WacProgram> p_program);
 	// Compile `sources` against the LIVE promoted world (symbolic group/area names
 	// resolve through the registry) and install on success. False (program not
 	// installed) when compilation has errors; the retained WacProgram holder
-	// carries the diagnostics.
+	// carries the diagnostics. (C++-only; the compile surface and the installed
+	// program's execution are pinned by the wac_program_surface ctest.)
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
 	// Retail executes the freshly installed WAC once before the 255-tick
 	// environment settle. Host/standalone authority only; idempotent per load.
@@ -1035,8 +1033,6 @@ public:
 	// Replace the early post-BMS restore point with the fully settled play-start
 	// state, including WAC temporal/RNG state.
 	void seal_mission_start_baseline();
-	// The installed WAC program's VM state (simulation/debug_cards.h WacState).
-	Ref<WacState> get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
 	// One opt-in seam for native sim/net/present/occlusion timings and
@@ -1153,12 +1149,11 @@ public:
 	// The live death-piece pool — each piece renders as its single husk-model
 	// section. (engine: runtime/world/destruction.cpp)
 	TypedArray<DeathPieceRow> get_death_pieces() const;
-	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
-	// bound_radius, flags, traits presence, KZ/bridge-DEAD anchors — the damage
-	// chain's gate inputs.
-	// (entity_card is the per-entity debug card; this one resolves by the
-	// placed bms_id and carries the §24 gate fields.)
-	Ref<DestructionDebugCard> get_destruction_debug(int p_bms_id) const;
+	// Whether the collision world holds an instance for the placed entity
+	// `bms_id` — the one destruction-gate fact the GUT collision cases read
+	// (the item-trait banks themselves are pinned by the
+	// item_death_traits_resolve ctest). False for an unknown id.
+	bool has_collision_instance(int p_bms_id) const;
 
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
 	void set_mission_variable(int index, int value);
@@ -1174,11 +1169,9 @@ public:
 	void set_panm_time_ms(int64_t p_time_ms);
 	int64_t get_panm_time_ms() const;
 	void debug_set_panm_time_ms(int64_t p_time_ms);
-	// Native pose-path health: cumulative queries/declines for the collision
-	// provider and the mounted resolver, plus the installed mounted model
-	// sources. The soak gates on declines == 0 — the A/B divergence stats this
-	// replaces were retired with the cutover.
-	Ref<NativePoseStats> debug_native_pose_stats() const;
+	// The installed mounted-pose model sources (the seat/mount table's
+	// resolved graphics per type): the count the seat-install pins read.
+	int get_mounted_graphic_source_count() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
@@ -1435,14 +1428,16 @@ public:
 	// Frame results: [bms_id, packed] pairs for every building the occlusion
 	// frame touched; the packed word is world/occlusion_feed.h's
 	// pack_building_visibility (section mask low, visible flag at bit 32),
-	// read back through the two static decoders below.
+	// read back through the two static decoders below. C++-only (the frame
+	// consumes the delta form; the full form stays for native callers).
 	PackedInt64Array get_building_visibility() const;
 	// The section mask of a packed building verdict (bit N = COBJ section /
 	// render part N; bit 0 = exterior; forced-visible def bits merged).
 	static int64_t building_visibility_mask(int64_t p_packed);
 	// The batch/frustum visible flag of a packed building verdict.
 	static bool building_visibility_visible(int64_t p_packed);
-	// bms_ids of non-building entities the collector gates culled this frame.
+	// bms_ids of non-building entities the collector gates culled this frame
+	// (C++-only, like get_building_visibility).
 	PackedInt32Array get_render_culled_bms_ids() const;
 	// Delta form of get_building_visibility(): only pairs whose packed value
 	// changed since the last call, so the shell applies changes instead of
@@ -1451,6 +1446,9 @@ public:
 	// Delta form of get_render_culled_bms_ids():
 	// [n_added, ids..., n_removed, ids...] since the last call.
 	PackedInt32Array get_render_culled_changes();
+	// The same delta over the decoded rows the EntityPresenter wire walk
+	// draws (culled wire handles this frame against the applied baseline).
+	PackedInt32Array get_wire_render_culled_changes();
 	// Per-draw sun-visibility feed (D-RLIT-3): triples
 	// [wire_handle_or_-1, bms_id_or_0, quality 1..4] whose quality changed.
 	// Exactly one identity is live per row. This is a cutover API: no bms-only
@@ -1483,16 +1481,10 @@ public:
 	// round-trip. False without a kernel or on a joiner (the tooling AI pool
 	// never joins the decoded view).
 	bool native_ai_debug(opennova::world::inspect::AiDebugReport &r_out) const;
-	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
-	// { tick, events: [ { tick, kind, kind_name, material, section, face,
-	//   secondary_section, fallback, effect_tag, effect_tag_name, entity_handle,
-	//   shooter_handle, ammo_index, husk, t, p0, p1, hit (Godot-space Vector3),
-	//   entity_name } ] } — oldest first, capped at RoundSim::kDebugTrailCap;
-	// every resolved outcome, face-miss fly-ons included.
-	Ref<RoundDebugReport> get_round_debug() const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
 	// draw filter) behind the F3 Rays window; counts + filter state ride
 	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
+	// C++-only: DevTools drives these and reads the unbound snapshots.
 	void set_ray_debug_recording(bool p_enabled);
 	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
 	void clear_ray_debug();
@@ -1524,8 +1516,8 @@ public:
 	// the entity's blink-box quad (see simulation_scars.cpp).
 	bool scar_owner_visible(uint16_t p_owner_packed) const;
 
-	// The round hit-detection reality for the F3 hitbox view as a
-	// HitboxDebugReport (simulation/hitbox_debug_report.h): the nearby entity
+	// The round hit-detection reality as a HitboxDebugReport
+	// (simulation/hitbox_debug_report.h) — the GUT collision oracle: the nearby entity
 	// hit meshes and the posed person section spheres.
 	// Triangles use the SAME husk-aware target_view + full-euler matrices the
 	// projectile raycast uses — the drawn mesh IS the tested mesh; capped at 96
@@ -1598,7 +1590,7 @@ public:
 	opennova::world::EntityHandle handle_for_bms_id(int p_bms_id) const;
 
 	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
-	// for WeatherCore.set_exposure_from_iris_samples — the camera ray runs
+	// for env::WeatherCore::set_exposure_from_iris_samples — the camera ray runs
 	// 8 units forward, clips against terrain, and samples at the end point and
 	// two points marched back toward the camera in thirds. Per sample: a blink
 	// hit classifies indoor (-1; -2 when the building carries no interior

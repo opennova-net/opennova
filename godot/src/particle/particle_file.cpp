@@ -121,12 +121,9 @@ void ParticleFile::copy_from_native(const opennova::particle::ParticleFile &file
 		tables[i] = t;
 	}
 	table_handles.clear();
-	table_handles.resize(static_cast<int>(file.table_handles.size()));
-	for (int i = 0; i < static_cast<int>(file.table_handles.size()); ++i) {
-		Ref<ParticleTableHandles> h;
-		h.instantiate();
-		h->copy_from_native(file.table_handles[static_cast<size_t>(i)]);
-		table_handles[i] = h;
+	table_handles.resize(file.table_handles.size());
+	for (size_t i = 0; i < file.table_handles.size(); ++i) {
+		table_handles[i].copy_from_native(file.table_handles[i]);
 	}
 	emit_changed();
 }
@@ -148,10 +145,9 @@ opennova::particle::ParticleFile ParticleFile::to_native() const {
 		Ref<ParticleTable> t = tables[i];
 		if (t.is_valid()) out.tables.push_back(t->to_native());
 	}
-	out.table_handles.reserve(static_cast<size_t>(table_handles.size()));
-	for (int i = 0; i < table_handles.size(); ++i) {
-		Ref<ParticleTableHandles> h = table_handles[i];
-		if (h.is_valid()) out.table_handles.push_back(h->to_native());
+	out.table_handles.reserve(table_handles.size());
+	for (const ParticleTableHandles &h : table_handles) {
+		out.table_handles.push_back(h.to_native());
 	}
 	return out;
 }

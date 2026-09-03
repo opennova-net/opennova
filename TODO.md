@@ -118,7 +118,7 @@ hardening, and project health. Divergences from the original engine belong in
       lines, round trails, skeleton bones, user-point markers, particle effect
       boxes. Each returns as an engine window (or a draw layer of its window)
       when wanted; the native feeds that survive are
-      `Simulation.get_hitbox_debug()` / `get_round_debug()` and the ray /
+      `Simulation.get_hitbox_debug()` (the round ring's mirror died with ADR 0043 slice G9; `tests/world/round_debug_trail_test.cpp` reads `RoundSim` directly) and the ray /
       contact capture rings behind `native_rays_snapshot` /
       `native_physics_snapshot`.
 - [ ] Stats window info cells not carried over from the retired page (they read

@@ -74,39 +74,6 @@ func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> v
 	], "six sky/cloud constants use retail 2/255; active packed skyfog stays byte/255")
 
 
-func test_weather_core_ticks_every_world_driven_sky_block_and_doubles_fog_afterward() -> void:
-	var core := WeatherCore.new()
-	var black := Color8(0, 0, 0)
-	core.snap_colors(black, black, black, black)
-	core.snap_sky_colors(black, black, black, black, black, black, black, black, black, black)
-	core.set_sky_color_targets(
-		Color8(8, 16, 24),
-		Color8(16, 32, 48),
-		Color8(24, 40, 56),
-		Color8(32, 64, 96),
-		Color8(40, 72, 104),
-		Color8(48, 80, 112),
-		Color8(56, 88, 120),
-		Color8(64, 96, 128),
-		Color8(72, 104, 136),
-		Color8(80, 112, 144))
-	core.tick(black, black, Color8(200, 104, 48), black, Color.WHITE, 0.0)
-
-	assert_eq(_color_units(core.get_fog()), [50, 26, 12],
-		"fog smooths in authored bytes before the saturating x2 render tail")
-	assert_eq(_color_units(core.get_skyfog()), [2, 4, 6],
-		"skyfog smooths, horizon-blends, then doubles (no blend at 1024)")
-	assert_eq(_color_units(core.get_ceiling()), [2, 4, 6])
-	assert_eq(_color_units(core.get_cloud()), [3, 5, 7])
-	assert_eq(_color_units(core.get_floor()), [4, 8, 12])
-	assert_eq(_color_units(core.get_skybase()), [5, 9, 13])
-	assert_eq(_color_units(core.get_skybright()), [6, 10, 14])
-	assert_eq(_color_units(core.get_skyhighlight()), [7, 11, 15])
-	assert_eq(_color_units(core.get_cloudbase()), [8, 12, 16])
-	assert_eq(_color_units(core.get_cloudhighlight()), [9, 13, 17])
-	assert_eq(_color_units(core.get_cloudedge()), [10, 14, 18])
-
-
 func test_weather_writes_all_dome_colors_back_to_environment() -> void:
 	var ctx := _make()
 	var weather := Weather.new()

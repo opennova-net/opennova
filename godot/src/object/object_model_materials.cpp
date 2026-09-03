@@ -4,7 +4,7 @@
 // channel — the model never touches the environment object.
 
 #include "object/object_model.h"
-#include "object/model_inspection_records.h"
+#include "object/material_info.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -74,26 +74,26 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index, int p_materi
 	Ref<ShaderMaterial> material;
 	material.instantiate();
 	// The authored MTRL row; a surface with no row builds the FF_ST_OP defaults.
-	const Ref<MaterialInfo> info = object_data_.is_valid()
-			? object_data_->get_material_info(p_array_index)
-			: Ref<MaterialInfo>();
-	String shader_tag = info.is_valid() ? info->get_shader_tag() : String("FF_ST_OP");
+	MaterialInfo info;
+	const bool has_info = object_data_.is_valid() &&
+			object_data_->get_material_info(p_array_index, info);
+	String shader_tag = has_info ? info.shader_tag : String("FF_ST_OP");
 	if (shader_tag.is_empty()) {
 		shader_tag = "FF_ST_OP";
 	}
 	int material_flags = 0;
-	if (info.is_valid() && info->get_alpha_test_enabled()) {
+	if (has_info && info.alpha_test_enabled) {
 		material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 	}
-	if (info.is_valid() && info->get_alpha_invert()) {
+	if (has_info && info.alpha_invert) {
 		material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT;
 	}
-	if (info.is_valid() && info->get_two_sided()) {
+	if (has_info && info.two_sided) {
 		material_flags |= THREEDI_MATERIAL_FLAG_TWO_SIDED;
 	}
-	const int emissive_type = (info.is_valid() && info->get_emissive()) ? 2 : 0;
-	const int is_glass_flag = (info.is_valid() && info->get_is_glass()) ? 1 : 0;
-	const int alpha_test_byte = info.is_valid() ? info->get_alpha_test() : 0;
+	const int emissive_type = (has_info && info.emissive) ? 2 : 0;
+	const int is_glass_flag = (has_info && info.is_glass) ? 1 : 0;
+	const int alpha_test_byte = has_info ? info.alpha_test : 0;
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 
 	// Textures resolve before the shader key: the detail stage only survives
@@ -184,7 +184,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index, int p_materi
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
 	}
-	const Color reflect = info.is_valid() ? info->get_reflect_color() : Color(0.7f, 0.8f, 0.9f, 0.35f);
+	const Color reflect = has_info ? info.reflect_color : Color(0.7f, 0.8f, 0.9f, 0.35f);
 	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color", reflect);
 	// The PANM evaluator supplies the complete two-row affine transform.
 	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
@@ -247,12 +247,12 @@ bool ObjectModel::material_runtime_is_dynamic(int p_material_index) const {
 	if (object_data_.is_null()) {
 		return true;
 	}
-	const Ref<MaterialInfo> info = object_data_->get_material_info(p_material_index);
-	if (info.is_null()) {
+	MaterialInfo info;
+	if (!object_data_->get_material_info(p_material_index, info)) {
 		return true;
 	}
-	return info->get_uv_u_style() != 0 || info->get_uv_v_style() != 0 ||
-			info->get_rgb_gen_style() != 0 || info->get_alpha_gen_style() != 0;
+	return info.uv_u_style != 0 || info.uv_v_style != 0 ||
+			info.rgb_gen_style != 0 || info.alpha_gen_style != 0;
 }
 
 // Partition surface materials into runtime-dynamic slots and the static

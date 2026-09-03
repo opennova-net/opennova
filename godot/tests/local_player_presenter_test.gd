@@ -947,7 +947,7 @@ func test_local_avatar_body_channel_follows_the_sim_tuple() -> void:
 	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle")
 	assert_eq(String(avatar.get_active_body_clip()), "anim_idle",
 			"the avatar plays the sim's served body key")
-	assert_true(avatar.get_body_blend() == null,
+	assert_false(avatar.has_body_blend(),
 			"a single-key tuple presents with no blend channel")
 	assert_almost_eq((avatar.global_position - sim.get_local_player_position()).length(),
 			0.0, 0.001, "the avatar node is stamped at the sim position")

@@ -33,11 +33,9 @@ struct WeatherOscillator;
 
 namespace godot {
 
-class MaterialInfo;
+struct MaterialInfo;
 class ModelLight;
 class ModelUserPoint;
-class PartAnimInfo;
-class RenderLodInfo;
 
 class ObjectData : public Resource {
 	GDCLASS(ObjectData, Resource)
@@ -196,8 +194,8 @@ public:
 	int get_material_count() const;
 	Array get_lod_surfaces(int p_lod_index) const;
 	bool is_skinned(int p_lod_index) const;
-	// One MTRL row (object/model_inspection_records.h); null out of range.
-	Ref<MaterialInfo> get_material_info(int p_index) const;
+	// One MTRL row (object/material_info.h, C++-only); false out of range.
+	bool get_material_info(int p_index, MaterialInfo &r_info) const;
 	// The MTRL array index a surface's material index addresses: the row whose
 	// authored index matches wins, else the array position itself when in
 	// range, else -1 (the alias fold the material cache keys on).
@@ -246,10 +244,6 @@ public:
 	int get_live_panm_lod() const;
 	PackedInt32Array get_effective_panm_targets(int p_lod_index) const;
 	int get_part_anim_count(int p_lod_index) const;
-	// One PANM row with its seven tracks; null out of range.
-	Ref<PartAnimInfo> get_part_anim_info(int p_lod_index, int p_anim_index) const;
-	// One RMDL LOD header; null out of range.
-	Ref<RenderLodInfo> get_render_lod_info(int p_lod_index) const;
 	// Per-part parent-relative bone pivot (native model space, raw ThreediRenderObject.rel),
 	// indexed by part index, for the given LOD -- the model's authoritative bone rest positions.
 	// The skeletal runtime feeds these to SkeletalAnim in place of the .bad's lossy

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -14,20 +14,16 @@ namespace godot {
 
 class ResourceRoot;
 
-// A compiled WAC script program: the GDExtension face of engine/runtime/wac's compiler,
-// so the editor can lint/inspect mission scripts and the runtime can install
-// them on the simulation (Simulation.set_wac_program). Compilation here is
-// registry-less (symbolic group/area names need a promoted world; numeric ids
-// always resolve) — full-fidelity compilation against a live world goes
-// through Simulation.compile_and_set_wac instead.
-class WacProgram : public RefCounted {
-	GDCLASS(WacProgram, RefCounted)
-
+// A compiled WAC script program: the C++ face of engine/runtime/wac's compiler
+// for the Simulation binding (Simulation::set_wac_program holds one; its
+// ClassDB row died with the ADR 0043 d10 sweep — the compile surface is
+// pinned by the wac_program_surface ctest). Compilation here is registry-less
+// (symbolic group/area names need a promoted world; numeric ids always
+// resolve) — full-fidelity compilation against a live world goes through
+// Simulation::compile_and_set_wac instead.
+class WacProgram {
 	opennova::wac::Program program_;
 	bool compiled_ = false;
-
-protected:
-	static void _bind_methods();
 
 public:
 	// Compile one source string. Returns OK when the program has no error
@@ -51,7 +47,7 @@ public:
 	int get_code_size() const;
 
 	// Adopt an already-compiled program (Simulation's registry-aware compile
-	// path) so diagnostics surface through one class either way. C++-only.
+	// path) so diagnostics surface through one class either way.
 	void adopt(opennova::wac::Program &&p_program) {
 		program_ = std::move(p_program);
 		compiled_ = true;

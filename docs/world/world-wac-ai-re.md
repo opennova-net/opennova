@@ -2522,10 +2522,10 @@ parking/offset residuals; its person bone-SECTION leg closed in §15.8b.
 Tooling landed with the grill (developer window, not witnessed behavior): the
 F3 **Rounds** tab + "Show round trails" world view over a new persistent
 `RoundSim` debug ring (`RoundDebugEvent`, cap 48) recording every resolved
-outcome — including face-miss fly-ons — exposed via
-`Simulation.get_round_debug()`. (The Rounds tab went with ADR 0039's hard cut
+outcome — including face-miss fly-ons — read by the ctest
+`tests/world/round_debug_trail_test.cpp` (the `Simulation.get_round_debug()` mirror died with ADR 0043 slice G9). (The Rounds tab went with ADR 0039's hard cut
 and the "Show round trails" world view with the GDScript F3 views on
-2026-09-02; the ring and `Simulation.get_round_debug()` survive.)
+2026-09-02; the engine ring survives.)
 
 Session 2 (same day, after an in-play "shoot through a building wall" report):
 the item-leg broad phase was still our segment-vs-sphere — a boundary-crossing

@@ -341,18 +341,6 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 	_switch_to(8, "WPN_SATCHEL_DETONATOR")
 
 
-func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
-	var slot := _sim.debug_spawn_round(Vector3(0, 10, 0), Vector3(1, 1, 0), "grenadehe")
-	assert_gt(slot, -1, "grenadehe spawned")
-	var expired_tick := -1
-	for t in 300:
-		_sim.step()
-		for ev: RoundDebugEvent in _sim.get_round_debug().events:
-			if ev.kind == 4 and expired_tick < 0:  # kExpired
-				expired_tick = t
-	assert_between(expired_tick, 240, 260, "the fuse, not an impact, ends the round")
-
-
 # The production smoke ammo reuses the flashbang's nade/nade TrcrID item.  Its
 # five-second ARM boundary fires the obj row once (the witnessed smoke-pour
 # start) but the projectile remains alive and harmless until its fuse expires.

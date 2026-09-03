@@ -57,7 +57,6 @@
 #include <runtime/world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
 #include <runtime/world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
 
-#include "env/weather_core.h" // kIrisSample* classification codes
 #include "object/item_database.h"
 #include "object/avatar_database.h"
 #include "object/object_data.h" // resolve_collision_instances: the .3di collision IR source

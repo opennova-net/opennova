@@ -121,11 +121,13 @@ var _effect_world: EffectWorld  # the runtime .ptl effect world (render-only, pe
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
-# The render-occlusion frame pass (occlusion_frame_pass.gd): the blink letter
-# gates, the per-frame section-mask/portal apply, and the two visibility
-# dictionaries the mission present pass shares BY REFERENCE. Constructed once
-# in _init; tick() calls it directly (hot path — no Callables).
-var _occlusion: OcclusionFramePass
+# The render-occlusion frame (OcclusionFrame, godot/src/world): the blink
+# letter gates, the per-frame section-mask/portal apply, the probe A/B seam
+# edges and the unload reset. Constructed once in _init, wired to the
+# retained scene nodes in _ready, re-handed each mission's runtime members
+# by the load stages; the device frame calls it directly (hot path — no
+# Callables). occlusion_frame() is its accessor.
+var _occlusion: OcclusionFrame
 # The Godot frame device legs (ADR 0035): the per-frame camera/timing latch
 # and the renderer/audio/environment leg bodies GameFramePipeline orders
 # around the session tick, extracted to world_device_frame.gd on the same
@@ -234,12 +236,11 @@ func _init() -> void:
 			_resolve_root,
 			func() -> PlayerSpawnLoadout: return _player_visuals.spawn_loadout())
 	add_child(_net_drive)
-	# The render-occlusion frame pass: plain RefCounted (no tree presence),
-	# direct-called from tick() every frame. Constructed exactly once — its two
-	# shared dictionaries must keep their identity for the mission present pass.
-	_occlusion = OcclusionFramePass.new()
-	_occlusion.setup(self)
-	# The frame device legs share the pass's construction slot: plain
+	# The render-occlusion frame: plain RefCounted (no tree presence),
+	# direct-called from the device frame every frame. Constructed exactly
+	# once; its scene-node wiring waits for _ready (the @onready nodes).
+	_occlusion = OcclusionFrame.new()
+	# The frame device legs share the frame's construction slot: plain
 	# RefCounted, wired once, direct-called through the leg delegates below.
 	_device_frame = WorldDeviceFrame.new()
 	_device_frame.setup(self)
@@ -273,6 +274,9 @@ func _ready() -> void:
 	set_process(false)
 	_frame_pipeline = GameFramePipelineScript.new()
 	_frame_pipeline.setup(self)
+	# The occlusion frame's retained render nodes exist from here on (the
+	# @onready lookups above); its per-mission members arrive with each load.
+	_occlusion.setup(_terrain, _sky_dome, _celestial, _water, _env)
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
 	if _terrain != null:
@@ -703,7 +707,7 @@ var _perf_probe_occlusion_skipped := false
 
 # The shared F3 frame-stats board (null outside the game shell). Feeds gate on
 # board capture so a closed Stats tab costs nothing; the occlusion split spans
-# land from OcclusionFramePass.apply_frame, the tick legs from tick() below.
+# land from OcclusionFrame.apply_frame, the tick legs from tick() below.
 var _frame_stats: FrameStats = null
 
 
@@ -757,7 +761,7 @@ func is_water_render_stats_measured() -> bool:
 ## request to its retail default and drops any sampled frame transport.
 func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_enabled = enabled
-	# The pass shares the probe's timing gate (see OcclusionFramePass.probe_timing).
+	# The frame shares the probe's timing gate (see OcclusionFrame.probe_timing).
 	_occlusion.probe_timing = enabled
 	_perf_probe_spans.clear()
 	if not enabled:
@@ -806,6 +810,13 @@ var _local_view_presenter: LocalPlayerPresenter = null
 ## The device legs GameFramePipeline orders each frame (world_device_frame.gd).
 func device_frame() -> WorldDeviceFrame:
 	return _device_frame
+
+
+## The render-occlusion frame (OcclusionFrame, godot/src/world): the device
+## frame drives its blink gates and per-frame apply, the load stages re-hand
+## it each mission's runtime members and reset it at unload.
+func occlusion_frame() -> OcclusionFrame:
+	return _occlusion
 
 
 ## The load-plan stage bodies (world_load_stages.gd); a test that drives one
