@@ -7,6 +7,12 @@
   PR #587; ctest `terrain_field_store`), called by `TerrainData` and the mission kernel. The
   `engine/net` SEAM_TREE entry in `scripts/lint/include_graph_check.py` is
   inherited from this era and harmless.
+  [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02) keeps the
+  seam and whitelists `terrain_query/terrain_field_build.h` for
+  `engine/runtime/mission` ONLY, so the mission kernel loads its own terrain
+  store and the embedders stop pre-building it; after the net move the seam
+  trees are `runtime/session` and `runtime/replication` instead of
+  `engine/net`.
 - **Owners**: maturity program LIBS track
 - **Supersedes/updates**: executes the LIBS-1 slice of the maturity
   umbrella (docs/maturity-program.md); sequenced after ADR 0019's npwire

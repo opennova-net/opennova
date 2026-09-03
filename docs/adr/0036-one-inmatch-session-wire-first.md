@@ -1,6 +1,12 @@
 # ADR 0036: one in-match session, wire-first compatibility
 
-- **Status**: accepted (2026-08-22; full cutover)
+- **Status**: accepted (2026-08-22; full cutover). **Superseded in full by
+  [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)**: the
+  session's banking, state machine and input retention survive unchanged as
+  `session::Session`, which now OWNS a `Role` (Local/Host/Joiner) instead of
+  driving a `TickTarget`; `netsim`/`npruntime`/`inmatch` move under
+  `runtime/` so `net/` means wire (ADR 0042 d8 taken). The witnessed frame
+  order and every retail-wire requirement remain in force there.
 - **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
   (2026-08-28) updates decision 2's implementer sentence: the concrete
   targets (`Simulation`, `apps/nw_server`) embed `mission::MissionKernel` and

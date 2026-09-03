@@ -3,6 +3,10 @@
 - **Status**: accepted (2026-08-08; the 2026-08-07 flattening assessment's
   "Shape A", maintainer-approved)
 - **Owners**: build/link topology
+- **Amended**: [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)
+  flips the top of the PUBLIC chain: `net` (wire only) links `base`, and
+  `runtime` (now carrying `session/` and `replication/`) links `net`; the
+  five archives and `opennova_io` remain.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) removes the
   `opennova_oned_edit` INTERFACE leaf and the editor-only `refs` subsystem;
   the five group archives and `opennova_io` remain. References to `refs` in
