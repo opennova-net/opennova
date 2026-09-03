@@ -318,8 +318,8 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 		var groups: Array = effect_world.get_debug_group_report()
 		var alive := 0
 		for g_v in groups:
-			for e_v in (g_v as Dictionary).get("emitters", []):
-				alive += int((e_v as Dictionary).get("alive", 0))
+			for e_v in (g_v as EffectGroupReport).emitters:
+				alive += (e_v as EffectEmitterReport).alive
 		parts = "%d/%d" % [groups.size(), alive]
 	var spans := ""
 	var shell := _ctx.game()

@@ -84,12 +84,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		# Per-tick emitter census: which authored emitters are live when.
 		var census := PackedStringArray()
 		for group_v in _fx.get_debug_group_report():
-			var group := group_v as Dictionary
+			var group := group_v as EffectGroupReport
 			var names := PackedStringArray()
-			for emitter_v in group.get("emitters", []):
-				var emitter := emitter_v as Dictionary
-				names.append("%s:%d" % [String(emitter.get("name", emitter.get("particle", "?"))),
-						int(emitter.get("alive", 0))])
+			for emitter_v in group.emitters:
+				var emitter := emitter_v as EffectEmitterReport
+				names.append("%s:%d" % [emitter.name, emitter.alive])
 			census.append("[%s]" % ",".join(names))
 		ctx.log("[gore-visual] tick %d emitters %s" % [tick + 1, " ".join(census)])
 	var after := await _stage.capture_after_render(_ctx.tree, _fx)
@@ -98,7 +97,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 	var emitters := 0
 	for group_v in _fx.get_debug_group_report():
-		emitters += ((group_v as Dictionary).get("emitters", []) as Array).size()
+		emitters += (group_v as EffectGroupReport).emitters.size()
 	var changed := ProbeCapture.changed_pixels(_before, after, 90)
 	ctx.log("[gore-visual] handle %d, spawned %d/%d, %d live emitter(s), %d changed pixel(s)"
 			% [handle, spawned, HIT_POINTS.size(), emitters, changed])

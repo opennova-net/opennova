@@ -167,10 +167,10 @@ func _fx_rows_for_node(world: GameWorld, node: Node, include_detached := false,
 	var out: Array = []
 	var prefix := "itemfx:%d:" % node.get_instance_id()
 	for row_v in world.get_effect_world().get_debug_group_report(include_hidden):
-		var row: Dictionary = row_v
-		var owner: Variant = row.get("owner_key")
+		var row: EffectGroupReport = row_v
+		var owner: Variant = row.owner_key
 		if owner is String and String(owner).begins_with(prefix) \
-				and (include_detached or not bool(row.get("detached", false))):
+				and (include_detached or not row.detached):
 			out.append(row)
 	return out
 
@@ -180,10 +180,10 @@ func _fx_rows_for_node(world: GameWorld, node: Node, include_detached := false,
 func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -> Array:
 	var out: Array = []
 	for row_v in world.get_effect_world().get_debug_group_report(include_hidden):
-		var row: Dictionary = row_v
-		if row.get("owner_key") != null:
+		var row: EffectGroupReport = row_v
+		if row.owner_key != null:
 			continue
-		if effect.is_empty() or String(row.get("name", "")) == effect:
+		if effect.is_empty() or row.name == effect:
 			out.append(row)
 	return out
 
@@ -527,10 +527,10 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 			"one real terrain hit presents exactly one impact transient")
 	var first_id := 0
 	if rows.size() == 1:
-		var spawn: Dictionary = rows[0]
-		first_id = int(spawn.get("id", 0))
-		var transform: Transform3D = spawn.get("transform", Transform3D.IDENTITY)
-		assert_eq(String(spawn.get("name", "")), IMPACT_EFFECT,
+		var spawn: EffectGroupReport = rows[0]
+		first_id = int(spawn.id)
+		var transform: Transform3D = spawn.transform
+		assert_eq(spawn.name, IMPACT_EFFECT,
 				"the surface row's authored .ptl effect reaches the effect world")
 		assert_lt(transform.basis.z.distance_to(Vector3.DOWN), 0.05,
 				"the transient carries the real incoming flight direction")
@@ -539,15 +539,15 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 		# impact reads age 1 (one counter bump), never real catch-up aging: the
 		# fresh emitters have aged that one initial tick plus the presenting
 		# frame's particle advances, and nothing more.
-		for emitter_v in spawn.get("emitters", []):
-			var age := float((emitter_v as Dictionary).get("age", -1.0))
+		for emitter_v in spawn.emitters:
+			var age := (emitter_v as EffectEmitterReport).age
 			assert_lte(age, float(ticks_in_frame + 1) * Simulation.tick_dt() + 0.0001,
 					"an impact presented in its production frame carries no catch-up aging")
 			assert_gte(age, Simulation.tick_dt() - 0.0001,
 					"the presenting tick's particle advance aged the fresh transient")
-		assert_eq(int(spawn.get("render_domain", -1)),
+		assert_eq(spawn.render_domain,
 				EffectScene.RENDER_DOMAIN_WORLD)
-		assert_gt(int(spawn.get("source_tick", 0)), 0,
+		assert_gt(int(spawn.source_tick), 0,
 				"the row carries its production tick for catch-up chronology")
 	var fires := audio.recent_fired_soundsets()
 	assert_eq(fires.size(), 1)
@@ -556,8 +556,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 		assert_eq(fired.set_name, IMPACT_SOUND,
 				"impact audio fires the same surface row's soundset")
 		assert_true(fired.played, "the staged bank carries the set, so the one-shot plays")
-		var impact_transform: Transform3D = (rows[0] as Dictionary).get(
-				"transform", Transform3D.IDENTITY)
+		var impact_transform: Transform3D = (rows[0] as EffectGroupReport).transform
 		assert_eq(fired.position, impact_transform.origin,
 				"impact audio shares collision presentation with the visual transient")
 	assert_eq(world.get_effect_light_report().live, 1,
@@ -577,7 +576,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	assert_lte(later.size(), 1,
 			"resolved impact rows cannot accumulate between presentation frames")
 	for row_v in later:
-		assert_eq(int((row_v as Dictionary).get("id", 0)), first_id,
+		assert_eq(int((row_v as EffectGroupReport).id), first_id,
 				"no second transient appears once the queue has drained")
 	assert_eq(audio.recent_fired_soundsets().size(), 1)
 	world.unload()
@@ -637,11 +636,11 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 			"the weapon consumer runs from the fixed-tick drain")
 	if rows.size() != 1 or consumer_ticks.is_empty():
 		return
-	var spawn: Dictionary = rows[0]
+	var spawn: EffectGroupReport = rows[0]
 	# The counter has already bumped once past the row's production tick when
 	# the drain runs (see the generic routing test above): the drain that
 	# presented the hit is the one that consumed weapon events at tick + 1.
-	var presenting_tick := int(spawn.get("source_tick", 0)) + 1
+	var presenting_tick := int(spawn.source_tick) + 1
 	var consume_index := consumer_ticks.find(presenting_tick)
 	assert_gte(consume_index, 0,
 			"the weapon consumer ran on the fixed tick that presented the impact")
@@ -652,8 +651,8 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	# Every fixed tick from the presenting one through the end of that frame
 	# ran one particle advance after its drain.
 	var advances_after_spawn := consumer_ticks.size() - consume_index
-	for emitter_v in spawn.get("emitters", []):
-		var age := float((emitter_v as Dictionary).get("age", -1.0))
+	for emitter_v in spawn.emitters:
+		var age := (emitter_v as EffectEmitterReport).age
 		assert_gte(age, float(advances_after_spawn) * Simulation.tick_dt() - 0.0001,
 				"the presenting tick's particle advance ran after the impact spawned")
 		# Same-frame drain: at most the one counter bump of initial age on top.
@@ -681,11 +680,11 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	assert_eq(rows.size(), 1)
 	if rows.is_empty():
 		return
-	var spawn: Dictionary = rows[0]
-	assert_eq(spawn.get("owner_key"), ssn,
+	var spawn: EffectGroupReport = rows[0]
+	assert_eq(spawn.owner_key, ssn,
 			"the emitter handle is owned per SSN entity (a scripted re-trigger replaces it)")
-	assert_eq(String(spawn.get("name", "")), FX_FALLBACK_EFFECT)
-	var transform: Transform3D = spawn.get("transform", Transform3D.IDENTITY)
+	assert_eq(spawn.name, FX_FALLBACK_EFFECT)
+	var transform: Transform3D = spawn.transform
 	var spawn_pos := transform.origin
 	assert_almost_eq(spawn_pos.x, 6.0, 0.01,
 			"the SSN resolves to the real registry entity's Godot-space position")
@@ -2543,14 +2542,14 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	var anchor_info := _fx_anchor_info()
 	var item_rows: Array = _fx_rows_for_node(world, nodes[1]) if nodes[1] != null else []
 	if item_rows.size() == 1:
-		var row: Dictionary = item_rows[0]
-		assert_eq(String(row.get("owner_key", "")),
+		var row: EffectGroupReport = item_rows[0]
+		assert_eq(String(row.owner_key),
 				"itemfx:%d:%d" % [nodes[1].get_instance_id(), _fx_anchor_index()],
 				"the emitter is keyed to the model's matched MFlash01 point")
-		assert_true((row.get("transform", Transform3D.IDENTITY) as Transform3D).origin
+		assert_true(row.transform.origin
 				.is_equal_approx(nodes[1].global_transform * anchor_info.position),
 				"the effect anchors at the real model's MFlash01 point")
-		assert_eq(int(row.get("binding", -1)), EffectScene.BINDING_FOLLOW_OWNER,
+		assert_eq(row.binding, EffectScene.BINDING_FOLLOW_OWNER,
 				"an entity-attached emitter follows its owner")
 	# A registered attachment is never duplicated by a re-run of the attach
 	# entry: neither the retry the particle switch triggers on re-enable nor a
@@ -2632,13 +2631,13 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 			"a node presented after the start event attaches on arrival")
 	var first_group := 0
 	if rows.size() == 1:
-		var row: Dictionary = rows[0]
-		first_group = int(row.get("id", 0))
-		assert_eq(String(row.get("name", "")), FX_PERSISTENT_EFFECT)
+		var row: EffectGroupReport = rows[0]
+		first_group = int(row.id)
+		assert_eq(row.name, FX_PERSISTENT_EFFECT)
 		var anchor_info := _fx_anchor_info()
-		assert_eq(String(row.get("owner_key", "")),
+		assert_eq(String(row.owner_key),
 				"itemfx:%d:%d" % [node.get_instance_id(), _fx_anchor_index()])
-		assert_true((row.get("transform", Transform3D.IDENTITY) as Transform3D).origin
+		assert_true(row.transform.origin
 				.is_equal_approx(node.global_transform * anchor_info.position),
 				"the effect anchors at the real model's MFlash01 point")
 
@@ -2652,7 +2651,7 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	var detached := _fx_rows_for_node(world, node, true)
 	assert_eq(detached.size(), 1)
 	if detached.size() == 1:
-		assert_eq(int((detached[0] as Dictionary).get("id", 0)), first_group,
+		assert_eq(int((detached[0] as EffectGroupReport).id), first_group,
 				"the stop detaches exactly the group the start created")
 	assert_eq(director.get_stats().control_active, 0,
 			"the stop retires every identity alias")
@@ -2663,7 +2662,7 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	rows = _fx_rows_for_node(world, node)
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
-		assert_ne(int((rows[0] as Dictionary).get("id", 0)), first_group,
+		assert_ne(int((rows[0] as EffectGroupReport).id), first_group,
 				"a later control transition creates a fresh group")
 	var public_effect := MissionEffect.make("text", 0, 0, 0, "still public")
 	world.get_runtime().effects_drained.emit([stopped, public_effect])
@@ -2772,7 +2771,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 			"mounting one synthetic emplacement starts only that sibling's effect")
 	assert_true(_fx_rows_for_node(world, siblings[1]).is_empty())
 	if first_rows.size() == 1:
-		assert_eq(String((first_rows[0] as Dictionary).get("owner_key", "")),
+		assert_eq(String((first_rows[0] as EffectGroupReport).owner_key),
 				"itemfx:%d:%d" % [siblings[0].get_instance_id(), _fx_anchor_index()])
 
 	var stop_first := MissionEffect.make("vehicle_control_stopped", 0, 0, -1)
@@ -2786,14 +2785,14 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	var second_rows := _fx_rows_for_node(world, siblings[1])
 	assert_eq(second_rows.size(), 1)
 	if second_rows.size() == 1:
-		assert_eq(String((second_rows[0] as Dictionary).get("owner_key", "")),
+		assert_eq(String((second_rows[0] as EffectGroupReport).owner_key),
 				"itemfx:%d:%d" % [siblings[1].get_instance_id(), _fx_anchor_index()],
 				"the shared synthetic origin cannot activate a neighboring attachment")
 	# The stopped sibling's group lingers detached until its particles die; the
 	# live (attached) census is one group: the neighbor's, never both.
 	var live := 0
 	for row_v in world.get_effect_world().get_debug_group_report():
-		if not bool((row_v as Dictionary).get("detached", false)):
+		if not (row_v as EffectGroupReport).detached:
 			live += 1
 	assert_eq(live, 1, "one live controller group: the neighbor's, never both")
 
@@ -2834,13 +2833,13 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var matched := _fx_unowned_rows(world, FX_PERSISTENT_EFFECT)
 	assert_eq(matched.size(), 1)
 	if matched.size() == 1:
-		var first: Dictionary = matched[0]
-		assert_eq(int(first.get("admission", -1)), EffectScene.ADMISSION_ALWAYS)
-		assert_eq(int(first.get("binding", -1)), EffectScene.BINDING_WORLD)
-		assert_eq(int(first.get("render_domain", -1)), EffectScene.RENDER_DOMAIN_WORLD)
-		assert_null(first.get("owner_key"), "static batches never invent follow owners")
+		var first: EffectGroupReport = matched[0]
+		assert_eq(first.admission, EffectScene.ADMISSION_ALWAYS)
+		assert_eq(first.binding, EffectScene.BINDING_WORLD)
+		assert_eq(first.render_domain, EffectScene.RENDER_DOMAIN_WORLD)
+		assert_null(first.owner_key, "static batches never invent follow owners")
 		var anchor_info := _fx_gun_anchor_info()
-		var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
+		var first_transform: Transform3D = first.transform
 		assert_true(first_transform.origin.is_equal_approx(
 				entity_transform * anchor_info.position))
 		var anchor_dir := anchor_info.rotation
@@ -2851,8 +2850,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var fallback := _fx_unowned_rows(world, FX_FALLBACK_EFFECT)
 	assert_eq(fallback.size(), 1)
 	if fallback.size() == 1:
-		var fallback_actual: Transform3D = (fallback[0] as Dictionary).get(
-				"transform", Transform3D.IDENTITY)
+		var fallback_actual: Transform3D = (fallback[0] as EffectGroupReport).transform
 		assert_true(fallback_actual.is_equal_approx(fallback_transform),
 				"an unmatched userpoint falls back to the entity origin and basis")
 	# The registered descriptors are never revisited: the retry the particle
@@ -2896,8 +2894,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	var rows := _fx_rows_for_node(world, node)
 	assert_eq(rows.size(), 1)
 	if rows.size() == 1:
-		var origin := ((rows[0] as Dictionary).get("transform", Transform3D.IDENTITY)
-				as Transform3D).origin
+		var origin := (rows[0] as EffectGroupReport).transform.origin
 		assert_true(origin.is_equal_approx(Vector3(99, 99, 99) + anchor_offset),
 				"before the first sim snapshot, the authored Node remains the safe spawn seed")
 
@@ -2913,8 +2910,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 				"a fixed tick follows the current client-view value, not the stale presented Node")
 		assert_almost_eq(value_pose.origin.z, -4.0, 0.01,
 				"the value pose rides the canonical mission-to-Godot frame")
-		var origin := ((rows[0] as Dictionary).get("transform", Transform3D.IDENTITY)
-				as Transform3D).origin
+		var origin := (rows[0] as EffectGroupReport).transform.origin
 		assert_true(origin.is_equal_approx(value_pose * anchor_offset),
 				"the attached group rides the value pose after the tick")
 

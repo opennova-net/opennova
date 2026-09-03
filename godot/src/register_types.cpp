@@ -46,16 +46,20 @@
 #include "particle/particle_graphic_layer.h"
 #include "particle/particle_def.h"
 #include "particle/particle_file.h"
+#include "lights/effect_light_director.h"
 #include "lights/effect_light_report.h"
 #include "lights/light_scene.h"
 #include "lights/light_spawn.h"
+#include "particle/effect_group_report.h"
 #include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
 #include "particle/effect_spawn_records.h"
+#include "particle/effect_world.h"
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
+#include "world/item_effect_director.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
@@ -355,16 +359,23 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectLoadReport);
 	GDREGISTER_CLASS(EffectSpawnRequest);
 	GDREGISTER_CLASS(EffectSpawnReceipt);
+	GDREGISTER_CLASS(EffectSpawnOptions);
 	GDREGISTER_CLASS(EffectOwnerPoseBatch);
 	GDREGISTER_CLASS(EffectScene);
+	GDREGISTER_CLASS(EffectEmitterReport);
+	GDREGISTER_CLASS(EffectGroupReport);
 	GDREGISTER_CLASS(CoronaRow);
 	GDREGISTER_CLASS(EffectLightRow);
 	GDREGISTER_CLASS(EffectLightReport);
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(GlowSpawn);
 	GDREGISTER_CLASS(ModelLightSpawn);
+	GDREGISTER_CLASS(EffectLightDirector);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
+	GDREGISTER_CLASS(EffectWorld);
+	GDREGISTER_CLASS(ItemEffectDirectorStats);
+	GDREGISTER_CLASS(ItemEffectDirector);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);
 	GDREGISTER_CLASS(DisplayDecode);

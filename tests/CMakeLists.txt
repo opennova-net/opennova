@@ -879,6 +879,14 @@ target_link_libraries(weather_state_test PRIVATE opennova_runtime)
 target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weather_state COMMAND weather_state_test)
 
+# The per-item ITEMS.DEF particlefx law (runtime/world/item_effects): the
+# pool / controller attrib gates, the identity aliases, and the matched-
+# userpoint / origin-fallback attach plan over a synthetic model.
+add_executable(item_effects_test world/item_effects_test.cpp)
+target_link_libraries(item_effects_test PRIVATE opennova_runtime)
+target_include_directories(item_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME item_effects COMMAND item_effects_test)
+
 # The precipitation pool (runtime/environment/precipitation): seed, fall, wrap,
 # floor, and the drawer compile.
 add_executable(precipitation_test environment/precipitation_test.cpp)

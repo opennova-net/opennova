@@ -87,14 +87,17 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_graphic_layer.cpp
     particle/particle_def.cpp
     particle/particle_file.cpp
+    lights/effect_light_director.cpp
     lights/effect_light_report.cpp
     lights/light_scene.cpp
     lights/light_spawn.cpp
     lights/light_spawn.cpp
     lights/light_spawn.cpp
+    particle/effect_group_report.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp
     particle/effect_spawn_records.cpp
+    particle/effect_world.cpp
     particle/particle_compositor.cpp
     particle/particle_renderer.cpp
     render/environment_cube_blit.cpp
@@ -183,6 +186,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_present.cpp
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
+    world/item_effect_director.cpp
     world/scar_draw_list.cpp
     world/scar_presenter.cpp
     wac/wac_program.cpp

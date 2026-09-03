@@ -1893,6 +1893,20 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 	return result;
 }
 
+void ParticleRenderer::collect_debug_emitter_bounds(
+		std::vector<opennova::renderer::ParticleEmitterDrawBounds> &r_out) const {
+	r_out.clear();
+	if (!impl_)
+		return;
+	for (const ParticleDrawSlot slot : {
+			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+		if (!impl_->slot_present[slot])
+			continue;
+		const auto &bounds = impl_->compilers[slot].draw_list().emitter_bounds;
+		r_out.insert(r_out.end(), bounds.begin(), bounds.end());
+	}
+}
+
 PackedStringArray ParticleRenderer::get_unresolved_texture_names() const {
 	PackedStringArray result;
 	if (!impl_)

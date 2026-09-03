@@ -63,4 +63,18 @@ void EffectSpawnReceipt::_bind_methods() {
 			DEFVAL(0), DEFVAL(0));
 }
 
+void EffectSpawnOptions::_bind_methods() {
+	EFFECT_SPAWN_OPTIONS_FIELDS(EFFECT_SPAWN_BIND_FIELD)
+	ClassDB::bind_method(D_METHOD("get_slot_key"), &EffectSpawnOptions::get_slot_key);
+	ClassDB::bind_method(D_METHOD("set_slot_key", "value"), &EffectSpawnOptions::set_slot_key);
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "slot_key", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT),
+			"set_slot_key", "get_slot_key");
+	ClassDB::bind_method(D_METHOD("get_owner_key"), &EffectSpawnOptions::get_owner_key);
+	ClassDB::bind_method(D_METHOD("set_owner_key", "value"), &EffectSpawnOptions::set_owner_key);
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "owner_key", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT),
+			"set_owner_key", "get_owner_key");
+}
+
 #undef EFFECT_SPAWN_BIND_FIELD
