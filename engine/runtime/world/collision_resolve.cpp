@@ -126,8 +126,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        EntityHandle *out_ground,
                                        const LadderResolveIO *ladder_io,
                                        const int32_t *eye_offset,
-                                       ResolvePerf *perf) {
-    if (perf != nullptr) *perf = {};
+                                       devtools::TickProfile *profile) {
     // [orig: movement collision resolver @ 0x4b2bd0]
     // heading/body_pitch feed the on-ladder 2-point capsule's body-axis sincos
     // chain — which retail multiplies by a constant-zero length (see the capsule
@@ -330,8 +329,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // ticks, where no org1 climber runs anyway.
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
-    const uint64_t contacts_start =
-            perf != nullptr ? io::perf_now_us() : 0;
+    devtools::ProfileLap lap(profile);
     auto it = candidates_.find(source.packed);
     dbg_last_contact = EntityHandle{};
     dbg_last_contact_item = 0;
@@ -595,8 +593,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[0] += total_force[0];
     pos[1] += total_force[1];
     pos[2] += total_force[2];
-    if (perf != nullptr)
-        perf->contacts_us += io::perf_now_us() - contacts_start;
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS);
 
     // The CL latch bookkeeping (motor callers already set the flag inline at
     // the latch site; this keeps the replica/harness channel and the transient
@@ -684,8 +681,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // Inter-entity sphere repulsion (no model contact only). [orig: @ 0x4b3a5c-0x4b3c52 —
     // threshold 30% of summed radii, push (thr - dist)/4 along the atan2 direction
     // via the quantized table with the (0x200000 - bam) index.]
-    const uint64_t repulsion_start =
-            perf != nullptr ? io::perf_now_us() : 0;
+    lap.restart();
     const bool had_model_contact =
         total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0;
     // [orig: @ 0x4b3a77-0x4b3aa1 — the dragger/carry anim states skip repulsion]
@@ -815,8 +811,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         }
     }
 
-    if (perf != nullptr)
-        perf->repulsion_us += io::perf_now_us() - repulsion_start;
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_REPULSION);
 
     // Leaving the ladder: latched at resolve start, nothing re-latched, a live
     // class-bit body — push 0.375u along +bodyHeading (over the lip on a natural
@@ -877,12 +872,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const int32_t feet_z = pos[2] - capsule_bottom;
     pos[2] = (pos[2] + 6143) & ~0x17FF;
     EntityHandle ground_hit;
-    const uint64_t ground_start =
-            perf != nullptr ? io::perf_now_us() : 0;
+    lap.restart();
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
-    if (perf != nullptr)
-        perf->ground_us += io::perf_now_us() - ground_start;
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_GROUND);
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
     // even a same-resolve CL latch. Generic ground is still resolved only by

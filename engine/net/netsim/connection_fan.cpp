@@ -1,4 +1,5 @@
 #include <net/netsim/connection_fan.h>
+#include <runtime/devtools/tick_profile.h>
 #include <base/io/perf_clock.h>
 
 #include <algorithm>
@@ -475,9 +476,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       std::size_t header_bytes,
-                                                      std::size_t hard_frame_limit,
-                                                      ConnectionS2CPerf *perf) {
-	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+                                                      std::size_t hard_frame_limit) {
+	devtools::ProfileLap lap(w.profile);
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
 		if (a != 0xFF) ++a;
@@ -487,8 +487,6 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		int64_t key;
 		const GameEntitySnapshot *snap;
 	};
-	uint64_t los_us = 0;
-	world::CollisionWorld::RaycastPerf los_perf;
 	std::vector<Scored> scored;
 	scored.reserve(entities.size());
 
@@ -527,11 +525,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const bool self_dead_or_spectator =
 			conn.respawn_pending ||
 			(self != nullptr && (self->state_flags & 0x02) != 0);
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->entity_setup_us = now - phase_start;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SETUP);
 
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
@@ -648,12 +642,13 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				const int32_t b3[3] = {e.x, e.y, e.z + kSightLift};
 				// The ray's collision scratch is write-only bookkeeping; the world is
 				// otherwise untouched (the AiSystem method itself is const).
-				const uint64_t los_start = perf != nullptr ? io::perf_now_us() : 0;
+				// The ray's own terrain/sector split lands on the LOS_TERRAIN /
+				// LOS_SECTOR rows inside the cached raycast.
+				const devtools::ProfileScope los_scope(
+						w.profile, devtools::Slot::SIM_REPLICATION_ENTITY_LOS);
 				los = w.ai->line_of_sight_clear_cached(
 						const_cast<world::World &>(w), a3, b3, conn.owned_entity,
-						world::EntityHandle{e.wire_handle},
-						perf != nullptr ? &los_perf : nullptr);
-				if (perf != nullptr) los_us += io::perf_now_us() - los_start;
+						world::EntityHandle{e.wire_handle});
 			}
 			const bool is_carrier = e.wire_handle == carrier_handle;
 
@@ -699,23 +694,12 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		const int64_t key = age + boost + v + ((age * (boost + v)) >> 8);
 		scored.push_back({key, &e});
 	}
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->entity_scoring_us = now - phase_start;
-		perf->entity_los_us = los_us;
-		perf->entity_los_terrain_us = los_perf.terrain_us;
-		perf->entity_los_sector_us = los_perf.sector_us;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SCORE);
 
 	// 3. Highest priority first [orig: descending shell sort @0x526cf0].
 	std::stable_sort(scored.begin(), scored.end(),
 	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->entity_sort_us = now - phase_start;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SORT);
 
 	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
 	// stamps on selection [orig: @0x50f168 age; @0x50f17c heading (Yaw+0x800000)>>24;
@@ -737,8 +721,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		written += record_bytes;
 		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
-	if (perf != nullptr)
-		perf->entity_budget_us = io::perf_now_us() - phase_start;
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
 	return selected;
 }
 
@@ -1002,10 +985,8 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
-                         std::size_t max_frame_body_bytes,
-                         ConnectionS2CPerf *perf) {
-	if (perf != nullptr) *perf = {};
-	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+                         std::size_t max_frame_body_bytes) {
+	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
 	if (owned == nullptr) return false;
@@ -1098,15 +1079,10 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 		std::vector<uint8_t> frame = build_0a_frame(
 				anchor, {}, flags2, hs, game_type, w.subgoals, {},
 				/*authority_recipient=*/true);
-		if (perf != nullptr) {
-			const uint64_t now = io::perf_now_us();
-			perf->encode_us = now - phase_start;
-			phase_start = now;
-		}
+		lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
 		conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 		                          /*reliable=*/false);
-		if (perf != nullptr)
-			perf->enqueue_us = io::perf_now_us() - phase_start;
+		lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
 		return true;
 	}
 
@@ -1119,11 +1095,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			: (max_frame_body_bytes > header_bytes
 					? max_frame_body_bytes - header_bytes
 					: 0);
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->setup_us = now - phase_start;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_FAN_SETUP);
 	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
 	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
 	// The first grouped-order port handed rounds only the leftovers — a real-world
@@ -1140,33 +1112,20 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->round_selection_us = now - phase_start;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
 					w, conn, ents, anchor, header_bytes + rounds_bytes,
-					max_frame_body_bytes, perf);
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->entity_selection_us = now - phase_start;
-		phase_start = now;
-	}
+					max_frame_body_bytes);
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
 	std::vector<uint8_t> frame = build_0a_frame(
 			anchor, selected, flags2, hs, game_type, w.subgoals,
 			std::move(rounds));
-	if (perf != nullptr) {
-		const uint64_t now = io::perf_now_us();
-		perf->encode_us = now - phase_start;
-		phase_start = now;
-	}
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
-	if (perf != nullptr)
-		perf->enqueue_us = io::perf_now_us() - phase_start;
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
 	return true;
 }
 

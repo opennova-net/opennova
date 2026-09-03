@@ -238,7 +238,7 @@ public:
 	opennova::inmatch::TickOutcome advance_mission_tick(
 			const opennova::inmatch::TickInput &) override {
 		opennova::inmatch::listen_host::frame(kernel_, host_, socket_,
-				/*viewport_height=*/0, /*perf=*/nullptr);
+				/*viewport_height=*/0);
 		return {opennova::inmatch::TickStatus::Ran,
 				static_cast<int32_t>(kernel_.world.logic_tick), {}};
 	}

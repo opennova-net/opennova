@@ -1,6 +1,7 @@
 #pragma once
 
 #include <net/npruntime/joiner_connection.h>
+#include <runtime/devtools/tick_profile.h>
 
 #include <net/netsim/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <net/netsim/session_transport.h>        // ISessionTransport
@@ -44,25 +45,6 @@
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
 namespace opennova::np {
-
-// Optional attribution for one Client_ProcessNetworkFrame call. It is supplied
-// only while the F3 capture window is open.
-struct ClientFramePerf {
-	uint64_t setup_us = 0;
-	uint64_t receive_us = 0;
-	uint64_t maintenance_us = 0;
-	uint64_t send_us = 0;
-
-	// Sum another record into this one (a render frame consumes 0..N ticks;
-	// the shell keeps one summed record per frame).
-	ClientFramePerf &operator+=(const ClientFramePerf &o) {
-		setup_us += o.setup_us;
-		receive_us += o.receive_us;
-		maintenance_us += o.maintenance_us;
-		send_us += o.send_us;
-		return *this;
-	}
-};
 
 class ClientRuntime {
 public:
@@ -202,11 +184,12 @@ public:
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
-	                                                             uint32_t now_tick = 0,
-	                                                             ClientFramePerf *perf = nullptr);
+	                                                             uint32_t now_tick = 0);
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
-	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(
-			uint32_t now_tick = 0, ClientFramePerf *perf = nullptr);
+	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
+	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
+	// this profile (the embedder's, normally the world's; null = no clocks).
+	void set_profile(devtools::TickProfile *profile) { profile_ = profile; }
 
 	// Typed gameplay seams used by the simulation; protocol tags/framing remain
 	// owned here. Fire is predicted locally before queueing C2S 0x06. The spent clip
@@ -525,8 +508,8 @@ private:
 	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
 	// frame.
 	std::vector<std::vector<uint8_t>> run_frame(
-			const PlayerExtendedUplink *uplink, uint32_t now_tick,
-			ClientFramePerf *perf);
+			const PlayerExtendedUplink *uplink, uint32_t now_tick);
+	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
 	void apply_zone_timer_value(const ZoneTimerValue &value);

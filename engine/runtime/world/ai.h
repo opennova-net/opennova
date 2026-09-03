@@ -636,30 +636,6 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags);
 
-// Optional attribution for one AiSystem gameplay tick. World only supplies this
-// while the F3 capture window is active; ordinary ticks keep the original path
-// free of clock reads.
-struct AiTickPerf {
-    uint64_t reactions_us = 0;
-    uint64_t collision_tables_us = 0;
-    uint64_t entities_us = 0;
-    uint64_t infantry_entities_us = 0;
-    uint64_t infantry_remote_us = 0;
-    uint64_t infantry_combat_us = 0;
-    uint64_t infantry_animation_us = 0;
-    uint64_t infantry_collision_us = 0;
-    uint64_t infantry_collision_contacts_us = 0;
-    uint64_t infantry_collision_repulsion_us = 0;
-    uint64_t infantry_collision_ground_us = 0;
-    uint64_t other_entities_us = 0;
-    uint64_t authority_vehicles_us = 0;
-    uint64_t vehicle_scan_us = 0;
-    uint64_t vehicle_motors_us = 0;
-    uint64_t vehicle_riders_us = 0;
-    uint64_t client_vehicles_us = 0;
-    uint64_t events_us = 0;
-};
-
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
@@ -667,7 +643,6 @@ public:
 
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
-    void tick_profiled(World &world, const TickContext &ctx, AiTickPerf *perf);
 
     // Re-seed every brain to the captured spawn baseline + clear the transient queues.
     // [Drives World::restore: load_systems() calls on_load on Play->Stop, so the AI
@@ -839,8 +814,7 @@ public:
     // Snapshot-fan variant: identical LOS semantics, with collision target
     // matrices reused inside a server-declared stable query epoch.
     bool line_of_sight_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
-                                    EntityHandle from, EntityHandle to,
-                                    CollisionWorld::RaycastPerf *perf = nullptr) const;
+                                    EntityHandle from, EntityHandle to) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
@@ -1009,8 +983,7 @@ public:
     // Order: anim root advance -> death edge -> ground resample (every 8) -> think +
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
-    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
-                       AiTickPerf *perf = nullptr);
+    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
     // 32-tick staged perception -> target commit, then per-tick reactions (the attack
     // anims), move modes, and the lead+error aim solution. Authority + alive only.
@@ -1171,8 +1144,7 @@ private:
     void rebuild_handle_index();
     // The one LOS body behind line_of_sight_clear / line_of_sight_clear_cached.
     bool line_of_sight_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
-                                  EntityHandle from, EntityHandle to, bool cached,
-                                  CollisionWorld::RaycastPerf *perf) const;
+                                  EntityHandle from, EntityHandle to, bool cached) const;
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)

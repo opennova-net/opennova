@@ -132,6 +132,7 @@ void Simulation::reset_world() {
 	kernel_->set_asset_index(
 			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
+	kernel_->profile.set_active(runtime_profiling_enabled_);
 	// Mission-scoped, while weapon_profile_ is player-scoped and outlives every
 	// load [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup
 	// path, not Game_StartMission]: the RESIDENT BUFFER is rebuilt per mission,
@@ -557,6 +558,7 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// not started yet and retain the historical fresh-runtime reset.
 			if (!joiner_bridge_.started() || !runtime_) {
 				runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+				runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 				runtime_->set_join_request(
 						join_role_, join_spectator_password_);
 				joiner_bridge_.reset_for_runtime_rebuild();
@@ -805,27 +807,19 @@ bool Simulation::advance_world_tick() {
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
-		// The pump adds its phases onto frame_phase_perf_.joiner; the local
-		// world tick's breakdown lands on the same World update rows the
-		// host/no-net ticks fill, once per tick.
-		if (runtime_profiling_enabled_) {
-			frame_phase_perf_.joiner.world = {};
-			frame_phase_perf_.joiner.client = {};
-		}
+		// The pump's phases, its wire leg and the local world tick's own
+		// breakdown all land on the kernel's profile (the same SIM_* rows the
+		// host/no-net ticks fill), once per tick.
 		joiner_pump();
-		if (runtime_profiling_enabled_) {
-			frame_phase_perf_.client_decode_us +=
-					static_cast<int64_t>(last_net_tick_us_);
-			frame_phase_perf_.host_session.server.add_logic_tick(
-					frame_phase_perf_.joiner.world);
-			frame_phase_perf_.client += frame_phase_perf_.joiner.client;
-		}
+		if (runtime_profiling_enabled_)
+			kernel_->profile.add(opennova::devtools::Slot::SIM_NET,
+					static_cast<int64_t>(last_net_tick_us_));
 		const uint64_t adm_start =
 				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 		kernel_->resolve_new_infantry_adm_ids();
 		if (runtime_profiling_enabled_) {
-			frame_phase_perf_.adm_resolve_us +=
-					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start);
+			kernel_->profile.add(opennova::devtools::Slot::SIM_ADM_RESOLVE,
+					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start));
 			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 		}
 		return true;
@@ -836,15 +830,10 @@ bool Simulation::advance_world_tick() {
 	// view arbiter's session inputs refresh first (the local-dead bit lives
 	// on the world even without a session).
 	kernel_->view_session_inputs = local_view_session_inputs();
-	opennova::world::LogicTickPerf world_perf;
-	kernel_->tick_no_net(runtime_profiling_enabled_ ? &world_perf : nullptr);
+	kernel_->tick_no_net(); // its world phases land on the kernel's profile
 	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
-	if (runtime_profiling_enabled_) {
-		// The direct tick attributes its world phases onto the same F3 keys
-		// the listen frame's server pump fills.
-		frame_phase_perf_.host_session.server.add_logic_tick(world_perf);
+	if (runtime_profiling_enabled_)
 		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-	}
 	return true;
 }
 
@@ -879,6 +868,7 @@ void Simulation::restore_world_baseline() {
 		// instead of inheriting a prior play epoch's rows and handle caches.
 		host_loop_.clear();
 		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
+		runtime_->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
 		install_item_class_resolver();
 		opennova::netsim::ClientReplicaPipeline &view = runtime_->view();
 		view.apply(0x10, opennova::encode_static_entity_batch(
@@ -978,8 +968,11 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
-	frame_phase_perf_ = {};
-	kernel_->collision.set_trace_profile_enabled(p_enabled);
+	if (kernel_ != nullptr) {
+		kernel_->profile.reset();
+		kernel_->profile.set_active(p_enabled);
+		kernel_->collision.set_trace_profile_enabled(p_enabled);
+	}
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {

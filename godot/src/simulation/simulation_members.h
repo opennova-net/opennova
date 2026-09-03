@@ -41,27 +41,11 @@ private:
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
-	// Capture-window-only attribution summed across every fixed tick consumed by
-	// one render frame: the engine's own per-pump records accumulate as-is
-	// (np::HostSessionPerf carries the ServerTickPerf world/replication split,
-	// np::ClientFramePerf the local ClientRuntime frame) plus the shell-side
-	// legs measured here. get_session_perf flattens them onto the F3 keys.
-	// Ordinary play leaves runtime_profiling_enabled_ false, so producers
-	// neither read clocks nor write these fields.
-	struct SessionPhasePerf {
-		opennova::np::HostSessionPerf host_session;
-		opennova::np::ClientFramePerf client;
-		int64_t host_prep_us = 0; // viewport/input/request setup before host_session_pump
-		int64_t host_player_us = 0; // the host's local view/weapon/medic pumps
-		int64_t client_decode_us = 0; // the local ClientState fold (host) / joiner wire leg
-		int64_t adm_resolve_us = 0;
-		// The joiner pump's phases after its wire leg (the world tick's own
-		// breakdown is folded onto host_session.server.world_* as well).
-		opennova::np::JoinerPumpPerf joiner;
-	};
-	SessionPhasePerf frame_phase_perf_;
 	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
-	// phase attribution above on it natively at the end of a session frame.
+	// kernel's tick profile (every touched SIM_* slot, ADR 0043 d5) plus the
+	// shell-side step/sink spans on it natively at the end of a session frame.
+	// Ordinary play leaves runtime_profiling_enabled_ false, so the profile is
+	// inactive and no producer reads a clock.
 	Ref<FrameStats> frame_stats_;
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	opennova::inmatch::Role configured_session_role() const;

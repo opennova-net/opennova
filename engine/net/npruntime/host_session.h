@@ -29,7 +29,7 @@
 #include <net/npruntime/napi_np_connection.h>
 #include <net/npruntime/napi_np_protocol.h>  // HostAcceptEvent + the server protocol entry points
 #include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_tick.h> // ServerTickPerf
+#include <net/npruntime/server_tick.h> // Server_TickUpdate
 
 namespace opennova::np {
 
@@ -98,37 +98,13 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 using HostBeforeServerTickFn = void (*)(void *context);
 using HostEventObserverFn = void (*)(void *context, const HostAcceptEvent &event);
 
-// Optional phase attribution for one host owner iteration. A null profile
-// keeps ordinary server/gameplay pumps free of diagnostic clock reads.
-struct HostSessionPerf {
-	uint64_t total_us = 0;
-	uint64_t receive_us = 0;
-	uint64_t connections_us = 0;
-	uint64_t adapter_us = 0;
-	uint64_t server_us = 0;
-	uint64_t send_us = 0;
-	ServerTickPerf server;
-
-	// Sum another record into this one (a render frame consumes 0..N ticks;
-	// the shell keeps one summed record per frame).
-	HostSessionPerf &operator+=(const HostSessionPerf &o) {
-		total_us += o.total_us;
-		receive_us += o.receive_us;
-		connections_us += o.connections_us;
-		adapter_us += o.adapter_us;
-		server_us += o.server_us;
-		send_us += o.send_us;
-		server += o.server;
-		return *this;
-	}
-};
-
+// The phases lap onto the SIM_HOST_* / SIM_SERVER_TICK rows of the world's
+// profile (ADR 0043 d5); an inactive profile reads no clock.
 void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick = nullptr,
 		void *before_server_tick_context = nullptr,
 		HostEventObserverFn event_observer = nullptr,
-		void *event_observer_context = nullptr,
-		HostSessionPerf *perf = nullptr);
+		void *event_observer_context = nullptr);
 
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.

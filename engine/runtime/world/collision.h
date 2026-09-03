@@ -44,6 +44,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <runtime/devtools/tick_profile.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::terrain {
@@ -779,24 +780,6 @@ public:
         int64_t static_faces = 0;
         int64_t dynamic_faces = 0;
     };
-    struct RaycastPerf {
-        uint64_t calls = 0;
-        uint64_t terrain_us = 0;
-        uint64_t sector_us = 0;
-        uint64_t sector_candidates = 0;
-    };
-    struct RaycastPrepPerf {
-        uint64_t candidate_collect_us = 0;
-        uint64_t grid_publish_us = 0;
-        uint64_t grid_span_us = 0;
-        uint64_t grid_bucket_us = 0;
-        uint64_t grid_workspace_us = 0;
-    };
-    struct ResolvePerf {
-        uint64_t contacts_us = 0;
-        uint64_t repulsion_us = 0;
-        uint64_t ground_us = 0;
-    };
     // Opt-in ray-debug capture: every segment query records one event into a
     // per-category ring while enabled (dev tooling — the F3 ray view/window
     // feed, not a ported surface). Per-category rings keep recurring per-frame
@@ -1159,14 +1142,16 @@ public:
     // then reuse retail's entity-resident matrix equivalent without observing
     // a pre-movement pose.
     bool raycast_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
-                              EntityHandle exclude_a, EntityHandle exclude_b,
-                              RaycastPerf *perf = nullptr);
+                              EntityHandle exclude_a, EntityHandle exclude_b);
+    // Sector candidates the most recent raycast_clear / raycast_clear_cached
+    // visited (the broad-phase's exactness, pinned by the collision ctest).
+    uint64_t last_los_sector_candidates() const { return last_los_sector_candidates_; }
     // Publish an exact broad-phase over the final live target bounds for a
     // caller-declared stable world phase. The replication fan prepares once
     // after movement/destruction, then every recipient ray queries only cells
     // intersecting its segment while retaining the original exact solid clip.
-    void prepare_cached_raycast_queries(World &world,
-                                        RaycastPrepPerf *perf = nullptr);
+    // Its phases lap onto the SIM_REPLICATION_QUERY_* rows of world.profile.
+    void prepare_cached_raycast_queries(World &world);
     void reset_query_view_cache();
 
     // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
@@ -1255,7 +1240,7 @@ public:
                            EntityHandle *out_ground = nullptr,
                            const LadderResolveIO *ladder_io = nullptr,
                            const int32_t *eye_offset = nullptr,
-                           ResolvePerf *perf = nullptr);
+                           devtools::TickProfile *profile = nullptr);
 
     // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
     // decoded remote row that has NO world entity — retail runs remote
@@ -1602,7 +1587,8 @@ private:
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
     bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                             EntityHandle exclude_a, EntityHandle exclude_b,
-                            bool cache_target_views, RaycastPerf *perf);
+                            bool cache_target_views);
+    uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
                                         bool person_faces_only) const;

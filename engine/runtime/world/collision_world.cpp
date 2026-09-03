@@ -428,10 +428,8 @@ void CollisionWorld::reset_query_view_cache() {
     invalidate_trace_views();
 }
 
-void CollisionWorld::prepare_cached_raycast_queries(World &world,
-                                                     RaycastPrepPerf *perf) {
-    if (perf != nullptr) *perf = {};
-    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+void CollisionWorld::prepare_cached_raycast_queries(World &world) {
+    devtools::ProfileLap lap(world.profile);
     // This is a new stable-world epoch: no matrix view or positional index may
     // survive from movement/destruction earlier in the logic tick.
     invalidate_trace_views();
@@ -475,13 +473,11 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
         });
     }
 
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->candidate_collect_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_REPLICATION_QUERY_COLLECT);
 
-    const uint64_t grid_start = phase_start;
+    // The grid publication as a whole (span + bucket + workspace) also lands
+    // on the SIM_REPLICATION_QUERY_GRID row.
+    const uint64_t grid_start = lap.last();
     stable_los_cell_spans_.reserve(stable_los_candidates_.size());
     bool have_cell_span = false;
     int32_t dense_min_x = 0;
@@ -525,11 +521,7 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
             dense_max_y = std::max(dense_max_y, max_y);
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->grid_span_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_REPLICATION_QUERY_GRID_SPAN);
 
     stable_los_dense_enabled_ = false;
     if (have_cell_span) {
@@ -587,19 +579,14 @@ void CollisionWorld::prepare_cached_raycast_queries(World &world,
             }
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->grid_bucket_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_REPLICATION_QUERY_GRID_BUCKET);
     stable_los_query_marks_.assign(stable_los_candidates_.size(), 0);
     stable_los_query_candidates_.reserve(stable_los_candidates_.size());
     stable_los_index_ready_ = true;
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->grid_workspace_us = now - phase_start;
-        perf->grid_publish_us = now - grid_start;
-    }
+    lap.mark(devtools::Slot::SIM_REPLICATION_QUERY_GRID_WORKSPACE);
+    if (lap.active())
+        world.profile->add(devtools::Slot::SIM_REPLICATION_QUERY_GRID,
+                           static_cast<int64_t>(lap.last() - grid_start));
 }
 
 const std::vector<uint32_t> &CollisionWorld::stable_los_candidates_for_ray(

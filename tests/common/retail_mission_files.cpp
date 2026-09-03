@@ -49,7 +49,7 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 void RetailMissionRig::tick() {
 	if (listen_server) {
 		NullDatagramSocket sock;
-		inmatch::listen_host::frame(*this, host, sock, /*viewport_height=*/0, /*perf=*/nullptr);
+		inmatch::listen_host::frame(*this, host, sock, /*viewport_height=*/0);
 		return;
 	}
 	tick_no_net();
