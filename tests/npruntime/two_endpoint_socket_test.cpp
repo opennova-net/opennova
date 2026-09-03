@@ -17,19 +17,19 @@
 //       Order-only (body byte-parity is deferred: our world stream is built from our own minimal
 //       World).
 
-#include <net/npruntime/host_session.h> // the host owner loop (promoted to engine/net/npruntime; SAME loop main.cpp runs)
+#include <runtime/session/host_session.h> // the host owner loop (promoted to engine/runtime/session; SAME loop main.cpp runs)
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter (for the host loop)
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/server_spawn.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_protocol.h>
+#include <runtime/session/server_session.h>
+#include <runtime/session/server_spawn.h>
 
 #include "host_test_setup.h"
 
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/wire_capture.h>

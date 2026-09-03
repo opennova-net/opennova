@@ -24,16 +24,16 @@
 // Every assertion starts from a state where the asserted value DIFFERS from its prior
 // value, so a no-op implementation cannot pass.
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/joiner_connection.h>
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/joiner_connection.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_message_dispatch.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

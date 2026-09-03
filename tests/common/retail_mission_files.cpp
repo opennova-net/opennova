@@ -2,7 +2,7 @@
 #include "common/null_datagram_socket.h"
 
 #include <base/io/log.h>
-#include <net/npwire/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 
 #include <cstdio>

@@ -15,7 +15,7 @@
 #include <memory>
 #include <vector>
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 

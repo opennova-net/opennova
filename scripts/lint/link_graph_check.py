@@ -89,6 +89,13 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         set(),
     ),
     (
+        "net means wire (ADR 0043 d4): opennova_net never links "
+        "opennova_runtime — the in-match session and replication sit ABOVE it",
+        ["opennova_net", SERVICE_TARGET],
+        ["opennova_runtime"],
+        set(),
+    ),
+    (
         "the godot adapter links session+gate via opennova_net, "
         "never the service leg",
         ["opennova"],

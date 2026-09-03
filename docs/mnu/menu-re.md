@@ -1438,7 +1438,7 @@ Accepted/divergent (each a documented decision, not a defect):
   `Server_QueueEntityAction`), the FIRST row stamps `g_map_file_name` /
   `missionData` / its rotation flag / `g_GameType`(+4392), then the
   SERVERTYPE arm (1 = NovaWorld HTTP hosting, 2 = LAN session).
-  **Port:** the witnessed rules live engine-side in `npwire/game_type.h`
+  **Port:** the witnessed rules live engine-side in `base/gameprofile/game_type.h`
   (`host_list_visible` / `host_filter_category` / `host_abbreviation_key` /
   `host_rotation_default`, pinned by `game_type_policy` ctest) through the
   `NetProtocol` binding; `mp_menu_companion.gd` seeds the host pool from

@@ -14,7 +14,7 @@
 
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/ammo_table_build.h>
-#include <net/npruntime/loadout_submit.h>
+#include <runtime/session/loadout_submit.h>
 
 #include <formats/def/def.h>
 #include <base/resource_index/resource_index.h>

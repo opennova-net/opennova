@@ -18,7 +18,7 @@
 //
 // Asset-free and wire-free: it drives ClientReplicaPipeline::tick_arms_dip() directly.
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <cstdint>
 #include <cstdio>

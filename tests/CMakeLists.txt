@@ -274,7 +274,7 @@ target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
-target_link_libraries(inmatch_session_test PRIVATE opennova_net)
+target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
 # The menu sound profile (the synthetic fixtures/lwf/menu.lwf): trigger sets
@@ -1029,7 +1029,7 @@ add_test(NAME minimap_markers COMMAND minimap_markers_test)
 # decode, the per-side default walk, and the joiner profile projection
 # (npruntime/join_character_profile.h).
 add_executable(character_registry_test npruntime/character_registry_test.cpp)
-target_link_libraries(character_registry_test PRIVATE opennova_net)
+target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
 
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
@@ -1999,7 +1999,7 @@ target_include_directories(net_ports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME net_ports COMMAND net_ports_test)
 
 add_executable(game_type_policy_test npwire/game_type_policy_test.cpp)
-target_link_libraries(game_type_policy_test PRIVATE opennova_net)
+target_link_libraries(game_type_policy_test PRIVATE opennova_runtime)
 target_include_directories(game_type_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME game_type_policy COMMAND game_type_policy_test)
 
@@ -2066,7 +2066,7 @@ add_executable(nw_host_register_e2e_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
 target_link_libraries(nw_host_register_e2e_test
-    PRIVATE opennova_novaworld_service opennova_net opennova_app_common)
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
 target_include_directories(nw_host_register_e2e_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server
@@ -2267,19 +2267,19 @@ add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
 # netsim tests — the in-match net seam (ADR 0009/0011).
 # The in-process loopback transport.
 add_executable(netsim_loopback_channel_test netsim/loopback_channel_test.cpp)
-target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_net)
+target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_runtime)
 add_test(NAME netsim_loopback_channel COMMAND netsim_loopback_channel_test)
 
 add_executable(netsim_item_replication_catalog_test
     netsim/item_replication_catalog_test.cpp)
-target_link_libraries(netsim_item_replication_catalog_test PRIVATE opennova_net opennova_formats)
+target_link_libraries(netsim_item_replication_catalog_test PRIVATE opennova_runtime opennova_formats)
 add_test(NAME netsim_item_replication_catalog
     COMMAND netsim_item_replication_catalog_test)
 
 # The ADR 0011 §4 loopback identity guard: World entity -> encode -> loopback ->
 # decode -> ClientState, field-identical to what the host's encoder + codec produced.
 add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
-target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_net)
+target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_runtime)
 add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 
 # A header-only retail join has no local BMS body to promote. The decoded
@@ -2287,7 +2287,7 @@ add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 # collision, deploy, and vehicle-seat consumers.
 add_executable(netsim_client_world_materializer_test
     netsim/client_world_materializer_test.cpp)
-target_link_libraries(netsim_client_world_materializer_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_world_materializer_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_world_materializer
     COMMAND netsim_client_world_materializer_test)
 
@@ -2297,18 +2297,18 @@ add_test(NAME netsim_client_world_materializer
 # bucket-ladder pins, and the honest chase-only fast-vehicle sustain limit
 # (the family prediction legs live world-side; watercraft_client_motor_test).
 add_executable(netsim_remote_motion_smoothness_test netsim/remote_motion_smoothness_test.cpp)
-target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_net)
+target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_runtime)
 add_test(NAME netsim_remote_motion_smoothness COMMAND netsim_remote_motion_smoothness_test)
 
 # The co-op-LAN fan-out guard: one World snapshot fanned to a connection table (loopback
 # self + a socket-free UdpSessionTransport joiner), per-connection anchoring, and the
 # host-side C2S 0x0C drain/SNAP — no Godot, no OS sockets (Increment A).
 add_executable(netsim_two_peer_fanout_test netsim/two_peer_fanout_test.cpp)
-target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_net)
+target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_runtime)
 add_test(NAME netsim_two_peer_fanout COMMAND netsim_two_peer_fanout_test)
 
 add_executable(netsim_build_player_uplink_test netsim/build_player_uplink_test.cpp)
-target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_net)
+target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_runtime)
 add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test)
 
 # The §5.10b decode-dispatch guard: the replica pipeline's items.def class resolver sizes
@@ -2317,35 +2317,35 @@ add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test
 # scatters every later record around the recipient anchor.
 add_executable(netsim_client_replica_pipeline_arms_dip_test
     netsim/client_replica_pipeline_arms_dip_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_arms_dip_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_arms_dip_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_arms_dip
     COMMAND netsim_client_replica_pipeline_arms_dip_test)
 
 add_executable(netsim_client_replica_pipeline_world_page_atomicity_test
     netsim/client_replica_pipeline_world_page_atomicity_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_world_page_atomicity
     COMMAND netsim_client_replica_pipeline_world_page_atomicity_test)
 
 add_executable(netsim_client_replica_pipeline_recoil_test
     netsim/client_replica_pipeline_recoil_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_recoil
     COMMAND netsim_client_replica_pipeline_recoil_test)
 
 add_executable(netsim_client_replica_pipeline_occupant_backref_test
     netsim/client_replica_pipeline_occupant_backref_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_occupant_backref
     COMMAND netsim_client_replica_pipeline_occupant_backref_test)
 
 add_executable(netsim_client_replica_pipeline_target_carrier_follow_test
     netsim/client_replica_pipeline_target_carrier_follow_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_target_carrier_follow_test
-    PRIVATE opennova_net)
+    PRIVATE opennova_runtime)
 add_executable(netsim_client_replica_pipeline_contact_resolver_test
     netsim/client_replica_pipeline_contact_resolver_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_contact_resolver_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_contact_resolver_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_contact_resolver
     COMMAND netsim_client_replica_pipeline_contact_resolver_test)
 add_test(NAME netsim_client_replica_pipeline_target_carrier_follow
@@ -2353,13 +2353,13 @@ add_test(NAME netsim_client_replica_pipeline_target_carrier_follow
 
 add_executable(netsim_client_replica_pipeline_class_resolver_test
     netsim/client_replica_pipeline_class_resolver_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_class_resolver_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_class_resolver_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_class_resolver
     COMMAND netsim_client_replica_pipeline_class_resolver_test)
 
 add_executable(netsim_client_replica_pipeline_anim_pulse_test
     netsim/client_replica_pipeline_anim_pulse_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_anim_pulse
     COMMAND netsim_client_replica_pipeline_anim_pulse_test)
 
@@ -2375,14 +2375,14 @@ add_test(NAME netsim_client_replica_pipeline_body_arbitration
     COMMAND netsim_client_replica_pipeline_body_arbitration_test)
 
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
-target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_net)
+target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_runtime)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
 
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
 # P0/P1: the in-process listen-server bring-up state writes (§5.0).
 add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
-target_link_libraries(npruntime_server_session_test PRIVATE opennova_net)
+target_link_libraries(npruntime_server_session_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
 
 # P3: the World-driven host-side spawn pipeline (Server_InitNewRoundState ->
@@ -2409,13 +2409,13 @@ add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridg
 # promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
 # settle > window > edges), and the D-NET-178 expansion reconcile decision.
 add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
-target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_net)
+target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
 
 # ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
-target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_net)
+target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
 # D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
@@ -2533,7 +2533,7 @@ add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 # D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and
 # reassembles the paged S2C 0x45 terrain-tile stream for wire-driven loading.
 add_executable(npruntime_join_wire_assets_test npruntime/join_wire_assets_test.cpp)
-target_link_libraries(npruntime_join_wire_assets_test PRIVATE opennova_net)
+target_link_libraries(npruntime_join_wire_assets_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_wire_assets COMMAND npruntime_join_wire_assets_test)
 
 # Retail in-match loss recovery: future 0x43/0x83 packets trigger direction-specific 0x84/0x44

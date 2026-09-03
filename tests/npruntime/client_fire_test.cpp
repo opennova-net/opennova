@@ -13,15 +13,15 @@
 // rejects further fire until the 0x25 relay refills; a no-clip weapon (clipsize -1) never
 // rejects; a table-less host accepts without bookkeeping.
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/session/napi_np_protocol.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/server_message_dispatch.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/session/session_transport.h>
+#include <runtime/session/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

@@ -4,7 +4,7 @@
 #include "simulation/simulation_internal.h"
 
 #include <formats/mission/bms.h>
-#include <net/npwire/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_view.h>
 

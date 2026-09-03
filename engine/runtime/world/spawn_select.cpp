@@ -9,7 +9,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>  // World, EntityRegistry registry
 #include <runtime/world/zone_chain.h>
 

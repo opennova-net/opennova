@@ -12,7 +12,7 @@
 
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <runtime/simassets/adm_root_motion.h>

@@ -19,9 +19,11 @@ easier to relay than to rediscover.
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, simassets, devtools — the Dear ImGui
   pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
-  surface, ADR 0039),
-  `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
-  netsim/npruntime implementation directories). `engine/` is the one public
+  surface, ADR 0039 — plus `session` (the in-match session, the listen-host
+  frame, the server/client state machines and frame loops, the transports) and
+  `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
+  `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
+  or links `runtime/`). `engine/` is the one public
   include root: `#include <runtime/world/x.h>`, `<formats/pff/pff.h>` (ADR 0040).
   Native consumers link the engine groups directly.
   See `engine/CLAUDE.md`.
@@ -113,7 +115,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - The in-match session owns lifecycle, role policy, fixed-tick banking, and
-  input consumption in portable C++ (`engine/net/inmatch/session.*`; ADR 0036,
+  input consumption in portable C++ (`engine/runtime/session/session.*`; ADR 0036,
   superseding ADR 0035's old name/location). An `inmatch::TickTarget` supplies
   the concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device

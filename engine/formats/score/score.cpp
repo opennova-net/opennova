@@ -10,7 +10,7 @@ namespace score {
 namespace {
 
 // The g_GameType code words the ladder tests, named here so the switch reads
-// like the original. These mirror engine/net/npwire/game_type.h, which the
+// like the original. These mirror engine/base/gameprofile/game_type.h, which the
 // formats layer may not include (ADR 0030: formats depends only on base/io and
 // other formats libs). [orig: load_scoring_table_for_game_type @0x52D300 —
 // the 0x10000 test @0x52d324 and the (g & 0xFFFDFFFF) == 0x10020 &&

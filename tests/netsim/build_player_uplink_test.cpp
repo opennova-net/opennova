@@ -1,4 +1,4 @@
-// build_player_uplink (engine/net/netsim) is the JOINER-side inverse of apply_player_intent: it
+// build_player_uplink (engine/runtime/replication) is the JOINER-side inverse of apply_player_intent: it
 // synthesizes the C2S 0x0C extended (type-10) uplink BODY from the joiner's own live
 // local-player state. This proves the full joiner->host round-trip — build the uplink from a
 // source pose, encode it (+ the 5-B sub-header), decode it, and read-apply it to the joiner's
@@ -6,9 +6,9 @@
 // moves on the host). [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
 
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/loopback_channel.h>
 
 #include "conn_fan_test_util.h"
 

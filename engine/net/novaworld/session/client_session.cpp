@@ -123,7 +123,7 @@ std::vector<uint8_t> ClientSession::start() {
 }
 
 // The shared identity struct-fill (declared in client_session.h) — used by ClientSession below AND by
-// np::JoinerConnection (engine/net/npruntime). The two builders differ only in the CO source and the framing
+// np::JoinerConnection (engine/runtime/session). The two builders differ only in the CO source and the framing
 // envelope, so the fill lives here once. [orig: one CNapiNPConnection identity block @0x61fe20.]
 ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view co) {
 	ClientHello hello;

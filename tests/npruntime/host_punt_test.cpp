@@ -9,16 +9,16 @@
 // fatal (C2S 0x20 "PUNT WCRC" / C2S 0x21 "PUNT ACRC"), so the SILENCE is pinned here
 // instead (D-NET-181).
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/joiner_connection.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/joiner_connection.h>
+#include <runtime/session/host_session.h>
+#include <runtime/session/napi_np_protocol.h>
+#include <runtime/session/server_session.h>
+#include <runtime/session/server_spawn.h>
+#include <runtime/session/server_tick.h>
 
-#include <net/netsim/idatagram_socket.h>
-#include <net/netsim/udp_session_transport.h>
+#include <net/npwire/idatagram_socket.h>
+#include <runtime/session/udp_session_transport.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>

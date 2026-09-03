@@ -7,8 +7,8 @@
 
 #include "netsim/conn_fan_test_util.h"
 
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/world/world.h>
 

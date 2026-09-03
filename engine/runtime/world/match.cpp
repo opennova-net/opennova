@@ -8,7 +8,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {

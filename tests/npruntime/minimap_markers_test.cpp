@@ -7,8 +7,8 @@
 #include <cstdio>
 #include <vector>
 
-#include <net/netsim/client_state.h>
-#include <net/npruntime/minimap_markers.h>
+#include <runtime/replication/client_state.h>
+#include <runtime/session/minimap_markers.h>
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>

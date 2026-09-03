@@ -6,8 +6,8 @@
 // depth (health folds, mount sync, mirrors) is covered by the GUT net suites
 // and the S10 live A/B; this test locks the portable sequencing contract.
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/joiner_world_bridge.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/joiner_world_bridge.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>

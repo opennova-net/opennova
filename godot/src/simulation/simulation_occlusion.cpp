@@ -6,9 +6,9 @@
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/round_debug_report.h"
 
-#include <net/netsim/connection_fan.h>
+#include <runtime/replication/connection_fan.h>
 #include <runtime/world/occlusion_feed.h>
-#include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
+#include <runtime/replication/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
 #include <runtime/world/occlusion_camera.h> // the camera hand-over
 #include <runtime/world/iris_march.h> // the iris exposure march

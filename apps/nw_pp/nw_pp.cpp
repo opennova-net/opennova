@@ -31,7 +31,7 @@
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
-#include <net/npwire/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/wire_handle.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/hud/feed_format.h>

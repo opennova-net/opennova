@@ -12,7 +12,7 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-// classify_session_protocol is the shared PN router (the in-match reply dispatch moved to engine/net/npruntime
+// classify_session_protocol is the shared PN router (the in-match reply dispatch moved to engine/runtime/session
 // with the P8 retirement of GameServerRuntime; the npruntime handshake test exercises that path).
 bool check_protocol_classifier_accepts_lobby_and_jointoperations() {
 	using opennova::SessionProtocolKind;

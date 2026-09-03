@@ -4,8 +4,8 @@
 // a complete prefix (or a complete page with trailing junk) applies, and
 // preexisting replica state is untouched by the failure.
 
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/npruntime/client_replica_present_projection.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/session/client_replica_present_projection.h>
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>

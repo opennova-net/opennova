@@ -1,7 +1,7 @@
 #include "network/net_protocol.h"
 
-#include <net/npruntime/game_config.h>
-#include <net/npwire/game_type.h>
+#include <runtime/session/game_config.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/wire_handle.h>

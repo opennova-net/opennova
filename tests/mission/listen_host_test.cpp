@@ -8,11 +8,11 @@
 // drain (a reload request is consumed by the server dispatcher while every
 // other datagram stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
-#include <net/inmatch/listen_host.h>
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npwire/game_type.h>
+#include <runtime/session/listen_host.h>
+#include <runtime/session/client_runtime.h>
+#include <runtime/session/host_session.h>
+#include <runtime/session/napi_np_connection.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/mission/mission_kernel.h>

@@ -5,7 +5,7 @@ per-item-type template loaded from `items.def`) and its copy into the 904-byte
 `GamePlayerEntity`. The reimplementation surface is the parsed model
 `DefItemDef` (`engine/formats/def`) and the Godot wrapper
 `ItemDatabase` (`godot/src/object`); the runtime entity copy lands in
-`engine/runtime/world` / `engine/net/netsim`. Binary: retail **Jointops.exe** (IDB
+`engine/runtime/world` / `engine/runtime/replication`. Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the divergence catalog code comments cite as
 `docs/world/itemdef-re.md (D-ITEMDEF-…)`.

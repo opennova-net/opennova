@@ -6,7 +6,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <net/npruntime/game_config.h>
+#include <runtime/session/game_config.h>
 
 namespace godot {
 

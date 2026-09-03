@@ -207,6 +207,55 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_chain.cpp
+    # replication — the world<->wire seam (ex net/netsim, ADR 0043 d4):
+    # connection-fan primitives, client replica state and its folds, the
+    # client world materializer, the roster/scoreboard views
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_body_arbitration.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_body_ticks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_death.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_endround.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_roster_tags.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_scoreboard_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_world_materializer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/connection_fan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/serializing_sink.cpp
+    # session — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
+    # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
+    # server/client state machines and frame loops, the transports
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/character_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/charattr_challenge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_replica_card.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_replica_present_projection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/end_round_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/host_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/integrity_challenge_profile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/join_session_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/joiner_world_bridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/listen_host.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/loadout_submit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/loopback_channel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/minimap_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/napi_np_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_initial_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_message_dispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/server_tick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/session_status.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/udp_session_transport.cpp
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.
@@ -217,8 +266,10 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
-# The Shape A chain: runtime -> base -> formats -> io (all PUBLIC).
-target_link_libraries(opennova_runtime PUBLIC opennova_base opennova_crt)
+# The chain (ADR 0043 d4): runtime -> net -> base -> formats -> io (all
+# PUBLIC). runtime carries the in-match session and replication, so it sits
+# above the wire-only net group.
+target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennova_crt)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 

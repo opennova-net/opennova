@@ -6,7 +6,7 @@
 //  find_spawn_entity_for_team @0x4fc810]
 #include <runtime/world/entity.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 #include <runtime/world/zone_capture.h>

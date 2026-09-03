@@ -1,7 +1,7 @@
 # Porting the per-frame S2C 0x0A emit (faithful, IDA-driven)
 
 The in-match replication core is the per-frame S2C `0x0A`. The retail host builds it in a small,
-fully-witnessed chain; our job is to port that chain into `engine/net/netsim` **structurally**, not to invent
+fully-witnessed chain; our job is to port that chain into `engine/runtime/replication` **structurally**, not to invent
 a broadcast. This doc is the runbook + current state so you can continue without re-deriving.
 
 Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F flood context), and
@@ -355,5 +355,5 @@ numbering").
   source, defer with a tracked D-NET divergence rather than guessing bytes. D-NET-134 is closed: phase 2
   uses the live mission/runtime environment owner and quantizes only at the wire boundary.
 - Never carry raw capture bytes through the encoder (ADR 0003).
-- After a `engine/net/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
+- After a `engine/runtime/replication` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
   kill the running Godot instance first) before a live test.

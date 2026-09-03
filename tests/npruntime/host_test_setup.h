@@ -4,10 +4,10 @@
 // real lifecycle (set_connection_mode -> set_transport_mode -> create_session). After this the host
 // is_in_session + (when authority) host_running, so the gated handshake legs admit a join.
 
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/server_session.h>
+#include <runtime/session/napi_np_protocol.h>
+#include <runtime/session/server_session.h>
 
-#include <net/netsim/session_transport.h>
+#include <runtime/session/session_transport.h>
 
 namespace opennova::np::test {
 

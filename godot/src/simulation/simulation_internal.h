@@ -24,21 +24,21 @@
 #include <string>
 #include <utility>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/entity_wire_bridge.h> // build_player_uplink (joiner-side C2S 0x0C body)
+#include <runtime/replication/connection.h>
+#include <runtime/replication/entity_wire_bridge.h> // build_player_uplink (joiner-side C2S 0x0C body)
 
 #include <net/npwire/entity_class.h> // class_from_tag (§5.10b *_function -> wire class)
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
-#include <net/npruntime/client_replica_present.h> // the client-replica present composition (ADR 0031)
-#include <net/npruntime/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
-#include <net/npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
-#include <net/npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
-#include <net/npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <runtime/session/client_replica_present.h> // the client-replica present composition (ADR 0031)
+#include <runtime/session/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
+#include <runtime/session/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
+#include <runtime/session/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
+#include <runtime/session/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
 #include <runtime/world/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
-#include <net/npwire/game_type.h>              // game_type::for_mission_mode
+#include <base/gameprofile/game_type.h>              // game_type::for_mission_mode
 
 #include <formats/def/def.h> // def_parse_weapons_memory / def_free_weapons
 
@@ -115,7 +115,7 @@ using opennova::simassets::aim_overlay_inputs_for;
 
 // The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
 // the engine with the joiner bridge (S10a, ADR 0028):
-// engine/net/npruntime joiner_world_bridge.h. The using declarations keep this
+// engine/runtime/session joiner_world_bridge.h. The using declarations keep this
 // family's call sites unchanged.
 using opennova::np::client_entity_for_handle;
 using opennova::np::wire_carrier_exclusion_for;
@@ -176,7 +176,7 @@ using opennova::world::EmplacedWeaponControls;
 using opennova::world::emplaced_weapon_controls_for;
 
 // The client-replica present composition helpers moved to the engine
-// (ADR 0031): engine/net/npruntime client_replica_present.h. The using
+// (ADR 0031): engine/runtime/session client_replica_present.h. The using
 // declarations keep this family's call sites unchanged.
 using opennova::np::emplaced_weapon_controls_for_client;
 using opennova::np::write_present_emplaced_controls;

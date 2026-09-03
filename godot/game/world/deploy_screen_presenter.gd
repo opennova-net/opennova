@@ -129,7 +129,7 @@ func select_spawn_row(row: int) -> void:
 ## flags1 bit1) — retail opens this same death.mnu DEATH screen for both, and
 ## the once-per-arming open latch belongs to the engine's ClientState, like
 ## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
-## (engine/net/netsim/client_state.h) and hud-re D-HUD-19.
+## (engine/runtime/replication/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:
 	if is_open() or _world == null or _ui_parent == null:
 		return false

@@ -13,8 +13,8 @@
 #define OPENNOVA_TEST_RETAIL_MISSION_FILES_H
 
 #include <base/io/bam.h>
-#include <net/inmatch/listen_host.h>
-#include <net/inmatch/session.h>
+#include <runtime/session/listen_host.h>
+#include <runtime/session/session.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <cmath>

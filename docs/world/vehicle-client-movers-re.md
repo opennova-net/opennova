@@ -4,7 +4,7 @@ The client-executed subsets of the per-family vehicle movers (the D-NET-196
 prediction legs), the boat platform solve, the shared suspension solvers, the
 cbik (bike) mover, and the aircraft contact solve. Implementing code:
 `engine/runtime/world/vehicle_motor.cpp` (the family `*_client_tick` movers +
-`watercraft_platform_solve`), `engine/net/netsim/client_replica_pipeline.cpp` (the
+`watercraft_platform_solve`), `engine/runtime/replication/client_replica_pipeline.cpp` (the
 per-class row chases), with the joiner wiring in
 `godot/src/simulation/simulation_net.cpp`. Binary: retail
 `Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every

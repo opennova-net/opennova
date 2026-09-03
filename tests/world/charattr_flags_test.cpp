@@ -9,7 +9,7 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
 
-#include <net/npruntime/charattr_challenge.h>
+#include <runtime/session/charattr_challenge.h>
 
 #include <cstdio>
 #include <cstring>

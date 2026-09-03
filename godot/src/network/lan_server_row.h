@@ -15,7 +15,7 @@ namespace godot {
 // the P2 server flags (JoinTarget.FLAG_*), the session id and the
 // advertised expansion. Map identity is deliberately absent: retail LAN
 // enumeration has not joined the session yet (engine:
-// net/npruntime/lan_discovery.h LanDiscoveryRow).
+// net/npwire/lan_discovery.h LanDiscoveryRow).
 #define LAN_SERVER_ROW_FIELDS(X)        \
 	X(String, server_name, String())    \
 	X(String, host_ip, String())        \

@@ -37,7 +37,7 @@ the code harder to change without helping a retail peer.
    decoders, message catalogue, signedness, field order, chunk sizes, and
    transaction order are proved against original-engine witnesses and exact
    bytes. OpenNova-to-OpenNova consistency never substitutes for that proof.
-2. `opennova::inmatch::Session` in `engine/net/inmatch/session.*` is the one
+2. `opennova::inmatch::Session` in `engine/runtime/session/session.*` is the one
    public owner of an active match's lifecycle, role policy, fixed cadence,
    retained input, and typed tick/frame outcomes. Its one inversion point is
    `inmatch::TickTarget`, implemented by the Godot simulation and headless host.

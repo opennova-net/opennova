@@ -5,9 +5,9 @@
 #ifndef OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
 #define OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/netsim/connection.h>        // netsim::TransportMode
-#include <net/netsim/session_transport.h> // netsim::ISessionTransport
+#include <runtime/session/napi_np_connection.h>
+#include <runtime/replication/connection.h>        // netsim::TransportMode
+#include <runtime/session/session_transport.h> // netsim::ISessionTransport
 #include <runtime/world/entity.h>         // world::EntityHandle
 
 #include <cstdint>

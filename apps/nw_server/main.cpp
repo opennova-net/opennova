@@ -23,12 +23,12 @@
 #include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
 #include <formats/trn/trn.h>
 #include <formats/trn/trn_io.h>
-#include <net/inmatch/listen_host.h>
-#include <net/inmatch/session.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/session_status.h>
-#include <net/npwire/game_type.h>
+#include <runtime/session/listen_host.h>
+#include <runtime/session/session.h>
+#include <runtime/session/host_session.h>
+#include <runtime/session/napi_np_server_ctx.h>
+#include <runtime/session/session_status.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/mission/mission_kernel.h>

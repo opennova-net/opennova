@@ -4,9 +4,10 @@ project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 # sqlite is only needed to DEFINE the novaworld service target inside engine/;
-# the extension links opennova_net (wire codec + session/gate legs + netsim +
-# npruntime), NEVER opennova_novaworld_service, so no sqlite or service code
-# ends up in the binary.
+# the extension links opennova_runtime (which PUBLIC-links the wire-only
+# opennova_net: codec + session/gate legs; the in-match session and
+# replication live in runtime/, ADR 0043 d4), NEVER opennova_novaworld_service,
+# so no sqlite or service code ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour (ONED's
 # run surface needs them in the release-mode dev zip too). The game's dev-tool

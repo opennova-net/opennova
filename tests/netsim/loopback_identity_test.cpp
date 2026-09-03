@@ -12,11 +12,11 @@
 // the pre-compression value — the codec is intentionally lossy). This guard must
 // stay green through every phase.
 
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/serializing_sink.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/session/loopback_channel.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/replication/serializing_sink.h>
 
 #include "conn_fan_test_util.h"
 

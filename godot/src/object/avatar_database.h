@@ -10,7 +10,7 @@
 
 #include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
-#include <net/npruntime/character_registry.h>
+#include <runtime/session/character_registry.h>
 
 #include <cstdint>
 #include <vector>
@@ -152,7 +152,7 @@ public:
 	// order) whose nationality alignment matches; no match -> the first combo of
 	// all; empty -> 0 [orig: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md].
 	int first_character_id(int alignment) const;
-	// The joiner's profile-to-wire projection (net/npruntime/
+	// The joiner's profile-to-wire projection (runtime/session/
 	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape
 	// (side_profiles [blue, red] each carrying nationality/division/combo tree
 	// indices and player_class).
