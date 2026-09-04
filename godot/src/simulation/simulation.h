@@ -938,7 +938,8 @@ public:
 	bool is_host_listening() const {
 		const opennova::inmatch::RoleKind kind = session_.kind();
 		return kind == opennova::inmatch::RoleKind::ListenHost ||
-				kind == opennova::inmatch::RoleKind::DedicatedHost;
+				kind == opennova::inmatch::RoleKind::DedicatedHost ||
+				net_.lan_host_pending;
 	}
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted

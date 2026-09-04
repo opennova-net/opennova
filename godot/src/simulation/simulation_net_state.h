@@ -53,6 +53,11 @@ struct SimulationNetState {
 	// HostConfig.serve_and_play / start_host_session's gating (engine:
 	// runtime/inmatch/host_role.cpp).
 	bool host_serve_and_play = true;
+	// A LAN host requested by enable_host_listen while a mission was LIVE: the
+	// session cannot switch roles mid-mission, so the pump is bound at once and
+	// the LAN HostRole is installed by ensure_session_role at the next load
+	// (the pre-G13 host_listen_ latch; is_host_listening() reads it meanwhile).
+	bool lan_host_pending = false;
 	uint32_t host_max_players = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell
 	// (which owns the resource root) before load; copied into the host ctx's

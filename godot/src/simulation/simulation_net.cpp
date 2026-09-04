@@ -287,14 +287,14 @@ bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes)
 bool Simulation::enable_host_listen(int p_port) {
 	using RoleKind = opennova::inmatch::RoleKind;
 	listen_server_ = true;
-	// The LAN host role, kinded by the UI server type (configure_host_session); the
-	// session's role switch is the gate a live mission refuses before any socket is
-	// touched.
-	if (!install_role(std::make_unique<opennova::inmatch::HostRole>(
-				net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
-				item_class_resolver()))) {
-		return false;
-	}
+	// The LAN host role, kinded by the UI server type (configure_host_session).
+	// A live mission cannot switch roles: the pump is still bound now and the
+	// role is installed at the next load (net_.lan_host_pending, consumed by
+	// ensure_session_role) -- the contract the armory's MP open rides.
+	const bool installed = install_role(std::make_unique<opennova::inmatch::HostRole>(
+			net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
+			item_class_resolver()));
+	net_.lan_host_pending = !installed;
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
 	// The LAN host scans the retail port range from the requested port
@@ -316,15 +316,16 @@ bool Simulation::enable_host_listen(int p_port) {
 	if (!bound) {
 		// Not a LAN host: the socketless SP listen server is what remains.
 		net_.pump_socket.reset();
-		(void)install_offline_role();
+		net_.lan_host_pending = false;
+		if (installed) (void)install_offline_role();
 		return false;
 	}
 	// The host role reads and writes the bound pump through the adapter from
 	// now on (the SP/test host never installs one and stays socketless). The
 	// kind-derived world rules (the authority, the mp session) applied with the
-	// role install.
+	// role install; a pending role takes the socket when it is installed.
 	net_.pump_socket = std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr());
-	host_role_->set_socket(net_.pump_socket.get());
+	if (installed) host_role_->set_socket(net_.pump_socket.get());
 	// P7: the LAN host rides the npruntime runtime (ctx over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). net_.host_session_config keeps the GDScript-facing session options
