@@ -29,13 +29,13 @@ private:
 	// reads the DefWeaponDef rows directly, the engine's loadout laws take the
 	// rows as they are, and nothing re-packs them. Freed at the top of every
 	// load attempt and in the destructor.
-	DefWeaponsFile weapons_file_ = {};
+	opennova::def::DefWeaponsFile weapons_file_ = {};
 	bool weapons_file_loaded_ = false;
 	String source_path;
 	String last_error;
 
 	void release_native_weapons();
-	const DefWeaponDef *row(int index) const {
+	const opennova::def::DefWeaponDef *row(int index) const {
 		return (index < 0 || static_cast<size_t>(index) >= weapons_file_.count)
 				? nullptr : &weapons_file_.entries[index];
 	}

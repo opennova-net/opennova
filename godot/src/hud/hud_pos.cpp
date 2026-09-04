@@ -10,6 +10,8 @@
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
 
+using namespace opennova::def;
+
 // The GDScript-facing mirrors are pinned to the engine's witnessed values —
 // a drifted copy here would silently split the native expiry policy from the
 // shell's wrap/trim consumers.

@@ -7,6 +7,8 @@
 #include <optional>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace {
 
 namespace ns = opennova::replication;

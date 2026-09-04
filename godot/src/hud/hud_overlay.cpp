@@ -38,6 +38,8 @@ using namespace godot;
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
+using namespace opennova::def;
+
 namespace {
 
 using opennova::hud::HudDrawList;

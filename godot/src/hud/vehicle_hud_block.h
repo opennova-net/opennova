@@ -18,8 +18,8 @@ class VehicleHudBlock : public RefCounted {
 	GDCLASS(VehicleHudBlock, RefCounted)
 
 public:
-	void assign(const DefVehicleHudBlock &p_block) { block_ = p_block; }
-	const DefVehicleHudBlock &native() const { return block_; }
+	void assign(const opennova::def::DefVehicleHudBlock &p_block) { block_ = p_block; }
+	const opennova::def::DefVehicleHudBlock &native() const { return block_; }
 
 	String get_sid() const;
 	void set_sid(const String &p_value);
@@ -38,7 +38,7 @@ protected:
 	static void _bind_methods();
 
 private:
-	DefVehicleHudBlock block_{};
+	opennova::def::DefVehicleHudBlock block_{};
 };
 
 } // namespace godot

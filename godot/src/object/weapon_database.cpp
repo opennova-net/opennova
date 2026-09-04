@@ -13,6 +13,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::def;
 
 static_assert(WeaponDatabase::FLAG_EMPLACED == DEF_WEAPON_FLAG_EMPLACED,
               "FLAG_EMPLACED drifted from def.h");

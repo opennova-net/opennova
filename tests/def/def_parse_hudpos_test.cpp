@@ -8,6 +8,8 @@
 
 #include "common/retail_paths.h"
 
+using namespace opennova::def;
+
 int main(void) {
     /* Every leg here reads the shipped hudpos.def (the memory legs compare
        against its path parse), so the whole test gates on the reference

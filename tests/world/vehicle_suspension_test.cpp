@@ -28,6 +28,7 @@
 #include <memory>
 
 using namespace opennova::world;
+using namespace opennova::def;
 
 namespace {
 

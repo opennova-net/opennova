@@ -10,6 +10,8 @@
 
 #include <utility>
 
+using namespace opennova::def;
+
 namespace opennova::devtools {
 
 namespace {

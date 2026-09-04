@@ -42,7 +42,7 @@ using ModelLookupFn = std::function<const Threedi3di3 *(const std::string &)>;
 // weapon, or an authored phrase_set). Duplicate/unknown/graphic-less ids and
 // unresolvable models degrade exactly like the shell extractor: authored
 // attachment rows survive without model anchors; seats/armory need the model.
-void extract_item_seat_specs(const DefItemsFile &items,
+void extract_item_seat_specs(const opennova::def::DefItemsFile &items,
                              const ModelLookupFn &model_for,
                              const std::vector<int> &seed_item_ids,
                              SeatSpecExtraction &out);

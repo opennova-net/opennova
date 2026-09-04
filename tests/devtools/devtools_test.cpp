@@ -31,6 +31,8 @@
 #include <cstring>
 #include <utility>
 
+using namespace opennova::def;
+
 using opennova::devtools::AiDebugSnapshot;
 using opennova::devtools::AiWindow;
 using opennova::devtools::CaptureWindow;

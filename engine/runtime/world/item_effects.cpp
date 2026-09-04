@@ -5,6 +5,8 @@
 #include <formats/def/def.h>
 #include <runtime/world/entity.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {

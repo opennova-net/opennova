@@ -64,6 +64,7 @@
 #include <base/io/strutil.h>
 
 using namespace opennova;
+using namespace opennova::def;
 
 namespace {
 

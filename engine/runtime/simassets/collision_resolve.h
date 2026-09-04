@@ -30,10 +30,10 @@ inline constexpr int kPlayerVisualItemId = mission::kPlayerVisualItemId;
 
 // Last-wins lookup over duplicate definition ids — the same load-order
 // overwrite the id-keyed item map exposed (see simassets item_traits).
-const DefItemDef *find_item_def(const DefItemsFile &items, int item_id);
+const opennova::def::DefItemDef *find_item_def(const opennova::def::DefItemsFile &items, int item_id);
 
 // Runtime item type -> items.def id, with the player's visual stand-in.
-int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items);
+int visual_item_id_for_runtime_type(int item_id, const opennova::def::DefItemsFile &items);
 
 // The first-husk piece-model metadata retail derives at death time (section
 // count, per-section centers, section 0's z extents).
@@ -111,14 +111,14 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 // typed result directly (there is no model/radius out-parameter compatibility
 // form).
 world::ResolvedCollisionShape collision_shape_for_runtime_type(
-		int runtime_item_id, const DefItemsFile &items,
+		int runtime_item_id, const opennova::def::DefItemsFile &items,
 		CollisionResolveState &state, const CollisionResolveDeps &deps);
 
 // The full registry sweep: every non-marker entity resolves its graphic (and
 // husk chain) into collision/occlusion instances, bound radius, vehicle probe
 // boxes, KZ blast points, and death-piece metadata. Idempotent per spawn id.
 // Returns the number of entities attached to a collision model.
-int resolve_collision_instances(world::World &world, const DefItemsFile &items,
+int resolve_collision_instances(world::World &world, const opennova::def::DefItemsFile &items,
 		CollisionResolveState &state, const CollisionResolveDeps &deps);
 
 } // namespace opennova::simassets

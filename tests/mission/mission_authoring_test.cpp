@@ -5,6 +5,8 @@
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
 
+using namespace opennova::def;
+
 using opennova::mission::EntityKind;
 namespace authoring = opennova::mission::authoring;
 

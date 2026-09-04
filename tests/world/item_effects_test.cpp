@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace {
 namespace w = opennova::world;
 

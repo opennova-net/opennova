@@ -14,6 +14,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 /* ========================================================================= */
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
@@ -552,3 +554,5 @@ void def_free_weapons(DefWeaponsFile *f) {
     free(f->ammo_class_lines);
     memset(f, 0, sizeof(*f));
 }
+
+} // namespace opennova::def

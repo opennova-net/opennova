@@ -1,6 +1,8 @@
 #pragma once
 
-struct DefHudPosFile;
+namespace opennova::def {
+struct DefHudPosFile;  // formats/def/def.h
+}
 
 // The HUD declutter system: hudpos.def HUDDECLUT_* masks x the persisted
 // hud_detail level -> the 24-slot per-element visibility table the overlay
@@ -74,7 +76,7 @@ class HudDeclutter;
 // `out` untouched when the file authors no known row at all (the test
 // harness's minimal layouts; retail never ships one), so the embedder keeps
 // the all-visible default instead of blanking the whole HUD.
-bool declutter_from_hudpos(const DefHudPosFile &file, HudDeclutter &out);
+bool declutter_from_hudpos(const opennova::def::DefHudPosFile &file, HudDeclutter &out);
 
 // The mask table + level + rebuild rule. Construction leaves every mask
 // all-bits (0xF = visible at every level) — the embedder/test-harness default

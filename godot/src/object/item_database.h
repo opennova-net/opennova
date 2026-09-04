@@ -36,7 +36,7 @@ private:
 	// rows directly from here; every accessor below converts at the call.
 	// Freed at the top of every load attempt (the id index clears first) and
 	// in the destructor.
-	DefItemsFile items_file_ = {};
+	opennova::def::DefItemsFile items_file_ = {};
 	bool items_file_loaded_ = false;
 	// id -> row index into items_file_.entries, assigned in file order so a
 	// duplicate id keeps its LAST row (the public lookup collapses duplicates;
@@ -53,9 +53,9 @@ private:
 	void release_native_items();
 	// Retains a successful parse and builds index_ / sorted_ids_ over it (both
 	// load paths adopt through here, so the views can never diverge).
-	void adopt_(const DefItemsFile &p_file);
+	void adopt_(const opennova::def::DefItemsFile &p_file);
 	// The row an id resolves to; nullptr for an unknown id.
-	const ::DefItemDef *row_(int p_id) const;
+	const opennova::def::DefItemDef *row_(int p_id) const;
 
 protected:
 	static void _bind_methods();
@@ -98,7 +98,7 @@ public:
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	// The retained parse the engine-side trait fold and the netsim replication
 	// catalog consume (empty — entries nullptr, count 0 — until a load succeeds).
-	const DefItemsFile &native_items() const noexcept { return items_file_; }
+	const opennova::def::DefItemsFile &native_items() const noexcept { return items_file_; }
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

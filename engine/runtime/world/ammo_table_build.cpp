@@ -3,6 +3,8 @@
 
 #include <base/io/strutil.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {

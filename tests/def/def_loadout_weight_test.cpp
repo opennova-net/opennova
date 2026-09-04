@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 
+using namespace opennova::def;
+
 namespace {
 int fail = 0;
 #define CHECK(c, m)                                                                                 \

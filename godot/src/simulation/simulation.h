@@ -651,7 +651,7 @@ private:
 	                                 bool p_allow_same_weapon_rebake);
 	// The Dictionary/def-row feeders both build the world install payload.
 	static opennova::world::WeaponInstallData install_data_from_def(
-			const DefWeaponDef &p_def, const Dictionary &p_clip_seconds);
+			const opennova::def::DefWeaponDef &p_def, const Dictionary &p_clip_seconds);
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
 	// The slot pool, spawn kit, availability table and pre-spawn class latch
@@ -1503,7 +1503,7 @@ public:
 	// calls it): the hull's health band + one row per authored seat pair
 	// (occupancy, rider health, the seat-select digit, the own seat). Returns
 	// false (rows cleared) when the local player rides nothing.
-	bool fill_vehicle_panel(const DefVehicleHudBlock &p_block,
+	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
 	// The AAS zone status panel feed (world/lfp_feed.h), NOT ClassDB-bound:
 	// one HudLfpZone per spawn-zone list entry joined with the client
@@ -1839,7 +1839,7 @@ public:
 	// the input block names the pump's gate ("" = accepted). Full contracts:
 	// simulation_player_weapon.cpp.
 	const opennova::world::LocalPlayerWeapon *native_local_player_weapon() const;
-	const DefWeaponDef *native_equipped_weapon_row() const;
+	const opennova::def::DefWeaponDef *native_equipped_weapon_row() const;
 	int native_equipped_weapon_adm_index() const;
 	const opennova::world::WeaponSlotState *native_active_weapon_slot() const;
 	const char *native_weapon_input_block() const;

@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cstring>
 
+using namespace opennova::def;
+
 namespace opennova::simassets {
 
 namespace {

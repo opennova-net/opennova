@@ -33,6 +33,7 @@
 
 using namespace opennova;
 using namespace opennova::world;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c)                                                              \

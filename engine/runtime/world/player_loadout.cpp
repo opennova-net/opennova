@@ -9,6 +9,8 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {

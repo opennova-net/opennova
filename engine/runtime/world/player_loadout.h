@@ -160,7 +160,7 @@ int32_t player_info_class_mask(int playerclass_value);
 // order [orig: populate_weapon_slot_lists @0x560430]: a row is included only
 // when loadout_selectable != 0 AND (charfilter & class_mask) AND
 // (teamfilter & team_mask). The caller prepends its own "NONE" row.
-void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
+void weapon_slot_indices(const opennova::def::DefWeaponDef *rows, size_t count, int slot,
                          int32_t class_mask, int32_t team_mask,
                          std::vector<int32_t> &out);
 

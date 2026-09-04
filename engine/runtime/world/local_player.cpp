@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <utility>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace w = opennova::world;

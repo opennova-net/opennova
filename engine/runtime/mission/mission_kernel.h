@@ -136,10 +136,10 @@ public:
 	// The embedder's already-parsed items.def (the shell's retained rows).
 	// Overrides the open_document parse — the caller keeps it alive for the
 	// kernel's lifetime; null reverts to the kernel's own parse.
-	void set_items_table(const DefItemsFile *items_table);
+	void set_items_table(const opennova::def::DefItemsFile *items_table);
 	// The live items.def rows every kernel leg reads: the override, else the
 	// kernel's own parse, else null (no item db — the gated steps skip).
-	const DefItemsFile *items_table() const {
+	const opennova::def::DefItemsFile *items_table() const {
 		return items_override_ != nullptr ? items_override_
 										  : (items_ok ? &items : nullptr);
 	}
@@ -289,7 +289,7 @@ public:
 	std::string mission_name;
 	std::string mission_basename;
 	bms::File mission;
-	DefItemsFile items{};
+	opennova::def::DefItemsFile items{};
 	bool items_ok = false;
 
 	// --- the world and its systems -------------------------------------------
@@ -343,7 +343,7 @@ public:
 	// view and medic-call state plus the verbs over them; the kernel keeps the
 	// asset-bound legs (the def tables, the .adm clips, the spawn entries).
 	world::LocalPlayer local;
-	DefWeaponsFile weapon_defs{};
+	opennova::def::DefWeaponsFile weapon_defs{};
 	bool weapon_defs_ok = false;
 	bool ammo_ok = false;
 	simassets::AdmClipIndex clip_index;
@@ -404,7 +404,7 @@ private:
 	std::function<void()> bringup_net_session_;
 	// The embedder source overrides (set_asset_index / set_items_table).
 	const ResourceIndex *external_index_ = nullptr;
-	const DefItemsFile *items_override_ = nullptr;
+	const opennova::def::DefItemsFile *items_override_ = nullptr;
 	// The embedder's trait sweep classifier (resolve_item_traits); unset until
 	// the embedder ran the sweep, so a restore re-stamps only what it stamped.
 	simassets::ItemWireClassFn item_wire_class_;

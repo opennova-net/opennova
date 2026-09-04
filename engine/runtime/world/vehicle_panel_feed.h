@@ -65,7 +65,7 @@ int build_vehicle_panel_slots(const World &world, EntityHandle root,
 // health come from the live seat occupant; the digit from the slot list;
 // `own_seat` marks the seat the local player sits in.
 void fill_vehicle_panel_seats(const World &world, EntityHandle root,
-                              EntityHandle local, const DefVehicleHudBlock &block,
+                              EntityHandle local, const opennova::def::DefVehicleHudBlock &block,
                               std::vector<hud::HudVehicleSeat> &out);
 
 

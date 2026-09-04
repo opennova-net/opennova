@@ -28,6 +28,7 @@
 #include "common/retail_paths.h"
 
 using namespace opennova;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c) \

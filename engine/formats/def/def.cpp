@@ -12,6 +12,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n) {
     /* [orig: calculate_loadout_weight @ 0x55f1f0] per weapon:
        weaponweight + (ammo_count > 0 ? ammo_count : maxclips) * clipweight. */
@@ -68,3 +70,5 @@ int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
     }
     return -1;
 }
+
+} // namespace opennova::def

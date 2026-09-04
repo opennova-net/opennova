@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+using namespace opennova::def; // the flag/attrib tables and DefHudColor, unqualified as before
+
 namespace opennova::defscan {
 
 /* ========================================================================= */
@@ -350,39 +352,41 @@ int lookup_item_attrib2(const char *name, size_t len) {
 
 }  // namespace opennova::defscan
 
+namespace opennova::def {
+
 /* The public index projection over the two tables above (def.h): a tool naming an
    ItemDefAttrib bit reads the parser's own token list. [orig: ItemDef_ParseProperty
    @0x49eb00] */
-extern "C" int def_item_attrib_keyword_count(void) {
+int def_item_attrib_keyword_count(void) {
     return opennova::defscan::item_attrib_table_count;
 }
 
-extern "C" const char *def_item_attrib_keyword(int index) {
+const char *def_item_attrib_keyword(int index) {
     if (index < 0 || index >= opennova::defscan::item_attrib_table_count) return NULL;
     return opennova::defscan::item_attrib_table[index].name;
 }
 
-extern "C" uint32_t def_item_attrib_keyword_bit(int index) {
+uint32_t def_item_attrib_keyword_bit(int index) {
     if (index < 0 || index >= opennova::defscan::item_attrib_table_count) return 0u;
     return (uint32_t)opennova::defscan::item_attrib_table[index].bit;
 }
 
-extern "C" int def_item_attrib2_keyword_count(void) {
+int def_item_attrib2_keyword_count(void) {
     return opennova::defscan::item_attrib2_table_count;
 }
 
-extern "C" const char *def_item_attrib2_keyword(int index) {
+const char *def_item_attrib2_keyword(int index) {
     if (index < 0 || index >= opennova::defscan::item_attrib2_table_count) return NULL;
     return opennova::defscan::item_attrib2_table[index].name;
 }
 
-extern "C" uint32_t def_item_attrib2_keyword_bit(int index) {
+uint32_t def_item_attrib2_keyword_bit(int index) {
     if (index < 0 || index >= opennova::defscan::item_attrib2_table_count) return 0u;
     return (uint32_t)opennova::defscan::item_attrib2_table[index].bit;
 }
 
 /* The DefItemType names (def.h): the non-injective pairs keep both tokens. */
-extern "C" const char *def_item_type_name(int type) {
+const char *def_item_type_name(int type) {
     switch (type) {
         case DEF_ITEM_TYPE_UNSET: return "unset";
         case DEF_ITEM_TYPE_VEHICLE: return "vehicle";
@@ -395,6 +399,8 @@ extern "C" const char *def_item_type_name(int type) {
         default: return "?";
     }
 }
+
+} // namespace opennova::def
 
 namespace opennova::defscan {
 

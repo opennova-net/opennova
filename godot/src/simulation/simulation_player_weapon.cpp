@@ -15,6 +15,7 @@
 #include <cstdio>
 
 using namespace sim_internal;
+using namespace opennova::def;
 
 // The world-side flag mirrors must stay the def parser's exact bits.
 static_assert(opennova::world::weapon_flag::kNoClipsNoDraw ==
