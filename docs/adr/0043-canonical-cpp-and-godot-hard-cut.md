@@ -250,9 +250,13 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
 
 14. **Style, last.** Per-lib C -> C++ (`.c` -> `.cpp`, no `extern "C"`,
     `namespace opennova::<lib>`, the `DEF_*` macros as `inline constexpr` of
-    the same names), `#pragma once` everywhere, a `.clang-format` and one
-    whitespace-only commit per group with `.git-blame-ignore-revs`, after
-    every structural slice has landed.
+    the same names), `#pragma once` everywhere, and a `.clang-format` (tabs:
+    Godot's own convention, the vendored godot-cpp style, and already the
+    majority) after every structural slice has landed. As landed
+    (2026-09-03, the maintainer's call): the `.clang-format` is committed as
+    CONFIG ONLY; the whitespace-only reformat commits per group, with
+    `.git-blame-ignore-revs`, are a separate follow-up PR so the hard cut's
+    diff stays reviewable.
 
 15. **Out of scope, named.** The pose-store unification (decision 2), and the
     ADR 0042 outstanding retail-interop recipe, which these slices neither
