@@ -10,6 +10,8 @@
 
 #include <formats/adm/adm.h>
 
+using namespace opennova::adm;
+
 static int failures = 0;
 #define CHECK(c)                                                                     \
     do {                                                                             \
