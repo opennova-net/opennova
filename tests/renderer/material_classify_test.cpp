@@ -15,6 +15,8 @@
 #include <iostream>
 #include <string>
 
+using namespace opennova::threedi;
+
 namespace {
 
 void expect(bool condition, const std::string &message) {

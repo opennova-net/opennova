@@ -16,6 +16,8 @@
 
 #include <base/io/fixed.h>
 
+namespace opennova::threedi {
+
 using opennova::io::read_u32_le;
 using opennova::io::read_s32_le;
 using opennova::io::read_u16_le;
@@ -1516,3 +1518,5 @@ int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_
     threedi_free_file(&file);
     return rc;
 }
+
+} // namespace opennova::threedi

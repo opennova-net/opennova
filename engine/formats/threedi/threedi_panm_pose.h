@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <vector>
 
+namespace opennova::threedi {
+
 // A node is "live" when any of its enabled transform families samples a track
 // with a non-zero control high nibble — plus the three rotation modes that
 // evaluate without sampling a conventional track (spinner reinterprets raw
@@ -61,4 +63,6 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                              std::vector<ThreediMatrix4x4> &r_matrices,
                              std::vector<uint8_t> *r_animated);
 
+
+} // namespace opennova::threedi
 #endif // OPENNOVA_THREEDI_PANM_POSE_H

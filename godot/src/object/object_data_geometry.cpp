@@ -16,6 +16,7 @@
 #include <vector>
 
 using namespace novaobj;
+using namespace opennova::threedi;
 
 namespace {
 

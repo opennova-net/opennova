@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <memory>
 
+using namespace opennova::threedi;
+
 namespace {
 
 bool expect(bool condition, const char *message) {

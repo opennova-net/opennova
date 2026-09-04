@@ -11,6 +11,7 @@
 #include <vector>
 
 using namespace opennova::crt;
+using namespace opennova::threedi;
 
 namespace {
 

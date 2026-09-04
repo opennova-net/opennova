@@ -32,7 +32,7 @@ inline String from_native(const char *value) {
 	return String(value == nullptr ? "" : value);
 }
 
-inline String control_register_name_for(const Threedi3di3 &model, int32_t reg) {
+inline String control_register_name_for(const opennova::threedi::Threedi3di3 &model, int32_t reg) {
 	if (reg < 0 || static_cast<uint32_t>(reg) >= model.ctrl.count) {
 		return String();
 	}

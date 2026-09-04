@@ -9,6 +9,7 @@
 #include "util/texture_path_resolver.h"
 
 using namespace novaobj;
+using namespace opennova::threedi;
 
 namespace {
 

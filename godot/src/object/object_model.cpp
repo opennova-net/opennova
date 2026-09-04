@@ -29,6 +29,8 @@
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 void EnvLightValues::_bind_methods() {

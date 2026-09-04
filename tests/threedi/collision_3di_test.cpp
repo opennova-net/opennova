@@ -10,6 +10,8 @@
 #include "common/test_paths.h"
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 static int failures = 0;
 
 static void check(bool condition, const char *message) {

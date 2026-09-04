@@ -34,7 +34,7 @@ struct SeatSpecExtraction {
 
 // The model source: graphic key -> parsed model (null = unresolvable). The
 // embedder wraps its SimModelCache; tests supply in-memory models.
-using ModelLookupFn = std::function<const Threedi3di3 *(const std::string &)>;
+using ModelLookupFn = std::function<const opennova::threedi::Threedi3di3 *(const std::string &)>;
 
 // Extract specs for the seed items.def ids (full 1xxxxx ids) and,
 // transitively, every authored addeweap child. An item lands a spec only when
@@ -50,8 +50,8 @@ void extract_item_seat_specs(const opennova::def::DefItemsFile &items,
 // The userpoint-local conversions, exposed for tests: the authored 16.16
 // model point into the mission-local seat frame (the yaw-zero correction
 // baked in), and the authored direction into the seat yaw offset in degrees.
-world::Vec3 seat_local_from_user_point(const ThreediUserPoint &point);
-int seat_yaw_offset_from_user_point(const ThreediUserPoint &point);
+world::Vec3 seat_local_from_user_point(const opennova::threedi::ThreediUserPoint &point);
+int seat_yaw_offset_from_user_point(const opennova::threedi::ThreediUserPoint &point);
 
 // The installed-table lookup (moved from npruntime's joiner bridge — a pure
 // specs probe belongs beside the extraction, below the net stack).

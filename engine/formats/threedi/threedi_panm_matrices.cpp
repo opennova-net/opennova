@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+namespace opennova::threedi {
+
 // [orig: Model_TransformBoneMatrices @0x58e390 — per-part scale / rotation / translation from
 //  the PANM tracks composed local-to-parent; tracks sampled by PANM_SampleTrack @0x5b2270]
 
@@ -417,3 +419,5 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
 
     return 0;
 }
+
+} // namespace opennova::threedi

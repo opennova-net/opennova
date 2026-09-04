@@ -3,6 +3,8 @@
 
 #include <formats/threedi/threedi_panm.h>
 
+using namespace opennova::threedi;
+
 static int expect_eq(const char *label, uint8_t got, uint8_t expected) {
     if (got != expected) {
         fprintf(stderr, "%s: got %u expected %u\n", label,

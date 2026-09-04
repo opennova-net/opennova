@@ -23,6 +23,8 @@
 #include <string>
 #include <utility>
 
+using namespace opennova::threedi;
+
 namespace opennova::simassets {
 
 namespace {

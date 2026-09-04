@@ -12,6 +12,8 @@
 #include <cstring>
 #include <limits>
 
+using namespace opennova::threedi;
+
 namespace opennova::terrain {
 namespace {
 

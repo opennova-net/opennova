@@ -24,6 +24,7 @@
 #include <vector>
 
 using namespace opennova::def;
+using namespace opennova::threedi;
 
 namespace {
 

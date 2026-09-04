@@ -70,7 +70,7 @@ struct ItemEffectAttachPlan {
 	bool origin_fallback = false;  // no match: one emitter at the entity origin
 };
 
-ItemEffectAttachPlan item_effect_attach_plan(const Threedi3di3 &model,
+ItemEffectAttachPlan item_effect_attach_plan(const opennova::threedi::Threedi3di3 &model,
 		const char *userpoint_name);
 
 } // namespace opennova::world

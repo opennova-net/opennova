@@ -9,6 +9,8 @@
 
 #include <algorithm>
 
+namespace opennova::threedi {
+
 namespace {
 
 bool track_is_live(const ThreediTransform &track) {
@@ -212,3 +214,5 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
     }
     return true;
 }
+
+} // namespace opennova::threedi

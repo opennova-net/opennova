@@ -29,6 +29,8 @@
 #include <unordered_map>
 #include <vector>
 
+using namespace opennova::threedi;
+
 namespace godot {
 namespace {
 

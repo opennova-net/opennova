@@ -3,6 +3,8 @@
 #include <math.h>
 #include <string.h>
 
+namespace opennova::threedi {
+
 // Port of the waveform-table builder used by PANM_SampleTrack. This committed
 // table is the deterministic result of the MSVC default seed, but retail
 // constructs it by consuming 256 calls from the process-wide CRT rand stream.
@@ -95,3 +97,5 @@ const uint8_t *threedi_panm_wave_table(void) {
     }
     return g_wave_table;
 }
+
+} // namespace opennova::threedi

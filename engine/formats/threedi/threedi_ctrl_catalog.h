@@ -9,9 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::threedi {
 
 enum {
     // Ordinal zero is LOD_FRAC, so a miss needs a distinct result.
@@ -134,8 +132,6 @@ int threedi_ctrl_register_ordinal(const char *name);
 // deliberately separate from the unambiguous lookup above.
 uint8_t threedi_ctrl_register_loader_ordinal(const char *name);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::threedi
 
 #endif // THREEDI_CTRL_CATALOG_H

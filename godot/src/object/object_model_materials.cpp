@@ -18,6 +18,8 @@
 #include <runtime/renderer/render_order.h>
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 namespace {

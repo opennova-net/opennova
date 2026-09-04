@@ -20,6 +20,8 @@
 #include "mission/mission_data.h"
 #include "mission/mission_object_placer_keys.h"
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 namespace {

@@ -10,6 +10,8 @@
 #include <formats/threedi/threedi.h>
 #include "threedi/threedi_compare.h"
 
+using namespace opennova::threedi;
+
 static int expect_true(int condition, const char *message)
 {
     if (!condition) {

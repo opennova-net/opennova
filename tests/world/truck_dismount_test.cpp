@@ -40,6 +40,8 @@
 #include <runtime/world/world.h>
 #include "common/retail_paths.h"
 
+using namespace opennova::threedi;
+
 namespace {
 
 using namespace opennova;

@@ -35,7 +35,7 @@ public:
 	// Parse-once lookup by graphic name (any authored path/extension spelling;
 	// the flat <basename>.3di rule). nullptr — cached — when the file is
 	// missing or unparsable.
-	const Threedi3di3 *model_for(const std::string &graphic);
+	const opennova::threedi::Threedi3di3 *model_for(const std::string &graphic);
 
 	// Load-budget stats (mission-load delta accounting).
 	size_t parsed_count() const { return parsed_count_; }
@@ -44,7 +44,7 @@ public:
 private:
 	const opennova::ResourceIndex *index_ = nullptr;
 	// Keyed by the lowercased basename; value nullptr = cached negative.
-	std::unordered_map<std::string, Threedi3di3 *> by_name_;
+	std::unordered_map<std::string, opennova::threedi::Threedi3di3 *> by_name_;
 	size_t parsed_count_ = 0;
 	size_t negative_count_ = 0;
 };

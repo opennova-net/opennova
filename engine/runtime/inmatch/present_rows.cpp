@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstring>
 
+using namespace opennova::threedi;
+
 namespace opennova::inmatch {
 
 using namespace opennova::world;

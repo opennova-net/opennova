@@ -10,9 +10,7 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::threedi {
 
 // Sample a PANM transform and return the raw 24.8 fixed-point value used by the
 // original animation code. The caller supplies:
@@ -47,8 +45,6 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      const int32_t *ctrl_values,
                                      ThreediMatrix4x4 *out_matrices);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::threedi
 
 #endif // THREEDI_PANM_RUNTIME_H

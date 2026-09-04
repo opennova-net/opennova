@@ -9,6 +9,8 @@
 #include <formats/threedi/threedi_3di3.h>
 #include "common/test_paths.h"
 
+using namespace opennova::threedi;
+
 static int has_extension(const char *name, const char *ext) {
     size_t nlen = strlen(name);
     size_t elen = strlen(ext);

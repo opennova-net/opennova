@@ -18,6 +18,8 @@
 #include <cstdio>
 #include <string>
 
+using namespace opennova::threedi;
+
 namespace {
 
 using namespace opennova;

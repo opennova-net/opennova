@@ -6,6 +6,7 @@
 #include <runtime/world/entity.h>
 
 using namespace opennova::def;
+using namespace opennova::threedi;
 
 namespace opennova::world {
 

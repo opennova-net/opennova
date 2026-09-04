@@ -21,6 +21,7 @@
 #include <base/io/bam.h>
 
 using namespace opennova::def;
+using namespace opennova::threedi;
 
 namespace opennova::simassets {
 

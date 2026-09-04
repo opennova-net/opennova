@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 
+using namespace opennova::threedi;
+
 namespace opennova::simassets {
 
 // Build the runtime collision model from a parsed .3di CDTA block — the exact

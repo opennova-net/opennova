@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+using namespace opennova::threedi;
+
 namespace opennova::renderer {
 
 namespace {

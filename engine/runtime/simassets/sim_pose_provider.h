@@ -80,7 +80,7 @@ inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 // indices from the canonical first RLOD's render objects (raw, engine frame).
 // The same rows AdmSkeletalClips::load_from_adm consumes; public so a test can
 // stand a rig up from a mounted model without the collision resolve.
-bool model_bone_table(const Threedi3di3 &model,
+bool model_bone_table(const opennova::threedi::Threedi3di3 &model,
 		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents);
 
 class SimPoseProvider : public world::IPoseProvider {
@@ -102,11 +102,11 @@ public:
 	// RLOD carries live PANM (the generic leg's precondition; mirrors the
 	// binding's has-live-PANM registration gate). The pointer must outlive the
 	// provider (SimModelCache retains its parses).
-	void register_generic_model(int32_t model_id, const Threedi3di3 *model);
+	void register_generic_model(int32_t model_id, const opennova::threedi::Threedi3di3 *model);
 	// Register the parsed model behind a collision model id for the userpoint
 	// leg (every model with a userpoint table, PANM or not). The pointer must
 	// outlive the provider.
-	void register_userpoint_model(int32_t model_id, const Threedi3di3 *model);
+	void register_userpoint_model(int32_t model_id, const opennova::threedi::Threedi3di3 *model);
 
 	// Register a person entity's skeletal source: the rig is the .adm clip
 	// set sampled against the MODEL's bone table (parent-relative pivots +
@@ -118,7 +118,7 @@ public:
 	bool register_skeletal_entity(world::EntityHandle entity,
 			uint64_t registry_spawn_id, int32_t model_id,
 			const std::string &rig_key, const std::string &adm_name,
-			const Threedi3di3 *model,
+			const opennova::threedi::Threedi3di3 *model,
 			const std::string &muzzle_userpoint = std::string());
 	void remove_entity(world::EntityHandle entity);
 	bool has_skeletal_entity(world::EntityHandle entity) const;
@@ -180,7 +180,7 @@ private:
 			const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) const;
-	bool build_generic(world::World &world, const Threedi3di3 &model3di,
+	bool build_generic(world::World &world, const opennova::threedi::Threedi3di3 &model3di,
 			world::EntityHandle entity,
 			const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
@@ -188,13 +188,13 @@ private:
 	// The canonical first RLOD's PANM part pose at the sim clock over the
 	// retail CTRL bus (PLAYPARTANIM phases, HEAT_GLOW, EWEAP yaw/pitch).
 	// False when the LOD has no live PANM (every part is the entity frame).
-	bool panm_part_matrices(world::World &world, const Threedi3di3 &model3di,
+	bool panm_part_matrices(world::World &world, const opennova::threedi::Threedi3di3 &model3di,
 			world::EntityHandle entity,
-			std::vector<ThreediMatrix4x4> &r_part_matrices) const;
+			std::vector<opennova::threedi::ThreediMatrix4x4> &r_part_matrices) const;
 
 	const ResourceIndex *index_ = nullptr;
-	std::unordered_map<int32_t, const Threedi3di3 *> generic_models_;
-	std::unordered_map<int32_t, const Threedi3di3 *> userpoint_models_;
+	std::unordered_map<int32_t, const opennova::threedi::Threedi3di3 *> generic_models_;
+	std::unordered_map<int32_t, const opennova::threedi::Threedi3di3 *> userpoint_models_;
 	std::unordered_map<uint64_t, SkeletalSource> skeletal_sources_;
 	std::unordered_map<std::string, std::shared_ptr<const AdmSkeletalClips>>
 			rig_cache_;

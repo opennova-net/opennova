@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::threedi {
+
 
 static int read_u32(FILE *f, uint32_t *out)
 {
@@ -195,3 +197,5 @@ void threedi_free_file(ThreediFile *file)
     file->buffer = NULL;
     file->buffer_len = 0;
 }
+
+} // namespace opennova::threedi

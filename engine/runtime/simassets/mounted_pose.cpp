@@ -14,6 +14,8 @@
 #include <vector>
 #include <base/io/bam.h>
 
+using namespace opennova::threedi;
+
 namespace opennova::simassets {
 
 namespace {
