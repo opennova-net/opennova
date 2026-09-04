@@ -32,6 +32,8 @@
 #include <formats/bad/bad.h>
 #include "common/retail_paths.h"
 
+using namespace opennova::bad;
+
 static int failures = 0;
 #define CHECK(c)                                                                       \
     do {                                                                               \

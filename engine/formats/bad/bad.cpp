@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::bad {
+
 // [orig: BoneFile_Load @0x40fff0 — header dword table: [5] bone count, [6] bone table (100-byte
 //  rows, names strupr'd), [7] channel table (12-byte rows), [8]/[9] events, [16]/[19] translation
 //  block; every stored offset is file-relative and relocated on load]
@@ -310,3 +312,5 @@ void bad_free(BadFile *bf) {
 
     memset(bf, 0, sizeof(BadFile));
 }
+
+} // namespace opennova::bad

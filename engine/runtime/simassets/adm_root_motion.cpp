@@ -8,6 +8,7 @@
 #include <base/resource_index/resource_index.h>
 
 using namespace opennova::adm;
+using namespace opennova::bad;
 
 namespace opennova::simassets {
 
