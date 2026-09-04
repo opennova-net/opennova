@@ -42,15 +42,15 @@ static inline int pff_test_write_modern(const char *path, const PffTestEntry *en
     f = fopen(path, "wb");
     if (!f) return -1;
 
-    hdr[0] = PFF_HEADER_SIZE;   /* header_size */
-    hdr[1] = PFF_MAGIC_PFF3;    /* magic */
+    hdr[0] = opennova::pff::PFF_HEADER_SIZE;   /* header_size */
+    hdr[1] = opennova::pff::PFF_MAGIC_PFF3;    /* magic */
     hdr[2] = n;                 /* num_entries */
-    hdr[3] = PFF_ENTRY_SIZE;    /* entry_size */
+    hdr[3] = opennova::pff::PFF_ENTRY_SIZE;    /* entry_size */
     hdr[4] = 0;                 /* file_table_offset (patched below) */
     fwrite(hdr, 4, 5, f);
 
     offs = (uint32_t *)malloc((n ? n : 1) * sizeof(uint32_t));
-    off = PFF_HEADER_SIZE;
+    off = opennova::pff::PFF_HEADER_SIZE;
     for (i = 0; i < n; ++i) {
         offs[i] = off;
         if (entries[i].size) {
@@ -69,10 +69,10 @@ static inline int pff_test_write_modern(const char *path, const PffTestEntry *en
 
     table_off = off;
     for (i = 0; i < n; ++i) {
-        uint8_t rec[PFF_ENTRY_SIZE];
-        uint32_t flags = entries[i].encrypted ? PFF_FLAG_ENCRYPTED : 0u;
+        uint8_t rec[opennova::pff::PFF_ENTRY_SIZE];
+        uint32_t flags = entries[i].encrypted ? opennova::pff::PFF_FLAG_ENCRYPTED : 0u;
         size_t nl = strlen(entries[i].name);
-        if (nl > PFF_NAME_SIZE) nl = PFF_NAME_SIZE;
+        if (nl > opennova::pff::PFF_NAME_SIZE) nl = opennova::pff::PFF_NAME_SIZE;
         memset(rec, 0, sizeof(rec));
         memcpy(rec + 0, &flags, 4);
         memcpy(rec + 4, &offs[i], 4);

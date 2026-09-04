@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+namespace opennova::pff {
+
 namespace {
 
 uint32_t pff_magic_for_format(PffFormat format)
@@ -238,3 +240,5 @@ int pff_write_archive(const char *path, PffFormat format,
     actx.entries = entries;
     return pff_write_archive_streamed(path, format, n ? se.data() : NULL, n, array_read_entry, &actx);
 }
+
+} // namespace opennova::pff

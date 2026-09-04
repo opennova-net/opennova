@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::pff {
+
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -305,3 +307,5 @@ int pff_is_pff(const uint8_t *data, size_t size)
     hdr = (const PffHeader *)data;
     return pff_valid_magic(hdr->magic) ? 1 : 0;
 }
+
+} // namespace opennova::pff
