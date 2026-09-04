@@ -179,13 +179,15 @@ public:
 	// The .adm registry id a decoded Player/Infantry row of `type_id` grounds
 	// on (items.def anim_def through the infantry adm index) — the netsim twin
 	// of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn half
-	// [orig: @0x40bb60]); -1 = no adm (the row stays chase-only), 0 = the
-	// default set when the model names none. Cached per type so late-joining
-	// peers and respawns cost one map lookup; -1 before the infantry sources
+	// [orig: @0x40bb60]); -1 = neither a model map nor the configured default
+	// is available (the row stays chase-only). Cached per type so late-joining
+	// peers and respawns cost one map lookup; -2 before the infantry sources
 	// are armed (rearm_infantry_adm) so nothing is stamped early.
 	int adm_id_for_runtime_type(uint16_t type_id);
 	// The cached id only (no registration): -1 when the type never resolved.
 	int cached_adm_id_for_runtime_type(uint16_t type_id) const;
+	// Changes when install/rearm/restore invalidates retained entity/replica IDs.
+	uint64_t infantry_adm_revision() const { return infantry_adm_revision_; }
 	// The S9 boot over the opened mission: the terrain field (the embedder's
 	// parsed documents when it built the store, else the kernel's own load),
 	// then the ordered step sequence with its gates (a missing file source
@@ -249,8 +251,8 @@ public:
 			const std::string &name = "ammo.def");
 	// The infantry clip set (.adm -> .bad root-motion tracks): clear + register
 	// the default map through `adm_index` (null = the kernel's asset index) and
-	// re-point the AI. Returns the default map's clip count (0 = nothing
-	// loaded; soldiers then stand, as in the original).
+	// re-point the AI. Returns the default map's clip count (0 = no default;
+	// armed model-specific maps still resolve and can supply root motion).
 	int install_infantry_anim(const std::string &adm_name,
 			const ResourceIndex *adm_index = nullptr);
 	// (Re)arm the per-entity .adm resolution: every soldier grounds on its OWN
@@ -419,6 +421,9 @@ private:
 	const ResourceIndex *adm_index_ = nullptr;
 	bool opened_ = false;
 	std::function<std::string(int32_t)> people_name_resolver_;
+	void reset_infantry_adm_ids();
+	int default_infantry_adm_id_ = -1;
+	uint64_t infantry_adm_revision_ = 0;
 	bool infantry_adm_retained_ = false;
 	int infantry_adm_resolved_ai_count_ = 0;
 

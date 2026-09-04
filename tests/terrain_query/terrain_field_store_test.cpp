@@ -2,7 +2,7 @@
 // SurfaceTypeMap builder (ADR 0042 d4, amending ADR 0020 d4).
 //
 // Covers, over small synthetic cpt/trn/charmap buffers:
-//   1. Dims and sector origins land in the height-field view.
+//   1. Dims, sector origins and authored extents land in both field views.
 //   2. The per-quadrant neighbour-tap locks (.trn lock_*) fold into the view.
 //   3. A world-remap bilinear height sample reads the copied heightmap.
 //   4. A surface index round-trips through the charmap view
@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <utility>
 
 using namespace opennova;
 
@@ -61,12 +62,42 @@ TrnConfig make_trn() {
 	TrnConfig trn;
 	trn.origin_x = -4;
 	trn.origin_y = -4;
+	trn.sector_count = 6;
+	trn.sector_rows = 5;
 	for (int r = 0; r < 16; ++r)
 		for (int c = 0; c < 16; ++c)
 			trn.sector_grid[r][c] = 1; // every cell maps quadrant 1 (top-left)
 	trn.lock_topright = {1, 0};    // quadrant 1: X locked, Z open
 	trn.lock_bottomright = {0, 1}; // quadrant 3: X open, Z locked
 	return trn;
+}
+
+// Check real lookup behavior: populated replicated grid cells outside the
+// authored rectangle must reject only in the bounds-checked query mode.
+void check_extent_queries(const terrain::TerrainHeightField &field) {
+	const auto &layout = field.layout;
+	check(layout.sector_count == 6 && layout.sector_rows == 5,
+			"non-square authored extent lands in the view");
+	const auto inside = terrain::coords_world_to_source(layout, 3.0, 2.0,
+			terrain::coords_editor_options());
+	check(inside.valid && inside.source_x == 3.0 && inside.source_z == 2.0,
+			"bounds-checked world query accepts an interior cell");
+	check(terrain::coords_world_to_cell_source(layout, 3.0, 2.0, 4, 4).valid,
+			"explicit interior cell resolves");
+	check(terrain::coords_sector_id_at_cell(layout, 4, 5) == 1,
+			"last authored row/column is included");
+	for (const auto &cell : {std::pair<int, int>{-1, 0}, {0, -1}, {5, 0}, {0, 6}}) {
+		const double x = (layout.origin_x + cell.second) * 512.0 + 3.0;
+		const double z = (layout.origin_y + cell.first) * 512.0 + 2.0;
+		check(terrain::coords_sector_id_at_cell(layout, cell.first, cell.second) == 0,
+				"explicit out-of-extent cell rejects");
+		check(!terrain::coords_world_to_source(layout, x, z,
+				terrain::coords_editor_options()).valid,
+				"bounds-checked world query rejects outside each edge");
+		check(terrain::coords_world_to_source(layout, x, z,
+				terrain::coords_runtime_options()).valid,
+				"runtime query still wraps and accepts replicated cells");
+	}
 }
 
 } // namespace
@@ -83,6 +114,10 @@ int main() {
 	terrain::terrain_field_store_build(store, cpt, trn, charmap.data(), 4, 4);
 	check(store.valid(), "store builds valid from synthetic cpt/trn");
 
+	check_extent_queries(store.height_field());
+	const terrain::TerrainHeightField borrowed = terrain::height_field_from(cpt, trn);
+	check(borrowed.heightmap == cpt.depth_buffer.data(), "non-owning field borrows the CPT");
+	check_extent_queries(borrowed);
 	const terrain::TerrainHeightField &field = store.height_field();
 	check(field.dim == kDim, "dim = sqrt(depth-buffer sample count)");
 	check(field.layout.origin_x == -4 && field.layout.origin_y == -4,
@@ -122,6 +157,7 @@ int main() {
 	trn = TrnConfig{};
 	charmap.assign(charmap.size(), 0);
 	charmap.clear();
+	check_extent_queries(store.height_field());
 	check_close(terrain::height_field_height_world_bilinear(store.height_field(), 3.0f, 2.0f),
 			19.0, 1e-4, "height sample survives the source documents being freed");
 	check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 3,
@@ -134,7 +170,7 @@ int main() {
 		terrain::CoordsQuadrantLocks locks{};
 		locks.set(0, true, true);
 		terrain::TerrainFieldStore bare;
-		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, locks);
+		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 6, 5, locks);
 		check(bare.valid(), "format-free build over raw buffers");
 		check(bare.height_field().locks.locked_x(0) && bare.height_field().locks.locked_z(0),
 				"raw locks pass through");
@@ -151,8 +187,30 @@ int main() {
 				"set_water_plane feeds the clamp plane");
 		bare.set_water_plane(0);
 		check(!bare.height_field().has_water, "a zero plane is no authored water");
+		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 2, 3, locks);
+		check(terrain::coords_sector_id_at_cell(bare.height_field().layout, 2, 1) == 1,
+				"rebuild accepts the new last cell");
+		check(terrain::coords_sector_id_at_cell(bare.height_field().layout, 3, 1) == 0 &&
+				terrain::coords_sector_id_at_cell(bare.height_field().layout, 2, 2) == 0,
+				"rebuild replaces both previous extents");
 		bare.clear();
+		check(bare.height_field().layout.sector_count == 0 &&
+				bare.height_field().layout.sector_rows == 0, "clear resets the extent");
 		check(!bare.valid(), "clear() invalidates the store");
+	}
+
+	// Applying another TRN replaces the borrowed field's extent too.
+	{
+		CptFile next_cpt = make_cpt();
+		TrnConfig next_trn = make_trn();
+		auto next_field = terrain::height_field_from(next_cpt, next_trn);
+		next_trn.sector_count = 2;
+		next_trn.sector_rows = 3;
+		terrain::height_field_apply_trn(next_field, next_trn);
+		check(terrain::coords_sector_id_at_cell(next_field.layout, 2, 1) == 1 &&
+				terrain::coords_sector_id_at_cell(next_field.layout, 3, 1) == 0 &&
+				terrain::coords_sector_id_at_cell(next_field.layout, 2, 2) == 0,
+				"applying a TRN replaces the borrowed view's extent");
 	}
 
 	// --- degenerate input ----------------------------------------------------

@@ -24,7 +24,7 @@ namespace opennova::terrain {
 // site can silently keep the old unconditional full-atlas wrap.
 CoordsQuadrantLocks coords_locks_from(const TrnConfig &trn);
 
-// Everything a TerrainHeightField takes from the TRN: the sector origins and
+// Everything a TerrainHeightField takes from the TRN: sector origins, extent and
 // the neighbour-tap locks. The heightmap and sector-grid POINTERS stay the
 // caller's, but the derived members live here so a second field builder cannot
 // silently miss one — which is exactly how the sim's grounding field kept the
@@ -40,7 +40,7 @@ void height_field_apply_trn(TerrainHeightField &field, const TrnConfig &trn);
 TerrainHeightField height_field_from(const CptFile &cpt, const TrnConfig &trn);
 
 // The ONE owning build: copy the depth buffer, flatten the 16x16 sector grid,
-// apply the origins and the per-quadrant neighbour-tap locks, and point the
+// apply the origins, extent and the per-quadrant neighbour-tap locks, and point the
 // SurfaceTypeMap at the (copied) charmap raster when one is supplied
 // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510].
 void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
