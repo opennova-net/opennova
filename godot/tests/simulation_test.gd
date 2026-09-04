@@ -2325,15 +2325,41 @@ func test_infantry_anim_map_failure_paths() -> void:
 	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0, "absent .adm -> 0 clips")
 	assert_eq(sim.get_infantry_clip_count(), 0, "failed load leaves no stale clip set")
 	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0)
+	assert_eq(sim.get_infantry_clip_count(), 0,
+			"rebuilding without a per-model resolver clears the previous default")
+
+
+func test_infantry_anim_map_without_default_keeps_model_specific_clips() -> void:
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var player_ai_index := -1
+	var local_handle := sim.get_local_player_wire_handle()
+	for ai_index in range(sim.get_entity_count()):
+		if sim.get_entity_wire_handle(ai_index) == local_handle:
+			player_ai_index = ai_index
+			break
+	assert_gte(player_ai_index, 0)
+	assert_eq(sim.entity_card_by_ai_index(0).get_adm_name(), "soldier.adm",
+			"the demo soldier uses the configured default before rebuilding")
 	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0,
-			"a retained per-entity resolver cannot replace a failed default with US01")
-	assert_eq(sim.get_infantry_clip_count(), 0,
-			"a failed registry rebuild remains empty after per-entity resolution")
+			"the return value reports clips from the requested default only")
+	assert_eq(sim.entity_card_by_ai_index(player_ai_index).get_adm_name(), "US01.adm",
+			"the player's own map is resolved again after rebuilding")
+	assert_eq(sim.entity_card_by_ai_index(0).get_adm_name(), "",
+			"the demo soldier cannot inherit the player's map as a fallback")
+	assert_eq(sim.get_infantry_clip_count(), 4,
+			"the rebuilt registry starts with US01's four clips, not the stale default")
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"US01 resolves the requested gait through its own idle clip")
 
 
 func test_restart_rebinds_baseline_player_to_own_adm() -> void:
