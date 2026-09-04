@@ -14,6 +14,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 /* ========================================================================= */
 /* HudPos Parsing                                                            */
 /* ========================================================================= */
@@ -564,3 +566,5 @@ void def_free_hudpos(DefHudPosFile *f) {
     free(f->hud.raw_lines);
     memset(f, 0, sizeof(*f));
 }
+
+} // namespace opennova::def

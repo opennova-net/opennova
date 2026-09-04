@@ -9,7 +9,9 @@
 
 #include <net/npwire/entity_class.h>
 
-struct DefItemsFile;
+namespace opennova::def {
+struct DefItemsFile;  // formats/def/def.h
+}
 
 namespace opennova::replication {
 
@@ -148,7 +150,7 @@ public:
 
 	static ItemReplicationCatalog from_definitions(
 			const std::vector<ItemReplicationDefinition> &definitions);
-	static ItemReplicationCatalog from_items_def(const ::DefItemsFile &items);
+	static ItemReplicationCatalog from_items_def(const opennova::def::DefItemsFile &items);
 
 	const ItemReplicationProfile *by_definition_id(int32_t definition_id) const noexcept;
 	const ItemReplicationProfile *by_wire_type(uint16_t wire_type_id) const noexcept;

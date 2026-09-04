@@ -23,13 +23,13 @@ namespace godot {
 class WeaponSightRow : public RefCounted {
 	GDCLASS(WeaponSightRow, RefCounted)
 
-	DefSightEntry value_ = {};
+	opennova::def::DefSightEntry value_ = {};
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const DefSightEntry &p_value) { value_ = p_value; }
+	void assign(const opennova::def::DefSightEntry &p_value) { value_ = p_value; }
 
 	String get_texture() const;
 	int get_x1() const { return value_.x1; }
@@ -56,14 +56,14 @@ public:
 class WeaponActionRow : public RefCounted {
 	GDCLASS(WeaponActionRow, RefCounted)
 
-	DefWeaponAction value_ = {};
+	opennova::def::DefWeaponAction value_ = {};
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const DefWeaponAction &p_value);
-	const DefWeaponAction &value() const { return value_; }
+	void assign(const opennova::def::DefWeaponAction &p_value);
+	const opennova::def::DefWeaponAction &value() const { return value_; }
 
 	// A row from its name and delays plus the optional clip and hooks — the
 	// fields a synthetic def authors, in the order they are usually given.
@@ -98,9 +98,9 @@ public:
 class WeaponDef : public RefCounted {
 	GDCLASS(WeaponDef, RefCounted)
 
-	DefWeaponDef value_ = {};
-	std::vector<DefSightEntry> sights_;
-	std::vector<DefWeaponAction> actions_;
+	opennova::def::DefWeaponDef value_ = {};
+	std::vector<opennova::def::DefSightEntry> sights_;
+	std::vector<opennova::def::DefWeaponAction> actions_;
 	int index_ = -1;
 
 	void rebind_rows();
@@ -110,9 +110,9 @@ protected:
 
 public:
 	// Copy the row (the parse keeps its own arrays; this record owns its copy).
-	void assign(int p_index, const DefWeaponDef &p_value);
+	void assign(int p_index, const opennova::def::DefWeaponDef &p_value);
 	// The record as the engine reads it (rows bound to this record's storage).
-	const DefWeaponDef &value() const { return value_; }
+	const opennova::def::DefWeaponDef &value() const { return value_; }
 	// An independent copy (a test derives a variant without touching the table's row).
 	Ref<WeaponDef> copy() const;
 

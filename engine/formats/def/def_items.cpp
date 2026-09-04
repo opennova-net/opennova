@@ -14,6 +14,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 /* ========================================================================= */
 /* Items Parsing                                                             */
 /* ========================================================================= */
@@ -787,3 +789,5 @@ void def_free_items(DefItemsFile *f) {
     free(f->entries);
     memset(f, 0, sizeof(*f));
 }
+
+} // namespace opennova::def

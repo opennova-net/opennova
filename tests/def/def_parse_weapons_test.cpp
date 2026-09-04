@@ -10,6 +10,8 @@
 
 #include "common/retail_paths.h"
 
+using namespace opennova::def;
+
 #define FEPS 0.01f
 
 int main(void) {

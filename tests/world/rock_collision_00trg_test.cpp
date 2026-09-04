@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace {
 
 using namespace opennova;

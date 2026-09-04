@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace opennova::simassets {
 
 namespace {

@@ -17,6 +17,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::def;
 
 // Pin the GDScript-facing TYPE_* mirror to the engine/formats/def source of truth so the
 // two mappings can never drift again (docs/world/itemdef-re.md D-ITEMDEF-1).
@@ -138,7 +139,7 @@ void ItemDatabase::adopt_(const DefItemsFile &p_file) {
 	}
 }
 
-const ::DefItemDef *ItemDatabase::row_(int p_id) const {
+const opennova::def::DefItemDef *ItemDatabase::row_(int p_id) const {
 	const auto it = index_.find(p_id);
 	return it == index_.end() ? nullptr : &items_file_.entries[it->second];
 }
@@ -216,42 +217,42 @@ bool ItemDatabase::has_item(int id) const {
 }
 
 String ItemDatabase::get_graphic(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->graphic);
 }
 
 String ItemDatabase::get_sid(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->sid);
 }
 
 String ItemDatabase::get_anim_def(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->anim_def);
 }
 
 String ItemDatabase::get_ai_function(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->ai_function);
 }
 
 String ItemDatabase::get_move_function(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->move_function);
 }
 
 int ItemDatabase::get_item_type(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? static_cast<int>(TYPE_UNKNOWN) : row->type;
 }
 
 int32_t ItemDatabase::get_model_scale_q16(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0 : row->scale_q16;
 }
 
 float ItemDatabase::get_light_transfer(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0.0f : row->light_transfer;
 }
 
@@ -259,7 +260,7 @@ float ItemDatabase::get_light_transfer(int id) const {
 // (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
 // AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
 bool ItemDatabase::is_ai_capable(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row != nullptr && (static_cast<uint32_t>(row->attrib) & 0x100000u) != 0;
 }
 
@@ -267,18 +268,18 @@ bool ItemDatabase::is_ai_capable(int id) const {
 // traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
 // (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
 uint32_t ItemDatabase::get_attrib(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib);
 }
 
 uint32_t ItemDatabase::get_attrib2(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib2);
 }
 
 bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
 		Vector4 &r_dims) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	if (row == nullptr || row->shadow_texture[0] == '\0') {
 		return false;
 	}
@@ -290,7 +291,7 @@ bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
 
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {
 	PackedInt32Array out;
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	if (row == nullptr) return out;
 	out.push_back(row->physics);
 	out.push_back(row->player_speed);
@@ -317,7 +318,7 @@ PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {
 }
 
 String ItemDatabase::get_display_name(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->display_name);
 }
 
@@ -325,18 +326,18 @@ String ItemDatabase::get_display_name(int id) const {
 // placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
 // ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
 String ItemDatabase::get_launchups_closeattack(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->launchups_closeattack);
 }
 
 TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(int id) const {
 	TypedArray<ItemEmplacementAttachment> out;
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	if (row == nullptr) {
 		return out;
 	}
 	for (size_t i = 0; i < row->emplacement_attachments_count; ++i) {
-		const ::DefItemEmplacementAttachment &attachment = row->emplacement_attachments[i];
+		const opennova::def::DefItemEmplacementAttachment &attachment = row->emplacement_attachments[i];
 		const int stored_slot = static_cast<int>(i + 1);
 		Ref<ItemEmplacementAttachment> record;
 		record.instantiate();
@@ -351,32 +352,32 @@ TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(
 }
 
 int ItemDatabase::get_emplacement_g_slot(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0 : row->emplacement_g_slot;
 }
 
 int ItemDatabase::get_emplacement_c_slot(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? 0 : row->emplacement_c_slot;
 }
 
 bool ItemDatabase::has_mount_config(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row != nullptr && row->phrase_set_valid != 0;
 }
 
 int ItemDatabase::get_mount_config(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row != nullptr && row->phrase_set_valid != 0 ? row->phrase_set : 0;
 }
 
 String ItemDatabase::get_husk(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->husk);
 }
 
 String ItemDatabase::get_huskfinal(int id) const {
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->huskfinal);
 }
 
@@ -403,7 +404,7 @@ TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 // consumes (item_records.h carries the witness).
 ItemParticleFx ItemDatabase::get_particle_fx(int id) const {
 	ItemParticleFx out;
-	const ::DefItemDef *row = row_(id);
+	const opennova::def::DefItemDef *row = row_(id);
 	if (row == nullptr) {
 		return out;
 	}

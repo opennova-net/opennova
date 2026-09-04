@@ -217,7 +217,7 @@ struct WeaponInstallData {
 // scalar slice the FSM bake reads plus the ACTION rows mirrored as
 // WeaponFsmActionRow. The clip-variant rings are the caller's (the kernel's
 // .adm clip index, or the embedder's own read).
-WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row);
+WeaponInstallData weapon_install_data_from_def(const opennova::def::DefWeaponDef &row);
 
 // The pump's wire-side outputs: the embedder's net layer consumes these — the
 // joiner's C2S 0x06 fired descriptor inputs and the 0x25 reload request. The

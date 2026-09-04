@@ -20,6 +20,8 @@
 #include <cmath>
 #include <cstdio>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {

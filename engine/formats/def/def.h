@@ -10,9 +10,7 @@
 #include <stdint.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::def {
 
 /* ========================================================================= */
 /* Ammo Definitions                                                          */
@@ -28,45 +26,45 @@ typedef struct DefEffectTableEntry {
 /* DefAmmoDef.flags bits — the ammo.def `flag <name>` OR-mask, record dword +0.
  * [orig: the 30-entry name/bit table @0x813500 walked first-match by
  * AmmoDef_ParseProperty @0x40a2d0; docs/net/novaworld-net-re.md §5.60] */
-#define DEF_AMMO_FLAG_IGNOREDMG 0x00000001u
-#define DEF_AMMO_FLAG_IGNORE 0x00000002u
-#define DEF_AMMO_FLAG_SHRAPNEL 0x00000004u
-#define DEF_AMMO_FLAG_SILENCED 0x00000008u
-#define DEF_AMMO_FLAG_WATER 0x00000010u
-#define DEF_AMMO_FLAG_DETONATESATCHELS 0x00000020u
-#define DEF_AMMO_FLAG_NOSMOKE 0x00000040u
-#define DEF_AMMO_FLAG_NOCOLLIDE 0x00000080u
-#define DEF_AMMO_FLAG_NOGRAVITY 0x00000100u
-#define DEF_AMMO_FLAG_HASITEM 0x00000200u
-#define DEF_AMMO_FLAG_INSTANTKILLZONE 0x00000400u
-#define DEF_AMMO_FLAG_OWNERIMMUNE 0x00000800u
-#define DEF_AMMO_FLAG_USEOWNMOVE 0x00002000u
-#define DEF_AMMO_FLAG_NOAGE 0x00004000u
-#define DEF_AMMO_FLAG_FORCETRACER 0x00008000u
-#define DEF_AMMO_FLAG_SHOTGUN 0x00010000u
-#define DEF_AMMO_FLAG_CLAYMORE 0x00020000u
-#define DEF_AMMO_FLAG_NOOITEMS 0x00080000u
-#define DEF_AMMO_FLAG_NOMITEMS 0x00100000u
-#define DEF_AMMO_FLAG_NODITEMS 0x00200000u
-#define DEF_AMMO_FLAG_PRIORITY 0x00800000u
-#define DEF_AMMO_FLAG_CLIPWATER 0x01000000u
-#define DEF_AMMO_FLAG_DESIGNATETARGET 0x02000000u
-#define DEF_AMMO_FLAG_IGNORFOILAGE 0x04000000u
-#define DEF_AMMO_FLAG_LAWR 0x08000000u
-#define DEF_AMMO_FLAG_FGRENADE 0x10000000u
-#define DEF_AMMO_FLAG_CLIPWATERFX 0x20000000u
+inline constexpr uint32_t DEF_AMMO_FLAG_IGNOREDMG = 0x00000001u;
+inline constexpr uint32_t DEF_AMMO_FLAG_IGNORE = 0x00000002u;
+inline constexpr uint32_t DEF_AMMO_FLAG_SHRAPNEL = 0x00000004u;
+inline constexpr uint32_t DEF_AMMO_FLAG_SILENCED = 0x00000008u;
+inline constexpr uint32_t DEF_AMMO_FLAG_WATER = 0x00000010u;
+inline constexpr uint32_t DEF_AMMO_FLAG_DETONATESATCHELS = 0x00000020u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOSMOKE = 0x00000040u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOCOLLIDE = 0x00000080u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOGRAVITY = 0x00000100u;
+inline constexpr uint32_t DEF_AMMO_FLAG_HASITEM = 0x00000200u;
+inline constexpr uint32_t DEF_AMMO_FLAG_INSTANTKILLZONE = 0x00000400u;
+inline constexpr uint32_t DEF_AMMO_FLAG_OWNERIMMUNE = 0x00000800u;
+inline constexpr uint32_t DEF_AMMO_FLAG_USEOWNMOVE = 0x00002000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOAGE = 0x00004000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_FORCETRACER = 0x00008000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_SHOTGUN = 0x00010000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_CLAYMORE = 0x00020000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOOITEMS = 0x00080000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NOMITEMS = 0x00100000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_NODITEMS = 0x00200000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_PRIORITY = 0x00800000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_CLIPWATER = 0x01000000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_DESIGNATETARGET = 0x02000000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_IGNORFOILAGE = 0x04000000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_LAWR = 0x08000000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_FGRENADE = 0x10000000u;
+inline constexpr uint32_t DEF_AMMO_FLAG_CLIPWATERFX = 0x20000000u;
 
 /* Ammo kill-zone types, record word +44 — drives the RoundData_SpawnRound ammo-class
  * dispatch (1 Knife = the immediate raycast, 6 Bullets = the standard projectile).
  * [orig: 8-name table @0x8133E0 rounds_kz_*; §5.60] */
-#define DEF_AMMO_KZ_NULL 0
-#define DEF_AMMO_KZ_KNIFE 1
-#define DEF_AMMO_KZ_STANDARD 2
-#define DEF_AMMO_KZ_MEDIC 3
-#define DEF_AMMO_KZ_RADIUSBLAST 4
-#define DEF_AMMO_KZ_C4 5
-#define DEF_AMMO_KZ_BULLETS 6
-#define DEF_AMMO_KZ_SLASH 7
+inline constexpr int DEF_AMMO_KZ_NULL = 0;
+inline constexpr int DEF_AMMO_KZ_KNIFE = 1;
+inline constexpr int DEF_AMMO_KZ_STANDARD = 2;
+inline constexpr int DEF_AMMO_KZ_MEDIC = 3;
+inline constexpr int DEF_AMMO_KZ_RADIUSBLAST = 4;
+inline constexpr int DEF_AMMO_KZ_C4 = 5;
+inline constexpr int DEF_AMMO_KZ_BULLETS = 6;
+inline constexpr int DEF_AMMO_KZ_SLASH = 7;
 
 typedef struct DefAmmoDef {
     char name[64];
@@ -208,52 +206,52 @@ typedef struct DefWeaponAction {
  * fixverticalofst are the original's).
  * [orig: the 16-B-stride {name, 0, flags1 bit, flags2 bit} table @0x830bf0;
  * def_scan.cpp's flag_table initializes from these] */
-#define DEF_WEAPON_FLAG_SCOPED 0x00000001u
-#define DEF_WEAPON_FLAG_SIGHTED 0x00000002u
-#define DEF_WEAPON_FLAG_UNDERWATER 0x00000004u
-#define DEF_WEAPON_FLAG_SHOWCOMANDER 0x00000008u
-#define DEF_WEAPON_FLAG_NOCLIPSNODRAW 0x00000010u
-#define DEF_WEAPON_FLAG_BURST 0x00000020u
-#define DEF_WEAPON_FLAG_NOTDROPABLE 0x00000040u
-#define DEF_WEAPON_FLAG_EMPLACED 0x00000080u
-#define DEF_WEAPON_FLAG_AUTO 0x00000100u
-#define DEF_WEAPON_FLAG_NORANGECHECK 0x00000200u
-#define DEF_WEAPON_FLAG_SHOWRANGE 0x00000400u
-#define DEF_WEAPON_FLAG_SHOWELEVATION 0x00000800u
-#define DEF_WEAPON_FLAG_ARMOR 0x00001000u
-#define DEF_WEAPON_FLAG_OKWHILEJUMPING 0x00002000u
-#define DEF_WEAPON_FLAG_ONLYFIRESCOPED 0x00004000u
-#define DEF_WEAPON_FLAG_LOLLYPOP 0x00008000u
-#define DEF_WEAPON_FLAG_ABSORBPITCH 0x00010000u
-#define DEF_WEAPON_FLAG_NOMOVE 0x00020000u
-#define DEF_WEAPON_FLAG_FORCECROUCH 0x00040000u
-#define DEF_WEAPON_FLAG_ONLYSCOPED 0x00080000u
-#define DEF_WEAPON_FLAG_2DIMPACT 0x00100000u
-#define DEF_WEAPON_FLAG_USEDESIGNATOR 0x00200000u
-#define DEF_WEAPON_FLAG_USESPREADTWO 0x00400000u
-#define DEF_WEAPON_FLAG_SHOWIMPACTDIST 0x00800000u
-#define DEF_WEAPON_FLAG_WHILESWIMMING 0x01000000u
-#define DEF_WEAPON_FLAG_NOCARDSWITCH 0x02000000u
-#define DEF_WEAPON_FLAG_HANDGUNUP 0x04000000u
-#define DEF_WEAPON_FLAG_QUICKSWITCH 0x08000000u
-#define DEF_WEAPON_FLAG_ONLYFIRELOCKED 0x10000000u
-#define DEF_WEAPON_FLAG_FORCESCOPED 0x20000000u
-#define DEF_WEAPON_FLAG_LASERBEAM 0x40000000u
-#define DEF_WEAPON_FLAG_POWERTHROW 0x80000000u
+inline constexpr uint32_t DEF_WEAPON_FLAG_SCOPED = 0x00000001u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_SIGHTED = 0x00000002u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_UNDERWATER = 0x00000004u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_SHOWCOMANDER = 0x00000008u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_NOCLIPSNODRAW = 0x00000010u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_BURST = 0x00000020u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_NOTDROPABLE = 0x00000040u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_EMPLACED = 0x00000080u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_AUTO = 0x00000100u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_NORANGECHECK = 0x00000200u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_SHOWRANGE = 0x00000400u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_SHOWELEVATION = 0x00000800u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_ARMOR = 0x00001000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_OKWHILEJUMPING = 0x00002000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_ONLYFIRESCOPED = 0x00004000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_LOLLYPOP = 0x00008000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_ABSORBPITCH = 0x00010000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_NOMOVE = 0x00020000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_FORCECROUCH = 0x00040000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_ONLYSCOPED = 0x00080000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_2DIMPACT = 0x00100000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_USEDESIGNATOR = 0x00200000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_USESPREADTWO = 0x00400000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_SHOWIMPACTDIST = 0x00800000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_WHILESWIMMING = 0x01000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_NOCARDSWITCH = 0x02000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_HANDGUNUP = 0x04000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_QUICKSWITCH = 0x08000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_ONLYFIRELOCKED = 0x10000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_FORCESCOPED = 0x20000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_LASERBEAM = 0x40000000u;
+inline constexpr uint32_t DEF_WEAPON_FLAG_POWERTHROW = 0x80000000u;
 
 /* DefWeaponDef.flags2 bits — dword 2 of the same witnessed table @0x830bf0. */
-#define DEF_WEAPON_FLAG2_NOSELECT 0x00000001u
-#define DEF_WEAPON_FLAG2_PARACHUTE 0x00000002u
-#define DEF_WEAPON_FLAG2_THERMAL 0x00000004u
-#define DEF_WEAPON_FLAG2_MONITOR 0x00000008u
-#define DEF_WEAPON_FLAG2_VIEWLOCK 0x00000010u
-#define DEF_WEAPON_FLAG2_ONLYLOCKSCOPED 0x00000020u
-#define DEF_WEAPON_FLAG2_NOAMMOTYPES 0x00000040u
-#define DEF_WEAPON_FLAG2_SHOWHUDPIP 0x00000080u
-#define DEF_WEAPON_FLAG2_FIXVERTICALOFST 0x00000100u
-#define DEF_WEAPON_FLAG2_INSET 0x00000200u
-#define DEF_WEAPON_FLAG2_NOAUTOZERO 0x00000400u
-#define DEF_WEAPON_FLAG2_INVISIBLE 0x00000800u
+inline constexpr uint32_t DEF_WEAPON_FLAG2_NOSELECT = 0x00000001u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_PARACHUTE = 0x00000002u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_THERMAL = 0x00000004u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_MONITOR = 0x00000008u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_VIEWLOCK = 0x00000010u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_ONLYLOCKSCOPED = 0x00000020u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_NOAMMOTYPES = 0x00000040u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_SHOWHUDPIP = 0x00000080u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_FIXVERTICALOFST = 0x00000100u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_INSET = 0x00000200u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_NOAUTOZERO = 0x00000400u;
+inline constexpr uint32_t DEF_WEAPON_FLAG2_INVISIBLE = 0x00000800u;
 
 typedef struct DefWeaponDef {
     char weapon_name[64];
@@ -489,50 +487,50 @@ typedef struct DefItemEmplacementAttachment {
  * NOT witnessed (stay raw at use sites): 0x8000, 0x80000000.
  * [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155;
  * def_scan.cpp's item_attrib_table initializes from these] */
-#define DEF_ITEM_ATTRIB_MOVECB 0x00000001u
-#define DEF_ITEM_ATTRIB_POWERUP 0x00000002u
-#define DEF_ITEM_ATTRIB_NOMOVESHOOT 0x00000004u
-#define DEF_ITEM_ATTRIB_NOTOOL 0x00000008u
-#define DEF_ITEM_ATTRIB_SNAP 0x00000010u
-#define DEF_ITEM_ATTRIB_EWEAP 0x00000020u
-#define DEF_ITEM_ATTRIB_PLAYERCONTROL 0x00000040u
-#define DEF_ITEM_ATTRIB_DOOR 0x00000080u
-#define DEF_ITEM_ATTRIB_NOTARGET 0x00000100u
-#define DEF_ITEM_ATTRIB_LANDABLE 0x00000200u
-#define DEF_ITEM_ATTRIB_MISSILE 0x00000400u
-#define DEF_ITEM_ATTRIB_TIRE 0x00000800u
-#define DEF_ITEM_ATTRIB_FASTROPE 0x00001000u
-#define DEF_ITEM_ATTRIB_TAKEABLE 0x00002000u
-#define DEF_ITEM_ATTRIB_EASY 0x00004000u
-#define DEF_ITEM_ATTRIB_4TEAM 0x00010000u
-#define DEF_ITEM_ATTRIB_CHANGETEAM 0x00020000u
-#define DEF_ITEM_ATTRIB_SPAWNPOINT 0x00040000u
-#define DEF_ITEM_ATTRIB_ARMORY 0x00080000u
-#define DEF_ITEM_ATTRIB_AIDATA 0x00100000u /* the §5.6 AI-class flag — gates the 0x0D AI-trailer */
-#define DEF_ITEM_ATTRIB_LEAVECORPSE 0x00400000u
-#define DEF_ITEM_ATTRIB_NODISMEMBER 0x00800000u
-#define DEF_ITEM_ATTRIB_NOWEAPON 0x01000000u
-#define DEF_ITEM_ATTRIB_REFLECT 0x02000000u
-#define DEF_ITEM_ATTRIB_NOSHADOW 0x04000000u
-#define DEF_ITEM_ATTRIB_CONCAVE 0x08000000u
-#define DEF_ITEM_ATTRIB_NOSCAR 0x10000000u
-#define DEF_ITEM_ATTRIB_NOHUD 0x20000000u
-#define DEF_ITEM_ATTRIB_NODIE 0x40000000u
+inline constexpr uint32_t DEF_ITEM_ATTRIB_MOVECB = 0x00000001u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_POWERUP = 0x00000002u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOMOVESHOOT = 0x00000004u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOTOOL = 0x00000008u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_SNAP = 0x00000010u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_EWEAP = 0x00000020u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_PLAYERCONTROL = 0x00000040u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_DOOR = 0x00000080u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOTARGET = 0x00000100u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_LANDABLE = 0x00000200u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_MISSILE = 0x00000400u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_TIRE = 0x00000800u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_FASTROPE = 0x00001000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_TAKEABLE = 0x00002000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_EASY = 0x00004000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_4TEAM = 0x00010000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_CHANGETEAM = 0x00020000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_SPAWNPOINT = 0x00040000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_ARMORY = 0x00080000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_AIDATA = 0x00100000u;  /* the §5.6 AI-class flag — gates the 0x0D AI-trailer */
+inline constexpr uint32_t DEF_ITEM_ATTRIB_LEAVECORPSE = 0x00400000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NODISMEMBER = 0x00800000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOWEAPON = 0x01000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_REFLECT = 0x02000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOSHADOW = 0x04000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_CONCAVE = 0x08000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOSCAR = 0x10000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NOHUD = 0x20000000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB_NODIE = 0x40000000u;
 
 /* DefItemDef.attrib2 bits — ItemDefAttrib2 (+0x58). docs/world/itemdef-re.md:157-160. */
-#define DEF_ITEM_ATTRIB2_VEHICLEBAY 0x00000001u
-#define DEF_ITEM_ATTRIB2_AUTOINHERITTEAM 0x00000002u
-#define DEF_ITEM_ATTRIB2_VEHICLESPAWN 0x00000004u
-#define DEF_ITEM_ATTRIB2_DYNAMICSHADOW 0x00000010u
-#define DEF_ITEM_ATTRIB2_STATICSHADOW 0x00000020u
-#define DEF_ITEM_ATTRIB2_TUNNELPIECE 0x00000040u
-#define DEF_ITEM_ATTRIB2_USEVK 0x00000080u
-#define DEF_ITEM_ATTRIB2_STATICDEATH 0x00000100u
-#define DEF_ITEM_ATTRIB2_ONTURRET 0x00000400u
-#define DEF_ITEM_ATTRIB2_HASTURRET 0x00000800u
-#define DEF_ITEM_ATTRIB2_ISTURRET 0x00001000u
-#define DEF_ITEM_ATTRIB2_FARP 0x00002000u
-#define DEF_ITEM_ATTRIB2_LANDMINE 0x00004000u
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_VEHICLEBAY = 0x00000001u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_AUTOINHERITTEAM = 0x00000002u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_VEHICLESPAWN = 0x00000004u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_DYNAMICSHADOW = 0x00000010u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_STATICSHADOW = 0x00000020u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_TUNNELPIECE = 0x00000040u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_USEVK = 0x00000080u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_STATICDEATH = 0x00000100u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_ONTURRET = 0x00000400u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_HASTURRET = 0x00000800u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_ISTURRET = 0x00001000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_FARP = 0x00002000u;
+inline constexpr uint32_t DEF_ITEM_ATTRIB2_LANDMINE = 0x00004000u;
 
 typedef struct DefItemDef {
     char display_name[128];
@@ -848,8 +846,8 @@ typedef struct DefHudGraphic {
    8 but does not store the authored count in the block -- its drawer derives
    seat count from the entity. A consumer of the parsed block has no entity to
    ask, so the authored count is retained here. Declared, not witnessed. */
-#define DEF_VEHICLE_HUD_MAX_EMPLACE 4
-#define DEF_VEHICLE_HUD_MAX_SEATS 8
+inline constexpr int DEF_VEHICLE_HUD_MAX_EMPLACE = 4;
+inline constexpr int DEF_VEHICLE_HUD_MAX_SEATS = 8;
 typedef struct DefVehicleHudBlock {
     char sid[16];              /* +0x04 [orig: the "sid" arm] */
     char icon[32];             /* +0x7C */
@@ -1062,8 +1060,6 @@ DefEncumbrance def_encumbrance_class(double weight);
 int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
                                          size_t parent_index);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::def
 
 #endif /* DEF_H */

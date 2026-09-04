@@ -8,6 +8,8 @@
 #include <formats/def/def.h>
 #include <base/io/strutil.h>
 
+using namespace opennova::def;
+
 namespace opennova::replication {
 
 namespace {
@@ -192,7 +194,7 @@ ItemReplicationCatalog ItemReplicationCatalog::from_definitions(
 	return catalog;
 }
 
-ItemReplicationCatalog ItemReplicationCatalog::from_items_def(const ::DefItemsFile &items) {
+ItemReplicationCatalog ItemReplicationCatalog::from_items_def(const opennova::def::DefItemsFile &items) {
 	std::vector<ItemReplicationDefinition> definitions;
 	definitions.reserve(items.count);
 	for (size_t i = 0; i < items.count; ++i) {

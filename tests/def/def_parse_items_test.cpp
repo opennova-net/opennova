@@ -11,6 +11,8 @@
 #include <ctype.h>
 #include <string>
 
+using namespace opennova::def;
+
 static int expect_str(const char *what, const char *got, const char *want) {
     if (strcmp(got, want) != 0) {
         fprintf(stderr, "FAIL: %s mismatch: expected '%s', got '%s'\n", what, want, got);

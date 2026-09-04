@@ -19,6 +19,7 @@
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \

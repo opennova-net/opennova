@@ -32,7 +32,7 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 // same load-order overwrite the binding's id-keyed item map exposed.
 // Idempotent; call after mission promotion (and again after spawning the
 // local player).
-void resolve_item_traits(world::World &world, const DefItemsFile &items,
+void resolve_item_traits(world::World &world, const opennova::def::DefItemsFile &items,
                          const ItemWireClassFn &wire_class);
 
 // The D-AI-5 host weapon seed + per-body sound-profile bind: stamp each AI
@@ -41,6 +41,6 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 // items.def sound_profile against the loaded profile table. Returns the
 // armed-NPC count. Call AFTER the ammo table is loaded; an unresolved or
 // absent round name leaves the NPC unarmed.
-int resolve_ai_weapons(world::World &world, const DefItemsFile &items);
+int resolve_ai_weapons(world::World &world, const opennova::def::DefItemsFile &items);
 
 } // namespace opennova::simassets

@@ -57,6 +57,8 @@
 
 #include "conn_fixture.h"
 
+using namespace opennova::def;
+
 namespace {
 
 using namespace opennova;

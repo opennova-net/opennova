@@ -17,6 +17,7 @@
 #include <runtime/world/vehicle_panel_feed.h>
 
 using namespace sim_internal;
+using namespace opennova::def;
 
 namespace godot {
 

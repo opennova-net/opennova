@@ -7,6 +7,8 @@
 #include <base/io/strutil.h>
 #include <formats/def/def.h>
 
+using namespace opennova::def;
+
 namespace opennova::hud {
 
 namespace {

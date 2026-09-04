@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace opennova::def;
+
 namespace godot {
 
 namespace {

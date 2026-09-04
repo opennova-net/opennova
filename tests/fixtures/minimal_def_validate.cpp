@@ -10,6 +10,8 @@
 #include <cstring>
 #include <string>
 
+using namespace opennova::def;
+
 namespace {
 
 bool expect(bool cond, const char *msg) {

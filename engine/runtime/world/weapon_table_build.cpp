@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 // engine/runtime/world mirrors these DEF_* bits beside their consumers (world stays

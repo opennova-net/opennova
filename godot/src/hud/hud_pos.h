@@ -36,7 +36,7 @@ class HudPos : public RefCounted {
 	GDCLASS(HudPos, RefCounted)
 
 private:
-	DefHudPosFile file_ = {};
+	opennova::def::DefHudPosFile file_ = {};
 	bool loaded_ = false;
 	String source_path_;
 	String last_error_;
@@ -214,7 +214,7 @@ public:
 	PackedByteArray get_declutter_flags(const String &p_name) const;
 	// The retained parse, for the engine folds that take the rows directly
 	// (hud_declutter.h declutter_from_hudpos).
-	const DefHudPosFile &native_file() const { return file_; }
+	const opennova::def::DefHudPosFile &native_file() const { return file_; }
 	// Named HUD colors (Godot Color, RGBA normalized): health_border, hud_textcolor,
 	// stancecolor_good/middle/bad, tagcolor_*, etc.
 	Dictionary get_colors() const;

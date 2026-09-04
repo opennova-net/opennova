@@ -30,6 +30,8 @@
 #include <cstdio>
 #include <utility>
 
+using namespace opennova::def;
+
 namespace opennova::mission {
 
 namespace w = opennova::world;

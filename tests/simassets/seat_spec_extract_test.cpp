@@ -16,6 +16,7 @@
 
 using namespace opennova;
 using namespace opennova::simassets;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c) \

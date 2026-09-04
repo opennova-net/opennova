@@ -20,6 +20,8 @@
 #include <unordered_set>
 #include <base/io/bam.h>
 
+using namespace opennova::def;
+
 namespace opennova::simassets {
 
 namespace {

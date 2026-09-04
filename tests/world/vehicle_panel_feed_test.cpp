@@ -13,6 +13,7 @@
 #include <string>
 
 using namespace opennova::world;
+using namespace opennova::def;
 namespace hud = opennova::hud;
 
 static int failures = 0;

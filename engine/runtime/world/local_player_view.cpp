@@ -23,6 +23,8 @@
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {
