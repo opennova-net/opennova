@@ -50,6 +50,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::mus {
+
 namespace {
 
 /* ---- Tokens ---- */
@@ -1326,7 +1328,7 @@ static void capture_source_path(const char *text, char *out_path, size_t cap) {
     }
 }
 
-extern "C" int mus_compile(const char *text, MusScript *out_script,
+int mus_compile(const char *text, MusScript *out_script,
                            int *err_line, int *err_col, const char **err_msg) {
     if (!text || !out_script) return -1;
     Compiler c;
@@ -1356,7 +1358,7 @@ extern "C" int mus_compile(const char *text, MusScript *out_script,
     return 0;
 }
 
-extern "C" void mus_script_free(MusScript *s) {
+void mus_script_free(MusScript *s) {
     if (!s) return;
     free(s->code);
     free(s->sections);
@@ -1369,7 +1371,7 @@ extern "C" void mus_script_free(MusScript *s) {
     s->variable_count = 0;
 }
 
-extern "C" void mus_free(void *p) { free(p); }
+void mus_free(void *p) { free(p); }
 
 /* Append `n` bytes from `src` to `*buf`, growing as needed. */
 static void buf_append(uint8_t **buf, size_t *cap, size_t *used,
@@ -1394,7 +1396,7 @@ static void buf_append_zero(uint8_t **buf, size_t *cap, size_t *used, size_t n) 
     *used += n;
 }
 
-extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
+int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
                                uint8_t **out_buf, size_t *out_size) {
     if (!scripts || !out_buf || !out_size) return -1;
 
@@ -1583,3 +1585,5 @@ extern "C" int mus_encode_file(const MusScript *const *scripts, uint32_t script_
     *out_size = used;
     return 0;
 }
+
+} // namespace opennova::mus

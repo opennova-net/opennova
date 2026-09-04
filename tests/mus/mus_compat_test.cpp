@@ -11,6 +11,8 @@
 
 #include "common/retail_paths.h"
 
+using namespace opennova::mus;
+
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif

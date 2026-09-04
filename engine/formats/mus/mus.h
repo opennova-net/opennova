@@ -11,17 +11,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::mus {
 
 /* --- Format constants --- */
-#define MUS_MAGIC_SCR0      0x30524353u    /* 'SCR0' little-endian */
-#define MUS_CHUNK_TAG_MU01  0x3130554Du    /* 'MU01' little-endian */
-#define MUS_NAME_SIZE       16
-#define MUS_GLOBALS_BYTES   68             /* Var00..Var15 + 1 user global */
-#define MUS_OPCODE_COUNT    65             /* opcodes 0x00..0x40 */
-#define MUS_INTRINSIC_NAMES 11             /* full set; runtime may bind a subset */
+inline constexpr uint32_t MUS_MAGIC_SCR0 = 0x30524353u;  /* 'SCR0' little-endian */
+inline constexpr uint32_t MUS_CHUNK_TAG_MU01 = 0x3130554Du;  /* 'MU01' little-endian */
+inline constexpr int MUS_NAME_SIZE = 16;
+inline constexpr int MUS_GLOBALS_BYTES = 68;  /* Var00..Var15 + 1 user global */
+inline constexpr int MUS_OPCODE_COUNT = 65;  /* opcodes 0x00..0x40 */
+inline constexpr int MUS_INTRINSIC_NAMES = 11;  /* full set; runtime may bind a subset */
 
 /* The bytecode opcodes referenced by NAME outside the decoder table itself
    (mus_decode.h kOps stays the full-width authority): the flow ops the AST /
@@ -43,7 +41,7 @@ typedef enum MusOpcode {
    string_section_size field (instance[+0x3C]); MDEdit invariantly emits 0x20
    and the compiler defaults to it, with 0 treated as 0x20.
    [orig: AudioVM_Op_Enter @ 0x672C20 reads instance[+0x3C]] */
-#define MUS_DEFAULT_LOCALS_BASE 0x20
+inline constexpr int MUS_DEFAULT_LOCALS_BASE = 0x20;
 
 /* --- On-disk structs --- */
 
@@ -82,17 +80,15 @@ typedef struct MusChunkHeader {
     uint32_t aux_table_b_offset;          /* relocated if nonzero */
 } MusChunkHeader;
 
-#ifdef __cplusplus
 static_assert(sizeof(MusFileHeader)  == 44, "MusFileHeader must be 44 bytes");
 static_assert(sizeof(MusChunkHeader) == 72, "MusChunkHeader must be 72 bytes");
-#endif
 
 /* --- Parsed in-memory representation --- */
 
-#define MUS_SECTION_NAME_SIZE  32         /* longer than MUS_NAME_SIZE to fit
+inline constexpr int MUS_SECTION_NAME_SIZE = 32;  /* longer than MUS_NAME_SIZE to fit
                                               "Multiplayerstart" + NUL */
-#define MUS_SOURCE_PATH_SIZE   256
-#define MUS_INTRINSIC_NAME_SIZE 32
+inline constexpr int MUS_SOURCE_PATH_SIZE = 256;
+inline constexpr int MUS_INTRINSIC_NAME_SIZE = 32;
 
 typedef struct MusSection {
     char     name[MUS_SECTION_NAME_SIZE]; /* from debug export table or "Section_N" */
@@ -306,8 +302,6 @@ void    mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value);
    Returns 0 on success, negative on error (NULL inputs / unknown section). */
 int mus_vm_jump_to_section(MusVM *vm, const char *section_name);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::mus
 
 #endif /* MUS_H */

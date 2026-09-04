@@ -105,7 +105,7 @@ private:
 	int _player_pool_size = 2;
 	StringName _audio_bus = StringName("Music");
 
-	MusVM *_vm = nullptr;
+	opennova::mus::MusVM *_vm = nullptr;
 	Vector<AudioStreamPlayer *> _players;
 	int _next_player = 0;
 	bool _vm_running = false;

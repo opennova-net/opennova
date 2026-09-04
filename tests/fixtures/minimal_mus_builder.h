@@ -46,19 +46,19 @@ inline int build_minimal_mus(const char *script_name, std::vector<uint8_t> *out)
 	              "  done\n"
 	              "}\n",
 	              script_name);
-	MusScript script = {};
+	opennova::mus::MusScript script = {};
 	int err_line = 0, err_col = 0;
 	const char *err_msg = nullptr;
-	int rc = mus_compile(src, &script, &err_line, &err_col, &err_msg);
+	int rc = opennova::mus::mus_compile(src, &script, &err_line, &err_col, &err_msg);
 	if (rc != 0) return rc;
-	const MusScript *scripts[1] = {&script};
+	const opennova::mus::MusScript *scripts[1] = {&script};
 	uint8_t *buf = nullptr;
 	size_t size = 0;
-	rc = mus_encode_file(scripts, 1, &buf, &size);
-	mus_script_free(&script);
+	rc = opennova::mus::mus_encode_file(scripts, 1, &buf, &size);
+	opennova::mus::mus_script_free(&script);
 	if (rc != 0) return rc;
 	out->assign(buf, buf + size);
-	mus_free(buf);
+	opennova::mus::mus_free(buf);
 	return 0;
 }
 

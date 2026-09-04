@@ -18,6 +18,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::mus;
 
 MusicScript::MusicScript() {
 	std::memset(&_mf, 0, sizeof(_mf));

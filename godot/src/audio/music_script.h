@@ -40,7 +40,7 @@ public:
 	String get_decompiled_text_with_bank(const StringName &p_script_name,
 			const Ref<SbfBank> &p_bank);
 
-	const MusScript *raw_script(const String &p_name) const;
+	const opennova::mus::MusScript *raw_script(const String &p_name) const;
 	PackedByteArray get_raw_file_bytes() const { return _file_bytes; }
 
 protected:
@@ -51,7 +51,7 @@ private:
 	// Retained so save_to_path can pass through the decrypted SCR0 bytes. The
 	// parser owns independent copies of its chunk data.
 	PackedByteArray _file_bytes;
-	MusFile _mf;
+	opennova::mus::MusFile _mf;
 	bool _opened = false;
 };
 
