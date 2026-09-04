@@ -125,7 +125,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
 	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &HudPos::loading_bar_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &HudPos::crosshair_total_spread_fp16);
@@ -138,7 +137,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_sidecar_image_name", "mission_file"), &HudPos::loading_sidecar_image_name);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed", "displayed", "reported"), &HudPos::loading_present_due);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
@@ -639,10 +638,6 @@ int HudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
 	return opennova::hud::power_fill_span(p_progress_fp16, p_extent_px);
 }
 
-int HudPos::loading_bar_step(int p_displayed, int p_reported) {
-	return opennova::hud::loading_bar_step(p_displayed, p_reported);
-}
-
 String HudPos::loading_fallback_image() { return opennova::hud::kLoadingFallbackImage; }
 String HudPos::loading_font_small() { return opennova::hud::kLoadingFontSmall; }
 String HudPos::loading_font_large() { return opennova::hud::kLoadingFontLarge; }
@@ -654,10 +649,8 @@ String HudPos::loading_sidecar_image_name(const String &p_mission_file) {
 			p_mission_file.utf8().get_data()).c_str());
 }
 
-bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed,
-		int p_displayed, int p_reported) {
-	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed,
-			p_displayed, p_reported);
+bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed) {
+	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed);
 }
 
 Vector2i HudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {

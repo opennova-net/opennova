@@ -1,7 +1,7 @@
 extends GutTest
 
 ## The mission loading screen (LoadingScreen): the sidecar-image rule, the
-## game-type text mapping, the progress-bar smoothing and fill arithmetic, and
+## game-type text mapping, exact stage progress and fill arithmetic, and
 ## the SP-vs-MP text split — each against the witnessed original behavior
 ## [orig: render_loading_screen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
 ## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
@@ -111,30 +111,7 @@ func test_unknown_gametype_yields_no_key() -> void:
 	assert_eq(HudPos.loading_gametype_text_key(0xDEAD), "")
 
 
-# --- bar smoothing [orig: 0x586c3f] --------------------------------------------
-
-func test_displayed_value_catches_up_to_reported() -> void:
-	# Our present() runs at the coarse progress-emit cadence, not the original's
-	# high-frequency pump, so the displayed value must catch up to reported in
-	# one draw or the bar never leaves ~10 (D-LOADSCR-1). A big jump lands ON
-	# reported, not one step past a stale value.
-	assert_eq(HudPos.loading_bar_step(6, 26), 26, "a reported jump catches the bar up")
-	assert_eq(HudPos.loading_bar_step(50, 100), 100, "a jump to 100 fills the bar")
-
-
-func test_displayed_value_leads_reported_by_at_most_ten() -> void:
-	# Once caught up, the bar creeps +1 ahead per draw (the witnessed liveness
-	# lead for a grinding stage that pulses one reported value), capped at +10.
-	assert_eq(HudPos.loading_bar_step(0, 0), 1, "creep ahead of a stalled 0")
-	assert_eq(HudPos.loading_bar_step(26, 26), 27, "creep one point ahead")
-	assert_eq(HudPos.loading_bar_step(9, 0), 10)
-	assert_eq(HudPos.loading_bar_step(10, 0), 10, "cap at reported + 10")
-	assert_eq(HudPos.loading_bar_step(36, 26), 36, "cap the lead at reported + 10")
-
-
-func test_displayed_value_caps_at_hundred() -> void:
-	assert_eq(HudPos.loading_bar_step(99, 100), 100)
-	assert_eq(HudPos.loading_bar_step(100, 100), 100)
+# --- exact stage progress ------------------------------------------------------
 
 
 # --- bar fill arithmetic [orig: v8 @ 0x5d4c40] ----------------------------------
@@ -173,23 +150,38 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	Strings.register_table("gametext", null)
 
 
-func test_present_tracks_reported_progress_then_leads() -> void:
+func test_present_tracks_exact_stage_progress() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	screen.set_progress(50)
-	# Unthrottled while the displayed value trails the reported one; the first
-	# present catches the bar up to reported (not one step past a stale 0), so
-	# the bar reflects real progress at our coarse present() cadence.
 	screen.present()
 	assert_eq(screen.displayed_progress(), 50,
-		"the bar catches up to the reported value in one present")
-	# Once caught up, an immediate re-present is throttled (no 100 ms elapsed,
-	# reported unchanged, not trailing) — the bar holds, not double-steps.
+		"the bar displays the exact real stage checkpoint")
 	screen.present()
-	assert_eq(screen.displayed_progress(), 50, "an immediate re-present is throttled")
-	# The witnessed liveness lead (+1 past reported while a stage grinds) advances
-	# on a due draw; force one to exercise it without the 100 ms wait.
+	assert_eq(screen.displayed_progress(), 50, "an immediate re-present holds")
 	screen.present(true)
-	assert_eq(screen.displayed_progress(), 51, "a due draw leads reported by one")
+	assert_eq(screen.displayed_progress(), 50,
+		"a forced window-pump redraw cannot invent progress")
+
+
+func test_canvas_layer_screen_tracks_viewport_resize() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var layer := CanvasLayer.new()
+	viewport.add_child(layer)
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
+	layer.add_child(screen)
+	await get_tree().process_frame
+	assert_eq(screen.presented_size(), Vector2i(320, 180),
+		"a CanvasLayer loading screen initially fills its viewport")
+	assert_true((screen.size * screen.scale).is_equal_approx(Vector2(320, 180)))
+
+	viewport.size = Vector2i(640, 360)
+	await get_tree().process_frame
+	assert_eq(screen.presented_size(), Vector2i(640, 360),
+		"the loading image refits when fullscreen changes the viewport")
+	assert_true((screen.size * screen.scale).is_equal_approx(Vector2(640, 360)),
+		"the submitted loading image is transformed across the full new surface")
 
 
 func test_background_availability_is_publicly_observable() -> void:
@@ -213,8 +205,8 @@ func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 	assert_true(prepared)
 	assert_gte(Engine.get_process_frames(), frame_before + 2,
 		"one ordinary frame must complete before the blocking load begins")
-	assert_gt(screen.displayed_progress(), 0,
-		"preparation submits a non-empty progress bar with the registered frame")
+	assert_eq(screen.displayed_progress(), 0,
+		"preparation cannot invent progress before the first real stage")
 
 
 func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:

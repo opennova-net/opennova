@@ -69,8 +69,8 @@ private:
 protected:
 public:
 	// The loading-screen percentage a mission load stage presents when it
-	// starts (engine/runtime/mission/mission_load_plan.h, the witnessed
-	// Game_StartMission schedule); LOAD_PROGRESS_COMPLETE is the finished value.
+	// starts (engine/runtime/mission/mission_load_plan.h). WORLD_READY marks
+	// local construction; COMPLETE belongs to the shell reveal/admission edge.
 	static int load_progress_percent(int p_stage);
 
 protected:
@@ -119,13 +119,16 @@ public:
 		// Mirrors opennova::mission::MissionLoadStage (engine/runtime/mission/
 		// mission_load_plan.h), pinned in the .cpp: the load stages the shell walks,
 		// each presenting load_progress_percent(stage) when it starts.
-		LOAD_STAGE_ENVIRONMENT = 0,
-		LOAD_STAGE_TERRAIN = 1,
-		LOAD_STAGE_OBJECTS = 2,
-		LOAD_STAGE_RUNTIME = 3,
-		LOAD_STAGE_AUDIO = 4,
-		LOAD_STAGE_EFFECTS = 5,
-		LOAD_STAGE_FINISH = 6,
+		LOAD_STAGE_MISSION_SETUP = 0,
+		LOAD_STAGE_ENVIRONMENT = 1,
+		LOAD_STAGE_TERRAIN = 2,
+		LOAD_STAGE_OBJECTS = 3,
+		LOAD_STAGE_RUNTIME = 4,
+		LOAD_STAGE_AUDIO = 5,
+		LOAD_STAGE_EFFECTS = 6,
+		LOAD_STAGE_EFFECTS_WARM = 7,
+		LOAD_STAGE_FINISH = 8,
+		LOAD_PROGRESS_WORLD_READY = 90,
 		LOAD_PROGRESS_COMPLETE = 100,
 		// items.def id = wire type id + this offset (engine/runtime/mission kItemIdOffset;
 		// pinned by static_assert in the .cpp). Bound so GDScript never

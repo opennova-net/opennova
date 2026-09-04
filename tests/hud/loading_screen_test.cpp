@@ -32,12 +32,12 @@ int main() {
 	check(loading_sidecar_image_name("maps\\ASH_I5A.bms") == "ASH_I5A.pcx",
 			"sidecar strips backslash dir");
 
-	// The present-due rule: interval elapsed, reported changed, or trailing.
-	check(loading_present_due(100, false, 50, 50), "due at the interval");
-	check(!loading_present_due(99, false, 50, 50), "not due under the interval");
-	check(loading_present_due(0, true, 50, 50), "due when reported changed");
-	check(loading_present_due(0, false, 40, 50), "due while displayed trails");
-	check(!loading_present_due(0, false, 55, 50), "not due when displayed leads");
+	// The present-due rule pumps on its interval or a real checkpoint change;
+	// repeated presents never invent work between checkpoints.
+	check(loading_present_due(100, false), "due at the interval");
+	check(!loading_present_due(99, false), "not due under the interval");
+	check(loading_present_due(0, true), "due when reported changed");
+	check(!loading_present_due(0, false), "unchanged checkpoints are not due early");
 
 	// The composited resource names.
 	check(std::strcmp(kLoadingFallbackImage, "loadscrn.pcx") == 0, "fallback image");

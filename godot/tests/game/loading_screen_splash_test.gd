@@ -190,6 +190,26 @@ func test_programmatic_dismissal_uses_the_same_closing_frame() -> void:
 
 # --- coordinator seams ---------------------------------------------------------
 
+func test_coordinator_progress_completes_only_on_the_shell_edge() -> void:
+	var owner: Node = add_child_autofree(Node.new())
+	var root := _art_root()
+	var world: GameWorld = autofree(GameWorld.new())
+	var coordinator := WorldLoadCoordinator.new()
+	assert_not_null(coordinator.start(owner, root, world,
+			LoadingScreenInfo.for_mission("00TRg.bms"), func() -> int:
+				world.load_progress.emit(90)
+				return OK))
+	await _pump_frames(4)
+	assert_eq(coordinator.progress_percent(), 90,
+		"a locally ready world remains below presentation completion")
+	coordinator.complete_progress()
+	assert_eq(coordinator.progress_percent(), 100,
+		"only the shell's release edge completes the bar")
+	coordinator.finish_presentation()
+	assert_eq(coordinator.progress_percent(), -1,
+		"no active loading presentation has no progress value")
+
+
 func test_coordinator_gate_seams_and_dismissal_forward() -> void:
 	var owner: Node = add_child_autofree(Node.new())
 	var root := _art_root()

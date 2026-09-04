@@ -208,6 +208,18 @@ func has_loading_background() -> bool:
 	return _world_load.has_background()
 
 
+## The active loading screen's exact real-stage checkpoint, or -1 after the
+## presentation has been released.
+func loading_progress_percent() -> int:
+	return _world_load.progress_percent()
+
+
+## Pixel extent of the active loading surface, or (-1, -1) after release.
+## This is the public render-probe seam for fullscreen coverage (ADR 0018).
+func loading_surface_size() -> Vector2i:
+	return _world_load.surface_size()
+
+
 ## Dismiss an active SP start-mission splash without manufacturing a key or
 ## mouse event. The coordinator preserves the normal closing-frame/reveal
 ## sequence, so rendered probes enter gameplay through the production seam.

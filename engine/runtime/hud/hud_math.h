@@ -151,14 +151,9 @@ int32_t power_throw_progress_fp16(int held_ticks);
 int power_fill_span(int32_t progress_fp16, int extent_px);
 
 // ---------------------------------------------------------------------------
-// The loading bar [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f — displayed
-// climbs +1 per draw up to the min(reported + 10, 100) liveness lead; the fill
-// arithmetic @ 0x5d4c40 — right edge = displayed * (w + 2) / 100 + x + 4
-// clamped to the track, then the final 1px inset]. Our coarser draw cadence
-// first catches displayed up to reported (the D-LOADSCR-1 adaptation: retail
-// reaches catch-up for free at window-message pump frequency).
-
-int loading_bar_step(int displayed, int reported);
+// The loading-bar fill arithmetic [orig: @ 0x5d4c40 — right edge =
+// displayed * (w + 2) / 100 + x + 4, clamped to the track, then the final
+// 1px inset]. Progress itself is an exact mission-stage checkpoint.
 
 struct LoadingBarSpan {
 	int left = 0;

@@ -13,7 +13,7 @@ extends Control
 ##  - background + text compositing  [orig: render_loading_screen @ 0x521d10]
 ##  - session text provider          [orig: HUD_GetLoadingScreenTextByGameType @ 0x51f300]
 ##  - fullscreen stretch present     [orig: LoadingScreen_DrawEffectFullscreen @ 0x586ba0]
-##  - throttle + creep + bar draw    [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]
+##  - throttle + exact bar draw      [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]
 ##  - bar primitive                  [orig: draw_progress_bar_0 @ 0x5d4c40]
 ##  - SP start-mission splash        [orig: show_start_mission_splash @ 0x520820]
 ##
@@ -44,10 +44,13 @@ var _custom_text := ""    # server message body [orig: g_sessionvar_custom_text 
 var _font_small: FontFile = null
 var _font_large: FontFile = null
 
-var _reported := 0        # last progress input [orig: this[8] @ 0x586c32]
-var _displayed := 0       # smoothed bar value [orig: this[9] @ 0x586c2f]
-var _last_drawn_reported := -1
+var _progress := 0        # exact real-stage checkpoint
+var _last_drawn_progress := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
+var _layout_viewport: Viewport = null
+var _layout_base_size := Vector2.ZERO
+var _presented_size := Vector2i.ZERO
+var _bar_fill: ColorRect = null
 
 ## Emitted when the start-mission splash has been dismissed AND its final
 ## background-only frame has had a frame to render [orig: the post-loop
@@ -108,7 +111,6 @@ static func load_background_texture(root: ResourceRoot, image_name: String) -> T
 ##   game_type — the numeric session game type [orig: GAMETYPE]; not carried
 ##     (negative) reads as 0
 func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg := resolve_background(root, info.mission_file)
 	_has_custom_bg = bg.custom
 	_texture = load_background_texture(root, bg.name)
@@ -154,33 +156,46 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 ## Report load progress [orig: the per-stage/per-model calls into
 ## LoadingScreen_UpdateAndPresent, e.g. Game_StartMission @ 0x52498f..0x525d29].
 func set_progress(percent: int) -> void:
-	_reported = clampi(percent, 0, 100)
+	_progress = clampi(percent, 0, 100)
+	_sync_bar_fill()
 
 
-## Redraw + present if due: at most every 100 ms, and only when the reported
-## value changed or the displayed value still trails it
-## [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]. `force` seeds the first
-## frame. Outside a live rendering context this only updates the smoothing.
+## Redraw + present if due: on a real checkpoint change or every 100 ms for
+## window-event pumping [orig: LoadingScreen_UpdateAndPresent @ 0x586be0].
+## `force` seeds the first frame but never changes the checkpoint.
 func present(force := false) -> void:
 	if _texture == null:
 		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
 	var now := Time.get_ticks_msec()
-	# The due rule (interval elapsed, reported changed, or displayed still
-	# trailing) is the engine's, hud/loading_screen.h.
+	# The shared native due rule (interval elapsed or a real checkpoint changed)
+	# lives in engine/runtime/hud/loading_screen.h.
 	var due := HudPos.loading_present_due(now - _last_present_ms,
-			_last_drawn_reported != _reported, _displayed, _reported)
+			_last_drawn_progress != _progress)
 	if not (force or due):
 		return
 	_last_present_ms = now
-	_last_drawn_reported = _reported
-	_displayed = HudPos.loading_bar_step(_displayed, _reported)
-	queue_redraw()
+	_last_drawn_progress = _progress
 	# The original pumps window messages and presents mid-load; process_events
 	# + force_draw are the shell-side equivalents so the OS window stays live
 	# and the screen refreshes while the load blocks the main loop
 	# [orig: Game_PumpWindowMessages @ 0x586be6 + Present @ 0x586d53].
+	if is_inside_tree():
+		if not GameRuntimeRoot.is_headless():
+			DisplayServer.process_events()
+			var runtime_root := get_tree().current_scene as GameRuntimeRoot
+			if runtime_root != null:
+				runtime_root.sync_game_viewport_to_window()
+		# A fullscreen event can change the viewport during process_events while
+		# the ordinary SceneTree loop is blocked. Refit before this same forced
+		# draw so no old-resolution strip survives for a frame.
+		_fit_to_viewport()
+		# queue_redraw is serviced only on an idle SceneTree frame. The background
+		# and frame keep their already-submitted commands; progress and fullscreen
+		# coverage update through CanvasItem transforms, which reach the rendering
+		# server during this blocked call.
+		_sync_bar_fill()
+	queue_redraw()
 	if is_inside_tree() and not GameRuntimeRoot.is_headless():
-		DisplayServer.process_events()
 		RenderingServer.force_draw(true, 0.0)
 
 
@@ -192,8 +207,7 @@ func present(force := false) -> void:
 func prepare_for_blocking_load(operation: WorldLoadOperation) -> bool:
 	if operation == null or operation.is_cancelled() or not is_inside_tree():
 		return false
-	# Seed the smoothed bar before the registration frame so that frame submits
-	# both the background and a non-empty fill to the canvas draw list.
+	# Submit the exact initial checkpoint with the registration frame.
 	present(true)
 	await get_tree().process_frame
 	if operation.is_cancelled() or not is_inside_tree():
@@ -206,7 +220,12 @@ func prepare_for_blocking_load(operation: WorldLoadOperation) -> bool:
 
 
 func displayed_progress() -> int:
-	return _displayed
+	return _progress
+
+
+## Pixel extent covered by this screen after its transform is applied.
+func presented_size() -> Vector2i:
+	return _presented_size
 
 
 ## Public ADR-0018 read seam for whether the visible session overlay is enabled.
@@ -257,6 +276,14 @@ func has_splash_arrow() -> bool:
 
 
 func _ready() -> void:
+	_layout_viewport = get_viewport()
+	set_anchors_preset(Control.PRESET_TOP_LEFT)
+	position = Vector2.ZERO
+	_fit_to_viewport()
+	_create_bar_fill()
+	if _layout_viewport != null and not _layout_viewport.size_changed.is_connected(
+			_fit_to_viewport):
+		_layout_viewport.size_changed.connect(_fit_to_viewport)
 	# The splash handlers below enable per-frame callbacks by existing; keep
 	# both off until the splash actually raises. Guarded: a splash raised
 	# before the screen entered the tree must not be silently disarmed here
@@ -264,6 +291,101 @@ func _ready() -> void:
 	if _splash_state == SplashState.NONE:
 		set_process(false)
 		set_process_input(false)
+
+
+func _exit_tree() -> void:
+	if _layout_viewport != null and _layout_viewport.size_changed.is_connected(
+			_fit_to_viewport):
+		_layout_viewport.size_changed.disconnect(_fit_to_viewport)
+	_layout_viewport = null
+
+
+func _fit_to_viewport() -> void:
+	if _layout_viewport == null:
+		return
+	var target := _layout_viewport.get_visible_rect().size
+	if target.x <= 0.0 or target.y <= 0.0:
+		return
+	set_anchors_preset(Control.PRESET_TOP_LEFT)
+	position = Vector2.ZERO
+	pivot_offset = Vector2.ZERO
+	_presented_size = Vector2i(roundi(target.x), roundi(target.y))
+	# Keep one submitted set of draw commands at the initial viewport size and
+	# resize it through the direct CanvasItem RID transform below. Unlike
+	# queue_redraw(), that reaches RenderingServer while the loader blocks the
+	# SceneTree, so a fullscreen event cannot leave an old-resolution strip.
+	if _layout_base_size == Vector2.ZERO:
+		_layout_base_size = target
+		size = target
+	var stretch := Vector2(target.x / _layout_base_size.x,
+			target.y / _layout_base_size.y)
+	scale = stretch
+	force_update_transform()
+	if is_inside_tree():
+		# Control defers its ordinary transform flush with the SceneTree. Push the
+		# same local transform straight to the canvas RID so a resize processed
+		# inside synchronous loading reaches this force_draw().
+		RenderingServer.canvas_item_set_transform(get_canvas_item(), Transform2D(
+				Vector2(stretch.x, 0.0), Vector2(0.0, stretch.y), Vector2.ZERO))
+	queue_redraw()
+
+
+func _create_bar_fill() -> void:
+	_bar_fill = ColorRect.new()
+	_bar_fill.name = "ProgressFill"
+	_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bar_fill.color = HudPos.loading_bar_fill_color()
+	_bar_fill.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	add_child(_bar_fill)
+	_layout_bar_fill()
+	_sync_bar_fill()
+
+
+func _layout_bar_fill() -> void:
+	if _bar_fill == null or _layout_base_size == Vector2.ZERO:
+		return
+	var surface_scale := _layout_base_size / Vector2(
+			HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
+	var bar_pos := HudPos.loading_bar_pos()
+	var bar_size := HudPos.loading_bar_size()
+	var x := int(bar_pos.x * surface_scale.x)
+	var y := int(bar_pos.y * surface_scale.y)
+	var w := int(bar_size.x * surface_scale.x)
+	var h := int(bar_size.y * surface_scale.y)
+	var full_span := HudPos.loading_bar_fill_span(x, w, 100)
+	_bar_fill.position = Vector2(full_span.x, y + 3)
+	_bar_fill.size = Vector2(full_span.y - full_span.x, h)
+	_bar_fill.pivot_offset = Vector2.ZERO
+
+
+func _sync_bar_fill() -> void:
+	if _bar_fill == null:
+		return
+	var full_width := int(_bar_fill.size.x)
+	if full_width <= 0:
+		return
+	var x := int(_bar_fill.position.x) - 3
+	var span := HudPos.loading_bar_fill_span(x, full_width, _progress)
+	var fill_width := maxi(0, span.y - span.x)
+	var should_draw := _texture != null and _splash_state == SplashState.NONE \
+			and fill_width > 0
+	# The rectangle's full draw command is submitted during the two-frame
+	# preparation barrier. Only its transform/modulate change during the
+	# synchronous loader, so force_draw can present the exact checkpoint
+	# without waiting for an idle-frame redraw.
+	var fill_scale := float(fill_width) / float(full_width)
+	var fill_modulate := Color.WHITE if should_draw \
+			else Color(1.0, 1.0, 1.0, 0.0)
+	_bar_fill.scale = Vector2(maxf(fill_scale, 0.000001), 1.0)
+	_bar_fill.self_modulate = fill_modulate
+	_bar_fill.force_update_transform()
+	if _bar_fill.is_inside_tree():
+		RenderingServer.canvas_item_set_transform(
+				_bar_fill.get_canvas_item(),
+				Transform2D(Vector2(fill_scale, 0.0), Vector2(0.0, 1.0),
+						_bar_fill.position))
+		RenderingServer.canvas_item_set_self_modulate(
+				_bar_fill.get_canvas_item(), fill_modulate)
 
 
 ## Raise the start-mission splash over the held background: the cursor-arrow
@@ -287,9 +409,11 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 		_splash_font = _load_font(root, HudPos.loading_splash_continue_font())
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE
+	_sync_bar_fill()
 	_splash_blink_on = _splash_blink_phase()
 	if is_inside_tree():
-		_splash_arrow_anchor = get_viewport().get_mouse_position()
+		_splash_arrow_anchor = _viewport_to_local(
+				get_viewport().get_mouse_position())
 	set_process_input(true)
 	set_process(true)
 	queue_redraw()
@@ -304,7 +428,7 @@ func _input(event: InputEvent) -> void:
 		# The arrow tracks the live cursor [orig: xLeft/yTop @ 0x3342e48/
 		# 0x3342e4c ARE the cursor position, written by
 		# Input_DispatchMouseEvent @ 0x761470]. Motion never dismisses.
-		_splash_arrow_anchor = motion.position
+		_splash_arrow_anchor = _viewport_to_local(motion.position)
 		queue_redraw()
 		return
 	var key := event as InputEventKey
@@ -319,6 +443,12 @@ func _input(event: InputEvent) -> void:
 	if button != null and button.pressed:
 		accept_event()
 		_splash_exit_edge()
+
+
+func _viewport_to_local(point: Vector2) -> Vector2:
+	return Vector2(
+			point.x / scale.x if not is_zero_approx(scale.x) else point.x,
+			point.y / scale.y if not is_zero_approx(scale.y) else point.y)
 
 
 func _process(_delta: float) -> void:
@@ -367,8 +497,8 @@ func _splash_exit_edge() -> void:
 func _draw() -> void:
 	if _texture == null:
 		return
-	# Background: stretched to the full display, no aspect preservation; drawn
-	# unmodulated — the original's 0xFF7F7F7F modulate is the MODULATE2X
+	# Background: stretched to the full display, no aspect preservation.
+	# Unmodulated — the original's 0xFF7F7F7F modulate is the MODULATE2X
 	# neutral (docs/interface/loading-screen-re.md D-LOADSCR-6)
 	# [orig: LoadingScreen_DrawEffectFullscreen rect (0,0,width,height) @ 0x586ba0].
 	draw_texture_rect(_texture, Rect2(Vector2.ZERO, size), false)
@@ -504,9 +634,9 @@ func _draw_progress_bar() -> void:
 	draw_rect(Rect2(x, y, w + 6, h + 6), Color.BLACK)
 	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), HudPos.loading_bar_border_gray())
 	draw_rect(Rect2(x + 2, y + 2, w + 2, h + 2), Color.BLACK)
-	var span := HudPos.loading_bar_fill_span(x, w, _displayed)
-	if span.y > span.x:
-		draw_rect(Rect2(span.x, y + 3, span.y - span.x, h), HudPos.loading_bar_fill_color())
+	# The fill is the ProgressFill child. Its complete red rectangle is
+	# submitted before loading blocks, then scaled to the exact native span by
+	# _sync_bar_fill() at each real checkpoint.
 
 
 # LoadingText lookup against the registered gametext table; a miss returns the

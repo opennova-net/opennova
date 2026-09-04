@@ -17,6 +17,8 @@ func test_startup_and_oned_share_the_runtime_root() -> void:
 	var runtime_root := packed.instantiate()
 	assert_true(runtime_root.has_method("get_main_game"),
 			"launch automation has one stable way through the added nesting")
+	assert_true(runtime_root.has_method("sync_game_viewport_to_window"),
+			"blocking loading presents can synchronize the optional game viewport")
 	assert_null(runtime_root.get_main_game(), "the game is created only after tree entry")
 	runtime_root.free()
 
