@@ -1993,11 +1993,12 @@ public:
 	void set_loco_scale(int p_scale);
 	int get_loco_scale() const;
 
-	// Wire the infantry root-motion source: resolve a model's .adm (e.g. "E_STAND.adm")
-	// through the shell's resource root and keep its clips' root tracks. Returns the number
-	// of anim states with a usable clip (0 = nothing loaded; org1 soldiers then stand —
-	// motion comes from clips, as in the original). Survives reset_world like the terrain.
+	// Install the default infantry root-motion map (e.g. "E_STAND.adm") through
+	// the shell's resource root. Returns its number of states with usable clips
+	// (0 if unavailable); model-specific maps resolve independently. Clip sets
+	// survive reset_world like the terrain.
 	int set_infantry_anim_map(const Ref<class ResourceRoot> &p_resource_root, const String &p_adm_name);
+	// Usable states in the first registered map (default or model-specific).
 	int get_infantry_clip_count() const { return kernel_->root_motion.clip_count(0); }
 
 	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
