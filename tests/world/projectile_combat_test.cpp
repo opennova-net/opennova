@@ -11,6 +11,7 @@
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
+using namespace opennova::crt;
 
 namespace {
 

@@ -16,6 +16,8 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
+using namespace opennova::crt;
+
 namespace opennova::world {
 
 namespace {

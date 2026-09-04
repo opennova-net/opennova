@@ -2,6 +2,8 @@
 
 #include <base/crt/crt_rng.h>
 
+using namespace opennova::crt;
+
 namespace opennova::world {
 namespace {
 

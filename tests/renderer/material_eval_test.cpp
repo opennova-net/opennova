@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+using namespace opennova::crt;
+
 namespace {
 
 constexpr float kInv255 = 1.0f / 255.0f;

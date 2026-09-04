@@ -17,6 +17,7 @@
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
+using namespace opennova::crt;
 using opennova::terrain::TerrainHeightField;
 
 static int failures = 0;
