@@ -57,8 +57,34 @@ func current_operation() -> WorldLoadOperation:
 
 
 func finish_presentation() -> void:
+	complete_progress()
 	_presentation_active = false
 	dismiss()
+
+
+## Present the final checkpoint only at the shell's reveal/transition edge.
+## GameWorld stops at WORLD_READY so a joiner waiting for authoritative
+## admission never claims to be complete.
+func complete_progress() -> bool:
+	if _screen == null or not _presentation_active:
+		return false
+	_screen.set_progress(MissionData.LOAD_PROGRESS_COMPLETE)
+	_screen.present(true)
+	return true
+
+
+## Exact visible checkpoint, or -1 when there is no loading presentation.
+func progress_percent() -> int:
+	return _screen.displayed_progress() if _screen != null else -1
+
+
+## Exact pixel size occupied by the active loading surface, or (-1, -1) once
+## the presentation is gone. Render probes use this instead of reaching into
+## the transient CanvasLayer/LoadingScreen ownership tree (ADR 0018).
+func surface_size() -> Vector2i:
+	if _screen == null:
+		return Vector2i(-1, -1)
+	return _screen.presented_size()
 
 
 func dismiss() -> void:
@@ -201,11 +227,6 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	_screen.name = "LoadingScreen"
 	_layer.add_child(_screen)
 	_screen.setup(_root, load_info)
-	# CanvasLayer is not a Control parent, so full-rect anchors have no layout
-	# rectangle to resolve against.
-	_screen.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_screen.position = Vector2.ZERO
-	_screen.size = _screen.get_viewport_rect().size
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
 	if not _world.join_session_identified.is_connected(_on_join_session_identified):

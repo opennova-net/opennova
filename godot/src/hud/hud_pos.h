@@ -116,7 +116,6 @@ public:
 	static int heat_fill_span(int p_extent_px, int p_heat);
 	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
 	static int power_fill_span(int p_progress_fp16, int p_extent_px);
-	static int loading_bar_step(int p_displayed, int p_reported);
 	static Vector2i loading_bar_fill_span(int p_x, int p_w, int p_displayed);
 	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
 			double p_screen_w);
@@ -136,8 +135,7 @@ public:
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
 	static String loading_sidecar_image_name(const String &p_mission_file);
-	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed,
-			int p_displayed, int p_reported);
+	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
 	static double loading_msg_x_frac();
 	static double loading_msg_right_frac();
 	static double loading_msg_label_y_frac();

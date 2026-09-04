@@ -326,9 +326,12 @@ static func _build_definitions() -> Array[ProbeDef]:
 		ProbeDef.make("loading_screen_render",
 				"The menu -> mission loading handoff: from the main menu, start the mission "
 				+ "and accept only a loading frame that carries both the loading art and the "
-				+ "red progress bar (the mounted root must hold the mission; mnml.bms by default).",
+				+ "red progress bar; optionally switch to fullscreen during the blocking load "
+				+ "and require full-resolution coverage (the mounted root must hold the mission; "
+				+ "mnml.bms by default).",
 				RENDER + "loading_screen_render_probe.gd", {
 					"mission": { "type": "string", "default": "mnml.bms" },
+					"fullscreen_during_load": { "type": "boolean", "default": false },
 				}, [], true, false, 120_000),
 		ProbeDef.make("effects_visual",
 				"The environment-particle visual probe: the mounted .ptl set in a bare "

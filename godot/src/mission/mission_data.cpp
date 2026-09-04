@@ -123,6 +123,8 @@ int MissionData::load_progress_percent(int p_stage) {
 			static_cast<mission::MissionLoadStage>(p_stage));
 }
 
+static_assert(MissionData::LOAD_STAGE_MISSION_SETUP ==
+		static_cast<int>(mission::MissionLoadStage::kMissionSetup));
 static_assert(MissionData::LOAD_STAGE_ENVIRONMENT ==
 		static_cast<int>(mission::MissionLoadStage::kEnvironment));
 static_assert(MissionData::LOAD_STAGE_TERRAIN ==
@@ -135,10 +137,14 @@ static_assert(MissionData::LOAD_STAGE_AUDIO ==
 		static_cast<int>(mission::MissionLoadStage::kAudio));
 static_assert(MissionData::LOAD_STAGE_EFFECTS ==
 		static_cast<int>(mission::MissionLoadStage::kEffects));
+static_assert(MissionData::LOAD_STAGE_EFFECTS_WARM ==
+		static_cast<int>(mission::MissionLoadStage::kEffectsWarm));
 static_assert(MissionData::LOAD_STAGE_FINISH ==
 		static_cast<int>(mission::MissionLoadStage::kFinish));
 static_assert(MissionData::LOAD_STAGE_FINISH + 1 ==
 		static_cast<int>(mission::MissionLoadStage::kCount));
+static_assert(MissionData::LOAD_PROGRESS_WORLD_READY ==
+		mission::kMissionLoadProgressWorldReady);
 static_assert(MissionData::LOAD_PROGRESS_COMPLETE ==
 		mission::kMissionLoadProgressComplete);
 
@@ -216,13 +222,16 @@ void MissionData::_bind_methods() {
 	BIND_ENUM_CONSTANT(KIND_ORGANIC);
 	BIND_CONSTANT(WP_FLAG_DOES_NOT_LOOP);
 	BIND_CONSTANT(ATTRIB_FORCE_INDOORS);
+	BIND_CONSTANT(LOAD_STAGE_MISSION_SETUP);
 	BIND_CONSTANT(LOAD_STAGE_ENVIRONMENT);
 	BIND_CONSTANT(LOAD_STAGE_TERRAIN);
 	BIND_CONSTANT(LOAD_STAGE_OBJECTS);
 	BIND_CONSTANT(LOAD_STAGE_RUNTIME);
 	BIND_CONSTANT(LOAD_STAGE_AUDIO);
 	BIND_CONSTANT(LOAD_STAGE_EFFECTS);
+	BIND_CONSTANT(LOAD_STAGE_EFFECTS_WARM);
 	BIND_CONSTANT(LOAD_STAGE_FINISH);
+	BIND_CONSTANT(LOAD_PROGRESS_WORLD_READY);
 	BIND_CONSTANT(LOAD_PROGRESS_COMPLETE);
 	ClassDB::bind_static_method("MissionData", D_METHOD("load_progress_percent", "stage"),
 			&MissionData::load_progress_percent);

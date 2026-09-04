@@ -629,7 +629,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	host.set_terrain_til_data(streamed_til)
 	assert_true(host.load_from_mission_data(mission))
 
-	var observed := {"local_load": false, "held": false}
+	var observed := {"local_load": false, "held": false, "held_progress": -1}
 	world.world_loaded.connect(func() -> void:
 		observed["local_load"] = true
 	, CONNECT_ONE_SHOT)
@@ -646,14 +646,19 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			# All handlers for world_loaded have now returned. The old behavior
 			# dismissed the loading screen in MainGame's handler here.
 			observed["held"] = _shell.is_world_loading() and not world.visible
+			observed["held_progress"] = _shell.loading_progress_percent()
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
 			break
 
 	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
+	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_WORLD_READY,
+			"the held joiner reports local-world readiness, not false completion")
 	assert_false(_shell.is_world_loading(),
 			"the loading screen releases after the authoritative join edge")
+	assert_eq(_shell.loading_progress_percent(), -1,
+			"the completed loading presentation no longer exposes a stale value")
 	assert_true(world.visible, "the admitted world is revealed")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
 	assert_eq(world.get_sim().get_join_terrain_til_state(),

@@ -143,6 +143,8 @@ int GameWorld::load_world(const String &p_dir) {
 // populated into the world. Returns OK, or the same error codes as
 // load_world.
 int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
+	emit_signal(kSignalLoadProgress,
+			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
 	Ref<ResourceRoot> resource_root = resolve_root(p_dir);
 	if (resource_root.is_null()) {
 		return ERR_CANT_OPEN;
@@ -172,6 +174,8 @@ int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 // sidecars continue through the mounted runtime root and its normal /d
 // policy.
 int GameWorld::load_loose_mission(const String &p_bms_name, const String &p_dir) {
+	emit_signal(kSignalLoadProgress,
+			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
 	const String mission_name = p_bms_name.strip_edges().replace("\\", "/");
 	if (mission_name.is_empty() || mission_name != mission_name.get_file() ||
 			mission_name.get_extension().to_lower() != "bms") {
@@ -203,6 +207,8 @@ int GameWorld::load_loose_mission(const String &p_bms_name, const String &p_dir)
 // use a saved .bms through load_mission() or load_loose_mission().
 int GameWorld::load_mission_data(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const String &p_dir) {
+	emit_signal(kSignalLoadProgress,
+			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
 	if (p_mission.is_null() || !p_mission->is_loaded()) {
 		emit_signal(kSignalLoadFailed, "no mission document to load");
 		return ERR_INVALID_PARAMETER;
@@ -333,6 +339,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
 	// first shot (measured: first-fire tap 92.9 ms -> repeat 12.5 ms). Retail
 	// pays this at load (the load plan's effect-system witness).
+	emit_signal(kSignalLoadProgress,
+			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
 	timeline->span("effects_warm");
 	warm_effect_world_catalog();
 	timeline->end_span();
@@ -342,7 +350,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	world_ready_ = true;
 	set_water_world_rendering_enabled(true);
 	build_minimap_water_mask();
-	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_COMPLETE);
+	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_WORLD_READY);
 	emit_signal(kSignalWorldLoaded);
 	return OK;
 }
