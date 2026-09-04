@@ -248,6 +248,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;
+                // The two afloat boat lanes stay paired with their authored
+                // model anchors. Their live speed controls are sampled by the
+                // shared watercraft mover; W1/W2 and particlefxs remain on
+                // their separate, currently unrouted transient/ground paths.
+                vt.wake_w3.effect = def->particlefxw3.effect;
+                vt.wake_w3.userpoint = def->particlefxw3.userpoint;
+                vt.wake_w4.effect = def->particlefxw4.effect;
+                vt.wake_w4.userpoint = def->particlefxw4.userpoint;
                 // def->top_heavy is parsed for parity but dead in retail —
                 // no consumer, so the traits do not carry it.
                 vt.player_control =

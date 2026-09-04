@@ -224,6 +224,10 @@ int main() {
     tank->bob = 219;
     tank->flip = 220;
     tank->scale_q16 = 0x18000;
+    std::strcpy(tank->particlefxw3.effect, "fx_sml_wk");
+    std::strcpy(tank->particlefxw3.userpoint, "FX00");
+    std::strcpy(tank->particlefxw4.effect, "fx_sml_wk_f");
+    std::strcpy(tank->particlefxw4.userpoint, "FX01");
     std::strcpy(tank->sound_profile, "SP_Tank");
     std::strcpy(tank->soundloops[0], "LP_TANK");
     std::strcpy(rifle->ammo_closeattack, "AT_RIFLE");
@@ -396,6 +400,10 @@ int main() {
         CHECK(vt->sound_profile == "SP_Tank");
         CHECK(vt->sound_loops[0] == "LP_TANK");
         CHECK(vt->sound_loops[1].empty());
+        CHECK(vt->wake_w3.effect == "fx_sml_wk");
+        CHECK(vt->wake_w3.userpoint == "FX00");
+        CHECK(vt->wake_w4.effect == "fx_sml_wk_f");
+        CHECK(vt->wake_w4.userpoint == "FX01");
     }
     const VehicleTraits *apc_vt = w.vehicles.traits.get(501);
     CHECK(apc_vt != nullptr);

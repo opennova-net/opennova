@@ -509,6 +509,12 @@ void EffectWorld::stop_group(int64_t p_group_id) {
 	scene_->detach(p_group_id);
 }
 
+bool EffectWorld::set_group_parameters(int64_t p_group_id, float p_rate_control,
+		float p_offset_control) {
+	return scene_.is_valid() && p_group_id != 0 &&
+			scene_->set_group_parameters(p_group_id, p_rate_control, p_offset_control);
+}
+
 void EffectWorld::release_effect_binding(const Variant &p_owner_key) {
 	if (const int64_t *slot_token = slot_tokens_.getptr(p_owner_key)) {
 		scene_->detach_slot(*slot_token);
@@ -648,6 +654,9 @@ TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include
 			emitter_row->set_position(godot_vector(emitter.position));
 			emitter_row->set_forward(godot_vector(emitter.forward));
 			emitter_row->set_age(emitter.age);
+			emitter_row->set_emit_rate(emitter.emit_rate);
+			emitter_row->set_spawn_y_offset(emitter.spawn_y_offset);
+			emitter_row->set_camera_pull(emitter.camera_pull);
 			emitter_row->set_kill_plane(static_cast<int>(emitter.kill_plane));
 			emitter_row->set_kill_plane_y(emitter.kill_plane_y);
 			row->add_emitter(emitter_row);
@@ -732,6 +741,9 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_effect_by_handle", "handle", "position", "orientation"),
 			&EffectWorld::spawn_effect_by_handle, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("stop_group", "group_id"), &EffectWorld::stop_group);
+	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
+					"offset_control"),
+			&EffectWorld::set_group_parameters);
 	ClassDB::bind_method(D_METHOD("release_effect_binding", "owner_key"),
 			&EffectWorld::release_effect_binding);
 	ClassDB::bind_method(D_METHOD("has_owner_binding", "owner_key"), &EffectWorld::has_owner_binding);

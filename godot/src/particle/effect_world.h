@@ -165,6 +165,11 @@ public:
 	bool spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3());
 	void stop_group(int64_t p_group_id);
+	// Update the two live arguments supplied by moving bone-trail effects:
+	// emission-rate control and vertical/camera-offset control. Inputs remain
+	// unclamped because the portable scene owns the retail formulas.
+	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
+			float p_offset_control);
 	// Releases the script/native binding identity for an owner whose
 	// lifecycle is complete. Call after stopping its group: generation-scoped
 	// owners (flying rounds, debris pieces) otherwise accumulate one slot

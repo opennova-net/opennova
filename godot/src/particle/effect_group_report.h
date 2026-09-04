@@ -28,7 +28,8 @@ namespace godot {
 // name = the emitter's particle definition; alive = its live particle count;
 // emitting = still emitting; rendered = the quads the last draw compiled for
 // it, bounds / bounds_valid the renderer-owned box of those quads; position /
-// forward / age the emitter's simulation pose and age; kill_plane /
+// forward / age the emitter's simulation pose and age; emit_rate /
+// spawn_y_offset / camera_pull are its live parameterized values; kill_plane /
 // kill_plane_y its water-plane clip (EffectScene.KillPlane).
 #define EFFECT_EMITTER_REPORT_FIELDS(X)     \
 	X(String, name, String())               \
@@ -41,6 +42,9 @@ namespace godot {
 	X(Vector3, position, Vector3())         \
 	X(Vector3, forward, Vector3(0, 0, -1))  \
 	X(float, age, 0.0f)                     \
+	X(float, emit_rate, 0.0f)               \
+	X(float, spawn_y_offset, 0.0f)          \
+	X(float, camera_pull, 0.0f)             \
 	X(int, kill_plane, 0)                   \
 	X(float, kill_plane_y, 0.0f)
 

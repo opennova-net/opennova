@@ -165,6 +165,11 @@ struct Emitter {
 	float emit_dur_remaining = 0.0f;   // counts down from def.emit_dur (by AGE, not per burst)
 	float emit_dur_total = 0.0f;
 	float emit_rate = 0.0f;
+	// Runtime copies of the definition's two positional values. Ordinary
+	// emitters retain the authored y-offset/camera-pull behavior; controlled
+	// effect groups reinterpret the pair through retail's blend parameter.
+	float spawn_y_offset = 0.0f;
+	float camera_pull = 0.0f;
 	float age = 0.0f;                  // emitter wall-clock
 	float emit_delay_remaining = 0.0f; // counts down from def.emit_delay before any spawn
 	bool emit_started = false;         // first burst primed? (it lands at t≈0, not one interval in)

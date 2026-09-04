@@ -5,8 +5,9 @@
 // Portable decisions over the parsed item row's attrib word (formats/def) and
 // the model's userpoint table (formats/threedi); the presenting shell
 // (godot/src/world/item_effect_director) spawns the groups and follows the
-// nodes. The fxs/fxw1..4 wake tiers and the death/fire/other family are
-// movement/damage-state driven and stay unrouted (ptl-format-re.md §8).
+// nodes. The watercraft W3/W4 lanes route separately through the portable
+// vehicle motor and fixed-tick presenter; fxs/W1/W2 and the death/fire/other
+// family remain movement/damage-state threads (ptl-format-re.md §8).
 // [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 (mission
 //  start, entity pools 1-3) -> ItemDef_GetBoneMaskByName @ 0x49ea40 (first
 //  16, stricmp) -> Entity_SpawnBoneTrailEffect @ 0x43bef0 (one mode-2 attached

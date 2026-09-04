@@ -2214,6 +2214,93 @@ bool run_authority_ai_leg_caps_at_waterspeed() {
 	return ok;
 }
 
+// The two boat-wake lanes are persistent emitter controls, sampled by the
+// shared cbot mover every other logic tick. W3 follows the commanded register;
+// W4 follows the signed current-speed register. The retail integer pipeline
+// shifts before taking the absolute value, so equal forward/reverse inputs
+// intentionally differ by one Q16 unit.
+bool run_wake_snapshot_tracks_even_tick_motion() {
+	bool ok = true;
+	ok &= expect(w::watercraft_wake_magnitude_q16(16384) == 32767u,
+			"forward wake magnitude preserves the retail multiply/shift order");
+	ok &= expect(w::watercraft_wake_magnitude_q16(-16384) == 32768u,
+			"reverse wake magnitude preserves the retail signed-shift asymmetry");
+	ok &= expect(w::watercraft_wake_magnitude_q16(0) == 0u,
+			"zero speed has zero wake magnitude");
+
+	Rig r;
+	make_rig(r);
+	r.traits.wake_w3.effect = "fx_sml_wk";
+	r.traits.wake_w3.userpoint = "FX00";
+	r.traits.wake_w4.effect = "fx_sml_wk_f";
+	r.traits.wake_w4.userpoint = "FX01";
+	w::Entity *boat = r.world.registry.get(r.boat);
+	if (!expect(boat != nullptr, "wake boat spawned")) return false;
+	stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
+			w::to_fixed(10.0f), 0, 16384, 0);
+
+	r.world.logic_tick = 1;
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
+	ok &= expect(!boat->veh.wake.valid, "odd ticks do not create a wake sample");
+
+	r.world.logic_tick = 2;
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
+	const w::VehicleWakeState sampled = boat->veh.wake;
+	ok &= expect(sampled.valid && sampled.afloat, "even afloat tick publishes wake state");
+	ok &= expect(sampled.source_tick == 2, "wake state records its source tick");
+	ok &= expect(sampled.water_z == r.world.env.water_z,
+			"wake state records the sampled water plane");
+	ok &= expect(sampled.command_magnitude_q16 ==
+			w::watercraft_wake_magnitude_q16(boat->veh.cmd_speed),
+			"W3 follows commanded speed");
+	ok &= expect(sampled.motion_magnitude_q16 ==
+			w::watercraft_wake_magnitude_q16(boat->veh.speed),
+			"W4 follows current motion");
+	ok &= expect(sampled.position.x == boat->position.x &&
+			sampled.position.y == boat->position.y &&
+			sampled.position.z == boat->position.z,
+			"wake state captures the post-solve boat pose");
+	ok &= expect(sampled.yaw_deg == boat->yaw && sampled.pitch_deg == boat->pitch &&
+			sampled.roll_deg == boat->roll,
+			"wake state captures the post-solve attitude");
+
+	r.world.logic_tick = 3;
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
+	ok &= expect(boat->veh.wake.source_tick == sampled.source_tick,
+			"odd ticks retain the previous wake sample");
+
+	r.world.env.water_z = 0;
+	r.world.logic_tick = 4;
+	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
+	ok &= expect(boat->veh.wake.valid && !boat->veh.wake.afloat,
+			"an even dry tick publishes the release state");
+	ok &= expect(boat->veh.wake.command_magnitude_q16 == 0 &&
+			boat->veh.wake.motion_magnitude_q16 == 0,
+			"a non-afloat sample zeros both wake lanes");
+
+	Rig authority;
+	make_rig(authority);
+	authority.traits.player_control = false;
+	authority.traits.wake_w3 = r.traits.wake_w3;
+	authority.traits.wake_w4 = r.traits.wake_w4;
+	w::Entity *authority_boat = authority.world.registry.get(authority.boat);
+	if (!expect(authority_boat != nullptr, "authority wake boat spawned")) return false;
+	stage(*authority_boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
+			w::to_fixed(10.0f), 0, 16384, 0);
+	authority.world.logic_tick = 2;
+	authority.world.vehicles.tick_watercraft_motor(
+			*authority_boat, authority.traits, nullptr);
+	ok &= expect(authority_boat->veh.wake.valid &&
+			authority_boat->veh.wake.source_tick == 2,
+			"the authority entry point publishes through the same wake core");
+	ok &= expect(authority_boat->veh.wake.command_magnitude_q16 ==
+			w::watercraft_wake_magnitude_q16(authority_boat->veh.cmd_speed) &&
+			authority_boat->veh.wake.motion_magnitude_q16 ==
+			w::watercraft_wake_magnitude_q16(authority_boat->veh.speed),
+			"authority W3/W4 use the same command/motion split");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -2258,6 +2345,7 @@ int main() {
 	ok &= run_client_family_sound_dispatch_scope();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();
+	ok &= run_wake_snapshot_tracks_even_tick_motion();
 	if (!ok) {
 		std::fprintf(stderr, "watercraft_client_motor: FAILED\n");
 		return EXIT_FAILURE;
