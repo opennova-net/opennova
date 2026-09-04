@@ -31,7 +31,7 @@ struct CharacterEntry {
 class CharacterRegistry {
 public:
 	// Flatten the parsed file: nationality -> division -> combo, file order.
-	static CharacterRegistry from_file(const AvatarsFile &file);
+	static CharacterRegistry from_file(const opennova::avatars::AvatarsFile &file);
 
 	// Append one combo (tree order); the packed id is derived here.
 	void add_entry(int nationality_index, int division_index, int combo_index,

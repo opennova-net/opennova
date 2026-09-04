@@ -24,6 +24,8 @@
 
 #include "common/file_io.h"
 
+using namespace opennova::avatars;
+
 #define SETSTR(field, val) std::snprintf((field), sizeof(field), "%s", (val))
 
 namespace {

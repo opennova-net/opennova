@@ -18,6 +18,8 @@
 
 #include <string>
 
+namespace opennova::avatars {
+
 /* ========================================================================= */
 /* Lexer helpers (copied from engine/formats/def/def.cpp)                          */
 /* ========================================================================= */
@@ -497,12 +499,12 @@ done:
     return 0;
 }
 
-extern "C" int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out) {
+int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out) {
     if (!data || !out) return 1;
     return parse_buffer((const char *)data, size, out);
 }
 
-extern "C" int avatars_parse(const char *path, AvatarsFile *out) {
+int avatars_parse(const char *path, AvatarsFile *out) {
     if (!path || !out) return 1;
     size_t len = 0;
     char *buf = read_file(path, &len);
@@ -512,7 +514,7 @@ extern "C" int avatars_parse(const char *path, AvatarsFile *out) {
     return rc;
 }
 
-extern "C" void avatars_free(AvatarsFile *file) {
+void avatars_free(AvatarsFile *file) {
     if (!file) return;
     for (size_t i = 0; i < file->parts_count; ++i) free_part(&file->parts[i]);
     free(file->parts);
@@ -546,7 +548,7 @@ static void emit_raw_lines(std::string &s, char (*raw)[512], size_t count, const
     }
 }
 
-extern "C" int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size) {
+int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size) {
     if (!file || !out_data || !out_size) return 1;
     std::string s;
     s.reserve(8192);
@@ -613,6 +615,8 @@ extern "C" int avatars_write(const AvatarsFile *file, char **out_data, size_t *o
     return 0;
 }
 
-extern "C" void avatars_free_buffer(char *data) {
+void avatars_free_buffer(char *data) {
     free(data);
 }
+
+} // namespace opennova::avatars

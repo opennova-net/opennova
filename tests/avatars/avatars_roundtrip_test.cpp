@@ -15,6 +15,8 @@
 #include "common/test_paths.h"
 #include <formats/avatars/avatars.h>
 
+using namespace opennova::avatars;
+
 #define SETSTR(field, val) std::snprintf((field), sizeof(field), "%s", (val))
 
 namespace {

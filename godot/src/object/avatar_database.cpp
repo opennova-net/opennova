@@ -16,6 +16,7 @@
 #include <algorithm>
 
 using namespace godot;
+using namespace opennova::avatars;
 
 namespace {
 

@@ -38,7 +38,7 @@ class AvatarDatabase : public RefCounted {
 	GDCLASS(AvatarDatabase, RefCounted)
 
 private:
-	AvatarsFile file_ = {};
+	opennova::avatars::AvatarsFile file_ = {};
 	bool loaded = false;
 	// The engine's wire-identity registry over the parsed tree (rebuilt lazily
 	// after a load): every packed-id decode, per-side default and sex row is
@@ -51,10 +51,10 @@ private:
 
 	void clear();
 	Error adopt_bytes(const PackedByteArray &p_bytes, const String &p_label);
-	const AvatarPart *find_part(int kind, const String &name) const; // case-insensitive
-	const AvatarNationality *nationality_at(int nat_index) const;
-	const AvatarDivision *division_at(int nat_index, int div_index) const;
-	const AvatarCombo *combo_at(int nat_index, int div_index, int combo_index) const;
+	const opennova::avatars::AvatarPart *find_part(int kind, const String &name) const; // case-insensitive
+	const opennova::avatars::AvatarNationality *nationality_at(int nat_index) const;
+	const opennova::avatars::AvatarDivision *division_at(int nat_index, int div_index) const;
+	const opennova::avatars::AvatarCombo *combo_at(int nat_index, int div_index, int combo_index) const;
 	Ref<AvatarComboRow> combo_row(int nat_index, int div_index, int combo_index) const;
 
 	// The witnessed menu preview-animation constants, re-exported from engine
@@ -81,16 +81,16 @@ public:
 	// AvatarPartKind (engine/formats/avatars/avatars.h), bound as an enum so
 	// the part lookups take a typed kind.
 	enum PartKind {
-		PART_HEAD = AVATAR_PART_HEAD,
-		PART_BODY = AVATAR_PART_BODY,
-		PART_ARMS = AVATAR_PART_ARMS,
+		PART_HEAD = opennova::avatars::AVATAR_PART_HEAD,
+		PART_BODY = opennova::avatars::AVATAR_PART_BODY,
+		PART_ARMS = opennova::avatars::AVATAR_PART_ARMS,
 	};
 	// AvatarSex.
-	enum { SEX_MALE = AVATAR_SEX_MALE, SEX_FEMALE = AVATAR_SEX_FEMALE };
+	enum { SEX_MALE = opennova::avatars::AVATAR_SEX_MALE, SEX_FEMALE = opennova::avatars::AVATAR_SEX_FEMALE };
 	// AvatarAlignment (the PLAYER_INFO team filter: good -> team 0, evil -> team 1).
-	enum { ALIGN_GOOD = AVATAR_ALIGN_GOOD, ALIGN_EVIL = AVATAR_ALIGN_EVIL };
+	enum { ALIGN_GOOD = opennova::avatars::AVATAR_ALIGN_GOOD, ALIGN_EVIL = opennova::avatars::AVATAR_ALIGN_EVIL };
 	// AvatarDiagnosticSeverity.
-	enum { DIAG_WARNING = AVATAR_DIAG_WARNING, DIAG_ERROR = AVATAR_DIAG_ERROR };
+	enum { DIAG_WARNING = opennova::avatars::AVATAR_DIAG_WARNING, DIAG_ERROR = opennova::avatars::AVATAR_DIAG_ERROR };
 	// The preview initial-yaw span: a fresh preview model spawns at
 	// rand() % PREVIEW_INITIAL_YAW_RANGE_DEG degrees (engine
 	// avatars/preview_animation.h carries the witness).

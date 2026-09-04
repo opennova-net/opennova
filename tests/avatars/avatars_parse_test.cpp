@@ -14,6 +14,8 @@
 #include "common/test_paths.h"
 #include <formats/avatars/avatars.h>
 
+using namespace opennova::avatars;
+
 namespace {
 
 const AvatarPart *find_part(const AvatarsFile &f, const char *name) {
