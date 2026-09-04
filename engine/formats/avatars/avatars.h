@@ -20,9 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::avatars {
 
 /* ========================================================================= */
 /* Enums (witnessed; see docs/playerinfo/avatars-re.md)                      */
@@ -167,8 +165,6 @@ void avatars_free(AvatarsFile *file);
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::avatars
 
 #endif /* AVATARS_H */

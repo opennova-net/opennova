@@ -12,6 +12,8 @@
 #include <cstdlib>
 #include <cstring>
 
+using namespace opennova::avatars;
+
 namespace {
 
 int g_failures = 0;

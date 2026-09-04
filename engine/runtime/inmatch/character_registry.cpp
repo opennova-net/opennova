@@ -2,6 +2,8 @@
 
 #include <net/npwire/character_id.h>
 
+using namespace opennova::avatars;
+
 namespace opennova::npruntime {
 
 CharacterRegistry CharacterRegistry::from_file(const AvatarsFile &file) {

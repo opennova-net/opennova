@@ -18,14 +18,14 @@ namespace godot {
 class AvatarPartRow : public RefCounted {
 	GDCLASS(AvatarPartRow, RefCounted)
 
-	AvatarPartSnapshot value_ = {};
+	opennova::avatars::AvatarPartSnapshot value_ = {};
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const AvatarPartSnapshot &p_value) { value_ = p_value; }
-	void assign(const AvatarPart &p_value);
+	void assign(const opennova::avatars::AvatarPartSnapshot &p_value) { value_ = p_value; }
+	void assign(const opennova::avatars::AvatarPart &p_value);
 
 	// AvatarDatabase.PART_HEAD / PART_BODY / PART_ARMS.
 	int get_kind() const { return value_.kind; }
@@ -51,7 +51,7 @@ public:
 class AvatarComboRow : public RefCounted {
 	GDCLASS(AvatarComboRow, RefCounted)
 
-	AvatarCombo value_ = {};
+	opennova::avatars::AvatarCombo value_ = {};
 	Ref<AvatarPartRow> head_;
 	Ref<AvatarPartRow> body_;
 	Ref<AvatarPartRow> arms_;
@@ -65,7 +65,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	void assign(const AvatarCombo &p_value, int p_alignment, int p_nationality_index,
+	void assign(const opennova::avatars::AvatarCombo &p_value, int p_alignment, int p_nationality_index,
 			int p_division_index, int p_combo_index, int p_character_id);
 
 	// The id token verbatim (e.g. "001") and its parsed number.
@@ -105,7 +105,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	void assign(const AvatarNationality &p_value);
+	void assign(const opennova::avatars::AvatarNationality &p_value);
 
 	String get_raw_id() const { return raw_id_; }
 	int get_id() const { return id_; }
@@ -133,7 +133,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	void assign(const AvatarDivision &p_value);
+	void assign(const opennova::avatars::AvatarDivision &p_value);
 
 	String get_raw_id() const { return raw_id_; }
 	int get_id() const { return id_; }
@@ -146,13 +146,13 @@ public:
 class AvatarDiagnosticRow : public RefCounted {
 	GDCLASS(AvatarDiagnosticRow, RefCounted)
 
-	AvatarDiagnostic value_ = {};
+	opennova::avatars::AvatarDiagnostic value_ = {};
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const AvatarDiagnostic &p_value) { value_ = p_value; }
+	void assign(const opennova::avatars::AvatarDiagnostic &p_value) { value_ = p_value; }
 
 	// 1-based source line; 0 when synthesized.
 	int get_line() const { return static_cast<int>(value_.line); }
