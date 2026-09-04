@@ -52,7 +52,8 @@ easier to relay than to rediscover.
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
-  place — bump submodules upstream) plus vendored in-tree bcrypt sources and two
+  place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
+  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and two
   hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
   `third_party/sqlite/CMakeLists.txt`) and Dear ImGui (`third_party/imgui/`,
   pinned to the commit the imgui-godot addon bundles — bump it and

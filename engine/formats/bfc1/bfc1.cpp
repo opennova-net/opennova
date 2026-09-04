@@ -1,7 +1,7 @@
 #include <formats/bfc1/bfc1.h>
 
 #include <string.h>
-#include "miniz.h"
+#include <miniz.h> // third_party/miniz
 
 int bfc1_is_bfc1(const uint8_t *data, size_t size)
 {

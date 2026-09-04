@@ -66,6 +66,7 @@ SCAN_ROOTS = (
     "third_party/sqlite",
     "third_party/bcrypt",
     "third_party/imgui",
+    "third_party/miniz",
 )
 
 # --- The rules -------------------------------------------------------------

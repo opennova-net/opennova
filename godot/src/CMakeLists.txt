@@ -17,6 +17,8 @@ add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # imgui-godot addon. GODOTCPP_TARGET is defined by now (godot-cpp's option
 # default or the -D on the command line).
 add_subdirectory(../../third_party/imgui opennova_imgui)
+# Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
+add_subdirectory(../../third_party/miniz opennova_miniz)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
 if(GODOTCPP_TARGET STREQUAL "template_release")
     set(OPENNOVA_DEVTOOLS OFF)
