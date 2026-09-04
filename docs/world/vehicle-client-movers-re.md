@@ -3711,7 +3711,9 @@ Deltas from the §7/§8 skeleton:
    bound |right.z| < 40960, rear-wheel contact, and MORE THAN ONE consecutive
    rear-contact tick (`entity[1].pad_040[8]`, reset in the both-wheels-off
    branch) [orig: @ 0x47A4CC..0x47A52B] — a one-tick graze never grounds the
-   bike. Both-wheel landings absorb half the fall
+   bike. Both wheels off clears the contact byte as it sets Flags 0x2000; the
+   mover therefore preserves its ballistic velocity instead of rebuilding it
+   from the grounded forward row. Both-wheel landings absorb half the fall
    [orig: `slideDecay −= slideDecay >> 1` @ 0x47B0F1..0x47B103].
 8. **The grounded heading/lean smoother** `Entity_SmoothHeadingToTarget`
    @ 0x45B2C0 (roll-rate producer into modelPtr2, the speed>4096 lean-latch

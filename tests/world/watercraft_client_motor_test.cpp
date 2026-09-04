@@ -363,6 +363,67 @@ bool run_bike_family_deltas() {
 	return ok;
 }
 
+bool run_bike_contact_loss_accumulates_gravity() {
+	// The light contact solve owns BOTH representations of wheel contact: the
+	// public airborne flag and BYTE2(aiRef0) (m.grounded). 06TR's motorcycle
+	// exposed the split-brain failure when both wheel probes missed: the solve
+	// set Flags 0x2000 but left m.grounded true, so the next mover tick rebuilt
+	// slide_z from the forward row and erased all but one -250 gravity step.
+	std::vector<uint16_t> heightmap(64 * 64, 0);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+
+	Rig r;
+	make_rig(r);
+	r.world.env.water_z = 0;
+	r.world.tables.terrain = &field;
+	r.traits.family = w::VehicleFamily::Bike;
+	r.traits.player_speed = 20972;
+	r.traits.acceleration = 512;
+	r.traits.deceleration = 512;
+	r.traits.torque = 7;
+	r.traits.mass = 3;
+	r.traits.max_slope = 30 * 11930464;
+	r.traits.slip_slope = 45 * 11930464;
+	const int32_t clearance = 36044;
+	r.traits.box_z_lo = -clearance;
+	r.traits.box_z_hi = -clearance + (12 << 13);
+	r.traits.box_y_lo = -(4 << 13);
+	r.traits.box_y_hi = 4 << 13;
+	r.traits.box_x_lo = -(11 << 13);
+	r.traits.box_x_hi = 11 << 13;
+	r.traits.foot_x_lo = r.traits.box_x_lo;
+	r.traits.foot_x_hi = r.traits.box_x_hi;
+	r.traits.foot_y_lo = r.traits.box_y_lo;
+	r.traits.foot_y_hi = r.traits.box_y_hi;
+
+	w::Entity *veh = r.world.registry.get(r.boat);
+	if (!expect(veh != nullptr, "airborne light-solver bike spawned")) return false;
+	const int32_t x0 = w::to_fixed(100.0f);
+	const int32_t y0 = w::to_fixed(200.0f);
+	const int32_t z0 = w::to_fixed(10.0f);
+	stage(*veh, x0, y0, z0, 0, 8192, 0);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
+
+	bool ok = expect((veh->flags & w::kEntityFlagInAir) != 0,
+	                 "both missed bike wheels set the airborne flag");
+	ok &= expect(!veh->veh.grounded,
+	             "both missed bike wheels clear the contact byte");
+	const int32_t first_slide = veh->veh.slide_z;
+	const int32_t first_z = w::to_fixed(veh->position.z);
+	r.world.vehicles.ground_client_tick(*veh, r.traits);
+	ok &= expect(veh->veh.slide_z == first_slide - 250,
+	             "an airborne bike accumulates the next gravity step");
+	ok &= expect(w::to_fixed(veh->position.z) < first_z,
+	             "an airborne bike descends on the next tick");
+	return ok;
+}
+
 bool run_ground_parked_rests_at_wheel_clearance() {
 	// The ground/tracked contact solve (D-NET-196 B-facet): a parked
 	// Ground-family row with resolved model boxes rests with its ORIGIN at
@@ -2166,6 +2227,7 @@ int main() {
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();
+	ok &= run_bike_contact_loss_accumulates_gravity();
 	ok &= run_ground_parked_rests_at_wheel_clearance();
 	ok &= run_tank_parked_rests_at_wheel_clearance();
 	ok &= run_bike_parked_rests_at_wheel_clearance();
