@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::gameprofile;
+
 namespace {
 
 int usage(const char *why) {

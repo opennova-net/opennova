@@ -19,6 +19,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::gameprofile;
 
 namespace {
 

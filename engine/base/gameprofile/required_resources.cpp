@@ -6,7 +6,11 @@
 #include <ctype.h>
 #include <stddef.h>
 
-static const RequiredResource k_required_resources[] = {
+namespace opennova::gameprofile {
+
+namespace {
+
+const RequiredResource k_required_resources[] = {
     /* --- Boot (Game_Run -> Game_InitSubsystems), witnessed order --- */
     { "game.cfg", BOOT_PHASE_BOOT, RES_OPTIONAL, 0,
       "missing -> silent Config_SetDefaults; version key != 0x1D re-defaults",
@@ -257,6 +261,8 @@ static const RequiredResource k_required_resources[] = {
 enum { k_required_resource_count =
            (int)(sizeof(k_required_resources) / sizeof(k_required_resources[0])) };
 
+} // namespace
+
 int gameprofile_required_resource_count(void) {
     return k_required_resource_count;
 }
@@ -268,7 +274,9 @@ const RequiredResource *gameprofile_required_resource_at(int index) {
     return &k_required_resources[index];
 }
 
-static int name_equals_ci(const char *a, const char *b) {
+namespace {
+
+int name_equals_ci(const char *a, const char *b) {
     while (*a && *b) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
             return 0;
@@ -278,6 +286,8 @@ static int name_equals_ci(const char *a, const char *b) {
     }
     return *a == '\0' && *b == '\0';
 }
+
+} // namespace
 
 const RequiredResource *gameprofile_required_resource_find(const char *name) {
     if (!name) {
@@ -290,3 +300,5 @@ const RequiredResource *gameprofile_required_resource_find(const char *name) {
     }
     return NULL;
 }
+
+} // namespace opennova::gameprofile

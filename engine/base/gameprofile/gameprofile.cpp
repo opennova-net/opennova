@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <ctype.h>
 
+namespace opennova::gameprofile {
+
 /* The PFF container key is universal across every NovaLogic title we have reversed (the ROL7
    keystream seeded 0x0312A4CE, verified vs Jointops.exe PFF_LoadFileToMemory @ 0x768920). The
    per-game row still carries the key so a future un-reversed game only needs a new table entry,
@@ -18,7 +20,9 @@
 #define PFF_CONTAINER_KEY_DEFAULT GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT
 #define GAMEPROFILE_FORMAT_PFF3   0  /* mirrors PffFormat in pff/pff.h */
 
-static const GameProfile k_profiles[] = {
+namespace {
+
+const GameProfile k_profiles[] = {
     { GAME_JO,      "jo",     "Joint Operations",             PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
     { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_FORCE_DEFAULT,   0, GAMEPROFILE_FORMAT_PFF3 },
     { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
@@ -27,7 +31,7 @@ static const GameProfile k_profiles[] = {
 };
 
 /* Case-insensitive ASCII compare of two NUL-terminated strings. */
-static int code_ieq(const char *a, const char *b) {
+int code_ieq(const char *a, const char *b) {
     while (*a && *b) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
             return 0;
@@ -37,6 +41,8 @@ static int code_ieq(const char *a, const char *b) {
     }
     return *a == *b;
 }
+
+} // namespace
 
 int gameprofile_count(void) {
     return (int)(sizeof(k_profiles) / sizeof(k_profiles[0]));
@@ -76,3 +82,5 @@ int gameprofile_scr_policy_for_code(const char *code) {
     const GameProfile *p = gameprofile_by_code(code);
     return p ? p->scr_policy : SCR_POLICY_VERSION_DETECT;
 }
+
+} // namespace opennova::gameprofile

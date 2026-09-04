@@ -13,6 +13,7 @@
 #include <cstring>
 
 using namespace godot;
+using namespace opennova::gameprofile;
 
 // ---------------------------------------------------------------------------
 // Helpers
