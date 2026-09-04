@@ -82,7 +82,9 @@ func is_game_view_embedded() -> bool:
 ## ordinary _process resize pass cannot run inside a blocking mission load.
 func sync_game_viewport_to_window() -> void:
 	if _embedded_game_view and not _tools_open and _runtime_window != null:
-		_resize_game_viewport(_runtime_window.size)
+		var target_size := _runtime_window.size
+		_resize_game_viewport(target_size)
+		_submit_game_viewport_rect(target_size)
 
 
 func _can_embed_game_view() -> bool:
@@ -156,3 +158,20 @@ func _resize_game_viewport(requested_size: Vector2i) -> void:
 	var size := Vector2i(maxi(1, requested_size.x), maxi(1, requested_size.y))
 	if _game_viewport.size != size:
 		_game_viewport.size = size
+
+
+## Replace the container's already-submitted texture rectangle immediately.
+## During a blocking mission load, Control's queued redraw cannot run, so a
+## fullscreen resize otherwise leaves the last windowed rectangle on the root
+## canvas even though both Control.size and SubViewport.size already changed.
+func _submit_game_viewport_rect(requested_size: Vector2i) -> void:
+	if not is_instance_valid(_game_container) or not is_instance_valid(_game_viewport):
+		return
+	var texture := _game_viewport.get_texture()
+	if texture == null:
+		return
+	var size := Vector2i(maxi(1, requested_size.x), maxi(1, requested_size.y))
+	var canvas_item := _game_container.get_canvas_item()
+	RenderingServer.canvas_item_clear(canvas_item)
+	RenderingServer.canvas_item_add_texture_rect(
+			canvas_item, Rect2(Vector2.ZERO, Vector2(size)), texture.get_rid())

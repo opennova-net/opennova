@@ -7,9 +7,9 @@ extends GameProbe
 ## the witnessed red progress bar. With fullscreen_during_load, the initial
 ## real-stage checkpoint switches the actual Window to fullscreen
 ## while the ordinary SceneTree loop is blocked; the accepted frame must also
-## prove that the game viewport, loading surface, and captured image all match
-## the fullscreen window. This catches both a premature forced draw and a
-## stale windowed-resolution loading surface. The
+## prove that the game viewport, loading surface, embedded container, and final
+## root-window image all match the fullscreen window. This catches both a
+## premature forced draw and a stale windowed-resolution root composite. The
 ## mission (mnml.bms by default) must be in the launch's mounted root: the
 ## committed minimal fixture wants `--resource-dir <repo>/assets /d`.
 
@@ -25,6 +25,7 @@ const ART_HEIGHT_FRACTION := 0.85
 const ART_MEAN_LUMA_MIN := 0.20
 const ART_SAMPLE_GRID := 192
 const EXTENDED_ART_SAMPLE_MIN := 32
+const EXTENDED_ART_LUMA_MIN := 0.10
 
 # BAR_FILL is Color8(0xEB, 0, 0). Restrict the scan to its witnessed bottom-center
 # neighborhood so incidental red pixels in the briefing art cannot satisfy it.
@@ -49,6 +50,8 @@ var _fullscreen_observed := false
 var _fullscreen_surface_matched := false
 var _fullscreen_art_extended := false
 var _max_extended_art_samples := 0
+var _fullscreen_mismatch_frames := 0
+var _first_fullscreen_mismatch := {}
 var _window: Window = null
 var _windowed_size := Vector2i.ZERO
 
@@ -69,6 +72,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	_fullscreen_surface_matched = false
 	_fullscreen_art_extended = false
 	_max_extended_art_samples = 0
+	_fullscreen_mismatch_frames = 0
+	_first_fullscreen_mismatch = {}
 	_windowed_size = Vector2i.ZERO
 	var mission := String(ctx.args.get("mission", MISSION_DEFAULT)).strip_edges()
 	var shell := ctx.game()
@@ -150,6 +155,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		"fullscreen_surface_matched": _fullscreen_surface_matched,
 		"fullscreen_art_extended": _fullscreen_art_extended,
 		"max_extended_art_samples": _max_extended_art_samples,
+		"fullscreen_mismatch_frames": _fullscreen_mismatch_frames,
+		"first_fullscreen_mismatch": _first_fullscreen_mismatch,
 	}
 	if is_instance_valid(shell) and shell.is_world_loading():
 		data["presentation_released"] = await ctx.wait_world_ready(LOAD_TIMEOUT_MS)
@@ -167,6 +174,10 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if not bool(data["progress_exact"]):
 		return ProbeVerdict.failed(
 				"loading progress did not follow the exact retail-mission checkpoints",
+				data)
+	if _fullscreen_mismatch_frames > 0:
+		return ProbeVerdict.failed(
+				"fullscreen presented stale loading pixels before reaching the new resolution",
 				data)
 	data["qualified_upper_mean_luma"] = _qualified_metrics.get("art_mean_luma", 0.0)
 	data["qualified_red_pixels"] = _qualified_metrics.get("red_pixels", 0)
@@ -198,13 +209,22 @@ func _on_load_progress(percent: int) -> void:
 	if _fullscreen_during_load and not _fullscreen_requested and percent >= 0 \
 			and _window != null:
 		_fullscreen_requested = true
-		WindowState.set_fullscreen(_window, true)
+		_press_f11()
 		DisplayServer.process_events()
 	# This callback runs after WorldLoadCoordinator presented the checkpoint.
 	# Complete that queued draw before reading back its pixels; frame_post_draw
 	# alone is delivered only after the synchronous loader yields to the loop.
 	RenderingServer.force_draw(true, 0.0)
 	_sample_loading_frame(percent)
+
+
+static func _press_f11() -> void:
+	for pressed in [true, false]:
+		var key := InputEventKey.new()
+		key.keycode = WindowState.TOGGLE_KEY
+		key.physical_keycode = WindowState.TOGGLE_KEY
+		key.pressed = pressed
+		Input.parse_input_event(key)
 
 
 func _on_frame_post_draw() -> void:
@@ -218,7 +238,9 @@ func _sample_loading_frame(checkpoint := -1) -> void:
 	if shell == null or not shell.is_world_loading():
 		return
 	var viewport := _ctx.viewport()
-	var image: Image = viewport.get_texture().get_image() if viewport != null else null
+	var capture_viewport: Viewport = _window if _window != null else viewport
+	var image: Image = capture_viewport.get_texture().get_image() \
+			if capture_viewport != null else null
 	if image == null or image.is_empty():
 		return
 	_loading_frames += 1
@@ -232,6 +254,14 @@ func _sample_loading_frame(checkpoint := -1) -> void:
 		var surface_size := shell.loading_surface_size()
 		var image_size := image.get_size()
 		var window_size := _window.size if _window != null else Vector2i.ZERO
+		var container_size := window_size
+		var runtime_root := _ctx.tree.current_scene as GameRuntimeRoot \
+				if _ctx.tree != null else null
+		if runtime_root != null and runtime_root.is_game_view_embedded():
+			var container := runtime_root.get_node_or_null(
+					"GameViewportContainer") as SubViewportContainer
+			if container != null:
+				container_size = Vector2i(container.size)
 		var fullscreen := _window != null and WindowState.is_fullscreen(_window)
 		_fullscreen_observed = _fullscreen_observed or fullscreen
 		var extended_art_samples := _count_extended_art_samples(image)
@@ -241,13 +271,24 @@ func _sample_loading_frame(checkpoint := -1) -> void:
 		_fullscreen_art_extended = _fullscreen_art_extended or art_extended
 		var surface_matched := fullscreen and window_size != _windowed_size \
 				and viewport_size == window_size \
-				and surface_size == viewport_size and image_size == viewport_size
+				and container_size == window_size \
+				and surface_size == viewport_size and image_size == window_size
 		_fullscreen_surface_matched = _fullscreen_surface_matched or surface_matched
 		metrics["fullscreen"] = fullscreen
 		metrics["window_size"] = window_size
 		metrics["viewport_size"] = viewport_size
+		metrics["container_size"] = container_size
 		metrics["surface_size"] = surface_size
 		metrics["extended_art_samples"] = extended_art_samples
+		if fullscreen and window_size != _windowed_size \
+				and (not surface_matched or not art_extended):
+			_fullscreen_mismatch_frames += 1
+			if _first_fullscreen_mismatch.is_empty():
+				_first_fullscreen_mismatch = metrics.duplicate()
+				var mismatch_path := _ctx.artifact_dir.path_join(
+						"fullscreen_first_mismatch.png")
+				if image.save_png(mismatch_path) == OK:
+					_ctx.artifact("fullscreen_first_mismatch", mismatch_path, "png")
 		if not surface_matched or not art_extended:
 			return
 	if float(metrics["art_mean_luma"]) > ART_MEAN_LUMA_MIN and int(metrics["red_pixels"]) > 0:
@@ -305,6 +346,6 @@ func _count_extended_art_samples(image: Image) -> int:
 				continue
 			var color := image.get_pixel(x, y)
 			var luma := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
-			if luma > 0.01:
+			if luma > EXTENDED_ART_LUMA_MIN:
 				samples += 1
 	return samples
