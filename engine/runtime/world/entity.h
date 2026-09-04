@@ -855,13 +855,14 @@ struct Entity {
         // Entity_ProcessLightVehiclePhysics, reset in the both-wheels-off
         // branch].
         int32_t light_rear_contact_ticks = 0;
-        // --- Part-animation accumulators (world/vehicle_part_anim.h). The
-        // rotor spin machine's three dwords and the wheel phase; the PANM
+        // --- Part-animation/fall accumulators (world/vehicle_part_anim.h).
+        // The rotor spin machine's three dwords and the wheel phase; the PANM
         // registers HELO_ROTOR/HELO_TAILROTOR/VEHICLE_WHEELS sample their
         // HIGH words [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 owns
         //  +0x460 speed / +0x464 angle / +0x468 rate; the wheel phase is
         //  +0x2B8; Entity_CacheVehicleHUDStats @0x4929B0 reads +0x466 /
-        //  +0x2BA].
+        //  +0x2BA]. The crashed bike's chassis-orientation helper reuses
+        //  +0x460 as its fall rate [orig: @0x468BFC/@0x468D67..0x468D7D].
         struct PartSpin {
             int32_t speed = 0; // +0x460
             int32_t angle = 0; // +0x464
@@ -899,7 +900,7 @@ struct Entity {
         uint8_t settle_2f0 = 0;      // +0x2F0 — the wreck/settle latch
         uint8_t fresh_2f1 = 0;       // +0x2F1 — 1 after Entity_RespawnVehicle
         uint8_t settled_2f2 = 0;     // +0x2F2 — settled upright (the sleep path)
-        uint8_t wreck_2fc = 0;       // +0x2FC — the crash latch
+        uint8_t wreck_2fc = 0;       // +0x2FC — wreck-settled / bike fall latch
         uint8_t has_been_driven = 0; // +0x3DE — the bike's driven byte
         uint32_t airborne_stamp_2f8 = 0; // +0x2F8 — the client crash window's stamp
         float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
