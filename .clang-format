@@ -1,0 +1,56 @@
+# OpenNova C++ style (ADR 0043 d14). CONFIG ONLY for now: the tree is not yet
+# formatted to it, and no whitespace-only reformat commit exists; that rides a
+# follow-up PR (one commit per group plus .git-blame-ignore-revs). Do not run
+# clang-format over the tree as part of an unrelated change.
+#
+# Derived from third_party/godot-cpp/.clang-format (Godot's own style: tabs,
+# 4-wide, attached braces, 8-wide continuation) with these deliberate
+# differences, each because the follow-up reformat must stay whitespace-only:
+#   ColumnLimit 100      godot-cpp uses 0 (never wrap). Measured 2026-09-03 over
+#                        engine/, apps/, tests/, godot/src (510k lines): 9.1% of
+#                        lines exceed 80 columns, 1.43% exceed 100, 0.33% exceed
+#                        120 -- the code honors 100, so 100 is what is enforced.
+#   NamespaceIndentation None (godot-cpp's default, spelled out): the engine
+#                        keeps namespace bodies at column 0.
+#   InsertBraces false   godot-cpp inserts braces around single statements; that
+#                        is a token change, not whitespace.
+#   RemoveSemicolon false same reason.
+#   SortIncludes Never   include order is a layering fact here (ADR 0040 group-
+#                        qualified includes; C headers before C++ ones in the
+#                        format libs); the include-graph lint reads it, the
+#                        formatter must not reorder it.
+#   Standard c++17       the engine's group standard (godot-cpp says c++20).
+# Godot-specific knobs with no subject in this tree (AttributeMacros for
+# _FORCE_INLINE_, JavaImportGroups, ObjCBlockIndentWidth) are dropped.
+# Commented-out entries are LLVM defaults kept visible for the next sync
+# (godot-cpp last synced against Clang 17.0.6).
+BasedOnStyle: LLVM
+AccessModifierOffset: -4
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignTrailingComments:
+  Kind: Never
+  OverEmptyLines: 0
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortFunctionsOnASingleLine: Inline
+# BraceWrapping: attached everywhere (LLVM default, BreakBeforeBraces: Attach)
+BreakConstructorInitializers: AfterColon
+ColumnLimit: 100
+ConstructorInitializerIndentWidth: 8
+ContinuationIndentWidth: 8
+Cpp11BracedListStyle: false
+IncludeBlocks: Preserve
+IndentCaseLabels: true
+IndentWidth: 4
+InsertBraces: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+NamespaceIndentation: None
+PackConstructorInitializers: NextLine
+RemoveSemicolon: false
+SortIncludes: Never
+SpacesInLineCommentPrefix:
+  Minimum: 0 # a minimum of 1 for comments, but 0 for disabled code
+  Maximum: -1
+Standard: c++17
+TabWidth: 4
+UseTab: Always

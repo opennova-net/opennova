@@ -50,6 +50,21 @@
   group target, not as its own (see the group-targets bullet below).
   Namespace `opennova`. Native consumers link the static group targets directly;
   no shared-library/FFI export surface is maintained.
+- Language: C++17 throughout (ADR 0043 d14). `engine/` carries no `.c` source
+  and no `extern "C"`; the vendored C (miniz, bcrypt, sqlite) lives under
+  `third_party/`. The format libs that were C APIs keep their C NAMES inside
+  `namespace opennova::<lib>` — `opennova::pff::pff_open`,
+  `opennova::def::DefWeaponDef`, `opennova::threedi::Threedi3di3`,
+  `opennova::gameprofile::gameprofile_by_code`, `opennova::crt::crt_rand15` — and
+  the former `DEF_*` / `PFF_*` / `FNT_*` / `THREEDI_*` macros are
+  `inline constexpr` of the same names (typed by their literal: `uint32_t` for
+  the u-suffixed masks and magics, `int` otherwise). A consumer `.cpp` takes
+  `using namespace opennova::<lib>;` after its includes; a consumer HEADER
+  spells the qualified name (a forward declaration goes inside the lib's
+  namespace, never bare). Every header is `#pragma once`. The whitespace
+  style is `.clang-format` at the repo root (tabs, 4-wide, 100 columns,
+  `NamespaceIndentation: None`) — config only until the whitespace-only
+  reformat commits land; never reformat a file as part of another change.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
