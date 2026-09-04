@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::mus {
+
 /* Operand types match the Python decompiler:
      0 = u8 (8-bit immediate)
      1 = u16 (16-bit immediate)
@@ -190,4 +192,6 @@ static void free_instructions(Instruction *insts, int count) {
     }
 }
 
+
+} // namespace opennova::mus
 #endif /* MUS_DECODE_H */

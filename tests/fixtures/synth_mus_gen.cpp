@@ -37,6 +37,8 @@
 
 #include "common/file_io.h"
 
+using namespace opennova::mus;
+
 namespace {
 
 bool expect(bool cond, const char *msg) {

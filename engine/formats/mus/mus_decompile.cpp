@@ -33,6 +33,8 @@
 #include "mus_decode.h"           // shared opcode table + Instruction + disassemble()
 #include "mus_decompile_shared.h" // resolve_*/CF/Stack/reconstruct_expression/...
 
+namespace opennova::mus {
+
 namespace {
 
 /* OpInfo / kOps[256] / MAX_OPERANDS / Instruction / disassemble() /
@@ -620,14 +622,16 @@ static int decompile_into_buf(const MusScript *script,
 
 }   /* anonymous namespace */
 
-extern "C" int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity) {
+int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity) {
     return decompile_into_buf(script, NULL, 0, out_text, out_capacity);
 }
 
-extern "C" int mus_decompile_with_names(const MusScript *script,
+int mus_decompile_with_names(const MusScript *script,
                                         const char *const *sbf_names,
                                         uint32_t sbf_name_count,
                                         char *out_text, size_t out_capacity) {
     return decompile_into_buf(script, sbf_names, sbf_name_count,
                               out_text, out_capacity);
 }
+
+} // namespace opennova::mus

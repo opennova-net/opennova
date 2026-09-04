@@ -10,10 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::mus {
+
 /* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic compare vs 'SCR0' 0x30524353).
    Engine itself only validates the SCR0 magic; we additionally bound the chunk
    count to a sane limit so a corrupt file does not provoke a runaway alloc. */
-extern "C" int mus_validate(const uint8_t *data, size_t size) {
+int mus_validate(const uint8_t *data, size_t size) {
     if (!data || size < sizeof(MusFileHeader)) return -1;
     MusFileHeader h;
     memcpy(&h, data, sizeof(h));
@@ -213,7 +215,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
    Memory-mode parser. Walks SCR0 header, reads chunk pointer table, parses
    each MU01 chunk into a MusScript, and copies the file-level intrinsic name
    table out of its Pascal-style strings blob. */
-extern "C" int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
+int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
     if (!out || !data) return -1;
     int v = mus_validate(data, size);
     if (v != 0) return v;
@@ -283,7 +285,7 @@ extern "C" int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
 /* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (CreateFile + ReadFile
    slurp at the head of the function). The engine reads the whole file into RAM
    before relocation; we mirror that by slurp + delegate. */
-extern "C" int mus_open(MusFile *out, const char *path) {
+int mus_open(MusFile *out, const char *path) {
     if (!out || !path) {
         if (out) memset(out, 0, sizeof(*out));
         return -1;
@@ -316,7 +318,7 @@ static int name_eq_n(const char *a, const char *b, size_t n) {
     return 1;
 }
 
-extern "C" const MusSection *mus_find_section(const MusScript *s, const char *name) {
+const MusSection *mus_find_section(const MusScript *s, const char *name) {
     if (!s || !name) return NULL;
     for (uint32_t i = 0; i < s->section_count; ++i) {
         if (name_eq_n(s->sections[i].name, name, MUS_NAME_SIZE)) {
@@ -326,7 +328,7 @@ extern "C" const MusSection *mus_find_section(const MusScript *s, const char *na
     return NULL;
 }
 
-extern "C" void mus_close(MusFile *file) {
+void mus_close(MusFile *file) {
     if (!file) return;
     if (file->scripts) {
         for (uint32_t i = 0; i < file->header.chunk_count; ++i) {
@@ -339,3 +341,5 @@ extern "C" void mus_close(MusFile *file) {
     }
     memset(file, 0, sizeof(*file));
 }
+
+} // namespace opennova::mus

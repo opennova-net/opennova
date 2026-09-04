@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::mus {
+
 namespace {
 
 /* Static stack/area sizes. The original VM has 4 KB+ for both stacks (stack
@@ -73,43 +75,43 @@ struct MusVM {
 
 /* ---- E1: lifecycle + hooks --------------------------------------------- */
 
-extern "C" MusVM *mus_vm_create(void) {
+MusVM *mus_vm_create(void) {
     MusVM *vm = (MusVM *)calloc(1, sizeof(MusVM));
     if (!vm) return NULL;
     vm->state = MUS_VM_STOPPED;
     return vm;
 }
 
-extern "C" void mus_vm_destroy(MusVM *vm) {
+void mus_vm_destroy(MusVM *vm) {
     free(vm);
 }
 
-extern "C" void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks) {
+void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks) {
     if (!vm) return;
     if (hooks) vm->hooks = *hooks;
     else memset(&vm->hooks, 0, sizeof(vm->hooks));
 }
 
-extern "C" MusVMState mus_vm_state(const MusVM *vm) {
+MusVMState mus_vm_state(const MusVM *vm) {
     return vm ? vm->state : MUS_VM_STOPPED;
 }
 
-extern "C" const char *mus_vm_last_error(const MusVM *vm) {
+const char *mus_vm_last_error(const MusVM *vm) {
     if (!vm) return "ok";
     return vm->last_error[0] ? vm->last_error : "ok";
 }
 
-extern "C" const char *mus_vm_current_section(const MusVM *vm) {
+const char *mus_vm_current_section(const MusVM *vm) {
     return vm ? vm->current_section_name : "";
 }
 
-extern "C" uint32_t mus_vm_pc(const MusVM *vm) {
+uint32_t mus_vm_pc(const MusVM *vm) {
     return vm ? vm->pc : 0;
 }
 
 /* ---- E2: load + start/stop/pause/resume -------------------------------- */
 
-extern "C" int mus_vm_load_script(MusVM *vm, const MusScript *s) {
+int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     if (!vm || !s) return -1;
     vm->script = s;
     vm->state  = MUS_VM_STOPPED;
@@ -138,22 +140,22 @@ extern "C" int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     return 0;
 }
 
-extern "C" void mus_vm_start(MusVM *vm) {
+void mus_vm_start(MusVM *vm) {
     if (!vm || !vm->script) return;
     vm->state = MUS_VM_RUNNING;
 }
 
-extern "C" void mus_vm_stop(MusVM *vm) {
+void mus_vm_stop(MusVM *vm) {
     if (!vm) return;
     vm->state = MUS_VM_STOPPED;
 }
 
-extern "C" void mus_vm_pause(MusVM *vm) {
+void mus_vm_pause(MusVM *vm) {
     if (!vm) return;
     if (vm->state == MUS_VM_RUNNING) vm->state = MUS_VM_PAUSED;
 }
 
-extern "C" void mus_vm_resume(MusVM *vm) {
+void mus_vm_resume(MusVM *vm) {
     if (!vm) return;
     if (vm->state == MUS_VM_PAUSED) vm->state = MUS_VM_RUNNING;
 }
@@ -955,7 +957,7 @@ static void check_section_transition(MusVM *vm) {
 
 /* Tick: witnessed dispatch loop @ Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
    Budget = 32 instructions (dword_3246B24). Halt latches break early. */
-extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
+int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     init_handlers();
     if (!vm) return 0;
     if (vm->state != MUS_VM_RUNNING) return 0;
@@ -1001,7 +1003,7 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
 
 /* ---- Globals accessors ------------------------------------------------ */
 
-extern "C" int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
+int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
     if (!vm) return 0;
     int byte_off = (int)var_index * 4;
     return globals_read32(vm, byte_off);
@@ -1009,7 +1011,7 @@ extern "C" int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
 
 /* The embedder's write into the VM globals (the screen MUSICVAR, the mission
    var pumps) [orig: AudioVM_SetVariable @ 0x671FA0]. */
-extern "C" void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
+void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
     if (!vm) return;
     int byte_off = (int)var_index * 4;
     if (byte_off + 4 > kGlobalsBytes) return;
@@ -1019,7 +1021,7 @@ extern "C" void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
 
 /* ---- E11: jump_to_section + section tracking --------------------------- */
 
-extern "C" int mus_vm_jump_to_section(MusVM *vm, const char *name) {
+int mus_vm_jump_to_section(MusVM *vm, const char *name) {
     if (!vm || !vm->script || !name) return -1;
     for (uint32_t i = 0; i < vm->script->section_count; ++i) {
         if (section_name_eq_local(vm->script->sections[i].name, name)) {
@@ -1039,3 +1041,5 @@ extern "C" int mus_vm_jump_to_section(MusVM *vm, const char *name) {
     }
     return -2;
 }
+
+} // namespace opennova::mus

@@ -11,6 +11,8 @@
 #include <cstring>
 #include <vector>
 
+using namespace opennova::mus;
+
 namespace {
 
 bool expect(bool cond, const char *msg) {

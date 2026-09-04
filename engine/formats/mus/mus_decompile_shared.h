@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::mus {
+
 /* ---- Operand helpers (match Python resolve_* lambdas) ---- */
 
 static void resolve_global_into(char *out, size_t cap, int idx,
@@ -375,4 +377,6 @@ static void format_play_token(const char *name, char *out, size_t cap) {
     else                     snprintf(out, cap, "\"%s\"", name);
 }
 
+
+} // namespace opennova::mus
 #endif /* MUS_DECOMPILE_SHARED_H */
