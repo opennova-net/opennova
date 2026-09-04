@@ -90,8 +90,10 @@ inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 inline constexpr int kLoadingPresentIntervalMs = 100;
 
 // Redraw + present when the window-pump interval elapses or a real checkpoint
-// changes. OpenNova intentionally omits retail's autonomous displayed-value
-// creep so the bar never claims work the pipeline has not reached.
+// changes. Retail stores the caller's checkpoint in this[8] @ 0x586c32 and a
+// separate liveness value in this[9] @ 0x586c2f, advanced at @ 0x586c3f.
+// OpenNova intentionally omits that autonomous displayed-value creep so the
+// bar never claims work the pipeline has not reached.
 inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed;
 }
