@@ -2,7 +2,7 @@
   "citation_allowlist_engine": [
     "bfc1",
     "devtools",
-    "base/gameprofile/gameprofile.c",
+    "base/gameprofile/gameprofile.cpp",
     "pcapio",
     "base/resource_index/boot_policy.cpp",
     "base/vfs/vfs_decode.cpp",

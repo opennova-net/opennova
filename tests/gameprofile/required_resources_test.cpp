@@ -6,6 +6,8 @@
 
 #include <base/gameprofile/required_resources.h>
 
+using namespace opennova::gameprofile;
+
 static int passed = 0;
 static int failed = 0;
 

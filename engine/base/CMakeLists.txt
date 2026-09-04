@@ -7,8 +7,8 @@
 
 add_library(opennova_base STATIC
     # gameprofile — game identity + required-resource tables
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_writer.cpp

@@ -383,12 +383,12 @@ target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
 # Game profile table tests
-add_executable(gameprofile_test gameprofile/gameprofile_test.c)
+add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gameprofile COMMAND gameprofile_test)
 
-add_executable(required_resources_test gameprofile/required_resources_test.c)
+add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
