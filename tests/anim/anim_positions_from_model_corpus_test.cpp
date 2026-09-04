@@ -37,6 +37,8 @@
 #include <vector>
 #include "common/retail_paths.h"
 
+using namespace opennova::adm;
+
 namespace fs = std::filesystem;
 using opennova::anim::Vec3;
 

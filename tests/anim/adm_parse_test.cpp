@@ -12,6 +12,8 @@
 
 #include "common/retail_paths.h"
 
+using namespace opennova::adm;
+
 int main(void) {
     const std::string fixture = retail::reference_fixture("adm/mp5_1st.adm");
     if (fixture.empty())

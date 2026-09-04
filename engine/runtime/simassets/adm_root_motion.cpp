@@ -7,6 +7,8 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 
+using namespace opennova::adm;
+
 namespace opennova::simassets {
 
 void AdmRootMotion::clear() {
