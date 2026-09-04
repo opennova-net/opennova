@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <formats/sbf/sbf.h>
 
+using namespace opennova::sbf;
+
 static int try_open(const char *path) {
     SbfArchive arc;
     int rc = sbf_open(&arc, path);

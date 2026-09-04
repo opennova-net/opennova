@@ -43,7 +43,7 @@ public:
 	String get_entry_name(int p_index) const;
 	Ref<SbfAudioStream> get_stream_at(int p_index);
 
-	const SbfRawEntry *raw_entry_at(int p_index) const;
+	const opennova::sbf::SbfRawEntry *raw_entry_at(int p_index) const;
 
 	// Raw source bytes held in memory from load_from_path (kept for
 	// sbf_open_memory lifetime). Used by the saver for raw passthrough.
@@ -80,7 +80,7 @@ private:
 	// _file_bytes outlives _arc; sbf_open_memory keeps the entry index
 	// pointing into this buffer until sbf_close.
 	PackedByteArray _file_bytes;
-	SbfArchive _arc;
+	opennova::sbf::SbfArchive _arc;
 	bool _opened = false;
 	bool _dirty = false;
 	// Per-entry int16 PCM overrides keyed by entry index. Populated by

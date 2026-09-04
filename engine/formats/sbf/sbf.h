@@ -10,27 +10,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::sbf {
 
 /* --- Format constants --- */
-#define SBF_MAGIC          0x30464253u      /* 'SBF0' little-endian */
+inline constexpr uint32_t SBF_MAGIC = 0x30464253u;  /* 'SBF0' little-endian */
 /* The header values every observed retail bank carries and the writer stamps:
    version 0x100 (never read by the engine) and the byte-paired-stereo
    channel-format selector (the engine accepts flags <= 2)
    [orig: AudioVM_OpenContextFile @ 0x672160 header reads]. */
-#define SBF_VERSION_DEFAULT            0x00000100u
-#define SBF_FLAGS_BYTE_PAIRED_STEREO   0x00000001u
-#define SBF_HEADER_SIZE    24
-#define SBF_ENTRY_SIZE     32
-#define SBF_NAME_SIZE      16
-#define SBF_CHUNK_HEADER   8
-#define SBF_CHUNK_AUDIO    4096             /* observed audio bytes per full chunk */
-#define SBF_CHUNK_TOTAL    (SBF_CHUNK_HEADER + SBF_CHUNK_AUDIO)
-#define SBF_SAMPLE_RATE    22050
-#define SBF_CHANNELS       2
-#define SBF_BITS_PER_SAMPLE 16
+inline constexpr uint32_t SBF_VERSION_DEFAULT = 0x00000100u;
+inline constexpr uint32_t SBF_FLAGS_BYTE_PAIRED_STEREO = 0x00000001u;
+inline constexpr int SBF_HEADER_SIZE = 24;
+inline constexpr int SBF_ENTRY_SIZE = 32;
+inline constexpr int SBF_NAME_SIZE = 16;
+inline constexpr int SBF_CHUNK_HEADER = 8;
+inline constexpr int SBF_CHUNK_AUDIO = 4096;  /* observed audio bytes per full chunk */
+inline constexpr int SBF_CHUNK_TOTAL = SBF_CHUNK_HEADER + SBF_CHUNK_AUDIO;
+inline constexpr int SBF_SAMPLE_RATE = 22050;
+inline constexpr int SBF_CHANNELS = 2;
+inline constexpr int SBF_BITS_PER_SAMPLE = 16;
 
 /* --- On-disk structs (must be packed at natural u32 alignment) --- */
 
@@ -169,8 +167,6 @@ int sbf_encode_file(const char * const *names, uint32_t entry_count,
 /* Free a buffer returned by sbf_encode_file. Forwards to free(). */
 void sbf_free(void *p);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::sbf
 
 #endif /* SBF_H */

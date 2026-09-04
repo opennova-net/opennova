@@ -54,7 +54,7 @@ private:
 	int _entry_index = -1;
 	bool _playing = false;
 	int _current_chunk = -1;
-	int16_t _decoded[SBF_CHUNK_AUDIO];
+	int16_t _decoded[opennova::sbf::SBF_CHUNK_AUDIO];
 	uint32_t _decoded_count = 0;
 	uint64_t _frames_consumed = 0; // total stereo frames produced since _start
 };

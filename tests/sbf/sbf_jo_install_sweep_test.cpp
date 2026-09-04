@@ -16,6 +16,8 @@
 #include <vector>
 #include "common/retail_paths.h"
 
+using namespace opennova::sbf;
+
 namespace {
 
 int g_failures = 0;
