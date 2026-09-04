@@ -5,12 +5,10 @@
 #include <stdint.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::bfc1 {
 
-#define BFC1_MAGIC       0x31434642u  /* "BFC1" little-endian */
-#define BFC1_HEADER_SIZE 8
+inline constexpr uint32_t BFC1_MAGIC = 0x31434642u;  /* "BFC1" little-endian */
+inline constexpr int BFC1_HEADER_SIZE = 8;
 
 /* Check if data starts with BFC1 magic. */
 int bfc1_is_bfc1(const uint8_t *data, size_t size);
@@ -28,8 +26,6 @@ int bfc1_decompress(const uint8_t *data, size_t size,
 int bfc1_uncompressed_size(const uint8_t *data, size_t size,
                            uint32_t *out_size);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::bfc1
 
 #endif /* BFC1_H */
