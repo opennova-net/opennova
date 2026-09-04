@@ -12,6 +12,8 @@
 #include <climits>
 #include <cstring>
 
+using namespace opennova::fnt;
+
 namespace opennova::menu {
 
 namespace {

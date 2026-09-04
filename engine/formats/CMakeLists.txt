@@ -39,7 +39,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_weather_core.cpp
     # fnt — bitmap fonts
-    ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.cpp
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
@@ -144,9 +144,6 @@ endif()
 # C++17 is the group standard (the per-format C++11 members are C++17-clean).
 target_compile_features(opennova_formats PUBLIC cxx_std_17)
 
-# fnt.c is C99.
 set_target_properties(opennova_formats PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
 )

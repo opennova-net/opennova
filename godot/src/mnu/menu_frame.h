@@ -216,12 +216,12 @@ protected:
 
 private:
 	struct LoadedFont {
-		fnt_font_t font = {};
+		opennova::fnt::fnt_font_t font = {};
 		bool valid = false;
 		std::vector<Ref<Texture2D>> pages;
 		~LoadedFont() {
 			if (valid) {
-				fnt_free(&font);
+				opennova::fnt::fnt_free(&font);
 			}
 		}
 	};

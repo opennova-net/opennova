@@ -39,6 +39,7 @@ using namespace godot;
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
 using namespace opennova::def;
+using namespace opennova::fnt;
 
 namespace {
 

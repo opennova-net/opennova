@@ -49,7 +49,7 @@ Registration is exactly ONE edit in `engine/formats/CMakeLists.txt`:
    `# <name> — <what the format holds>` + one
    `${CMAKE_CURRENT_SOURCE_DIR}/<name>/<file>.cpp` line per TU.
 
-The group already carries C++17, C99, POSITION_INDEPENDENT_CODE, and a PUBLIC
+The group already carries C++17, POSITION_INDEPENDENT_CODE, and a PUBLIC
 link to `opennova_io` — add nothing else; no include-list edit exists any
 more (the pre-flatten `include/<prefix>/` + `src/` split and the per-lib
 PUBLIC include entries are gone).

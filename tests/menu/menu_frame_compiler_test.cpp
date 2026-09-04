@@ -15,6 +15,8 @@
 #include <cstring>
 #include <string>
 
+using namespace opennova::fnt;
+
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
 using opennova::menu::MenuFrameState;

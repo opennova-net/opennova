@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::fnt;
+
 using opennova::hud::GameFont;
 using opennova::hud::GameFontState;
 using opennova::hud::HudDrawList;

@@ -663,7 +663,7 @@ static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
 // live here; compile() emits everything for one frame in retail's order.
 class HudFrameCompiler {
 public:
-	void configure(const HudLayout &layout, const fnt_font_t *font);
+	void configure(const HudLayout &layout, const opennova::fnt::fnt_font_t *font);
 
 	// The overlay label fonts + their resolution scales — the Arial pair and
 	// the large slot retail loads beside the hudpos HUD font
@@ -676,9 +676,9 @@ public:
 	// face [orig: @ 0x5a3680/@ 0x5a38a1], the big-map grid labels with the
 	// large face. Null fonts fall back to the hudpos font at scale 1
 	// (layout-only embedders keep drawing).
-	void configure_label_fonts(const fnt_font_t *normal, const fnt_font_t *bold,
-			const fnt_font_t *large, float scale, float large_scale,
-			const fnt_font_t *impact38 = nullptr);
+	void configure_label_fonts(const opennova::fnt::fnt_font_t *normal, const opennova::fnt::fnt_font_t *bold,
+			const opennova::fnt::fnt_font_t *large, float scale, float large_scale,
+			const opennova::fnt::fnt_font_t *impact38 = nullptr);
 
 	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
 	// flash, the message ring) — the texture-table refresh path, e.g. the

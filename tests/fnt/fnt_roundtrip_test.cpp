@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::fnt;
+
 #ifndef OPENNOVA_SOURCE_DIR
 #define OPENNOVA_SOURCE_DIR "."
 #endif

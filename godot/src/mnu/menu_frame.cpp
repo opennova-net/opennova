@@ -26,6 +26,7 @@
 #include <string>
 
 using namespace godot;
+using namespace opennova::fnt;
 using opennova::to_std;
 
 // The EDIT_RESULT_* re-exports track menu/menu_edit.h EditKeyResult; pin the
