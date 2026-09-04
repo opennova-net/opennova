@@ -5,6 +5,8 @@
 
 #include "common/test_expect.h"
 
+using namespace opennova::scr;
+
 int main() {
     static const uint8_t encrypted[] = {
         0x53, 0x43, 0x52, 0x00, 0xbc, 0xe1, 0xc6, 0x36,

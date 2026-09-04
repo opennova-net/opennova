@@ -65,6 +65,7 @@
 
 using namespace opennova;
 using namespace opennova::def;
+using namespace opennova::scr;
 
 namespace {
 
