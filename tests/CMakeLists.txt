@@ -1913,6 +1913,14 @@ target_include_directories(mission_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(mission_kernel_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel COMMAND mission_kernel_test)
 
+# Per-model infantry animation loading with an absent default, using synthetic
+# ADM/BAD fixtures: movement, fallback, late spawn, restore and replica rearm.
+add_executable(mission_infantry_anim_test mission/mission_infantry_anim_test.cpp)
+target_link_libraries(mission_infantry_anim_test PRIVATE opennova_runtime)
+target_include_directories(mission_infantry_anim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_infantry_anim_test PRIVATE cxx_std_17)
+add_test(NAME mission_infantry_anim COMMAND mission_infantry_anim_test)
+
 # The kernel's lifecycle contract over the same synthetic mission, ungated: the
 # ordering guards, the sealed play-start baseline (capture/restore rewinds the
 # registry, the player, the clock and the event latches), the strict-vs-lenient

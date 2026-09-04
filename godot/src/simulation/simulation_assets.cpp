@@ -18,24 +18,11 @@
 using namespace sim_internal;
 
 int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, const String &p_adm_name) {
-	// The default clip set (adm_id 0) and the per-entity re-resolve are the
-	// kernel's ONE install (mission_kernel.cpp install_infantry_anim); this
-	// binding hands the mounted index over and re-arms the joiner's decoded
-	// rows, whose stamps index the rebuilt registry with old ids otherwise.
-	const int default_clip_count = kernel_->install_infantry_anim(
+	// The kernel owns default/model map resolution. The joiner observes its
+	// animation revision and re-arms decoded rows when the registry changes.
+	return kernel_->install_infantry_anim(
 			std::string(p_adm_name.utf8().get_data()),
 			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
-	if (runtime_ != nullptr && is_joiner()) {
-		for (opennova::replication::ClientEntityState &es :
-				runtime_->state().entities) {
-			if (es.rm_adm_id != -2) {
-				es.rm_adm_id = -2;
-				es.rm_state = -1;
-				es.rm_leg_seeded = false;
-			}
-		}
-	}
-	return default_clip_count;
 }
 
 // Per-entity .adm resolution: ground each soldier off its OWN model's clip,

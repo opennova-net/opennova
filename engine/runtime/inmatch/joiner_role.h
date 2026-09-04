@@ -178,6 +178,7 @@ private:
 	void send_hello_once();
 	// Resolve each decoded organic row's adm id once its type is known.
 	void resolve_row_adm_ids();
+	uint64_t infantry_adm_revision_seen_ = 0;
 	// A streamed topology/world change materialized: rebuild the asset-backed
 	// caches (collision/occlusion instances, item traits, seat specs) for the
 	// retired/spawned/updated rows.

@@ -204,7 +204,7 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 	const auto cached = adm_by_runtime_type_.find(type_id);
 	if (cached != adm_by_runtime_type_.end()) return cached->second;
 	const DefItemsFile *item_rows = items_table();
-	if (!infantry_adm_retained_ || item_rows == nullptr || root_motion.empty()) return -1;
+	if (!infantry_adm_retained_ || item_rows == nullptr) return -2;
 	const ResourceIndex *adm_source = adm_index_ != nullptr ? adm_index_ : asset_index();
 	const int visual = simassets::visual_item_id_for_runtime_type(type_id, *item_rows);
 	const DefItemDef *def = simassets::find_item_def(*item_rows, visual);
@@ -214,7 +214,8 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 		if (!strutil::ends_with_icase(adm, ".adm")) adm += ".adm";
 		adm_id = root_motion.register_adm(adm_source, adm);
 	}
-	if (adm_id < 0 && !root_motion.empty()) adm_id = 0; // the default set
+	if (adm_id < 0) adm_id = default_infantry_adm_id_;
+	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
 	adm_by_runtime_type_[type_id] = adm_id;
 	return adm_id;
 }
@@ -343,57 +344,55 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 }
 
 void MissionKernel::resolve_new_infantry_adm_ids() {
-	const DefItemsFile *item_rows = items_table();
-	if (!infantry_adm_retained_ || item_rows == nullptr || root_motion.empty()) return;
-	const ResourceIndex *adm_source = adm_index_ != nullptr ? adm_index_ : asset_index();
+	if (!infantry_adm_retained_ || items_table() == nullptr) return;
 	const int count = world.ai.count();
 	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
 		infantry_adm_resolved_ai_count_ = 0;
 	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
 		w::AiEntity *e = world.ai.at(i);
 		if (e == nullptr) continue;
-		e->inf.adm_id = 0;
+		e->inf.adm_id = default_infantry_adm_id_;
 		if (!e->inf.active) continue;
 		const w::Entity *ent = world.registry.get(e->handle);
 		if (ent == nullptr) continue;
-		const int visual = simassets::visual_item_id_for_runtime_type(ent->item_id, *item_rows);
-		const DefItemDef *def = simassets::find_item_def(*item_rows, visual);
-		if (def == nullptr || def->anim_def[0] == '\0') continue;
-		std::string adm = def->anim_def;
-		if (!strutil::ends_with_icase(adm, ".adm")) adm += ".adm";
-		const int adm_id = root_motion.register_adm(adm_source, adm);
-		if (adm_id >= 0) e->inf.adm_id = adm_id;
+		e->inf.adm_id = adm_id_for_runtime_type(ent->item_id);
 	}
 	infantry_adm_resolved_ai_count_ = count;
+	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
+}
+
+void MissionKernel::reset_infantry_adm_ids() {
+	adm_by_runtime_type_.clear();
+	++infantry_adm_revision_;
+	infantry_adm_resolved_ai_count_ = 0;
+	for (int i = 0; i < world.ai.count(); ++i)
+		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = default_infantry_adm_id_;
+	resolve_new_infantry_adm_ids();
 }
 
 void MissionKernel::rearm_infantry_adm(const ResourceIndex *adm_index) {
 	if (adm_index != nullptr) adm_index_ = adm_index;
 	infantry_adm_retained_ = true;
-	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < world.ai.count(); ++i)
-		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = 0;
-	resolve_new_infantry_adm_ids();
+	reset_infantry_adm_ids();
 }
 
 int MissionKernel::install_infantry_anim(const std::string &adm_name,
 		const ResourceIndex *adm_index) {
 	adm_index_ = adm_index != nullptr ? adm_index : asset_index();
 	root_motion.clear();
-	// The decoded-row adm cache indexes the registry that just died.
-	adm_by_runtime_type_.clear();
-	infantry_adm_resolved_ai_count_ = 0;
-	const int default_adm = root_motion.register_adm(adm_index_, adm_name);
-	if (default_adm != 0)
+	// Registration id 0 may belong to a model-specific map when the configured
+	// default is absent. Only the configured map may serve as the fallback.
+	default_infantry_adm_id_ = root_motion.register_adm(adm_index_, adm_name);
+	if (default_infantry_adm_id_ < 0)
 		io::logf(io::LogLevel::kWarn,
-				"mission kernel: no infantry clips from '%s' - AI soldiers will stand still",
+				"mission kernel: no default infantry clips from '%s' - model-specific maps remain available",
 				adm_name.c_str());
 	// A source with no clips counts as none: the selector then resolves every
 	// state to "no clip" and soldiers stand, exactly the original's
 	// relationship between motion and clips.
 	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
-	if (default_adm == 0) resolve_new_infantry_adm_ids();
-	return default_adm == 0 ? root_motion.clip_count(0) : 0;
+	reset_infantry_adm_ids();
+	return root_motion.clip_count(default_infantry_adm_id_);
 }
 
 bool MissionKernel::load_weapon_table(const BootFileSource &files,
@@ -730,10 +729,7 @@ bool MissionKernel::restore_baseline() {
 	if (have_wac_baseline) wac.restore_runtime_state(wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
 	// handles across epochs, so the high-water mark cannot be trusted.
-	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < world.ai.count(); ++i)
-		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = 0;
-	resolve_new_infantry_adm_ids();
+	reset_infantry_adm_ids();
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the
 		// embedder still presents the borrowed emplacement definition.

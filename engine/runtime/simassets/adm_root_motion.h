@@ -41,8 +41,8 @@ public:
 	// same name returns the cached id, so a given .adm is parsed once however
 	// many soldiers use it. Returns -1 if the .adm has no usable clip (its
 	// soldiers then hold their state and stand — motion comes from clips, as
-	// in the original). The first successful registration is id 0 (the default
-	// set).
+	// in the original). The first successful registration is id 0; choosing
+	// a default fallback is the caller's policy.
 	int register_adm(const opennova::ResourceIndex *index, const std::string &adm_name);
 	void clear();
 
@@ -95,7 +95,7 @@ public:
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }
-	// States with a usable track in a given set (default set 0 unless specified).
+	// States with a usable track in a given set (first registered set unless specified).
 	int clip_count(int adm_id = 0) const;
 	const std::string &adm_name(int adm_id = 0) const;
 

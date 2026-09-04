@@ -125,10 +125,18 @@ void JoinerRole::send_stance_change(uint16_t action_id) {
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
 // type once per row; -1 = no adm (the row stays chase-only, truthful). The
 // kernel resolves and caches per type (adm_id_for_runtime_type).
+// The row-side root-motion leg shares the authority's per-model registry
+// (net-re section 5.38e), the AnimMap_RegisterEntity spawn half [orig: @0x40bb60].
 void JoinerRole::resolve_row_adm_ids() {
 	mission::MissionKernel &kernel = *kernel_;
-	if (!runtime || kernel.root_motion.empty()) return;
+	if (!runtime) return;
+	const bool rearm = infantry_adm_revision_seen_ != kernel.infantry_adm_revision();
 	for (replication::ClientEntityState &es : runtime->state().entities) {
+		if (rearm) {
+			es.rm_adm_id = -2;
+			es.rm_state = -1;
+			es.rm_leg_seeded = false;
+		}
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
 		if (es.type_id == 0) continue;
@@ -136,6 +144,9 @@ void JoinerRole::resolve_row_adm_ids() {
 		if (adm_id < -1) continue; // the sources are not armed yet: leave the row pending
 		es.rm_adm_id = static_cast<int16_t>(adm_id);
 	}
+	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
+	// The first decoded row may have registered the first usable model map.
+	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
 }
 
 // A streamed topology/world change landed in the registry: retire the
@@ -477,12 +488,6 @@ void JoinerRole::wire_frame_providers() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	// The row-side root-motion leg (net-re §5.38e): hand the joiner's view the
-	// same per-model .adm registry the authority movers ground on, and resolve
-	// each decoded organic row's adm id once its type is known — the netsim
-	// twin of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn
-	// half [orig: @0x40bb60]).
-	rt.view().set_root_motion_source((kernel.root_motion.empty() ? nullptr : &kernel.root_motion));
 	// The same joiner terrain backs the post-root 2u person ground probe.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B7CF4;
 	// Entity_UpdateInfantryAI @0x4BF7FA; Entity_MovementCollisionResolver tail
