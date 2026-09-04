@@ -1,8 +1,7 @@
 // Typed 3DI3 format parsing utilities.
 // This interprets GHDR/RLOD trees into stable native C structs.
 
-#ifndef THREEDI_3DI3_H
-#define THREEDI_3DI3_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -872,4 +871,3 @@ static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
 
 } // namespace opennova::threedi
 #pragma pack(pop)
-#endif // THREEDI_3DI3_H

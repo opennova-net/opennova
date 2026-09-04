@@ -1,5 +1,4 @@
-#ifndef GAMEPROFILE_REQUIRED_RESOURCES_H
-#define GAMEPROFILE_REQUIRED_RESOURCES_H
+#pragma once
 
 namespace opennova::gameprofile {
 
@@ -66,5 +65,3 @@ const RequiredResource *gameprofile_required_resource_at(int index);
 const RequiredResource *gameprofile_required_resource_find(const char *name);
 
 } // namespace opennova::gameprofile
-
-#endif /* GAMEPROFILE_REQUIRED_RESOURCES_H */

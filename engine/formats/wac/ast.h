@@ -1,6 +1,5 @@
 // WAC abstract syntax tree.
-#ifndef OPENNOVA_WAC_AST_H
-#define OPENNOVA_WAC_AST_H
+#pragma once
 
 #include <string>
 #include <utility>
@@ -58,5 +57,3 @@ struct Stmt {
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_AST_H

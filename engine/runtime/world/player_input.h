@@ -2,8 +2,7 @@
 // engine's input front end (docs/net/novaworld-net-re.md section 5.38). The host's input layer
 // fills a PlayerInput; this maps it onto the player entity's infantry state as the original
 // packs g_inputFlags into entity+0x12C.
-#ifndef OPENNOVA_WORLD_PLAYER_INPUT_H
-#define OPENNOVA_WORLD_PLAYER_INPUT_H
+#pragma once
 
 #include <cstdint>
 
@@ -59,5 +58,3 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in);
 void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_PLAYER_INPUT_H

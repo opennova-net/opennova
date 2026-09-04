@@ -19,8 +19,7 @@
 // synthetic legs ran prints retail::skip_leg(...) for the missing retail leg
 // and exits 0 like any other passing test.
 
-#ifndef OPENNOVA_TEST_RETAIL_PATHS_H
-#define OPENNOVA_TEST_RETAIL_PATHS_H
+#pragma once
 
 #include "test_paths.h"
 
@@ -150,5 +149,3 @@ inline int skip_leg(const char *needs) {
 // Return the gated skip unless `path` names an existing file.
 #define RETAIL_REQUIRE_FILE_OR_SKIP(path, needs)                              \
     if (!::retail::file_exists(path)) return ::retail::skip(needs)
-
-#endif // OPENNOVA_TEST_RETAIL_PATHS_H

@@ -5,8 +5,7 @@
 // (godot/src/object) — previously two verbatim copies.
 // [orig: STRP runtime decode — basic loop @ 0x474CAF, skinned @ 0x474B60;
 //  record fields in docs/threedi/3di-gp-format-re.md STRP/ROBJ].
-#ifndef OPENNOVA_THREEDI_STRIP_DECODE_H
-#define OPENNOVA_THREEDI_STRIP_DECODE_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 
@@ -121,4 +120,3 @@ inline bool threedi_decode_strip_indices(const ThreediLod &lod,
 
 
 } // namespace opennova::threedi
-#endif // OPENNOVA_THREEDI_STRIP_DECODE_H

@@ -9,8 +9,7 @@
 // The wrap IS the math: a BAM difference is the shortest-arc delta because the
 // seam wraps (docs/engine-primer.md).
 
-#ifndef OPENNOVA_IO_BAM_H
-#define OPENNOVA_IO_BAM_H
+#pragma once
 
 #include <cstdint>
 
@@ -66,5 +65,3 @@ constexpr double kDegreesPerRadian = 180.0 / kPi;
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_BAM_H

@@ -1,8 +1,7 @@
 // Runtime PANM helpers: sampling packed PANM tracks using the original wave table.
 // These functions are pure (no allocations); caller provides time and optional control table.
 
-#ifndef THREEDI_PANM_RUNTIME_H
-#define THREEDI_PANM_RUNTIME_H
+#pragma once
 
 #include <stdint.h>
 #include <stddef.h>
@@ -46,5 +45,3 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      ThreediMatrix4x4 *out_matrices);
 
 } // namespace opennova::threedi
-
-#endif // THREEDI_PANM_RUNTIME_H

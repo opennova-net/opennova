@@ -8,8 +8,7 @@
  * the engine never validates it [orig: GameFont_LoadFromBlob @ 0x674740 / HUD_LoadFontIntoSlot @ 0x580400].
  */
 
-#ifndef OPENNOVA_FNT_H
-#define OPENNOVA_FNT_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -157,5 +156,3 @@ fnt_error_t fnt_pack_shelf(const fnt_pack_size_t *sizes, size_t count,
 const char *fnt_error_string(fnt_error_t error);
 
 } // namespace opennova::fnt
-
-#endif /* OPENNOVA_FNT_H */

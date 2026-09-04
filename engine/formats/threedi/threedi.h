@@ -1,5 +1,4 @@
-#ifndef THREEDI_H
-#define THREEDI_H
+#pragma once
 
 // Minimal 3DI chunk reader/builder API.
 // Chunks are represented as a simple tree mirroring the 3DI on-disk layout.
@@ -38,5 +37,3 @@ int threedi_read_memory(const uint8_t *data, size_t size, ThreediFile *out_file)
 void threedi_free_file(ThreediFile *file);
 
 } // namespace opennova::threedi
-
-#endif // THREEDI_H

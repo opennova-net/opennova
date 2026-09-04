@@ -3,8 +3,7 @@
 // server can spawn the player without a engine/runtime/mission dependency. The player is an
 // authoritative pool-0 World entity (ADR 0012), indistinguishable from any other simulated
 // entity, driven by the SAME infantry motor as an NPC but ordered from input, not AI think.
-#ifndef OPENNOVA_WORLD_PLAYER_SPAWN_H
-#define OPENNOVA_WORLD_PLAYER_SPAWN_H
+#pragma once
 
 #include <cstdint>
 
@@ -82,5 +81,3 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 EntityHandle spawn_remote_player(World &world, const PlayerSpawn &spawn);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_PLAYER_SPAWN_H

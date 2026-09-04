@@ -7,8 +7,7 @@
 // Lives in engine/runtime/world (no engine/runtime/mission dependency, like player_spawn.h); scans the world
 // registry's promoted markers by item_id (== the raw BMS type_id, make_seed promote.cpp:78),
 // equivalent to the original's items.def-index match (ItemList_FindIndexByTypeId is injective).
-#ifndef OPENNOVA_WORLD_SPAWN_SELECT_H
-#define OPENNOVA_WORLD_SPAWN_SELECT_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -137,5 +136,3 @@ inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
 
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_SPAWN_SELECT_H

@@ -1,8 +1,7 @@
 // Entity registry: fixed-capacity pools + the addressing surface both scripting
 // systems use (by net id / group / team / area / name), plus named non-entity
 // addressables (areas, routes/wplists, groups).
-#ifndef OPENNOVA_WORLD_ENTITY_REGISTRY_H
-#define OPENNOVA_WORLD_ENTITY_REGISTRY_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -137,5 +136,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ENTITY_REGISTRY_H

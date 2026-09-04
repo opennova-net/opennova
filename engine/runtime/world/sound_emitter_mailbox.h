@@ -1,6 +1,5 @@
 // Bounded transport for entity-attached persistent sound intents.
-#ifndef OPENNOVA_WORLD_SOUND_EMITTER_MAILBOX_H
-#define OPENNOVA_WORLD_SOUND_EMITTER_MAILBOX_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -68,5 +67,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_SOUND_EMITTER_MAILBOX_H

@@ -34,8 +34,7 @@
 // vehicle sound families beyond the ground idle/drive/reverse pass in
 // vehicle_sound.cpp, and the vehicle AI state machine's non-drive states
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
-#ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
-#define OPENNOVA_WORLD_VEHICLE_MOTOR_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -238,5 +237,3 @@ void stamp_saved_live_pose(Entity &e);
 
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_VEHICLE_MOTOR_H

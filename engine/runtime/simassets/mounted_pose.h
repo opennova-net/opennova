@@ -4,8 +4,7 @@
 // model-bound resolver. [orig: UseGun Entity_AttachToBoneAndUpdateTransform
 // @ 0x5463d0; the addeweap attachment frame build_bone_attachment_matrix
 // @ 0x56C630 over build_direction_look_at_matrix @ 0x612C90]
-#ifndef OPENNOVA_SIMASSETS_MOUNTED_POSE_H
-#define OPENNOVA_SIMASSETS_MOUNTED_POSE_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -70,5 +69,3 @@ bool resolve_model_mounted_pose(const opennova::threedi::Threedi3di3 &model,
                                 world::MountedPose &out);
 
 } // namespace opennova::simassets
-
-#endif // OPENNOVA_SIMASSETS_MOUNTED_POSE_H

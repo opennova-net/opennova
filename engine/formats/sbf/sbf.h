@@ -1,5 +1,4 @@
-#ifndef SBF_H
-#define SBF_H
+#pragma once
 
 /* SBF (Sound Buffer File) audio bank format reader.
 
@@ -168,5 +167,3 @@ int sbf_encode_file(const char * const *names, uint32_t entry_count,
 void sbf_free(void *p);
 
 } // namespace opennova::sbf
-
-#endif /* SBF_H */

@@ -1,5 +1,4 @@
-#ifndef MUS_H
-#define MUS_H
+#pragma once
 
 /* MUS (interactive-music script) container reader.
 
@@ -303,5 +302,3 @@ void    mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value);
 int mus_vm_jump_to_section(MusVM *vm, const char *section_name);
 
 } // namespace opennova::mus
-
-#endif /* MUS_H */

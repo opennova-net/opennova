@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_NOVAWORLD_INGAME_MESSAGE_CATALOG_H
-#define OPENNOVA_NOVAWORLD_INGAME_MESSAGE_CATALOG_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -176,5 +175,3 @@ inline const char *ingame_message_name(char dir, uint8_t tag) {
 }
 
 } // namespace opennova
-
-#endif // OPENNOVA_NOVAWORLD_INGAME_MESSAGE_CATALOG_H

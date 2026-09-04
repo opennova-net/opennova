@@ -10,8 +10,7 @@
 // def-type families 6003/6096 (team 1), 6004/6097 (team 2), 6090/6098 (team 3),
 // 6091/6099 (team 4) seed each team's assigned/base slot from THEIR zone number.
 // [orig: ZoneSlotChain_BuildFromMission @ 0x4A2DE0]
-#ifndef OPENNOVA_WORLD_ZONE_CHAIN_H
-#define OPENNOVA_WORLD_ZONE_CHAIN_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -57,5 +56,3 @@ struct ZoneChain {
 uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ZONE_CHAIN_H

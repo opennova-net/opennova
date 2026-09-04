@@ -47,8 +47,7 @@
 //    physics remain outside this model.
 //  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
 //    spawn a sim round.
-#ifndef OPENNOVA_WORLD_ROUND_SIM_H
-#define OPENNOVA_WORLD_ROUND_SIM_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -520,5 +519,3 @@ void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
                     const AmmoTableEntry &ammo);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ROUND_SIM_H

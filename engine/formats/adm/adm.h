@@ -1,6 +1,5 @@
 // ADM animation-definition parser. Runtime reads only.
-#ifndef ADM_H
-#define ADM_H
+#pragma once
 
 #include <stddef.h>
 
@@ -25,5 +24,3 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out);
 void adm_free(AdmFile *af);
 
 } // namespace opennova::adm
-
-#endif // ADM_H

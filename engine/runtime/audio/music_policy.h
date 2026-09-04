@@ -5,8 +5,7 @@
 // service consumes the re-exports and never restates a value).
 //
 // Full driving witness: docs/audio/mus-sbf-re.md §Game music driving.
-#ifndef OPENNOVA_AUDIO_MUSIC_POLICY_H
-#define OPENNOVA_AUDIO_MUSIC_POLICY_H
+#pragma once
 
 #include <string>
 
@@ -82,5 +81,3 @@ inline MusicPairNames game_music_pair_names(const std::string &expansion_name) {
 }
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_MUSIC_POLICY_H

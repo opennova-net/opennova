@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_WORLD_ANGLE_H
-#define OPENNOVA_WORLD_ANGLE_H
+#pragma once
 
 #include <cstdint>
 #include <cmath>
@@ -34,5 +33,3 @@ inline double mission_yaw_deg_from_bam_heading(int32_t heading_bam) {
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ANGLE_H

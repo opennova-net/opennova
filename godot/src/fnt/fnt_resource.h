@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_FNT_RESOURCE_H
-#define OPENNOVA_FNT_RESOURCE_H
+#pragma once
 
 #include <godot_cpp/classes/font_file.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -67,5 +66,3 @@ private:
 };
 
 } // namespace godot
-
-#endif // OPENNOVA_FNT_RESOURCE_H

@@ -3,8 +3,7 @@
 // missions inside the .pff set (localres for the base game, <exp>.pff for an
 // expansion), so a loose <install>/<name>.bms is never how a stock install
 // carries one; the packed reference install CI mounts has none either.
-#ifndef OPENNOVA_TEST_RETAIL_MISSION_H
-#define OPENNOVA_TEST_RETAIL_MISSION_H
+#pragma once
 
 #include "retail_paths.h"
 
@@ -51,5 +50,3 @@ inline bool read_mission(const std::string &install, const std::string &name,
 }
 
 } // namespace retail
-
-#endif

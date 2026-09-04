@@ -8,8 +8,7 @@
 //  EffectSlot_AllocateAndInit @ 0x527c30 (the 128 x 24-B slot pool
 //  @ 0x24DF678..0x24E0278 {flags|1, soundDef, pos[3], countdown}),
 //  Sound_TickPendingSlots @ 0x529310 (per-tick countdown, play on zero)]
-#ifndef OPENNOVA_WORLD_FIRE_SOUND_H
-#define OPENNOVA_WORLD_FIRE_SOUND_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -137,5 +136,3 @@ private:
 void fire_sound_on_spawn(World &world, const RoundSpawnParams &params);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_FIRE_SOUND_H

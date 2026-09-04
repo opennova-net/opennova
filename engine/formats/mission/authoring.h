@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_MISSION_AUTHORING_H
-#define OPENNOVA_MISSION_AUTHORING_H
+#pragma once
 
 #include <formats/mission/mission.h>
 
@@ -20,5 +19,3 @@ namespace opennova::mission::authoring {
 EntityKind entity_kind_for_item_type(int def_item_type);
 
 } // namespace opennova::mission::authoring
-
-#endif // OPENNOVA_MISSION_AUTHORING_H

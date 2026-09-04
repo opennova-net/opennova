@@ -36,8 +36,7 @@
 // Raycasts test ONLY type-1 volumes [orig: Entity_RaycastCollisionModel @ 0x413060];
 // the blink point query tests ONLY type-8 volumes of building-kind entities
 // [orig: Entity_TestCollisionSections @ 0x4aef90].
-#ifndef OPENNOVA_WORLD_COLLISION_H
-#define OPENNOVA_WORLD_COLLISION_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -1668,5 +1667,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_COLLISION_H

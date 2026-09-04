@@ -4,8 +4,7 @@
 // to inline per-file. ASCII-only on purpose: NovaLogic asset names and keys
 // are ASCII, and locale-dependent tolower would change matching behavior.
 
-#ifndef OPENNOVA_IO_STRUTIL_H
-#define OPENNOVA_IO_STRUTIL_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -116,5 +115,3 @@ inline bool hex_to_bytes(std::string_view hex, std::vector<uint8_t> &out)
 
 } // namespace strutil
 } // namespace opennova
-
-#endif // OPENNOVA_IO_STRUTIL_H

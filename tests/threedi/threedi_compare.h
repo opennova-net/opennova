@@ -1,5 +1,4 @@
-#ifndef THREEDI_COMPARE_H
-#define THREEDI_COMPARE_H
+#pragma once
 
 #include <stddef.h>
 
@@ -11,5 +10,3 @@ int threedi_3di3_compare_file_chunks(const char *expected_path,
                                                     const char *chunk_ids_csv,
                                                     char *report,
                                                     size_t report_size);
-
-#endif // THREEDI_COMPARE_H

@@ -1,7 +1,6 @@
 // Compiled WAC program: the faithful bytecode stream plus the rebased operand /
 // string pools and the diagnostics gathered during compilation.
-#ifndef OPENNOVA_WAC_PROGRAM_H
-#define OPENNOVA_WAC_PROGRAM_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -39,5 +38,3 @@ struct Program {
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_PROGRAM_H

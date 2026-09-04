@@ -5,8 +5,7 @@
 // the drained destruction / scar values; the presenting shell
 // (godot/src/simulation DestructionPresenter, godot/src/world ScarPresenter)
 // grafts the models and resolves the live nodes.
-#ifndef OPENNOVA_WORLD_PRESENT_PASSES_H
-#define OPENNOVA_WORLD_PRESENT_PASSES_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -45,5 +44,3 @@ std::string husk_identity_key(int32_t bms_id, int64_t spawn_origin, int32_t wire
 bool husk_settle_keeps_carved_tilt(float pitch_deg, float roll_deg);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_PRESENT_PASSES_H

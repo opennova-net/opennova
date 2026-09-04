@@ -1,8 +1,7 @@
 /* Synthetic PFF archive writer for tests. Header-only; builds in-memory archives so tests
    never depend on copyrighted game data. Shared by the engine/formats/pff unit tests and the engine/base/vfs
    tests. Mirrors the on-disk layout verified in notes/vfs/phase0_ida_verification.md. */
-#ifndef PFF_TEST_WRITER_H
-#define PFF_TEST_WRITER_H
+#pragma once
 
 #include <stdint.h>
 #include <stdio.h>
@@ -138,5 +137,3 @@ static inline int pff_test_write_legacy(const char *path, const PffTestEntry *en
     fclose(f);
     return 0;
 }
-
-#endif /* PFF_TEST_WRITER_H */

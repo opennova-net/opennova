@@ -1,5 +1,4 @@
-#ifndef PFF_INTERNAL_H
-#define PFF_INTERNAL_H
+#pragma once
 
 /* engine/formats/pff-internal helpers shared between the reader (pff.cpp) and writer (pff_writer.cpp).
    Not part of the public API (pff/pff.h). Both translation units compile as C++, so this needs
@@ -18,4 +17,3 @@ void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
 
 
 } // namespace opennova::pff
-#endif /* PFF_INTERNAL_H */

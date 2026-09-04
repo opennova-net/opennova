@@ -6,8 +6,7 @@
 // by this one generated glyph set — a null font slot draws nothing, which is
 // exactly the black Startup screen the minimal set showed without it.
 // Glyph data is authored here (no external font, no retail bytes).
-#ifndef OPENNOVA_TESTS_MINIMAL_FNT_BUILDER_H
-#define OPENNOVA_TESTS_MINIMAL_FNT_BUILDER_H
+#pragma once
 
 #include <formats/fnt/fnt.h>
 
@@ -161,5 +160,3 @@ inline opennova::fnt::fnt_error_t build_font_pages(opennova::fnt::fnt_font_t *fo
 inline opennova::fnt::fnt_error_t build_font(opennova::fnt::fnt_font_t *font) { return build_font_pages(font, 1); }
 
 } // namespace minimal_fnt
-
-#endif // OPENNOVA_TESTS_MINIMAL_FNT_BUILDER_H

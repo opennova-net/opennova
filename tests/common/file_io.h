@@ -5,8 +5,7 @@
 // committed bytes back to byte-compare its writer's output, a roundtrip test
 // reads the fixture it feeds the parser. Header-only, infrastructure only (no
 // retail counterpart to cite).
-#ifndef OPENNOVA_TESTS_COMMON_FILE_IO_H
-#define OPENNOVA_TESTS_COMMON_FILE_IO_H
+#pragma once
 
 #include <cstdint>
 #include <fstream>
@@ -46,5 +45,3 @@ inline bool write_file(const std::string &path, const std::vector<uint8_t> &byte
 }
 
 } // namespace test_io
-
-#endif // OPENNOVA_TESTS_COMMON_FILE_IO_H

@@ -14,8 +14,7 @@
  * consumers see the same duplicate/forward-reference behavior as the original.
  */
 
-#ifndef AVATARS_H
-#define AVATARS_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -166,5 +165,3 @@ int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 
 } // namespace opennova::avatars
-
-#endif /* AVATARS_H */

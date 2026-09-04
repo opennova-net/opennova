@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_WORLD_DEATH_CAMERA_H
-#define OPENNOVA_WORLD_DEATH_CAMERA_H
+#pragma once
 
 // Camera mode 4 — the death/overview lerp camera (net-re 0x52, §5.39). When
 // the arbiter enters mode 4, Camera_SetTrackedEntity computes a FROM pose (a
@@ -81,5 +80,3 @@ constexpr int32_t kDeathCameraReachQ16 = 0x50000; // 5.0 u
 constexpr int32_t kDeathCameraLiftQ16 = 0x8000;   // 0.5 u
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_DEATH_CAMERA_H

@@ -6,8 +6,7 @@
 //
 // All functions are pure and allocation-free; buffers are caller-owned.
 
-#ifndef THREEDI_PANM_H
-#define THREEDI_PANM_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -228,4 +227,3 @@ inline constexpr int THREEDI_PANM_WAVE_TABLE_SIZE = 2816;
 const uint8_t *threedi_panm_wave_table(void);
 
 } // namespace opennova::threedi
-#endif // THREEDI_PANM_H

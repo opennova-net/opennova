@@ -12,8 +12,7 @@
 // storage (Entity_BuildMapPoiLists @ 0x42de40) and the spectate-cycle reuse are
 // unported (docs/interface/hud-re.md D-HUD-17).
 
-#ifndef OPENNOVA_WORLD_WAYPOINT_TRACK_H
-#define OPENNOVA_WORLD_WAYPOINT_TRACK_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -91,5 +90,3 @@ struct WaypointHudView {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WAYPOINT_TRACK_H

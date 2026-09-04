@@ -3,8 +3,7 @@
 // simulation internals (ADR 0028) — every input is world state, and both the
 // legacy render/collision paths and the engine-side pose provider consume the
 // same derivations (ADR 0016 one-impl).
-#ifndef OPENNOVA_WORLD_MOUNT_CONTROLS_H
-#define OPENNOVA_WORLD_MOUNT_CONTROLS_H
+#pragma once
 
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -149,5 +148,3 @@ inline bool emplaced_weapon_controls_for(
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_MOUNT_CONTROLS_H

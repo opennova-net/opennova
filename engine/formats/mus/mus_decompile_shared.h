@@ -1,5 +1,4 @@
-#ifndef MUS_DECOMPILE_SHARED_H
-#define MUS_DECOMPILE_SHARED_H
+#pragma once
 
 /* Shared MUS decompile helpers: name resolution, control-flow analysis, and
    stack-based expression reconstruction used by mus_decompile.cpp. */
@@ -379,4 +378,3 @@ static void format_play_token(const char *name, char *out, size_t cap) {
 
 
 } // namespace opennova::mus
-#endif /* MUS_DECOMPILE_SHARED_H */

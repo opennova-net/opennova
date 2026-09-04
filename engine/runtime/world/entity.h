@@ -4,8 +4,7 @@
 // @0x4f0a20, Jointops.exe): entities live in fixed-capacity pools; each carries a
 // 16-bit net id (the "SSN" WAC/BMS scripts reference). A live entity is named by a
 // packed handle (pool<<12 | slot) — 4-bit pool index, 12-bit slot.
-#ifndef OPENNOVA_WORLD_ENTITY_H
-#define OPENNOVA_WORLD_ENTITY_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -947,5 +946,3 @@ inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ENTITY_H

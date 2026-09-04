@@ -2,8 +2,7 @@
 // from the shell binding's simulation internals (ADR 0028): every input is
 // world/anim state, and the legacy render/collision paths and the engine-side
 // pose provider must select the same channels (ADR 0016 one-impl).
-#ifndef OPENNOVA_SIMASSETS_POSE_INPUTS_H
-#define OPENNOVA_SIMASSETS_POSE_INPUTS_H
+#pragma once
 
 #include <runtime/anim/aim_overlay.h>
 #include <runtime/world/ai.h>
@@ -77,5 +76,3 @@ inline anim::AimOverlayInputs aim_overlay_inputs_for(
 }
 
 } // namespace opennova::simassets
-
-#endif // OPENNOVA_SIMASSETS_POSE_INPUTS_H

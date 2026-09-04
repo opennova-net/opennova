@@ -6,8 +6,7 @@
 // @0x82D290]; argc/call_conv derived per the WacScript_InitAndLoad @0x4f91f0
 // classification.
 // The authoritative rows live in command_table_data.cpp.
-#ifndef OPENNOVA_WAC_COMMAND_H
-#define OPENNOVA_WAC_COMMAND_H
+#pragma once
 
 #include <cstdint>
 #include <string_view>
@@ -38,5 +37,3 @@ const CommandDef *wac_find_command(std::string_view name);
 int wac_command_index(std::string_view name);
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_COMMAND_H

@@ -25,8 +25,7 @@
 //
 // The host presents; this module simulates and RECORDS (the RoundSim/Destruction
 // events precedent) — engine/runtime/world stays render-free.
-#ifndef OPENNOVA_WORLD_THROWABLES_H
-#define OPENNOVA_WORLD_THROWABLES_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -264,5 +263,3 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           bool allow_consequences = true);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_THROWABLES_H

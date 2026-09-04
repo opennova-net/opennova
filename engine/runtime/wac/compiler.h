@@ -5,8 +5,7 @@
 // expressions, and command calls with inline operand references. Operands are
 // resolved here (V#/G#/M#, builtins, prefixes, literals -> pool refs), the
 // rebased analogue of WacScript_ResolveParameter @0x4f2920.
-#ifndef OPENNOVA_WAC_COMPILER_H
-#define OPENNOVA_WAC_COMPILER_H
+#pragma once
 
 #include <string_view>
 #include <vector>
@@ -40,5 +39,3 @@ Program compile_source(std::string_view source, const CompileEnv &env);
 Program compile_program(const std::vector<std::string> &sources, const CompileEnv &env);
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_COMPILER_H

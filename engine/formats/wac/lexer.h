@@ -3,8 +3,7 @@
 // optional parens, comma/space-separated args, quoted strings. Error-tolerant:
 // the shipped corpus contains typos (e.g. `enif`, bare `never`) and must not
 // crash the lexer.
-#ifndef OPENNOVA_WAC_LEXER_H
-#define OPENNOVA_WAC_LEXER_H
+#pragma once
 
 #include <string>
 #include <string_view>
@@ -39,5 +38,3 @@ bool is_wac_keyword(std::string_view lowered);
 bool is_word_operator(std::string_view lowered);
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_LEXER_H

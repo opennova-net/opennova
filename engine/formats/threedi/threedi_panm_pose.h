@@ -8,8 +8,7 @@
 // [orig: model CTRL loader @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290;
 //  PANM_SampleTrack @ 0x5B2270; the node-matrix builder is
 //  threedi_panm_runtime.h's threedi_panm_build_node_matrices]
-#ifndef OPENNOVA_THREEDI_PANM_POSE_H
-#define OPENNOVA_THREEDI_PANM_POSE_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 
@@ -65,4 +64,3 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
 
 
 } // namespace opennova::threedi
-#endif // OPENNOVA_THREEDI_PANM_POSE_H
