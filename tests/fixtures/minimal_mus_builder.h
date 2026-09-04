@@ -27,10 +27,10 @@ inline int build_silent_sbf(std::vector<uint8_t> *out) {
 	const size_t counts[] = {pcm.size()};
 	uint8_t *buf = nullptr;
 	size_t size = 0;
-	const int rc = sbf_encode_file(kNames, 1, samples, counts, &buf, &size);
+	const int rc = opennova::sbf::sbf_encode_file(kNames, 1, samples, counts, &buf, &size);
 	if (rc != 0) return rc;
 	out->assign(buf, buf + size);
-	sbf_free(buf);
+	opennova::sbf::sbf_free(buf);
 	return 0;
 }
 

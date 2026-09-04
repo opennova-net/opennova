@@ -14,11 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::sbf {
+
 /* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (magic + flags check).
    The bounds-vs-size check only fires when caller gave us more than just the
    header; passing exactly SBF_HEADER_SIZE bytes does header-only validation
    (used by sbf_open before it has read the index off disk). */
-extern "C" int sbf_validate(const uint8_t *data, size_t size) {
+int sbf_validate(const uint8_t *data, size_t size) {
     if (!data || size < SBF_HEADER_SIZE) return -1;
     SbfHeader h;
     memcpy(&h, data, SBF_HEADER_SIZE);
@@ -35,7 +37,7 @@ extern "C" int sbf_validate(const uint8_t *data, size_t size) {
 /* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0.
    Mirrors the engine's CreateFile+ReadFile pair: 24-byte header, then N×32-byte
    entries from index_offset. */
-extern "C" int sbf_open(SbfArchive *arc, const char *path) {
+int sbf_open(SbfArchive *arc, const char *path) {
     if (!arc || !path) return -1;
     memset(arc, 0, sizeof(*arc));
 
@@ -65,7 +67,7 @@ extern "C" int sbf_open(SbfArchive *arc, const char *path) {
 
 /* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (header + entry-loop reads).
    Memory-mode counterpart: ingests header + index from a caller-provided buffer. */
-extern "C" int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
+int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
     if (!arc || !data) return -1;
     memset(arc, 0, sizeof(*arc));
 
@@ -83,7 +85,7 @@ extern "C" int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size
     return 0;
 }
 
-extern "C" void sbf_close(SbfArchive *arc) {
+void sbf_close(SbfArchive *arc) {
     if (!arc) return;
     free(arc->entries);
     arc->entries = NULL;
@@ -105,7 +107,7 @@ static int sbf_iequals_name(const char *entry_name, const char *search) {
     return search[SBF_NAME_SIZE] == 0 ? 1 : 0;
 }
 
-extern "C" const SbfRawEntry *sbf_find_by_name(const SbfArchive *arc, const char *name) {
+const SbfRawEntry *sbf_find_by_name(const SbfArchive *arc, const char *name) {
     if (!arc || !name || !arc->entries) return NULL;
     for (uint32_t i = 0; i < arc->header.entry_count; ++i) {
         if (sbf_iequals_name(arc->entries[i].name, name)) {
@@ -115,7 +117,7 @@ extern "C" const SbfRawEntry *sbf_find_by_name(const SbfArchive *arc, const char
     return NULL;
 }
 
-extern "C" const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t index) {
+const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t index) {
     if (!arc || !arc->entries) return NULL;
     if (index >= arc->header.entry_count) return NULL;
     return &arc->entries[index];
@@ -124,7 +126,7 @@ extern "C" const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t 
 /* Witnessed: jointops!Sbf_StartEntry @ 0x004ED910 (SetFilePointer to data_offset)
    + jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile).
    This function reads the entry's full audio range in one shot. */
-extern "C" int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
+int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
                              uint8_t *out_buf, size_t buf_size) {
     if (!arc || !entry || !out_buf) return -1;
     if (buf_size < entry->total_size) return -2;
@@ -139,7 +141,7 @@ extern "C" int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
    Bytes are byte-paired stereo: even byte (i&1==0) is the LEFT channel sample
    shifted by scale_a; odd byte is RIGHT shifted by scale_b. valid_samples is
    the count of audio BYTES to consume (and matches the int16 output count). */
-extern "C" int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
+int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
                                  int16_t *out_samples, size_t out_capacity) {
     if (!chunk_bytes || !out_samples) return -1;
     if (chunk_size < SBF_CHUNK_HEADER) return -2;
@@ -165,7 +167,7 @@ extern "C" int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
 /* Iterate chunks across a raw entry buffer. Walks SBF_CHUNK_TOTAL strides;
    short trailing chunk (e.g. JO NULLS' single 0x1008 block) decodes naturally
    via sbf_decode_chunk's valid_samples honor. */
-extern "C" int sbf_decode_all(const uint8_t *raw, size_t raw_size,
+int sbf_decode_all(const uint8_t *raw, size_t raw_size,
                                int16_t *out, size_t cap) {
     if (!raw || !out) return -1;
     size_t off = 0, produced = 0;
@@ -182,7 +184,7 @@ extern "C" int sbf_decode_all(const uint8_t *raw, size_t raw_size,
 
 /* Witnessed: jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile of
    block_size bytes). Hot path for streaming AudioStreamPlayback. */
-extern "C" int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
+int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
                                uint32_t chunk_index, uint8_t *out_buf,
                                size_t buf_size) {
     if (!arc || !entry || !out_buf) return -1;
@@ -208,7 +210,7 @@ extern "C" int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
 /* No engine equivalent: original game shipped pre-encoded SBFs.
    Iterates 7 -> 0 because larger scale = more precision but clips sooner;
    we want the largest scale where the chunk's loudest sample still fits. */
-extern "C" uint8_t sbf_pick_scale(const int16_t *s, size_t count) {
+uint8_t sbf_pick_scale(const int16_t *s, size_t count) {
     if (!s || count == 0) return 0;
     int32_t max_abs = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -226,7 +228,7 @@ extern "C" uint8_t sbf_pick_scale(const int16_t *s, size_t count) {
    Mirror of sbf_decode_chunk: lay down the 8-byte header (valid_samples,
    scale pair, reserved constants), then encode each int16 to one offset-
    binary u8 byte; pad the rest with 0x80 (decodes to silence). */
-extern "C" int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
+int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
                                  uint8_t *out_buf, size_t out_capacity) {
     if (!samples || !out_buf) return -1;
     if (sample_count > SBF_CHUNK_AUDIO) return -2;
@@ -253,7 +255,7 @@ extern "C" int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
 
 /* No engine equivalent: a thin wrapper so callers freeing buffers from
    sbf_encode_file don't reach into the lib's allocator directly. */
-extern "C" void sbf_free(void *p) {
+void sbf_free(void *p) {
     free(p);
 }
 
@@ -262,7 +264,7 @@ extern "C" void sbf_free(void *p) {
    Header.flags = 1 selects the byte-paired stereo path the decoder accepts;
    block_size mirrors the SBF_CHUNK_TOTAL stride that every observed file
    uses. */
-extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
+int sbf_encode_file(const char * const *names, uint32_t n,
                                 const int16_t * const *pcm,
                                 const size_t *counts,
                                 uint8_t **out_buf, size_t *out_size) {
@@ -337,3 +339,5 @@ extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
     *out_size = total;
     return 0;
 }
+
+} // namespace opennova::sbf

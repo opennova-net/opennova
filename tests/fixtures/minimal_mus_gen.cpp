@@ -12,6 +12,7 @@
 #include <vector>
 
 using namespace opennova::mus;
+using namespace opennova::sbf;
 
 namespace {
 

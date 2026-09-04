@@ -15,6 +15,7 @@
 #include <cstring>
 
 using namespace godot;
+using namespace opennova::sbf;
 
 SbfBank::SbfBank() {
 	std::memset(&_arc, 0, sizeof(_arc));
