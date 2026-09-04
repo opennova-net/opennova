@@ -5,9 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::bad {
 
 typedef struct BadBone {
     char name[33];
@@ -58,8 +56,6 @@ int bad_parse(const char *path, BadFile *out);
 int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out);
 void bad_free(BadFile *bf);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::bad
 
 #endif // BAD_H

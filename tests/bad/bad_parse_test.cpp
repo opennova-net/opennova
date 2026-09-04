@@ -8,6 +8,8 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 
+using namespace opennova::bad;
+
 // The null guard runs unconditionally; the shipped BINOC.bad (the reference
 // fixture set, OPENNOVA_JO_ASSETS) is the SKIP-LEG retail leg that pins the
 // rig's layout.

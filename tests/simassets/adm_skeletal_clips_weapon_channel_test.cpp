@@ -50,6 +50,8 @@
 #include <base/resource_index/resource_index.h>
 #include <runtime/simassets/adm_skeletal_clips.h>
 
+using namespace opennova::bad;
+
 using opennova::anim::PoseBone;
 using opennova::anim::Quat;
 using opennova::simassets::AdmSkeletalClips;
