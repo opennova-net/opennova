@@ -9533,8 +9533,14 @@ complete phase → full reset + next=7, else next=idle — the request drops); s
 (flags 0x20000000 → scope on + def fov; cross-category → fov 80.0), view-bias zeroing
 `@ 0x4dfbcf`, camera update; the completion consumes the pending slot (the equip swap +
 the FP model re-resolve `count_weapon_effects_and_update_viewmodel @ 0x4dc9e0`). The
-reimpl commits on the FSM's switchfrom/switchrank `action_finished`, re-installing the
-viewmodel through the host event drain (`switch_to_weapon`).
+reimpl commits on the FSM's distinct `switch_completed` event for SWITCHFROM or
+SWITCHRANK. Only a holster or initial mount queues SWITCHTO on the new slot;
+SWITCHRANK changes fire mode in place and returns to idle without a draw animation
+or its lockout. The local presenter consumes `switch_to_weapon`, immediately hides
+the retired viewmodel, and rebuilds, places, and poses its replacement before the
+same frame renders. Deferring that rebuild until the next input pass left a
+one-frame gap; queuing SWITCHTO for both commit paths inserted an unwanted draw
+transition after fire-mode changes.
 
 **ToSpecial/QuickSwitch (input case 220, unported — D-WPN-23).**
 This path was previously mislabeled Binoculars. Action 220 is ToSpecial (catalog id 37,

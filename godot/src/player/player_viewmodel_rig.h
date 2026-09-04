@@ -161,8 +161,8 @@ public:
 	// Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM
 	// from the (changed) equipped weapon -- the armory ACCEPT re-mount [orig:
 	// WeaponLoadout_ApplyFromBuffer @0x565cd0 tail -> Player_MountWeaponSlot
-	// @0x4dfa40]. The parts array keeps its (freed) entries until the rebuild
-	// re-collects them; every reader guards on instance validity.
+	// @0x4dfa40]. Retires the old draw and parts immediately; the next
+	// presentation pass rebuilds and poses the replacement before rendering.
 	void refresh_viewmodel();
 	// How many times the viewmodel was dropped for a rebuild (a read seam: the
 	// armory pins count the equip/unequip refreshes).

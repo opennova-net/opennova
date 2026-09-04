@@ -321,6 +321,64 @@ void test_switch_walks() {
     CHECK(r.combo == 195); // the wrap revisits and remounts the eligible equipped rank
 }
 
+// Drive the request, outgoing action, commit event, and target install as the
+// live player does. SWITCHRANK changes modes in place; only SWITCHFROM draws
+// the target. [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x5433b0]
+void test_committed_switch_only_draws_after_holstering() {
+    for (const bool same_category : {true, false}) {
+        Fixture f;
+        World world;
+        world.tables.weapons = f.t;
+        WeaponInventory inv;
+        inv.reset(f.t);
+        weapon_inventory_load_from_display(f.t,
+                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv);
+        weapon_inventory_seed_pools(f.t, inv, 8);
+        weapon_inventory_recalc_clips(f.t, inv);
+        inv.equipped_combo = 3 * 65;
+        world.registry.configure_pool(0, 1);
+        Entity seed;
+        seed.alive = true;
+        seed.health = 100;
+        world.cached.local_player = world.registry.spawn(0, seed);
+
+        WeaponInstallData data;
+        data.name = "WPN_M4AUTO";
+        data.clipsize = 30;
+        data.rows.resize(2);
+        std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "switchrank");
+        std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "switchfrom");
+        for (WeaponFsmActionRow &row : data.rows) {
+            row.delaystart = 1;
+            row.delayend = 1;
+        }
+        LocalPlayerWeapon weapon;
+        PlayerViewState view;
+        local_weapon_install(world, weapon, data, false, false, &inv, view);
+        const WeaponSwitchOutcome outcome = weapon_switch_to_handle(f.t, inv,
+                (same_category ? 3 : 2) * 65,
+                local_weapon_switch_gates(world, weapon, &inv));
+        CHECK(outcome.kind == WeaponSwitchOutcome::kMount);
+        CHECK(outcome.same_category == same_category);
+        handle_weapon_switch_outcome(world, weapon, &inv, outcome);
+        LocalWeaponPumpIO io;
+        io.view = &view;
+        io.inventory = &inv;
+        for (int tick = 0; tick < 80 && weapon.switch_in_flight; ++tick) {
+            ++world.logic_tick;
+            local_weapon_pump_tick(world, weapon, io);
+        }
+        CHECK(!weapon.switch_in_flight);
+        CHECK(inv.equipped_combo == outcome.combo);
+        CHECK(!weapon.events.empty());
+        data.name = same_category ? "WPN_AK47AUTO" : "WPN_PISTOL";
+        CHECK(!weapon.events.empty() && weapon.events.back().switch_to_weapon == data.name);
+        local_weapon_install(world, weapon, data, false, false, &inv, view);
+        CHECK(weapon.slot.next == (same_category ? weapon_action::kIdle
+                                                : weapon_action::kSwitchTo));
+    }
+}
+
 void test_cycle() {
     Fixture f;
     WeaponInventory inv;
@@ -477,6 +535,7 @@ int main() {
     test_pools_and_recalc();
     test_select();
     test_switch_walks();
+    test_committed_switch_only_draws_after_holstering();
     test_defaults();
     test_kit_damage_classes();
     test_cycle();

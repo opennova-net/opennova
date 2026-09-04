@@ -145,15 +145,15 @@ void PlayerViewmodelRig::ensure_viewmodel() {
 }
 
 void PlayerViewmodelRig::refresh_viewmodel() {
-	if (Node3D *node = viewmodel()) {
-		node->queue_free();
-	}
-	viewmodel_id_ = ObjectID();
+	clear_viewmodel();
 	++generation_;
 }
 
 void PlayerViewmodelRig::clear_viewmodel() {
 	if (Node3D *node = viewmodel()) {
+		// queue_free is deferred: retire the old draw immediately, including
+		// when a catch-up tick builds its replacement in the same frame.
+		node->set_visible(false);
 		node->queue_free();
 	}
 	viewmodel_id_ = ObjectID();
