@@ -10,51 +10,48 @@
 #include <math.h>
 #include <formats/threedi/threedi.h>
 
-#if defined(_MSC_VER) && !defined(__cplusplus)
-// MSVC's C mode lacks _Static_assert; alias to C++ static_assert.
-#define _Static_assert static_assert
-#endif
-
 #pragma pack(push, 1)
 
-#define THREEDI_VERTEX_FLAG_TANGENTS 0x14u
-#define THREEDI_VERTEX_FLAG_SKINNED  0x40u
+namespace opennova::threedi {
+
+inline constexpr uint32_t THREEDI_VERTEX_FLAG_TANGENTS = 0x14u;
+inline constexpr uint32_t THREEDI_VERTEX_FLAG_SKINNED = 0x40u;
 
 // Material flags (material_flags field in ThreediMaterial)
-#define THREEDI_MATERIAL_FLAG_ALPHA_TEST   0x01u  // Enable alpha test/scissor
-#define THREEDI_MATERIAL_FLAG_ALPHA_INVERT 0x02u  // Invert alpha test (1 - threshold)
-#define THREEDI_MATERIAL_FLAG_TWO_SIDED    0x04u  // Disable backface culling
+inline constexpr uint32_t THREEDI_MATERIAL_FLAG_ALPHA_TEST = 0x01u;  // Enable alpha test/scissor
+inline constexpr uint32_t THREEDI_MATERIAL_FLAG_ALPHA_INVERT = 0x02u;  // Invert alpha test (1 - threshold)
+inline constexpr uint32_t THREEDI_MATERIAL_FLAG_TWO_SIDED = 0x04u;  // Disable backface culling
 
 // Texture slot types (slot field in ThreediMaterialTexture)
-#define THREEDI_TEX_SLOT_DIFFUSE  1  // Primary diffuse texture
-#define THREEDI_TEX_SLOT_DETAIL   2  // Secondary/detail texture
-#define THREEDI_TEX_SLOT_NORMAL   3  // Normal map texture
-#define THREEDI_TEX_SLOT_NORMAL_B 4  // Secondary normal map texture
+inline constexpr int THREEDI_TEX_SLOT_DIFFUSE = 1;  // Primary diffuse texture
+inline constexpr int THREEDI_TEX_SLOT_DETAIL = 2;  // Secondary/detail texture
+inline constexpr int THREEDI_TEX_SLOT_NORMAL = 3;  // Normal map texture
+inline constexpr int THREEDI_TEX_SLOT_NORMAL_B = 4;  // Secondary normal map texture
 
 /* Light flags byte (ThreediLight::flags): bits 0-2 disable legs, bit 3 the
  * light type (0 = Omni, 1 = Target). */
-#define THREEDI_LIGHT_FLAG_DISABLE_CORONA  0x01u
-#define THREEDI_LIGHT_FLAG_DISABLE_TERRAIN 0x02u
-#define THREEDI_LIGHT_FLAG_DISABLE_OBJECTS 0x04u
-#define THREEDI_LIGHT_FLAG_TYPE_TARGET     0x08u
+inline constexpr uint32_t THREEDI_LIGHT_FLAG_DISABLE_CORONA = 0x01u;
+inline constexpr uint32_t THREEDI_LIGHT_FLAG_DISABLE_TERRAIN = 0x02u;
+inline constexpr uint32_t THREEDI_LIGHT_FLAG_DISABLE_OBJECTS = 0x04u;
+inline constexpr uint32_t THREEDI_LIGHT_FLAG_TYPE_TARGET = 0x08u;
 
 // Texture format types (type field in ThreediMaterialTexture)
-#define THREEDI_TEX_TYPE_DIFFUSE     0  // Standard diffuse texture
-#define THREEDI_TEX_TYPE_NORMAL_MDT  4  // Normal map from MDT format
-#define THREEDI_TEX_TYPE_NORMAL_TGA  5  // Normal map from TGA alpha channel
+inline constexpr int THREEDI_TEX_TYPE_DIFFUSE = 0;  // Standard diffuse texture
+inline constexpr int THREEDI_TEX_TYPE_NORMAL_MDT = 4;  // Normal map from MDT format
+inline constexpr int THREEDI_TEX_TYPE_NORMAL_TGA = 5;  // Normal map from TGA alpha channel
 
 // Texture flags (flags field in ThreediMaterialTexture)
-#define THREEDI_TEX_FLAG_ANIMATED  0x01u  // Part of animation sequence
-#define THREEDI_TEX_FLAG_CLAMPED   0x02u  // Use clamp addressing (vs wrap)
+inline constexpr uint32_t THREEDI_TEX_FLAG_ANIMATED = 0x01u;  // Part of animation sequence
+inline constexpr uint32_t THREEDI_TEX_FLAG_CLAMPED = 0x02u;  // Use clamp addressing (vs wrap)
 
 /* 3DI3 chunk-header dword: high bit = parent (has children), low 24 bits =
  * payload length. One home; the reader and writer TUs both use these. */
-#define THREEDI_3DI3_PARENT_FLAG 0x80000000u
-#define THREEDI_3DI3_LENGTH_MASK 0x00FFFFFFu
+inline constexpr uint32_t THREEDI_3DI3_PARENT_FLAG = 0x80000000u;
+inline constexpr uint32_t THREEDI_3DI3_LENGTH_MASK = 0x00FFFFFFu;
 
 // Emissive type values (emissive_type field in ThreediMaterial)
-#define THREEDI_EMISSIVE_NONE      0  // Not emissive
-#define THREEDI_EMISSIVE_FULL      2  // Full emissive (LUM shader variants)
+inline constexpr int THREEDI_EMISSIVE_NONE = 0;  // Not emissive
+inline constexpr int THREEDI_EMISSIVE_FULL = 2;  // Full emissive (LUM shader variants)
 
 typedef enum ThreediMeshType {
     THREEDI_MESH_INVALID = 0,
@@ -217,11 +214,7 @@ typedef struct ThreediLight {
     float rotation[4];    // { -rotY, rotZ, rotX, cos(falloff) }
     float view_proj[16];  // 4x4 matrix row-major
 } ThreediLight;
-#ifdef __cplusplus
 static_assert(sizeof(ThreediLight) == 116, "ThreediLight layout mismatch");
-#else
-_Static_assert(sizeof(ThreediLight) == 116, "ThreediLight layout mismatch");
-#endif
 
 typedef struct ThreediUserPoint {
     int32_t x;
@@ -254,7 +247,6 @@ static inline void threedi_user_point_direction(const ThreediUserPoint *up, floa
     out[2] = (float)up->rot_x / 65536.0f;
 }
 
-
 typedef struct ThreediCollisionModelData {
     float bbox[6];                // {minX, minY, minZ, maxX, maxY, maxZ}
     float radii[3];               // {max_radius, max_radius_xy, max_radius_z}
@@ -284,11 +276,7 @@ typedef struct ThreediBoundingVolume {
     int32_t max_z_fp16;
     int32_t plane_count;
 } ThreediBoundingVolume;
-#ifdef __cplusplus
 static_assert(sizeof(ThreediBoundingVolume) == 36, "ThreediBoundingVolume layout mismatch");
-#else
-_Static_assert(sizeof(ThreediBoundingVolume) == 36, "ThreediBoundingVolume layout mismatch");
-#endif
 
 typedef struct ThreediCollisionVertex {
     float position[3];
@@ -337,13 +325,8 @@ typedef struct ThreediCollisionTranslation {
     int32_t translation[3]; // exact authored 16.16 integers
 } ThreediCollisionTranslation;
 
-#ifdef __cplusplus
 static_assert(sizeof(ThreediCollisionObject) == 88, "ThreediCollisionObject layout mismatch");
 static_assert(sizeof(ThreediCollisionTranslation) == 12, "ThreediCollisionTranslation layout mismatch");
-#else
-_Static_assert(sizeof(ThreediCollisionObject) == 88, "ThreediCollisionObject layout mismatch");
-_Static_assert(sizeof(ThreediCollisionTranslation) == 12, "ThreediCollisionTranslation layout mismatch");
-#endif
 
 typedef struct ThreediCollisionModel {
     ThreediCollisionModelData model_data; // CMDL
@@ -621,13 +604,8 @@ typedef struct ThreediPartAnimation {
     ThreediTransform translation;
 } ThreediPartAnimation;
 
-#ifdef __cplusplus
 static_assert(sizeof(ThreediTransform) == 8, "ThreediTransform layout mismatch");
 static_assert(sizeof(ThreediPartAnimation) == 0x44, "ThreediPartAnimation layout mismatch");
-#else
-_Static_assert(sizeof(ThreediTransform) == 8, "ThreediTransform layout mismatch");
-_Static_assert(sizeof(ThreediPartAnimation) == 0x44, "ThreediPartAnimation layout mismatch");
-#endif
 
 typedef struct ThreediControlRegister {
     char name[25];
@@ -655,9 +633,6 @@ typedef struct ThreediMatrix4x4 {
 } ThreediMatrix4x4;
 
 // Matrix helper functions (row-major, row-vector convention: p' = p * M)
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 static inline void threedi_mat4_identity(ThreediMatrix4x4 *out) {
     memset(out->m, 0, sizeof(out->m));
@@ -758,10 +733,6 @@ static inline void threedi_mat4_make_rot_z(ThreediMatrix4x4 *out, float angle) {
     out->m[5] = c;
 }
 
-#ifdef __cplusplus
-}
-#endif
-
 typedef struct ThreediMatrixTable {
     uint32_t count;
     uint32_t record_size;
@@ -838,10 +809,6 @@ typedef struct Threedi3di3 {
 
 } Threedi3di3;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // Parse a ThreediFile's chunk tree into typed geometry structures.
 // Returns 0 on success, -1 on parse/validation errors.
 int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
@@ -872,7 +839,7 @@ int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
 
 // The attach scan reads only a model's FIRST 16 userpoints — the result is a
 // 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
-#define THREEDI_USER_POINT_SCAN_LIMIT 16
+inline constexpr int THREEDI_USER_POINT_SCAN_LIMIT = 16;
 
 // A userpoint name -> the 16-bit mask over the model's FIRST 16 userpoints:
 // exact case-insensitive match, and duplicate names all set their bit. This is
@@ -903,9 +870,6 @@ static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
     return mask;
 }
 
-#ifdef __cplusplus
-}
-#endif
-
+} // namespace opennova::threedi
 #pragma pack(pop)
 #endif // THREEDI_3DI3_H

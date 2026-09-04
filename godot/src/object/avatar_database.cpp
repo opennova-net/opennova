@@ -17,6 +17,7 @@
 
 using namespace godot;
 using namespace opennova::avatars;
+using namespace opennova::threedi;
 
 namespace {
 

@@ -7,9 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::threedi {
 
 typedef struct ThreediChunk {
     char id[5];                // FourCC, null-terminated.
@@ -39,8 +37,6 @@ int threedi_read_memory(const uint8_t *data, size_t size, ThreediFile *out_file)
 // Recursively free a ThreediFile and its chunks.
 void threedi_free_file(ThreediFile *file);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::threedi
 
 #endif // THREEDI_H

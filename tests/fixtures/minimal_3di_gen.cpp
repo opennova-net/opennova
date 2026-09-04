@@ -60,6 +60,8 @@ using namespace synth3di;
 
 #include "common/file_io.h"
 
+using namespace opennova::threedi;
+
 namespace {
 
 int failures = 0;

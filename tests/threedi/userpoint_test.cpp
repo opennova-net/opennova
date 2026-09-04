@@ -7,6 +7,8 @@
 
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 static int failures = 0;
 
 static void check(bool cond, const char *msg) {

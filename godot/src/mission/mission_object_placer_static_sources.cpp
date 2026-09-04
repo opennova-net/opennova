@@ -8,6 +8,8 @@
 
 #include "mission/mission_object_placer_keys.h"
 
+using namespace opennova::threedi;
+
 // The placer's read-back seams and destruction-support registry: static
 // user-point / item-effect / light-draw sources, static terrain-shadow
 // sources, and the per-BMS static instance table. The placement walk itself

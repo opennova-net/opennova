@@ -427,12 +427,12 @@ private:
 	};
 	struct MountedPoseLive {
 		uint32_t time_ms = 0;
-		std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> controls{};
+		std::array<int32_t, opennova::threedi::THREEDI_CTRL_REGISTER_COUNT> controls{};
 		bool valid = false;
 		simassets::MountedPosePartMatrices parts;
 	};
-	std::map<const Threedi3di3 *, MountedPoseRest> mounted_rest_cache_;
-	std::map<const Threedi3di3 *, std::vector<MountedPoseLive>> mounted_live_cache_;
+	std::map<const opennova::threedi::Threedi3di3 *, MountedPoseRest> mounted_rest_cache_;
+	std::map<const opennova::threedi::Threedi3di3 *, std::vector<MountedPoseLive>> mounted_live_cache_;
 	uint32_t mounted_cache_tick_ = 0xFFFFFFFFu;
 };
 

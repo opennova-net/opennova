@@ -15,6 +15,8 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 static int failures = 0;
 #define CHECK(c)                                                              \
     do {                                                                      \

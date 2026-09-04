@@ -73,7 +73,7 @@ struct TerrainStaticShadowResolvedMaterial {
 	uint32_t unsupported_issues = kTerrainStaticShadowUnsupportedNone;
 	// Immutable POD copy of the authored runtime inputs consumed by the shared
 	// material evaluator. The source model may be released after resolution.
-	ThreediMaterial runtime_material{};
+	opennova::threedi::ThreediMaterial runtime_material{};
 	// One entry for a static diffuse texture, or authored frame order for an
 	// animated diffuse slot. Missing entries remain null and fail only when
 	// that frame is selected.
@@ -139,7 +139,7 @@ TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 // Resolves the full caster geometry/material description from the parsed
 // model. graphic feeds the geometry key (lowercased before hashing).
 std::shared_ptr<TerrainStaticShadowResolvedGeometry>
-resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
+resolve_terrain_static_shadow_geometry(const opennova::threedi::Threedi3di3 &model,
 		std::string_view graphic,
 		TerrainStaticShadowTextureProvider &textures);
 

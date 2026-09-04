@@ -12,6 +12,8 @@
 #include <formats/threedi/threedi_3di3.h>
 #include "common/test_paths.h"
 
+using namespace opennova::threedi;
+
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk,
                                              const char id[4]) {
     size_t i;

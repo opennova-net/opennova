@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <cstddef>
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 void ObjectModel::rebuild_scene() {

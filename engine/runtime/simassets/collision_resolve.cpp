@@ -15,6 +15,7 @@
 #include <cstring>
 
 using namespace opennova::def;
+using namespace opennova::threedi;
 
 namespace opennova::simassets {
 

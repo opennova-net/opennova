@@ -65,6 +65,8 @@
 #include <vector>
 #include <cstring>
 
+using namespace opennova::threedi;
+
 namespace {
 
 const char *blend_name(opennova::renderer::ObjectBlendMode blend) {

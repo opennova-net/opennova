@@ -44,7 +44,7 @@ private:
 	// Immutable parsed runtime content. Loading another .3di replaces the whole
 	// model and invalidates every derived cache; there is no Godot authoring
 	// session or editable intermediate representation.
-	Threedi3di3 source_model = {};
+	opennova::threedi::Threedi3di3 source_model = {};
 	bool has_source_model = false;
 	uint64_t change_revision_ = 0;
 	// Process-wide content counter bumped alongside every per-document revision.
@@ -87,10 +87,10 @@ private:
 		bool valid = false;
 		bool has_noise = false;
 		uint64_t revision = 0;
-		std::vector<ThreediPartAnimation> anims;         // effective set for `lod`
-		std::vector<ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
-		std::vector<ThreediVec3> pivots;
-		std::vector<ThreediMatrix4x4> node_matrices;     // scratch, per anim node
+		std::vector<opennova::threedi::ThreediPartAnimation> anims;         // effective set for `lod`
+		std::vector<opennova::threedi::ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
+		std::vector<opennova::threedi::ThreediVec3> pivots;
+		std::vector<opennova::threedi::ThreediMatrix4x4> node_matrices;     // scratch, per anim node
 		std::vector<int> part_to_node;
 		std::vector<Transform3D> part_transforms;        // per part, godot frame
 		std::vector<uint64_t> part_revision;             // revision at last change
@@ -119,7 +119,7 @@ private:
 	Error _open_3di(const String &p_path);
 	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	bool _effective_panm_for_lod(int p_lod_index,
-			std::vector<ThreediPartAnimation> &r_nodes) const;
+			std::vector<opennova::threedi::ThreediPartAnimation> &r_nodes) const;
 
 protected:
 	static void _bind_methods();
@@ -129,30 +129,30 @@ public:
 	// authority; defined FROM it so they can never drift). Bound as class
 	// constants so runtime consumers do not re-declare the bytes.
 	enum {
-		MATERIAL_FLAG_ALPHA_TEST = THREEDI_MATERIAL_FLAG_ALPHA_TEST,
-		MATERIAL_FLAG_ALPHA_INVERT = THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
-		MATERIAL_FLAG_TWO_SIDED = THREEDI_MATERIAL_FLAG_TWO_SIDED,
-		TEX_FLAG_ANIMATED = THREEDI_TEX_FLAG_ANIMATED,
-		TEX_FLAG_CLAMPED = THREEDI_TEX_FLAG_CLAMPED,
-		TEX_SLOT_DIFFUSE = THREEDI_TEX_SLOT_DIFFUSE,
-		TEX_SLOT_DETAIL = THREEDI_TEX_SLOT_DETAIL,
-		TEX_SLOT_NORMAL = THREEDI_TEX_SLOT_NORMAL,
-		TEX_SLOT_NORMAL_B = THREEDI_TEX_SLOT_NORMAL_B,
-		LIGHT_FLAG_DISABLE_CORONA = THREEDI_LIGHT_FLAG_DISABLE_CORONA,
-		LIGHT_FLAG_DISABLE_TERRAIN = THREEDI_LIGHT_FLAG_DISABLE_TERRAIN,
-		LIGHT_FLAG_DISABLE_OBJECTS = THREEDI_LIGHT_FLAG_DISABLE_OBJECTS,
-		LIGHT_FLAG_TYPE_TARGET = THREEDI_LIGHT_FLAG_TYPE_TARGET,
+		MATERIAL_FLAG_ALPHA_TEST = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+		MATERIAL_FLAG_ALPHA_INVERT = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
+		MATERIAL_FLAG_TWO_SIDED = opennova::threedi::THREEDI_MATERIAL_FLAG_TWO_SIDED,
+		TEX_FLAG_ANIMATED = opennova::threedi::THREEDI_TEX_FLAG_ANIMATED,
+		TEX_FLAG_CLAMPED = opennova::threedi::THREEDI_TEX_FLAG_CLAMPED,
+		TEX_SLOT_DIFFUSE = opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE,
+		TEX_SLOT_DETAIL = opennova::threedi::THREEDI_TEX_SLOT_DETAIL,
+		TEX_SLOT_NORMAL = opennova::threedi::THREEDI_TEX_SLOT_NORMAL,
+		TEX_SLOT_NORMAL_B = opennova::threedi::THREEDI_TEX_SLOT_NORMAL_B,
+		LIGHT_FLAG_DISABLE_CORONA = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_CORONA,
+		LIGHT_FLAG_DISABLE_TERRAIN = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_TERRAIN,
+		LIGHT_FLAG_DISABLE_OBJECTS = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_OBJECTS,
+		LIGHT_FLAG_TYPE_TARGET = opennova::threedi::THREEDI_LIGHT_FLAG_TYPE_TARGET,
 	};
 
 	// Generator-style consumers (threedi/threedi_panm.h
 	// ThreediGeneratorConsumer): the 0x71..0x75 control-register range
 	// dispatches differently per retail consumer.
 	enum {
-		GENERATOR_CONSUMER_UV = THREEDI_GENERATOR_CONSUMER_UV,
-		GENERATOR_CONSUMER_RGB = THREEDI_GENERATOR_CONSUMER_RGB,
-		GENERATOR_CONSUMER_ALPHA = THREEDI_GENERATOR_CONSUMER_ALPHA,
-		GENERATOR_CONSUMER_LIGHT = THREEDI_GENERATOR_CONSUMER_LIGHT,
-		GENERATOR_CONSUMER_PANM = THREEDI_GENERATOR_CONSUMER_PANM,
+		GENERATOR_CONSUMER_UV = opennova::threedi::THREEDI_GENERATOR_CONSUMER_UV,
+		GENERATOR_CONSUMER_RGB = opennova::threedi::THREEDI_GENERATOR_CONSUMER_RGB,
+		GENERATOR_CONSUMER_ALPHA = opennova::threedi::THREEDI_GENERATOR_CONSUMER_ALPHA,
+		GENERATOR_CONSUMER_LIGHT = opennova::threedi::THREEDI_GENERATOR_CONSUMER_LIGHT,
+		GENERATOR_CONSUMER_PANM = opennova::threedi::THREEDI_GENERATOR_CONSUMER_PANM,
 	};
 
 	// --- Witnessed threedi catalog/unit re-exports (statics; the engine
@@ -166,7 +166,7 @@ public:
 	// Native-side read access to the parsed model. The collision sweep
 	// (Simulation::resolve_collision_instances) builds the runtime collision
 	// model from the CDTA block; GDScript keeps the curated getters only.
-	const Threedi3di3 &native_model() const { return source_model; }
+	const opennova::threedi::Threedi3di3 &native_model() const { return source_model; }
 
 	Error open_file(const String &p_path);
 	// Mounted .3DI loads also feed the retail-compatible network challenge registry.

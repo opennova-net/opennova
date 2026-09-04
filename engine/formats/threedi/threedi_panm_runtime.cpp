@@ -8,6 +8,8 @@
 
 using namespace opennova::crt;
 
+namespace opennova::threedi {
+
 // Retail uses two-operand 32-bit IMUL and keeps the low dword, then performs
 // an arithmetic shift. Spell both operations in unsigned bits so overflow is
 // intentional rather than C++ signed-overflow undefined behavior.
@@ -106,3 +108,5 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
             panm_wave_lookup(table, track->control, phase);
     return start_fp8 + retail_imul_sar8(wave_fp8, delta);
 }
+
+} // namespace opennova::threedi

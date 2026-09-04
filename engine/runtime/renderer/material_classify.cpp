@@ -3,6 +3,8 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 namespace opennova::renderer {
 
 namespace {

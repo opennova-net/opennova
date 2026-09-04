@@ -27,6 +27,7 @@
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
 using namespace sim_internal;
+using namespace opennova::threedi;
 
 // The GDScript-facing seat codes are the SAME values engine/runtime/world computes with —
 // a drifted copy here would silently corrupt every binding-side seat-spec walk.

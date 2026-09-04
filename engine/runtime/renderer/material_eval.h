@@ -22,13 +22,13 @@ struct LightRuntime {
 };
 
 using ControlRegisterValues =
-        std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT>;
+        std::array<int32_t, opennova::threedi::THREEDI_CTRL_REGISTER_COUNT>;
 
 // Evaluate per-frame material animation state (UV, RGB, alpha).
 // ctrl_values is retail's canonical signed 96-slot bus. ctrl_names preserves
 // the model-local table used by material parameter indices; those names are
 // patched through the loader convention before indexing the global bus.
-MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
+MaterialRuntime eval_material_runtime(const opennova::threedi::ThreediMaterial& mat,
                                       uint32_t time_ms,
                                       const std::vector<std::string>& ctrl_names,
                                       const ControlRegisterValues& ctrl_values);
@@ -46,7 +46,7 @@ LightRuntime eval_light_runtime(uint8_t style,
 // max_anim_frames clamps cycle length when the engine pads slot tables; pass 0
 // for no clamp. ctrl_names/ctrl_values use the same loader-patched global-bus
 // resolution as eval_material_runtime and are only consumed for type 1.
-int compute_anim_frame(const ThreediMaterial& mat,
+int compute_anim_frame(const opennova::threedi::ThreediMaterial& mat,
                        uint32_t max_anim_frames,
                        uint32_t time_ms,
                        const std::vector<std::string>& ctrl_names,

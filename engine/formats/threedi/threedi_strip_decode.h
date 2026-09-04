@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <vector>
 
+namespace opennova::threedi {
+
 // The material-array slot for an authored material index: the first material
 // whose .index matches, else the index itself when it is in range, else -1.
 inline int threedi_material_array_index_for_id(const Threedi3di3 &model,
@@ -117,4 +119,6 @@ inline bool threedi_decode_strip_indices(const ThreediLod &lod,
 	return true;
 }
 
+
+} // namespace opennova::threedi
 #endif // OPENNOVA_THREEDI_STRIP_DECODE_H

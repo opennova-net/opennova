@@ -33,24 +33,24 @@ struct MountedPoseControlSources {
 
 void compose_mounted_pose_controls(
         uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
-        int32_t (&r_ctrl)[THREEDI_CTRL_REGISTER_COUNT]);
+        int32_t (&r_ctrl)[opennova::threedi::THREEDI_CTRL_REGISTER_COUNT]);
 
 // The resolver's PANM clock: retail's 16 ms logic-tick time, unless a debug
 // override (>= 0) pins it.
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms);
 
-using MountedPosePartMatrices = std::vector<ThreediMatrix4x4>;
+using MountedPosePartMatrices = std::vector<opennova::threedi::ThreediMatrix4x4>;
 
 // Evaluate the complete LOD-0 part pose once. A carrier can expose several
 // attachment/seat userpoints; callers may reuse these matrices for every seat
 // instead of re-running PANM for each one.
 bool evaluate_model_mounted_pose_parts(
-        const Threedi3di3 &model, uint32_t time_ms,
+        const opennova::threedi::Threedi3di3 &model, uint32_t time_ms,
         const int32_t *ctrl_values, MountedPosePartMatrices &out);
 
 // Resolve one seat from already evaluated rest/live part matrices.
 bool resolve_model_mounted_pose_from_parts(
-        const Threedi3di3 &model, const world::Entity &carrier,
+        const opennova::threedi::Threedi3di3 &model, const world::Entity &carrier,
         const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
         const MountedPosePartMatrices &live_parts, world::MountedPose &out);
 
@@ -63,7 +63,7 @@ bool resolve_model_mounted_pose_from_parts(
 // carrier baseline. ctrl_values is the 96-slot global register bus (may be
 // null); time_ms the retail PANM clock. Mirrors the binding resolver's
 // gates/fallthroughs exactly — false means "use the portable fallback".
-bool resolve_model_mounted_pose(const Threedi3di3 &model,
+bool resolve_model_mounted_pose(const opennova::threedi::Threedi3di3 &model,
                                 const world::Entity &carrier,
                                 const world::Seat &seat,
                                 const int32_t *ctrl_values, uint32_t time_ms,

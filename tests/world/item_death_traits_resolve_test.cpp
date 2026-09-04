@@ -34,6 +34,7 @@
 using namespace opennova;
 using namespace opennova::world;
 using namespace opennova::def;
+using namespace opennova::threedi;
 
 static int failures = 0;
 #define CHECK(c)                                                              \
