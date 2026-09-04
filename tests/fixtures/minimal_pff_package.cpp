@@ -28,6 +28,8 @@
 
 #include <cstring>
 
+using namespace opennova::pff;
+
 namespace fs = std::filesystem;
 
 namespace {

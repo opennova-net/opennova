@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+namespace opennova::pff {
+
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
    strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
    @ 0x7685d0). Reads up to raw_cap bytes or until a NUL; result capped to out_sz - 1 chars.
@@ -14,4 +16,6 @@
    agrees with what the reader expects. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
 
+
+} // namespace opennova::pff
 #endif /* PFF_INTERNAL_H */

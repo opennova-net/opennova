@@ -38,15 +38,15 @@ public:
 		uint32_t timestamp = 0;
 		uint32_t checksum = 0;
 		bool added = false;               // true: bytes in `data`; false: read from `src`
-		const PffEntry *src = nullptr;    // retained entries: points into source_.entries
+		const opennova::pff::PffEntry *src = nullptr;    // retained entries: points into source_.entries
 		std::vector<uint8_t> data;        // added entries: the exact stored bytes
 	};
 
 private:
-	::PffArchive source_{};               // open C-ABI read handle (zero-inited until open())
+	opennova::pff::PffArchive source_{};               // open C-ABI read handle (zero-inited until open())
 	bool source_open_ = false;
 	std::string source_path_;
-	PffFormat source_format_ = PFF_FORMAT_PFF3;
+	opennova::pff::PffFormat source_format_ = opennova::pff::PFF_FORMAT_PFF3;
 	int game_id_ = 0;                     // GAME_JO
 	bool dirty_ = false;
 	mutable String last_error_;
@@ -102,7 +102,7 @@ private:
 	void extract_worker();
 
 	static String to_native_path(const String &path);
-	static PffFormat format_from_magic(uint32_t magic);
+	static opennova::pff::PffFormat format_from_magic(uint32_t magic);
 	// Streaming-writer callback: fills `out` with entry[index]'s stored bytes. ctx is `this`.
 	static int read_entry_cb(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
 

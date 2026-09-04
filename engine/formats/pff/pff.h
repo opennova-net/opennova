@@ -5,24 +5,22 @@
 #include <stdint.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::pff {
 
 /* --- Format constants --- */
-#define PFF_HEADER_SIZE  20
-#define PFF_ENTRY_SIZE   36
-#define PFF_NAME_SIZE    16
+inline constexpr int PFF_HEADER_SIZE = 20;
+inline constexpr int PFF_ENTRY_SIZE = 36;
+inline constexpr int PFF_NAME_SIZE = 16;
 
 /* Known magic values */
-#define PFF_MAGIC_PFF3   0x33464650u  /* "PFF3" - JO/DFX2 era */
-#define PFF_MAGIC_PFF4   0x34464650u  /* "PFF4" - JO/DFX2 era */
-#define PFF_MAGIC_BHD    0x34460001u  /* BHD variant           */
+inline constexpr uint32_t PFF_MAGIC_PFF3 = 0x33464650u;  /* "PFF3" - JO/DFX2 era */
+inline constexpr uint32_t PFF_MAGIC_PFF4 = 0x34464650u;  /* "PFF4" - JO/DFX2 era */
+inline constexpr uint32_t PFF_MAGIC_BHD = 0x34460001u;  /* BHD variant           */
 
 /* Entry flags. Bit 0 marks an ENCRYPTED payload (it is NOT a "deleted" marker): the
    engine XOR-decrypts such entries when reading them. Verified against Jointops.exe
    PFF_LoadFileToMemory @ 0x768920 (see notes/vfs/phase0_ida_verification.md). */
-#define PFF_FLAG_ENCRYPTED 0x01u
+inline constexpr uint32_t PFF_FLAG_ENCRYPTED = 0x01u;
 
 /* --- Structs --- */
 
@@ -112,12 +110,12 @@ typedef struct PffWriteEntry {
 } PffWriteEntry;
 
 /* pff_write_archive return codes. */
-#define PFF_WRITE_OK             0
-#define PFF_WRITE_ERR_IO        (-1)  /* file open/write/rename failure, or NULL data with size  */
-#define PFF_WRITE_ERR_NAME_LEN  (-2)  /* a name exceeds PFF_NAME_SIZE bytes                       */
-#define PFF_WRITE_ERR_NAME_EMPTY (-3) /* a name normalizes to empty (blank / whitespace only)     */
-#define PFF_WRITE_ERR_DUP_NAME  (-4)  /* two entries share a normalized (uppercased) name         */
-#define PFF_WRITE_ERR_TOO_LARGE (-5)  /* total payload size overflows the uint32 offset space     */
+inline constexpr int PFF_WRITE_OK = 0;
+inline constexpr int PFF_WRITE_ERR_IO = -1;  /* file open/write/rename failure, or NULL data with size  */
+inline constexpr int PFF_WRITE_ERR_NAME_LEN = -2;  /* a name exceeds PFF_NAME_SIZE bytes                       */
+inline constexpr int PFF_WRITE_ERR_NAME_EMPTY = -3;  /* a name normalizes to empty (blank / whitespace only)     */
+inline constexpr int PFF_WRITE_ERR_DUP_NAME = -4;  /* two entries share a normalized (uppercased) name         */
+inline constexpr int PFF_WRITE_ERR_TOO_LARGE = -5;  /* total payload size overflows the uint32 offset space     */
 
 /* Write a modern archive: header(20) | payloads | directory(36 each). Entries are emitted sorted
    by normalized name (uppercase + trailing-space trim), matching the engine's on-disk convention
@@ -167,8 +165,6 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
    @ 0x768920). No-op when buf is NULL or size is 0. */
 void pff_container_xor(uint8_t *buf, size_t size, uint32_t container_key);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::pff
 
 #endif /* PFF_H */

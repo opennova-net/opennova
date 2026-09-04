@@ -14,6 +14,7 @@
 
 using namespace godot;
 using namespace opennova::gameprofile;
+using namespace opennova::pff;
 
 // ---------------------------------------------------------------------------
 // Helpers

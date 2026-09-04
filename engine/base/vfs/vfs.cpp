@@ -16,6 +16,8 @@
 
 #include <base/io/strutil.h>
 
+using namespace opennova::pff;
+
 namespace fs = std::filesystem;
 
 namespace opennova {

@@ -41,6 +41,6 @@ inline constexpr const char *kPackExcludedDirs[] = {"src/"};
 
 // PFF entry names are 16 BYTES (formats/pff PFF_NAME_SIZE); a name that fits
 // in 16 characters can still overflow in UTF-8.
-inline constexpr int kPffNameBytes = PFF_NAME_SIZE;
+inline constexpr int kPffNameBytes = opennova::pff::PFF_NAME_SIZE;
 
 } // namespace opennova
