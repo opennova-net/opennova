@@ -2570,7 +2570,8 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 # shared rig (common/retail_mission_files.h). Gated: OPENNOVA_JO_DIR (a packed
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
-        world/truck_rest_00tra world/rock_collision_00trg world/ai_corpse world/ai_threat
+        world/truck_rest_00tra world/motorcycle_gravity_06tr
+        world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
         mission/native_assets_00trg mission/lose_flow_04tr)

@@ -1094,6 +1094,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         // Flags |= 0x2000 @0x47AC84; the crashed/parked Z-lift and the
         // spine-crash latch are deferred with the wreck machine].
         m.light_rear_contact_ticks = 0;
+        m.grounded = false;
         world.vehicles.suspension_airborne_loop(veh, traits, 2, kSinkGrowthBike,
                                          corner_adj);
         veh.flags |= kEntityFlagInAir;
