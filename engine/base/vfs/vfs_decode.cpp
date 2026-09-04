@@ -3,6 +3,8 @@
 #include <formats/bfc1/bfc1.h>
 #include <formats/scr/scr.h>
 
+using namespace opennova::bfc1;
+
 namespace opennova {
 namespace {
 
