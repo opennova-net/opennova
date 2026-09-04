@@ -94,6 +94,18 @@ void Simulation::ensure_session_role() {
 	using RoleKind = opennova::inmatch::RoleKind;
 	const State state = session_.state();
 	if (state != State::Unloaded && state != State::Failed) return;
+	if (net_.lan_host_pending) {
+		// The LAN host enable_host_listen could not install mid-mission: the
+		// role lands now, over the pump that was bound then.
+		net_.lan_host_pending = false;
+		if (install_role(std::make_unique<opennova::inmatch::HostRole>(
+					net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
+					item_class_resolver())) &&
+				net_.pump_socket != nullptr) {
+			host_role_->set_socket(net_.pump_socket.get());
+		}
+		return;
+	}
 	if (joiner_role_ != nullptr) return;
 	if (host_role_ != nullptr && host_role_->kind() != RoleKind::SinglePlayer) {
 		const RoleKind kind = net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost;
