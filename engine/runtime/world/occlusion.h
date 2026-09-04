@@ -16,8 +16,7 @@
 // The occlusion model data is host-fed PODs from the parsed .3di occlusion IR
 // (the same leaf-consumer seam as CollisionModel, ADR 0020): engine/runtime/world never
 // touches the format stack.
-#ifndef OPENNOVA_WORLD_OCCLUSION_H
-#define OPENNOVA_WORLD_OCCLUSION_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -456,5 +455,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_OCCLUSION_H

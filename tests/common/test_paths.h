@@ -1,8 +1,7 @@
 // Pure C helper to locate the repo root directory from __FILE__.
 // Walks parent directories looking for both "fixtures/" and "engine/".
 
-#ifndef TEST_PATHS_H
-#define TEST_PATHS_H
+#pragma once
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,5 +122,3 @@ static const char *test_paths_temp_dir(void) {
     return "/tmp";
 #endif
 }
-
-#endif // TEST_PATHS_H

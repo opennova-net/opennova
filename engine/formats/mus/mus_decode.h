@@ -1,5 +1,4 @@
-#ifndef MUS_DECODE_H
-#define MUS_DECODE_H
+#pragma once
 
 /* Internal shared MUS bytecode decoder.
 
@@ -194,4 +193,3 @@ static void free_instructions(Instruction *insts, int count) {
 
 
 } // namespace opennova::mus
-#endif /* MUS_DECODE_H */

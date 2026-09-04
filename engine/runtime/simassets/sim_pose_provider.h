@@ -6,8 +6,7 @@
 // [orig: the model+168 callback consumed in lockstep by
 //  Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; the person pose chain is
 //  Entity_BuildBoneTransformMatrices @ 0x4b1290.]
-#ifndef OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
-#define OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
+#pragma once
 
 #include <runtime/anim/aim_overlay.h>
 #include <runtime/simassets/adm_skeletal_clips.h>
@@ -203,5 +202,3 @@ private:
 };
 
 } // namespace opennova::simassets
-
-#endif // OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H

@@ -4,8 +4,7 @@
 // dbl_7DF578 = 0.006135923151542565, the double nearest 2pi/1024) and truncated
 // toward zero (_ftol2_sse). The cos consumer reads the same table +256 entries
 // (off_849934 = outMillis + 0x400).] (D-INF-4 CLOSED — the generator is witnessed.)
-#ifndef OPENNOVA_WORLD_DIR_TABLE_H
-#define OPENNOVA_WORLD_DIR_TABLE_H
+#pragma once
 
 #include <cmath>
 #include <cstdint>
@@ -40,5 +39,3 @@ inline void quantized_dir(int32_t heading, int32_t &cos22, int32_t &sin22) {
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_DIR_TABLE_H

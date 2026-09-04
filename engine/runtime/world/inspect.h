@@ -7,8 +7,7 @@
 // binding forwards these into typed records and converts to JSON only at the
 // MCP boundary; a joiner's decoded replica section is NET level and lives in
 // runtime/inmatch/client_replica_card.h.
-#ifndef OPENNOVA_WORLD_INSPECT_H
-#define OPENNOVA_WORLD_INSPECT_H
+#pragma once
 
 #include <cstdint>
 #include <functional>
@@ -391,5 +390,3 @@ AiDebugReport ai_debug_report(World &world);
 
 } // namespace inspect
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_INSPECT_H

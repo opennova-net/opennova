@@ -7,8 +7,7 @@
 //  NapiNPServerMsg_HandleVehicleDetach @0x4FC980 -> Entity_DetachFromVehicle @0x4355F0.
 //  There is NO reply message: the 0x0A compact player record's mounted branch is the
 //  confirmation for everyone including the requester.]
-#ifndef OPENNOVA_WORLD_VEHICLE_ATTACH_H
-#define OPENNOVA_WORLD_VEHICLE_ATTACH_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -110,5 +109,3 @@ struct AttachLabelScanStats {
 
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_VEHICLE_ATTACH_H

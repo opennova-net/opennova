@@ -15,8 +15,7 @@
 // default arrays are still the D-CTRL-1 RE hunt, so their defaults are
 // unbound. Joystick capture is not wired (no joystick runtime yet).
 
-#ifndef OPENNOVA_CONTROLS_BINDING_SET_H
-#define OPENNOVA_CONTROLS_BINDING_SET_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -131,5 +130,3 @@ class BindingSet {
 };
 
 }  // namespace opennova::controls
-
-#endif  // OPENNOVA_CONTROLS_BINDING_SET_H

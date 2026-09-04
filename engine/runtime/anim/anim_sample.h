@@ -36,8 +36,7 @@
 // open D-INF-13 question (docs/divergence-ledger.md): its bone-table source, whether it
 // carries the FP builder's bone-0 padding loop @0x40c5a1, and its frame map.
 
-#ifndef OPENNOVA_ANIM_SAMPLE_H
-#define OPENNOVA_ANIM_SAMPLE_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -168,5 +167,3 @@ Quat bad_channel_quat(float x, float y, float z, float w);
 Quat mat3_to_quat(const float m[9]);
 
 }  // namespace opennova::anim
-
-#endif  // OPENNOVA_ANIM_SAMPLE_H

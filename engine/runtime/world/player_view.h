@@ -14,8 +14,7 @@
 // at 30, 60, or 144 fps (ADR 0016: policy, state, and cadence live in the
 // engine; the host samples input and applies node transforms).
 
-#ifndef OPENNOVA_WORLD_PLAYER_VIEW_H
-#define OPENNOVA_WORLD_PLAYER_VIEW_H
+#pragma once
 
 #include <cstdint>
 
@@ -500,5 +499,3 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 PlayerCameraPose &out);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_PLAYER_VIEW_H

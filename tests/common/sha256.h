@@ -1,8 +1,7 @@
 // SHA-256 (FIPS 180-4) for test oracles: the retail capture pins record payload
 // digests, and the engine ships no general-purpose hash. Test-only; never link
 // this into a product target.
-#ifndef OPENNOVA_TEST_SHA256_H
-#define OPENNOVA_TEST_SHA256_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -104,5 +103,3 @@ inline std::string sha256_hex(const std::vector<uint8_t> &data) {
 }
 
 } // namespace testhash
-
-#endif

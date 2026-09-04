@@ -4,8 +4,7 @@
 // is deliberately NOT auto-decoded). The keystream mirrors the engine's own
 // SCR cipher so the tests describe the bytes a retail localres.pff carries
 // without any retail bytes.
-#ifndef OPENNOVA_TESTS_COMMON_MUS_SCR_FIXTURE_H
-#define OPENNOVA_TESTS_COMMON_MUS_SCR_FIXTURE_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -61,5 +60,3 @@ inline std::vector<uint8_t> scr_wrapped(const std::vector<uint8_t> &plain, uint8
 }
 
 } // namespace mus_scr_fixture
-
-#endif // OPENNOVA_TESTS_COMMON_MUS_SCR_FIXTURE_H

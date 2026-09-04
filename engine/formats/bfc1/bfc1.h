@@ -1,5 +1,4 @@
-#ifndef BFC1_H
-#define BFC1_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -27,5 +26,3 @@ int bfc1_uncompressed_size(const uint8_t *data, size_t size,
                            uint32_t *out_size);
 
 } // namespace opennova::bfc1
-
-#endif /* BFC1_H */

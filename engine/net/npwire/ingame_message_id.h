@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_NPWIRE_INGAME_MESSAGE_ID_H
-#define OPENNOVA_NPWIRE_INGAME_MESSAGE_ID_H
+#pragma once
 
 #include <cstdint>
 
@@ -142,5 +141,3 @@ inline constexpr uint8_t CLIENT_QUALITY = 0x4C;             // §5.33 burst clie
 inline constexpr uint8_t GAME_START_ACK = 0x4E;             // 4 B reply to s2c::GAME_START_SIGNAL
 
 } // namespace opennova::c2s
-
-#endif // OPENNOVA_NPWIRE_INGAME_MESSAGE_ID_H

@@ -9,8 +9,7 @@
 // separate, later concern — and from Entity.anim_slot (the retail entity+0x374
 // character-model selector; entity.h). body_anim_slot == -1 means "no clip / hold rest".
 
-#ifndef OPENNOVA_WORLD_BODY_ANIM_H
-#define OPENNOVA_WORLD_BODY_ANIM_H
+#pragma once
 
 #include <cstdint>
 
@@ -45,5 +44,3 @@ inline const char *body_anim_adm_key(int32_t slot) {
 }
 
 }  // namespace opennova::world
-
-#endif  // OPENNOVA_WORLD_BODY_ANIM_H

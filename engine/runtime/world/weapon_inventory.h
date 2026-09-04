@@ -9,8 +9,7 @@
 // gathers the local-player instance into value types; the server-side copy stays in
 // engine/runtime/inmatch (D-NET-152 shape).
 // [witness record: docs/net/novaworld-net-re.md §5.57/§5.58 + the loadout grill 2026-07-18]
-#ifndef OPENNOVA_WORLD_WEAPON_INVENTORY_H
-#define OPENNOVA_WORLD_WEAPON_INVENTORY_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -265,5 +264,3 @@ struct LocalInventoryView {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WEAPON_INVENTORY_H

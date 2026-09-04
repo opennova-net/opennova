@@ -8,8 +8,7 @@
 //  +0x25D..+0x266; armory gate itemDef->attrib & 0x80000 @ 0x4361ee/@ 0x5a36f5
 //  with the "armory" prefix walk @ 0x436226/@ 0x5a372b; addeweap anchors
 //  docs/world/itemdef-re.md §child-emplacements]
-#ifndef OPENNOVA_SIMASSETS_SEAT_SPEC_EXTRACT_H
-#define OPENNOVA_SIMASSETS_SEAT_SPEC_EXTRACT_H
+#pragma once
 
 #include <formats/def/def.h>
 #include <runtime/mission/promote.h>
@@ -85,5 +84,3 @@ void refresh_item_seat_spec(world::World &world,
 		world::Entity &entity, bool p_wire_header_world);
 
 } // namespace opennova::simassets
-
-#endif // OPENNOVA_SIMASSETS_SEAT_SPEC_EXTRACT_H

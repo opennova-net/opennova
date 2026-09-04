@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_CREDITS_PLAYER_H
-#define OPENNOVA_CREDITS_PLAYER_H
+#pragma once
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/font.hpp>
@@ -85,5 +84,3 @@ private:
 };
 
 }  // namespace godot
-
-#endif  // OPENNOVA_CREDITS_PLAYER_H

@@ -4,8 +4,7 @@
 // sound-emitter seam. It owns authored slot selection and fixed-point gain/pitch
 // math; callers and the Godot presenter only see SoundEmitterEvent rows.
 // [orig: Entity_ProcessMovementSoundEffects @0x5294a0]
-#ifndef OPENNOVA_WORLD_VEHICLE_SOUND_H
-#define OPENNOVA_WORLD_VEHICLE_SOUND_H
+#pragma once
 
 namespace opennova::world {
 
@@ -16,5 +15,3 @@ struct VehicleTraits;
 
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_VEHICLE_SOUND_H

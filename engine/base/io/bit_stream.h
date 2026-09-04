@@ -13,8 +13,7 @@
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
 
-#ifndef OPENNOVA_IO_BIT_STREAM_H
-#define OPENNOVA_IO_BIT_STREAM_H
+#pragma once
 
 #include <algorithm>
 #include <cstdint>
@@ -198,5 +197,3 @@ private:
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_BIT_STREAM_H

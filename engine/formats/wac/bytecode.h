@@ -14,8 +14,7 @@
 // Tracked deviation: original operand words are absolute 32-bit pointers into the
 // var/operand/string pools; we rebase them to tagged pool-relative references
 // (OperandKind). The opcode/dispatch/accumulator behavior is preserved exactly.
-#ifndef OPENNOVA_WAC_BYTECODE_H
-#define OPENNOVA_WAC_BYTECODE_H
+#pragma once
 
 #include <cstdint>
 
@@ -139,5 +138,3 @@ enum class Builtin : uint32_t {
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_BYTECODE_H

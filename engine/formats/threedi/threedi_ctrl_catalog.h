@@ -3,8 +3,7 @@
 // A model's CTRL records name entries in this global table.  The ordinal is
 // the index used by retail's two-dword runtime control-register storage.
 
-#ifndef THREEDI_CTRL_CATALOG_H
-#define THREEDI_CTRL_CATALOG_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -133,5 +132,3 @@ int threedi_ctrl_register_ordinal(const char *name);
 uint8_t threedi_ctrl_register_loader_ordinal(const char *name);
 
 } // namespace opennova::threedi
-
-#endif // THREEDI_CTRL_CATALOG_H

@@ -5,8 +5,7 @@
 // banks LOOSE in the game dir and the .bin scripts in localres.pff. Both are
 // pure writer output (engine/formats/sbf encoder + engine/formats/mus compiler), generated at
 // package time, never committed.
-#ifndef OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
-#define OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
+#pragma once
 
 #include <formats/mus/mus.h>
 #include <formats/sbf/sbf.h>
@@ -63,5 +62,3 @@ inline int build_minimal_mus(const char *script_name, std::vector<uint8_t> *out)
 }
 
 } // namespace minimal_mus
-
-#endif // OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H

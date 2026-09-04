@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_BASE_CRT_RNG_H
-#define OPENNOVA_BASE_CRT_RNG_H
+#pragma once
 
 #include <stdint.h>
 
@@ -20,5 +19,3 @@ void crt_srand(uint32_t seed);
 uint32_t crt_rand_state(void);
 
 } // namespace opennova::crt
-
-#endif // OPENNOVA_BASE_CRT_RNG_H

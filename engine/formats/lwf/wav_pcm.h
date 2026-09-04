@@ -4,8 +4,7 @@
 // PCM. Moved from the shell binding's WavLoader (ADR 0031: format
 // semantics live engine-side; the binding boxes the result into an
 // AudioStreamWAV).
-#ifndef OPENNOVA_LWF_WAV_PCM_H
-#define OPENNOVA_LWF_WAV_PCM_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -31,5 +30,3 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 
 }  // namespace lwf
 }  // namespace opennova
-
-#endif  // OPENNOVA_LWF_WAV_PCM_H

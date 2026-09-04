@@ -1,8 +1,7 @@
 // WAC scripting system: an ISystem that ticks the WAC VM against the shared
 // world. One of the two scripting evaluators (alongside the BMS event runtime);
 // both register with the World tick service and drive the same entities/vars.
-#ifndef OPENNOVA_WAC_WAC_SYSTEM_H
-#define OPENNOVA_WAC_WAC_SYSTEM_H
+#pragma once
 
 #include <utility>
 
@@ -113,5 +112,3 @@ private:
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_WAC_SYSTEM_H

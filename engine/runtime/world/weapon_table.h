@@ -4,8 +4,7 @@
 // builds it from a parsed DefWeaponsFile; the engine feeds it from the resource root
 // (Simulation::load_weapon_table). [orig: the AdmDefs table @0x24E7FE0, 255 x 1120 B;
 // docs/net/novaworld-net-re.md §5.57]
-#ifndef OPENNOVA_WORLD_WEAPON_TABLE_H
-#define OPENNOVA_WORLD_WEAPON_TABLE_H
+#pragma once
 
 #include <cctype>
 #include <cstdint>
@@ -180,5 +179,3 @@ struct WeaponTable {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WEAPON_TABLE_H

@@ -5,8 +5,7 @@
 // loaded per mission from literally "ammo.def" by AmmoDef_LoadAll @ 0x40B0B0 (same
 // encrypted-ASCII parse as weapon.def), token map AmmoDef_ParseProperty @ 0x40A2D0;
 // docs/net/novaworld-net-re.md §5.60]
-#ifndef OPENNOVA_WORLD_AMMO_TABLE_H
-#define OPENNOVA_WORLD_AMMO_TABLE_H
+#pragma once
 
 #include <cctype>
 #include <cstdint>
@@ -213,5 +212,3 @@ struct AmmoTable {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_AMMO_TABLE_H

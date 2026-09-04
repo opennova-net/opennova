@@ -19,8 +19,7 @@
 // The host presents; this module simulates and RECORDS. Every visual/audible
 // leg lands in DestructionEvents for the present pass to drain (the RoundSim
 // fired/impacts precedent) — engine/runtime/world stays render-free.
-#ifndef OPENNOVA_WORLD_DESTRUCTION_H
-#define OPENNOVA_WORLD_DESTRUCTION_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -438,5 +437,3 @@ int32_t item_bullet_damage_gate(const World &world, const Entity &target,
 // rest) live in world/entity.h — the one home beside the field they describe.
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_DESTRUCTION_H

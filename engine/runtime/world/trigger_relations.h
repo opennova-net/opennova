@@ -13,8 +13,7 @@
 // are UNGUARDED reads of whatever memory follows; reproducing an OOB read
 // would be manufacturing garbage (ADR 0003 class), so every read here is
 // sanitized to false out of range — recorded in the RE record §3a.
-#ifndef OPENNOVA_WORLD_TRIGGER_RELATIONS_H
-#define OPENNOVA_WORLD_TRIGGER_RELATIONS_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -136,5 +135,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_TRIGGER_RELATIONS_H

@@ -15,8 +15,7 @@
 // [orig: PRNG_ScaledRandom @ 0x75be50] one global ROL-LCG stream drives every pick:
 //   state = ROL32(state + ROL32(state, 11), 3); index = (count * (state & 0xFF)) >> 8;
 // seeded statically with 0x2B0749C1 [orig: .data @ 0x85A3DC] and never reseeded.
-#ifndef OPENNOVA_AUDIO_SOUND_SELECTOR_H
-#define OPENNOVA_AUDIO_SOUND_SELECTOR_H
+#pragma once
 
 #include <cstdint>
 #include <unordered_map>
@@ -80,5 +79,3 @@ private:
 };
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_SOUND_SELECTOR_H

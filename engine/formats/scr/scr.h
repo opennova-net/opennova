@@ -1,5 +1,4 @@
-#ifndef SCR_H
-#define SCR_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -41,5 +40,3 @@ int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
 
 } // namespace opennova::scr
-
-#endif /* SCR_H */

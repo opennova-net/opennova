@@ -12,8 +12,7 @@
 // them (colors/sizes/blend live in the present pass beside the other presentation
 // tables). The style CAP (ring length) is engine data consumed sim-side, so the
 // witnessed per-type cap/jitter columns live here.
-#ifndef OPENNOVA_WORLD_TRACER_TRAILS_H
-#define OPENNOVA_WORLD_TRACER_TRAILS_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -105,5 +104,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_TRACER_TRAILS_H

@@ -1,8 +1,7 @@
 // Growable little-endian byte sink, the write-side counterpart of
 // io/byte_reader.h (semantics lifted from engine/runtime/mission's BMS Writer).
 
-#ifndef OPENNOVA_IO_BYTE_WRITER_H
-#define OPENNOVA_IO_BYTE_WRITER_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -85,5 +84,3 @@ private:
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_BYTE_WRITER_H

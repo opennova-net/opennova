@@ -16,8 +16,7 @@
 //     wheels and rockers that way), strip indices are strip-relative.
 // Every float that the writer quantizes (16.16, Q14, Q8, byte colors) is
 // stored pre-quantized so a read -> write round trip reproduces the bytes.
-#ifndef OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H
-#define OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm.h>
@@ -906,5 +905,3 @@ inline bool mint(const Model &m, const std::string &scratch_path, std::vector<ui
 }
 
 } // namespace synth3di
-
-#endif // OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H

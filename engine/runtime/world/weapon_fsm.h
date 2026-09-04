@@ -11,8 +11,7 @@
 // Deliberately def-lib-agnostic (ADR 0020 shape: engine/runtime/world consumes no format stack):
 // callers feed plain WeaponFsmActionRow mirrors of the parsed DefWeaponAction rows plus a
 // clip-duration callback; the bake produces the runtime table exactly as the original does.
-#ifndef OPENNOVA_WORLD_WEAPON_FSM_H
-#define OPENNOVA_WORLD_WEAPON_FSM_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -379,5 +378,3 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WEAPON_FSM_H

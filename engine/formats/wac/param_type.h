@@ -6,8 +6,7 @@
 // scaled to 16.16 fixed-point per the declared slot type (distance/meters/
 // seconds/hour/heading). RAW types (Text/Filename/Variable) are passed
 // by-reference (pointer), which drives the command call_conv derivation.
-#ifndef OPENNOVA_WAC_PARAM_TYPE_H
-#define OPENNOVA_WAC_PARAM_TYPE_H
+#pragma once
 
 #include <cstdint>
 
@@ -50,5 +49,3 @@ constexpr int kParamTypeCount = 28;
 const char *param_type_name(ParamType t);
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_PARAM_TYPE_H

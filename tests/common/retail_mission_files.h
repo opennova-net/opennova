@@ -8,8 +8,7 @@
 // Gating is the caller's: open() (inherited from the kernel) takes the root
 // from retail::install() / retail::assets() and reports a missing file so the
 // test can retail::skip.
-#ifndef OPENNOVA_TEST_RETAIL_MISSION_FILES_H
-#define OPENNOVA_TEST_RETAIL_MISSION_FILES_H
+#pragma once
 
 #include <base/io/bam.h>
 #include <runtime/inmatch/host_role.h>
@@ -93,5 +92,3 @@ inline world::Vec3 ai_position(const world::AiEntity &e) {
 }
 
 } // namespace opennova::testrig
-
-#endif // OPENNOVA_TEST_RETAIL_MISSION_FILES_H

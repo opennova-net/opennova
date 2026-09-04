@@ -22,8 +22,7 @@
 // persistent AudioStreamPlayer3D channels (D-SND-6), and bus/pan/doppler mapping
 // (D-SND-8). Positions are world-space floats (1 unit = 1 game unit); distances enter
 // the witnessed curve as Q16.16, exactly like the GDScript form this replaces.
-#ifndef OPENNOVA_AUDIO_AMBIENT_MIXER_H
-#define OPENNOVA_AUDIO_AMBIENT_MIXER_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -248,5 +247,3 @@ private:
 };
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_AMBIENT_MIXER_H

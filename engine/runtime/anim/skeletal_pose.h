@@ -7,8 +7,7 @@
 // [orig: the runtime window walk is BoneAnim_FindKeyframeAtTime @0x410220
 //  (hold-last past the summed durations) feeding BoneAnim_TransformBones
 //  @0x410360; the bind layer is build_world_bone_matrices @0x40c770.]
-#ifndef OPENNOVA_ANIM_SKELETAL_POSE_H
-#define OPENNOVA_ANIM_SKELETAL_POSE_H
+#pragma once
 
 #include <runtime/anim/anim_sample.h>
 
@@ -71,5 +70,3 @@ void bind_rest_local(const ClipBone &bone, const ClipBone *parent,
 void quat_to_mat3_rows(const Quat &q, float r_rows[9]);
 
 } // namespace opennova::anim
-
-#endif // OPENNOVA_ANIM_SKELETAL_POSE_H

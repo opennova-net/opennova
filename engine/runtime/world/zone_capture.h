@@ -19,8 +19,7 @@
 // This preserves the original collision semantics without a second remote-only
 // objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0,
 // capture callback callsite @0x4B2F90..0x4B2FD0]
-#ifndef OPENNOVA_WORLD_ZONE_CAPTURE_H
-#define OPENNOVA_WORLD_ZONE_CAPTURE_H
+#pragma once
 
 #include <cstdint>
 #include <variant>
@@ -188,5 +187,3 @@ int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
 
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ZONE_CAPTURE_H

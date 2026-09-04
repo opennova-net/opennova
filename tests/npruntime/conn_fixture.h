@@ -2,8 +2,7 @@
 // the phase a test wants (New, or InMatch with its owned entity announced),
 // bound to a transport. Construction contract in one place, so a change to
 // NapiNPConnection's link/burst/phase fields is edited once.
-#ifndef OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
-#define OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H
+#pragma once
 
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/replication/connection.h>        // replication::TransportMode
@@ -31,5 +30,3 @@ inline opennova::inmatch::NapiNPConnection make_conn(uint32_t id, int type,
 }
 
 } // namespace conn_fixture
-
-#endif // OPENNOVA_TESTS_NPRUNTIME_CONN_FIXTURE_H

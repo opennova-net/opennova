@@ -1,6 +1,5 @@
 // BAD skeletal-animation parser. Runtime reads only.
-#ifndef BAD_H
-#define BAD_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -57,5 +56,3 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out);
 void bad_free(BadFile *bf);
 
 } // namespace opennova::bad
-
-#endif // BAD_H

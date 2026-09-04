@@ -13,8 +13,7 @@
 //  Apply: yaw -= scaledX << 16 (case 166 @ 0x4e109d); pitch += scaledY << 16
 //  (case 164 @ 0x4e0fed) clamped to +-80 deg, with the UP limit +40 deg while
 //  prone (MoveOrder & 0x100) @ 0x4e0ff7.]
-#ifndef OPENNOVA_WORLD_PLAYER_LOOK_H
-#define OPENNOVA_WORLD_PLAYER_LOOK_H
+#pragma once
 
 #include <cstdint>
 
@@ -43,5 +42,3 @@ void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSet
                        int32_t dx_px, int32_t dy_px, int32_t scoped_zoom, bool prone);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_PLAYER_LOOK_H

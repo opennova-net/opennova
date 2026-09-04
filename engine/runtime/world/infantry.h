@@ -1,8 +1,7 @@
 // Infantry motor: per-frame update for AI soldiers (org1) and the local player path
 // that shares this port. IDA is the source of truth for the movement and animation
 // state fields cited here.
-#ifndef OPENNOVA_WORLD_INFANTRY_H
-#define OPENNOVA_WORLD_INFANTRY_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -738,5 +737,3 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
                            int16_t health);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_INFANTRY_H

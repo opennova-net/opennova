@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_VFS_H
-#define OPENNOVA_VFS_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -181,5 +180,3 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
                                        const std::string &expansion);
 
 } // namespace opennova
-
-#endif // OPENNOVA_VFS_H

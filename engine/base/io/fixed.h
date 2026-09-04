@@ -3,8 +3,7 @@
 // 16.16 is the engine-wide fixed-point convention (docs/engine-primer.md);
 // 2.14 appears in the 3DI3 normal/quaternion payloads.
 
-#ifndef OPENNOVA_IO_FIXED_H
-#define OPENNOVA_IO_FIXED_H
+#pragma once
 
 #include <algorithm>
 #include <cmath>
@@ -92,5 +91,3 @@ constexpr double kInvQ22One = 1.0 / 4194304.0;
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_FIXED_H

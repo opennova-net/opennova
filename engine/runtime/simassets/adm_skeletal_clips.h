@@ -11,8 +11,7 @@
 //  AnimMap_FindSlotByName @0x40cfa0 (stricmp); every quoted token on a row is
 //  a VARIANT of the same slot in file order — AnimMap_ParseConfigLine
 //  @0x40cb60 / AnimMap_RegisterBoneNode @0x40c2d0.]
-#ifndef OPENNOVA_SIMASSETS_ADM_SKELETAL_CLIPS_H
-#define OPENNOVA_SIMASSETS_ADM_SKELETAL_CLIPS_H
+#pragma once
 
 #include <runtime/anim/anim_sample.h>
 #include <runtime/anim/skeletal_pose.h>
@@ -146,5 +145,3 @@ AdmSkeletalClips::RestTransform rest_affine_inverse(
 		const AdmSkeletalClips::RestTransform &t);
 
 } // namespace opennova::simassets
-
-#endif // OPENNOVA_SIMASSETS_ADM_SKELETAL_CLIPS_H

@@ -17,8 +17,7 @@
 // Native C++ static-link interface (ADR 0024). Godot-free, depends on
 // engine/base/io only.
 
-#ifndef OPENNOVA_PLAYERSAV_WEAPON_SAV_H
-#define OPENNOVA_PLAYERSAV_WEAPON_SAV_H
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -164,5 +163,3 @@ KitPage decode_kit_page(const uint8_t *page, size_t size);
 void encode_kit_page(const KitPage &page, uint8_t *out, size_t size);
 
 }  // namespace opennova::playersav
-
-#endif  // OPENNOVA_PLAYERSAV_WEAPON_SAV_H

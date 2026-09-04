@@ -3,8 +3,7 @@
  * Parses Novalogic .def files: weapon.def, items.def, ammo.def, hudpos.def.
  */
 
-#ifndef DEF_H
-#define DEF_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -1061,5 +1060,3 @@ int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
                                          size_t parent_index);
 
 } // namespace opennova::def
-
-#endif /* DEF_H */

@@ -6,8 +6,7 @@
 // systems (WAC VM, BMS event evaluator, future GDScript) at the authoritative
 // logic-tick cadence. Editor and runtime drive the SAME World; the editor just
 // owns the clock (and can pause/step/snapshot).
-#ifndef OPENNOVA_WORLD_WORLD_H
-#define OPENNOVA_WORLD_WORLD_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -760,5 +759,3 @@ void count_mission_units(World &world);
 int32_t count_defined_subgoals(const World &world);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WORLD_H

@@ -1,5 +1,4 @@
-#ifndef GAMEPROFILE_H
-#define GAMEPROFILE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -67,5 +66,3 @@ const GameProfile *gameprofile_by_code(const char *code);
 int gameprofile_scr_policy_for_code(const char *code);
 
 } // namespace opennova::gameprofile
-
-#endif /* GAMEPROFILE_H */

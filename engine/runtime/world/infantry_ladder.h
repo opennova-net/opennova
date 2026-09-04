@@ -1,8 +1,7 @@
 // The D-COL-5 ladder legs shared between the motor TU (the jump/bottom tails
 // inside tick_infantry) and the ladder TU (the org2 override + org1 block).
 // Witness record: docs/world/world-wac-ai-re.md §30.
-#ifndef OPENNOVA_WORLD_INFANTRY_LADDER_H
-#define OPENNOVA_WORLD_INFANTRY_LADDER_H
+#pragma once
 
 #include <cstdint>
 
@@ -42,5 +41,3 @@ void infantry_ladder_view_clamp(InfantryState &inf, uint32_t entity_flags);
 LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_INFANTRY_LADDER_H

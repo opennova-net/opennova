@@ -12,8 +12,7 @@
 // spawn-transform copy). The nav table mirrors the waypoint populator XML_ParseGroupAction
 // @0x4cc450 (34-dword channel records over pool-3 marker nodes). See
 // notes/world/ai_movement.md §4 / §10 for the RE map + the tracked deviations below.
-#ifndef OPENNOVA_MISSION_PROMOTE_H
-#define OPENNOVA_MISSION_PROMOTE_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -193,5 +192,3 @@ void stash_mission_loadout_rules(
         std::vector<world::WeaponKitEntry> &r_kit_rows);
 
 } // namespace opennova::mission
-
-#endif // OPENNOVA_MISSION_PROMOTE_H

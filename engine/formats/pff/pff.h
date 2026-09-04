@@ -1,5 +1,4 @@
-#ifndef PFF_H
-#define PFF_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -166,5 +165,3 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
 void pff_container_xor(uint8_t *buf, size_t size, uint32_t container_key);
 
 } // namespace opennova::pff
-
-#endif /* PFF_H */

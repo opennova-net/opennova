@@ -21,8 +21,7 @@
 // containers (a vector of AiEntity, a direct AiProfile/AiScheduler member, a static
 // StateRow table). Struct bodies are modeled as int32 f[N] + named indices so the
 // ported handlers index fields exactly as the decompiler does (b.f[4], b.f[5], ...).
-#ifndef OPENNOVA_WORLD_AI_H
-#define OPENNOVA_WORLD_AI_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -1159,5 +1158,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_AI_H

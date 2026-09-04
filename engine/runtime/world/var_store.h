@@ -9,8 +9,7 @@
 //
 // Globals G# (dword_C6BA40) persist across mission link; mission V# clear at
 // mission start; music M# is a small parallel bank.
-#ifndef OPENNOVA_WORLD_VAR_STORE_H
-#define OPENNOVA_WORLD_VAR_STORE_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -46,5 +45,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_VAR_STORE_H
