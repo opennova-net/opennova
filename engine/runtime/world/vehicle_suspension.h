@@ -31,7 +31,8 @@
 //                               cleared by the crash tests, re-raised by the client window
 //   +0x2F2  settled_2f2         the sleep path's "settled upright" byte
 //   +0x2F8  airborne_stamp_2f8  the client crash window's airborne tick stamp
-//   +0x2FC  wreck_2fc           the crash latch (sinks zeroed with it)
+//   +0x2FC  wreck_2fc           wreck-settled / bike fall-over latch; the light
+//                               chassis helper uses +0x460 as its angular rate
 //   +0x3DE  has_been_driven     the bike's "has been driven" byte
 //
 // THE TICK, in the witnessed order inside each family contact solve:
@@ -46,8 +47,8 @@
 //   5. post-contact  — all pads back in contact → sinks reset
 //   6. tail          — crash_request = 0; the amplitude/energy tail
 //
-// NAMED RESIDUALS (not ported; no D-row — they are the D-NET-196 crash/flip/
-// park/wreck latch machine the record already lists as deferred):
+// NAMED RESIDUALS (not ported; no D-row — they are the remaining D-NET-196
+// crash/flip/park/wreck machinery the record already lists as deferred):
 //   - the arming IMPULSE: `sink_k × pick` dumped as −Z force slots (+0x368+0x14k)
 //     through Entity_ClearSuspensionForces → Vehicle_ComputeAveragedOrientation —
 //     a chassis TILT folded into the chassis matrix + the +0x534 quaternion

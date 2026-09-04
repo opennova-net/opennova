@@ -621,6 +621,95 @@ bool run_bike_parked_rests_at_wheel_clearance() {
 	return ok;
 }
 
+bool run_bike_wreck_falls_under_gravity() {
+	// A crashed bike enables its orientation override on the next contact.
+	// Once both wheels and the center spine touch at low forward speed, retail
+	// latches +0x2FC, seeds +0x460, and compounds a local-Y rotation whose
+	// per-tick rate loses 298261 BAM [orig:
+	// Entity_UpdateVehicleChassisOrientation @0x468BCB..0x468D83]. That is
+	// the rotational-gravity leg which takes a tipped motorcycle down.
+	std::vector<uint16_t> heightmap(64 * 64, 42 * 256);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+
+	Rig r;
+	make_rig(r);
+	r.world.env.water_z = 0;
+	r.world.tables.terrain = &field;
+	r.traits.family = w::VehicleFamily::Bike;
+	r.traits.player_speed = 20972;
+	r.traits.acceleration = 512;
+	r.traits.deceleration = 512;
+	r.traits.torque = 7;
+	r.traits.mass = 3;
+	r.traits.max_slope = 30 * 11930464;
+	r.traits.slip_slope = 45 * 11930464;
+	const int32_t clearance = 36044;
+	r.traits.box_z_lo = -clearance;
+	r.traits.box_z_hi = -clearance + (12 << 13);
+	r.traits.box_y_lo = -(4 << 13);
+	r.traits.box_y_hi = 4 << 13;
+	r.traits.box_x_lo = -(11 << 13);
+	r.traits.box_x_hi = 11 << 13;
+	r.traits.foot_x_lo = r.traits.box_x_lo;
+	r.traits.foot_x_hi = r.traits.box_x_hi;
+	r.traits.foot_y_lo = r.traits.box_y_lo;
+	r.traits.foot_y_hi = r.traits.box_y_hi;
+
+	w::Entity *veh = r.world.registry.get(r.boat);
+	if (!expect(veh != nullptr, "chassis-down bike spawned")) return false;
+	const int32_t radius =
+			((r.traits.box_z_hi - r.traits.box_z_lo) >> 1) - 0x4000;
+	const int32_t contact_z = (42 << 16) + clearance - radius - 1024;
+	veh->position.z = float(w::from_fixed(contact_z));
+	veh->flags |= w::kEntityFlagSuspensionCrashed;
+	veh->veh.crashed = 1;
+	veh->veh.speed = 0x1800; // low-speed trigger, but above the 0x1000 fall seed
+
+	int32_t max_pitch_delta = 0;
+	for (int t = 0; t < 120; ++t) {
+		// Once the fall has latched, park the drive registers. Without retail's
+		// `crashed == 0` sleep gate this freezes the attitude after only a few
+		// degrees even though +0x2FC still owns the chassis orientation.
+		if (t >= 2) {
+			veh->veh.speed = 0;
+			veh->veh.speed_accel = 0;
+			veh->veh.cmd_speed = 0;
+			veh->veh.vel_x = 0;
+			veh->veh.vel_y = 0;
+		}
+		if (t % 8 == 0)
+			stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), contact_z,
+			      0, 0, 0);
+		r.world.vehicles.ground_client_tick(*veh, r.traits);
+		max_pitch_delta = std::max(
+				max_pitch_delta,
+				opennova::io::bam_abs(opennova::io::bam_sub(
+						veh->veh.air_pitch_bam, 0)));
+	}
+	std::fprintf(stderr,
+	             "[bike-fall] pitch=%d delta=%d speed=%d override=%d latched=%d grounded=%d air=%d\n",
+	             veh->veh.air_pitch_bam, max_pitch_delta, veh->veh.speed,
+	             int(veh->veh.byte_2ef),
+	             int(veh->veh.wreck_2fc),
+	             int(veh->veh.grounded),
+	             int((veh->flags & w::kEntityFlagInAir) != 0));
+	bool ok = expect(veh->veh.byte_2ef != 0,
+	                 "contact enables the crashed bike's orientation override");
+	ok &= expect(veh->veh.wreck_2fc != 0,
+	                 "wheel-and-spine contact latches the bike fall-over state");
+	ok &= expect(veh->veh.speed == 0,
+	             "drive speed reaches rest without putting the crashed bike to sleep");
+	ok &= expect(max_pitch_delta > 20 * 11930464,
+	             "rotational gravity carries the tipped bike toward the ground");
+	return ok;
+}
+
 bool run_tank_family_deltas() {
 	// The ctan promotion (D-NET-196): tanks ride the ground core with the
 	// witnessed family deltas. Pin the observable off-contact trio — gravity
@@ -2080,6 +2169,7 @@ int main() {
 	ok &= run_ground_parked_rests_at_wheel_clearance();
 	ok &= run_tank_parked_rests_at_wheel_clearance();
 	ok &= run_bike_parked_rests_at_wheel_clearance();
+	ok &= run_bike_wreck_falls_under_gravity();
 	ok &= run_tank_family_deltas();
 	ok &= run_platform_solve_settles_at_waterline();
 	ok &= run_afloat_latch_controls_drag();

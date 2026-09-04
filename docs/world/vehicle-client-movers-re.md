@@ -23,12 +23,12 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
 | Aircraft mover AUTHORITY half (`@ 0x490310`: the AI flight block, the health machine, the rotor gate, the drains) | MATCHING — ported 2026-09-01 (`AiSystem::chel_ai_drive` + the authority legs of `aircraft_client_tick`) | §1.13 spec; `vehicle_mount` (`test_helo_ai_flight`, `test_helo_authority_health`) |
 | Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
-| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the wreck-tumble machinery unported | §4 |
+| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the bike's `+0x2FC` / `+0x460` fall arm is ported, while the force-based wreck-tumble machinery remains unported | §4 / §9 |
 | cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
 | Aircraft contact solve (`@ 0x47EF10`, defined 2026-07-31) | MATCHING — ported, client subset (`aircraft_contact_solve`, 2026-08-01) | §6 spec; landing/ramp-conform/water-hysteresis/sleep bench legs in `watercraft_client_motor` |
 | Ground/tracked contact solve (`@ 0x47C1C0`) | MATCHING — ported, client subset (`ground_contact_solve`, 2026-08-05) | §7 spec; the wheel-clearance rest + drop-landing bench legs in `watercraft_client_motor` |
 | Wheeled (ctan) contact solve (`@ 0x475DE0`) | MATCHING — ported, client subset (`wheeled_contact_solve`, 2026-08-06) | §8 spec; the tank rest/drop bench legs |
-| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06); the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop bench legs |
+| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06), including the contacted-wreck fall arm; the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop/wreck-fall bench legs |
 | Tank (ctan) mover deltas (`@ 0x488AB0`) | MATCHING — the witnessed family deltas ported into the shared ground core (2026-08-06) | §10 spec; the tank family-delta bench leg |
 | Aircraft local-driver input map (`@ 0x490310` occupant block) | MATCHING — ported (`stage_air_vehicle_input` + the both-command blend, 2026-08-06); analog collective = named deferral | §10.4; the air local-pilot gate bench leg |
 
@@ -2560,8 +2560,8 @@ Runs below the input gate on every machine, driven by the mirrored `[136]/[132]`
 9. Contact/attitude solve: `Entity_ProcessLightVehiclePhysics(entity, frame, 1)
    @ 0x479600` `[orig: call @ 0x486672]` — GROUND DIFF: ground calls
    `Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0` `[orig: call @ 0x48d0b1]`. The
-   bike's terrain pose + lean/roll attitude live in the light solve (B-facet,
-   unported for every family).
+   bike's terrain pose + lean/roll attitude live in the light solve (the B-facet
+   is ported in §9; only the grounded lean smoother remains deferred).
 10. Yaw application: ALWAYS applied — `Yaw += modelPtr0`, quartered (`>> 2`) when
     `Flags & 0x2000` `[orig: @ 0x486681..0x486697]`. GROUND DIFF: ground gates on
     `!(Flags & 0x2000) && BYTE2(aiRef0) && !crashed && !settled` and never quarters
@@ -2656,10 +2656,10 @@ Divergent (bike vs what the interim runs):
    states are simulated client-side (they derive from the input block + light
    solve).
 6. **Contact/attitude solve** — light (`@ 0x479600`) vs tracked (`@ 0x47C1C0`):
-   owns bike lean/roll. The tracked solve is PORTED (§7, 2026-08-05) and the
-   interim runs it for bikes too, so a parked bike rests at wheel clearance and
-   conforms pitch/roll; the light solve's own deltas (bike lean machine, its
-   probe shape) remain the open witness.
+   owns bike lean/roll. The dedicated light solve is PORTED (§9, 2026-08-06):
+   a parked bike rests at wheel clearance and conforms pitch/roll, while a
+   contacted crashed bike now enters the witnessed `+0x2FC` fall-over arm. The
+   grounded lean smoother remains the open attitude witness.
 7. Crash/brake-lock/slip legs differ in detail (24576 clamp, `+0x8E4` brake, 1/8
    reverse) — all input-side or crash-state-side, unreachable for a remote bike
    until occupant/crash replication lands.
@@ -3699,10 +3699,14 @@ Deltas from the §7/§8 skeleton:
    through the standard substitute pair. **Z = (c0.z + c1.z) × 0.5**
    (flt_7C3B94 = 0.5) — the mean wheel penetration, adopted with the
    slideDecay non-positive clamp. Airborne: the fit of the unlifted corners =
-   attitude identity. The crash tumble (BuildYXZ with the 298261 BAM/tick
-   fall-over decay — a parked bike TIPS OVER), the wheelie force queues
-   (`Entity_QueueSuspensionForce`), and the flip 0..100 def clamp ride the
-   deferred wreck machine.
+   attitude identity. The contacted-crash fall arm is LIVE: front, rear, and
+   center-spine contact below `0x2000` speed latches `+0x2FC`; speed above
+   `0x1000` seeds the shared `+0x460` accumulator to `0x016C16C1`, then
+   `Math_BuildFixedPointRotationMatrixYXZ(frame, 0, +0x460, 0)` compounds the
+   local-Y fall and subtracts 298261 BAM/tick [orig: @0x468B62..0x468D83].
+   The later part-spin tick intentionally consumes the same `+0x460` word.
+   Wheelie force queues (`Entity_QueueSuspensionForce`) and the flip 0..100
+   def clamp remain in the deferred wreck machine.
 7. **The contact byte needs a REAR-WHEEL RUN**: `up.z(Q16) > 4096`, the lean
    bound |right.z| < 40960, rear-wheel contact, and MORE THAN ONE consecutive
    rear-contact tick (`entity[1].pad_040[8]`, reset in the both-wheels-off
@@ -3720,7 +3724,8 @@ Deltas from the §7/§8 skeleton:
 
 Port: `light_contact_solve` (vehicle_contact_solve.cpp), routed by
 `VehicleFamily::Bike` (the tracked-solve interim retired). Bench: the bike
-rest/drop legs.
+rest/drop legs and `run_bike_wreck_falls_under_gravity` (the crashed sleep
+gate, `+0x2EF` contact transition, `+0x2FC` latch, and rotational fall).
 
 ## §10 The tank (ctan) mover deltas + the air local-driver input map (ported 2026-08-06)
 
