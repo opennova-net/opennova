@@ -1,0 +1,11 @@
+# Files clang-format must never touch (patterns are POSIX globs relative to
+# this file; `*` also matches path separators).
+# Vendored code: submodules, the in-tree bcrypt and miniz sources, the
+# FetchContent pins. Bump upstream, never reformat.
+third_party/*
+# Bootstrapped Godot addons (GUT, imgui-godot) are not ours either.
+godot/addons/*
+# Generated CMake trees.
+build/*
+godot/build/*
+godot/src/build/*

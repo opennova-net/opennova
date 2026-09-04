@@ -1,8 +1,7 @@
 #pragma once
 
 /* engine/formats/pff-internal helpers shared between the reader (pff.cpp) and writer (pff_writer.cpp).
-   Not part of the public API (pff/pff.h). Both translation units compile as C++, so this needs
-   no extern "C". */
+   Not part of the public API (pff/pff.h); lives in namespace opennova::pff beside it. */
 
 #include <stddef.h>
 
