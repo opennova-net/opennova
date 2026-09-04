@@ -14,35 +14,33 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::fnt {
 
-#define FNT_MAGIC 0x30544E46u /* "FNT0" in little-endian */
+inline constexpr uint32_t FNT_MAGIC = 0x30544E46u;  /* "FNT0" in little-endian */
 /* The header +4 word is the DESIGN WIDTH; the glyph render scale is
  * FNT_DESIGN_REFERENCE_WIDTH / design_width. Shipped JO fonts are 800-designed
  * (scale 1.0); a non-800 font is scaled, never rejected [orig: @ 0x674740]. */
-#define FNT_DESIGN_REFERENCE_WIDTH 800u
-#define FNT_DEFAULT_DESIGN_WIDTH 800u /* what our from-scratch writer emits */
-#define FNT_HEADER_SIZE 32u
-#define FNT_GLYPH_COUNT 224u
-#define FNT_GLYPH_SIZE 20u
-#define FNT_GLYPH_TABLE_SIZE (FNT_GLYPH_COUNT * FNT_GLYPH_SIZE)
-#define FNT_TOTAL_HEADER (FNT_HEADER_SIZE + FNT_GLYPH_TABLE_SIZE)
-#define FNT_TEXTURE_WIDTH 256u
-#define FNT_TEXTURE_HEIGHT 256u
-#define FNT_TEXTURE_CHANNELS 4u
-#define FNT_TEXTURE_SIZE (FNT_TEXTURE_WIDTH * FNT_TEXTURE_HEIGHT * FNT_TEXTURE_CHANNELS)
-#define FNT_FIRST_CHAR 32u
-#define FNT_MAX_PAGES 16u
+inline constexpr uint32_t FNT_DESIGN_REFERENCE_WIDTH = 800u;
+inline constexpr uint32_t FNT_DEFAULT_DESIGN_WIDTH = 800u;  /* what our from-scratch writer emits */
+inline constexpr uint32_t FNT_HEADER_SIZE = 32u;
+inline constexpr uint32_t FNT_GLYPH_COUNT = 224u;
+inline constexpr uint32_t FNT_GLYPH_SIZE = 20u;
+inline constexpr uint32_t FNT_GLYPH_TABLE_SIZE = FNT_GLYPH_COUNT * FNT_GLYPH_SIZE;
+inline constexpr uint32_t FNT_TOTAL_HEADER = FNT_HEADER_SIZE + FNT_GLYPH_TABLE_SIZE;
+inline constexpr uint32_t FNT_TEXTURE_WIDTH = 256u;
+inline constexpr uint32_t FNT_TEXTURE_HEIGHT = 256u;
+inline constexpr uint32_t FNT_TEXTURE_CHANNELS = 4u;
+inline constexpr uint32_t FNT_TEXTURE_SIZE = FNT_TEXTURE_WIDTH * FNT_TEXTURE_HEIGHT * FNT_TEXTURE_CHANNELS;
+inline constexpr uint32_t FNT_FIRST_CHAR = 32u;
+inline constexpr uint32_t FNT_MAX_PAGES = 16u;
 
 /* The witnessed non-printing bytes: retail measures and draws text from
  * unsigned bytes, skipping controls below space plus the 0x7F..0x81 range;
  * every other byte directly selects its FNT glyph record
  * [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0 —
  * v11 < 0x20 || 0x7F || 0x80 || 0x81]. */
-#define FNT_NONPRINT_FIRST 0x7Fu
-#define FNT_NONPRINT_LAST 0x81u
+inline constexpr uint32_t FNT_NONPRINT_FIRST = 0x7Fu;
+inline constexpr uint32_t FNT_NONPRINT_LAST = 0x81u;
 
 static inline int fnt_byte_is_nonprinting(uint8_t byte) {
 	return byte < FNT_FIRST_CHAR ||
@@ -130,7 +128,7 @@ static inline void fnt_get_glyph_size(const fnt_glyph_t *glyph,
  * table describes; the packer only decides where our writer puts glyphs. */
 
 /* Gutter between packed glyph cells and to the page edges. */
-#define FNT_PACK_PAD 1u
+inline constexpr uint32_t FNT_PACK_PAD = 1u;
 
 typedef struct {
 	uint32_t width; /* 0 (with height 0) marks an empty cell */
@@ -158,8 +156,6 @@ fnt_error_t fnt_pack_shelf(const fnt_pack_size_t *sizes, size_t count,
 
 const char *fnt_error_string(fnt_error_t error);
 
-#ifdef __cplusplus
-}
-#endif
+} // namespace opennova::fnt
 
 #endif /* OPENNOVA_FNT_H */

@@ -6,6 +6,8 @@
 
 #include <formats/fnt/fnt.h>
 
+using namespace opennova::fnt;
+
 static int passed = 0;
 static int failed = 0;
 

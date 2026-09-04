@@ -207,7 +207,7 @@ public:
 	MenuFrameCompiler &operator=(const MenuFrameCompiler &) = delete;
 
 	// Borrow the screen (not owned; the caller keeps document + fonts alive).
-	void configure(const mnu::Screen *screen, const fnt_font_t *default_font);
+	void configure(const mnu::Screen *screen, const opennova::fnt::fnt_font_t *default_font);
 
 	// The flattened stylesheet (menu_style.mns evaluate output); %VAR% color
 	// and texture values resolve through it, case-insensitive, unresolved
@@ -224,7 +224,7 @@ public:
 	// Unregistered names fall back to the default font. Set before
 	// configure(); clear before re-registering when the backing storage is
 	// reloaded (the compiler borrows the pointers).
-	void register_font(const std::string &name, const fnt_font_t *font);
+	void register_font(const std::string &name, const opennova::fnt::fnt_font_t *font);
 	void clear_registered_fonts();
 
 	// Whole-value %VAR% stylesheet resolution (case-insensitive, unresolved
@@ -490,7 +490,7 @@ private:
 			const MenuWidgetState *ws) const;
 	std::string widget_text(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
-	const fnt_font_t *font_for(const WidgetNode &node) const;
+	const opennova::fnt::fnt_font_t *font_for(const WidgetNode &node) const;
 	void measure_text(const WidgetNode &node, const std::string &text,
 			int *out_w, int *out_h) const;
 
@@ -607,14 +607,14 @@ private:
 	void emit_cursor(const MenuFrameState &state);
 
 	const mnu::Screen *screen_ = nullptr;
-	const fnt_font_t *default_font_ = nullptr;
+	const opennova::fnt::fnt_font_t *default_font_ = nullptr;
 	std::map<std::string, std::string> style_vars_;
 	std::map<std::string, std::string> text_lookup_;
-	std::map<std::string, const fnt_font_t *> registered_fonts_;
+	std::map<std::string, const opennova::fnt::fnt_font_t *> registered_fonts_;
 	std::vector<std::string> texture_names_;
 	std::vector<std::pair<int, int>> texture_sizes_;
 	std::vector<std::string> font_names_;
-	std::vector<const fnt_font_t *> fonts_;
+	std::vector<const opennova::fnt::fnt_font_t *> fonts_;
 	std::vector<WidgetNode> nodes_;
 	int32_t screen_cursor_ = kMenuTexNone;
 	std::map<int, EditScroll> edit_scroll_;

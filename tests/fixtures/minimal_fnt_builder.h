@@ -90,7 +90,7 @@ inline const GlyphArt *glyph_art_table(size_t *count) {
 // one per glyph 32..255. The 5x7 art renders 2x (10x14) at cell offset (1, 1);
 // the glyph UV rect spans 12x16 so text gets a 2px advance gap.
 const uint32_t kCellSize = 16;
-const uint32_t kCellsPerRow = FNT_TEXTURE_WIDTH / kCellSize; // 16
+const uint32_t kCellsPerRow = opennova::fnt::FNT_TEXTURE_WIDTH / kCellSize; // 16
 const uint32_t kGlyphUvWidth = 12;
 
 inline const GlyphArt *find_art(char ch) {
@@ -109,20 +109,20 @@ inline const GlyphArt *find_art(char ch) {
 // never invisible). The minimal set's boot font is the one-page form; the
 // committed fixtures/fnt/synth_{1,3}page.fnt test fixtures are minted from
 // the same art (tests/fixtures/minimal_fnt_gen.cpp).
-inline fnt_error_t build_font_pages(fnt_font_t *font, uint32_t num_pages) {
-	if (num_pages == 0 || num_pages > FNT_MAX_PAGES) return FNT_ERR_INVALID_PAGE_COUNT;
-	const fnt_error_t rc = fnt_init_blank(font, num_pages, 0);
-	if (rc != FNT_OK) return rc;
+inline opennova::fnt::fnt_error_t build_font_pages(opennova::fnt::fnt_font_t *font, uint32_t num_pages) {
+	if (num_pages == 0 || num_pages > opennova::fnt::FNT_MAX_PAGES) return opennova::fnt::FNT_ERR_INVALID_PAGE_COUNT;
+	const opennova::fnt::fnt_error_t rc = opennova::fnt::fnt_init_blank(font, num_pages, 0);
+	if (rc != opennova::fnt::FNT_OK) return rc;
 
 	for (uint32_t p = 0; p < num_pages; ++p)
-		std::memset(fnt_get_page_data(font, p), 0, FNT_TEXTURE_SIZE);
+		std::memset(opennova::fnt::fnt_get_page_data(font, p), 0, opennova::fnt::FNT_TEXTURE_SIZE);
 
-	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
+	for (uint32_t i = 0; i < opennova::fnt::FNT_GLYPH_COUNT; ++i) {
 		const uint32_t page_index = i % num_pages;
-		uint8_t *page = fnt_get_page_data(font, page_index);
+		uint8_t *page = opennova::fnt::fnt_get_page_data(font, page_index);
 		const uint32_t cell_x = (i % kCellsPerRow) * kCellSize;
 		const uint32_t cell_y = (i / kCellsPerRow) * kCellSize;
-		const char ch = static_cast<char>(FNT_FIRST_CHAR + i);
+		const char ch = static_cast<char>(opennova::fnt::FNT_FIRST_CHAR + i);
 		const GlyphArt *art = (ch == ' ') ? nullptr : find_art(ch);
 		const bool hollow_box = (ch != ' ' && art == nullptr && ch < 127);
 
@@ -140,25 +140,25 @@ inline fnt_error_t build_font_pages(fnt_font_t *font, uint32_t num_pages) {
 					for (uint32_t dx = 0; dx < 2; ++dx) {
 						const uint32_t px = cell_x + 1 + col * 2 + dx;
 						const uint32_t py = cell_y + 1 + row * 2 + dy;
-						uint8_t *p = page + (py * FNT_TEXTURE_WIDTH + px) * FNT_TEXTURE_CHANNELS;
+						uint8_t *p = page + (py * opennova::fnt::FNT_TEXTURE_WIDTH + px) * opennova::fnt::FNT_TEXTURE_CHANNELS;
 						p[0] = p[1] = p[2] = p[3] = 0xFF;
 					}
 				}
 			}
 		}
 
-		fnt_glyph_t &g = font->glyphs[i];
+		opennova::fnt::fnt_glyph_t &g = font->glyphs[i];
 		g.page = page_index;
-		g.uv.u0 = static_cast<float>(cell_x) / FNT_TEXTURE_WIDTH;
-		g.uv.v0 = static_cast<float>(cell_y) / FNT_TEXTURE_HEIGHT;
-		g.uv.u1 = static_cast<float>(cell_x + kGlyphUvWidth) / FNT_TEXTURE_WIDTH;
-		g.uv.v1 = static_cast<float>(cell_y + kCellSize) / FNT_TEXTURE_HEIGHT;
+		g.uv.u0 = static_cast<float>(cell_x) / opennova::fnt::FNT_TEXTURE_WIDTH;
+		g.uv.v0 = static_cast<float>(cell_y) / opennova::fnt::FNT_TEXTURE_HEIGHT;
+		g.uv.u1 = static_cast<float>(cell_x + kGlyphUvWidth) / opennova::fnt::FNT_TEXTURE_WIDTH;
+		g.uv.v1 = static_cast<float>(cell_y + kCellSize) / opennova::fnt::FNT_TEXTURE_HEIGHT;
 	}
-	return FNT_OK;
+	return opennova::fnt::FNT_OK;
 }
 
 // The minimal set's boot font: the one-page form.
-inline fnt_error_t build_font(fnt_font_t *font) { return build_font_pages(font, 1); }
+inline opennova::fnt::fnt_error_t build_font(opennova::fnt::fnt_font_t *font) { return build_font_pages(font, 1); }
 
 } // namespace minimal_fnt
 

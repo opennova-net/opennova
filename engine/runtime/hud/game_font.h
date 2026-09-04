@@ -78,8 +78,8 @@ struct GameFontRun {
 class GameFont {
 public:
 	// Borrow a parsed font (not owned; the caller keeps it alive).
-	void set_font(const fnt_font_t *font) { font_ = font; }
-	const fnt_font_t *font() const { return font_; }
+	void set_font(const opennova::fnt::fnt_font_t *font) { font_ = font; }
+	const opennova::fnt::fnt_font_t *font() const { return font_; }
 
 	// Emitted glyph quads carry page indices offset by this base, giving each
 	// font its own page namespace inside one mixed draw list (the compiler
@@ -129,9 +129,9 @@ public:
 
 private:
 	struct Cursor;
-	const fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
+	const opennova::fnt::fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
 
-	const fnt_font_t *font_ = nullptr;
+	const opennova::fnt::fnt_font_t *font_ = nullptr;
 	uint32_t page_base_ = 0;
 };
 

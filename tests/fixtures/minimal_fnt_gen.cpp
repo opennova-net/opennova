@@ -21,6 +21,8 @@
 
 #include "common/file_io.h"
 
+using namespace opennova::fnt;
+
 namespace {
 
 bool expect(bool cond, const char *msg) {
