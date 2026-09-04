@@ -315,7 +315,12 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	if (e != nullptr) e->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
 	const WeaponTableEntry *def =
 			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
-	w.start_in_switchto = true;
+	// SWITCHRANK commits in place; only a holster (or an initial mount) queues
+	// the target's draw. Treating a fire-mode change as SWITCHFROM inserted a
+	// second animation and its draw lockout after the mode-switch action.
+	// [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x543475]
+	w.start_in_switchto = !w.active ||
+			active_local_weapon_slot(world, w)->current != weapon_action::kSwitchRank;
 	if (e == nullptr) {
 		w.presentation_pending = true;
 		return;

@@ -862,6 +862,62 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 			"the FSM's play serial advances with the served clips")
 
 
+func test_fire_mode_change_keeps_one_posed_viewmodel_per_frame() -> void:
+	await _assert_fire_mode_change_frames(1)
+
+
+func test_fire_mode_change_keeps_the_pose_during_catch_up() -> void:
+	await _assert_fire_mode_change_frames(4)
+
+
+# Exercise the real frame boundary, including a switch in the middle of a
+# multi-tick batch. The outgoing model must retire immediately and its
+# replacement must be placed and posed before the frame reaches rendering.
+func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var previous_model := presenter.viewmodel()
+	var starting_weapon := String(sim.get_local_player_weapon_name())
+	sim.request_local_player_weapon_category(3)
+	var switched := false
+	for frame in 45:
+		var frame_dt := TICK * float(ticks_per_frame)
+		var frame_input := presenter.before_world_tick(frame_dt, false, true)
+		world.tick(camera.global_position, camera.global_transform, frame_dt, frame_input)
+		presenter.after_world_tick()
+		var model := presenter.viewmodel()
+		assert_not_null(model, "frame %d retains the first-person weapon" % frame)
+		if is_instance_valid(previous_model) and model != previous_model:
+			assert_false(previous_model.is_visible_in_tree(),
+					"the retired viewmodel stops drawing before its replacement appears")
+		var view := world.local_player_weapon_view()
+		assert_ne(view.current_action, 6, "fire-mode changes never enter SWITCHTO")
+		assert_ne(view.next_action, 6, "fire-mode changes never queue SWITCHTO")
+		assert_eq(presenter.vm_parts().size(), 2, "the arms and gun remain present")
+		for part in presenter.vm_parts():
+			var clip := String(view.anim_key) if not String(view.anim_key).is_empty() else "anim_wpn_idle"
+			assert_eq(String(part.get_active_body_clip()), clip,
+					"frame %d renders the current weapon animation" % frame)
+			var animation := part.get_skeletal_anim()
+			var length := animation.get_clip_length(clip, view.anim_variant)
+			var phase := float(view.anim_advance_ticks) * TICK
+			if length > 0.0:
+				phase = fposmod(phase, length) if animation.is_clip_looping(clip, view.anim_variant) \
+						else minf(phase, length)
+			assert_almost_eq(part.get_animation_time(), phase, 0.00001,
+					"frame %d preserves the simulation animation phase" % frame)
+		previous_model = model
+		switched = switched or String(sim.get_local_player_weapon_name()) != starting_weapon
+	assert_true(switched, "reselecting the rifle category changes its fire mode")
+	assert_eq(world.local_player_weapon_view().next_action, 0,
+			"an in-place fire-mode change does not queue a draw animation")
+
+
 func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown() -> void:
 	# The sim answers category REQUESTS through the event drain
 	# (switch_to_weapon); the presenter is the ONE registered fixed-tick

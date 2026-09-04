@@ -586,6 +586,10 @@ void LocalPlayerPresenter::update_player_camera() {
 	if (world() == nullptr || camera() == nullptr) {
 		return;
 	}
+	// A fixed-tick switch can retire the viewmodel after the input pass built
+	// it. Rebuild before this frame's placement/pose so the handoff never
+	// reaches the renderer with a missing gun or an unplaced replacement.
+	ensure_models();
 	const Ref<Simulation> pose_sim = sim();
 	const Vector3 pos = pose_sim.is_valid() ? pose_sim->get_local_player_position() : Vector3();
 	stamp_camera_pose();
