@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstdio>
 
+using namespace opennova::crt;
+
 namespace {
 
 using opennova::terrain::Rgba8Image;

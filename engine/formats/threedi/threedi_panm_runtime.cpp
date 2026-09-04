@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+using namespace opennova::crt;
 
 // Retail uses two-operand 32-bit IMUL and keeps the low dword, then performs
 // an arithmetic shift. Spell both operations in unsigned bits so overflow is

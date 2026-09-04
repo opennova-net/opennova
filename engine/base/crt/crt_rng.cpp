@@ -2,6 +2,8 @@
 
 #include <base/io/crt_rand.h>
 
+namespace opennova::crt {
+
 namespace {
 
 // The recurrence itself lives once, in io::CrtRand; this is the second,
@@ -23,3 +25,5 @@ void crt_srand(uint32_t seed) {
 uint32_t crt_rand_state(void) {
 	return g_crt_rand.state;
 }
+
+} // namespace opennova::crt
