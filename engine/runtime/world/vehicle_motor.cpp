@@ -86,6 +86,16 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
     return out;
 }
 
+uint32_t watercraft_wake_magnitude_q16(int32_t signed_speed) noexcept {
+    const int64_t product = int64_t{0xFFFF} * static_cast<int64_t>(signed_speed);
+    // Spell x86's signed SAR as floor division so the result is portable C++
+    // for negative inputs (ordinary signed division truncates toward zero).
+    const int64_t scaled = product >= 0
+            ? product / 0x8000
+            : -((-product + 0x7FFF) / 0x8000);
+    return static_cast<uint32_t>(scaled < 0 ? -scaled : scaled);
+}
+
 // The controlling occupant: the Controller/Driver seat's occupant, stale-validated
 // against the occupant's own mount fields (the original walks its mountHandles and
 // clears mismatches every tick) [orig: @0x48b8a1-0x48b944 — occupant must satisfy
@@ -1755,6 +1765,31 @@ static void watercraft_motor_core(World &world, Entity &veh,
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    // The afloat wake handles are updated by BOTH authority and client runs of
+    // this shared core, every even logic tick. W3 receives command speed and
+    // W4 receives current signed motion; both use the same scaled integer
+    // magnitude. Capture after the platform solve and yaw apply, because the
+    // userpoint update consumes this exact vehicle frame. [orig:
+    // Entity_UpdateWatercraftPhysics @0x48D480 wake calls; the W3/W4 argument
+    // setup immediately after the platform/yaw tail]
+    if ((world.logic_tick & 1u) == 0u &&
+            (!traits.wake_w3.effect.empty() || !traits.wake_w4.effect.empty())) {
+        VehicleWakeState &wake = m.wake;
+        wake.valid = true;
+        wake.afloat = m.plat_afloat;
+        wake.source_tick = world.logic_tick;
+        wake.position = veh.position;
+        wake.pitch_deg = veh.pitch;
+        wake.yaw_deg = veh.yaw;
+        wake.roll_deg = veh.roll;
+        wake.water_z = world.env.water_z;
+        wake.command_magnitude_q16 = wake.afloat
+                ? watercraft_wake_magnitude_q16(m.cmd_speed)
+                : 0u;
+        wake.motion_magnitude_q16 = wake.afloat
+                ? watercraft_wake_magnitude_q16(m.speed)
+                : 0u;
+    }
     // The wheel phase — the watercraft mover's inline form, run by every
     // machine that executes the core [orig: `+0x2B8 += +0x220 << 13`
     //  @0x48E9F0..0x48E9F9 inside Entity_UpdateWatercraftPhysics; the mover

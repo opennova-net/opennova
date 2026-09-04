@@ -209,6 +209,48 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	assert_eq(world.live_group_count(), 0, "finished finite group is swept")
 
 
+func test_live_group_parameters_drive_rate_and_offset_without_clamping() -> void:
+	var def := ParticleDef.new()
+	def.id = "wake dots"
+	def.emit_dur = 0.1
+	def.emit_rate = 30.0
+	def.emit_rate_adj = 30.0
+	def.emit_burst = 1
+	def.y_offset = 2.0
+	def.z_offset = 4.0
+	def.age = 1.0
+	def.flags = ParticleDef.FLAG_FOREVER_EMIT
+	var effect := ParticleEffect.new()
+	effect.id = "wake"
+	effect.pdefs = PackedStringArray([def.id])
+	var file := ParticleFile.new()
+	file.particles = [def]
+	file.effects = [effect]
+	var world := _make_world()
+	world.load_particle_file(file)
+	var receipt: EffectSpawnReceipt = world.spawn_effect_owned_request(
+			"wake-owner", effect.id, Vector3.ZERO, Vector3.FORWARD)
+	assert_true(receipt.spawned)
+
+	assert_true(world.set_group_parameters(receipt.group_id, 0.75, 0.25))
+	var emitter := _single_emitter(world)
+	assert_almost_eq(emitter.emit_rate, 45.0, 0.0001,
+			"rate = base + adjustment * (2m - 1)")
+	assert_almost_eq(emitter.spawn_y_offset, 0.0, 0.0001,
+			"spawn Y uses the second live control")
+	assert_almost_eq(emitter.camera_pull, 0.0, 0.0001,
+			"controlled trails stop reusing z_offset as camera pull")
+
+	assert_true(world.set_group_parameters(receipt.group_id, 0.0, 1.5),
+			"controls outside 0..1 are accepted")
+	emitter = _single_emitter(world)
+	assert_almost_eq(emitter.emit_rate, 0.0, 0.0001,
+			"a negative effective rate floors at zero")
+	assert_almost_eq(emitter.spawn_y_offset, 10.0, 0.0001)
+	assert_false(world.set_group_parameters(receipt.group_id, NAN, 0.0))
+	assert_false(world.set_group_parameters(999999, 0.5, 0.5))
+
+
 func test_runtime_reset_preserves_catalog_and_discards_live_admission() -> void:
 	var world := _make_world()
 	world.load_particle_file(_make_short_effect_file())

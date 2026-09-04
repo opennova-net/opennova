@@ -32,6 +32,7 @@
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "simulation/throwable_presenter.h"
+#include "simulation/vehicle_wake_presenter.h"
 
 namespace godot {
 
@@ -280,6 +281,7 @@ public:
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
+	void present_vehicle_wake_visuals(const TypedArray<VehicleWakeVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
 
 	// --- Statics shared by both walks and their consumers --------------------
@@ -589,6 +591,7 @@ private:
 	std::unique_ptr<FirePresenter> fire_;
 	Ref<DestructionPresenter> destruction_;
 	Ref<ThrowablePresenter> throwable_;
+	Ref<VehicleWakePresenter> vehicle_wake_;
 	ObjectID scars_id_;
 	ObjectID environment_id_;
 	Vector3 listener_position_ = Vector3(INFINITY, INFINITY, INFINITY);

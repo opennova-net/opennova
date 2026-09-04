@@ -128,6 +128,60 @@ TypedArray<ThrowableVisualRow> Simulation::get_throwable_visuals() const {
 	return out;
 }
 
+void Simulation::fill_vehicle_wake_visual_rows(
+		std::vector<opennova::world::VehicleWakeVisualRow> &r_rows) const {
+	r_rows.clear();
+	if (!kernel_) return;
+	const opennova::world::World &world = kernel_->world;
+	world.registry.for_each([&](const opennova::world::Entity &entity) {
+		if (!entity.alive ||
+				((entity.flags | entity.engine_flags) & opennova::world::kEntityFlagDead) != 0) {
+			return;
+		}
+		const opennova::world::VehicleTraits *traits =
+				world.vehicles.traits.get(entity.item_id);
+		if (traits == nullptr || traits->family != opennova::world::VehicleFamily::Watercraft ||
+				(traits->wake_w3.effect.empty() && traits->wake_w4.effect.empty()) ||
+				!entity.veh.wake.valid) {
+			return;
+		}
+		const opennova::world::VehicleWakeState &wake = entity.veh.wake;
+		opennova::world::VehicleWakeVisualRow row;
+		row.handle_packed = entity.handle.packed;
+		row.registry_spawn_id = entity.registry_spawn_id;
+		row.item_id = entity.item_id;
+		row.bms_id = entity.bms_id;
+		row.spawn_origin = entity.spawn_origin;
+		row.source_tick = wake.source_tick;
+		row.pos = wake.position;
+		row.pitch_deg = wake.pitch_deg;
+		row.yaw_deg = wake.yaw_deg;
+		row.roll_deg = wake.roll_deg;
+		row.water_z = wake.water_z;
+		row.afloat = wake.afloat;
+		row.w3_effect = traits->wake_w3.effect;
+		row.w3_userpoint = traits->wake_w3.userpoint;
+		row.w3_magnitude_q16 = wake.command_magnitude_q16;
+		row.w4_effect = traits->wake_w4.effect;
+		row.w4_userpoint = traits->wake_w4.userpoint;
+		row.w4_magnitude_q16 = wake.motion_magnitude_q16;
+		r_rows.push_back(std::move(row));
+	});
+}
+
+TypedArray<VehicleWakeVisualRow> Simulation::get_vehicle_wake_visuals() const {
+	TypedArray<VehicleWakeVisualRow> out;
+	std::vector<opennova::world::VehicleWakeVisualRow> rows;
+	fill_vehicle_wake_visual_rows(rows);
+	for (const opennova::world::VehicleWakeVisualRow &row : rows) {
+		Ref<VehicleWakeVisualRow> wrapped;
+		wrapped.instantiate();
+		wrapped->assign(row);
+		out.push_back(wrapped);
+	}
+	return out;
+}
+
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// The current-waypoint slice of the per-frame HUD info rebuild, plus the
 	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914

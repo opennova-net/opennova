@@ -174,6 +174,9 @@ void EffectScene::_bind_methods() {
 			&EffectScene::detach);
 	ClassDB::bind_method(D_METHOD("detach_slot", "slot_token"),
 			&EffectScene::detach_slot);
+	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
+					"offset_control"),
+			&EffectScene::set_group_parameters);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
 			&EffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
@@ -342,6 +345,17 @@ void EffectScene::detach_slot(int64_t p_slot_token) {
 		token_from_godot(p_slot_token)
 	});
 	advance_in_place(0.0);
+}
+
+bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,
+		float p_offset_control) {
+	const bool changed = scene_.set_group_parameters(
+			opennova::particle::EffectGroupId{ token_from_godot(p_group_id) },
+			p_rate_control, p_offset_control);
+	if (changed) {
+		snapshot_dirty_ = true;
+	}
+	return changed;
 }
 
 void EffectScene::reset_runtime_state() {

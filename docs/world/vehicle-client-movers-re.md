@@ -390,9 +390,14 @@ entity->Yaw += entity->modelPtr0;                 // [0x48ECF2] EVERY tick, no g
 After this: the wake-anim lerp on brain[115..126] (current vec at +0x1CC..0x1E0 chases
 target at +0x1E4..0x1F8; [118] steps by +/-0x2108421 toward [124], snap-copies when
 close) [orig: 0x48ECF5..0x48ED76] — animation only, note-only. Then bone-trail FX
-(masks 3/4 when afloat every 2nd tick, 1/2 otherwise every 4th tick, intensity =
-brain[136] / currentSpeed) and the movement-sound machine — cosmetic. Tail rebuilds
-orientationMatrix from `&entity->Position` and sets Flags bit 0x20000 [0x48EF50..0x48EF63].
+(masks 3/4 when afloat every 2nd tick, 1/2 otherwise every 4th tick) and the
+movement-sound machine — cosmetic. **W3/W4 ported 2026-09-04:** the shared
+authority/client core captures the post-solve pose and water plane on that
+even-tick cadence, with W3 driven by brain[136] command speed and W4 by signed
+current speed; the fixed-tick presenter updates persistent first-16 userpoint
+groups and their two live particle controls. The dry W1/W2 leg remains open.
+Tail rebuilds orientationMatrix from `&entity->Position` and sets Flags bit
+0x20000 [0x48EF50..0x48EF63].
 
 ---
 

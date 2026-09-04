@@ -2132,6 +2132,12 @@ public:
 	// rows for the tests.
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
+	// Even-tick, simulation-owned watercraft W3/W4 wake samples. The native
+	// vector is the fixed-tick presenter's path; the typed array is the
+	// diagnostic/test wrapper over the same values.
+	void fill_vehicle_wake_visual_rows(
+			std::vector<opennova::world::VehicleWakeVisualRow> &r_rows) const;
+	TypedArray<VehicleWakeVisualRow> get_vehicle_wake_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's

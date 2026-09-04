@@ -178,8 +178,9 @@ public:
 			const Ref<class MissionData> &p_mission) const;
 	// The item's slot-A particle effect ("particlefx", the always-on attached
 	// emitter the runtime effect-attach pass consumes); null = unknown id, empty
-	// effect = key absent. The other authored slots (particlefxs, particlefxw1..4,
-	// the death/fire/other family) are read engine-side from the retained parse.
+	// effect = key absent. Watercraft W3/W4 are copied engine-side into vehicle
+	// traits; particlefxs/W1/W2 and the death/fire/other family remain available
+	// from the retained parse for their separate runtime paths.
 	// Slot A ("particlefx") as authored, the row the runtime effect-attach
 	// pass consumes natively; `valid` false for an unknown item.
 	ItemParticleFx get_particle_fx(int id) const;

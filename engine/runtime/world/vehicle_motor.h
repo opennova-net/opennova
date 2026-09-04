@@ -87,6 +87,14 @@ constexpr bool vehicle_family_uses_direct_air_mover(VehicleFamily family) {
            family == VehicleFamily::Plane;
 }
 
+// One of the two cbot-only, afloat wake slots retained from items.def. Unlike
+// the general item particle slot, these are speed-controlled persistent groups
+// and deliberately stay in the portable vehicle traits.
+struct VehicleWakeEffect {
+    std::string effect;
+    std::string userpoint;
+};
+
 struct VehicleTraits {
     int32_t physics = 0;       // itemDef+0x8DC ground-dispatch selector; direct air ignores it
     int32_t player_speed = 0;  // itemDef+0x8E8
@@ -145,6 +153,8 @@ struct VehicleTraits {
     int32_t shock = 0;         // the landing damp (11 - shock)/11; the oscillator
                                // clamps THIS field to [0,10] in place, as retail
                                // clamps the def's (@0x45D18F..0x45D1A2)
+    VehicleWakeEffect wake_w3; // particlefxw3: commanded-speed wake
+    VehicleWakeEffect wake_w4; // particlefxw4: current-motion wake
     // Platform probe geometry from the model bound boxes (16.16 model space;
     // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
     // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
@@ -217,6 +227,11 @@ struct VehicleCtrlRegisters {
 
 VehicleCtrlRegisters vehicle_ctrl_registers(
         const Entity::VehicleMotorState &state);
+
+// abs((0xFFFF * signed_speed) >> 15), kept as Q16 control magnitude. The
+// arithmetic shift occurs before absolute value, including its one-unit
+// forward/reverse asymmetry.
+uint32_t watercraft_wake_magnitude_q16(int32_t signed_speed) noexcept;
 
 
 

@@ -118,6 +118,8 @@ public:
 	PackedInt64Array get_active_owner_tokens() const;
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
+	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
+			float p_offset_control);
 	void reset_runtime_state();
 
 	// Runtime clock: advances simulation without materializing a render snapshot

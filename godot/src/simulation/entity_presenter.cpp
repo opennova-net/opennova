@@ -182,6 +182,8 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::present_destruction_drained);
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
+	ClassDB::bind_method(D_METHOD("present_vehicle_wake_visuals", "visuals"),
+			&EntityPresenter::present_vehicle_wake_visuals);
 	ClassDB::bind_method(D_METHOD("present_scar_draw_list", "draw_list"),
 			&EntityPresenter::present_scar_draw_list);
 	BIND_ENUM_CONSTANT(PASS_PROFILE_FIRE_US);
@@ -255,6 +257,7 @@ EntityPresenter::EntityPresenter() :
 		fire_(std::make_unique<FirePresenter>(this)) {
 	destruction_.instantiate();
 	throwable_.instantiate();
+	vehicle_wake_.instantiate();
 	ScarPresenter *scars_node = memnew(ScarPresenter);
 	scars_node->set_name("Scars");
 	add_child(scars_node);
@@ -306,6 +309,7 @@ void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> 
 	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
 			p_fx, p_lights);
 	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
+	vehicle_wake_->setup(s, this, index_, p_fx, anchors);
 	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
 	if (ScarPresenter *scars_node = scars()) {
 		scars_node->set_resource_root(p_resource_root);
@@ -355,6 +359,7 @@ PackedInt64Array EntityPresenter::profile_present_passes() {
 }
 
 void EntityPresenter::sync_fixed_tick_effects() {
+	vehicle_wake_->sync_fixed_tick_effects();
 	throwable_->sync_fixed_tick_effects();
 }
 
@@ -442,6 +447,12 @@ void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p
 void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
 	throwable_->present_visuals(
 			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
+}
+
+void EntityPresenter::present_vehicle_wake_visuals(
+		const TypedArray<VehicleWakeVisualRow> &p_visuals) {
+	vehicle_wake_->sync_visuals(
+			unwrap_rows<opennova::world::VehicleWakeVisualRow, VehicleWakeVisualRow>(p_visuals));
 }
 
 void EntityPresenter::present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list) {

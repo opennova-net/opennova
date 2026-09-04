@@ -256,6 +256,7 @@ void EntityPresenter::reset_wire_runtime_state() {
 	// stop the move groups), scars (every scar mesh goes).
 	destruction_->reset_runtime_state();
 	throwable_->reset_runtime_state();
+	vehicle_wake_->reset_runtime_state();
 	if (ScarPresenter *scars_node = scars()) {
 		scars_node->reset_runtime_state();
 	}

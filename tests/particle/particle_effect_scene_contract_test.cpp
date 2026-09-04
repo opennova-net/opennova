@@ -285,6 +285,59 @@ bool replace_detach_and_validation_contract() {
 			"follow binding requires an owner");
 }
 
+bool live_group_parameters_contract() {
+	p::ParticleDef wake = particle("wake spray");
+	wake.flags = p::particle_flag::ForeverEmit;
+	wake.emit_rate = 30.0f;
+	wake.emit_rate_adj = 30.0f;
+	wake.y_offset = 2.0f;
+	wake.z_offset = 4.0f;
+	p::EffectSceneConfig config;
+	config.documents.push_back(document("wake.ptl", {wake}, {{"wake", {"wake spray"}}}));
+	p::EffectScene scene;
+	scene.open(config);
+	const auto receipt = scene.spawn(spawn_request(scene.intern("wake")));
+	if (!check(receipt.spawned(), "controlled wake group spawns")) return false;
+
+	const auto before = scene.inspect(false);
+	const auto *before_group = debug_group(before, receipt.group);
+	if (!check(before_group != nullptr && before_group->emitters.size() == 1 &&
+			near(before_group->emitters[0].spawn_y_offset, 2.0) &&
+			near(before_group->emitters[0].camera_pull, 4.0),
+			"uncontrolled group retains authored offset behavior")) return false;
+
+	if (!check(scene.set_group_parameters(receipt.group, 0.75f, 0.25f),
+			"live group accepts the two retail controls")) return false;
+	const auto after = scene.inspect(false);
+	const auto *after_group = debug_group(after, receipt.group);
+	if (!check(after_group != nullptr && after_group->emitters.size() == 1 &&
+			near(after_group->emitters[0].emit_rate, 45.0) &&
+			near(after_group->emitters[0].spawn_y_offset, 0.0) &&
+			near(after_group->emitters[0].camera_pull, 0.0),
+			"controls update rate, spawn offset, and camera pull")) return false;
+
+	const auto frame = advance_frame(scene, 0.016f);
+	if (!check(frame.emitters.size() == 1 && frame.particles.size() == 1 &&
+			near(frame.emitters[0].camera_pull, 0.0) &&
+			near(frame.particles[0].position.y, 0.0),
+			"the first controlled advance uses the updated values")) return false;
+	if (!check(scene.set_group_parameters(receipt.group, 0.0f, 1.5f),
+			"finite controls outside zero-to-one remain valid")) return false;
+	const auto extrapolated = scene.inspect(false);
+	const auto *extrapolated_group = debug_group(extrapolated, receipt.group);
+	if (!check(extrapolated_group != nullptr &&
+			near(extrapolated_group->emitters[0].emit_rate, 0.0) &&
+			near(extrapolated_group->emitters[0].spawn_y_offset, 10.0),
+			"rate floors at zero while offset control extrapolates")) return false;
+	if (!check(!scene.set_group_parameters(p::EffectGroupId{999999}, 0.5f, 0.5f) &&
+			!scene.set_group_parameters(receipt.group,
+					std::numeric_limits<float>::quiet_NaN(), 0.5f),
+			"missing groups and non-finite controls are rejected")) return false;
+	scene.detach(receipt.group);
+	return check(!scene.set_group_parameters(receipt.group, 0.5f, 0.5f),
+			"detached draining groups reject further controls");
+}
+
 bool fixed_age_and_order_contract() {
 	p::EffectScene scene;
 	auto config = one_effect();
@@ -715,6 +768,7 @@ int main() {
 	if (!slot_owner_and_admission_contract()) return 1;
 	if (!child_reaping_and_group_suppression_lifetime_contract()) return 1;
 	if (!replace_detach_and_validation_contract()) return 1;
+	if (!live_group_parameters_contract()) return 1;
 	if (!fixed_age_and_order_contract()) return 1;
 	if (!capacity_rejection_contract()) return 1;
 	if (!lightweight_debug_contract()) return 1;

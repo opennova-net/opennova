@@ -1171,7 +1171,7 @@ public:
 				quad.roll = particle.rotation;
 				quad.yaw = particle.yaw;
 				quad.pitch = particle.pitch;
-				quad.camera_pull = definition.z_offset;
+				quad.camera_pull = source_emitter.camera_pull;
 				quad.primary_color = pack_argb(red, green, blue, alpha);
 				quad.alignment = (definition.flags &
 						opennova::particle::particle_flag::YawAndPitch) != 0 ?

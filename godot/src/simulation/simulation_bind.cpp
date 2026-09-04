@@ -474,6 +474,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
+	ClassDB::bind_method(D_METHOD("get_vehicle_wake_visuals"),
+	                     &Simulation::get_vehicle_wake_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),

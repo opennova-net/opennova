@@ -246,6 +246,23 @@ constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
 }
                                                                  // [orig: @0x40e9f0; @0x40dc8e]
 
+// Captured inputs for the watercraft's two afloat wake lanes. The cbot mover
+// samples these on its even-tick effect pass; presentation consumes the saved
+// pose rather than a later interpolated entity pose, so particles and their
+// intensity share one simulation instant.
+struct VehicleWakeState {
+    bool valid = false;
+    bool afloat = false;
+    uint32_t source_tick = 0;
+    Vec3 position;
+    float pitch_deg = 0.0f;
+    float yaw_deg = 0.0f;
+    float roll_deg = 0.0f;
+    int32_t water_z = 0;
+    uint32_t command_magnitude_q16 = 0;
+    uint32_t motion_magnitude_q16 = 0;
+};
+
 struct Entity {
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
@@ -848,6 +865,7 @@ struct Entity {
         bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
         bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
         bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
+        VehicleWakeState wake;             // even-tick W3/W4 presentation sample
         int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
         // Light (cbik) solve: consecutive rear-wheel contact ticks — the
         // contact byte requires > 1, so a one-tick graze never grounds the
