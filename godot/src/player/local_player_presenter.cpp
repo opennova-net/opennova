@@ -308,6 +308,10 @@ bool LocalPlayerPresenter::handle_key_input(const Ref<InputEvent> &p_event, bool
 	return input_router_.handle_key_input(p_event, p_active);
 }
 
+void LocalPlayerPresenter::consume_use_hold() {
+	input_router_.consume_use_hold();
+}
+
 bool LocalPlayerPresenter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	return input_router_.handle_input(p_event, p_active);
 }
@@ -816,6 +820,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "event", "active"), &LocalPlayerPresenter::handle_key_input);
+	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

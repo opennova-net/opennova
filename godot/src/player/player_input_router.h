@@ -56,6 +56,11 @@ public:
 	// frame.
 	void reset();
 	void release_mouse_capture();
+	// The shell consumed the live USE-ITEM hold for a chord of its own (the
+	// debug pick rides Shift+F6; the tools window opening mid-hold): the
+	// release edge then runs no mount toggle. Applied after this frame's
+	// fresh-press reset so a same-frame chord sticks.
+	void consume_use_hold();
 
 private:
 	Ref<Simulation> sim() const;
@@ -65,6 +70,14 @@ private:
 	void sample_weapon_input(const Ref<MissionFrameInput> &p_frame_input, bool p_gameplay_input_active);
 	void send_weapon_switch_input(bool p_captured);
 	void sample_hud_input(bool p_active);
+	void sample_use_item(bool p_active);
+	// Whether the live USE hold swallows the token's press this frame: the
+	// hold was live LAST frame and the key firing the row is a digit.
+	bool digit_swallowed(const char *p_token) const;
+	// A row's down edge as retail's key-EVENT dispatch sees it: the RAW held
+	// state latches (a key held across an inactive frame never re-fires when
+	// the gate reopens) and a swallowed digit fires nothing.
+	bool event_row_edge(const char *p_token, bool p_active, bool &r_was_down) const;
 	void request_stance(int p_stance);
 	void read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 			bool &r_lean_left, bool &r_lean_right, bool &r_jump) const;
@@ -90,6 +103,16 @@ private:
 	PackedStringArray weapon_category_tokens_;
 	int category_was_down_ = 0;
 	bool seat_was_down_[10] = {};
+	// The USE-ITEM hold chain (sample_use_item): the frame latch the polled
+	// `useitem` row sets (dword_24C18DC), its previous-frame copy
+	// (dword_24C18E0), the hold-consumed flag a seat digit or a shell chord
+	// sets (dword_24C18E4), the shell's pending consume, and the raw digit
+	// latches the special-key arm edges from.
+	bool use_latched_ = false;
+	bool use_held_prev_ = false;
+	bool use_hold_consumed_ = false;
+	bool use_consume_pending_ = false;
+	bool use_digit_was_down_[10] = {};
 	bool cycle_prev_was_down_ = false;
 	bool cycle_next_was_down_ = false;
 	bool radar_out_was_down_ = false;

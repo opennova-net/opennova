@@ -5,6 +5,7 @@
 // UI_PopulateControlMappingList @ 0x55c0c0]
 #include <cstdlib>
 #include <iostream>
+#include <set>
 #include <string>
 
 #include <runtime/controls/binding_set.h>
@@ -316,6 +317,67 @@ bool test_format_display_string() {
   return true;
 }
 
+// The keyboard dispatcher's two passes in poll form over the live records
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 -- the modifier pass
+// @0x49d327..0x49d3ac; the fallback @0x49d3ba..0x49d488 runs for a key event
+// only when the modifier pass matched nothing]: Ctrl+1 fires seat1 and never
+// Knife, a bare 1 fires Knife, Ctrl+R fires respawn and never the reload,
+// Ctrl over an unclaimed key still reaches its modifier-less row, and a mixed
+// record follows the ROW's modifier.
+bool test_pressed_key_two_passes() {
+  BindingSet set;
+  const int seat1 = set.index_of_token("seat1");
+  const int knife = set.index_of_token("Knife");
+  const int respawn = set.index_of_token("respawn");
+  const int reload = set.index_of_token("magazine");
+  const int binoculars = set.index_of_token("binoculars");
+  CHECK(seat1 >= 0 && knife >= 0 && respawn >= 0 && reload >= 0 && binoculars >= 0,
+        "the rows exist");
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  CHECK(set.pressed_key(seat1, key_down) == 0 && set.pressed_key(knife, key_down) == 0,
+        "nothing held, nothing fires");
+  CHECK(set.pressed_key(-1, key_down) == 0, "an unknown row fires nothing");
+
+  down = {0x31};
+  CHECK(set.pressed_key(knife, key_down) == 0x31, "a bare 1 fires Knife (fallback pass)");
+  CHECK(set.pressed_key(seat1, key_down) == 0, "a bare 1 never fires the Ctrl+1 seat row");
+  down = {0x11, 0x31};
+  CHECK(set.pressed_key(seat1, key_down) == 0x31, "Ctrl+1 fires seat1 (modifier pass)");
+  CHECK(set.pressed_key(knife, key_down) == 0,
+        "the modifier pass claims the key: Knife stays silent");
+  down = {0x11};
+  CHECK(set.pressed_key(seat1, key_down) == 0 && set.pressed_key(knife, key_down) == 0,
+        "Ctrl alone fires neither");
+
+  down = {0x52};
+  CHECK(set.pressed_key(reload, key_down) == 0x52, "R reloads");
+  CHECK(set.pressed_key(respawn, key_down) == 0, "R alone never respawns");
+  down = {0x11, 0x52};
+  CHECK(set.pressed_key(respawn, key_down) == 0x52, "Ctrl+R respawns");
+  CHECK(set.pressed_key(reload, key_down) == 0, "Ctrl+R never reloads");
+  down = {0x11, 0x42};
+  CHECK(set.pressed_key(binoculars, key_down) == 0x42,
+        "a held modifier over an unclaimed key still fires the modifier-less row");
+
+  // A mixed record: Ctrl+1 primary, bare Z secondary.
+  BindingRecord rec;
+  rec.primary = 0x31;
+  rec.primary_mod = 17;
+  rec.secondary = 0x5A;
+  CHECK(set.set_record(binoculars, rec), "the mixed record installs");
+  down = {0x11, 0x5A};
+  CHECK(set.pressed_key(binoculars, key_down) == 0x5A,
+        "pass 1 checks the ROW's modifier, then either key: Ctrl+Z fires");
+  down = {0x5A};
+  CHECK(set.pressed_key(binoculars, key_down) == 0,
+        "a bare Z never fires: the fallback wants both modifier words zero");
+  down = {0x11, 0x31};
+  CHECK(set.pressed_key(binoculars, key_down) == 0x31 && set.pressed_key(seat1, key_down) == 0x31,
+        "two Ctrl+1 rows both fire in poll form (retail queues both events)");
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -340,6 +402,7 @@ int main() {
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
+  RUN_TEST(test_pressed_key_two_passes);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

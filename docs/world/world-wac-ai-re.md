@@ -4473,6 +4473,26 @@ mount toggle, in that witnessed order [orig: Input_HandleActionBinding_0
    (`!dword_24C18DC && dword_24C18E0`, suppressed by `dword_24C18E4`) ->
    `Entity_ToggleVehicleMount(g_local_player_entity)` [orig: @ 0x49d6dc].
 
+The `useitem` row (catalog row 44, default VK_SHIFT, flags 0x0C000805: bit 4 =
+a HELD binding) is polled every frame by `Input_ProcessToggleBindings
+@ 0x499480`, so its action re-fires while the key is down and the latch stays
+live for the whole hold. The hold doubles as a chord: `Input_ProcessKeyboardEvents
+@ 0x49d1f0` runs `Input_HandleSpecialKeys @ 0x49c5c0` on every key-down event
+BEFORE the binding tables, and its `dword_24C18E0` arm (USE was held last
+frame) [orig: @ 0x49c6d8..0x49c730] takes a raw digit VK 0x30..0x39 -- key 1..9
+selects seat index 0..8, key 0 seat 9 -- calls `Entity_FindAvailableSeat(player,
+index)` once per hold (`dword_24C18E4` latches it), then returns 1, so the digit
+reaches no binding row (Knife on a bare 1 stays silent) and the release runs no
+mount toggle. This is the "SHIFT or CTRL key and the corresponding number key"
+of the retail Readme: Shift is USE, the chord above; Ctrl+digit are the seat
+rows below. The shipped KeyChart prints only the Ctrl form. Port:
+`PlayerInputRouter::sample_use_item` (the frame latch, the previous-frame copy,
+the consumed flag, the digit arm over Godot's physical key state, the release
+edge -> `Simulation::local_player_toggle_mount`) and `event_row_edge` (a digit
+row fires nothing while the hold is live); the shell keeps only the armory
+arm of the press and marks the hold consumed for its own Shift+F6 pick chord
+(`LocalPlayerPresenter::consume_use_hold`, the `dword_24C18E4` stand-in).
+
 `Entity_ToggleVehicleMount @ 0x436950`: gated on the equipped weapon action
 (`!EquippedSlot || currentAction < 2 || currentAction == 5 ||
 slot.nextAction == 11` — idle/emptyidle/dry-click/pending-overheat pass);
@@ -4536,8 +4556,12 @@ select indices 0..9 of the CURRENT mount's slot list. The catalog binds them
 to Ctrl+1..Ctrl+9 and Ctrl+0: rows 17..26 carry VK_CONTROL (17) in the
 slot-1 modifier word at entry +24, and the keyboard dispatcher's first pass
 matches a row only while its modifier key is held; the modifier-less weapon
-rows on the same digits fire from the fallback pass. The two therefore never
-collide and retail needs no mount-state split between them. The list starts
+rows on the same digits fire from the fallback pass, which runs for a key
+event only when the first pass matched nothing (a pass-1 hit fires and skips
+it @ 0x49d437), so Ctrl+1 fires seat1 alone and a bare 1 fires Knife alone.
+The two therefore never collide and retail needs no mount-state split between
+them. `BindingSet::pressed_key` is that rule in poll form (ctest `controls`);
+`ControlsModel::is_token_pressed` samples through it. The list starts
 with the control seat, then attached gun children, then passenger slots 0..7.
 It is independent of USRP/vector order and HUD texture availability. A
 gun-child mount re-roots to its carrier; a root without vehicle attrib 0x40
@@ -4575,6 +4599,7 @@ neither marker nor digit.
 | Numbered seat query and weapon gate | MATCHING (behavioral proof) | `vehicle_panel_feed`: driver/gun/passenger order, gun-child re-root, bounds, human/AI/unresolved occupancy, missing control bone, idle/dry/reload/overheat and missing-weapon gates |
 | Joiner numbered-seat request and confirmation | MATCHING (behavioral proof) | `inmatch_joiner_role`: passenger first in vector, key-1 index selects driver bone, framed 0x26 uses H rather than L, body waits for echo, then forward drives the carrier and emits moving 0x0C |
 | Godot binding and input sampling | shell binding / not grillable | thin `Simulation::local_player_select_seat` role dispatch; real keyboard retail-host verification recorded in net-re section 5.10 |
+| USE-hold digit chord and mount-toggle release edge | MATCHING (structural port) | `PlayerInputRouter::sample_use_item` mirrors the three globals and the special-key arm; the row-level rule is pinned by ctest `controls` and GUT `controls_model_test`; no headless fixture yet drives the router over a mounted player, so the chord is verified by reading, not by a test |
 
 A live retail-host/OpenNova-joiner run on `00TRa.bms` established the pre-port
 failure: while seated in the transport truck's passenger position, key 1

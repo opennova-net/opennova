@@ -134,6 +134,9 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		const bool delta_ok = head_ok && root != kNoSample;
 		tick_sim->set_local_player_eye_offset(delta_ok ? head - root : Vector3(), delta_ok);
 	}
+	// The USE hold ages first: its previous-frame state decides which digit
+	// presses the binding rows below never see.
+	sample_use_item(p_gameplay_input_active);
 	sample_weapon_input(frame_input, p_gameplay_input_active);
 	sample_hud_input(p_gameplay_input_active);
 	return frame_input;
@@ -188,40 +191,126 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 void PlayerInputRouter::send_weapon_switch_input(bool p_captured) {
 	const Ref<Simulation> switch_sim = sim();
 	// The seat rows default to Ctrl+1..Ctrl+0 and the weapon categories to the
-	// bare digits; the binding's own modifier keeps them apart, so neither
-	// side is gated on the mount state here. Off a mount the seat action is
-	// an engine no-op (no slot list), and a control seat refuses the category
-	// switch inside the engine's walk, as retail does.
+	// bare digits; the binding sampler's two passes keep them apart (Ctrl+1
+	// fires only seat1, a bare 1 only Knife), so neither side is gated on the
+	// mount state here. Off a mount the seat action is an engine no-op (no
+	// slot list), and a control seat refuses the category switch inside the
+	// engine's walk, as retail does. The other seat path, USE held + a raw
+	// digit, is sample_use_item's special-key arm, and while that hold is live
+	// the digit rows below never fire.
 	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22;
 	//  Player_SwitchToWeaponByHandle parentSlot gate @0x4e0192]
 	static const char *seat_tokens[] = {"seat1", "seat2", "seat3", "seat4", "seat5",
 			"seat6", "seat7", "seat8", "seat9", "seat10"};
 	for (int i = 0; i < 10; ++i) {
-		if (opennova::world::latched_key_edge(pressed(seat_tokens[i]), p_captured,
-				seat_was_down_[i]) && switch_sim.is_valid())
+		if (event_row_edge(seat_tokens[i], p_captured, seat_was_down_[i]) &&
+				switch_sim.is_valid()) {
 			switch_sim->local_player_select_seat(i);
+		}
 	}
+	// The category latches ride the RAW key state like the other event rows:
+	// a digit held across an armory/F3 window, or under the USE hold, must not
+	// switch when the gate reopens.
 	int down_mask = 0;
 	for (int64_t i = 0; i < weapon_category_tokens_.size(); ++i) {
-		if (p_captured && pressed(weapon_category_tokens_[i].utf8().get_data())) {
-			down_mask |= 1 << i;
-			if ((category_was_down_ & (1 << i)) == 0 && switch_sim.is_valid()) {
-				switch_sim->request_local_player_weapon_category(
-						static_cast<Simulation::WeaponCategory>(i + 1));
-			}
+		const CharString token = weapon_category_tokens_[i].utf8();
+		if (!pressed(token.get_data())) {
+			continue;
+		}
+		down_mask |= 1 << i;
+		if (p_captured && (category_was_down_ & (1 << i)) == 0 &&
+				!digit_swallowed(token.get_data()) && switch_sim.is_valid()) {
+			switch_sim->request_local_player_weapon_category(
+					static_cast<Simulation::WeaponCategory>(i + 1));
 		}
 	}
 	category_was_down_ = down_mask;
-	const bool prev_down = p_captured && pressed("cycleweaponP");
-	if (prev_down && !cycle_prev_was_down_ && switch_sim.is_valid()) {
+	if (event_row_edge("cycleweaponP", p_captured, cycle_prev_was_down_) &&
+			switch_sim.is_valid()) {
 		switch_sim->request_local_player_weapon_cycle(-1);
 	}
-	cycle_prev_was_down_ = prev_down;
-	const bool next_down = p_captured && pressed("cycleweaponN");
-	if (next_down && !cycle_next_was_down_ && switch_sim.is_valid()) {
+	if (event_row_edge("cycleweaponN", p_captured, cycle_next_was_down_) &&
+			switch_sim.is_valid()) {
 		switch_sim->request_local_player_weapon_cycle(1);
 	}
-	cycle_next_was_down_ = next_down;
+}
+
+bool PlayerInputRouter::digit_swallowed(const char *p_token) const {
+	if (!use_held_prev_ || controls_.is_null()) {
+		return false;
+	}
+	// The VK digits 0x30..0x39 [orig: the (key - 48) <= 9 test @0x49c6e0].
+	const int vk = controls_->pressed_key_for_token(p_token);
+	return vk >= 0x30 && vk <= 0x39;
+}
+
+bool PlayerInputRouter::event_row_edge(const char *p_token, bool p_active,
+		bool &r_was_down) const {
+	const bool down = pressed(p_token);
+	return opennova::world::latched_key_edge(down,
+			p_active && !(down && digit_swallowed(p_token)), r_was_down);
+}
+
+void PlayerInputRouter::consume_use_hold() {
+	use_consume_pending_ = true;
+}
+
+// The USE-ITEM hold, retail's per-frame chain over the polled `useitem` row
+// (row 44, default Shift; its flag 4 makes it a held binding whose action
+// fires every frame the key is down). Input_ProcessFrame ages the frame
+// latch (dword_24C18E0 = dword_24C18DC, then clears it); the action's
+// LABEL_121 arm re-latches it and, on a FRESH press, clears the consumed
+// flag dword_24C18E4; a digit key pressed while the hold was live LAST frame
+// is a special key handled before the binding tables: it selects seat
+// (digit - 1) with the 0 key as seat 9 once per hold, marks the hold
+// consumed, and the digit reaches no binding row; the release edge
+// (!dword_24C18DC && dword_24C18E0) runs the mount toggle unless the hold was
+// consumed. The press's armory/vehicle-menu arms are the shell's: it opens
+// the screen on the key event, and the inactive gameplay frames that follow
+// reset this chain, as does a shell chord through consume_use_hold.
+// [orig: Input_ProcessFrame @0x49d520 -- the latch aging @0x49d57f..0x49d585,
+//  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
+//  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
+//  @0x4e0b65..0x4e0b71; Input_HandleSpecialKeys @0x49c5c0, the held-USE digit
+//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790]
+void PlayerInputRouter::sample_use_item(bool p_active) {
+	use_held_prev_ = use_latched_;
+	use_latched_ = false;
+	if (!p_active) {
+		// A menu, the tools window or the armory screen over the hold: no
+		// toggle on the release that follows, no seat pick behind them.
+		use_held_prev_ = false;
+	}
+	if (p_active && pressed("useitem")) {
+		if (!use_held_prev_) {
+			use_hold_consumed_ = false;
+		}
+		use_latched_ = true;
+	}
+	if (use_consume_pending_) {
+		use_hold_consumed_ = true;
+		use_consume_pending_ = false;
+	}
+	const Ref<Simulation> use_sim = sim();
+	Input *input = Input::get_singleton();
+	for (int digit = 0; digit < 10; ++digit) {
+		// The VK digit codes 0x30..0x39 are Godot's KEY_0..KEY_9 values.
+		const bool down = input != nullptr &&
+				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + digit));
+		if (!opennova::world::latched_key_edge(down, use_held_prev_,
+					use_digit_was_down_[digit])) {
+			continue;
+		}
+		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
+		const int seat = digit == 0 ? 9 : digit - 1;
+		if (!use_hold_consumed_ && use_sim.is_valid()) {
+			use_sim->local_player_select_seat(seat);
+		}
+		use_hold_consumed_ = true;
+	}
+	if (!use_latched_ && use_held_prev_ && !use_hold_consumed_ && use_sim.is_valid()) {
+		use_sim->local_player_toggle_mount();
+	}
 }
 
 // The retail radar-zoom bindings are ordinary configurable key rows applying
@@ -239,11 +328,11 @@ void PlayerInputRouter::sample_hud_input(bool p_active) {
 	// witness): a key held across an armory/F3 window must NOT re-fire when
 	// the gate reopens.
 	const Ref<Simulation> hud_sim = sim();
-	if (opennova::world::latched_key_edge(pressed("radarout"), p_active, radar_out_was_down_) &&
+	if (event_row_edge("radarout", p_active, radar_out_was_down_) &&
 			hud_sim.is_valid()) {
 		hud_sim->request_hud_radar_zoom(1);
 	}
-	if (opennova::world::latched_key_edge(pressed("radarin"), p_active, radar_in_was_down_) &&
+	if (event_row_edge("radarin", p_active, radar_in_was_down_) &&
 			hud_sim.is_valid()) {
 		hud_sim->request_hud_radar_zoom(-1);
 	}
@@ -252,7 +341,7 @@ void PlayerInputRouter::sample_hud_input(bool p_active) {
 	// IN-GAME dispatcher, not the menu-context one.
 	// [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
 	//  @0x520bc0 (0->2->3->0)]
-	if (opennova::world::latched_key_edge(pressed("map_toggle"), p_active, map_toggle_was_down_) &&
+	if (event_row_edge("map_toggle", p_active, map_toggle_was_down_) &&
 			hud_sim.is_valid()) {
 		hud_sim->request_hud_map_cycle();
 	}
