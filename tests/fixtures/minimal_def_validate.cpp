@@ -76,17 +76,16 @@ int main() {
 		def_free_items(&items);
 	}
 
-	// weapon.def — the ONE rifle: WPN_M4AUTO, the spawn/equip default the engine
-	// resolves by LITERAL [orig: PlayerClass_InitEntity @ 0x4B1116 ->
-	// AvatarDef_FindIndexByName("WPN_M4AUTO")], carrying the first-person
-	// viewmodel slice the bring-up set ships (the AKM model). A set without that
-	// name spawns the player unarmed; a second name would only restate the rows.
+	// weapon.def — the ONE rifle: WPN_AK47AUTO, the AKM first-person model the
+	// bring-up set ships. The engine's hardcoded WPN_M4AUTO spawn default
+	// [orig: PlayerClass_InitEntity @ 0x4B1116] is deliberately unanswered: the
+	// mission's kit arms the player (minimal_map_validate pins it).
 	{
 		DefWeaponsFile weapons{};
 		CHECK(def_parse_weapons(path("weapon.def").c_str(), &weapons) == 0, "weapon.def parses");
 		CHECK(weapons.count == 1, "weapon.def carries exactly one weapon");
-		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_M4AUTO");
-		CHECK(rifle != nullptr, "weapon.def carries WPN_M4AUTO (the spawn/equip default)");
+		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_AK47AUTO");
+		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the one rifle)");
 		if (rifle != nullptr) {
 			CHECK(std::strcmp(rifle->gfx1, "AKM_1st") == 0, "the rifle names its first-person model");
 			CHECK(std::strcmp(rifle->animadm, "AKM_1ST") == 0, "the rifle names its first-person .adm");

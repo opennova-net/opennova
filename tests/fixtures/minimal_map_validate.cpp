@@ -7,14 +7,15 @@
 //
 // What is worth guarding is what the ENGINE needs, checked against the committed file:
 // it parses, it places the player, it points at the minimal terrain, it starts in daylight,
-// it carries no offline weapon kit (the one rifle the set ships is the engine's own WPN_M4AUTO
-// spawn default, so a kit would only restate it), and it places the set's own model, the
-// house (items.def 108001, assets/house.3di).
+// it arms the player with the one rifle the set ships (the AK as its weapon kit, listed as
+// allowed -- the set answers no WPN_M4AUTO, so the kit is what the single-player load
+// promotes [orig: Mission_LoadBMSFile @ 0x40F4E0, the non-session branch]), and it places
+// the set's own model, the house (items.def 108001, assets/house.3di).
 //
 // `--write` is deliberately a surgical editor rather than a generator: it loads the committed
-// ONED-authored mission, clears a kit if one is present, adds the house when no building names
-// it, and emits it through the production BMS writer (bms::write, from scratch). Existing
-// records and fields are otherwise preserved.
+// ONED-authored mission, sets the kit and the availability list to the AK when they differ,
+// adds the house when no building names it, and emits it through the production BMS writer
+// (bms::write, from scratch). Existing records and fields are otherwise preserved.
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
@@ -44,6 +45,13 @@ int fail = 0;
 	} while (0)
 
 const char *kMapBase = "mnml";
+// The one rifle weapon.def ships. The kit tuple is {name, ammoPri, ammoSec, flags}: six clips
+// requested, the secondary and the damage-class byte at their -1 defaults (net-re section 5.63).
+const char *kRifle = "WPN_AK47AUTO";
+const char *kRifleClips = "6";
+// The availability chunk's status byte is signed in the original's read; -1 maps to
+// "mission-allowed" at apply [orig: build_item_restriction_table @ 0x54DDB0, @ 0x54de3f..0x54de49].
+const int kMissionAllowedStatus = -1;
 // Only ids the engine addresses BY NUMBER are reserved; 106001 is the player start marker the
 // engine reads to place the hardcoded player item. The team starts are the MP spawn markers
 // the host/join acceptance step depends on -- a map without both loads completely and leaves
@@ -79,6 +87,17 @@ bool is_lfs_pointer(const std::vector<uint8_t> &b) {
 	static const char kSentinel[] = "version https://git-lfs";
 	const size_t n = sizeof(kSentinel) - 1;
 	return b.size() >= n && std::equal(kSentinel, kSentinel + n, b.begin());
+}
+
+bool kit_is_the_rifle(const opennova::bms::File &doc) {
+	const std::vector<opennova::mission::WeaponLoadoutEntry> kit = opennova::mission::weapon_loadout(doc);
+	return kit.size() == 1 && kit.front().name == kRifle;
+}
+
+bool availability_is_the_rifle(const opennova::bms::File &doc) {
+	const std::vector<opennova::mission::ItemAvailabilityEntry> rows =
+			opennova::mission::item_availability(doc);
+	return rows.size() == 1 && rows.front().name == kRifle && rows.front().status == kMissionAllowedStatus;
 }
 
 int count_houses(const opennova::bms::File &doc) {
@@ -141,17 +160,30 @@ int main(int argc, char **argv) {
 
 		bool changed = false;
 
-		// No offline kit: the player spawns with the engine's WPN_M4AUTO default, the one rifle
-		// weapon.def ships. A kit here would either restate that or name a weapon the set does
-		// not carry.
-		std::vector<opennova::mission::WeaponLoadoutEntry> loadout =
-				opennova::mission::weapon_loadout(doc);
-		if (write_mode && !loadout.empty()) {
-			CHECK(opennova::mission::set_weapon_loadout(doc, {}, error), error.c_str());
-			loadout.clear();
+		// The kit: the one rifle, promoted over the engine's WPN_M4AUTO default on the
+		// single-player load (a live session takes the profile's kit instead).
+		if (write_mode && !kit_is_the_rifle(doc)) {
+			opennova::mission::WeaponLoadoutEntry rifle;
+			rifle.name = kRifle;
+			rifle.ammo_primary = kRifleClips;
+			rifle.ammo_secondary = "-1";
+			rifle.flags = "-1";
+			CHECK(opennova::mission::set_weapon_loadout(doc, {rifle}, error), error.c_str());
 			changed = true;
 		}
-		CHECK(loadout.empty(), "the mission carries no offline weapon kit (the engine default equips)");
+		CHECK(kit_is_the_rifle(doc), "the mission's weapon kit is the one rifle, WPN_AK47AUTO");
+
+		// The availability list: the same rifle, mission-allowed.
+		if (write_mode && !availability_is_the_rifle(doc)) {
+			doc.item_availability.clear();
+			opennova::bms::ItemAvailabilityEntry allowed;
+			allowed.name = kRifle;
+			allowed.status = static_cast<uint8_t>(kMissionAllowedStatus);
+			doc.item_availability.push_back(allowed);
+			opennova::mission::sync_counts(doc);
+			changed = true;
+		}
+		CHECK(availability_is_the_rifle(doc), "the mission lists WPN_AK47AUTO as its one allowed weapon");
 
 		int houses = count_houses(doc);
 		if (write_mode && houses == 0) {
@@ -188,14 +220,14 @@ int main(int argc, char **argv) {
 			std::vector<uint8_t> generated;
 			CHECK(opennova::bms::write(doc, generated, error), error.c_str());
 
-			// Never replace the committed mission until the produced bytes parse and carry the edit.
+			// Never replace the committed mission until the produced bytes parse and carry the edits.
 			opennova::bms::File verify;
 			if (fail == 0)
 				CHECK(opennova::bms::parse(generated.data(), generated.size(), verify, error),
 				      "rewritten mnml.bms parses");
 			if (fail == 0) {
-				CHECK(opennova::mission::weapon_loadout(verify).empty(),
-				      "rewritten mnml.bms carries no kit");
+				CHECK(kit_is_the_rifle(verify), "rewritten mnml.bms keeps the rifle kit");
+				CHECK(availability_is_the_rifle(verify), "rewritten mnml.bms keeps the rifle allowed");
 				CHECK(count_houses(verify) == 1, "rewritten mnml.bms places the house once");
 			}
 
@@ -210,10 +242,11 @@ int main(int argc, char **argv) {
 					std::printf("wrote %s (%zu bytes)\n", bms_path.c_str(), generated.size());
 			}
 		} else if (write_mode && fail == 0) {
-			std::printf("%s already carries no kit and places the house\n", bms_path.c_str());
+			std::printf("%s already arms the rifle, allows it, and places the house\n", bms_path.c_str());
 		}
 	}
 
-	if (fail == 0) std::printf("OK: minimal map .env + .bms valid; no kit; the house stands\n");
+	if (fail == 0)
+		std::printf("OK: minimal map .env + .bms valid; the AK is the kit and the allowed weapon; the house stands\n");
 	return fail == 0 ? 0 : 1;
 }

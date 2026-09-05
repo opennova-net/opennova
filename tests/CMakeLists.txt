@@ -638,6 +638,15 @@ target_compile_definitions(minimal_map_validate_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
+# Minimal mission boot through the production kernel: its offline BMS kit
+# overrides the WPN_M4AUTO engine fallback and equips the real AK identity.
+add_executable(minimal_runtime_loadout_test fixtures/minimal_runtime_loadout.cpp)
+target_link_libraries(minimal_runtime_loadout_test PRIVATE opennova_runtime)
+target_compile_features(minimal_runtime_loadout_test PRIVATE cxx_std_17)
+target_compile_definitions(minimal_runtime_loadout_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_runtime_loadout COMMAND minimal_runtime_loadout_test)
+
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)

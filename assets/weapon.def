@@ -2,15 +2,15 @@
 // viewmodel it submits. Authored from scratch (no retail asset); parses through
 // engine/formats/def def_parse_weapons.
 //
-// ONE entry: WPN_M4AUTO, the spawn/equip default the engine resolves BY NAME at
-// player spawn [orig: PlayerClass_InitEntity @ 0x4B1116 ->
-// AvatarDef_FindIndexByName("WPN_M4AUTO")] and the fresh profile's single-player
-// + class pages (engine/formats/playersav/weapon_sav.cpp). Without a definition
-// of that name the player spawns with no weapon at all, so the one rifle this
-// set ships answers to it -- and carries the viewmodel the bring-up set has
-// (the AKM first-person model, its .adm and the character arms). The
-// first-person def resolves from the EQUIPPED weapon's own rows, so no second
-// name and no mission kit are needed.
+// ONE entry: WPN_AK47AUTO, the rifle the bring-up set actually ships (the AKM
+// first-person model, its .adm and clips, the character arms). The engine's
+// hardcoded spawn default is WPN_M4AUTO, resolved BY NAME at player spawn
+// [orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")];
+// this set deliberately does not answer it -- the mission arms the player
+// instead: mnml.bms carries the AK as its weapon kit and lists it as allowed,
+// which the single-player load promotes over the default [orig:
+// Mission_LoadBMSFile @ 0x40F4E0, the non-session branch]. The first-person def
+// resolves from the equipped weapon's own rows.
 //
 // The GFX1/GFX1A/ANIMADM/pos/TPOS row shapes are the witnessed REVX02 weapon.def
 // layout [orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers
@@ -23,10 +23,10 @@
 // carried ahead of the asset it names.
 ammoclass_max_carry CLASS_556MM		1000
 
-weapon "WPN_M4AUTO"
+weapon "WPN_AK47AUTO"
 	category 1
 	rank     0
-	statid   100
+	statid   101
 	// The magazine + reserve keys the parser actually reads [orig: WeaponDef_ParseProperty
 	// @ 0x54d730]: clipsize is the magazine (no key = a no-clip weapon, so the reload
 	// gate refuses), ammoclass names the carried pool the reserve reads through
