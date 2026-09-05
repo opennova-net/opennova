@@ -317,14 +317,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the tests read fixtures/ and assets/ only
+          lfs: false   # scoped below: native fixtures, game assets, and preview examples
           submodules: recursive
 
-      - name: Pull Git LFS assets (fixtures/ and assets/ only)
+      - name: Pull Git LFS assets (fixtures, assets, and preview examples)
         shell: bash
         run: |
           git lfs install --local
-          git lfs pull --include="fixtures/**,assets/**"
+          git lfs pull --include="fixtures/**,assets/**,examples/world_preview/**"
 
       # The retail data the asset gates need (docs/asset-gated-tests.md); the
       # same composite action as the engine test job.
