@@ -598,3 +598,110 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			"the mounted eye sits above the lifted carrier anchor")
 	assert_lt(view.camera_pitch_deg, 0.0,
 			"the mounted camera looks down on the vehicle")
+
+
+func _culled_wire_after_frames(sim: Simulation, camera: Transform3D, frames: int) -> Dictionary:
+	# Fold the diff-based verdict feed (added count, removed count, ids...)
+	# into the set of wire handles the collector gate currently culls.
+	var culled := {}
+	for _frame in range(frames):
+		sim.run_occlusion_frame(camera, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+		var changes: PackedInt32Array = sim.get_wire_render_culled_changes()
+		if changes.size() < 2:
+			continue
+		# [added_count, added ids..., removed_count, removed ids...] — the
+		# same layout GameWorld's occlusion frame applies.
+		var added := int(changes[0])
+		for i in range(1, 1 + added):
+			culled[int(changes[i])] = true
+		for i in range(2 + added, changes.size()):
+			culled.erase(int(changes[i]))
+	return culled
+
+
+func _camera_behind(origin: Vector3, travel: Vector3) -> Transform3D:
+	var forward := travel.normalized()
+	var eye := origin - forward * 5.0 + Vector3(0.0, 1.5, 0.0)
+	return Transform3D(Basis.looking_at(forward, Vector3.UP), eye)
+
+
+func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
+	# The listen host's own runtime spawns (the DBuggy's addeweap gun) pass the
+	# same collector gate as its placed rows, from their LIVE pose. The host's
+	# loopback 0x0A is header-only, so the decoded row keeps the spawn image:
+	# a sphere pinned there culled the gun as soon as the driven buggy left
+	# it behind ("the emplaced weapon disappears when you drive").
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
+		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
+		return
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	var child_types := {}
+	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(DBUGGY_ITEM_ID):
+		child_types[authored.item_id - 100000] = true
+	assert_gt(child_types.size(), 0, "the shipped DBuggy authors a child emplacement")
+
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var placed := mission.add_entity(
+			MissionData.KIND_ITEM, DBUGGY_ITEM_ID, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_not_null(placed)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var placer := MissionObjectPlacer.create(root, item_db)
+	placer.place(mission, container)
+	var mission_objects := container.get_node_or_null("MissionObjects") as Node3D
+	assert_not_null(mission_objects)
+	if mission_objects == null:
+		return
+	var rt = MissionRoot.new()
+	add_child_autofree(rt)
+	var node_options := MissionSetupOptions.new()
+	node_options.resource_root = root
+	node_options.item_db = item_db
+	node_options.placer = placer
+	node_options.playable = true
+	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
+	assert_true(rt.tick())
+	var sim: Simulation = rt.get_sim()
+	var carrier_node := rt.get_entity_index().resolve(
+			placed.bms_id, MissionData.KIND_ITEM, placed.index) as Node3D
+	assert_not_null(carrier_node)
+	if carrier_node == null:
+		return
+	var handles: Array = _synthetic_attachment_rows(sim, child_types).keys()
+	assert_gt(handles.size(), 0, "the DBuggy attachment reaches the wire-present path")
+
+	# Parked: a camera behind the buggy collects both the buggy and its gun.
+	var parked := carrier_node.global_transform.origin
+	var culled := _culled_wire_after_frames(sim, _camera_behind(parked, Vector3.FORWARD), 4)
+	var culled_bms := sim.get_render_culled_changes()
+	assert_false(Array(culled_bms).slice(1, 1 + int(culled_bms[0])).has(placed.bms_id),
+			"the parked buggy is collected")
+	for handle_v in handles:
+		assert_false(culled.has(int(handle_v)),
+				"attachment %04x is collected beside the parked buggy" % int(handle_v))
+
+	assert_true(sim.local_player_toggle_mount(), "the local player mounts the DBuggy")
+	rt.play()
+	for _tick in range(62 * 6):
+		var input := MissionFrameInput.new()
+		input.delta_seconds = Simulation.tick_dt()
+		input.set_movement(true, false, false, false, false, false, false)
+		var outcome: MissionFrameOutcome = rt.advance_session_frame(input)
+		assert_true(outcome != null and outcome.did_tick(), "each drive frame runs one logic tick")
+	var driven := carrier_node.global_transform.origin
+	var travel := driven - parked
+	assert_gt(travel.length(), 8.0, "the DBuggy drove well clear of its spawn image")
+
+	# Driven: the camera rides behind the buggy, the spawn image is far behind it.
+	culled = _culled_wire_after_frames(sim, _camera_behind(driven, travel), 4)
+	culled_bms = sim.get_render_culled_changes()
+	assert_false(Array(culled_bms).slice(1, 1 + int(culled_bms[0])).has(placed.bms_id),
+			"the driven buggy is collected")
+	for handle_v in handles:
+		assert_false(culled.has(int(handle_v)),
+				"attachment %04x stays collected on the driven buggy (live pose, not the spawn image)" % int(handle_v))

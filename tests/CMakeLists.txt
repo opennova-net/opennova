@@ -2582,7 +2582,7 @@ foreach(port
         world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/lose_flow_04tr)
+        mission/native_assets_00trg mission/lose_flow_04tr mission/buggy_01tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
