@@ -17,6 +17,7 @@
 
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
 
+#include <runtime/simassets/collision_resolve.h> // find_item_def (a rider's authored hp)
 #include <runtime/simassets/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -154,19 +155,20 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 		// An occupied raw slot still blocks selection, but an unresolved
 		// client rider has no HUD marker [orig: driver rider-state gate @0x5A56F5].
 		if (rider == nullptr) return {true, false, 0, 0, false};
+		// The retained spawn slot names our wire H until sync_authoritative_mount
+		// reconciles it to L; retail reads the one local entity either way.
+		if (local != nullptr && runtime->has_self_handle() &&
+				rider->handle == runtime->self_handle())
+			return {true, local->handle == requester, local->health, local->health_max, true, true};
 	}
 	if (rider == nullptr) return {};
 
 	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player};
-	const def::DefItemDef *item = nullptr;
-	if (const def::DefItemsFile *items = kernel_->items_table()) {
-		for (size_t i = 0; i < items->count; ++i) {
-			if (items->entries[i].id == rider->type_id + mission::kItemIdOffset) {
-				item = &items->entries[i];
-				break;
-			}
-		}
-	}
+	const def::DefItemsFile *items = kernel_->items_table();
+	const def::DefItemDef *item = items != nullptr
+			? simassets::find_item_def(*items,
+					  static_cast<int>(rider->type_id) + mission::kItemIdOffset)
+			: nullptr;
 	if (item == nullptr) return result;
 	result.health = result.max_health = item->hp;
 	if (rider->cls == EntityClass::Player && rider->net_has_compact) {

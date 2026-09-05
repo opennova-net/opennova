@@ -2,7 +2,6 @@
 
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
-#include "simulation/player_local_view.h"
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
@@ -188,21 +187,25 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 // switch_denied).
 void PlayerInputRouter::send_weapon_switch_input(bool p_captured) {
 	const Ref<Simulation> switch_sim = sim();
-	const Ref<PlayerLocalView> view = switch_sim.is_valid() ? switch_sim->get_local_player_view() : Ref<PlayerLocalView>();
-	const bool mounted = view.is_valid() && view->get_mounted();
-	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22]
+	// The seat rows default to Ctrl+1..Ctrl+0 and the weapon categories to the
+	// bare digits; the binding's own modifier keeps them apart, so neither
+	// side is gated on the mount state here. Off a mount the seat action is
+	// an engine no-op (no slot list), and a control seat refuses the category
+	// switch inside the engine's walk, as retail does.
+	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22;
+	//  Player_SwitchToWeaponByHandle parentSlot gate @0x4e0192]
 	static const char *seat_tokens[] = {"seat1", "seat2", "seat3", "seat4", "seat5",
 			"seat6", "seat7", "seat8", "seat9", "seat10"};
 	for (int i = 0; i < 10; ++i) {
-		if (opennova::world::latched_key_edge(pressed(seat_tokens[i]),
-				p_captured && mounted, seat_was_down_[i]) && switch_sim.is_valid())
+		if (opennova::world::latched_key_edge(pressed(seat_tokens[i]), p_captured,
+				seat_was_down_[i]) && switch_sim.is_valid())
 			switch_sim->local_player_select_seat(i);
 	}
 	int down_mask = 0;
 	for (int64_t i = 0; i < weapon_category_tokens_.size(); ++i) {
 		if (p_captured && pressed(weapon_category_tokens_[i].utf8().get_data())) {
 			down_mask |= 1 << i;
-			if (!mounted && (category_was_down_ & (1 << i)) == 0 && switch_sim.is_valid()) {
+			if ((category_was_down_ & (1 << i)) == 0 && switch_sim.is_valid()) {
 				switch_sim->request_local_player_weapon_category(
 						static_cast<Simulation::WeaponCategory>(i + 1));
 			}
