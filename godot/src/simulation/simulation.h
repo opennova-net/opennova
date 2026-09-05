@@ -2253,6 +2253,7 @@ public:
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a
 	// mount, swap or dismount applied. (engine: runtime/mission/mission_kernel.h)
 	bool local_player_toggle_mount();
+	bool local_player_select_seat(int p_index);
 
 	// The floating attach labels around the local player (world::AttachLabel:
 	// the mission-space position with the +0.1875 u lift applied, the seat

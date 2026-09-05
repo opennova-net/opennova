@@ -4531,11 +4531,54 @@ is); per free-or-own seat, weight by type — **ctrl/drvr 0x2000 < UseGun/defaul
 (the driver seat wins a deck board). AI boarding modes constrain it: aiComp
 mode 123 takes only `sitex`, mode 124 refuses `ctrlx` (see 23.4).
 
-Seat-position keys: actions 0xB6-0xBF -> `Entity_FindAvailableSeat(player,
-0..9)` [orig: @ 0x436790] — seat N of the CURRENT mount's slot list (weapon
-idle-gated; a seat occupied by an AI can be displaced by a player —
-`occupant.Flags & 0x100` check). Unported (follow-up; the toggle covers the
-missions).
+Seat-position keys are ported (2026-09-05, D-AI-11 d). Actions 0xB6-0xBF
+select indices 0..9 of the CURRENT mount's slot list; the default keys are
+1..9,0. The list starts with the control seat, then attached gun children,
+then passenger slots 0..7. It is independent of USRP/vector order and HUD
+texture availability. A gun-child mount re-roots to its carrier; a root
+without vehicle attrib 0x40 or a control bone produces no list.
+[orig: Input_HandleActionBinding_0 @ 0x4E0B81..0x4E0C22;
+Entity_BuildWeaponSlotList @ 0x434C60..0x434DDA]
+
+The action accepts a missing EquippedSlot, currentAction < 2, or
+currentAction == 11. Unlike USE, pending action 11 and current dry-click
+state 5 do not pass. A free slot qualifies; a player requester may also
+REQUEST a resolved non-player occupant's slot. This is not force displacement:
+the request reaches the ordinary authority handler, whose occupied-slot arm
+rejects it. A client waits for the host's compact relationship echo before
+changing its mounted body. [orig: Entity_FindAvailableSeat @ 0x436798..0x4368B0;
+Entity_RequestVehicleAttach @ 0x4365DD..0x436602;
+Entity_ProcessVehicleAttach @ 0x435BA9..0x435BB1]
+
+`LocalPlayer::find_numbered_seat` owns the action gate and uses
+`find_numbered_vehicle_seat` over the same `build_vehicle_panel_slots` list as
+the overlay. `select_numbered_seat` applies the authority path;
+`JoinerRole::queue_numbered_seat` submits C2S 0x26 with the joiner's wire H.
+`PlayerInputRouter` samples the configurable seat bindings on down edges while
+mounted, retaining raw key latches across inactive UI frames and suppressing
+weapon-category switches in that context. Unresolved retained occupants stay
+blocked until their player/AI classification is known.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Numbered seat query and weapon gate | MATCHING (behavioral proof) | `vehicle_panel_feed`: driver/gun/passenger order, gun-child re-root, bounds, human/AI/unresolved occupancy, missing control bone, idle/dry/reload/overheat and missing-weapon gates |
+| Joiner numbered-seat request and confirmation | MATCHING (behavioral proof) | `inmatch_joiner_role`: passenger first in vector, key-1 index selects driver bone, framed 0x26 uses H rather than L, body waits for echo, then forward drives the carrier and emits moving 0x0C |
+| Godot binding and input sampling | host code / not grillable | thin `Simulation::local_player_select_seat` role dispatch; real keyboard retail-host verification recorded in net-re section 5.10 |
+
+A live retail-host/OpenNova-joiner run on `00TRa.bms` established the pre-port
+failure: while seated in the transport truck's passenger position, key 1
+emitted no attach request. After the port it did; the authority correctly
+refused that particular AI-occupied driver seat. On a free ATV, keys 2 and 1
+then switched from driver to passenger and back through actual confirmations,
+and normal forward input moved retail's vehicle about 17.4 metres. See net-re
+section 5.10 for the live evidence and its LAN scope. The matching proxy and
+four-player host settings were required to establish this test pair; a copied
+one-player setting had previously stalled admission.
+
+IDB changes made during the session: appended comments on
+`Entity_FindAvailableSeat @ 0x436790`, `Entity_BuildWeaponSlotList @ 0x434C60`
+and the key-1 call site `@ 0x4E0B81`; corrected the AI-displacement interpretation
+additively, renamed no symbols, and saved the IDB.
 
 Port notes (`vehicle_attach.cpp`): `VehicleSystem::player_toggle_mount` +
 `find_nearest_free_seat` + `attach_to_seat_index` over our seat model; the
@@ -4948,7 +4991,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, death-detach animation, UseGun live root position, and the joiner C2S 0x26/0x27 + requester-local S2C 0x0A confirmation leg (`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`; player/AI callers `0x4b63c7` / `0x4bec23`): (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS/reject leg (`attrib & 0x20` -> `groundEntity`) is unmodeled, while the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) seat-position keys 0xB6-0xBF and the displace-AI rule are unported; (e) the AI board walk is ported (#571, 2026-08-25 — §23.4); the 64-tick seated seat-upgrade `@ 0x4ba9d8..0x4baa41` and the E1..E8 entry-bone stagger stay open under D-INF-2; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains a candidate skip until pool-1 hulls are built. Generic-seat follow and the full UseGun matrix basis remain D-INF-2. | §23.1/§23.4/§23.5 and §26; asset-gated 00TRc E50triB GUT | mount/ride/drive/emplaced-fire/death, UseGun root position, and joiner relationship confirmation are live; boarding, generic/full-basis, and scan residuals stay OPEN |
+| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, death-detach animation, UseGun live root position, and the joiner C2S 0x26/0x27 + requester-local S2C 0x0A confirmation leg (`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`; player/AI callers `0x4b63c7` / `0x4bec23`): (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS/reject leg (`attrib & 0x20` -> `groundEntity`) is unmodeled, while the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) numbered seat-position keys 0xB6-0xBF are ported (2026-09-05; request-side AI eligibility preserves the authority occupied-slot rejection); (e) the AI board walk is ported (#571, 2026-08-25 — §23.4); the 64-tick seated seat-upgrade `@ 0x4ba9d8..0x4baa41` and the E1..E8 entry-bone stagger stay open under D-INF-2; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains a candidate skip until pool-1 hulls are built. Generic-seat follow and the full UseGun matrix basis remain D-INF-2. | §23.1/§23.4/§23.5 and §26; asset-gated 00TRc E50triB GUT | mount/ride/drive/emplaced-fire/death, UseGun root position, and joiner relationship confirmation are live; boarding, generic/full-basis, and scan residuals stay OPEN |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

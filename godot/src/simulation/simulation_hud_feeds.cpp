@@ -9,6 +9,7 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
 
+#include <formats/mission/mission.h> // runtime type -> authored item ID
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
 #include <runtime/replication/client_state.h>
@@ -41,7 +42,7 @@ Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	if (root == nullptr) return out;
 	opennova::world::VehiclePanelRoot v;
 	v.shown = true;
-	v.item_id = root->item_id;
+	v.item_id = root->item_id + opennova::mission::kItemIdOffset;
 	out->assign(v);
 	return out;
 }

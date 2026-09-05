@@ -8,6 +8,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -206,11 +207,39 @@ VehicleSeatOccupancy vehicle_seat_occupancy(
     result.occupied = seat.occupant.valid();
     if (const Entity *rider = world.registry.get(seat.occupant)) {
         result.rider_resolved = true;
+        result.player = (rider->flags & kEntityFlagPlayer) != 0;
         result.own_seat = seat.occupant == requester;
         result.health = rider->health;
         result.max_health = rider->health_max;
     }
     return result;
+}
+
+// [orig: Entity_FindAvailableSeat @0x436790..0x4368BB]
+bool find_numbered_vehicle_seat(const World &world, const Entity &player, int index,
+        VehicleSeatSelection &out, const VehicleOccupancySource *source) {
+    out = {};
+    if (index < 0 || index >= kVehiclePanelSlotMax) return false;
+    const EntityHandle root = vehicle_panel_root(world, player);
+    std::vector<VehiclePanelSlot> slots;
+    if (index >= build_vehicle_panel_slots(world, root, slots)) return false;
+    const VehiclePanelSlot &slot = slots[static_cast<size_t>(index)];
+    const Entity *carrier = world.registry.get(slot.entity);
+    if (carrier == nullptr) return false;
+    for (int i = 0; i < static_cast<int>(carrier->seats.size()); ++i) {
+        const Seat &seat = carrier->seats[static_cast<size_t>(i)];
+        if (seat.retail_slot != slot.type || seat.bone_index == 0 ||
+                (seat.type != SeatType::Passenger && seat.type != SeatType::Controller &&
+                 seat.type != SeatType::Driver && seat.type != SeatType::Gunner)) continue;
+        const auto occupied = vehicle_seat_occupancy(world, *carrier, seat, player.handle, source);
+        // The requester-side AI exception is not a force-attach. Retail's
+        // authority still rejects occupied slots @0x435BA9..0x435BB1.
+        if (occupied.occupied && ((player.flags & kEntityFlagPlayer) == 0 ||
+                !occupied.rider_resolved || occupied.player)) return false;
+        out = {carrier->handle, i, seat.type};
+        return true;
+    }
+    return false;
 }
 
 bool find_best_vehicle_seat(

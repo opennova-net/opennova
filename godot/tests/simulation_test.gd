@@ -2460,6 +2460,49 @@ func test_load_from_editor_mission_data() -> void:
 	assert_eq(sim.get_brain_count(), 2, "both organics got AI brains")
 	assert_eq(sim.get_entity_kind(0), 3, "entity 0 maps back to KIND_ORGANIC")
 
+# The mounted view hands an authored items.def ID to the HUD's SID lookup.
+# A runtime type (1294) cannot find the definition (101294); the live retail
+# join used to draw no panel even though the mount itself succeeded.
+func test_vehicle_panel_resolves_authored_item_id_after_seat_selection() -> void:
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
+	var item_db := _item_db_from_text(dir, """begin "Panel carrier"
+  id 101294
+  sid carrier_panel
+  type vehicle
+  graphic carrier
+  hp 3000
+  attrib: PlayerControl
+end
+""")
+	_write_fixture_text(dir, "hudpos.def", """VEHICLE_HUD
+  sid carrier_panel
+  interface carrier_panel.tga
+  driver 16,196
+  seats 4,38,196,60,196,82,196,104,196
+VEHICLE_END
+""")
+	var layout := HudPos.new()
+	assert_eq(layout.load(dir.path_join("hudpos.def")), OK)
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101294, Vector3.ZERO, Vector3.ZERO))
+	var sim := Simulation.new()
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	assert_true(sim.local_player_toggle_mount())
+	# Pick a different seat first so key 1 exercises the driver's request.
+	sim.local_player_select_seat(1)
+	assert_true(sim.local_player_select_seat(0))
+	var view := sim.get_vehicle_panel_view()
+	assert_true(view.shown)
+	assert_eq(view.item_id, 101294, "the HUD receives the definition ID, not wire type 1294")
+	var block := layout.get_vehicle_hud(item_db.get_sid(view.item_id))
+	assert_not_null(block, "a confirmed driver resolves the authored vehicle panel")
+
+
 func test_item_seat_specs_mount_command_125_spawn() -> void:
 	# carrier authors one ctrlx13 point plus four sitexNN points: the native
 	# extraction supplies the seat table the Dictionary seam used to fake.

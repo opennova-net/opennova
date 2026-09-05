@@ -129,7 +129,7 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	const world::Entity *local = kernel_->local.player();
 	if (local != nullptr && local->mounted && local->mount_target == carrier.handle &&
 			local->mount_bone == seat.bone_index) {
-		return {true, local->handle == requester, local->health, local->health_max, true};
+		return {true, local->handle == requester, local->health, local->health_max, true, true};
 	}
 	const auto &state = runtime->state();
 	const replication::ClientEntityState *rider = nullptr;
@@ -157,11 +157,11 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	}
 	if (rider == nullptr) return {};
 
-	world::VehicleSeatOccupancy result{true, false, 1, 1, true};
+	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player};
 	const def::DefItemDef *item = nullptr;
 	if (const def::DefItemsFile *items = kernel_->items_table()) {
 		for (size_t i = 0; i < items->count; ++i) {
-			if (items->entries[i].id == rider->type_id) {
+			if (items->entries[i].id == rider->type_id + mission::kItemIdOffset) {
 				item = &items->entries[i];
 				break;
 			}
@@ -218,6 +218,16 @@ bool JoinerRole::queue_mount_toggle() {
 			hit.seat_index >= static_cast<int>(vehicle->seats.size())) return false;
 	return runtime->queue_vehicle_attach(hit.vehicle.packed,
 			vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index);
+}
+
+// [orig: Entity_FindAvailableSeat @0x436790 -> Entity_RequestVehicleAttach @0x436602]
+bool JoinerRole::queue_numbered_seat(int index) {
+	if (!kernel_ || !runtime) return false;
+	world::VehicleSeatSelection selected;
+	if (!kernel_->local.find_numbered_seat(index, selected, this)) return false;
+	const world::Entity *carrier = kernel_->world.registry.get(selected.vehicle);
+	return carrier != nullptr && runtime->queue_vehicle_attach(selected.vehicle.packed,
+			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
 }
 
 void JoinerRole::send_stance_change(uint16_t action_id) {
