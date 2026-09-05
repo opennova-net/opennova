@@ -97,6 +97,9 @@ void BindingSet::restore_defaults() {
     // unbound) [orig: the DEFAULTS copy loop @ 0x55bdda..0x55be69].
     records_[i].primary = static_cast<uint16_t>(cat[i].default_key);
     records_[i].secondary = static_cast<uint16_t>(cat[i].default_key2);
+    // The slot-1 modifier rides the same static row (+24): Ctrl+1..Ctrl+0
+    // for the seat rows, Ctrl+T for gtalk, ... [orig: seat1 @0x8160D8 +24].
+    records_[i].primary_mod = static_cast<uint16_t>(cat[i].default_mod);
   }
 }
 

@@ -238,6 +238,10 @@ bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 bool LocalPlayer::select_numbered_seat(int index) {
 	w::VehicleSeatSelection selected;
 	if (!find_numbered_seat(index, selected)) return false;
+	// The same out-of-session unarmed UseGun rejection toggle_mount carries
+	// [orig: Entity_AttachToUseGunSlot @0x546c07].
+	if (!world_.rules.session_open && !weapon.active && selected.type == w::SeatType::Gunner)
+		return false;
 	const w::Entity *carrier = world_.registry.get(selected.vehicle);
 	const bool changed = carrier != nullptr && world_.vehicles.process_attach(
 			world_.cached.local_player, selected.vehicle,

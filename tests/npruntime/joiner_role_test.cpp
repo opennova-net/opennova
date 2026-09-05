@@ -518,8 +518,20 @@ bool run_remote_vehicle_occupancy() {
 	             "remote dismount frees selection and panel despite stale spawn occupancy");
 	world.registry.get(vh)->seats[0].occupant = w::EntityHandle{0x5000};
 	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
-	ok &= expect(!panel[0].occupied,
-	             "an unresolved raw control handle does not draw a rider health marker");
+	ok &= expect(!panel[0].occupied && panel[0].label.empty(),
+	             "an unresolved raw control handle draws neither a rider marker nor a digit");
+
+	// The retained spawn slot can still name our wire H before the first self
+	// compact reconciles it to L: that seat is the local player's own.
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	world.registry.get(vh)->seats[0].occupant = w::EntityHandle{0x0005};
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(panel[0].occupied && panel[0].own_seat && panel[0].health == local->health,
+	             "a retained H occupant reads as the local player's own seat");
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	ok &= expect(labels.size() == 1 && labels[0].seat_index == 1,
+	             "the retained H seat is not offered to the local player again");
 	return ok;
 }
 

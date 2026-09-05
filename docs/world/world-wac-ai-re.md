@@ -4532,12 +4532,19 @@ is); per free-or-own seat, weight by type — **ctrl/drvr 0x2000 < UseGun/defaul
 mode 123 takes only `sitex`, mode 124 refuses `ctrlx` (see 23.4).
 
 Seat-position keys are ported (2026-09-05, D-AI-11 d). Actions 0xB6-0xBF
-select indices 0..9 of the CURRENT mount's slot list; the default keys are
-1..9,0. The list starts with the control seat, then attached gun children,
-then passenger slots 0..7. It is independent of USRP/vector order and HUD
-texture availability. A gun-child mount re-roots to its carrier; a root
-without vehicle attrib 0x40 or a control bone produces no list.
-[orig: Input_HandleActionBinding_0 @ 0x4E0B81..0x4E0C22;
+select indices 0..9 of the CURRENT mount's slot list. The catalog binds them
+to Ctrl+1..Ctrl+9 and Ctrl+0: rows 17..26 carry VK_CONTROL (17) in the
+slot-1 modifier word at entry +24, and the keyboard dispatcher's first pass
+matches a row only while its modifier key is held; the modifier-less weapon
+rows on the same digits fire from the fallback pass. The two therefore never
+collide and retail needs no mount-state split between them. The list starts
+with the control seat, then attached gun children, then passenger slots 0..7.
+It is independent of USRP/vector order and HUD texture availability. A
+gun-child mount re-roots to its carrier; a root without vehicle attrib 0x40
+or a control bone produces no list.
+[orig: the binding catalog @ 0x8159AC (108-byte rows; seat1 @ 0x8160D8, +24 =
+0x11); Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7 (modifier pass),
+@ 0x49d3ba..0x49d488 (fallback); Input_HandleActionBinding_0 @ 0x4E0B81..0x4E0C22;
 Entity_BuildWeaponSlotList @ 0x434C60..0x434DDA]
 
 The action accepts a missing EquippedSlot, currentAction < 2, or
@@ -4554,16 +4561,20 @@ Entity_ProcessVehicleAttach @ 0x435BA9..0x435BB1]
 `find_numbered_vehicle_seat` over the same `build_vehicle_panel_slots` list as
 the overlay. `select_numbered_seat` applies the authority path;
 `JoinerRole::queue_numbered_seat` submits C2S 0x26 with the joiner's wire H.
-`PlayerInputRouter` samples the configurable seat bindings on down edges while
-mounted, retaining raw key latches across inactive UI frames and suppressing
-weapon-category switches in that context. Unresolved retained occupants stay
-blocked until their player/AI classification is known.
+`PlayerInputRouter` samples the configurable seat bindings on down edges,
+retaining raw key latches across inactive UI frames; `BindingSet` seeds the
+catalog's Ctrl modifier, so the digit rows reach the weapon walk unchanged and
+a control seat's refusal stays the engine's `parentSlot` 2/3/5 gate
+(`weapon_switch_to_handle`) [orig: Player_SwitchToWeaponByHandle @ 0x4e0192].
+A passenger keeps switching weapons, as in retail. Unresolved retained
+occupants stay blocked until their player/AI classification is known and draw
+neither marker nor digit.
 
 | Component | Verdict | Evidence |
 |---|---|---|
 | Numbered seat query and weapon gate | MATCHING (behavioral proof) | `vehicle_panel_feed`: driver/gun/passenger order, gun-child re-root, bounds, human/AI/unresolved occupancy, missing control bone, idle/dry/reload/overheat and missing-weapon gates |
 | Joiner numbered-seat request and confirmation | MATCHING (behavioral proof) | `inmatch_joiner_role`: passenger first in vector, key-1 index selects driver bone, framed 0x26 uses H rather than L, body waits for echo, then forward drives the carrier and emits moving 0x0C |
-| Godot binding and input sampling | host code / not grillable | thin `Simulation::local_player_select_seat` role dispatch; real keyboard retail-host verification recorded in net-re section 5.10 |
+| Godot binding and input sampling | shell binding / not grillable | thin `Simulation::local_player_select_seat` role dispatch; real keyboard retail-host verification recorded in net-re section 5.10 |
 
 A live retail-host/OpenNova-joiner run on `00TRa.bms` established the pre-port
 failure: while seated in the transport truck's passenger position, key 1
@@ -4571,9 +4582,7 @@ emitted no attach request. After the port it did; the authority correctly
 refused that particular AI-occupied driver seat. On a free ATV, keys 2 and 1
 then switched from driver to passenger and back through actual confirmations,
 and normal forward input moved retail's vehicle about 17.4 metres. See net-re
-section 5.10 for the live evidence and its LAN scope. The matching proxy and
-four-player host settings were required to establish this test pair; a copied
-one-player setting had previously stalled admission.
+section 5.10 for the live evidence and its LAN scope.
 
 IDB changes made during the session: appended comments on
 `Entity_FindAvailableSeat @ 0x436790`, `Entity_BuildWeaponSlotList @ 0x434C60`

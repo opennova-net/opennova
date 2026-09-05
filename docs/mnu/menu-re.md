@@ -1272,6 +1272,15 @@ Accepted/divergent (each a documented decision, not a defect):
 - **D-CTRL-1 (mouse/joystick defaults):** the keyboard defaults are byte-exact from the catalog;
   the per-device mouse/joystick binding arrays are profile-built at runtime, not static, and are
   not ported — mouse/joystick rows show the action list with a blank Control column.
+  2026-09-05: the keyboard slot-1 MODIFIER column is byte-exact too — the catalog row's +24
+  word is VK_CONTROL (17) on seat1..seat10, ScopeZeroInc, nvggainup/nvggaindown, gtalk,
+  sqtalk, respawn, command2 and hudcolor (the +26 slot-2 word is zero on every row), and
+  `BindingSet::restore_defaults` seeds `primary_mod` from it, so the seat chords no longer
+  collide with the digit weapon rows [orig: seat1 @ 0x8160D8 +24; the dispatcher's
+  modifier-first pass `Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7`, fallback
+  `@ 0x49d3ba..0x49d488`]. Witnessed but still unported here: the same row's +20 word is a
+  static MOUSE default mask (Prone 0x10 middle button; ScopeZeroDec/Inc 0x800/0x400 wheel
+  with a Ctrl mouse modifier at +28; attack_1 0x1 left) — the D-CTRL-1 mouse hunt's data.
 - **D-CTRL-2 (visibility filter) — FIXED 2026-07-05:** the witnessed per-entry gate
   (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList @ 0x55c0c0`)
   is ported: every catalog row carries its witnessed flag word (the static catalog's flags

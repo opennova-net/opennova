@@ -960,7 +960,7 @@ and `inmatch_joiner_role` both failed with real ID conventions before the fix.
 The live retail LAN retest then displayed the truck silhouette, its AI-occupied
 driver marker and the local passenger X; the pre-fix screenshot had no panel.
 Numbered seat actions share the panel's ordered slot list; see world-wac-ai-re
-section 23.1. This ID handoff is host code / not grillable; retail's texture gate
+section 23.1. This ID handoff is shell plumbing / not grillable; retail's texture gate
 and health-band rules below are unchanged.
 
 Witnessed in #536/#537/#540/#541, re-witnessed in the post-merge review, and

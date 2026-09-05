@@ -58,6 +58,31 @@ bool test_catalog_defaults() {
   CHECK(jump != nullptr && jump->default_key == 0x20, "jump = Space");
   const ActionDef *reload = find_action("magazine");
   CHECK(reload != nullptr && reload->default_key == 0x52, "reload = R");
+
+  // The seat rows share the digit keys with the weapon categories and differ
+  // only by the slot-1 modifier word (+24): Ctrl+1 = seat1, bare 1 = Knife
+  // [orig: rows @0x8160D8 / @0x81657C; Input_ProcessKeyboardEvents
+  //  @0x49d35b modifier pass, @0x49d3ba fallback].
+  const ActionDef *seat1 = find_action("seat1");
+  CHECK(seat1 != nullptr && seat1->default_key == 0x31 && seat1->default_mod == 0x11,
+        "seat1 = Ctrl+1");
+  const ActionDef *seat10 = find_action("seat10");
+  CHECK(seat10 != nullptr && seat10->default_key == 0x30 && seat10->default_mod == 0x11,
+        "seat10 = Ctrl+0");
+  const ActionDef *knife = find_action("Knife");
+  CHECK(knife != nullptr && knife->default_key == 0x31 && knife->default_mod == 0,
+        "Knife = bare 1");
+  const ActionDef *gtalk = find_action("gtalk");
+  CHECK(gtalk != nullptr && gtalk->default_key == 0x54 && gtalk->default_mod == 0x11,
+        "gtalk = Ctrl+T");
+  CHECK(reload->default_mod == 0, "reload carries no modifier");
+  int ctrl_rows = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    CHECK(cat[i].default_mod == 0 || cat[i].default_mod == 0x11,
+          "the only witnessed slot-1 modifier is VK_CONTROL");
+    if (cat[i].default_mod == 0x11) ++ctrl_rows;
+  }
+  CHECK(ctrl_rows == 18, "eighteen catalog rows default to a Ctrl chord");
   return true;
 }
 
@@ -230,6 +255,15 @@ bool test_binding_set_assignment() {
   r = set.record(fwd);
   CHECK(r->primary == default_primary && r->secondary == default_secondary,
         "DEFAULTS restores the catalog binding");
+  const int seat1 = set.index_of_token("seat1");
+  const int knife = set.index_of_token("Knife");
+  CHECK(seat1 >= 0 && knife >= 0, "seat1 and Knife rows exist");
+  CHECK(set.record(seat1)->primary == 0x31 && set.record(seat1)->primary_mod == 17,
+        "the default seat1 record is the Ctrl+1 chord");
+  CHECK(set.record(knife)->primary == 0x31 && set.record(knife)->primary_mod == 0,
+        "the default Knife record is a bare 1");
+  CHECK(set.control_text(seat1, Device::Keyboard).rfind("Ctrl - 1", 0) == 0,
+        "the Options table shows the seat chord");
 
   // Live rows mirror the static build and consume edits.
   const std::vector<ControlRow> stat = build_rows(Device::Keyboard);

@@ -104,26 +104,31 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
     std::vector<VehiclePanelSlot> slots;
     build_vehicle_panel_slots(world, root_h, slots);
 
+    // Returns true for a held slot whose rider has no def: retail draws
+    // neither its box (the itemDef tests @0x5a5180 / @0x5a56f5 sit inside
+    // the non-0xFFFF arm) nor its digit (the 0xFFFF arm alone prints one).
     const auto occupant_row = [&](const Entity &carrier, const Seat *seat, hud::HudVehicleSeat &row) {
-        if (seat == nullptr) return;
+        if (seat == nullptr) return false;
         const auto occupancy = vehicle_seat_occupancy(world, carrier, *seat, local, source);
         row.occupied = occupancy.occupied && occupancy.rider_resolved;
         row.own_seat = row.occupied && occupancy.own_seat;
         row.health = occupancy.health;
         row.max_health = occupancy.max_health;
+        return occupancy.occupied && !occupancy.rider_resolved;
     };
     char label[8];
 
     for (size_t pos = 0; pos < slots.size(); ++pos) {
         const VehiclePanelSlot &slot = slots[pos];
         hud::HudVehicleSeat row;
+        bool unresolved = false;
         if (slot.type == 8) {
             // The driver pair [orig: @0x5a568e..0x5a5793, digit 1 @0x5a57ee].
             row.x = block.driver_x;
             row.y = block.driver_y;
             row.retail_slot = 8;
             std::snprintf(label, sizeof(label), "%1d", hud::kDriverLabelDigit);
-            occupant_row(*root, seat_by_retail_slot(*root, 8), row);
+            unresolved = occupant_row(*root, seat_by_retail_slot(*root, 8), row);
         } else if (slot.type == 9) {
             // The emplacement pair of the child's gun slot
             // [orig: @0x5a53b7..0x5a5547, digit i + 2 @0x5a5602].
@@ -136,7 +141,7 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
             row.is_emplacement = true;
             std::snprintf(label, sizeof(label), "%1d",
                     hud::emplace_label_digit(slot.gun_slot));
-            occupant_row(*child, gun_seat(*child), row);
+            unresolved = occupant_row(*child, gun_seat(*child), row);
         } else {
             // A passenger seat pair [orig: @0x5a5112..0x5a5364, digit
             //  (listPos + 1) % 10 @0x5a5283].
@@ -146,9 +151,9 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
             row.retail_slot = slot.type;
             std::snprintf(label, sizeof(label), "%1d",
                     hud::seat_label_digit(static_cast<int>(pos)));
-            occupant_row(*root, seat_by_retail_slot(*root, slot.type), row);
+            unresolved = occupant_row(*root, seat_by_retail_slot(*root, slot.type), row);
         }
-        row.label = label;
+        if (!unresolved) row.label = label;
         out.push_back(row);
     }
 }

@@ -2445,8 +2445,6 @@ The training truck's driver was AI-occupied: key 1 reached retail, whose normal
 occupied-seat gate refused it. This confirms that the request-side AI exception
 is not forced displacement. A pre-port run had emitted no request for key 1.
 
-The matching onHook proxy and explicit four-player capacity were necessary for
-this local pair; the earlier startup/admission attempts were setup failures.
 Both owned games stopped cleanly; the host capture completed with zero dropped,
 truncated or write-error packets. Raw captures and screenshots remain local.
 This establishes the retail LAN in-match path, not an external NovaWorld join.

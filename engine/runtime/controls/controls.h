@@ -69,6 +69,16 @@ struct ActionDef {
   // @ 0x55c0c0; KeyBinding_BuildFilteredTable @ 0x54c2b0;
   // UI_BuildKeyBindingLoadoutTable @ 0x559e50].
   uint32_t flags;
+  // The slot-1 modifier VK the catalog defaults carry (entry +24; the slot-2
+  // word at +26 is zero on every row): 17 = VK_CONTROL on seat1..seat10,
+  // ScopeZeroInc, nvggainup/down, gtalk, sqtalk, respawn, command2 and
+  // hudcolor. The keyboard dispatcher's first pass matches only rows whose
+  // modifier key is held; modifier-less rows fire from its fallback pass, so
+  // Ctrl+1 reaches seat1 while a bare 1 reaches Knife
+  // [orig: Input_ProcessKeyboardEvents @0x49d35b..0x49d3a7 (modifier pass),
+  //  @0x49d3ba..0x49d488 (fallback); seat1's row @0x8160D8 +24 = 0x11].
+  // Rows that omit the field aggregate-initialize it to 0.
+  int default_mod = 0;
 };
 
 // The full static catalog (pointer + element count).
