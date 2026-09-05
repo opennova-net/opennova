@@ -692,6 +692,10 @@ hatch (a baseline bump, logged in this doc).
 Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 (no new workflow).
 
+**2026-09-05 citation ratchet refresh:** the retail vehicle/seat changes reduce
+`godot_orig_cites` from 1038 at the base to 1036. The mount rules moved into their
+native owners; the device adapter retains a citation for numbered-key dispatch.
+
 **Logged C-ABI baseline bumps** (the same-commit escape hatch):
 
 - 2026-07-05, 104 → 106: added `def_loadout_weight` + `def_encumbrance_class`

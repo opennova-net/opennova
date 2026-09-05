@@ -31,6 +31,7 @@ struct VehicleSeatOccupancy {
     // Selection tests the retained handle; the HUD additionally resolves
     // its pool/slot before drawing the rider's marker.
     bool rider_resolved = false;
+    bool player = false; // retail Flags & 0x100; numbered-seat request eligibility
 };
 
 // A joiner's remote organics live in its decoded state, outside World pool 0.
@@ -57,6 +58,13 @@ struct VehicleSeatSelection {
     int seat_index = -1; // seat index, or the armory_points index in armory mode
     SeatType type = SeatType::None;
 };
+
+// Seat-position action index 0..9 (keys 1..9,0), in the same list order as
+// the mounted panel. A player may request an AI-held slot; the authority
+// still adjudicates occupancy when processing the request.
+// [orig: Entity_FindAvailableSeat @0x436790; Entity_BuildWeaponSlotList @0x434C60]
+bool find_numbered_vehicle_seat(const World &world, const Entity &player, int index,
+        VehicleSeatSelection &out, const VehicleOccupancySource *source = nullptr);
 
 // The WAC/AI attach-to-seat command ids: 123 accepts sitex (passenger)
 // seats only, 124 rejects ctrlx (controller) seats, 125 takes any seat by

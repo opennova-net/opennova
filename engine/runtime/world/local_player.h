@@ -92,6 +92,11 @@ public:
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
     // out-of-session UseGun rejection (session_open gates it).
     bool toggle_mount();
+    // Numbered seat keys share the panel's list and their own idle/overheat
+    // gate; a joiner uses the query then waits for the authority's reply.
+    bool find_numbered_seat(int index, VehicleSeatSelection &out,
+            const VehicleOccupancySource *source = nullptr);
+    bool select_numbered_seat(int index);
     LocalPlayerViewFrame view_frame();
     // The Player_CanFireWeapon verdict the body updater and the HUD share
     // [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper

@@ -949,6 +949,20 @@ restamp), `promote`. Residues in the D-HUD-20 row.
 ### Mounted-vehicle panel — `HUD_DrawVehicleHealthBars @0x5a4fd0` (ported end to end 2026-08-21)
 
 The silhouette-and-seats panel drawn while the local player is mounted.
+
+**2026-09-05 integration correction (D-NET-157):** the mounted view now sends
+the authored items.def ID to the shell's SID lookup. Runtime vehicle type 1301
+must resolve definition 101301; handing through 1301 made the real ATV panel
+vanish. The remote seat HP lookup applies the same `kItemIdOffset` conversion.
+The engine already uses this mapping for item traits; these two consumers had
+missed it. `simulation_test::test_vehicle_panel_resolves_authored_item_id_after_seat_selection`
+and `inmatch_joiner_role` both failed with real ID conventions before the fix.
+The live retail LAN retest then displayed the truck silhouette, its AI-occupied
+driver marker and the local passenger X; the pre-fix screenshot had no panel.
+Numbered seat actions share the panel's ordered slot list; see world-wac-ai-re
+section 23.1. This ID handoff is host code / not grillable; retail's texture gate
+and health-band rules below are unchanged.
+
 Witnessed in #536/#537/#540/#541, re-witnessed in the post-merge review, and
 completed in the wire-up round (the list builder, the gate, the label digits):
 

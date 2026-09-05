@@ -181,6 +181,14 @@ bool Simulation::local_player_toggle_mount() {
 	return changed;
 }
 
+bool Simulation::local_player_select_seat(int p_index) {
+	if (!kernel_) return false;
+	if (is_joiner()) return joiner_role_ && joiner_role_->queue_numbered_seat(p_index);
+	const bool changed = kernel_->local.select_numbered_seat(p_index);
+	if (changed) refresh_local_player_view_effects();
+	return changed;
+}
+
 bool Simulation::fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const {
 	r_labels.clear();
 	if (!kernel_) return false;

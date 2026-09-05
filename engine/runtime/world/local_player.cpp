@@ -220,6 +220,39 @@ bool LocalPlayer::toggle_mount() {
 	return changed;
 }
 
+// [orig: Entity_FindAvailableSeat @0x436798..0x4367C8]
+bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
+		const VehicleOccupancySource *source) {
+	out = {};
+	const w::Entity *local = player();
+	if (local == nullptr || !local->alive || local->health <= 0) return false;
+	w::sync_local_usegun_weapon_transition(world_, weapon);
+	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world_, weapon);
+	// This is currentAction == 11, not the USE toggle's pending-action gate.
+	if (weapon.active && slot != nullptr && slot->current >= 2 && slot->current != w::weapon_action::kOverheated)
+		return false;
+	return w::find_numbered_vehicle_seat(world_, *local, index, out, source);
+}
+
+// [orig: Entity_FindAvailableSeat @0x4368B0 -> Entity_RequestVehicleAttach @0x4365DD]
+bool LocalPlayer::select_numbered_seat(int index) {
+	w::VehicleSeatSelection selected;
+	if (!find_numbered_seat(index, selected)) return false;
+	const w::Entity *carrier = world_.registry.get(selected.vehicle);
+	const bool changed = carrier != nullptr && world_.vehicles.process_attach(
+			world_.cached.local_player, selected.vehicle,
+			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
+	if (changed) {
+		view.binoculars_requested = false;
+		view_tracker.binocular_yaw_offset_deg = 0.0f;
+		view_tracker.binocular_pitch_offset_deg = 0.0f;
+		w::local_player_view_refresh(&world_, view);
+		sync_local_mounted_input_heading();
+		w::sync_local_usegun_weapon_transition(world_, weapon);
+	}
+	return changed;
+}
+
 w::LocalPlayerViewFrame LocalPlayer::view_frame() {
 	World &world = world_;
 	w::LocalPlayerViewFrame f;

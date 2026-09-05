@@ -125,7 +125,7 @@ Each domain's next step is named in its own record, not centrally:
 
 | Domain | Open rows live in | The record that names the next step |
 |---|---|---|
-| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§32); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
+| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§32); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology); 2026-09-05: numbered seat keys share the mounted panel list and send confirmed joiner requests (world-wac-ai-re section 23.1, D-AI-11 d); live retail LAN ATV drive/seat changes and restored vehicle panel verified; panel/rider HP lookups translate authored definition IDs (D-NET-157, 2026-09-05) |
 | Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/runtime/inmatch/ROADMAP.md` ; section 5.10 covers joiner vehicle confirmation and shared seat/overlay occupancy |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
 | Render (materials, order, lighting, occlusion) | ledger § Render — draw order + § Render — occlusion (the materials/state and lighting tables hold no open rows) | [render/README.md](render/README.md) |

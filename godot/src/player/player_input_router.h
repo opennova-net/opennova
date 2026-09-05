@@ -89,6 +89,7 @@ private:
 	// Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows].
 	PackedStringArray weapon_category_tokens_;
 	int category_was_down_ = 0;
+	bool seat_was_down_[10] = {};
 	bool cycle_prev_was_down_ = false;
 	bool cycle_next_was_down_ = false;
 	bool radar_out_was_down_ = false;

@@ -2383,7 +2383,7 @@ the 0x0A compact record's mounted branch (byte0 bone + carrier, §5.10) is the c
 for everyone including the requester.
 
 
-**Client confirmation and seat queries (re-grill 2026-09-04).** The client consumes
+**Client confirmation and seat queries (re-grill 2026-09-04/05).** The client consumes
 an already approved assignment through a different arm of the shared attach routine.
 The EquippedSlot busy test and enemy-rider test are authority-only
 [orig: Entity_ProcessVehicleAttach @ 0x435B27 / @ 0x435B3C]. An occupied matching slot
@@ -2396,7 +2396,7 @@ claim the motor after a retained spawn slot or stale rider already occupied it.
 
 `VehicleSystem::apply_confirmed_mount` implements the receive arm;
 `JoinerRole::sync_authoritative_mount` reconciles the confirmed self slot's wire **H**
-with native local **L** (?5.38b) before resolving the previous occupant. The authority's
+with native local **L** (§5.38b) before resolving the previous occupant. The authority's
 request validation remains in `VehicleSystem::process_attach`. Mounted Use first scans
 for another nearby seat, then sends attach when found or detach when absent
 [orig: Entity_ToggleVehicleMount @ 0x4369AC..0x4369C7]. `JoinerRole::queue_mount_toggle`
@@ -2418,6 +2418,15 @@ well [orig: Vehicle_HasEnemyOccupant @ 0x4359F0]. The player compact's retained
 `health_class_byte` reconstructs its health tier midpoint using the authored HP and
 the separately rounded `0xC000`/`0x6FFF` products
 [orig: Entity_SetHealthFromDifficultyByte @ 0x4AD580..0x4AD68C].
+Both the remote HP lookup and the mounted `VehiclePanelView.item_id` now
+translate runtime type IDs to authored definition IDs with `kItemIdOffset`.
+The missing conversion hid real panels (ATV type 1301 needs definition 101301)
+and left remote HP at the fallback. The GUT Simulation/HUD regression and
+native health regression both failed with real ID conventions before this fix.
+A subsequent live retail LAN screenshot showed the restored truck silhouette,
+AI-occupied driver marker and own passenger X; the pre-fix view had no panel.
+Numbered seat bindings 1..0 now select the shared driver/gun/passenger list
+through `LocalPlayer` / `JoinerRole`; see world-wac-ai-re section 23.1 (D-AI-11d).
 
 | Component | Verdict | Evidence |
 |---|---|---|
@@ -2425,11 +2434,24 @@ the separately rounded `0xC000`/`0x6FFF` products
 | Mounted Use and local overlays | MATCHING (behavioral proof) | Same test decodes actual framed C2S 0x26/0x27, waits for confirmation, and checks the selected label and own-seat health row |
 | Remote seat query bridge | MATCHING (behavioral proof) | Same test covers occupied-seat rejection, teammate co-boarding, hostile riders, H/L numeric collision, tier health, and dismount overriding retained spawn occupancy; `netsim_loopback_identity` preserves the health byte through the real frame decoder |
 
-The game-MCP `retail_parity_visual` attach stage also passes (scope-down labels 2,
-settled ADS 1, third-person 2); its inspected image is a query visualization, not a
-live retail match. A local `onhook_host_lan` attempt on `01TR.bms` / COOP timed out
-before host readiness. It provides no retail driving verdict. These synthetic
-frame/query checks do not establish live NovaWorld driving parity.
+Live retail-host/OpenNova-joiner validation on `00TRa.bms` / COOP passed
+2026-09-05. The joiner (wire H=3, native L=0) mounted the free ATV's controller
+bone 1, and 2.5 seconds of normal forward input moved the authority's vehicle
+about 17.4 metres. Decoded server compacts and a read of the owned retail
+process's vehicle position agreed. Normal key 2 requested passenger bone 6;
+key 1 requested driver bone 1 again; both settled through retail confirmations.
+The capture contains the real framed 0x26 requests for those transitions.
+The training truck's driver was AI-occupied: key 1 reached retail, whose normal
+occupied-seat gate refused it. This confirms that the request-side AI exception
+is not forced displacement. A pre-port run had emitted no request for key 1.
+
+The matching onHook proxy and explicit four-player capacity were necessary for
+this local pair; the earlier startup/admission attempts were setup failures.
+Both owned games stopped cleanly; the host capture completed with zero dropped,
+truncated or write-error packets. Raw captures and screenshots remain local.
+This establishes the retail LAN in-match path, not an external NovaWorld join.
+The game-MCP `retail_parity_visual` attach stage also passed (scope-down labels 2,
+settled ADS 1, third-person 2), with its query visualization inspected.
 The existing lower attach-definition gates, gun-carrier traversal and own-hull LOS
 stand-in remain tracked under D-NET-157 / D-AI-11. IDA function comments were appended
 at the five receive/toggle/health/HUD anchors above; no symbols were renamed.

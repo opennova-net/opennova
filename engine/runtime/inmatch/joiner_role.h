@@ -90,6 +90,7 @@ public:
 	// Choose the use-item seat request without mutating the local body.
 	// The caller applies the equipped weapon's busy gate before this action.
 	bool queue_mount_toggle();
+	bool queue_numbered_seat(int seat_index);
 	world::VehicleSeatOccupancy seat_occupancy(const world::Entity &carrier,
 			const world::Seat &seat, world::EntityHandle requester) const override;
 	void collect_hostile_mounts(const world::Entity &requester,

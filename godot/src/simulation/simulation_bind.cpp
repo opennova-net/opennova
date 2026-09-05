@@ -502,6 +502,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
+	ClassDB::bind_method(D_METHOD("local_player_select_seat", "index"), &Simulation::local_player_select_seat);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),
 	                     &Simulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "kit", "filter_by_availability"),

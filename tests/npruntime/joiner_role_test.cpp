@@ -262,6 +262,15 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	controller.source_name = "ctrlx00";
 	if (occupancy == 1) controller.occupant = w::EntityHandle{self_handle};
 	vehicle.seats.push_back(controller);
+	if (occupancy == 4) {
+		w::Seat passenger;
+		passenger.type = w::SeatType::Passenger;
+		passenger.bone_index = 4;
+		passenger.retail_slot = 0;
+		passenger.source_name = "sitex00";
+		// Array order differs from the numbered HUD list: driver is key 1.
+		vehicle.seats.insert(vehicle.seats.begin(), passenger);
+	}
 	const auto vh = world.registry.spawn(1, vehicle);
 	w::EntityHandle previous_driver;
 	if (occupancy == 2) {
@@ -296,11 +305,28 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
 	self.carrier_handle = vh.packed;
-	self.mount_bone = 1;
+	self.mount_bone = occupancy == 4 ? 4 : 1;
 	self.state_flags = w::kEntityFlagMounted;
 	self.state_flags_known = true;
 	h.role.run_tick(h.input);
 	local = h.kernel->local.player();
+	if (occupancy == 4) {
+		if (!expect(local->mount_type == w::SeatType::Passenger,
+				"numbered-seat fixture starts in a confirmed passenger seat")) return false;
+		h.socket.datagrams.clear();
+		if (!expect(h.role.queue_numbered_seat(0),
+				"seat key 1 queues the available driver seat")) return false;
+		h.role.run_tick(h.input);
+		ProtocolMessage selected;
+		if (!expect(h.socket.last_message(0x26, selected) &&
+				selected.payload == std::vector<uint8_t>({self_handle, 0,
+					static_cast<uint8_t>(vh.packed), static_cast<uint8_t>(vh.packed >> 8), 1, 0}) &&
+				h.kernel->local.player()->mount_bone == 4,
+				"numbered seat emits the driver bone with H and waits for the host echo")) return false;
+		h.role.runtime->state().find(self_handle)->mount_bone = 1;
+		h.role.run_tick(h.input);
+		local = h.kernel->local.player();
+	}
 	std::printf("vehicle joiner occupied=%d: mounted=%d local=%04x wire=%04x\n",
 			occupancy, local->mounted, local->handle.packed, self_handle);
 	if (!expect(local->mounted && local->mount_target == vh &&
@@ -315,7 +341,7 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 		h.role.run_tick(h.input);
 	}
 	if (!expect(world.registry.get(vh)->primary_occupant == local->handle &&
-			world.registry.get(vh)->seats[0].occupant == local->handle,
+			world.registry.get(vh)->seats[occupancy == 4 ? 1 : 0].occupant == local->handle,
 			"confirmed controller relation restores its control link")) return false;
 	h.kernel->local.set_movement_keys(true, false, false, false, false, false, false);
 	for (int tick = 0; tick < 62; ++tick) h.role.run_tick(h.input);
@@ -343,11 +369,14 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 					"holding forward predicts motion of the confirmed driver vehicle")) return false;
 
 	def::DefVehicleHudBlock hud_block{};
+	if (occupancy == 4) hud_block.seat_count = 1;
 	std::vector<hud::HudVehicleSeat> panel;
 	w::fill_vehicle_panel_seats(world, vh, local->handle, hud_block, panel, &h.role);
-	if (!expect(panel.size() == 1 && panel[0].occupied && panel[0].own_seat &&
+	if (!expect(panel.size() == (occupancy == 4 ? 2u : 1u) && panel[0].occupied && panel[0].own_seat &&
 			panel[0].health == local->health,
 			"vehicle overlay highlights the confirmed local seat and its health")) return false;
+
+	if (occupancy == 4) return true;
 
 	// The use-item scan can select another nearby carrier while mounted.
 	// It must queue attach, keep the current seat until the echo, then detach
@@ -437,7 +466,7 @@ bool run_remote_vehicle_occupancy() {
 	peer.team = static_cast<uint8_t>(local->team);
 	peer.team_known = true;
 	def::DefItemDef person_def{};
-	person_def.id = w::kPlayerInfantryTypeId;
+	person_def.id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
 	person_def.hp = 100;
 	def::DefItemsFile items{&person_def, 1};
 	h.kernel->set_items_table(&items);
@@ -508,6 +537,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(1);
 	ok &= run_confirmed_vehicle_drive(2);
 	ok &= run_confirmed_vehicle_drive(3);
+	ok &= run_confirmed_vehicle_drive(4);
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

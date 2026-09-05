@@ -2,6 +2,7 @@
 
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
+#include "simulation/player_local_view.h"
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
@@ -187,11 +188,21 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 // switch_denied).
 void PlayerInputRouter::send_weapon_switch_input(bool p_captured) {
 	const Ref<Simulation> switch_sim = sim();
+	const Ref<PlayerLocalView> view = switch_sim.is_valid() ? switch_sim->get_local_player_view() : Ref<PlayerLocalView>();
+	const bool mounted = view.is_valid() && view->get_mounted();
+	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22]
+	static const char *seat_tokens[] = {"seat1", "seat2", "seat3", "seat4", "seat5",
+			"seat6", "seat7", "seat8", "seat9", "seat10"};
+	for (int i = 0; i < 10; ++i) {
+		if (opennova::world::latched_key_edge(pressed(seat_tokens[i]),
+				p_captured && mounted, seat_was_down_[i]) && switch_sim.is_valid())
+			switch_sim->local_player_select_seat(i);
+	}
 	int down_mask = 0;
 	for (int64_t i = 0; i < weapon_category_tokens_.size(); ++i) {
 		if (p_captured && pressed(weapon_category_tokens_[i].utf8().get_data())) {
 			down_mask |= 1 << i;
-			if ((category_was_down_ & (1 << i)) == 0 && switch_sim.is_valid()) {
+			if (!mounted && (category_was_down_ & (1 << i)) == 0 && switch_sim.is_valid()) {
 				switch_sim->request_local_player_weapon_category(
 						static_cast<Simulation::WeaponCategory>(i + 1));
 			}

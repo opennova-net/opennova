@@ -60,7 +60,8 @@ int build_vehicle_panel_slots(const World &world, EntityHandle root_h,
     out.clear();
     const Entity *root = world.registry.get(root_h);
     if (root == nullptr) return 0;
-    if ((root->item_attrib & kAttribVehicle) == 0) return 0;
+    if (!root->has_item_def || (root->item_attrib & kAttribVehicle) == 0 ||
+            seat_by_retail_slot(*root, 8) == nullptr) return 0; // def+613 @0x434C91
     // Slot 0: the vehicle's control seat [orig: @0x434ca9..0x434cab].
     out.push_back(VehiclePanelSlot{root_h, 8, -1});
     // The attached gun children [orig: the child walk @0x434cf4..0x434d5e —
