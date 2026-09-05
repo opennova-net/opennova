@@ -84,6 +84,24 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
     return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
 }
 
+// While seated, retail's LOS leg walks the hulls: the OWN carrier's other
+// seats sit behind its hull, and an EWeap candidate riding a vehicle resolves
+// its LOS target to that carrier, so the EWeap's own hull still blocks the ray
+// to its seat from a rider inside the carrier [orig: Entity_FindNearestSeatOrArmory
+// @0x43615c..0x436183 -> Entity_CheckLineOfSightTerrainAndEntities @0x53b130].
+// That is why USE exits a vehicle instead of cycling its seats or hopping onto
+// its own gun. Pool-1 hulls are unbuilt (D-AI-11 j), so the occlusion is
+// modeled as this candidate skip over the rider's carrier FAMILY: the root
+// carrier (an EWeap mount re-roots to its carrier) and every EWeap child of it.
+bool own_carrier_family(const World &world, const Entity &player, const Entity &cand) {
+    if (!player.mounted || !player.mount_target.valid()) return false;
+    EntityHandle root = player.mount_target;
+    if (const Entity *mount = world.registry.get(root);
+            mount != nullptr && mount->emplacement_parent.valid())
+        root = mount->emplacement_parent;
+    return cand.handle == root || cand.emplacement_parent == root;
+}
+
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common.
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
@@ -537,11 +555,7 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-        // While seated, the OWN vehicle's other seats are LOS-blocked by its hull in
-        // retail (the ray walks pool-1 collision models) — that is why USE exits
-        // instead of cycling seats. Pool-1 hulls are unbuilt (D-AI-11 j), so the hull
-        // occlusion is modeled as this candidate skip (D-AI-11 j).
-        if (player.mounted && cand.handle == player.mount_target) return;
+        if (own_carrier_family(world, player, cand)) return; // the D-AI-11 j hull stand-in
         if (scan_entity_rejected(cand, player, hostile_mounts)) return;
         if (!armory_mode) {
             // [orig: the searchMode-0 seat loop @0x435f1e]
@@ -616,6 +630,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
+        if (own_carrier_family(world, player, cand)) return; // the D-AI-11 j hull stand-in
         if (scan_entity_rejected(cand, player, hostile_mounts)) return;
         if (!armory_mode) {
             // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]

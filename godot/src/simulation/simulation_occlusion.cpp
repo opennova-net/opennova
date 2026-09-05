@@ -94,9 +94,10 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// spawns with no placed identity — pass the SAME collector gate: retail's
 	// client walks the pool entities it built from the wire exactly as the
 	// host walks its own (the witness lives on OcclusionWorld::
-	// sphere_render_visible). A row with a registry twin uses that twin's
-	// collision bound sphere (the host's runtime spawns); a bare row is the
-	// position-centred unit sphere the organics leg above falls back to.
+	// sphere_render_visible). A row with a registry twin (the host's own
+	// runtime spawns) takes the twin's live verdict, exactly like the placed
+	// rows above; a bare row is the position-centred unit sphere the organics
+	// leg above falls back to.
 	present_.occlusion_culled_wire.clear();
 	if (runtime_ != nullptr) {
 		// A latch belongs to one row lifetime: drop the counters of handles
@@ -139,20 +140,22 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 					twin->spawn_origin != opennova::world::kSpawnOriginNone))
 				continue; // a placed row: the registry walk above gated it
 			if (h == kernel_->world.cached.local_player) continue;
+			if (twin != nullptr) {
+				// The host's own runtime spawn (an addeweap gun child, a
+				// runtime-placed item): the listen host walks its OWN pool entity
+				// with the same live pose the placed walk above uses. Its decoded
+				// row is a spawn image — the loopback 0x0A is header-only, so
+				// es.x/y/z never follow a moving carrier, and a sphere pinned
+				// there culled the gun the moment the driven buggy left it.
+				opennova::world::Entity *live = kernel_->world.registry.get(h);
+				if (live != nullptr &&
+						!kernel_->occlusion.entity_render_visible(
+								kernel_->world, kernel_->collision, *live, cam))
+					present_.occlusion_culled_wire.push_back(static_cast<int32_t>(handle));
+				continue;
+			}
 			int32_t center_world[3] = {es.x, es.y, es.z};
 			int32_t radius = 0x10000;
-			const opennova::world::CollisionModel *cm = twin != nullptr
-					? kernel_->collision.model_for(kernel_->world, h)
-					: nullptr;
-			if (cm != nullptr && cm->valid()) {
-				int32_t center_local[3];
-				opennova::world::OcclusionWorld::bound_sphere_fixed(
-						*cm, center_local, radius);
-				const opennova::world::CollisionMatrix pose =
-						opennova::world::collision_matrix_from_heading(
-								es.heading_bam, center_world);
-				pose.transform_point(center_local, center_world);
-			}
 			uint8_t &latch = present_.wire_occlusion_latch[handle];
 			if (!kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
 						center_world, radius, latch, kernel_->world.logic_tick))
