@@ -188,7 +188,7 @@ int32_t horizontal_speed_q16(const MotorFrame &f) {
 // dirt, the sampler's own default). [orig: Terrain_GetSurfaceTypeAtPosition
 // @ 0x606510; consumed as material + 4 by the bounce presentation @ 0x4447c3]
 int32_t sampled_ground_surface(const World &world, const MotorFrame &f) {
-    const int32_t surface = terrain::surface_type_at_fixed(world.surface_map, f.px, f.py);
+    const int32_t surface = terrain::surface_type_at_fixed(world.tables.surface_map, f.px, f.py);
     return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface : 1;
 }
 
@@ -935,24 +935,11 @@ void ThrowableSim::detonate_satchels_by_owner(World &world, EntityHandle owner) 
         if (!d.active || d.owner.packed != owner.packed ||
             d.owner_spawn_id != live_owner->registry_spawn_id)
             continue;
-        const AmmoTableEntry *ammo = world.ammo.by_index(d.ammo_index);
+        const AmmoTableEntry *ammo = world.tables.ammo.by_index(d.ammo_index);
         if (ammo == nullptr) continue;
         if (!strutil::iequals(ammo->name, "satchel")) continue;
         Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
         if (e != nullptr) e->health = -1;
-    }
-}
-
-void ThrowableSim::remove_devices_by_owner(World &world, EntityHandle owner) {
-    // [orig: Server_ProcessPlayerDeath -> Entity_RemovePlacedDevicesByOwner
-    // @ 0x546e00 -> Server_RemoveEntityAndNotify @ 0x50a270 — silent removal.]
-    const Entity *live_owner = world.registry.get(owner);
-    if (live_owner == nullptr) return;
-    for (PlacedDevice &d : devices) {
-        if (!d.active || d.owner.packed != owner.packed ||
-            d.owner_spawn_id != live_owner->registry_spawn_id)
-            continue;
-        remove_device(world, d);
     }
 }
 
@@ -974,7 +961,7 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
     // [orig: the think handlers spawn a fire descriptor at the device position
     // with the boom ammo and the OWNER as source -> RoundData_SpawnRound's
     // instantkillzone leg queues the explosion; obj effect tag 4 at the pos.]
-    const int boom_index = world.ammo.index_of(boom_ammo_name);
+    const int boom_index = world.tables.ammo.index_of(boom_ammo_name);
     if (boom_index >= 0) {
         RoundSpawnParams p;
         p.owner = device.owner;
@@ -1118,7 +1105,7 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
         d.think_delay_ticks = static_cast<int32_t>(
                 static_cast<uint32_t>(d.think_delay_ticks) - 1u);
         if (arming) continue;
-        const AmmoTableEntry *ammo = world.ammo.by_index(d.ammo_index);
+        const AmmoTableEntry *ammo = world.tables.ammo.by_index(d.ammo_index);
         if (ammo == nullptr) continue;
         const bool dead = e->health <= 0;
         switch (d.think) {
@@ -1133,7 +1120,7 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
             if (dead || enemy_in_cone(world, collision, terrain, d,
                                       ammo->kz_minradius,
                                       ammo->kz_pieslice_bam, false)) {
-                const int shrap = world.ammo.index_of("claymoreshrapnel");
+                const int shrap = world.tables.ammo.index_of("claymoreshrapnel");
                 if (shrap >= 0) {
                     RoundSpawnParams p;
                     p.owner = d.owner;

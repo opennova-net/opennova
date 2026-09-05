@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::scr;
+
 namespace fs = std::filesystem;
 
 namespace {

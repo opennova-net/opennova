@@ -1,7 +1,8 @@
 extends GutTest
 
 # LocalPlayerPresenter over a REAL GameWorld + Simulation (the ADR 0033 typed
-# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: FlyCamera)).
+# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: GameplayCamera,
+# controls: ControlsModel); scripted movement rides a PlayerMoveIntent).
 # Every test stages the minimal mission fixture, loads mnml.bms through the packaged
 # world scene (playable auto-spawn: the ADR 0011 listen-server host player), and
 # observes behavior through the sim's own getters, the PlayerLocalView snapshot,
@@ -61,6 +62,19 @@ func after_all() -> void:
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# A key a failed assertion left down must not leak into the next case.
+	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7]:
+		_hold(keycode, false)
+
+
+# Physical key state through Input, flushed so the router's next sample sees it.
+func _hold(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 
 
 # --- real-world staging -------------------------------------------------------
@@ -184,11 +198,11 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_shared_root), OK)
 	world.set_resource_root(root)
-	world.set_local_player_spawn_loadout({
-		"primary": "WPN_M4AUTO",
-		"accessory": "WPN_SATCHEL_CHARGE",
-		"player_class": 8,
-	})
+	var loadout := PlayerSpawnLoadout.new()
+	loadout.primary = "WPN_M4AUTO"
+	loadout.accessory = "WPN_SATCHEL_CHARGE"
+	loadout.player_class = 8
+	world.set_local_player_spawn_loadout(loadout)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	if baked_terrain:
@@ -212,9 +226,17 @@ func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresent
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera)
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	return presenter
+
+
+# A scripted movement frame (the neutral intent by default): the same seven
+# bits the live binding table would produce.
+func _move_intent(forward: bool = false, lean_left: bool = false) -> PlayerMoveIntent:
+	var intent := PlayerMoveIntent.new()
+	intent.forward = forward
+	intent.lean_left = lean_left
+	return intent
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
@@ -291,23 +313,20 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 
 	# Held forward reaches the motor's body selection: the walk/run promotion
 	# leaves idle [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d].
-	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": true})
+	presenter.set_input_override(_move_intent(true))
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_anim_key()) != "anim_idle"),
 			"held forward promotes the body selection off idle")
 
 	# Releasing the source settles the motor back to idle.
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_anim_key()) == "anim_idle"),
 			"releasing input settles the motor back to idle")
 
 	# A live UI overlay keeps the world ticking but submits a NEUTRAL movement
 	# frame: the same held source no longer reaches the motor.
-	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": true})
+	presenter.set_input_override(_move_intent(true))
 	var tick_before := int(sim.get_logic_tick())
 	for i in 30:
 		var frame_input := presenter.before_world_tick(TICK, false, false)
@@ -321,15 +340,13 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 	# Q/E lean is entity state the sim composes into the camera roll (lean/4
 	# rides fp_roll). Sign: positive roll tilts right, so lean LEFT is negative
 	# [orig: roll = entity+0x2DC + (entity+0xB0)/4 @0x437fe6].
-	presenter.set_input_source(func() -> Dictionary:
-		return {"lean_left": true})
+	presenter.set_input_override(_move_intent(false, true))
 	_frame(world, presenter, camera, 30)
 	var view := world.local_player_view()
 	assert_lt(view.camera_roll_deg, -5.0, "held lean-left composes a leftward camera roll")
 	assert_lt(camera.global_basis.y.x, -0.01,
 			"negative composed roll tilts the stamped view left")
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
+	presenter.set_input_override(_move_intent())
 	_frame(world, presenter, camera, 60)
 	assert_almost_eq(world.local_player_view().camera_roll_deg, 0.0, 1.0,
 			"releasing the lean eases the composed roll back out")
@@ -420,6 +437,71 @@ func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	_frame(world, presenter, camera, 2)
 	assert_eq(world.local_player_view().nvg_gain, 0,
 			"'-' steps the gain down and the sim clamps at the floor")
+
+
+# The router's digit rows over the LIVE binding table and key state, on a row
+# that samples without mouse capture (the weapon-category rows need it and
+# headless has no cursor to capture): radarout rebound to 7 fires on a bare 7
+# (the dispatcher's fallback pass), a 7 pressed while USE (the `useitem` row,
+# default Shift) is held is the special-key seat chord and reaches no row,
+# Ctrl+7 is the seat7 row alone (the modifier pass claims the key), and the
+# same bare 7 afterwards fires again.
+# [orig: Input_HandleSpecialKeys @0x49c6d8..0x49c730;
+#  Input_ProcessKeyboardEvents @0x49d327..0x49d3ac (modifier pass),
+#  @0x49d3ba..0x49d488 (fallback)]
+func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var radar_out := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Radar Zoom Out":
+			radar_out = model.action_index_for_row(i)
+	assert_gte(radar_out, 0, "the radarout row is in the table")
+	assert_true(model.assign_godot_key(radar_out, KEY_7, false), "radarout takes 7 as its second key")
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var zoom := sim.get_hud_radar_zoom_q16()
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "a bare 7 fires the rebound radarout row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+	zoom = sim.get_hud_radar_zoom_q16()
+
+	_hold(KEY_SHIFT, true)
+	_frame(world, presenter, camera, 2)  # the hold must have been live LAST frame
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 3)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
+			"a digit under the USE hold is the seat chord and reaches no row")
+	_hold(KEY_7, false)
+	_hold(KEY_SHIFT, false)
+	_frame(world, presenter, camera, 2)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "releasing the hold fires nothing")
+
+	_hold(KEY_CTRL, true)
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 3)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
+			"Ctrl+7 is the seat7 row: the modifier pass claims the key")
+	_hold(KEY_7, false)
+	_hold(KEY_CTRL, false)
+	_frame(world, presenter, camera, 2)
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "the same bare 7 fires again")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
 
 
 # --- the camera cluster -------------------------------------------------------
@@ -739,7 +821,7 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 	# submit); the gun part never does.
 	var arms_part := presenter.vm_parts()[0] as ObjectModel
 	var gun_part := presenter.vm_parts()[1] as ObjectModel
-	assert_eq(String(arms_part.get_meta("avatar_part", "")), "arms",
+	assert_eq(arms_part.avatar_part, ObjectModel.AVATAR_PART_ARMS,
 			"the first viewmodel part is the character's arms")
 	assert_eq(int(arms_part.get_ctrl_values().get("TEX_CAMO1", -1)), 4)
 	assert_eq(int(arms_part.get_ctrl_values().get("TEX_CAMO2", -1)), 2)
@@ -858,6 +940,62 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 			"the FSM's play serial advances with the served clips")
 
 
+func test_fire_mode_change_keeps_one_posed_viewmodel_per_frame() -> void:
+	await _assert_fire_mode_change_frames(1)
+
+
+func test_fire_mode_change_keeps_the_pose_during_catch_up() -> void:
+	await _assert_fire_mode_change_frames(4)
+
+
+# Exercise the real frame boundary, including a switch in the middle of a
+# multi-tick batch. The outgoing model must retire immediately and its
+# replacement must be placed and posed before the frame reaches rendering.
+func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var previous_model := presenter.viewmodel()
+	var starting_weapon := String(sim.get_local_player_weapon_name())
+	sim.request_local_player_weapon_category(3)
+	var switched := false
+	for frame in 45:
+		var frame_dt := TICK * float(ticks_per_frame)
+		var frame_input := presenter.before_world_tick(frame_dt, false, true)
+		world.tick(camera.global_position, camera.global_transform, frame_dt, frame_input)
+		presenter.after_world_tick()
+		var model := presenter.viewmodel()
+		assert_not_null(model, "frame %d retains the first-person weapon" % frame)
+		if is_instance_valid(previous_model) and model != previous_model:
+			assert_false(previous_model.is_visible_in_tree(),
+					"the retired viewmodel stops drawing before its replacement appears")
+		var view := world.local_player_weapon_view()
+		assert_ne(view.current_action, 6, "fire-mode changes never enter SWITCHTO")
+		assert_ne(view.next_action, 6, "fire-mode changes never queue SWITCHTO")
+		assert_eq(presenter.vm_parts().size(), 2, "the arms and gun remain present")
+		for part in presenter.vm_parts():
+			var clip := String(view.anim_key) if not String(view.anim_key).is_empty() else "anim_wpn_idle"
+			assert_eq(String(part.get_active_body_clip()), clip,
+					"frame %d renders the current weapon animation" % frame)
+			var animation := part.get_skeletal_anim()
+			var length := animation.get_clip_length(clip, view.anim_variant)
+			var phase := float(view.anim_advance_ticks) * TICK
+			if length > 0.0:
+				phase = fposmod(phase, length) if animation.is_clip_looping(clip, view.anim_variant) \
+						else minf(phase, length)
+			assert_almost_eq(part.get_animation_time(), phase, 0.00001,
+					"frame %d preserves the simulation animation phase" % frame)
+		previous_model = model
+		switched = switched or String(sim.get_local_player_weapon_name()) != starting_weapon
+	assert_true(switched, "reselecting the rifle category changes its fire mode")
+	assert_eq(world.local_player_weapon_view().next_action, 0,
+			"an in-place fire-mode change does not queue a draw animation")
+
+
 func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown() -> void:
 	# The sim answers category REQUESTS through the event drain
 	# (switch_to_weapon); the presenter is the ONE registered fixed-tick
@@ -943,7 +1081,7 @@ func test_local_avatar_body_channel_follows_the_sim_tuple() -> void:
 	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle")
 	assert_eq(String(avatar.get_active_body_clip()), "anim_idle",
 			"the avatar plays the sim's served body key")
-	assert_true(avatar.get_body_blend().is_empty(),
+	assert_false(avatar.has_body_blend(),
 			"a single-key tuple presents with no blend channel")
 	assert_almost_eq((avatar.global_position - sim.get_local_player_position()).length(),
 			0.0, 0.001, "the avatar node is stamped at the sim position")

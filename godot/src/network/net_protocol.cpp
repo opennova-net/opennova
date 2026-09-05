@@ -1,7 +1,7 @@
 #include "network/net_protocol.h"
 
-#include <net/npruntime/game_config.h>
-#include <net/npwire/game_type.h>
+#include <runtime/inmatch/game_config.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/wire_handle.h>
@@ -49,7 +49,7 @@ static_assert(NetProtocol::RETAIL_LAN_PORT_MAX == opennova::kRetailLanPortMax,
 static_assert(NetProtocol::DEFAULT_GATE_PORT == opennova::kNovaWorldGatePort,
 		"DEFAULT_GATE_PORT drifted from npwire net_ports.h");
 
-static_assert(NetProtocol::MAX_PLAYERS_CAP == opennova::np::kMaxPlayersCap,
+static_assert(NetProtocol::MAX_PLAYERS_CAP == opennova::inmatch::kMaxPlayersCap,
 		"MAX_PLAYERS_CAP drifted from npruntime game_config.h");
 static_assert(NetProtocol::MAX_CALLSIGN_LENGTH == opennova::game_rules::kMaxCallsignLength,
 		"MAX_CALLSIGN_LENGTH drifted from npwire game_type.h");

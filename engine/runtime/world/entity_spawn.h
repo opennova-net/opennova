@@ -2,8 +2,7 @@
 // machine (docs/net/novaworld-net-re.md §5.2b). Kept separate from promotion
 // (engine/runtime/mission) so the netsim/Phase-2 in-process listen-server player spawn can reuse it
 // without pulling in a mission dependency (engine/runtime/world stays Godot- and mission-agnostic).
-#ifndef OPENNOVA_WORLD_ENTITY_SPAWN_H
-#define OPENNOVA_WORLD_ENTITY_SPAWN_H
+#pragma once
 
 #include <runtime/world/entity.h>
 
@@ -23,5 +22,3 @@ namespace opennova::world {
 void entity_reset_to_spawn_state(Entity &e);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ENTITY_SPAWN_H

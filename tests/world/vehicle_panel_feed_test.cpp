@@ -5,6 +5,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
+#include <runtime/world/local_player.h>
 
 #include <runtime/hud/hud_vehicle_panel.h>
 
@@ -13,6 +14,7 @@
 #include <string>
 
 using namespace opennova::world;
+using namespace opennova::def;
 namespace hud = opennova::hud;
 
 static int failures = 0;
@@ -113,6 +115,56 @@ int main() {
         CHECK(slots[1].type == 9 && slots[1].entity == r.gun && slots[1].gun_slot == 1);
         CHECK(slots[2].type == 0);
         CHECK(slots[3].type == 3);
+    }
+
+    // Numbered seats use the same root/list, independent of vector order,
+    // HUD art availability and proximity. Player-held seats reject requests;
+    // the request-side AI exception does not override authority occupancy.
+    {
+        Rig r;
+        Entity &local = r.e(r.passenger);
+        local.flags |= kEntityFlagPlayer;
+        r.seat_occupant(r.veh, 3, r.passenger);
+        VehicleSeatSelection pick;
+        CHECK(find_numbered_vehicle_seat(r.w, local, 0, pick));
+        CHECK(pick.vehicle == r.veh && pick.seat_index == 1 && pick.type == SeatType::Controller);
+        CHECK(find_numbered_vehicle_seat(r.w, local, 1, pick));
+        CHECK(pick.vehicle == r.gun && pick.type == SeatType::Gunner);
+        CHECK(find_numbered_vehicle_seat(r.w, local, 2, pick));
+        CHECK(pick.vehicle == r.veh && pick.seat_index == 0);
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 3, pick)); // own player-held seat
+        CHECK(!find_numbered_vehicle_seat(r.w, local, -1, pick));
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 4, pick));
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 10, pick));
+        r.seat_occupant(r.veh, 8, r.driver);
+        r.e(r.driver).flags |= kEntityFlagPlayer;
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 0, pick));
+        r.e(r.driver).flags &= ~kEntityFlagPlayer;
+        CHECK(find_numbered_vehicle_seat(r.w, local, 0, pick));
+        CHECK(!r.w.vehicles.attach_to_seat(local.handle, pick)); // authority still rejects busy
+        local.flags &= ~kEntityFlagPlayer;
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 0, pick)); // AI cannot request another rider's seat
+        local.flags |= kEntityFlagPlayer;
+        r.e(r.veh).seats[1].occupant = EntityHandle{0x5000};
+        CHECK(!find_numbered_vehicle_seat(r.w, local, 0, pick)); // unresolved retained occupant
+        r.e(r.veh).seats[1].occupant = {};
+        r.w.cached.local_player = local.handle;
+        LocalPlayer controls(r.w);
+        controls.weapon.active = true;
+        controls.weapon.slot.current = weapon_action::kReload;
+        controls.weapon.slot.next = weapon_action::kOverheated;
+        CHECK(!controls.find_numbered_seat(0, pick));
+        controls.weapon.slot.current = weapon_action::kEmpty;
+        CHECK(!controls.find_numbered_seat(0, pick));
+        controls.weapon.slot.current = weapon_action::kOverheated;
+        CHECK(controls.find_numbered_seat(0, pick));
+        controls.weapon.active = false;
+        controls.weapon.slot.current = weapon_action::kReload;
+        CHECK(controls.find_numbered_seat(0, pick)); // no EquippedSlot
+        local.mount_target = r.gun;
+        CHECK(controls.find_numbered_seat(0, pick) && pick.vehicle == r.veh);
+        r.e(r.veh).seats.erase(r.e(r.veh).seats.begin() + 1);
+        CHECK(!controls.find_numbered_seat(0, pick)); // root must author a control bone
     }
 
     // --- the root: a mounted driver names the vehicle; a gunner on the child

@@ -237,17 +237,21 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 			"MOUSE_SENSITIVITY", "INVERT_MOUSE"]:
 		assert_false(driver.is_widget_disabled(driver.widget_id(unlocked_name)),
 				"%s remains an interactive core setting" % unlocked_name)
-	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:
 			assert_true(driver.is_widget_disabled(id),
 					"%s is visible but read-only until supported" % unsupported_name)
-	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_COLOR")))
-	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_SPREAD")))
-	assert_eq(driver.selected_row(driver.widget_id("XHAIR_COLOR")), 0,
-			"unsupported crosshair tint stays on white")
+	for crosshair_name in ["XHAIR_COLOR", "XHAIR_SPREAD"]:
+		assert_false(driver.is_widget_disabled(driver.widget_id(crosshair_name)),
+				"%s is a supported interactive setting" % crosshair_name)
+	var xhair_color := driver.widget_id("XHAIR_COLOR")
+	assert_eq(int(driver.item_value(xhair_color,
+			driver.selected_row(xhair_color))),
+			PlayerOptions.DEFAULT_CROSSHAIR_COLOR,
+			"the colour list seeds by value onto the default white row")
 	assert_true(driver.is_widget_checked(driver.widget_id("XHAIR_SPREAD")),
-			"the runtime-supported spread stays enabled")
+			"the default spread toggle seeds enabled")
 	_cleanup(dir)
 
 func test_video_options_are_highest_quality_and_read_only() -> void:
@@ -447,6 +451,47 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 	_cleanup(dir)
 
 
+class _RecordingCompanion extends MenuCompanion:
+	var built := 0
+	var released := 0
+
+	func owns_menu(driver: MenuDriver) -> bool:
+		return driver != null and driver.get_menu_file() == "main.mnu"
+
+	func on_menu_built(driver: MenuDriver, file: String, screen: String,
+			root: ResourceRoot) -> void:
+		super(driver, file, screen, root)
+		built += 1
+
+	func on_menu_released() -> void:
+		super()
+		released += 1
+
+
+func test_companion_released_when_document_changes_hands() -> void:
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	var stub := _RecordingCompanion.new()
+	shell.add_companion(stub)
+	assert_true(shell.open_menu("main.mnu", ""), "the claimed document opens")
+	assert_eq(stub.built, 1, "the claiming companion is handed the wiring")
+	assert_eq(stub.released, 0)
+	assert_true(shell.open_menu("options.mnu", ""), "an unclaimed document opens")
+	assert_eq(stub.released, 1,
+			"losing the document releases the previously wired companion")
+	assert_eq(stub.built, 1, "no rebuild for a document it does not own")
+	assert_true(shell.open_menu("main.mnu", ""))
+	assert_eq(stub.built, 2, "re-claiming wires the companion again")
+	assert_eq(stub.released, 1, "a re-claim is not a release")
+	_cleanup(dir)
+
+
+
 func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> void:
 	var config := ConfigFile.new()
 	config.set_value("player", "crosshair_style", 11)
@@ -472,6 +517,54 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 	assert_eq(PlayerOptions.new().current().crosshair_style, 18,
 			"the selection persists through the shared owner")
 	assert_signal_emit_count(options, "changed", 1)
+	shell.get_resource_root().clear()
+	_rm_runtime_dir(dir)
+
+
+func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
+	var config := ConfigFile.new()
+	config.set_value("player", "crosshair_spread", false)
+	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	var options := PlayerOptions.new()
+	var dir := _make_runtime_dir()
+	var shell = _make_runtime_shell(dir, options)
+	if shell == null:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_runtime_dir(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var color: int = driver.widget_id("XHAIR_COLOR")
+	assert_gte(color, 0, "Options authors the crosshair colour spin list.")
+	assert_false(driver.is_widget_disabled(color),
+			"the colour list is interactive")
+	assert_eq(int(driver.item_value(color, driver.selected_row(color))),
+			PlayerOptions.DEFAULT_CROSSHAIR_COLOR,
+			"the default colour seeds by value onto the white row")
+	var spread: int = driver.widget_id("XHAIR_SPREAD")
+	assert_gte(spread, 0, "Options authors the spread checkbox.")
+	assert_false(driver.is_widget_disabled(spread))
+	assert_false(driver.is_widget_checked(spread),
+			"the persisted spread toggle seeds the checkbox")
+
+	var target_row := driver.selected_row(color)
+	for row in driver.item_count(color):
+		if int(driver.item_value(color, row)) \
+				!= PlayerOptions.DEFAULT_CROSSHAIR_COLOR:
+			target_row = row
+			break
+	driver.select_row(color, target_row)  # emits the "spinlist" value change
+	assert_eq(options.current().crosshair_color,
+			int(driver.item_value(color, target_row)),
+			"the picked row's authored value reaches the shared owner")
+	assert_eq(PlayerOptions.new().current().crosshair_color,
+			options.current().crosshair_color,
+			"the colour persists through the shared owner")
+	driver.set_widget_checked(spread, true)
+	driver.widget_activated.emit(spread, "XHAIR_SPREAD")
+	assert_true(options.current().crosshair_spread,
+			"the checkbox activation writes the shared owner")
+	assert_true(PlayerOptions.new().current().crosshair_spread,
+			"the spread toggle persists")
 	shell.get_resource_root().clear()
 	_rm_runtime_dir(dir)
 
@@ -539,7 +632,7 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "3")
 	assert_true(driver.is_widget_disabled(object_detail),
 			"the in-game object-detail alias is pinned to the supported renderer")
-	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:
 			assert_true(driver.is_widget_disabled(id),
@@ -558,15 +651,24 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
+	var music_before: int = options.current().music_volume
 	driver.widget_value_changed.emit("MUSICVOLUME", "scroll", 84, "84")
+	assert_eq(options.current().music_volume, 84,
+			"edits apply live as the preview")
 	driver.widget_activated.emit(driver.widget_id("OPT_CANCEL"), "OPT_CANCEL")
 	assert_true(driver.is_widget_shown(main_wrapper))
 	assert_false(driver.is_widget_shown(options_wrapper))
-	assert_eq(options.current().music_volume, 84,
-			"Cancel only navigates because pause-menu edits save immediately")
+	# Retail's pause Cancel re-seeds the screen from the saved settings and
+	# rolls the live preview back; Accept committed sound_fx as the baseline
+	# (docs/mnu/menu-re.md "The in-game options dialog").
+	assert_eq(options.current().music_volume, music_before,
+			"Cancel reverts the staged music edit")
+	assert_eq(options.current().sound_fx_volume, 72,
+			"the accepted edit survives a later Cancel")
 	var reloaded := PlayerOptions.new().current()
 	assert_eq(reloaded.sound_fx_volume, 72)
-	assert_eq(reloaded.music_volume, 84)
+	assert_eq(reloaded.music_volume, music_before,
+			"the reverted edit never reaches the config")
 	_cleanup(dir)
 
 # Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
@@ -765,6 +867,51 @@ func test_play_screen_accept_still_launches() -> void:
 	driver.widget_activated.emit(accept, "ACCEPT")  # no explicit pick -> first .bms
 	# ACCEPT on a mission-list screen still launches (first .bms, none selected).
 	assert_signal_emitted_with_parameters(shell, "start_requested", ["alpha.bms"])
+	DirAccess.remove_absolute(dir.path_join("main.mnu"))
+	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+	DirAccess.remove_absolute(dir)
+
+
+# The options controller listens on the same driver for every document. On a
+# play screen (no CONTROL_MAPPING) its named controls must stay inert: ACCEPT
+# belongs to the shell's launch path (no pop underneath the launch), and a
+# stray DEFAULTS activation must not wipe the persisted bindings.
+func test_options_controls_inert_without_control_table() -> void:
+	var dir := OS.get_temp_dir().path_join("menu_shell_sp_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_copy(SP_PLAY_FIXTURE, dir.path_join("main.mnu"))  # jo_sp: ACCEPT, no control table
+	var f := FileAccess.open(dir.path_join("alpha.bms"), FileAccess.WRITE)
+	if f != null:
+		f.store_buffer(PackedByteArray([0]))
+		f.close()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		DirAccess.remove_absolute(dir.path_join("main.mnu"))
+		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+		DirAccess.remove_absolute(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	assert_lt(driver.widget_id("CONTROL_MAPPING"), 0, "jo_sp authors no control table")
+	watch_signals(shell)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_signal_emitted(shell, "start_requested", "the shell launch path still owns ACCEPT")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+			"no options pop underneath the launch")
+	assert_eq(shell.get_menu_stack_depth(), 0)
+	# Re-bind an action, then fire the name the options surface would own; a
+	# stray DEFAULTS must not restore (rows already at defaults would make a
+	# no-op restore pass vacuously, hence the edit first).
+	var model: ControlsModel = ControlsBindings.model()
+	var saved: Dictionary = model.save_blob()
+	var action: int = model.action_index_for_row(0)
+	model.assign_godot_key(action, KEY_G, false)
+	var edited := model.control_text(action, ControlsModel.DEVICE_KEYBOARD)
+	driver.widget_activated.emit(-1, "DEFAULTS")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD), edited,
+			"a stray DEFAULTS on a non-options document leaves the bindings alone")
+	model.load_blob(saved)
+	ControlsBindings.persist()
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 	DirAccess.remove_absolute(dir)
@@ -1260,3 +1407,78 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 			"the Forward record still holds its defaults")
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
+
+
+func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
+	var dir := _make_dir()
+	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_ingame_menu(), "the retail pause document opens")
+	var driver: MenuDriver = shell.get_driver()
+	watch_signals(shell)
+	var confirm := driver.widget_id("CONFIRM_EXIT")
+	var main_wrapper := driver.widget_id("MAIN_WRAPPER")
+	assert_gte(confirm, 0, "game.mnu authors the confirm panel")
+	assert_false(driver.is_widget_shown(confirm),
+			"the 'Are you sure?' panel starts hidden")
+
+	# ABORT is authored actions only (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER):
+	# the shell must NOT treat it as the return-to-menu Command. A mouse click
+	# cannot drive it here - the authored button has no BOTTOM, so its height
+	# is font-derived and solves to zero without the mounted style/fonts - so
+	# the activation seam and the public action executor stand in (the
+	# on-activation ACTION dispatch itself is pinned by menu_driver_test).
+	driver.widget_activated.emit(driver.widget_id("ABORT"), "ABORT")
+	assert_signal_not_emitted(shell, "return_to_menu_requested",
+			"ABORT alone leaves the mission alive")
+	_raise_confirm(driver)
+	assert_true(driver.is_widget_shown(confirm),
+			"ABORT's authored actions raise the 'Are you sure?' panel")
+	assert_false(driver.is_widget_shown(main_wrapper),
+			"the main wrapper hides behind the confirmation")
+
+	# ESC is the authored CONFIRM_NO hotkey (the hidden MAIN_WRAPPER's
+	# HIDDEN_BACK cannot eat it): cancel restores the wrapper.
+	assert_true(driver.handle_key_input(_pause_key(KEY_ESCAPE)))
+	assert_false(driver.is_widget_shown(confirm), "No cancels the exit")
+	assert_true(driver.is_widget_shown(main_wrapper))
+	assert_signal_not_emitted(shell, "return_to_menu_requested")
+
+	# ENTER is the authored CONFIRM_YES hotkey: the exit itself is the shell's
+	# registered Command on CONFIRM_YES, like the engine's per-control seam.
+	_raise_confirm(driver)
+	assert_true(driver.handle_key_input(_pause_key(KEY_ENTER)))
+	assert_signal_emitted(shell, "return_to_menu_requested",
+			"CONFIRM_YES emits the mission-exit intent")
+	_cleanup(dir)
+
+
+# ABORT's authored action list, through the driver's public action executor
+# (dispatch_action_row hands it lower-cased states).
+# ABORT's AUTHORED action rows raise the panel: read off the document and
+# dispatched through the driver's own executor, so the pin is on game.mnu's
+# SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER, never on literals a test typed.
+func _raise_confirm(driver: MenuDriver) -> void:
+	var rows: Array[MnuActionRow] = driver.widget_actions(driver.widget_id("ABORT"))
+	var shape: Array[String] = []
+	for row: MnuActionRow in rows:
+		shape.append("%s %s %s" % [row.type.to_lower(),
+				row.target.to_upper(),
+				row.state.to_lower()])
+	assert_eq(shape, ["window CONFIRM_EXIT show", "window MAIN_WRAPPER hide"],
+			"game.mnu's ABORT authors SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER")
+	for row: MnuActionRow in rows:
+		assert_true(driver.dispatch_action_row(row),
+				"the authored %s row dispatches" % row.target)
+
+
+func _pause_key(keycode: Key) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.physical_keycode = keycode
+	key.pressed = true
+	return key

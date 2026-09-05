@@ -94,28 +94,10 @@ func _write_weapon_sav() -> String:
 	return path
 
 
-func test_profile_page_offsets_read_back_through_the_sim() -> void:
-	var sim := Simulation.new()
-	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
-	var summary: Dictionary = sim.get_weapon_profile_summary()
-	assert_true(bool(summary.get("loaded", false)), "the profile should report loaded")
-
-	var blue: Dictionary = summary.get("blue", {})
-	var red: Dictionary = summary.get("red", {})
-	# The class byte at the side base, and the page it selects at +6 + 2048*(class-5).
-	assert_eq(int(blue.get("player_class", -1)), BLUE_CLASS)
-	assert_eq(int(red.get("player_class", -1)), RED_CLASS)
-	assert_eq(Array(blue.get("kit", [])), BLUE_PAGE,
-			"the blue summary must be the class-%d page" % BLUE_CLASS)
-	assert_eq(Array(red.get("kit", [])), RED_PAGE,
-			"the red summary must be the class-%d page (a different side AND a different page index)"
-					% RED_CLASS)
-	sim.free()
-
-
-func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
+func test_a_malformed_profile_is_reported() -> void:
 	# Retail's miss leaves PlayerProfile_InitDefaults' values installed [orig: @0x54bb40]:
-	# both sides class 8, one weapon name per page. A bad header must not be fatal.
+	# both sides class 8, one weapon name per page (the playersav ctest pins the
+	# shipped defaults and the page pick). A bad header must not be fatal.
 	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	assert_not_null(f)
@@ -125,14 +107,6 @@ func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
 
 	var sim := Simulation.new()
 	assert_ne(sim.load_weapon_profile(path), OK, "a bad header must be reported")
-	var summary: Dictionary = sim.get_weapon_profile_summary()
-	assert_false(bool(summary.get("loaded", true)), "a rejected file must not latch as loaded")
-	var blue: Dictionary = summary.get("blue", {})
-	assert_eq(int(blue.get("player_class", -1)), 8,
-			"the shipped default class is rifleman on both sides [orig: @0x54bbe0]")
-	assert_eq(Array(blue.get("kit", [])), ["WPN_M4AUTO"],
-			"the shipped blue class-8 page is the single WPN_M4AUTO literal [orig: @0x54bdbb]")
-	sim.free()
 
 
 func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> void:
@@ -161,15 +135,15 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 	}
 	assert_eq(Simulation.save_weapon_profile_selection(path, profile), OK,
 			"PLAYER_INFO ACCEPT atomically rewrites the active profile")
-	var summary: Dictionary = Simulation.read_weapon_profile_summary(path)
-	assert_true(bool(summary.get("loaded", false)))
-	var blue: Dictionary = summary.get("blue", {})
-	var red: Dictionary = summary.get("red", {})
-	assert_eq(int(blue.get("player_class", -1)), 9)
-	assert_eq(int(red.get("player_class", -1)), 9,
+	var summary := Simulation.read_weapon_profile_summary(path)
+	assert_true(summary.loaded)
+	var blue := summary.blue
+	var red := summary.red
+	assert_eq(blue.player_class, 9)
+	assert_eq(red.player_class, 9,
 			"retail ACCEPT writes the class to both 0x8006 side blocks")
-	assert_eq(int(blue.get("avatar_packed", -1)), 0x0400)
-	assert_eq(int(red.get("avatar_packed", -1)), 0x8407,
+	assert_eq(blue.avatar_packed, 0x0400)
+	assert_eq(red.avatar_packed, 0x8407,
 			"the two side-specific packed character ids survive together")
 
 	var rewritten := FileAccess.get_file_as_bytes(path)
@@ -229,17 +203,12 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	# catalog load and silently shipped the defaults.
 	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
 
-	var inv: Dictionary = sim.get_local_player_inventory()
+	var inv := sim.get_local_player_inventory()
 	var held := []
-	for row in Array(inv.get("slots", [])):
-		held.append(String((row as Dictionary).get("name", "")))
+	for row in inv.slots:
+		held.append((row as PlayerInventorySlot).name)
 	for name in RED_PAGE:
 		assert_does_not_have(held, name,
 				"%s is on the RED page; an unlatched team must not commit a side" % name)
 	assert_does_not_have(held, OFF_PAGE,
 			"%s is on no page at all" % OFF_PAGE)
-	# The profile itself still parsed — only the COPY is deferred.
-	var summary: Dictionary = sim.get_weapon_profile_summary()
-	assert_true(bool(summary.get("loaded", false)),
-			"deferring the page copy must not discard the parsed profile")
-	sim.free()

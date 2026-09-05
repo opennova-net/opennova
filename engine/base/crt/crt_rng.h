@@ -1,11 +1,8 @@
-#ifndef OPENNOVA_BASE_CRT_RNG_H
-#define OPENNOVA_BASE_CRT_RNG_H
+#pragma once
 
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::crt {
 
 // The statically linked MSVC CRT random stream used by retail (one state per
 // thread, getptd). Retail routes EVERY rand()/srand() through that one
@@ -21,8 +18,4 @@ uint16_t crt_rand15(void);
 void crt_srand(uint32_t seed);
 uint32_t crt_rand_state(void);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // OPENNOVA_BASE_CRT_RNG_H
+} // namespace opennova::crt

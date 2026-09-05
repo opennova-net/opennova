@@ -1,4 +1,6 @@
 #include <formats/aip/aip.h>
+#include <base/io/tick_rate.h>
+#include <base/io/strutil.h>
 
 #include <cstdlib>
 #include <string>
@@ -7,13 +9,6 @@
 namespace opennova::aip {
 
 namespace {
-
-std::string ascii_lower(const std::string &s) {
-    std::string out = s;
-    for (char &c : out)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    return out;
-}
 
 // atoi-shape numeric read: leading sign + digits, junk tails ignored.
 int32_t parse_int(const std::string &s) {
@@ -35,7 +30,7 @@ int32_t deg_to_bam(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * 11930464.0); // [orig: dbl_7C6E18]
 }
 int32_t secs_to_ticks(const std::string &s) {
-    return static_cast<int32_t>(std::atof(s.c_str()) * 62.5); // [orig: dbl_7C3B48]
+    return static_cast<int32_t>(std::atof(s.c_str()) * io::kTickHz); // [orig: dbl_7C3B48]
 }
 int32_t units_fixed(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * 65536.0); // [orig: dbl_7C3CC0]
@@ -57,7 +52,7 @@ int32_t climb_fixed(const std::string &s) {
 // The WEAPON_* flag token loop, shared by primary_flags/secondary_flags.
 void apply_weapon_flags(uint32_t &flags, const std::vector<std::string> &toks) {
     for (std::size_t k = 2; k < toks.size(); ++k) {
-        const std::string t = ascii_lower(toks[k]);
+        const std::string t = strutil::to_lower(toks[k]);
         if (t == "weapon_slow") flags |= kWeaponSlow;
         else if (t == "weapon_turret") flags |= kWeaponTurret;
         else if (t == "weapon_fast") flags |= kWeaponFast;
@@ -70,7 +65,7 @@ void apply_weapon_flags(uint32_t &flags, const std::vector<std::string> &toks) {
 // COMBAT_FLAGS-only in retail and simply never appear in evade lines.
 void apply_mode_flags(uint32_t &flags, const std::vector<std::string> &toks) {
     for (std::size_t k = 2; k < toks.size(); ++k) {
-        const std::string t = ascii_lower(toks[k]);
+        const std::string t = strutil::to_lower(toks[k]);
         if (t == "follow_wp") flags |= 0x1;
         else if (t == "no_action") flags |= 0x2;
         else if (t == "flee") flags |= 0x4;
@@ -122,11 +117,11 @@ Profile parse_profile(const uint8_t *text, size_t size) {
         }
         i = end + 1;
         if (toks.size() < 2) continue;
-        const std::string key = ascii_lower(toks[0]);
+        const std::string key = strutil::to_lower(toks[0]);
         const std::string &value = toks[1];
 
         if (key == "type") {
-            const std::string v = ascii_lower(value);
+            const std::string v = strutil::to_lower(value);
             if (v == "helo") prof.type = 1;
             else if (v == "ground") prof.type = 2;
             else if (v == "organic") prof.type = 3;
@@ -148,7 +143,7 @@ Profile parse_profile(const uint8_t *text, size_t size) {
             if (key == "combat_climb") { prof.helo_combat_climb = climb_fixed(value); continue; }          // @0x45f757..0x45f78f -> +220
             // turn_rate: atol * 0xB60B60 (11930464 BAM per degree) then the signed
             // /62 (the 0x84210843 magic + sar 5 + sign fix) @0x45f8b0..0x45f8dc -> +224
-            if (key == "turn_rate") { prof.turn_rate_bam_tick = 11930464 * parse_int(value) / 62; continue; }
+            if (key == "turn_rate") { prof.turn_rate_bam_tick = 11930464 * parse_int(value) / io::kTicksPerSecondInt; continue; }
             // accel_time: atol, then (v << 5 - v) * 2 = 62 * v @0x45f902..0x45f91b -> +228
             if (key == "accel_time") { prof.accel_ticks = 62 * parse_int(value); continue; }
             if (key == "use_waypoint_z") { prof.use_waypoint_z = parse_int(value); continue; }             // atol @0x45f941..0x45f952 -> +56

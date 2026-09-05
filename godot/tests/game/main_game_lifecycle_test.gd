@@ -5,91 +5,37 @@ extends GutTest
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
-const BAKED_TERRAIN_DIR := "res://../fixtures/terrain/tmap"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
-const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
-# Witnessed retail placement (assets/README.md): strings plus the
-# mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
-# localres; environment, terrain, and terrain art in resource.
-const LANGUAGE_FILES := [
-	"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
-	"menutxt.bin", "mnml.bin", "mnml.pcx", "mnml.lwf",
-]
-const LOCALRES_FILES := [
-	"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu",
-	"game.mnu", "weapon.mnu",
-	"mnml.bms", "menu_style.mns", "newarow1.tga", "mnml.dbf",
-]
-const RESOURCE_FILES := [
-	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
-	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
-	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
-]
-# The synthetic Tmap terrain (its .trn names the mnml art packed above).
-const BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
-# This lifecycle-only armory deliberately resolves the engine fallback as well
-# as the selected profile weapon. The regression must fail if GameWorld mistakes
-# a nonempty WPN_M4AUTO fallback inventory for a mission-authored kit.
-const LIFECYCLE_WEAPON_DEF := """
-ammoclass_max_carry CLASS_556MM 1000
-
-weapon "WPN_AK47AUTO"
-	category 1
-	rank 0
-	statid 102
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 AK_TEST_FIRST
-end
-
-weapon "WPN_M4AUTO"
-	category 1
-	rank 0
-	statid 101
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 M4AUTO_TEST_FIRST
-end
-
-weapon "WPN_M4"
-	category 1
-	rank 0
-	statid 100
-	ammo AM_556MM
-	clip 30
-	maxclips 7
-	gfx1 M4_TEST_FIRST
-end
-"""
+# The packed shell recipe (the retail-shaped archive layout, the baked Tmap
+# terrain, the lifecycle-only weapon.def) lives on WorldFixture.boot_shell.
 
 
-class EntityShellHarness:
-	extends "res://game/main_game.gd"
+# The shell the entity-discovery adapter reads: a GameShell answering one real
+# MissionRoot (rule 11's sanctioned fake: public verbs only).
+class EntityRuntimeShell:
+	extends GameShell
 
-	# A real MissionPresentation over an in-memory mission: two authored organics
-	# plus the auto-spawned host player supply the AI/registry rows the
-	# discovery pages walk (the sim-double era ended when discovery became the
-	# engine's typed Simulation.entity_directory()).
-	var runtime: MissionPresentation = null
+	var runtime: MissionRoot = null
 
-	func ensure_runtime(parent: Node) -> void:
-		if runtime != null:
-			return
-		var mission := MissionData.new()
-		assert(mission.create_default() == OK)
-		mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
-		mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
-		var container := Node3D.new()
-		parent.add_child(container)
-		runtime = MissionPresentation.new()
-		parent.add_child(runtime)
-		runtime.setup(mission, container)
-
-	func _current_runtime():
+	func get_runtime() -> MissionRoot:
 		return runtime
+
+
+# A real MissionRoot over an in-memory mission: two authored organics
+# plus the auto-spawned host player supply the AI/registry rows the discovery
+# pages walk (the sim-double era ended when discovery became the engine's typed
+# Simulation.entity_directory()).
+func _entity_runtime(parent: Node) -> MissionRoot:
+	var mission := MissionData.new()
+	assert(mission.create_default() == OK)
+	mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
+	mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
+	var container := Node3D.new()
+	parent.add_child(container)
+	var runtime := MissionRoot.new()
+	parent.add_child(runtime)
+	runtime.setup(mission, container)
+	return runtime
 
 
 var _saved_config := PackedByteArray()
@@ -99,14 +45,17 @@ var _shell: Node = null
 
 
 func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
+	# The audio rows of the shell's debug-control table bind the AudioServer
+	# in C++ (ADR 0043 d12): their argument schemas refuse before the mixer.
 	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
 	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
-	assert_eq(debug_adapter.debug_set_audio_bus_mute("__missing_bus__", true),
+	var controls: DebugControlTable = debug_adapter.get_debug_controls()
+	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["__missing_bus__", true]).error),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_adapter.debug_set_audio_bus_volume("Master", INF),
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["Master", INF]).error),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_adapter.debug_set_audio_bus_volume(
-			"Master", DebugControls.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume",
+			["Master", DebugControlTable.AUDIO_BUS_VOLUME_MAX_DB + 0.5]).error),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
 	if bus < 0:
@@ -118,10 +67,10 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 		"solo": AudioServer.is_bus_solo(bus),
 		"bypass": AudioServer.is_bus_bypassing_effects(bus),
 	}
-	assert_eq(debug_adapter.debug_set_audio_bus_volume("SFX", -14.5), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_mute("SFX", true), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_solo("SFX", true), OK)
-	assert_eq(debug_adapter.debug_set_audio_bus_bypass("SFX", true), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["SFX", -14.5]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["SFX", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_solo", ["SFX", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_bypass", ["SFX", true]).error), OK)
 	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
 	assert_true(AudioServer.is_bus_mute(bus))
 	assert_true(AudioServer.is_bus_solo(bus))
@@ -137,16 +86,9 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 	# adapter's match arms are its implementation. An action added to the catalog
 	# without an adapter arm would fall through to ERR_INVALID_PARAMETER here.
 	var adapter: GameDebugAdapter = add_child_autofree(GameDebugAdapter.new())
-	var seams := GameShellSeams.new()
-	seams.runtime_source = func(): return null
-	seams.world_source = func(): return null
-	seams.presenter_source = func(): return null
-	seams.shell_state_source = func(): return "menu"
-	seams.world_loading_source = func(): return false
-	seams.dev_tools_open_source = func(): return false
-	seams.resume_action = func(): pass
-	seams.quit_action = func(): pass
-	adapter.configure(seams)
+	# The null shell (GameShell's base) answers "menu"-less unavailability for
+	# every supplier; the catalog contract only needs the arms to exist.
+	adapter.configure(autofree(GameShell.new()))
 	for action in GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS:
 		assert_ne(adapter.mcp_game_control(action), ERR_INVALID_PARAMETER,
 				"the adapter recognizes cataloged action '%s'" % action)
@@ -156,11 +98,12 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
-	# The shell stays OFF-tree (its _process expects the packaged scene's
-	# children); the runtime + container mount under the test instead.
-	var shell: EntityShellHarness = autofree(EntityShellHarness.new())
-	shell.ensure_runtime(self)
-	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
+	# The runtime + container mount under the test; the adapter reads them
+	# through a GameShell fake, no MainGame instance involved.
+	var shell: EntityRuntimeShell = autofree(EntityRuntimeShell.new())
+	shell.runtime = _entity_runtime(self)
+	var debug_adapter: GameDebugAdapter = autofree(GameDebugAdapter.new())
+	debug_adapter.configure(shell)
 
 	var page: Dictionary = debug_adapter.get_mcp_game_entities(0, 64)
 
@@ -299,22 +242,28 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 			"the retained water graph owns its live color ImageTexture")
 	assert_not_null(weak_water_normal.get_ref(),
 			"the retained water graph owns its live normal ImageTexture")
-	VegAssetsScript.list_graphics(resource_root, true)
+	# The vegetation asset caches are the world's foliage dispatcher's own
+	# state (they die with the world); the shell's exit leg empties them
+	# explicitly, observed here through the idempotent leg EXIT_TREE runs.
+	var world := _shell.get_node("World") as GameWorld
+	var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
+	dispatcher.list_graphics(resource_root, true)
 	var weak_texture: WeakRef = weakref(texture)
 	texture = null
 	assert_not_null(weak_texture.get_ref(),
 			"the runtime root retains the decoded texture")
-	assert_gt(VegAssetsScript.cache_entry_count(), 0,
-			"the process-static vegetation registry is populated before exit")
+	assert_gt(dispatcher.asset_cache_entry_count(), 0,
+			"the world's vegetation asset caches are populated before exit")
 
+	_shell.finish_runtime_shutdown()
+	assert_eq(dispatcher.asset_cache_entry_count(), 0,
+			"MainGame exit clears the world's vegetation asset caches")
 	_shell.queue_free()
 	_shell = null
 	await get_tree().process_frame
 
 	assert_true(resource_root.get_root_dir().is_empty(),
 			"MainGame exit clears the mounted root before extension deinitialization")
-	assert_eq(VegAssetsScript.cache_entry_count(), 0,
-			"MainGame exit clears the process-static renderer resource cache")
 	assert_null(weak_texture.get_ref(),
 			"the cached ImageTexture dies while RenderingServer is still alive")
 	assert_null(weak_cursor.get_ref(),
@@ -348,9 +297,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"the bound JoinTarget enters the two-frame loading-screen barrier")
 	target = null
 
-	var retained_seams: GameShellSeams = _shell.get_game_debug_adapter().get_shell_seams()
-	assert_true(retained_seams.world_loading_source.is_valid(),
-			"the configured debug seam captures MainGame before shutdown")
+	assert_same(_shell.get_game_debug_adapter().get_shell(), _shell,
+			"the configured debug adapter holds MainGame before shutdown")
 	var load_operation: WorldLoadOperation = _shell.begin_runtime_shutdown()
 	assert_not_null(load_operation)
 	if not load_operation.is_settled():
@@ -365,13 +313,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"finish_runtime_shutdown leaves the frame unconfigured")
 	assert_null(weak_cursor.get_ref(),
 			"the cooperative shutdown path drops its global custom cursor before exit")
-	assert_null(_shell.get_game_debug_adapter().get_shell_seams(),
-			"shutdown releases every Callable edge back into MainGame")
-	for property in retained_seams.get_property_list():
-		if property["type"] == TYPE_CALLABLE:
-			var callable: Callable = retained_seams.get(property["name"])
-			assert_false(callable.is_valid(),
-					"shutdown invalidates retained seam %s" % property["name"])
+	assert_null(_shell.get_game_debug_adapter().get_shell(),
+			"shutdown releases the shell from the debug adapter")
 
 
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
@@ -384,9 +327,7 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 		return
 	var picked_dir := _temp_dir.path_join("picked")
 	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
-	_write_pff(picked_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
-	_write_pff(picked_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	_write_pff(picked_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	WorldFixture.stage_shell_archives(self, picked_dir, false)
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir)
 
 	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
@@ -419,12 +360,10 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	assert_not_null(loose)
 	loose.store_string("loose trn")
 	loose.close()
-	# The packed variant satisfies the boot manifest the same way _make_shell's
+	# The packed variant satisfies the boot manifest the same way boot_shell's
 	# fixture does — a partial runtime install would report missing boot
 	# resources as engine errors and fail this test about mounting.
-	_write_pff(packed_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
-	_write_pff(packed_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	_write_pff(packed_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	WorldFixture.stage_shell_archives(self, packed_dir, false)
 	ResourceDirSettings.set_game("jo")
 
 	assert_null(BootRootMount.mount(loose_dir, false),
@@ -454,7 +393,7 @@ func test_bundled_game_dir_is_the_exe_dir_only_when_it_carries_a_boot_archive() 
 			"no boot archive -> not a game dir")
 	assert_eq(LaunchFlags.bundled_game_dir(""), "",
 			"an empty probe dir is never a game dir")
-	_write_pff(_temp_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), [])
 	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), _temp_dir,
 			"any boot-table archive makes the exe dir the default game dir")
 
@@ -469,7 +408,7 @@ func test_boot_defaults_to_the_bundled_game_dir_and_never_persists_it() -> void:
 	var configured_dir := _temp_dir.path_join("configured")
 	assert_eq(DirAccess.make_dir_recursive_absolute(game_dir), OK)
 	assert_eq(DirAccess.make_dir_recursive_absolute(configured_dir), OK)
-	_write_pff(game_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, game_dir.path_join("localres.pff"), [])
 	var saved_dir := ResourceDirSettings.get_resource_dir()
 	var saved_override: String = LaunchFlags.get_bundled_probe_override()
 	ResourceDirSettings.set_resource_dir("")
@@ -514,7 +453,7 @@ func test_boot_falls_through_to_bundled_loose_assets_and_blesses_only_them() -> 
 
 	# The packed bundle outranks the loose sibling when both are present (tagged zip
 	# carrying stray sources still boots the packed game).
-	_write_pff(exe_dir.path_join("localres.pff"), [])
+	WorldFixture.write_pff(self, exe_dir.path_join("localres.pff"), [])
 	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), exe_dir,
 			"a boot archive beside the exe wins over the assets/ sibling")
 	ResourceDirSettings.set_resource_dir(saved_dir)
@@ -552,7 +491,8 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	assert_false(world.get_current_frame_clear_color().is_equal_approx(boot_clear),
 			"the loaded mission exercised a distinct frame clear")
 
-	# The pause menu's ABORT command emits this public intent.
+	# The pause menu's CONFIRM_YES command (ABORT's "Are you sure?" panel)
+	# emits this public intent.
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -672,24 +612,24 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_gt(host_body_records, 0,
 			"the host fixture includes authored pools that must reach the wire-only join")
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Loading Hold Host",
-		"mission_name": "Minimal",
-		"mission_file": advertised_file,
-		"gametype": 0x30020,
-		"max_players": 4,
-		# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
-		# leaves the host advertising whatever expansion this machine last persisted, and the
-		# joiner's preload then correctly refuses a data set this install cannot mount
-		# (D-NET-178) — a failure about machine state, not about the loading-screen hold.
-		"expansion": "",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Loading Hold Host"
+	host_options.mission_name = "Minimal"
+	host_options.mission_file = advertised_file
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
+	# leaves the host advertising whatever expansion this machine last persisted, and the
+	# joiner's preload then correctly refuses a data set this install cannot mount
+	# (D-NET-178) — a failure about machine state, not about the loading-screen hold.
+	host_options.expansion = ""
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	var streamed_til := TilFixture.bytes_for_cell(4)
 	host.set_terrain_til_data(streamed_til)
 	assert_true(host.load_from_mission_data(mission))
 
-	var observed := {"local_load": false, "held": false}
+	var observed := {"local_load": false, "held": false, "held_progress": -1}
 	world.world_loaded.connect(func() -> void:
 		observed["local_load"] = true
 	, CONNECT_ONE_SHOT)
@@ -706,14 +646,19 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			# All handlers for world_loaded have now returned. The old behavior
 			# dismissed the loading screen in MainGame's handler here.
 			observed["held"] = _shell.is_world_loading() and not world.visible
+			observed["held_progress"] = _shell.loading_progress_percent()
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
 			break
 
 	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
+	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_WORLD_READY,
+			"the held joiner reports local-world readiness, not false completion")
 	assert_false(_shell.is_world_loading(),
 			"the loading screen releases after the authoritative join edge")
+	assert_eq(_shell.loading_progress_percent(), -1,
+			"the completed loading presentation no longer exposes a stale value")
 	assert_true(world.visible, "the admitted world is revealed")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
 	assert_eq(world.get_sim().get_join_terrain_til_state(),
@@ -731,7 +676,6 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			"host-only pools reach native materialization and wire presentation from the load/live stream")
 	assert_gt(wire_stats.spawned + wire_stats.unresolved, 0,
 			"the renderer attempted every streamed row even when this minimal fixture lacks its .3di")
-	host.free()
 
 
 func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
@@ -748,14 +692,14 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 			FIXTURE_DIR.path_join("mnml.bms"))), OK)
 	var advertised_file := "wire_truncated_til.bms"
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Truncated TIL Host",
-		"mission_name": "Minimal",
-		"mission_file": advertised_file,
-		"gametype": 0x30020,
-		"max_players": 4,
-		"expansion": "",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Truncated TIL Host"
+	host_options.mission_name = "Minimal"
+	host_options.mission_file = advertised_file
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.expansion = ""
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	# Advertise two records but provide one. The host emits the canonical first
 	# page [0,1), then has no second page; admission must see Receiving, never
@@ -797,7 +741,6 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	assert_false(revealed,
 			"a Receiving terrain stream cannot reveal the admitted world")
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
-	host.free()
 
 
 # An in-match session loss must tear the world down to the menu through the SAME
@@ -907,19 +850,16 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	assert_gt(int(runtime.get_sim().get_logic_tick()), tick_before,
 			"the live world keeps ticking under the tools")
 
-	# The pick stack, end to end: the world load installed the highlight view
-	# for the shell's list, F3-open flipped the click catcher on, and the
+	# The pick stack, end to end: F3-open flipped the click catcher on, and the
 	# sim-authoritative ray is terrain-occluded exactly like a bullet.
-	assert_not_null(world.get_node_or_null("PickDebug"),
-			"the world renders the shell's pick list")
 	assert_not_null(world.get_node_or_null("PickClickCatcher"),
 			"dev tools open: world clicks ray-pick")
 	var pick_sim = runtime.get_sim()
 	var player_pos: Vector3 = pick_sim.get_local_player_position()
-	var down: Dictionary = pick_sim.debug_pick_entity(
+	var down: DebugPickCard = pick_sim.debug_pick_entity(
 			player_pos + Vector3(0, 20, 0), Vector3.DOWN, 100.0)
-	assert_false(bool(down.get("hit", true)))
-	assert_eq(String(down.get("blocked", "")), "terrain",
+	assert_false(down.hit)
+	assert_eq(down.blocked, "terrain",
 			"terrain blocks the pick exactly like a bullet")
 	_shell.pick_at_crosshair()
 	assert_not_null(_shell.find_child("PickToast", true, false),
@@ -1041,8 +981,8 @@ func test_minimal_mission_ak_loadout_outranks_player_info_selection() -> void:
 	assert_eq(viewmodel_def.weapon_name, "WPN_AK47AUTO")
 	assert_eq(viewmodel_def.gfx1, "AK_TEST_FIRST",
 		"the first viewmodel resolves through the actual AK identity")
-	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
-	assert_eq(String(inventory.get("equipped_name", "")), "WPN_AK47AUTO",
+	var inventory: PlayerInventory = world.get_sim().get_local_player_inventory()
+	assert_eq(inventory.equipped_name, "WPN_AK47AUTO",
 		"the spawned simulation equips the same mission-authored AK")
 
 
@@ -1073,18 +1013,18 @@ func test_player_info_loadout_is_equipped_when_mission_has_no_kit() -> void:
 	assert_eq(viewmodel_def.weapon_name, "WPN_M4")
 	assert_eq(viewmodel_def.gfx1, "M4_TEST_FIRST",
 		"the selected weapon's first-person model replaces the AK fallback")
-	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
-	assert_eq(String(inventory.get("equipped_name", "")), "WPN_M4",
+	var inventory: PlayerInventory = world.get_sim().get_local_player_inventory()
+	assert_eq(inventory.equipped_name, "WPN_M4",
 		"the spawned simulation equips the same selected primary")
 
 
-# Every DebugControls row resolves its live owner over a loaded world (ADR 0042
-# d5). The no-world harness (debug_controls_test.gd) can only read the engine
-# rows as unavailable; here each value row is available and writable for a
-# confirmed authority caller, writes its own value back through its owner and
-# reads it back, and each action reaches its engine or device verdict instead
-# of "no owner" (ERR_UNAVAILABLE) or "no row" (ERR_DOES_NOT_EXIST). A row whose
-# read/write/invoke closure stops resolving fails here, on the real shell.
+# Every DebugControlTable row resolves its live owner over a loaded world (ADR
+# 0043 d12). The no-world harness (debug_controls_test.gd) can only read the
+# world rows as unavailable; here each value row is available and writable for
+# a confirmed authority caller, writes its own value back through its owner
+# and reads it back, and each action reaches its engine or device verdict
+# instead of "no owner" (ERR_UNAVAILABLE) or "no row" (ERR_DOES_NOT_EXIST). A
+# row whose owner binding stops resolving fails here, on the real shell.
 func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -1100,39 +1040,42 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 	await get_tree().process_frame
 
 	var adapter: GameDebugAdapter = _shell.get_game_debug_adapter()
-	var controls: DebugControls = adapter.get_debug_controls()
+	var controls: DebugControlTable = adapter.get_debug_controls()
 	assert_true(adapter.has_debug_authority(), "the SP shell owns debug authority")
+	assert_same(_shell.get_dev_tools().get_debug_control_table(), controls,
+			"F3 drives the same table MCP does")
 	var ids := controls.row_ids()
 	assert_gt(ids.size(), 0, "the table carries its rows")
 	var engine_rows := 0
 	for id in ids:
 		var row := controls.control(id)
-		var state := controls.get_control_state(id, true)
+		var state := controls.get_state(id, true)
 		assert_true(state.available,
 				"'%s' resolves its owner over the loaded world (%s)" % [id, state.reason])
 		if not state.available:
 			continue
-		if row.owner == DebugControls.OWNER_ENGINE:
+		if row.owner == DebugControlRow.OWNER_ENGINE:
 			engine_rows += 1
 		assert_true(state.writable,
 				"'%s' is writable for a confirmed authority caller (%s)" % [id, state.reason])
-		if row.kind == DebugControls.Kind.ACTION:
+		if row.kind == DebugControlRow.ACTION:
 			continue
 		assert_ne(state.value, null, "'%s' reads a live value" % id)
-		var normalized: Dictionary = DebugControls.normalize_value(row, state.value)
-		assert_true(bool(normalized["ok"]), "'%s' reads a value inside its own domain" % id)
-		assert_eq(controls.set_control_value(id, state.value, true), OK,
+		var normalized: Variant = DebugControlTable.normalize_value(row, state.value)
+		assert_ne(normalized, null, "'%s' reads a value inside its own domain" % id)
+		assert_eq(controls.set_value(id, state.value, true), OK,
 				"'%s' writes its own value back through its owner" % id)
-		var read_back: Variant = controls.get_control_state(id, true).value
-		if row.kind == DebugControls.Kind.SLIDER:
-			assert_almost_eq(float(read_back), float(normalized["value"]), maxf(row.step, 0.001),
+		var read_back: Variant = controls.get_state(id, true).value
+		if row.kind == DebugControlRow.SLIDER:
+			assert_almost_eq(float(read_back), float(normalized), maxf(row.step, 0.001),
 					"'%s' reads back the value it wrote" % id)
 		else:
-			assert_eq(read_back, normalized["value"], "'%s' reads back the value it wrote" % id)
+			assert_eq(read_back, normalized, "'%s' reads back the value it wrote" % id)
 	assert_gt(engine_rows, 0, "the engine rows answer over the loaded world")
 
 	# The actions, each with in-domain arguments, against the engine's or the
-	# device's own verdict. The audio rows write the mixer, so they restore it.
+	# device's own verdict. The audio rows write the mixer, so they restore it;
+	# the weather rows write the world that leaves below.
 	var master := AudioServer.get_bus_index("Master")
 	var master_volume := AudioServer.get_bus_volume_db(master)
 	var master_mute := AudioServer.is_bus_mute(master)
@@ -1148,6 +1091,14 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"set_mission_variable", [0, 0]],
 		[&"environment_lightning_short", []],
 		[&"environment_lightning_long", []],
+		[&"environment_sky_height", [65536000]],
+		[&"environment_time_of_day_minutes", [720]],
+		[&"environment_sun_fade", [0, 0]],
+		[&"environment_color_fade", [0]],
+		[&"environment_wind_scale", [256]],
+		[&"environment_block_color", [0, 0xFFFFFF]],
+		[&"environment_lightning_color", [0xFFFFFF]],
+		[&"environment_weather_snapshot", []],
 		[&"deploy_pick", [0]],
 		[&"set_viewmodel_weapon", ["WPN_M4"]],
 		[&"clear_viewmodel_weapon", []],
@@ -1155,8 +1106,8 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"local_player_look", [1.0, 0.0]],
 	]
 	for case in must_succeed:
-		var outcome := controls.invoke_control(case[0], case[1], true)
-		assert_eq(int(outcome["error"]), OK,
+		var outcome := controls.invoke(case[0], case[1], true)
+		assert_eq(int(outcome.error), OK,
 				"action '%s' reaches its owner's verdict" % case[0])
 	# In-domain arguments that name entities this minimal world may not carry:
 	# the engine answers with its own refusal, never with a missing owner.
@@ -1167,94 +1118,29 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 		[&"crew_local_player", [1]],
 	]
 	for case in may_refuse:
-		var outcome := controls.invoke_control(case[0], case[1], true)
-		var error := int(outcome["error"])
+		var outcome := controls.invoke(case[0], case[1], true)
+		var error := int(outcome.error)
 		assert_true(error == OK or error == ERR_INVALID_PARAMETER,
 				"action '%s' reaches the engine (error %d)" % [case[0], error])
 	AudioServer.set_bus_volume_db(master, master_volume)
 	AudioServer.set_bus_mute(master, master_mute)
 
 	# The one action that ends the world runs last, and leaves a clean menu.
-	var leave := controls.invoke_control(&"runtime_return_to_menu", [], true)
-	assert_eq(int(leave["error"]), OK, "runtime_return_to_menu reaches the shell")
+	var leave := controls.invoke(&"runtime_return_to_menu", [], true)
+	assert_eq(int(leave.error), OK, "runtime_return_to_menu reaches the shell")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
-	assert_false(controls.get_control_state(&"show_collision").available,
+	assert_false(controls.get_state(&"hide_foliage").available,
 			"the world rows read unavailable again once the world is gone")
 
 
-func _make_shell(without_mission_loadout := false):
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 31,
-			"the retail-shaped archives contain every minimal fixture resource")
-	var language_entries := _fixture_entries(LANGUAGE_FILES)
-	var localres_entries := _fixture_entries(LOCALRES_FILES, without_mission_loadout)
-	var resource_entries := _fixture_entries(RESOURCE_FILES)
-	# The minimal TRN is intentionally CPT-less and cannot create render RIDs.
-	# Pack the substituted TRN's baked payload + textures so this regression
-	# reaches the exact raw-patch visibility leak.
-	for filename in BAKED_TERRAIN_FILES:
-		var bytes := FileAccess.get_file_as_bytes(BAKED_TERRAIN_DIR.path_join(filename))
-		assert_false(bytes.is_empty(), "%s is available in the baked fixture" % filename)
-		resource_entries.append({"name": filename, "bytes": bytes})
-	_write_pff(_temp_dir.path_join("language.pff"), language_entries)
-	_write_pff(_temp_dir.path_join("localres.pff"), localres_entries)
-	_write_pff(_temp_dir.path_join("resource.pff"), resource_entries)
-
-	ResourceDirSettings.set_resource_dir(_temp_dir)
-	ResourceDirSettings.set_expansion("")
-	ResourceDirSettings.set_game("jo")
-	var shell = MAIN_GAME_SCENE.instantiate()
-	assert_not_null(shell)
-	if shell == null:
-		return null
-	add_child(shell)
-	await get_tree().process_frame
-	var menu_shell = shell.get_node("MenuLayer/MenuShell")
-	assert_eq(menu_shell.get_current_menu_file().to_lower(),
-			"main.mnu", "the packed fixture boots through the real menu shell")
+# The packed shell (WorldFixture.boot_shell): the staged archive dir is this
+# test's _temp_dir so after_each removes it once the shell released its roots.
+func _make_shell(without_mission_loadout := false) -> MainGame:
+	var shell: MainGame = await WorldFixture.boot_shell(self, without_mission_loadout)
+	_temp_dir = WorldFixture.last_shell_dir()
 	return shell
-
-
-func _fixture_entries(filenames: Array, without_mission_loadout := false) -> Array:
-	var entries: Array = []
-	for filename in filenames:
-		var source := FIXTURE_DIR.path_join(filename)
-		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
-		# while retaining that logical archive name.
-		if filename == "mnml.trn":
-			source = BAKED_TERRAIN_DIR.path_join("Tmap.trn")
-		# The in-world screens (ESC pause overlay + armory) pack the shipped JO
-		# menus from the reference fixture set under their retail archive names;
-		# without the set the boot packs the minted main menu under those names
-		# (a valid menu; the screen-verb test that opens them pends).
-		elif filename == "game.mnu":
-			source = RetailData.fixture("mnu/jo_game.mnu")
-			if source.is_empty():
-				source = FIXTURE_DIR.path_join("main.mnu")
-		elif filename == "weapon.mnu":
-			source = RetailData.fixture("mnu/jo_weapon.mnu")
-			if source.is_empty():
-				source = FIXTURE_DIR.path_join("main.mnu")
-		var bytes := FileAccess.get_file_as_bytes(source)
-		if filename == "mnml.bms" and without_mission_loadout:
-			var mission := MissionData.new()
-			assert_eq(mission.open_file(ProjectSettings.globalize_path(source)), OK,
-					"the committed minimal mission opens for the no-kit fixture")
-			assert_true(mission.set_weapon_loadout([]),
-					"the profile-over-fallback fixture can clear the authored kit")
-			var no_kit_path := _temp_dir.path_join("mnml_no_kit.bms")
-			assert_eq(mission.save_as(no_kit_path), OK,
-					"the no-kit lifecycle mission serializes")
-			bytes = FileAccess.get_file_as_bytes(no_kit_path)
-		if filename == "weapon.def":
-			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()
-		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
-		entries.append({"name": filename, "bytes": bytes})
-	return entries
 
 
 func _wait_for_world_load(world, frame_limit := 240) -> void:
@@ -1286,7 +1172,8 @@ func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_true(world.visible, "the loaded world is presented")
 	assert_false(menu_shell.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
-	assert_not_null(world.get_node_or_null("MissionObjects"))
+	assert_not_null(world.get_node_or_null("MissionRoot/MissionObjects"),
+			"the placed container is the mission root's child")
 	assert_gt(terrain.get_visible_patch_count(), 0,
 			"the loaded mission made raw RenderingServer terrain patches visible")
 
@@ -1302,13 +1189,8 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"raw terrain RIDs obey the hidden GameWorld ancestor")
 	assert_true(world.get_current_frame_clear_color().is_equal_approx(boot_clear),
 			"the mission sky clear is restored to the boot/menu frame clear")
-	assert_null(world.get_node_or_null("MissionObjects"),
+	assert_null(world.get_node_or_null("MissionRoot"),
 			"no mission presentation subtree remains")
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # The SP lose flow's SHELL half (world-wac-ai-re §20): the WAC Lose banner
@@ -1336,8 +1218,8 @@ func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu(
 
 	var banner_key := "STRMISC_KILLEDGREEN"
 	world.mission_effects.emit([
-		{"kind": "lose", "a": 0, "str": banner_key},
-		{"kind": "round_end", "a": 2},
+		MissionEffect.make("lose", 0, 0, 0, banner_key),
+		MissionEffect.make("round_end", 2),
 	])
 	assert_false(_shell.is_gameplay_input_active(),
 			"the round-end latch stops gameplay input while the world keeps ticking")

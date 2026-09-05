@@ -97,6 +97,7 @@ control register 0, values 0..4, no speed):
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
 | `mount_mtrl0_rgbgen113_reg1` | mount | material 0 RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |
+| `pump_minefield` | pump | ignored USRP followed by sixteen mixed-case mine names across the existing five parts; only the first fourteen bind | native `minefield`; GUT `minefield_present_test` |
 | `pump_anim0_noise_translation` | pump | LOD0 row 0: translation z enabled, control 0x36, end 32767 | `object_data_panm_apply_test.gd` same-time noise |
 | `shed_lght0_sub2_origin_atten100` | shed | light 0: subobject 2, position zero, atten_end 100 | `effect_light_world_test.gd` exact ROBJ row; `per_model_light_isolation_test.gd` owner scope |
 | `armory_lght0_sub1_offset` | armory | light 0: subobject 1, Godot position (0.25, 0.5, -0.75), atten_end 1000 | effect_light spawn-time matrix |
@@ -150,7 +151,7 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   combos with both `skipdemo` flag levels, four good and four evil); the shipped
   table is the reference-tree leg of `avatars_parse` and `avatars_roundtrip`.
 - `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
-  authored through `MissionDocument` and written by `bms::write` (four populated
+  authored through the `bms_edit` free functions and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and
   environment in its header); the shipped ash_i5b is `mission_mis_idempotency`'s
   reference-tree leg and the whole shipped corpus is the gated `mission_corpus`.

@@ -66,6 +66,7 @@ SCAN_ROOTS = (
     "third_party/sqlite",
     "third_party/bcrypt",
     "third_party/imgui",
+    "third_party/miniz",
 )
 
 # --- The rules -------------------------------------------------------------
@@ -86,6 +87,13 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         "(Shape A: opennova_novaworld_service sits ABOVE opennova_net)",
         ["opennova_net"],
         [SERVICE_TARGET],
+        set(),
+    ),
+    (
+        "net means wire (ADR 0043 d4): opennova_net never links "
+        "opennova_runtime — the in-match session and replication sit ABOVE it",
+        ["opennova_net", SERVICE_TARGET],
+        ["opennova_runtime"],
         set(),
     ),
     (

@@ -31,7 +31,7 @@ const ACCEPT_HOTKEY := KEY_SHIFT
 signal opened
 signal closed
 
-var _world: GameWorld = null
+var _view: ArmoryWorldView = null
 var _player_presenter: LocalPlayerPresenter = null  # viewmodel rebuild on ACCEPT
 var _ui_parent: Node = null
 # The layout source, converted ONCE at setup: a Control parent (test overlays)
@@ -59,15 +59,15 @@ func _init() -> void:
 	_armory.armory_closed.connect(close)
 
 
-## Wire the presenter to a world + player presenter and the node the menu overlays
-## (the HUD layer in the game shell; tests pass their own Control parent).
-func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter,
+## Wire the presenter to its world view + player presenter and the node the menu
+## overlays (the HUD layer in the game shell; tests pass their own Control parent).
+func setup(view: ArmoryWorldView, player_presenter_in: LocalPlayerPresenter,
 		ui_parent: Node) -> void:
-	_world = world
+	_view = view
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
-	_connect_layout_source()
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func set_player_team(team: int) -> void:
@@ -89,9 +89,9 @@ func get_menu_driver() -> MenuDriver:
 ## stands in an armory zone. Returns false when out of zone or the menu cannot
 ## build (the key is then ignored, matching the original's silent gate).
 func try_open() -> bool:
-	if _world == null:
+	if _view == null:
 		return false
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null or not sim.local_player_in_armory_zone():
 		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
 	return open()
@@ -101,9 +101,9 @@ func try_open() -> bool:
 ## play. The shells arrive through try_open()'s zone gate; tests that stage the
 ## world without a type-6 volume drive this directly.
 func open() -> bool:
-	if is_open() or _world == null or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null:
 		return false
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null:
 		return false
 	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
@@ -152,33 +152,36 @@ func open() -> bool:
 		"SECONDARY": -1,
 		"ACCESSORY": -1,
 	}
-	var weapon_db: WeaponDatabase = _world.get_weapon_database()
+	var weapon_db: WeaponDatabase = _view.weapon_database()
 	if weapon_db != null and weapon_db.is_loaded():
 		current_primary = ""
-		for value in sim.get_local_player_loadout():
-			var row := value as Dictionary
-			var weapon_name := String(row.get("name", ""))
+		for row: WeaponKitEntry in sim.get_local_player_loadout():
+			var weapon_name := row.name
 			var index: int = weapon_db.find_weapon(weapon_name)
 			if index < 0:
 				continue
-			match int(weapon_db.get_weapon(index).get("slot", -1)):
+			match weapon_db.get_weapon(index).slot:
 				WeaponDatabase.SLOT_PRIMARY:
 					if current_primary.is_empty():
 						current_primary = weapon_name
-						current_parent_clips["PRIMARY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["PRIMARY"] = row.ammo_primary
 				WeaponDatabase.SLOT_SECONDARY:
 					if current_secondary.is_empty():
 						current_secondary = weapon_name
-						current_parent_clips["SECONDARY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["SECONDARY"] = row.ammo_primary
 				WeaponDatabase.SLOT_ACCESSORY:
 					if current_accessory.is_empty():
 						current_accessory = weapon_name
-						current_parent_clips["ACCESSORY"] = int(
-								row.get("ammo_primary", -1))
+						current_parent_clips["ACCESSORY"] = row.ammo_primary
 				WeaponDatabase.SLOT_GRENADE:
-					current_grenades.append(row.duplicate(true))
+					# The companion's grenade rows keep the persisted-profile shape
+					# (the loadout profile's "grenades" entries).
+					current_grenades.append({
+						"name": row.name,
+						"ammo_primary": row.ammo_primary,
+						"ammo_secondary": row.ammo_secondary,
+						"flags": row.flags,
+					})
 	_armory.set_current_loadout(
 			current_primary, current_secondary, current_accessory, current_grenades,
 			current_parent_clips)
@@ -202,6 +205,7 @@ func close() -> void:
 	# A dropdown left open would come back mid-popup on the next open (the frame
 	# only hides; the driver's per-widget state persists across shows).
 	_driver.close_active_combo_popup()
+	_armory.on_menu_released()
 	_frame.visible = false
 	set_process(false)
 	closed.emit()
@@ -249,7 +253,7 @@ func teardown() -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -284,14 +288,14 @@ func _ensure_menu() -> bool:
 	_driver.attach(_frame, _audio)
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
-	var style := _load_style(root)
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("ArmoryPresenter: %s has no screens" % MENU_FILE)
 		teardown()
 		return false
 	_menu_root = root
-	_armory.set_weapon_database(_world.get_weapon_database())
+	_armory.set_weapon_database(_view.weapon_database())
 	return true
 
 
@@ -328,30 +332,24 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
-	if _world != null:
-		var sim: Simulation = _world.get_sim()
-		var kit: Array[Dictionary] = []
+	if _view != null:
+		var sim: Simulation = _view.sim()
+		var kit: Array[WeaponKitEntry] = []
 		for slot_key in ["primary", "secondary", "accessory"]:
 			var weapon_name := String(loadout.get(slot_key, ""))
 			if weapon_name.is_empty():
 				continue
-			kit.append({
-				"name": weapon_name,
-				"ammo_primary": int(loadout.get(slot_key + "_clips", -1)),
-				"ammo_secondary": -1,
-				"flags": -1,
-			})
+			kit.append(WeaponKitEntry.make(weapon_name,
+					int(loadout.get(slot_key + "_clips", -1))))
 		for value in loadout.get("grenades", []):
 			var grenade := value as Dictionary
 			var weapon_name := String(grenade.get("name", ""))
 			if weapon_name.is_empty():
 				continue
-			kit.append({
-				"name": weapon_name,
-				"ammo_primary": int(grenade.get("ammo_primary", -1)),
-				"ammo_secondary": int(grenade.get("ammo_secondary", -1)),
-				"flags": int(grenade.get("flags", -1)),
-			})
+			kit.append(WeaponKitEntry.make(weapon_name,
+					int(grenade.get("ammo_primary", -1)),
+					int(grenade.get("ammo_secondary", -1)),
+					int(grenade.get("flags", -1))))
 		var applied := false
 		if sim != null:
 			applied = bool(sim.apply_local_player_loadout(
@@ -363,7 +361,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
 			# leaves the table bare; the knife fallback is the MISSION loader's rule,
 			# not the armory's].
-			_world.clear_local_player_weapon()
+			_view.clear_local_player_weapon()
 			if _player_presenter != null:
 				_player_presenter.refresh_viewmodel()
 			close()
@@ -372,12 +370,11 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 		# the viewmodel for it now (the commit event would also catch up next tick).
 		var equipped := primary
 		if sim != null:
-			var inv: Dictionary = sim.get_local_player_inventory()
-			var equipped_name := String(inv.get("equipped_name", ""))
+			var equipped_name := sim.get_local_player_inventory().equipped_name
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \
-				and _world.set_local_player_weapon_by_name(equipped) \
+				and _view.set_local_player_weapon_by_name(equipped) \
 				and _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
 	close()
@@ -400,14 +397,6 @@ func _register_text_tables(root: ResourceRoot) -> void:
 
 
 # The canonical menu stylesheet name the original engine looks for.
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-
-
-func _connect_layout_source() -> void:
-	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
-
-
 func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)

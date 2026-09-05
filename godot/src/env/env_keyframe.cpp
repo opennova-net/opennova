@@ -1,26 +1,11 @@
 #include "env/env_keyframe.h"
+#include "util/color_convert.h"
 
 #include <algorithm>
 
 using namespace godot;
 
 namespace {
-
-Color to_color(const opennova::env::Rgb &rgb) {
-	return Color(rgb.r, rgb.g, rgb.b);
-}
-
-opennova::env::Rgb to_rgb(const Color &color) {
-	return {
-		static_cast<float>(color.r),
-		static_cast<float>(color.g),
-		static_cast<float>(color.b),
-	};
-}
-
-int clamp_time(int time) {
-	return std::max(0, std::min(2359, time));
-}
 
 } // namespace
 
@@ -58,40 +43,40 @@ void EnvKeyframe::_bind_methods() {
 
 void EnvKeyframe::copy_from_native(const opennova::env::Keyframe &keyframe) {
 	time = keyframe.time;
-	sun_color = to_color(keyframe.sun);
-	ground_color = to_color(keyframe.ground);
-	fog_color = to_color(keyframe.fog);
-	sky_color = to_color(keyframe.sky);
-	moon_color = to_color(keyframe.moon);
-	skyfog_color = to_color(keyframe.skyfog);
-	skybase_color = to_color(keyframe.skybase);
-	skybright_color = to_color(keyframe.skybright);
-	skyhighlight_color = to_color(keyframe.skyhighlight);
-	cloudbase_color = to_color(keyframe.cloudbase);
-	cloudhighlight_color = to_color(keyframe.cloudhighlight);
-	cloudedge_color = to_color(keyframe.cloudedge);
+	sun_color = opennova::color_from_env_rgb(keyframe.sun);
+	ground_color = opennova::color_from_env_rgb(keyframe.ground);
+	fog_color = opennova::color_from_env_rgb(keyframe.fog);
+	sky_color = opennova::color_from_env_rgb(keyframe.sky);
+	moon_color = opennova::color_from_env_rgb(keyframe.moon);
+	skyfog_color = opennova::color_from_env_rgb(keyframe.skyfog);
+	skybase_color = opennova::color_from_env_rgb(keyframe.skybase);
+	skybright_color = opennova::color_from_env_rgb(keyframe.skybright);
+	skyhighlight_color = opennova::color_from_env_rgb(keyframe.skyhighlight);
+	cloudbase_color = opennova::color_from_env_rgb(keyframe.cloudbase);
+	cloudhighlight_color = opennova::color_from_env_rgb(keyframe.cloudhighlight);
+	cloudedge_color = opennova::color_from_env_rgb(keyframe.cloudedge);
 	emit_changed();
 }
 
 opennova::env::Keyframe EnvKeyframe::to_native() const {
 	opennova::env::Keyframe keyframe;
-	keyframe.time = clamp_time(time);
-	keyframe.sun = to_rgb(sun_color);
-	keyframe.ground = to_rgb(ground_color);
-	keyframe.fog = to_rgb(fog_color);
-	keyframe.sky = to_rgb(sky_color);
-	keyframe.moon = to_rgb(moon_color);
-	keyframe.skyfog = to_rgb(skyfog_color);
-	keyframe.skybase = to_rgb(skybase_color);
-	keyframe.skybright = to_rgb(skybright_color);
-	keyframe.skyhighlight = to_rgb(skyhighlight_color);
-	keyframe.cloudbase = to_rgb(cloudbase_color);
-	keyframe.cloudhighlight = to_rgb(cloudhighlight_color);
-	keyframe.cloudedge = to_rgb(cloudedge_color);
+	keyframe.time = opennova::env::clamp_tod_time(time);
+	keyframe.sun = opennova::env_rgb_from_color(sun_color);
+	keyframe.ground = opennova::env_rgb_from_color(ground_color);
+	keyframe.fog = opennova::env_rgb_from_color(fog_color);
+	keyframe.sky = opennova::env_rgb_from_color(sky_color);
+	keyframe.moon = opennova::env_rgb_from_color(moon_color);
+	keyframe.skyfog = opennova::env_rgb_from_color(skyfog_color);
+	keyframe.skybase = opennova::env_rgb_from_color(skybase_color);
+	keyframe.skybright = opennova::env_rgb_from_color(skybright_color);
+	keyframe.skyhighlight = opennova::env_rgb_from_color(skyhighlight_color);
+	keyframe.cloudbase = opennova::env_rgb_from_color(cloudbase_color);
+	keyframe.cloudhighlight = opennova::env_rgb_from_color(cloudhighlight_color);
+	keyframe.cloudedge = opennova::env_rgb_from_color(cloudedge_color);
 	return keyframe;
 }
 
-void EnvKeyframe::set_time(int p_time) { time = clamp_time(p_time); emit_changed(); }
+void EnvKeyframe::set_time(int p_time) { time = opennova::env::clamp_tod_time(p_time); emit_changed(); }
 int EnvKeyframe::get_time() const { return time; }
 
 #define IMPL_COLOR(field, setter, getter) \

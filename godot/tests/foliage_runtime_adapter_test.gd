@@ -256,6 +256,12 @@ func test_detail_preview_uses_foliage_map() -> void:
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
 		assert_eq(int(draw.layer_mask) & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
 			"an alpha-blind catcher must not darken whole foliage cards")
+		assert_eq(int(draw.layer_mask), Water.VISUAL_LAYER_TERRAIN_FOLIAGE,
+			"foliage rides its own bit alone: the beauty camera admits it and " +
+			"the water mirror excludes it (the witnessed reflection context " +
+			"collects no foliage, env-tod-re.md #30)")
+		assert_eq(Water.REFLECTION_CULL_MASK & Water.VISUAL_LAYER_TERRAIN_FOLIAGE, 0,
+			"the mirror mask excludes the foliage blanket")
 		var material := draw.material as ShaderMaterial
 		assert_not_null(material)
 		if material != null:
@@ -597,6 +603,6 @@ func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> v
 	assert_eq(String(diagnostics[1].graphic), 'missing_veg')
 
 	var stats := _dispatcher.get_frame_stats()
-	assert_eq(int(stats.get('authored_slots', -1)), 3)
-	assert_eq(int(stats.get('enabled_slots', -1)), 1)
-	assert_eq(int(stats.get('disabled_slots', -1)), 2)
+	assert_eq(stats.authored_slots, 3)
+	assert_eq(stats.enabled_slots, 1)
+	assert_eq(stats.disabled_slots, 2)

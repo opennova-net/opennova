@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/npruntime/join_session_policy.h>
+#include <runtime/inmatch/join_session_policy.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -9,23 +9,23 @@
 
 namespace godot {
 
-// Thin wrapper over np::JoinSessionPolicy + np::decide_join_expansion — the
+// Thin wrapper over inmatch::JoinSessionPolicy + inmatch::decide_join_expansion — the
 // joiner session-drive policy (the two 0xEA60 reachable-analog windows, the
 // S2C 0x7B promote validation, the admission/deploy/loss edge machine, the
-// D-NET-178 expansion reconcile decision). One instance per NetSessionDrive;
+// D-NET-178 expansion reconcile decision). One instance per SessionDrive;
 // the drive reads simulation state, forwards it here, and executes exactly
 // what the returned flags say (signal emission, the settle call, the mount
 // switch). Every decision, window, latch, and reason text lives in
-// engine/net/npruntime/join_session_policy.cpp.
+// engine/runtime/inmatch/join_session_policy.cpp.
 class NetSessionPolicy : public RefCounted {
 	GDCLASS(NetSessionPolicy, RefCounted)
 
 public:
-	// np::JoinExpansionAction.
+	// inmatch::JoinExpansionAction.
 	enum { ACTION_KEEP = 0, ACTION_REMOUNT = 1, ACTION_FAIL = 2 };
-	// np::JoinPreloadStep.
+	// inmatch::JoinPreloadStep.
 	enum { STEP_WAIT = 0, STEP_FAIL = 1 };
-	// The admission-frame edge flags (np::kAdmission*).
+	// The admission-frame edge flags (inmatch::kAdmission*).
 	enum {
 		FRAME_DONE = 1 << 0,
 		EMIT_SESSION_LOST = 1 << 1,
@@ -71,8 +71,8 @@ protected:
 	static void _bind_methods();
 
 private:
-	opennova::np::JoinSessionPolicy policy_;
-	opennova::np::JoinExpansionDecision decision_;
+	opennova::inmatch::JoinSessionPolicy policy_;
+	opennova::inmatch::JoinExpansionDecision decision_;
 };
 
 } // namespace godot

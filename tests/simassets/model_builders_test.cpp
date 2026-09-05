@@ -21,6 +21,8 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 
+using namespace opennova::threedi;
+
 namespace {
 
 std::string fixture_dir() {

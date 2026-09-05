@@ -419,7 +419,7 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	// the render-side camera-ward pull (emitter+0x140, seeded -z_offset in
 	// CEffectEmitter_Initialize @ 0x5e6349)].
 	p.position = e.position;
-	p.position.y += def.y_offset;
+	p.position.y += e.spawn_y_offset;
 	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
 	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
@@ -498,10 +498,14 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 		e.emit_dur_total = std::isfinite(duration) ? std::max(duration, 0.0f) : 0.0f;
 		e.emit_dur_remaining = e.emit_dur_total;
 		e.emit_rate = std::isfinite(rate) ? std::max(rate, 0.0f) : 0.0f;
+		e.spawn_y_offset = def->y_offset;
+		e.camera_pull = def->z_offset;
 	} else {
 		e.emit_dur_total = 0.0f;
 		e.emit_dur_remaining = 0.0f;
 		e.emit_rate = 0.0f;
+		e.spawn_y_offset = 0.0f;
+		e.camera_pull = 0.0f;
 	}
 	e.age = 0.0f;
 	e.gravity_accel = def != nullptr && std::isfinite(def->gravity)

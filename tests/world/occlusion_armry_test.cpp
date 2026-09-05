@@ -38,6 +38,7 @@
 #include "common/retail_paths.h"
 
 using namespace opennova::world;
+using namespace opennova::threedi;
 using opennova::terrain::TerrainHeightField;
 
 static int failures = 0;

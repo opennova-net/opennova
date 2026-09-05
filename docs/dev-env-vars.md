@@ -67,13 +67,13 @@ option.
 | `--lan-mode <1..4>` | host LAN rate mode (the witnessed holdoffs 12/6/4/3) |
 | `--lan-max-players <1..64>` | listen-host capacity |
 | `--callsign <name>` | the local player's callsign (15-char wire clamp) |
-| `--integrity-profile <id>` | the integrity profile the host advertises / the joiner presents |
+| `--integrity-profile <id>` | the integrity profile the host advertises / the joiner presents; applies to every joiner entry (`--lan-join` and NovaWorld browser joins). Default empty = the joiner leaves anti-cheat CRC challenges unanswered (the parity-safe posture, D-NET-181) |
 | `--capture-pcap <path>` | write the session's UDP traffic to a pcap |
 | `--mcp-port <1..65535>` | start the `opennova-game` MCP endpoint on that port ([mcp.md](mcp.md)) |
 
 ## Debug controls that replaced post-boot hooks
 
-The typed debug-control table (`DebugControls`, driven as `game_debug` over MCP) carries the actions the old env
+The typed debug-control table (`DebugControlTable`, driven as `game_debug` over MCP) carries the actions the old env
 hooks performed after boot: `teleport_local_player {position, yaw_deg,
 pitch_deg}` (the debug pose), `deploy_pick {zone}` (the auto-deploy hook),
 `set_viewmodel_weapon {weapon}` / `clear_viewmodel_weapon` (the viewmodel

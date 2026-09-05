@@ -15,6 +15,10 @@
 
 #include "particle/effect_scene.h"
 
+namespace opennova::renderer {
+struct ParticleEmitterDrawBounds;
+} // namespace opennova::renderer
+
 namespace godot {
 
 class Camera3D;
@@ -100,6 +104,12 @@ public:
 	int64_t get_draw_command_count() const;
 	Dictionary get_debug_draw_list_report() const;
 	Array get_debug_emitter_bounds() const;
+	// The native form of get_debug_emitter_bounds for the C++ EffectWorld
+	// report (no Dictionary round trip): the compiled emitter bounds of every
+	// present draw slot, the world lists first, then first-person. Not bound
+	// to Godot.
+	void collect_debug_emitter_bounds(
+			std::vector<opennova::renderer::ParticleEmitterDrawBounds> &r_out) const;
 	PackedStringArray get_unresolved_texture_names() const;
 };
 

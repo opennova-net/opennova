@@ -1,5 +1,5 @@
 // Drives a crafted JointOperations joiner through the npruntime server legs
-// (opennova::np::handle_server_datagram / frame_in_match_s2c) end-to-end: the handshake (0x41/0x42),
+// (opennova::inmatch::handle_server_datagram / frame_in_match_s2c) end-to-end: the handshake (0x41/0x42),
 // the SESSION-framed (0x43) reactive §5.1 reply path (dispatch_session_replies — handshake /
 // server-info / mission-metadata / loadout / roster / spawn-confirm), and the join-leg validation
 // (non-JO / HK / capacity / retransmit).
@@ -14,13 +14,13 @@
 // the joiner-side framer; the server's internally-generated SCRK is recovered from the ServerAuth reply,
 // so the encrypted 0x83 replies decode without any test accessor.
 
-#include <net/npruntime/napi_np_protocol.h>
+#include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
-#include <net/npruntime/integrity_challenge_profile.h>
-#include <net/npruntime/lan_discovery.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/server_tick.h>
+#include <runtime/inmatch/integrity_challenge_profile.h>
+#include <net/npwire/lan_discovery.h>
+#include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <formats/def/def.h>
@@ -32,8 +32,8 @@
 #include "common/retail_paths.h"
 #include "host_test_setup.h"
 
-#include <net/netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/inmatch/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
 #include <net/npwire/ingame_message_id.h>
@@ -52,10 +52,12 @@
 #include <utility>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 
 // The host advertises this key in ServerHello.hk; the join leg checks ClientAuth.hk against it, so
 // crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
@@ -78,8 +80,7 @@ bool mount_on_test_emplacement(
 	emplacement.seats.push_back(gunner);
 	emplacement_out = world.registry.spawn(1, emplacement);
 	return emplacement_out.valid() &&
-	       world::entity_process_vehicle_attach(
-					world, player, emplacement_out, gunner.bone_index);
+	       world.vehicles.process_attach(player, emplacement_out, gunner.bone_index);
 }
 
 bool test_emplacement_is_owned_by(
@@ -212,26 +213,26 @@ bool reply_has_tag(const std::vector<ProtocolMessage> &msgs, uint8_t tag) {
 
 // Complete the 0x41/0x42 handshake for `peer` and recover the server SCRK so the test can decode the
 // encrypted 0x83 replies.
-bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view client_scrk,
+bool handshake(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view client_scrk,
                uint32_t client_ck, std::string &out_server_scrk,
                uint32_t *out_server_sk = nullptr,
                uint32_t *out_next_client_seq = nullptr,
                bool complete_game_admission = true,
                std::vector<ProtocolMessage> *out_post_handshake = nullptr) {
-	const std::size_t connections_before_hello = np::connection_count(ctx);
+	const std::size_t connections_before_hello = inmatch::connection_count(ctx);
 	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "TestJoiner";
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-	auto rh = np::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
+	auto rh = inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	if (!expect(rh.outbound.size() == 1, "0x41 -> one ServerHello")) return false;
 	if (!expect(rh.events.empty(), "0x41 is stateless and emits no peer event")) return false;
-	if (!expect(np::connection_count(ctx) == connections_before_hello,
+	if (!expect(inmatch::connection_count(ctx) == connections_before_hello,
 	            "0x41 is stateless and creates no connection")) return false;
 
 	ClientAuth auth = make_valid_client_auth(
 			1, client_ck, kHostKey, "TestJoiner", client_scrk);
 	auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-	auto ra = np::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
+	auto ra = inmatch::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
 	if (!expect(ra.outbound.size() >= 1, "0x42 -> ServerAuth + initial settings")) return false;
 	uint8_t op = 0;
 	std::vector<uint8_t> body;
@@ -251,7 +252,7 @@ bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view 
 			client_scrk, sa.sk, sequence++,
 			{make_protocol_message(
 					0x00, retail_join_request(ctx.config.expansion))});
-	auto join_result = np::handle_server_datagram(
+	auto join_result = inmatch::handle_server_datagram(
 			ctx, peer, join_dg.data(), join_dg.size(), 3);
 	ProtocolPacketHeader session_header;
 	std::vector<ProtocolMessage> messages;
@@ -268,7 +269,7 @@ bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view 
 	auto form_dg = craft_session(
 			client_scrk, sa.sk, sequence++,
 			{make_protocol_message(0x01, {0x00})});
-	auto form_result = np::handle_server_datagram(
+	auto form_result = inmatch::handle_server_datagram(
 			ctx, peer, form_dg.data(), form_dg.size(), 4);
 	messages.clear();
 	if (!expect(
@@ -289,11 +290,11 @@ bool handshake(np::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view 
 	auto echo_dg = craft_session(
 			client_scrk, sa.sk, sequence++,
 			{make_protocol_message(0x02, std::move(echo))});
-	auto echo_result = np::handle_server_datagram(
+	auto echo_result = inmatch::handle_server_datagram(
 			ctx, peer, echo_dg.data(), echo_dg.size(), 5);
 	if (!expect(
 				!echo_result.outbound.empty() &&
-						np::connection_count(ctx) ==
+						inmatch::connection_count(ctx) ==
 								connections_before_hello + 1,
 				"handshake helper completes C2S 0x02 challenge echo")) {
 		return false;
@@ -324,20 +325,20 @@ const ProtocolMessage *find_reply(
 // with its live retail ServerHello fields but does not admit the scanner; only
 // a subsequent validated 0x42 changes the player/connection count.
 bool run_lan_discovery_metadata_is_live_and_stateless() {
-	netsim::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	config.server_name = "Configured LAN Host";
 	config.game_type = 0x00010020u;
-	config.mp_attributes |= np::GameConfig::kMpAttribTeamChoose;
+	config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
 	config.max_players = 11;
 	config.spectator_slots = -1;
 	config.spectator_password = "watch";
 	config.expansion = "jox99";
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Lan,
 	                        kHostKey, &loopback, config);
 
-	const std::vector<uint8_t> probe = np::build_lan_discovery_probe(0x11223344u);
+	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(0x11223344u);
 	uint8_t probe_opcode = 0;
 	std::vector<uint8_t> probe_body;
 	if (!expect(nw_decode_inbound(probe.data(), probe.size(), probe_opcode, probe_body) &&
@@ -361,15 +362,15 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	            "LAN discovery probe matches the exact retail JO identity")) return false;
 
 	const PeerAddr scanner{0x0100007Fu, 32100};
-	const std::size_t before_scan = np::connection_count(ctx);
-	auto first = np::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 1);
+	const std::size_t before_scan = inmatch::connection_count(ctx);
+	auto first = inmatch::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 1);
 	if (!expect(first.outbound.size() == 1, "LAN discovery 0x41 receives one 0x81")) return false;
 	if (!expect(first.events.empty(), "LAN discovery 0x41 emits no peer event")) return false;
-	if (!expect(np::connection_count(ctx) == before_scan,
+	if (!expect(inmatch::connection_count(ctx) == before_scan,
 	            "LAN discovery 0x41 does not register the scanner")) return false;
 
-	np::LanDiscoveryServer found;
-	if (!expect(np::parse_lan_discovery_reply(first.outbound[0].data(), first.outbound[0].size(), found),
+	opennova::LanDiscoveryServer found;
+	if (!expect(opennova::parse_lan_discovery_reply(first.outbound[0].data(), first.outbound[0].size(), found),
 	            "LAN discovery parser accepts the host 0x81")) return false;
 	if (!expect(found.server_name == config.server_name, "0x81 SN reflects server_name")) return false;
 	if (!expect(found.gametype == config.game_type, "0x81 P1 reflects gametype")) return false;
@@ -396,43 +397,43 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
-	np::LanDiscoveryServer ignored;
-	if (!expect(!np::parse_lan_discovery_reply(
+	opennova::LanDiscoveryServer ignored;
+	if (!expect(!opennova::parse_lan_discovery_reply(
 	                    foreign_reply.data(), foreign_reply.size(), ignored),
 	            "LAN discovery rejects a non-JO 0x81")) return false;
 
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	const PeerAddr joiner{0x0100007Fu, 32101};
 	auto auth = craft_auth("JOINTOPERATIONS", kHostKey, 0x12345678u, scrk);
-	auto joined = np::handle_server_datagram(ctx, joiner, auth.data(), auth.size(), 2);
+	auto joined = inmatch::handle_server_datagram(ctx, joiner, auth.data(), auth.size(), 2);
 	if (!expect(!joined.outbound.empty(), "validated 0x42 admits the real joiner")) return false;
-	if (!expect(np::connection_count(ctx) == before_scan + 1,
+	if (!expect(inmatch::connection_count(ctx) == before_scan + 1,
 	            "only 0x42 adds the remote connection")) return false;
 
-	auto second = np::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 3);
-	np::LanDiscoveryServer refreshed;
+	auto second = inmatch::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 3);
+	opennova::LanDiscoveryServer refreshed;
 	if (!expect(second.outbound.size() == 1 &&
-	            np::parse_lan_discovery_reply(second.outbound[0].data(), second.outbound[0].size(), refreshed),
+	            opennova::parse_lan_discovery_reply(second.outbound[0].data(), second.outbound[0].size(), refreshed),
 	            "repeated LAN discovery receives a parseable 0x81")) return false;
 	if (!expect(refreshed.current_players == 2, "0x81 NP updates after admission")) return false;
-	if (!expect(np::connection_count(ctx) == before_scan + 1,
+	if (!expect(inmatch::connection_count(ctx) == before_scan + 1,
 	            "repeated discovery still creates no connection")) return false;
 
 	// Zero-valued gated fields are absent on the wire. The discovery parser
 	// must still report the live zeroes rather than ServerHello builder defaults.
-	np::NapiNPServerCtx dedicated;
-	np::GameConfig dedicated_config;
+	inmatch::NapiNPServerCtx dedicated;
+	inmatch::GameConfig dedicated_config;
 	dedicated_config.server_name = "Empty Dedicated Host";
 	dedicated_config.game_type = 0;
 	dedicated_config.max_players = 4;
 	dedicated_config.expansion.clear();
-	np::test::bring_up_host(dedicated, np::ConnectionMode::HostOnly,
-	                        np::SocketMode::Lan, kHostKey, nullptr, dedicated_config);
-	auto empty_reply = np::handle_server_datagram(
+	inmatch::test::bring_up_host(dedicated, inmatch::ConnectionMode::HostOnly,
+	                        inmatch::SocketMode::Lan, kHostKey, nullptr, dedicated_config);
+	auto empty_reply = inmatch::handle_server_datagram(
 			dedicated, scanner, probe.data(), probe.size(), 4);
-	np::LanDiscoveryServer empty;
+	opennova::LanDiscoveryServer empty;
 	if (!expect(empty_reply.outbound.size() == 1 &&
-	            np::parse_lan_discovery_reply(empty_reply.outbound[0].data(),
+	            opennova::parse_lan_discovery_reply(empty_reply.outbound[0].data(),
 	                                          empty_reply.outbound[0].size(), empty),
 	            "empty dedicated host returns a parseable 0x81")) return false;
 	if (!expect(empty.current_players == 0 && empty.gametype == 0 && empty.expansion.empty(),
@@ -449,7 +450,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 						empty_hello.p2 == 0x00000904u,
 				"Deathmatch LAN 0x81 still carries TeamChoose from live mp_attributes"))
 		return false;
-	if (!expect(np::connection_count(dedicated) == 0,
+	if (!expect(inmatch::connection_count(dedicated) == 0,
 	            "dedicated-host discovery remains stateless")) return false;
 	return true;
 }
@@ -466,9 +467,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 // 32-byte regions around the live cap/game-type/mpattrib fields and three fixed
 // 32-byte strings. Re-requests must return the same per-session block.
 bool run_mission_transfers_match_retail_lan_contract() {
-	netsim::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	config.server_name = "Untitled ";
 	config.mission_name = "Training: Grenade Launcher";
 	config.mission_file = "00TRg.bms";
@@ -477,8 +478,8 @@ bool run_mission_transfers_match_retail_lan_contract() {
 	config.mp_attributes = 0x00003A06u;
 	config.max_players = 4;
 	config.expansion = "revx02";
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient,
-	                        np::SocketMode::Lan, kHostKey, &loopback, config);
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+	                        inmatch::SocketMode::Lan, kHostKey, &loopback, config);
 
 	const PeerAddr peer{0x0100007Fu, 30064};
 	const std::string client_scrk =
@@ -495,7 +496,7 @@ bool run_mission_transfers_match_retail_lan_contract() {
 	                   ProtocolMessage &out) -> bool {
 		const std::vector<uint8_t> dg = craft_session(
 				client_scrk, server_sk, seq++, {make_protocol_message(tag, {})});
-		const auto result = np::handle_server_datagram(
+		const auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), now);
 		if (result.outbound.empty()) return false;
 		ProtocolPacketHeader header;
@@ -638,16 +639,16 @@ bool run_tag60_mission_name_selects_by_game_type() {
 	uint16_t port = 30120;
 	uint32_t client_key = 0x60000001u;
 	for (const Case &test_case : cases) {
-		netsim::LoopbackChannel loopback;
-		np::NapiNPServerCtx ctx;
-		np::GameConfig config;
+		replication::LoopbackChannel loopback;
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::GameConfig config;
 		config.server_name = "Tag60 Selector Host";
 		config.mission_name = test_case.title;
 		config.mission_file = test_case.file;
 		config.game_type = test_case.game_type;
 		config.max_players = 4;
-		np::test::bring_up_host(ctx, np::ConnectionMode::HostClient,
-				np::SocketMode::Lan, kHostKey, &loopback, config);
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+				inmatch::SocketMode::Lan, kHostKey, &loopback, config);
 
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string client_scrk =
@@ -662,7 +663,7 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		const std::vector<uint8_t> request = craft_session(
 				client_scrk, server_sk, sequence,
 				{make_protocol_message(0x33, {})});
-		const auto result = np::handle_server_datagram(
+		const auto result = inmatch::handle_server_datagram(
 				ctx, peer, request.data(), request.size(), 130);
 		if (!expect(!result.outbound.empty(),
 				"0x33 selector request returns a server-info transfer"))
@@ -691,8 +692,8 @@ bool run_tag60_mission_name_selects_by_game_type() {
 }
 
 bool run_reactive_replies() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30000};
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB"; // 61
@@ -709,7 +710,7 @@ bool run_reactive_replies() {
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
 		auto dg = craft_session(client_scrk, server_sk, seq++, msgs);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		if (r.outbound.empty()) return false;
 		ProtocolPacketHeader hdr;
 		return decode_s2c(r.outbound.back(), server_scrk, hdr, out);
@@ -805,7 +806,7 @@ bool run_reactive_replies() {
 		// encoding, so verify one-send behavior against the host's retained queue instead of
 		// the decoded message (which necessarily carries ProtocolMessage's default policy).
 		bool pong_retained = false;
-		for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		for (const inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list) {
 			if (!(connection.peer == peer)) continue;
 			for (const auto &[packet_sequence, retained] : connection.seq.retained_outbound) {
 				(void)packet_sequence;
@@ -829,8 +830,8 @@ bool run_reactive_replies() {
 // @0x514f7c], and the client field-parses 0x51 (@0x431BB0 CharacterEntity rebind) — an
 // invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
 bool run_plain_join_tag29_draws_no_tag51() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30600};
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -846,14 +847,14 @@ bool run_plain_join_tag29_draws_no_tag51() {
 
 	auto mission_dg = craft_session(
 			client_scrk, server_sk, seq++, {make_protocol_message(0x37, {})});
-	np::handle_server_datagram(ctx, peer, mission_dg.data(), mission_dg.size(), 100);
-	if (!expect(np::bind_connection_player(ctx, peer, 1, 0x0005),
+	inmatch::handle_server_datagram(ctx, peer, mission_dg.data(), mission_dg.size(), 100);
+	if (!expect(inmatch::bind_connection_player(ctx, peer, 1, 0x0005),
 	            "server binds the connection to its allocated player entity handle")) return false;
 
 	auto spawn_req = craft_session(
 			client_scrk, server_sk, seq++,
 			{make_protocol_message(0x29, {0x00, 0x00})});
-	auto spawn_r = np::handle_server_datagram(ctx, peer, spawn_req.data(), spawn_req.size(), 200);
+	auto spawn_r = inmatch::handle_server_datagram(ctx, peer, spawn_req.data(), spawn_req.size(), 200);
 	for (const auto &dg : spawn_r.outbound) {
 		ProtocolPacketHeader hdr;
 		std::vector<ProtocolMessage> msgs;
@@ -872,8 +873,8 @@ bool run_plain_join_tag29_draws_no_tag51() {
 // frees. (The 0x46 removal fan to remaining in-match peers rides their transports; covered by the
 // staging call, no in-match second peer modeled here.)
 bool run_goodbye_despawns_player_entity() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	world::World w;
 	w.registry.configure_pool(0, 8);
@@ -894,23 +895,23 @@ bool run_goodbye_despawns_player_entity() {
 	std::string server_scrk;
 	uint32_t server_sk = 0;
 	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE01u, server_scrk, &server_sk)) return false;
-	if (!expect(np::bind_connection_player(ctx, peer, 1, h.packed),
+	if (!expect(inmatch::bind_connection_player(ctx, peer, 1, h.packed),
 	            "connection binds the live world entity")) return false;
 
 	// The goodbye carries the receiver-local server key. Empty, truncated, wrong-key, and stale
 	// prior-session packets must not tear down the live connection.
 	auto malformed_bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, {});
-	np::handle_server_datagram(ctx, peer, malformed_bye.data(), malformed_bye.size(), 398);
-	if (!expect(w.registry.get(h) != nullptr && np::connection_count(ctx) == 1,
+	inmatch::handle_server_datagram(ctx, peer, malformed_bye.data(), malformed_bye.size(), 398);
+	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1,
 	            "empty goodbye body is ignored")) return false;
 	auto wrong_bye = craft(
 			SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk ^ 0x01010101u));
-	np::handle_server_datagram(ctx, peer, wrong_bye.data(), wrong_bye.size(), 399);
-	if (!expect(w.registry.get(h) != nullptr && np::connection_count(ctx) == 1,
+	inmatch::handle_server_datagram(ctx, peer, wrong_bye.data(), wrong_bye.size(), 399);
+	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1,
 	            "wrong receiver-local goodbye key is ignored")) return false;
 
 	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk));
-	np::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+	inmatch::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
 
 	if (!expect(w.registry.get(h) == nullptr,
 	            "goodbye despawns the owned world entity (D-NET-149)")) return false;
@@ -930,8 +931,8 @@ bool run_goodbye_despawns_player_entity() {
 // A different CI/CK reusing one UDP endpoint is a replacement, not a vector erase. The old
 // authoritative entity and roster membership must be torn down before the new session is admitted.
 bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
@@ -944,7 +945,7 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 	if (!handshake(ctx, peer, old_scrk, 0xC0FFEE11u, server_scrk)) return false;
 	const world::EntityHandle old_entity = w.registry.spawn(0, world::Entity{});
 	if (!expect(old_entity.valid() &&
-	                    np::bind_connection_player(ctx, peer, 1, old_entity.packed),
+	                    inmatch::bind_connection_player(ctx, peer, 1, old_entity.packed),
 	            "endpoint-reuse fixture binds the old entity")) return false;
 	world::EntityHandle emplacement;
 	if (!expect(
@@ -954,9 +955,9 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 				"endpoint-reuse fixture owns the emplaced-gun seat and control latches")) {
 		return false;
 	}
-	for (np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!(conn.peer == peer)) continue;
-		conn.phase = np::ConnectionPhase::PlayerAdded;
+		conn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		conn.burst.spawned = true;
 		conn.reply.roster_counted = true;
 	}
@@ -967,10 +968,10 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 			"NEWCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD");
 	auto replacement_dg = craft(
 			SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(replacement));
-	auto result = np::handle_server_datagram(
+	auto result = inmatch::handle_server_datagram(
 			ctx, peer, replacement_dg.data(), replacement_dg.size(), 500);
 
-	if (!expect(!result.outbound.empty() && np::connection_count(ctx) == 1,
+	if (!expect(!result.outbound.empty() && inmatch::connection_count(ctx) == 1,
 	            "replacement endpoint is admitted as one fresh connection")) return false;
 	if (!expect(w.registry.get(old_entity) == nullptr,
 	            "endpoint replacement despawns the old authoritative entity")) return false;
@@ -981,7 +982,7 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 	}
 	if (!expect(ctx.np_protocol.roster_generation == roster_before + 1,
 	            "endpoint replacement advances the roster generation")) return false;
-	const np::NapiNPConnection &fresh = ctx.np_protocol.connection_list.front();
+	const inmatch::NapiNPConnection &fresh = ctx.np_protocol.connection_list.front();
 	if (!expect(fresh.client_ci == replacement.ci && fresh.client_ck == replacement.ck &&
 	                    fresh.player_name == replacement.na &&
 	                    !fresh.link.owned_entity.valid(),
@@ -992,8 +993,8 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 // Retail's JO connection profile reaps an otherwise-valid peer after 120000 ms of receive
 // inactivity. The reap must take the same complete entity/roster teardown path as keyed goodbye.
 bool run_inactive_peer_is_reaped() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
@@ -1009,7 +1010,7 @@ bool run_inactive_peer_is_reaped() {
 		return false;
 	}
 	const world::EntityHandle entity = w.registry.spawn(0, world::Entity{});
-	if (!expect(entity.valid() && np::bind_connection_player(ctx, peer, 1, entity.packed),
+	if (!expect(entity.valid() && inmatch::bind_connection_player(ctx, peer, 1, entity.packed),
 	            "idle-reap fixture binds the player entity")) return false;
 	world::EntityHandle emplacement;
 	if (!expect(
@@ -1018,9 +1019,9 @@ bool run_inactive_peer_is_reaped() {
 				"idle-reap fixture owns the emplaced-gun seat and control latches")) {
 		return false;
 	}
-	for (np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+	for (inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!(conn.peer == peer)) continue;
-		conn.phase = np::ConnectionPhase::PlayerAdded;
+		conn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		conn.burst.spawned = true;
 		conn.reply.roster_counted = true;
 		conn.receive_inactive_ms = 119999;
@@ -1030,7 +1031,7 @@ bool run_inactive_peer_is_reaped() {
 	// classifies it as unadmitted; it must not refresh the live connection's receive clock.
 	auto wrong_receiver = craft_session(
 			scrk, server_sk ^ 0x01010101u, 4, {});
-	auto ignored = np::handle_server_datagram(
+	auto ignored = inmatch::handle_server_datagram(
 			ctx, peer, wrong_receiver.data(), wrong_receiver.size(), 6);
 	if (!expect(ignored.outbound.empty(), "wrong receiver-local 0x43 is silently ignored"))
 		return false;
@@ -1040,17 +1041,17 @@ bool run_inactive_peer_is_reaped() {
 		return false;
 	}
 
-	const std::vector<np::TickOut> outs =
-			np::tick_connections(ctx, /*elapsed_ms=*/2, /*now_tick=*/7);
+	const std::vector<inmatch::TickOut> outs =
+			inmatch::tick_connections(ctx, /*elapsed_ms=*/2, /*now_tick=*/7);
 	bool saw_goodbye = false;
-	for (const np::TickOut &out : outs)
-		for (const np::HostAcceptEvent &event : out.events)
-			if (event.kind == np::HostAcceptEvent::Kind::PeerGoodbye &&
+	for (const inmatch::TickOut &out : outs)
+		for (const inmatch::HostAcceptEvent &event : out.events)
+			if (event.kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye &&
 			    event.peer == peer)
 				saw_goodbye = true;
 	if (!expect(saw_goodbye, "inactivity reap surfaces owner cleanup for the dead endpoint"))
 		return false;
-	if (!expect(np::connection_count(ctx) == 0,
+	if (!expect(inmatch::connection_count(ctx) == 0,
 	            "120000 ms inactive peer is removed from the connection list")) return false;
 	if (!expect(w.registry.get(entity) == nullptr,
 	            "inactivity reap despawns the authoritative player entity")) return false;
@@ -1066,9 +1067,9 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// The 1.7.5.7 host validates these NapiNetConfig values before allocating a
 	// connection. They are binary literals, not negotiable host settings.
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		struct BadField {
 			const char *name;
 			const char *value;
@@ -1090,10 +1091,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					static_cast<uint16_t>(31300 + (bad.name[0] + bad.name[1]))};
 			auto dg = craft(
 					SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-			auto result = np::handle_server_datagram(
+			auto result = inmatch::handle_server_datagram(
 					ctx, peer, dg.data(), dg.size(), 1);
 			if (!expect(
-						result.outbound.empty() && np::connection_count(ctx) == 0,
+						result.outbound.empty() && inmatch::connection_count(ctx) == 0,
 						"invalid retail game-environment literal is rejected before allocation")) {
 				return false;
 			}
@@ -1103,10 +1104,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				1, 0xA0000001u, kHostKey, "MissingEnvironment", scrk);
 		auto dg = craft(
 				SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(missing));
-		auto result = np::handle_server_datagram(
+		auto result = inmatch::handle_server_datagram(
 				ctx, PeerAddr{0x0100007Fu, 31320}, dg.data(), dg.size(), 2);
 		if (!expect(
-					result.outbound.empty() && np::connection_count(ctx) == 0,
+					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
 					"missing required game-environment literals is rejected before allocation")) {
 			return false;
 		}
@@ -1115,12 +1116,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// A form post cannot skip the JOIN request. The protocol violation tears
 	// down the pending node, so it occupies neither a player slot nor an entity.
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
-		world::AiSystem ai;
-		w.ai = &ai;
+		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
 		const PeerAddr peer{0x0100007Fu, 31330};
@@ -1136,7 +1136,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					"0x42 alone does not mark a remote player admitted")) {
 			return false;
 		}
-		np::tick_connections(ctx, 16, 10);
+		inmatch::tick_connections(ctx, 16, 10);
 		if (!expect(
 					!ctx.np_protocol.connection_list.front().link.owned_entity.valid(),
 					"0x42 alone cannot spawn an authoritative entity")) {
@@ -1146,10 +1146,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		auto dg = craft_session(
 				scrk, server_sk, 1,
 				{make_protocol_message(0x01, {0x00})});
-		auto result = np::handle_server_datagram(
+		auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), 11);
 		if (!expect(
-					result.outbound.empty() && np::connection_count(ctx) == 0,
+					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
 					"out-of-order 0x01 is dropped and releases the pending admission")) {
 			return false;
 		}
@@ -1158,9 +1158,9 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// The JOIN request itself is structural: the golden base-game request is
 	// VERSIONCRCSTRING="0". A malformed body cannot advance the FSM.
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		const PeerAddr peer{0x0100007Fu, 31331};
 		std::string server_scrk;
 		uint32_t server_sk = 0;
@@ -1172,10 +1172,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		auto dg = craft_session(
 				scrk, server_sk, 1,
 				{make_protocol_message(0x00, {'b', 'a', 'd'})});
-		auto result = np::handle_server_datagram(
+		auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), 12);
 		if (!expect(
-					result.outbound.empty() && np::connection_count(ctx) == 0,
+					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
 					"malformed 0x00 JOIN is dropped and releases the pending admission")) {
 			return false;
 		}
@@ -1187,9 +1187,9 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// admits [orig: Server_ValidatePlayerJoinRequest — gate @0x51231e, compare
 	// @0x512331, reject DPC=48 @0x512341].
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		ctx.config.expansion_version_checksum = -559038737; // 0xDEADBEEF as i32
 		const PeerAddr peer{0x0100007Fu, 31335};
 		std::string server_scrk;
@@ -1204,10 +1204,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				scrk, server_sk, 1,
 				{make_protocol_message(
 						0x00, retail_join_request(ctx.config.expansion))});
-		auto result = np::handle_server_datagram(
+		auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), 12);
 		if (!expect(
-					result.outbound.empty() && np::connection_count(ctx) == 0,
+					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
 					"a mismatched expansion version checksum is rejected [orig: @0x512341]")) {
 			return false;
 		}
@@ -1225,7 +1225,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				{make_protocol_message(
 						0x00, retail_join_request(
 								ctx.config.expansion, "-559038737"))});
-		auto ok_result = np::handle_server_datagram(
+		auto ok_result = inmatch::handle_server_datagram(
 				ctx, peer, ok_dg.data(), ok_dg.size(), 13);
 		ProtocolPacketHeader crc_hdr;
 		std::vector<ProtocolMessage> crc_replies;
@@ -1243,9 +1243,9 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// retail stores the TLV without reading it [orig: the g_ExpansionName[0]
 	// gate @0x51231e].
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		ctx.config.expansion.clear();
 		ctx.config.expansion_version_checksum = 0;
 		const PeerAddr peer{0x0100007Fu, 31336};
@@ -1260,7 +1260,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				scrk, server_sk, 1,
 				{make_protocol_message(
 						0x00, retail_join_request("", "12345"))});
-		auto result = np::handle_server_datagram(
+		auto result = inmatch::handle_server_datagram(
 				ctx, peer, dg.data(), dg.size(), 12);
 		ProtocolPacketHeader base_hdr;
 		std::vector<ProtocolMessage> base_replies;
@@ -1277,12 +1277,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// Happy path: each request advances exactly one turn, and the authoritative
 	// player becomes spawn-eligible only after the 256-byte challenge echo.
 	{
-		np::NapiNPServerCtx ctx;
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
-		world::AiSystem ai;
-		w.ai = &ai;
+		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
 		const PeerAddr peer{0x0100007Fu, 31332};
@@ -1298,7 +1297,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				scrk, server_sk, 1,
 				{make_protocol_message(
 						0x00, retail_join_request(ctx.config.expansion))});
-		auto join_result = np::handle_server_datagram(
+		auto join_result = inmatch::handle_server_datagram(
 				ctx, peer, join_dg.data(), join_dg.size(), 100);
 		ProtocolPacketHeader hdr;
 		std::vector<ProtocolMessage> replies;
@@ -1320,7 +1319,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		auto form_dg = craft_session(
 				scrk, server_sk, 2,
 				{make_protocol_message(0x01, {0x00})});
-		auto form_result = np::handle_server_datagram(
+		auto form_result = inmatch::handle_server_datagram(
 				ctx, peer, form_dg.data(), form_dg.size(), 101);
 		replies.clear();
 		if (!expect(
@@ -1347,11 +1346,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		auto echo_dg = craft_session(
 				scrk, server_sk, 3,
 				{make_protocol_message(0x02, std::move(echo))});
-		auto echo_result = np::handle_server_datagram(
+		auto echo_result = inmatch::handle_server_datagram(
 				ctx, peer, echo_dg.data(), echo_dg.size(), 102);
 		if (!expect(
 					!echo_result.outbound.empty() &&
-							np::connection_count(ctx) == 1 &&
+							inmatch::connection_count(ctx) == 1 &&
 							ctx.np_protocol.connection_list.front().self_id_seen &&
 							ctx.np_protocol.connection_list.front().reply.admission_metadata_pushed &&
 							!ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
@@ -1359,7 +1358,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					"valid 0x02 echo completes admission and emits post-handshake metadata")) {
 			return false;
 		}
-		np::tick_connections(ctx, 16, 103);
+		inmatch::tick_connections(ctx, 16, 103);
 		if (!expect(
 					ctx.np_protocol.connection_list.front().link.owned_entity.valid() &&
 							ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
@@ -1367,18 +1366,18 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					"next tick spawns the player and emits only spawn metadata")) {
 			return false;
 		}
-		const std::vector<np::TickOut> pre_metadata_tick =
-				np::tick_connections(ctx, 16, 104);
+		const std::vector<inmatch::TickOut> pre_metadata_tick =
+				inmatch::tick_connections(ctx, 16, 104);
 		if (!expect(
 					pre_metadata_tick.empty() &&
 					!ctx.np_protocol.connection_list.front().reply.roster_pushed,
 					"following tick waits for the mission-metadata boundary")) {
 			return false;
 		}
-		np::NapiNPConnection &connection =
+		inmatch::NapiNPConnection &connection =
 				ctx.np_protocol.connection_list.front();
 		const std::vector<ProtocolMessage> join_tail =
-				np::dispatch_session_replies(
+				inmatch::dispatch_session_replies(
 						ctx.config, connection,
 						{make_protocol_message(0x37, {})}, 105,
 						ctx.np_protocol.connection_list, &w);
@@ -1396,8 +1395,8 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 bool run_non_jo_peer_is_ignored() {
 	// The join legs validate the complete retail JO identity + HK echo (the @0x6213b0/@0x62b750
 	// gates). Any mismatched version field is silently dropped with no reply and no connection.
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 31000};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 
@@ -1407,14 +1406,14 @@ bool run_non_jo_peer_is_ignored() {
 		hello.pn = "NOVAWORLDUDP";
 		hello.ci = 1;
 		auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 		if (!expect(r.outbound.empty(), "lobby PN produces no JO ServerHello")) return false;
-		if (!expect(np::connection_count(ctx) == 0, "lobby PN registers no JO connection")) return false;
+		if (!expect(inmatch::connection_count(ctx) == 0, "lobby PN registers no JO connection")) return false;
 	}
 	auto reject_hello = [&](ClientHello hello, uint32_t now, const char *message) {
 		auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
-		return expect(r.outbound.empty() && np::connection_count(ctx) == 0, message);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		return expect(r.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
 	};
 	{
 		ClientHello hello = make_jointoperations_client_hello(1);
@@ -1430,14 +1429,14 @@ bool run_non_jo_peer_is_ignored() {
 	// (b) non-JO ClientAuth -> no ServerAuth, no node (the join re-validates PN).
 	{
 		auto dg = craft_auth("NOVAWORLDUDP", kHostKey, 0xDEADBEEFu, scrk);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 5);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 5);
 		if (!expect(r.outbound.empty(), "non-JO 0x42 produces no ServerAuth")) return false;
-		if (!expect(np::connection_count(ctx) == 0, "non-JO 0x42 registers no connection")) return false;
+		if (!expect(inmatch::connection_count(ctx) == 0, "non-JO 0x42 registers no connection")) return false;
 	}
 	auto reject_auth = [&](ClientAuth auth, uint32_t now, const char *message) {
 		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
-		return expect(r.outbound.empty() && np::connection_count(ctx) == 0, message);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		return expect(r.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
 	};
 	{
 		ClientAuth auth = make_valid_client_auth(
@@ -1459,44 +1458,43 @@ bool run_non_jo_peer_is_ignored() {
 	// (c) JO ClientAuth with the WRONG host key -> dropped (HK echo gate).
 	{
 		auto dg = craft_auth("JOINTOPERATIONS", kHostKey ^ 0x1u, 0xDEADBEEFu, scrk);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 11);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 11);
 		if (!expect(r.outbound.empty(), "wrong-HK 0x42 produces no ServerAuth")) return false;
-		if (!expect(np::connection_count(ctx) == 0, "wrong-HK 0x42 registers no connection")) return false;
+		if (!expect(inmatch::connection_count(ctx) == 0, "wrong-HK 0x42 registers no connection")) return false;
 	}
 	return true;
 }
 
 // A live handshake against a host that was NOT brought up (host_running == 0) is rejected.
 bool run_handshake_rejected_when_host_down() {
-	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx); // config only — NO create_session, so host_running stays 0
+	inmatch::NapiNPServerCtx ctx;
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
 	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "EarlyBird";
 	auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 	if (!expect(r.outbound.empty(), "0x41 to a down host produces no ServerHello")) return false;
-	if (!expect(np::connection_count(ctx) == 0, "0x41 to a down host registers no connection")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 0, "0x41 to a down host registers no connection")) return false;
 	return true;
 }
 
-// The full P0->P1->P2 listen-host bring-up preserves the host's own type-2 loopback through
-// configure_session_runtime, and a remote joiner is added alongside it (not in place of it).
+// The full listen-host bring-up installs the host's own type-2 loopback, and a remote joiner is added
+// alongside it (not in place of it).
 bool run_listen_host_lifecycle() {
-	netsim::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig settings;
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
 	settings.max_players = 8; // co-op listen host: host loopback + up to 7 joiners (capacity gate)
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        kHostKey, &loopback, settings);
 
 	if (!expect(ctx.is_in_session == 1, "listen host is in session")) return false;
 	if (!expect(ctx.is_authority == 1 && ctx.is_mp_session_peer == 1, "HostClient = host + client")) return false;
 	if (!expect(ctx.np_protocol.host_running == 1, "listen host is running")) return false;
 	if (!expect(ctx.np_protocol.host_key == kHostKey, "host key seeded")) return false;
-	if (!expect(np::connection_count(ctx) == 1, "loopback preserved through configure_session_runtime")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 1, "listen-host session installs one loopback")) return false;
 	if (!expect(ctx.np_protocol.connection_list[0].type == 2, "preserved node is the type-2 loopback")) return false;
 
 	const PeerAddr peer{0x0100007Fu, 31200};
@@ -1504,13 +1502,13 @@ bool run_listen_host_lifecycle() {
 	ClientHello hello = make_jointoperations_client_hello(1);
 	hello.co = "RemoteJoiner";
 	auto h = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-	auto rh = np::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
+	auto rh = inmatch::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
 	if (!expect(rh.outbound.size() == 1, "remote 0x41 -> one ServerHello")) return false;
 	auto a = craft_auth("JOINTOPERATIONS", kHostKey, 0xDEADBEEFu, scrk);
-	auto ra = np::handle_server_datagram(ctx, peer, a.data(), a.size(), 2);
+	auto ra = inmatch::handle_server_datagram(ctx, peer, a.data(), a.size(), 2);
 	if (!expect(ra.outbound.size() >= 1, "remote 0x42 -> ServerAuth + initial settings")) return false;
 
-	if (!expect(np::connection_count(ctx) == 2, "joiner added alongside the loopback")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 2, "joiner added alongside the loopback")) return false;
 	int loopbacks = 0, remotes = 0;
 	for (const auto &c : ctx.np_protocol.connection_list) {
 		if (c.type == 2) ++loopbacks;
@@ -1525,20 +1523,19 @@ bool run_listen_host_lifecycle() {
 // proves two admissions drained before spawn cannot advertise the same identity.
 bool run_post_handshake_slot_is_reserved_until_spawn() {
 	world::World world;
-	world::AiSystem ai;
-	world.ai = &ai;
+	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
-	netsim::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig settings;
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
 	settings.max_players = 8;
-	np::test::bring_up_host(
-			ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(
+			ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 			kHostKey, &loopback, settings);
 	ctx.world = &world;
 	if (!expect(
-				np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1 &&
+				inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1 &&
 						ctx.np_protocol.connection_list.front().reply.player_slot == 0,
 				"listen host owns roster slot 0 before remote admission")) {
 		return false;
@@ -1560,7 +1557,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	}
 	bool first_reserved = false;
 	bool second_reserved = false;
-	for (const np::NapiNPConnection &connection :
+	for (const inmatch::NapiNPConnection &connection :
 	     ctx.np_protocol.connection_list) {
 		if (connection.peer == first_peer)
 			first_reserved = connection.reply.player_slot_reserved;
@@ -1573,11 +1570,11 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 		return false;
 	}
 
-	const std::vector<np::TickOut> spawn_out =
-			np::tick_connections(ctx, 16, 6);
+	const std::vector<inmatch::TickOut> spawn_out =
+			inmatch::tick_connections(ctx, 16, 6);
 	auto slot_message_for = [&](const PeerAddr &peer, std::string_view server_scrk,
 	                            ProtocolMessage &slot) {
-		for (const np::TickOut &tick : spawn_out) {
+		for (const inmatch::TickOut &tick : spawn_out) {
 			if (!(tick.peer == peer)) continue;
 			for (const std::vector<uint8_t> &datagram : tick.outbound) {
 				ProtocolPacketHeader header;
@@ -1604,7 +1601,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	uint8_t first_spawned_slot = 0xFF;
 	uint8_t second_spawned_slot = 0xFF;
 	bool spawned_reservation_left = false;
-	for (const np::NapiNPConnection &connection :
+	for (const inmatch::NapiNPConnection &connection :
 	     ctx.np_protocol.connection_list) {
 		if (connection.peer == first_peer) {
 			first_spawned_slot = connection.reply.player_slot;
@@ -1625,7 +1622,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	}
 
 	if (!expect(
-				np::drop_connection(ctx, first_peer),
+				inmatch::drop_connection(ctx, first_peer),
 				"disconnect releases the first remote roster identity")) {
 		return false;
 	}
@@ -1636,8 +1633,8 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 				replacement_server_scrk)) {
 		return false;
 	}
-	const np::NapiNPConnection *replacement = nullptr;
-	for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+	const inmatch::NapiNPConnection *replacement = nullptr;
+	for (const inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == replacement_peer) replacement = &connection;
 	if (!expect(
 				replacement != nullptr && replacement->reply.player_slot_reserved &&
@@ -1646,7 +1643,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 		return false;
 	}
 	if (!expect(
-				np::drop_connection(ctx, replacement_peer),
+				inmatch::drop_connection(ctx, replacement_peer),
 				"pre-spawn teardown releases an advertised reservation")) {
 		return false;
 	}
@@ -1657,8 +1654,8 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 				second_replacement_server_scrk)) {
 		return false;
 	}
-	const np::NapiNPConnection *second_replacement = nullptr;
-	for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+	const inmatch::NapiNPConnection *second_replacement = nullptr;
+	for (const inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == second_replacement_peer)
 			second_replacement = &connection;
 	return expect(
@@ -1684,21 +1681,20 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 // kit. This regression therefore treats UDP boundaries as protocol semantics.
 bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	world::World world;
-	world::AiSystem ai;
-	world.ai = &ai;
+	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
-	netsim::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	config.game_type = 0x00010020u;
 	config.max_players = 4;
 	config.expansion = "revx02";
-	np::test::bring_up_host(
-			ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(
+			ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 			kHostKey, &loopback, config);
 	ctx.world = &world;
-	if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 	            "listen host exists before the retail join sequence")) {
 		return false;
 	}
@@ -1727,9 +1723,9 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 		return false;
 	}
 
-	auto messages_for_peer = [&](const std::vector<np::TickOut> &outs,
+	auto messages_for_peer = [&](const std::vector<inmatch::TickOut> &outs,
 	                             std::vector<ProtocolMessage> &messages) {
-		for (const np::TickOut &tick : outs) {
+		for (const inmatch::TickOut &tick : outs) {
 			if (!(tick.peer == peer)) continue;
 			for (const std::vector<uint8_t> &datagram : tick.outbound) {
 				ProtocolPacketHeader header;
@@ -1743,7 +1739,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 
 	std::vector<ProtocolMessage> spawn_pump;
 	if (!expect(
-			messages_for_peer(np::tick_connections(ctx, 16, 6), spawn_pump) &&
+			messages_for_peer(inmatch::tick_connections(ctx, 16, 6), spawn_pump) &&
 			spawn_pump.size() == 6 && spawn_pump[0].tag == 0x03 &&
 			spawn_pump[0].payload == std::vector<uint8_t>{0x00} &&
 			is_settings(spawn_pump[1]) && is_settings(spawn_pump[2]) &&
@@ -1756,20 +1752,20 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 		return false;
 	}
 
-	np::NapiNPConnection *remote = nullptr;
-	for (np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+	inmatch::NapiNPConnection *remote = nullptr;
+	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == peer) remote = &connection;
 	if (!expect(remote != nullptr, "spawn-pump fixture retains the remote connection"))
 		return false;
 	std::vector<ProtocolMessage> premature_roster;
 	if (!expect(
-			!messages_for_peer(np::tick_connections(ctx, 16, 7), premature_roster) &&
+			!messages_for_peer(inmatch::tick_connections(ctx, 16, 7), premature_roster) &&
 			premature_roster.empty(),
 			"the post-spawn tick does not emit an early standalone roster")) {
 		return false;
 	}
 
-	const std::vector<ProtocolMessage> join_tail = np::dispatch_session_replies(
+	const std::vector<ProtocolMessage> join_tail = inmatch::dispatch_session_replies(
 			ctx.config, *remote,
 			{make_protocol_message(0x47, {}), make_protocol_message(0x37, {})},
 			7, ctx.np_protocol.connection_list, &world);
@@ -1788,12 +1784,12 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 		return false;
 	}
 	if (!expect(
-			np::Server_SetPlayerSpectator(ctx, *remote, world, true),
+			inmatch::Server_SetPlayerSpectator(ctx, *remote, world, true),
 			"authority can move the live player into spectator state")) {
 		return false;
 	}
 	const std::vector<ProtocolMessage> spectator_state =
-			np::dispatch_session_replies(
+			inmatch::dispatch_session_replies(
 					ctx.config, *remote, {make_protocol_message(0x47, {})},
 					7, ctx.np_protocol.connection_list, &world);
 	const ProtocolMessage *spectator_slot = find_reply(spectator_state, 0x75);
@@ -1804,21 +1800,21 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 		return false;
 	}
 	if (!expect(
-			np::Server_SetPlayerSpectator(ctx, *remote, world, false),
+			inmatch::Server_SetPlayerSpectator(ctx, *remote, world, false),
 			"authority can return the spectator to ordinary play")) {
 		return false;
 	}
 
 	std::vector<ProtocolMessage> same_tick_stream;
 	if (!expect(
-			!messages_for_peer(np::tick_connections(ctx, 16, 7), same_tick_stream) &&
+			!messages_for_peer(inmatch::tick_connections(ctx, 16, 7), same_tick_stream) &&
 			same_tick_stream.empty(),
 			"world streaming waits until after the roster send boundary")) {
 		return false;
 	}
 	std::vector<ProtocolMessage> next_tick_stream;
 	return expect(
-			messages_for_peer(np::tick_connections(ctx, 16, 8), next_tick_stream) &&
+			messages_for_peer(inmatch::tick_connections(ctx, 16, 8), next_tick_stream) &&
 			!next_tick_stream.empty() && !reply_has_tag(next_tick_stream, 0x16),
 			"world streaming begins on the following tick without another roster");
 }
@@ -1834,16 +1830,16 @@ bool run_full_player_info_is_recipient_scoped_lan_metadata() {
 	world::World world;
 	world.registry.configure_pool(0, 8);
 
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	config.player_name = "RetailHost403";
 	config.server_name = "Untitled ";
 	config.mission_name = "Training: Grenade Launcher";
 	config.mission_file = "00TRg.bms";
 	config.game_type = 0x00010020u;
 	config.expansion = "revx02";
-	np::test::bring_up_host(
-			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+	inmatch::test::bring_up_host(
+			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
 	ctx.world = &world;
 
@@ -1901,16 +1897,16 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 		world::World world;
 		world.registry.configure_pool(0, 8);
 
-		np::NapiNPServerCtx ctx;
-		np::GameConfig config;
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::GameConfig config;
 		config.player_name = "RetailHost403";
 		config.server_name = "Untitled ";
 		config.mission_name = test_case.mission_title;
 		config.mission_file = "TDH_I3A.bms";
 		config.game_type = test_case.game_type;
 		config.expansion = "revx02";
-		np::test::bring_up_host(
-				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+		inmatch::test::bring_up_host(
+				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 				kHostKey, nullptr, config);
 		ctx.world = &world;
 
@@ -1948,15 +1944,15 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 // A retransmitted 0x42 ClientAuth for an already-joined connection must re-send
 // the cached ServerAuth, not re-mint the server SCRK/SK.
 bool run_retransmit_0x42_keeps_keys() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30800};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	const uint32_t ck = 0x12345678u;
 
 	auto first_auth = [&](uint32_t now, ServerAuth &out_sa) -> bool {
 		auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk); // craft_auth uses CI = 1
-		auto r = np::handle_server_datagram(ctx, peer, a.data(), a.size(), now);
+		auto r = inmatch::handle_server_datagram(ctx, peer, a.data(), a.size(), now);
 		if (!expect(r.outbound.size() >= 1, "0x42 -> ServerAuth + initial settings")) return false;
 		uint8_t op = 0;
 		std::vector<uint8_t> body;
@@ -1972,7 +1968,7 @@ bool run_retransmit_0x42_keeps_keys() {
 	if (!expect(sa2.sk == sa1.sk, "retransmit re-sends the SAME ServerAuth SK (no re-mint)")) return false;
 	if (!expect(sa2.scrk == sa1.scrk, "retransmit re-sends the SAME ServerAuth SCRK (no re-mint)")) return false;
 	if (!expect(sa2.mi == sa1.mi, "retransmit re-sends the SAME MI (connection_id)")) return false;
-	if (!expect(np::connection_count(ctx) == 1, "retransmit does not create a second node")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 1, "retransmit does not create a second node")) return false;
 	return true;
 }
 
@@ -1990,7 +1986,7 @@ bool run_spectator_admission_codes_match_retail() {
 		return craft(
 				SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 	};
-	auto decode_auth = [&](const np::HandleResult &result, ServerAuth &auth,
+	auto decode_auth = [&](const inmatch::HandleResult &result, ServerAuth &auth,
 	                       const char *message) {
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
@@ -2008,19 +2004,19 @@ bool run_spectator_admission_codes_match_retail() {
 	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 stores JSR/JSPP on the
 	// connection; NapiNPProtocol_HandleClientJoin @0x62b750 has no spectator
 	// leg of its own]
-	np::NapiNPServerCtx ctx;
-	np::GameConfig settings;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
 	settings.max_players = 1;
 	settings.spectator_slots = 1;
 	settings.spectator_password = "watch";
-	np::test::bring_up_host(
-			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+	inmatch::test::bring_up_host(
+			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, settings);
 
 	const PeerAddr admitted_peer{0x0100007Fu, 32012};
 	const std::vector<uint8_t> admitted_datagram =
 			spectator_auth(12, 0x1212u, "WATCH");
-	const np::HandleResult admitted = np::handle_server_datagram(
+	const inmatch::HandleResult admitted = inmatch::handle_server_datagram(
 			ctx, admitted_peer, admitted_datagram.data(),
 			admitted_datagram.size(), 3);
 	ServerAuth admitted_reply;
@@ -2030,7 +2026,7 @@ bool run_spectator_admission_codes_match_retail() {
 		return false;
 	}
 	if (!expect(
-			admitted_reply.cr == 1 && np::connection_count(ctx) == 1 &&
+			admitted_reply.cr == 1 && inmatch::connection_count(ctx) == 1 &&
 			ctx.np_protocol.connection_list.front().join_spectator_request == 1 &&
 			ctx.np_protocol.connection_list.front().join_spectator_password ==
 					"WATCH" &&
@@ -2051,18 +2047,18 @@ bool run_spectator_admission_codes_match_retail() {
 		auto player_auth = craft_auth(
 				"JOINTOPERATIONS", kHostKey, 0x1414u, player_scrk);
 		const PeerAddr player_peer{0x0100007Fu, 32014};
-		np::HandleResult player_result = np::handle_server_datagram(
+		inmatch::HandleResult player_result = inmatch::handle_server_datagram(
 				ctx, player_peer, player_auth.data(), player_auth.size(), 4);
 		if (!expect(
 				!player_result.outbound.empty() &&
-				np::connection_count(ctx) == 2,
+				inmatch::connection_count(ctx) == 2,
 				"an ordinary player occupies the spectator headroom (shared count)")) {
 			return false;
 		}
 		const PeerAddr third{0x0100007Fu, 32013};
 		const std::vector<uint8_t> datagram =
 				spectator_auth(13, 0x1313u, "watch");
-		np::HandleResult result = np::handle_server_datagram(
+		inmatch::HandleResult result = inmatch::handle_server_datagram(
 				ctx, third, datagram.data(), datagram.size(), 5);
 		ServerAuth reply;
 		if (!decode_auth(result, reply, "join beyond shared capacity answers")) {
@@ -2070,7 +2066,7 @@ bool run_spectator_admission_codes_match_retail() {
 		}
 		if (!expect(
 				reply.cr == 0 && reply.jfc == 14 && reply.jfp == 5 &&
-				np::connection_count(ctx) == 2,
+				inmatch::connection_count(ctx) == 2,
 				"shared capacity rejects with JFC 14 / JFP 5 and no node")) {
 			return false;
 		}
@@ -2098,23 +2094,23 @@ bool run_spectator_admission_codes_match_retail() {
 		bool spectator_latched = false;
 		DisconnectEvent event;
 	};
-	auto drive_join_gate = [&](const np::GameConfig &config,
-			std::vector<np::NapiNPConnection> &roster, size_t index) {
+	auto drive_join_gate = [&](const inmatch::GameConfig &config,
+			std::vector<inmatch::NapiNPConnection> &roster, size_t index) {
 		JoinGate out;
-		netsim::UdpSessionTransport transport(
-				netsim::UdpSessionTransport::Role::Host);
-		np::NapiNPConnection &conn = roster[index];
+		replication::UdpSessionTransport transport(
+				replication::UdpSessionTransport::Role::Host);
+		inmatch::NapiNPConnection &conn = roster[index];
 		conn.link.transport = &transport;
 		const std::vector<ProtocolMessage> replies =
-				np::dispatch_session_replies(config, conn,
+				inmatch::dispatch_session_replies(config, conn,
 						{make_protocol_message(0x00, join_payload)},
 						5, roster, nullptr);
 		out.valid = true;
 		for (const ProtocolMessage &reply : replies)
 			if (reply.tag == s2c::INIT) out.got_init = true;
 		out.rejected =
-				conn.admission_stage == np::GameAdmissionStage::Rejected;
-		netsim::Datagram staged;
+				conn.admission_stage == inmatch::GameAdmissionStage::Rejected;
+		replication::Datagram staged;
 		if (transport.pop_outbound(staged)) {
 			out.punt_staged = parse_disconnect_event(
 					staged.body.data(), staged.body.size(), out.event);
@@ -2125,10 +2121,10 @@ bool run_spectator_admission_codes_match_retail() {
 	};
 	auto make_gate_conn = [](uint8_t spectator_request,
 			std::string password) {
-		np::NapiNPConnection conn;
-		conn.type = np::NapiNPConnection::kTypeServerSide;
-		conn.phase = np::ConnectionPhase::Joined;
-		conn.admission_stage = np::GameAdmissionStage::AwaitJoinRequest;
+		inmatch::NapiNPConnection conn;
+		conn.type = inmatch::NapiNPConnection::kTypeServerSide;
+		conn.phase = inmatch::ConnectionPhase::Joined;
+		conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
 		conn.join_spectator_request = spectator_request;
 		conn.join_spectator_password = std::move(password);
 		return conn;
@@ -2137,9 +2133,9 @@ bool run_spectator_admission_codes_match_retail() {
 	{
 		// Spectating disabled: the gate latches, then punts DPC 14. (An empty
 		// expansion keeps the 0x00 payload to the bare VERSIONCRCSTRING TLV.)
-		np::GameConfig disabled;
+		inmatch::GameConfig disabled;
 		disabled.expansion.clear();
-		std::vector<np::NapiNPConnection> roster;
+		std::vector<inmatch::NapiNPConnection> roster;
 		roster.push_back(make_gate_conn(1, ""));
 		const JoinGate gate = drive_join_gate(disabled, roster, 0);
 		if (!expect(gate.rejected && !gate.got_init,
@@ -2158,14 +2154,14 @@ bool run_spectator_admission_codes_match_retail() {
 		}
 	}
 
-	np::GameConfig gate_config;
+	inmatch::GameConfig gate_config;
 	gate_config.expansion.clear();
 	gate_config.spectator_slots = 1;
 	gate_config.spectator_password = "watch";
 	{
 		// Wrong password: DPC 16. The compare is case-insensitive, so the
 		// mixed-case password must NOT reject.
-		std::vector<np::NapiNPConnection> roster;
+		std::vector<inmatch::NapiNPConnection> roster;
 		roster.push_back(make_gate_conn(1, "wrong"));
 		const JoinGate gate = drive_join_gate(gate_config, roster, 0);
 		if (!expect(
@@ -2175,7 +2171,7 @@ bool run_spectator_admission_codes_match_retail() {
 			return false;
 		}
 	}
-	std::vector<np::NapiNPConnection> roster;
+	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_gate_conn(1, "WATCH"));
 	{
 		const JoinGate gate = drive_join_gate(gate_config, roster, 0);
@@ -2200,23 +2196,23 @@ bool run_spectator_admission_codes_match_retail() {
 }
 
 bool run_capacity_rejects_when_full() {
-	np::NapiNPServerCtx ctx;
-	np::GameConfig settings;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
 	settings.max_players = 2; // dedicated host: two joiner slots, no host loopback
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 
 	auto join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
 		auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk);
-		return np::handle_server_datagram(ctx, p, a.data(), a.size(), now);
+		return inmatch::handle_server_datagram(ctx, p, a.data(), a.size(), now);
 	};
 
 	if (!expect(join(PeerAddr{0x0100007Fu, 32001}, 0x1111u, 1).outbound.size() >= 1,
 	            "joiner 1 key-established (ServerAuth + initial settings)")) return false;
 	if (!expect(join(PeerAddr{0x0100007Fu, 32002}, 0x2222u, 2).outbound.size() >= 1,
 	            "joiner 2 key-established (ServerAuth + initial settings)")) return false;
-	if (!expect(np::connection_count(ctx) == 2, "two joiners fill the server")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 2, "two joiners fill the server")) return false;
 
 	auto r3 = join(PeerAddr{0x0100007Fu, 32003}, 0x3333u, 3);
 	uint8_t opcode = 0;
@@ -2233,11 +2229,11 @@ bool run_capacity_rejects_when_full() {
 			"over-capacity join returns the retail CR=0 0x82 with JFC 14 / JFP 4")) {
 		return false;
 	}
-	if (!expect(np::connection_count(ctx) == 2, "over-capacity join creates no node")) return false;
+	if (!expect(inmatch::connection_count(ctx) == 2, "over-capacity join creates no node")) return false;
 	return true;
 }
 
-// Armory-fed loadout resolve (D-NET-141): with world.weapons built from the committed fixture,
+// Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the committed fixture,
 // the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
 // filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
 // (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
@@ -2246,8 +2242,8 @@ bool run_capacity_rejects_when_full() {
 // NOTE fixture truth ≠ live-install truth: a real JO:CA root resolves a larger weapon.def whose
 // indices reproduce the golden bytes end-to-end — that equality is the live v16 wire gate.
 bool run_loadout_resolve_with_armory() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	// The armory: the shipped weapon.def from the reference fixture set -> the
 	// witnessed table (null@0 + file order). A SKIP-LEG retail leg without it.
@@ -2260,13 +2256,13 @@ bool run_loadout_resolve_with_armory() {
 	DefWeaponsFile wf{};
 	if (!expect(def_parse_weapons(def_path.c_str(), &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
-	world.weapons = world::build_weapon_table(wf);
+	world.tables.weapons = world::build_weapon_table(wf);
 	def_free_weapons(&wf);
 	DefAmmoFile af{};
 	if (!expect(def_parse_ammo(ammo_path.c_str(), &af) == 0, "fixture ammo.def parses")) return false;
-	world.ammo = world::build_ammo_table(af);
+	world.tables.ammo = world::build_ammo_table(af);
 	def_free_ammo(&af);
-	world::resolve_weapon_round_types(world.weapons, world.ammo);
+	world::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30100};
@@ -2281,7 +2277,7 @@ bool run_loadout_resolve_with_armory() {
 	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
 	                        std::vector<ProtocolMessage> &out) -> bool {
 		auto dg = craft_session(client_scrk, server_sk, seq++, msgs);
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		if (r.outbound.empty()) return false;
 		ProtocolPacketHeader hdr;
 		return decode_s2c(r.outbound.back(), server_scrk, hdr, out);
@@ -2305,7 +2301,7 @@ bool run_loadout_resolve_with_armory() {
 		auto dg = craft_session(
 				client_scrk, server_sk, seq++,
 				{make_protocol_message(0x2F, req)});
-		auto response = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		auto response = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		bool saw_5a = false;
 		for (const std::vector<uint8_t> &outbound : response.outbound) {
 			ProtocolPacketHeader hdr;
@@ -2314,8 +2310,8 @@ bool run_loadout_resolve_with_armory() {
 			if (reply_has_tag(messages, 0x5A)) saw_5a = true;
 		}
 		if (!expect(!saw_5a, label)) return false;
-		const np::NapiNPConnection *connection = nullptr;
-		for (const np::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+		const inmatch::NapiNPConnection *connection = nullptr;
+		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) connection = &candidate;
 		return expect(connection != nullptr && !connection->reply.loadout_synced &&
 		                      !connection->burst.loadout_received &&
@@ -2396,9 +2392,9 @@ bool run_loadout_resolve_with_armory() {
 		                    lo.slots[0].ammo_secondary == 0xFF &&
 		                    lo.slots[0].ammo_alt == 2,
 		            "explicit request -> clips plus the accepted damage-class byte")) return false;
-		const world::WeaponTableEntry *m4 = world.weapons.by_index(9);
-		const np::NapiNPConnection *connection = nullptr;
-		for (const np::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+		const world::WeaponTableEntry *m4 = world.tables.weapons.by_index(9);
+		const inmatch::NapiNPConnection *connection = nullptr;
+		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) connection = &candidate;
 		const int pool_id = m4 != nullptr ? m4->ammo_class_id : -1;
 		// The accepted count seeds the carried pool, then the rebuilt slot draws
@@ -2408,10 +2404,10 @@ bool run_loadout_resolve_with_armory() {
 				? 4 * m4->clipsize - m4->clipsize * m4->ammo_class_count
 				: 0;
 		if (m4 != nullptr && pool_id >= 0 &&
-		    pool_id < static_cast<int>(world.weapons.ammo_class_caps.size())) {
+		    pool_id < static_cast<int>(world.tables.weapons.ammo_class_caps.size())) {
 			expected_pool = std::min(
 					expected_pool,
-					world.weapons.ammo_class_caps[static_cast<size_t>(pool_id)]);
+					world.tables.weapons.ammo_class_caps[static_cast<size_t>(pool_id)]);
 		}
 		if (!expect(
 				connection != nullptr && pool_id >= 0 && pool_id < 128 &&
@@ -2422,13 +2418,13 @@ bool run_loadout_resolve_with_armory() {
 		}
 	}
 
-	const int m4_auto = world.weapons.index_of("WPN_M4AUTO");
-	const int m4_m203_auto = world.weapons.index_of("WPN_M4M203AUTO");
+	const int m4_auto = world.tables.weapons.index_of("WPN_M4AUTO");
+	const int m4_m203_auto = world.tables.weapons.index_of("WPN_M4M203AUTO");
 	if (!expect(m4_auto > 0 && m4_m203_auto > 0,
 	            "shared-ammo loadout fixtures resolve")) return false;
-	const int16_t m4_ammo = world.weapons.entries[static_cast<size_t>(m4_auto)].ammo_index;
+	const int16_t m4_ammo = world.tables.weapons.entries[static_cast<size_t>(m4_auto)].ammo_index;
 	if (!expect(m4_ammo >= 0 &&
-	                    world.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
+	                    world.tables.weapons.entries[static_cast<size_t>(m4_m203_auto)].ammo_index == m4_ammo,
 	            "M4AUTO and M4M203AUTO share one resolved AmmoDef index")) return false;
 
 	// player+89688 is indexed by AmmoDef, not by granted weapon. The later accepted M4M203AUTO
@@ -2477,15 +2473,14 @@ bool run_loadout_resolve_with_armory() {
 // entity+660 zero (@0x515ab0). This host is table-less, so an accepted grant echoes its request
 // entries and the class-0 EMPTY grant is unambiguous.
 bool run_loadout_envelope_gates() {
-	np::NapiNPServerCtx ctx;
-	np::GameConfig settings;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig settings;
 	settings.max_players = 8;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
 	world::World world;
 	world.registry.configure_pool(0, 16);
-	world::AiSystem ai;
-	world.ai = &ai; // the §5.2b spawn mounts the infantry motor
+	world::AiSystem &ai = world.ai; // the §5.2b spawn mounts the infantry motor
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30150};
@@ -2496,16 +2491,16 @@ bool run_loadout_envelope_gates() {
 	if (!handshake(ctx, peer, client_scrk, 0xDEADBEE3u, server_scrk, &server_sk, &seq)) return false;
 	// The spawn pump binds the joiner's pool-0 entity, so the handler has a real entity+660 to
 	// stamp (or to leave alone). [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]
-	if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 	            "the admitted joiner spawns its player entity")) return false;
 
-	auto joiner_conn = [&]() -> const np::NapiNPConnection * {
-		for (const np::NapiNPConnection &c : ctx.np_protocol.connection_list)
+	auto joiner_conn = [&]() -> const inmatch::NapiNPConnection * {
+		for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 			if (c.peer == peer) return &c;
 		return nullptr;
 	};
 	auto joiner_entity = [&]() -> world::Entity * {
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (c == nullptr || !c->link.owned_entity.valid()) return nullptr;
 		return world.registry.get(c->link.owned_entity);
 	};
@@ -2515,7 +2510,7 @@ bool run_loadout_envelope_gates() {
 	// One 0x2F in, the last 0x5A body out (empty when the handler produced none).
 	auto submit = [&](const std::vector<uint8_t> &req, uint32_t now) -> std::vector<uint8_t> {
 		auto dg = craft_session(client_scrk, server_sk, seq++, {make_protocol_message(0x2F, req)});
-		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
 		std::vector<uint8_t> body;
 		for (const std::vector<uint8_t> &outbound : r.outbound) {
 			ProtocolPacketHeader hdr;
@@ -2539,7 +2534,7 @@ bool run_loadout_envelope_gates() {
 		if (!expect(lo.avatar_class == 6 && lo.slots.empty(),
 		            "the re-send carries the LIVE class and the player's current (empty) slots"))
 			return false;
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && !c->reply.loadout_synced && !c->burst.loadout_received &&
 		                    c->reply.last_loadout_reply.empty(),
 		            "an out-of-range team opens no gate and retains no body")) return false;
@@ -2556,7 +2551,7 @@ bool run_loadout_envelope_gates() {
 		                    lo.avatar_class == 8 && lo.slots.size() == 1 &&
 		                    lo.slots[0].type_id == 9,
 		            "a valid envelope grants the submitted kit")) return false;
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && c->reply.loadout_synced && c->burst.loadout_received &&
 		                    c->reply.last_loadout_reply == granted,
 		            "the accepted grant opens the gates and is retained")) return false;
@@ -2571,7 +2566,7 @@ bool run_loadout_envelope_gates() {
 				submit({0x01, 0x0C, 0xC3, 0x00, 0x00, 0x00, 20, 0xFF, 0xFF, 0xFF, 0xFF}, 220);
 		if (!expect(body == granted, "an out-of-range class re-sends the retained grant verbatim"))
 			return false;
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && c->reply.last_loadout_reply == granted,
 		            "an out-of-range class disturbs no retained body")) return false;
 		if (!expect(joiner_entity()->player_class == 8,
@@ -2586,7 +2581,7 @@ bool run_loadout_envelope_gates() {
 		if (!expect(decode_weapon_loadout(granted.data(), granted.size(), lo) &&
 		                    lo.slots.size() == 1 && lo.slots[0].type_id == 20,
 		            "team 5 applies while the game type is team-less")) return false;
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && c->reply.last_loadout_reply == granted,
 		            "the team-5 grant is retained")) return false;
 	}
@@ -2610,7 +2605,7 @@ bool run_loadout_envelope_gates() {
 		if (!expect(decode_weapon_loadout(body.data(), body.size(), lo) &&
 		                    lo.avatar_class == 0 && lo.slots.empty(),
 		            "class 0 grants nothing and heads the reply with class 0")) return false;
-		const np::NapiNPConnection *c = joiner_conn();
+		const inmatch::NapiNPConnection *c = joiner_conn();
 		if (!expect(c != nullptr && c->reply.last_loadout_reply == body,
 		            "the empty class-0 grant REPLACES the retained body")) return false;
 		if (!expect(joiner_entity()->player_class == 0,
@@ -2641,8 +2636,8 @@ bool run_loadout_envelope_gates() {
 // @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260; wire: retail-ashi5a f=199140;
 // D-NET-146]
 bool run_character_join_vars_parsed() {
-	np::NapiNPServerCtx ctx;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30900};
 
 	ClientAuth auth = make_valid_client_auth(
@@ -2661,10 +2656,10 @@ bool run_character_join_vars_parsed() {
 	auth.cu.push_back(make_client_cu_chunk(2, "VCB", "4"));
 	auth.cu.push_back(make_client_cu_chunk(1, "CI0", "9999"));     // type 1: NOT a tag var
 	auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 	if (!expect(r.outbound.size() >= 1, "0x42 with CU vars admitted")) return false;
 
-	const np::NapiNPConnection *conn = nullptr;
+	const inmatch::NapiNPConnection *conn = nullptr;
 	for (const auto &c : ctx.np_protocol.connection_list) {
 		if (c.peer == peer) conn = &c;
 	}
@@ -2678,13 +2673,13 @@ bool run_character_join_vars_parsed() {
 	            "VCA/VCB avatar bytes parsed (golden 1/4)")) return false;
 
 	// TR out-of-range clamps to 0xFF [orig: @0x4c752f tr != -1 && (u8)tr >= 2 -> -1].
-	np::NapiNPServerCtx ctx2;
-	np::test::bring_up_host(ctx2, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	inmatch::NapiNPServerCtx ctx2;
+	inmatch::test::bring_up_host(ctx2, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer2{0x0100007Fu, 30901};
 	ClientAuth auth2 = auth;
 	auth2.cu.push_back(make_client_cu_chunk(2, "TR", "7"));
 	auto dg2 = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth2));
-	np::handle_server_datagram(ctx2, peer2, dg2.data(), dg2.size(), 1);
+	inmatch::handle_server_datagram(ctx2, peer2, dg2.data(), dg2.size(), 1);
 	for (const auto &c : ctx2.np_protocol.connection_list) {
 		if (c.peer == peer2 &&
 		    !expect(c.char_vars.team_request == 0xFF, "TR=7 clamps to 0xFF")) return false;
@@ -2703,23 +2698,23 @@ bool run_integrity_replies_validate_registered_profile() {
 		bool staged = false;
 		bool extra_staged = false;
 		bool parsed = false;
-		netsim::Datagram datagram;
+		replication::Datagram datagram;
 		DisconnectEvent event;
 	};
 
 	auto observe = [](std::string_view profile_id, uint8_t tag,
 			std::vector<uint8_t> body, uint32_t weapon_salt = 0,
 			uint32_t ammo_salt = 0, bool append_ping = false) {
-		np::GameConfig config;
+		inmatch::GameConfig config;
 		config.integrity_profile = std::string(profile_id);
-		netsim::UdpSessionTransport transport(
-				netsim::UdpSessionTransport::Role::Host);
-		std::vector<np::NapiNPConnection> roster(1);
-		np::NapiNPConnection &conn = roster.front();
+		replication::UdpSessionTransport transport(
+				replication::UdpSessionTransport::Role::Host);
+		std::vector<inmatch::NapiNPConnection> roster(1);
+		inmatch::NapiNPConnection &conn = roster.front();
 		conn.type = 1;
-		conn.phase = np::ConnectionPhase::InMatch;
+		conn.phase = inmatch::ConnectionPhase::InMatch;
 		conn.burst.spawned = true;
-		conn.link.mode = netsim::TransportMode::Client;
+		conn.link.mode = replication::TransportMode::Client;
 		conn.link.transport = &transport;
 		conn.reply.integrity_weapon_crc_salt = weapon_salt;
 		conn.reply.integrity_ammo_crc_salt = ammo_salt;
@@ -2729,19 +2724,19 @@ bool run_integrity_replies_validate_registered_profile() {
 		if (append_ping)
 			messages.push_back(make_protocol_message(c2s::PING, {}));
 		Observation result;
-		result.replies_empty = np::dispatch_session_replies(
+		result.replies_empty = inmatch::dispatch_session_replies(
 				config, conn, messages,
 				100, roster, nullptr).empty();
 		if (append_ping) {
 			result.replies_empty = result.replies_empty &&
-					np::dispatch_session_replies(
+					inmatch::dispatch_session_replies(
 							config, conn,
 							{make_protocol_message(c2s::PING, {})},
 							101, roster, nullptr).empty();
 		}
 		result.disconnect_latched = conn.host_disconnect_sent;
 		result.staged = transport.pop_outbound(result.datagram);
-		netsim::Datagram extra;
+		replication::Datagram extra;
 		result.extra_staged = transport.pop_outbound(extra);
 		if (result.staged) {
 			result.parsed = parse_disconnect_event(
@@ -2774,9 +2769,9 @@ bool run_integrity_replies_validate_registered_profile() {
 	constexpr uint32_t kAmmoRow18Crc = 0x2D087374u;
 	constexpr uint32_t kWeaponSalt = 0x11223344u;
 	constexpr uint32_t kAmmoSalt = 0x55667788u;
-	const std::string_view profile = np::kRetailRevx02IntegrityProfileId;
+	const std::string_view profile = inmatch::kRetailRevx02IntegrityProfileId;
 
-	if (!expect(!np::weapon_integrity_reply_matches(
+	if (!expect(!inmatch::weapon_integrity_reply_matches(
 					0xFF, /*source_crc=*/42, /*salt=*/0,
 					/*received_crc=*/41),
 			"a profile source CRC of 42 does not bypass a non-42 C2S 0x20 mismatch"))
@@ -2856,12 +2851,12 @@ bool run_integrity_replies_validate_registered_profile() {
 // Drive that public reply/tick sequence so a premature one-shot list cannot leave the
 // HUD's "Number of players" pinned at one.
 bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	config.max_players = 4;
 	config.player_name = "OpenNovaHost403";
-	np::test::bring_up_host(
-			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+	inmatch::test::bring_up_host(
+			ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
 
 	world::World world;
@@ -2877,9 +2872,9 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	            "scoreboard fixture owns retail slots 0 and 1")) return false;
 	ctx.world = &world;
 
-	np::NapiNPConnection host;
+	inmatch::NapiNPConnection host;
 	host.type = 2;
-	host.phase = np::ConnectionPhase::PlayerAdded;
+	host.phase = inmatch::ConnectionPhase::PlayerAdded;
 	host.burst.spawned = true;
 	host.link.owned_entity = host_handle;
 	host.reply.player_slot = 0;
@@ -2888,16 +2883,16 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	ctx.np_protocol.connection_list.push_back(std::move(host));
 
 	const PeerAddr peer{0x0100007Fu, 32786};
-	netsim::UdpSessionTransport transport(
-			netsim::UdpSessionTransport::Role::Host);
-	np::NapiNPConnection joiner;
+	replication::UdpSessionTransport transport(
+			replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection joiner;
 	joiner.peer = peer;
 	joiner.type = 1;
-	joiner.phase = np::ConnectionPhase::PlayerAdded;
-	joiner.admission_stage = np::GameAdmissionStage::Complete;
+	joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
+	joiner.admission_stage = inmatch::GameAdmissionStage::Complete;
 	joiner.burst.spawned = true;
 	joiner.link.owned_entity = joiner_handle;
-	joiner.link.mode = netsim::TransportMode::Client;
+	joiner.link.mode = replication::TransportMode::Client;
 	joiner.link.transport = &transport;
 	joiner.reply.player_slot = 1;
 	joiner.reply.player_name = "RetailJoin403";
@@ -2912,16 +2907,16 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	// The global mission counter—not a per-connection epoch—owns the repair.
 	// Counter 309 advances to 310 without a list; the next call crosses 311.
 	ctx.scoreboard_broadcast_timer = 309;
-	np::Server_TickUpdate(ctx);
-	netsim::Datagram staged;
+	inmatch::Server_TickUpdate(ctx);
+	replication::Datagram staged;
 	bool premature_list = false;
 	while (transport.pop_outbound(staged))
 		premature_list = premature_list || staged.tag == 0x16;
 	if (!expect(!premature_list, "no scoreboard broadcast before boundary 311"))
 		return false;
 
-	np::NapiNPConnection &remote = ctx.np_protocol.connection_list.back();
-	const std::vector<ProtocolMessage> sync = np::dispatch_session_replies(
+	inmatch::NapiNPConnection &remote = ctx.np_protocol.connection_list.back();
+	const std::vector<ProtocolMessage> sync = inmatch::dispatch_session_replies(
 			ctx.config, remote,
 			{make_protocol_message(0x22, {0x01, 0xF7, 0x5C})},
 			310, ctx.np_protocol.connection_list, &world);
@@ -2936,7 +2931,7 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	if (!expect(learned_slot_one, "retail slot walk learns slot 1 before the list repair"))
 		return false;
 
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	PlayerList list;
 	bool saw_repaired_list = false;
 	while (transport.pop_outbound(staged)) {
@@ -2958,7 +2953,7 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	remote.link.spectator = true;
 	world.registry.get(joiner_handle)->team = 0;
 	ctx.scoreboard_broadcast_timer = 310;
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	bool saw_spectator_list = false;
 	while (transport.pop_outbound(staged)) {
 		if (staged.tag == 0x16 &&

@@ -1,0 +1,1486 @@
+#include "simulation/entity_presenter.h"
+#include "util/axes.h"
+
+#include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/string_name.hpp>
+
+#include <algorithm>
+#include <base/io/fixed.h>
+
+#include <runtime/mission/placement_traits.h>
+#include <runtime/simassets/sim_pose_provider.h>
+
+#include "audio/mission_audio.h"
+#include "env/mission_environment.h"
+#include "lights/effect_light_director.h"
+#include "particle/effect_world.h"
+#include "simulation/destruction_events.h"
+#include "simulation/present_event_records.h"
+#include "simulation/simulation.h"
+#include "world/item_effect_director.h"
+#include "world/scar_draw_list.h"
+#include "world/scar_presenter.h"
+
+// The PLACED walk, the per-row legs both walks share, the statics and the
+// bound surface. The wire walk (cold path, registry, hot rows) is
+// entity_presenter_wire.cpp.
+
+using namespace godot;
+
+namespace {
+
+// CTRL register names + presentation-owner tags (String VALUES handed to the
+// model's owner-aware CTRL store — not dispatch names; the dispatch itself is
+// direct C++ calls on ObjectModel).
+struct CtrlNames {
+	String eweap_gunyaw = String("EWEAP_GUNYAW");
+	String eweap_gunpitch = String("EWEAP_GUNPITCH");
+	String vehicle_steering = String("VEHICLE_STEERING");
+	String vehicle_speed = String("VEHICLE_SPEED");
+	// The part-animation registers the same cveh callback publishes (catalog
+	// ordinals 46 / 47 / 60, engine/formats/threedi/threedi_ctrl_catalog.h).
+	String helo_rotor = String("HELO_ROTOR");
+	String helo_tailrotor = String("HELO_TAILROTOR");
+	String vehicle_wheels = String("VEHICLE_WHEELS");
+	String tex_team = String("TEX_TEAM");
+	String team_swing = String("TEAMSWING");
+	String lfp_camp_percent = String("LFP_CAMPPERCENT");
+	String heat_glow = String("HEAT_GLOW");
+	String owner_emplaced = String("present:emplaced");
+	String owner_vehicle_motion = String("present:vehicle_motion");
+	String owner_sector_team = String("present:sector_team");
+	String owner_zone = String("present:zone");
+	String owner_world_heat = String("present:world_heat");
+};
+
+const CtrlNames &names() {
+	static CtrlNames n;
+	return n;
+}
+
+inline int32_t field_i(const float *p, int base, int field) {
+	return static_cast<int32_t>(p[base + field]);
+}
+
+void set_owned_ctrl(ObjectModel *model, const String &owner,
+		const String &reg, int32_t value) {
+	model->set_ctrl_override(owner, reg, value);
+}
+
+void clear_owned_ctrl(ObjectModel *model, const String &owner,
+		const String &reg) {
+	model->clear_ctrl_override(owner, reg);
+}
+
+constexpr int AIM_PAYLOAD_FLOATS =
+		Simulation::PF_EMPLACED_CONTROLS_VALID -
+		Simulation::PF_AIM_BODY_PITCH_DEG;
+static_assert(AIM_PAYLOAD_FLOATS == 30,
+		"aim cache must cover body Euler plus all nine overlay triples");
+
+} // namespace
+
+void EntityPresenter::_bind_methods() {
+	// --- the placed walk ---
+	ClassDB::bind_method(D_METHOD("setup", "sim", "index", "placer"),
+			&EntityPresenter::setup, DEFVAL(Ref<MissionObjectPlacer>()));
+	ClassDB::bind_method(D_METHOD("set_output_channels", "channels"),
+			&EntityPresenter::set_output_channels);
+	ClassDB::bind_method(D_METHOD("get_output_channels"),
+			&EntityPresenter::get_output_channels);
+	ClassDB::bind_method(
+			D_METHOD("present_snapshot", "snap", "stride", "layout_revision"),
+			&EntityPresenter::present_snapshot);
+	ClassDB::bind_method(
+			D_METHOD("profile_present_snapshot", "snap", "stride",
+					"layout_revision"),
+			&EntityPresenter::profile_present_snapshot);
+	ClassDB::bind_method(D_METHOD("get_stats_record"),
+			&EntityPresenter::get_stats_record);
+	// --- the wire walk ---
+	ClassDB::bind_method(
+			D_METHOD("setup_wire", "sim", "placer", "container", "defer_index"),
+			&EntityPresenter::setup_wire, DEFVAL(Ref<EntityIndex>()));
+	ClassDB::bind_method(D_METHOD("set_synthetic_origin_only", "enabled"),
+			&EntityPresenter::set_synthetic_origin_only);
+	ClassDB::bind_method(D_METHOD("set_cold_spawn_budget", "budget"),
+			&EntityPresenter::set_cold_spawn_budget);
+	ClassDB::bind_method(D_METHOD("set_spectator_camera", "camera"),
+			&EntityPresenter::set_spectator_camera);
+	ClassDB::bind_method(
+			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
+			&EntityPresenter::present_wire_snapshot);
+	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
+			&EntityPresenter::set_render_culled);
+	ClassDB::bind_method(D_METHOD("clear_render_culled"),
+			&EntityPresenter::clear_render_culled);
+	ClassDB::bind_method(D_METHOD("pending_spawn_count"),
+			&EntityPresenter::pending_spawn_count);
+	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
+			&EntityPresenter::get_wire_stats_record);
+	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
+			&EntityPresenter::resolve_wire_handle);
+	ClassDB::bind_method(D_METHOD("held_weapon_node", "wire_handle"),
+			&EntityPresenter::held_weapon_node);
+	ClassDB::bind_method(D_METHOD("set_entity_lighting_context", "wire_handle",
+			"effect_scale", "interior_lerp", "light_transfer"),
+			&EntityPresenter::set_entity_lighting_context);
+	ClassDB::bind_method(D_METHOD("muzzle_world_for", "handle", "userpoint"),
+			&EntityPresenter::muzzle_world_for);
+	ClassDB::bind_method(D_METHOD("wire_entity_count"),
+			&EntityPresenter::wire_entity_count);
+	ClassDB::bind_method(D_METHOD("wire_nodes"), &EntityPresenter::wire_nodes);
+	ClassDB::bind_method(D_METHOD("register_wire_node", "handle", "node"),
+			&EntityPresenter::register_wire_node);
+	ClassDB::bind_method(D_METHOD("register_wire_held_weapon", "handle", "node"),
+			&EntityPresenter::register_wire_held_weapon);
+	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
+			&EntityPresenter::reset_wire_runtime_state);
+	ClassDB::bind_method(D_METHOD("teardown"), &EntityPresenter::teardown);
+	// --- the present passes ---
+	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
+			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
+			&EntityPresenter::setup_passes);
+	ClassDB::bind_method(D_METHOD("set_listener_position", "position"),
+			&EntityPresenter::set_listener_position);
+	ClassDB::bind_method(D_METHOD("listener_position"),
+			&EntityPresenter::listener_position);
+	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
+	ClassDB::bind_method(D_METHOD("profile_present_passes"),
+			&EntityPresenter::profile_present_passes);
+	ClassDB::bind_method(D_METHOD("sync_fixed_tick_effects"),
+			&EntityPresenter::sync_fixed_tick_effects);
+	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
+			&EntityPresenter::get_fire_present_stats);
+	ClassDB::bind_method(D_METHOD("get_destruction_present_stats"),
+			&EntityPresenter::get_destruction_present_stats);
+	ClassDB::bind_method(D_METHOD("get_throwable_present_stats"),
+			&EntityPresenter::get_throwable_present_stats);
+	ClassDB::bind_method(D_METHOD("get_scar_present_stats"),
+			&EntityPresenter::get_scar_present_stats);
+	ClassDB::bind_method(D_METHOD("has_active_wreck_fire", "owner_key"),
+			&EntityPresenter::has_active_wreck_fire);
+	ClassDB::bind_method(D_METHOD("warm_fire_pipelines", "position"),
+			&EntityPresenter::warm_fire_pipelines);
+	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("scar_presenter"), &EntityPresenter::scar_presenter);
+	ClassDB::bind_method(D_METHOD("present_fires", "events"),
+			&EntityPresenter::present_fires);
+	ClassDB::bind_method(D_METHOD("present_fire_sounds", "sounds"),
+			&EntityPresenter::present_fire_sounds);
+	ClassDB::bind_method(D_METHOD("present_slot_sounds", "events"),
+			&EntityPresenter::present_slot_sounds);
+	ClassDB::bind_method(D_METHOD("present_sound_emitters", "events"),
+			&EntityPresenter::present_sound_emitters);
+	ClassDB::bind_method(D_METHOD("draw_tracer_rows", "rows"),
+			&EntityPresenter::draw_tracer_rows);
+	ClassDB::bind_method(D_METHOD("present_destruction_drained", "events", "pieces"),
+			&EntityPresenter::present_destruction_drained);
+	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
+			&EntityPresenter::present_throwable_visuals);
+	ClassDB::bind_method(D_METHOD("present_vehicle_wake_visuals", "visuals"),
+			&EntityPresenter::present_vehicle_wake_visuals);
+	ClassDB::bind_method(D_METHOD("present_scar_draw_list", "draw_list"),
+			&EntityPresenter::present_scar_draw_list);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_FIRE_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_DESTRUCTION_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_THROWABLE_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_SCARS_US);
+	BIND_ENUM_CONSTANT(PASS_PROFILE_SLOT_COUNT);
+	// Emitted once per materialized wire body, after the wire rows are
+	// presented (identity + production transform applied); never re-emitted.
+	// A late subscriber replays wire_nodes() itself.
+	ADD_SIGNAL(MethodInfo("wire_node_spawned",
+			PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_NODE_TYPE,
+					"ObjectModel"),
+			PropertyInfo(Variant::INT, "kind"),
+			PropertyInfo(Variant::INT, "item_id")));
+	// --- the statics ---
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
+					"hand_frame"),
+			&EntityPresenter::held_weapon_attach_transform, DEFVAL(false));
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("held_weapon_hand_frame_basis", "bone_model_to_world"),
+			&EntityPresenter::held_weapon_hand_frame_basis);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("find_skeleton", "root"), &EntityPresenter::find_skeleton);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("held_weapon_attach_nudge"),
+			&EntityPresenter::held_weapon_attach_nudge);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("held_weapon_hand_frame_z_rad"),
+			&EntityPresenter::held_weapon_hand_frame_z_rad);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("held_weapon_hand_frame_y_rad"),
+			&EntityPresenter::held_weapon_hand_frame_y_rad);
+	BIND_CONSTANT(HELD_WEAPON_BONE_INDEX);
+	BIND_CONSTANT(DEFAULT_COLD_SPAWN_BUDGET);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("aim_root_basis", "snap", "base", "fallback"),
+			&EntityPresenter::aim_root_basis);
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("aim_apply", "node", "snap", "base", "drive_root_basis"),
+			&EntityPresenter::aim_apply, DEFVAL(true));
+	ClassDB::bind_static_method("EntityPresenter",
+			D_METHOD("emplaced_apply", "node", "snap", "base", "clear_when_invalid"),
+			&EntityPresenter::emplaced_apply);
+	BIND_ENUM_CONSTANT(OUTPUT_TRANSFORM);
+	BIND_ENUM_CONSTANT(OUTPUT_PART_ANIM);
+	BIND_ENUM_CONSTANT(OUTPUT_VISIBILITY);
+	BIND_ENUM_CONSTANT(OUTPUT_BODY_ANIM);
+	BIND_ENUM_CONSTANT(OUTPUT_ALL);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_CORE_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_AIM_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_CONTROLS_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_VISIBILITY_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_US);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_SUBMITTED_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_BODY_ROWS);
+	BIND_ENUM_CONSTANT(MISSION_PROFILE_SLOT_COUNT);
+}
+
+Simulation *EntityPresenter::sim() const {
+	return sim_id_.is_valid()
+			? Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_))
+			: nullptr;
+}
+
+// The passes exist for the presenter's whole life (their stats read as empty
+// records before setup_passes); the "Scars" child is the scar device.
+EntityPresenter::EntityPresenter() :
+		fire_(std::make_unique<FirePresenter>(this)) {
+	destruction_.instantiate();
+	throwable_.instantiate();
+	vehicle_wake_.instantiate();
+	ScarPresenter *scars_node = memnew(ScarPresenter);
+	scars_node->set_name("Scars");
+	add_child(scars_node);
+	scars_id_ = scars_node->get_instance_id();
+}
+
+void EntityPresenter::setup(Object *sim, Object *index,
+		const Ref<MissionObjectPlacer> &placer) {
+	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
+		release_part_anim_outputs();
+	}
+	Simulation *native_sim = Object::cast_to<Simulation>(sim);
+	sim_id_ = native_sim != nullptr ? native_sim->get_instance_id() : ObjectID();
+	index_ = Ref<EntityIndex>(Object::cast_to<EntityIndex>(index));
+	placer_ = placer;
+	plan_revision_ = -1; // force a rebuild against the new wiring
+	plan_dirty_ = true;
+	release_planned_rows();
+}
+
+void EntityPresenter::teardown() {
+	reset_wire_runtime_state();
+	fire_->teardown(); // frees the tracer mesh instance under the container
+	release_planned_rows();
+	plan_dirty_ = true;
+}
+
+// --- The present passes ------------------------------------------------------
+
+ScarPresenter *EntityPresenter::scars() const {
+	return scars_id_.is_valid()
+			? Object::cast_to<ScarPresenter>(ObjectDB::get_instance(scars_id_))
+			: nullptr;
+}
+
+MissionEnvironment *EntityPresenter::environment() const {
+	return environment_id_.is_valid()
+			? Object::cast_to<MissionEnvironment>(ObjectDB::get_instance(environment_id_))
+			: nullptr;
+}
+
+void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
+		const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio, EffectWorld *p_fx,
+		EffectLightDirector *p_lights, MissionEnvironment *p_environment,
+		ItemEffectDirector *p_anchors) {
+	Simulation *s = sim();
+	const Ref<ItemEffectDirector> anchors(p_anchors);
+	fire_->setup(s, p_container, p_audio, p_fx, p_lights);
+	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
+			p_fx, p_lights);
+	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
+	vehicle_wake_->setup(s, this, index_, p_fx, anchors);
+	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->set_resource_root(p_resource_root);
+	}
+}
+
+void EntityPresenter::set_listener_position(const Vector3 &p_position) {
+	listener_position_ = p_position;
+}
+
+void EntityPresenter::present_scars() {
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->present_frame(sim(), listener_position_, environment(), index_.ptr(), this);
+	}
+}
+
+void EntityPresenter::present_passes() {
+    present_minefields();
+	fire_->present();
+	destruction_->present();
+	throwable_->present();
+	// After the entity rows and the other passes: the entity-ring meshes
+	// parent under section nodes the row walks may have just built.
+	present_scars();
+}
+
+PackedInt64Array EntityPresenter::profile_present_passes() {
+    present_minefields();
+	PackedInt64Array spans;
+	spans.resize(PASS_PROFILE_SLOT_COUNT);
+	Time *clock = Time::get_singleton();
+	uint64_t start = clock->get_ticks_usec();
+	fire_->present();
+	uint64_t now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_FIRE_US, static_cast<int64_t>(now - start));
+	start = now;
+	destruction_->present();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_DESTRUCTION_US, static_cast<int64_t>(now - start));
+	start = now;
+	throwable_->present();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_THROWABLE_US, static_cast<int64_t>(now - start));
+	start = now;
+	present_scars();
+	now = clock->get_ticks_usec();
+	spans.set(PASS_PROFILE_SCARS_US, static_cast<int64_t>(now - start));
+	return spans;
+}
+
+void EntityPresenter::sync_fixed_tick_effects() {
+	vehicle_wake_->sync_fixed_tick_effects();
+	throwable_->sync_fixed_tick_effects();
+}
+
+Ref<FirePresentStats> EntityPresenter::get_fire_present_stats() const {
+	return fire_->get_stats();
+}
+
+Ref<DestructionPresentStats> EntityPresenter::get_destruction_present_stats() const {
+	return destruction_->get_stats();
+}
+
+Ref<ThrowablePresentStats> EntityPresenter::get_throwable_present_stats() const {
+	return throwable_->get_stats();
+}
+
+Ref<ScarPresentStats> EntityPresenter::get_scar_present_stats() const {
+	if (ScarPresenter *scars_node = scars()) {
+		return scars_node->get_present_stats();
+	}
+	Ref<ScarPresentStats> empty;
+	empty.instantiate();
+	return empty;
+}
+
+bool EntityPresenter::has_active_wreck_fire(const String &p_owner_key) const {
+	return destruction_->has_active_wreck_fire(p_owner_key);
+}
+
+void EntityPresenter::warm_fire_pipelines(const Vector3 &p_position) {
+	fire_->warm_pipelines(p_position);
+}
+
+Ref<ImmediateMesh> EntityPresenter::fire_ribbon_mesh() const {
+	return fire_->ribbon_mesh();
+}
+
+ScarPresenter *EntityPresenter::scar_presenter() const {
+	return scars();
+}
+
+// The bound data legs unwrap the test-authored records into the engine rows
+// the passes consume (ADR 0043 d10: C++ consumers read the native vectors).
+template <typename Row, typename Record>
+static std::vector<Row> unwrap_rows(const TypedArray<Record> &p_records) {
+	std::vector<Row> rows;
+	rows.reserve(static_cast<size_t>(p_records.size()));
+	for (int64_t i = 0; i < p_records.size(); ++i) {
+		const Ref<Record> record = p_records[i];
+		if (record.is_valid()) {
+			rows.push_back(record->value());
+		}
+	}
+	return rows;
+}
+
+void EntityPresenter::present_fires(const TypedArray<FirePresentationEvent> &p_events) {
+	fire_->present_fires(
+			unwrap_rows<opennova::world::FirePresentationRow, FirePresentationEvent>(p_events));
+}
+
+void EntityPresenter::present_fire_sounds(const TypedArray<FireSoundRow> &p_sounds) {
+	fire_->present_fire_sounds(unwrap_rows<opennova::world::ReadyFireSound, FireSoundRow>(p_sounds));
+}
+
+void EntityPresenter::present_slot_sounds(const TypedArray<SlotSoundRow> &p_events) {
+	fire_->present_slot_sounds(unwrap_rows<opennova::world::SoundSlotEvent, SlotSoundRow>(p_events));
+}
+
+void EntityPresenter::present_sound_emitters(const TypedArray<SoundEmitterRow> &p_events) {
+	fire_->present_sound_emitters(
+			unwrap_rows<opennova::world::SoundEmitterEvent, SoundEmitterRow>(p_events));
+}
+
+void EntityPresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
+	fire_->draw_tracer_rows(p_rows);
+}
+
+void EntityPresenter::present_destruction_drained(const Ref<DestructionDrain> &p_events,
+		const TypedArray<DeathPieceRow> &p_pieces) {
+	const opennova::world::DestructionEvents none;
+	destruction_->present_drained(p_events.is_valid() ? p_events->value() : none,
+			unwrap_rows<opennova::world::DeathPieceRow, DeathPieceRow>(p_pieces));
+}
+
+void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals) {
+	throwable_->present_visuals(
+			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
+}
+
+void EntityPresenter::present_vehicle_wake_visuals(
+		const TypedArray<VehicleWakeVisualRow> &p_visuals) {
+	vehicle_wake_->sync_visuals(
+			unwrap_rows<opennova::world::VehicleWakeVisualRow, VehicleWakeVisualRow>(p_visuals));
+}
+
+void EntityPresenter::present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list) {
+	if (ScarPresenter *scars_node = scars()) {
+		scars_node->present_draw_list(p_draw_list, index_.ptr(), this);
+	}
+}
+
+// Retained rows stop being "planned" the moment the plan drops them, so a model
+// that later leaves the mission (a despawned row kept alive as a preview) no
+// longer moves the lifetime stamp on death.
+void EntityPresenter::release_planned_rows() {
+	for (const Row &row : rows_) {
+		ObjectModel *model =
+				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model != nullptr) {
+			model->set_present_planned(false);
+		}
+	}
+	rows_.clear();
+}
+
+void EntityPresenter::set_output_channels(int channels) {
+	const int next = channels & OUTPUT_ALL;
+	if ((output_channels_ & OUTPUT_PART_ANIM) != 0 &&
+			(next & OUTPUT_PART_ANIM) == 0) {
+		// Turning a presentation seam off must release its retained writers;
+		// otherwise the last pose survives indefinitely on persistent nodes.
+		release_part_anim_outputs();
+	}
+	const int rising = next & ~output_channels_;
+	output_channels_ = next;
+	if (rising == 0) {
+		return;
+	}
+	for (Row &row : rows_) {
+		if ((rising & OUTPUT_TRANSFORM) != 0) {
+			row.transform_stamp_valid = false;
+		}
+		if ((rising & OUTPUT_PART_ANIM) != 0) {
+			row.ctrl_publish_state_valid = false;
+		}
+		if ((rising & OUTPUT_BODY_ANIM) != 0) {
+			row.body_stamp_valid = false;
+		}
+	}
+}
+
+Ref<MissionPresentStats> EntityPresenter::get_stats_record() const {
+	Ref<MissionPresentStats> stats;
+	stats.instantiate();
+	stats->moved = stat_moved_;
+	stats->posed = stat_posed_;
+	stats->hidden = stat_hidden_;
+	stats->plan_rebuilds = stat_plan_rebuilds_;
+	stats->transform_builds = stat_transform_builds_;
+	stats->aim_dispatches = stat_aim_dispatches_;
+	stats->rhc_dispatches = stat_rhc_dispatches_;
+	stats->part_dispatches = stat_part_dispatches_;
+	stats->control_dispatches = stat_control_dispatches_;
+	stats->body_dispatches = stat_body_dispatches_;
+	return stats;
+}
+
+namespace {
+
+// The held weapon placement — the calibration and the full derivation live at
+// pivot nudge in raw def units, X negated into the render frame — the values
+// engine simassets/sim_pose_provider.h (the sim-side muzzle shares them)
+// [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
+constexpr int kHeldWeaponBoneIndex = opennova::simassets::kHeldWeaponBoneIndex;
+const Vector3 kHeldWeaponAttachNudge(opennova::simassets::kHeldWeaponAttachNudgeX,
+		opennova::simassets::kHeldWeaponAttachNudgeY,
+		opennova::simassets::kHeldWeaponAttachNudgeZ);
+// Hand-frame calibration [orig: Rz dbl_7C9BA0 / Ry dbl_7C9B98 via
+// Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0].
+constexpr double kHandFrameZRad = opennova::simassets::kHeldWeaponHandFrameZRad;
+constexpr double kHandFrameYRad = opennova::simassets::kHeldWeaponHandFrameYRad;
+
+} // namespace
+
+Basis EntityPresenter::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
+	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
+	// form; signs as authored (two inversions cancel — the simassets ledger
+	// documents why).
+	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
+			Basis(Vector3(0, 1, 0), kHandFrameYRad);
+}
+
+Variant EntityPresenter::held_weapon_attach_transform(Object *body,
+		const Vector3 &attach_angles_bms, bool hand_frame) {
+	Skeleton3D *skel = Object::cast_to<Skeleton3D>(find_skeleton(body));
+	if (skel == nullptr || skel->get_bone_count() <= kHeldWeaponBoneIndex) {
+		return Variant();
+	}
+	// `M16 · pivot16` IS the joint world position; the nudge rides bone 16's
+	// MODEL->WORLD rotation (pose relative to REST — the rest basis is a large
+	// rotation) [orig: translation overwrite @ 0x4b22cf..0x4b22f8].
+	const Transform3D joint_world = skel->get_global_transform() *
+			skel->get_bone_global_pose(kHeldWeaponBoneIndex);
+	const Transform3D model_to_world = joint_world *
+			skel->get_bone_global_rest(kHeldWeaponBoneIndex).affine_inverse();
+	const Basis basis = hand_frame
+			? held_weapon_hand_frame_basis(model_to_world.basis)
+			: bms_to_godot_basis(attach_angles_bms);
+	return Transform3D(basis,
+			joint_world.origin + model_to_world.basis.xform(kHeldWeaponAttachNudge));
+}
+
+Vector3 EntityPresenter::held_weapon_attach_nudge() {
+	return kHeldWeaponAttachNudge;
+}
+
+double EntityPresenter::held_weapon_hand_frame_z_rad() {
+	return opennova::simassets::kHeldWeaponHandFrameZRad;
+}
+
+double EntityPresenter::held_weapon_hand_frame_y_rad() {
+	return opennova::simassets::kHeldWeaponHandFrameYRad;
+}
+
+Object *EntityPresenter::find_skeleton(Object *root) {
+	// The recursive Skeleton3D walk the GDScript reference ran per call, native
+	// (ObjectModel.rebuild() frees children, so caching the result by
+	// ObjectID would go stale mid-play; the walk itself is now cheap).
+	if (root == nullptr) {
+		return nullptr;
+	}
+	if (Object::cast_to<Skeleton3D>(root) != nullptr) {
+		return root;
+	}
+	Node *node = Object::cast_to<Node>(root);
+	if (node == nullptr) {
+		return nullptr;
+	}
+	for (int i = 0; i < node->get_child_count(); ++i) {
+		Object *found = find_skeleton(node->get_child(i));
+		if (found != nullptr) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+Basis EntityPresenter::aim_root_basis(const PackedFloat32Array &snap, int base,
+		const Basis &fallback) {
+	const float *p = snap.ptr();
+	if (field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID) == 0) {
+		return fallback;
+	}
+	return bms_to_godot_basis(
+			Vector3(p[base + Simulation::PF_AIM_BODY_PITCH_DEG],
+					p[base + Simulation::PF_AIM_BODY_YAW_DEG],
+					p[base + Simulation::PF_AIM_BODY_ROLL_DEG]));
+}
+
+void EntityPresenter::aim_apply(Object *node, const PackedFloat32Array &snap,
+		int base, bool drive_root_basis) {
+	ObjectModel *model = Object::cast_to<ObjectModel>(node);
+	if (model == nullptr) {
+		return;
+	}
+	const float *p = snap.ptr();
+	// The mounted-seat selector's final skeletal verdict applies to placed and
+	// wire models alike [orig: BN17 special row @ 0x4b1290].
+	model->set_right_hand_collapsed(
+			field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED) != 0);
+	if (field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID) == 0) {
+		model->clear_aim_overlay();
+		return;
+	}
+	aim_apply_valid(model, snap, base, drive_root_basis);
+}
+
+void EntityPresenter::aim_apply_valid(Object *node,
+		const PackedFloat32Array &snap, int base, bool drive_root_basis) {
+	ObjectModel *model = Object::cast_to<ObjectModel>(node);
+	if (model == nullptr) {
+		return;
+	}
+	const Basis current_basis = model->get_basis();
+	const Basis body_basis = aim_root_basis(snap, base, current_basis);
+	if (drive_root_basis && current_basis != body_basis) {
+		model->set_basis(body_basis);
+	}
+	const Basis inverse_body = body_basis.inverse();
+	const float *p = snap.ptr();
+	Basis deltas[ObjectModel::kAimOverlayClasses];
+	for (int overlay_class = 0; overlay_class < ObjectModel::kAimOverlayClasses;
+			++overlay_class) {
+		const int offset = base + Simulation::PF_AIM_ANGLES +
+				overlay_class * Simulation::PF_AIM_CLASS_STRIDE;
+		deltas[overlay_class] = inverse_body *
+				bms_to_godot_basis(
+						Vector3(p[offset], p[offset + 1], p[offset + 2]));
+	}
+	model->set_aim_overlay_deltas(deltas);
+}
+
+namespace {
+
+void emplaced_clear_typed(ObjectModel *model);
+void vehicle_motion_clear_typed(ObjectModel *model);
+void zone_team_clear_typed(ObjectModel *model);
+void world_heat_clear_typed(ObjectModel *model);
+
+int emplaced_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+		int base, bool clear_when_invalid) {
+	const CtrlNames &n = names();
+	const float *p = snap.ptr();
+	if (field_i(p, base, Simulation::PF_EMPLACED_CONTROLS_VALID) == 1) {
+		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw,
+				field_i(p, base, Simulation::PF_EWEAP_GUNYAW));
+		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch,
+				field_i(p, base, Simulation::PF_EWEAP_GUNPITCH));
+		return 2;
+	}
+	// Nodes persist across dismount/death: remove only the two controls this
+	// presenter owns — a bulk CTRL clear would also erase live WAC channels.
+	if (clear_when_invalid) {
+		emplaced_clear_typed(model);
+	}
+	return 0;
+}
+
+void emplaced_clear_typed(ObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw);
+	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch);
+}
+
+int vehicle_motion_apply_typed(ObjectModel *model,
+		const PackedFloat32Array &snap, int base) {
+	const CtrlNames &n = names();
+	const float *p = snap.ptr();
+	if (field_i(p, base, Simulation::PF_VEHICLE_MOTION_VALID) == 1) {
+		// Both fields are owned even at rest (literal zero), exactly as the
+		// cveh callback stores them immediately before model submission.
+		// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+		//  stores @0x4929D7 / @0x4929F1]
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering,
+				field_i(p, base, Simulation::PF_VEHICLE_STEERING));
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed,
+				field_i(p, base, Simulation::PF_VEHICLE_SPEED));
+		// The part-animation words are stored by the same callback, again as
+		// literal zero at rest [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
+		// the rotor word @0x492ACA..0x492ADE for both rotor ordinals, the wheel
+		// word @0x4929B4; see docs/world/vehicle-client-movers-re.md §14].
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor,
+				field_i(p, base, Simulation::PF_VEHICLE_ROTOR));
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor,
+				field_i(p, base, Simulation::PF_VEHICLE_TAIL_ROTOR));
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels,
+				field_i(p, base, Simulation::PF_VEHICLE_WHEELS));
+		return 5;
+	}
+	vehicle_motion_clear_typed(model);
+	return 0;
+}
+
+void vehicle_motion_clear_typed(ObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels);
+}
+
+int zone_team_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+		int base) {
+	const CtrlNames &n = names();
+	const float *p = snap.ptr();
+	int writes = 0;
+	if (field_i(p, base, Simulation::PF_TEX_TEAM_VALID) == 1) {
+		set_owned_ctrl(model, n.owner_sector_team, n.tex_team,
+				field_i(p, base, Simulation::PF_TEX_TEAM));
+		++writes;
+	} else {
+		clear_owned_ctrl(model, n.owner_sector_team, n.tex_team);
+	}
+	if (field_i(p, base, Simulation::PF_ZONE_CTRL_VALID) == 1) {
+		// TEAMSWING is an unconditional store inside the packed-zone-byte
+		// branch, including literal zero for team 1.
+		set_owned_ctrl(model, n.owner_zone, n.team_swing,
+				field_i(p, base, Simulation::PF_TEAMSWING));
+		++writes;
+	} else {
+		clear_owned_ctrl(model, n.owner_zone, n.team_swing);
+	}
+	if (field_i(p, base, Simulation::PF_LFP_CAMPPERCENT_VALID) == 1) {
+		set_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent,
+				field_i(p, base, Simulation::PF_LFP_CAMPPERCENT));
+		++writes;
+	} else {
+		// A numbered zone without a timer-list entry does not write LFP at all.
+		// Releasing our bounded per-model writer represents that omission; it is
+		// deliberately not a fabricated zero store.
+		clear_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent);
+	}
+	return writes;
+}
+
+void zone_team_clear_typed(ObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_sector_team, n.tex_team);
+	clear_owned_ctrl(model, n.owner_zone, n.team_swing);
+	clear_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent);
+}
+
+int world_heat_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
+		int base) {
+	const CtrlNames &n = names();
+	const float *p = snap.ptr();
+	if (field_i(p, base, Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1) {
+		// The valid carrier-attachment scope owns cold zero too.
+		// [orig: HUD_CacheWeaponSlotInfo @ 0x440969 / @ 0x440991,
+		//  sole caller @ 0x546518]
+		set_owned_ctrl(model, n.owner_world_heat, n.heat_glow,
+				field_i(p, base, Simulation::PF_WORLD_HEAT_GLOW));
+		return 1;
+	}
+	world_heat_clear_typed(model);
+	return 0;
+}
+
+void world_heat_clear_typed(ObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_world_heat, n.heat_glow);
+}
+
+} // namespace
+
+int EntityPresenter::wire_controls_apply(ObjectModel *model,
+		const PackedFloat32Array &snap, int base) {
+	int writes = 0;
+	writes += emplaced_apply_typed(model, snap, base, true);
+	writes += vehicle_motion_apply_typed(model, snap, base);
+	writes += zone_team_apply_typed(model, snap, base);
+	writes += world_heat_apply_typed(model, snap, base);
+	return writes;
+}
+
+int EntityPresenter::emplaced_apply(Object *node,
+		const PackedFloat32Array &snap, int base, bool clear_when_invalid) {
+	ObjectModel *model = Object::cast_to<ObjectModel>(node);
+	return model != nullptr
+			? emplaced_apply_typed(model, snap, base, clear_when_invalid)
+			: 0;
+}
+
+// --- The per-row legs both walks share ---------------------------------------
+
+void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
+		int base) {
+	model->set_match_terrain_enabled(
+			(field_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
+}
+
+bool EntityPresenter::stamp_right_hand_collapsed(ObjectModel *model,
+		const float *p, int base, int32_t &last_rhc) {
+	const int32_t rhc = field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED);
+	if (rhc == last_rhc) {
+		return false;
+	}
+	model->set_right_hand_collapsed(rhc != 0);
+	last_rhc = rhc;
+	return true;
+}
+
+bool EntityPresenter::aim_payload_changed(const float *p, int base,
+		std::array<float, kAimPayloadFloats> &cache, bool &cache_valid) {
+	static_assert(kAimPayloadFloats == AIM_PAYLOAD_FLOATS,
+			"the shared aim cache must span exactly aim_apply_valid's reads");
+	const float *payload = p + base + Simulation::PF_AIM_BODY_PITCH_DEG;
+	if (cache_valid) {
+		bool same = true;
+		for (int i = 0; i < kAimPayloadFloats; ++i) {
+			if (payload[i] != cache[static_cast<size_t>(i)]) {
+				same = false;
+				break;
+			}
+		}
+		if (same) {
+			return false;
+		}
+	}
+	std::copy_n(payload, kAimPayloadFloats, cache.begin());
+	cache_valid = true;
+	return true;
+}
+
+void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
+		int base, int64_t &last_mask) {
+	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
+		const uint32_t hidden_mask =
+				static_cast<uint32_t>(field_i(
+						p, base, Simulation::PF_SECTION_MASK_LO)) |
+				(static_cast<uint32_t>(field_i(
+						p, base, Simulation::PF_SECTION_MASK_HI))
+						<< 16);
+		const int64_t section_visibility_mask = static_cast<int64_t>(
+				hidden_mask ^ 0xffffffffu);
+		if (section_visibility_mask != last_mask) {
+			model->set_section_visibility_mask(section_visibility_mask);
+			last_mask = section_visibility_mask;
+		}
+	} else if (last_mask != -2 && last_mask != -1) {
+		model->set_section_visibility_mask(-1);
+		last_mask = -1;
+	}
+}
+
+// --- The placed walk ---------------------------------------------------------
+
+int64_t EntityPresenter::current_index_generation() {
+	return index_.is_valid() ? index_->get_generation() : 0;
+}
+
+bool EntityPresenter::row_plan_is_current(int64_t size, int stride,
+		int64_t layout_revision) {
+	if (plan_dirty_ || plan_revision_ != layout_revision ||
+			plan_stride_ != stride || plan_snapshot_size_ != size ||
+			plan_index_generation_ != current_index_generation() ||
+			plan_model_lifetime_generation_ !=
+					ObjectModel::lifetime_generation()) {
+		return false;
+	}
+	return true;
+}
+
+void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
+		int64_t layout_revision) {
+	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
+		release_part_anim_outputs();
+	}
+	++stat_plan_rebuilds_;
+	release_planned_rows();
+	plan_revision_ = layout_revision;
+	plan_stride_ = stride;
+	plan_snapshot_size_ = size;
+	plan_index_generation_ = current_index_generation();
+	plan_model_lifetime_generation_ = ObjectModel::lifetime_generation();
+	plan_dirty_ = false;
+	if (index_.is_null()) {
+		plan_dirty_ = true;
+		return;
+	}
+	const int64_t count = size / stride;
+	rows_.reserve(static_cast<size_t>(count));
+	for (int64_t r = 0; r < count; ++r) {
+		const int base = static_cast<int>(r * stride);
+		const int32_t bms_id = field_i(p, base, Simulation::PF_BMS_ID);
+		const int32_t kind = field_i(p, base, Simulation::PF_KIND);
+		const int32_t idx = field_i(p, base, Simulation::PF_INDEX);
+		ObjectModel *model = index_->resolve(bms_id, kind, idx);
+		if (model == nullptr) {
+			continue;
+		}
+		Row row;
+		row.base = base;
+		row.node_id = model->get_instance_id();
+		row.model = model;
+		model->set_present_planned(true);
+		row.entity_kind = kind;
+		row.entity_index = idx;
+		row.bms_id = bms_id;
+		rows_.push_back(row);
+	}
+}
+
+void EntityPresenter::release_part_anim_outputs() {
+	for (const Row &row : rows_) {
+		ObjectModel *model =
+				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model == nullptr) continue;
+		model->begin_ctrl_update();
+		model->clear_part_phase(1);
+		model->clear_part_phase(2);
+		emplaced_clear_typed(model);
+		vehicle_motion_clear_typed(model);
+		zone_team_clear_typed(model);
+		world_heat_clear_typed(model);
+		model->end_ctrl_update();
+	}
+}
+
+const String &EntityPresenter::infantry_key(int state) {
+	auto it = infantry_keys_.find(state);
+	if (it == infantry_keys_.end()) {
+		it = infantry_keys_.emplace(state, Simulation::infantry_anim_key(state))
+					 .first;
+	}
+	return it->second;
+}
+
+void EntityPresenter::present_snapshot(const PackedFloat32Array &snap,
+		int stride, int64_t layout_revision) {
+	present_snapshot_impl(snap, stride, layout_revision, nullptr);
+}
+
+PackedInt64Array EntityPresenter::profile_present_snapshot(
+		const PackedFloat32Array &snap, int stride, int64_t layout_revision) {
+	MissionFrameProfile profile;
+	present_snapshot_impl(snap, stride, layout_revision, &profile);
+	PackedInt64Array result;
+	result.resize(MISSION_PROFILE_SLOT_COUNT);
+	result.set(MISSION_PROFILE_CORE_US, profile.core_us);
+	result.set(MISSION_PROFILE_AIM_US, profile.aim_us);
+	result.set(MISSION_PROFILE_CONTROLS_US, profile.controls_us);
+	result.set(MISSION_PROFILE_VISIBILITY_US, profile.visibility_us);
+	result.set(MISSION_PROFILE_BODY_US, profile.body_us);
+	result.set(MISSION_PROFILE_ROWS, profile.rows);
+	result.set(MISSION_PROFILE_SUBMITTED_ROWS, profile.submitted_rows);
+	result.set(MISSION_PROFILE_BODY_ROWS, profile.body_rows);
+	return result;
+}
+
+void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
+		int stride, int64_t layout_revision, MissionFrameProfile *p_profile) {
+	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
+		return;
+	}
+	const float *p = snap.ptr();
+	const int64_t size = snap.size();
+	if (!row_plan_is_current(size, stride, layout_revision)) {
+		rebuild_row_plan(p, size, stride, layout_revision);
+	}
+	for (Row &row : rows_) {
+		// Main-thread Node destruction advances this stamp in PREDELETE. Once
+		// a planned model was freed by a notification dispatched during this
+		// walk, no retained pointer is trusted for the rest of it: every later
+		// row resolves cold through ObjectDB (a freed row's visibility intent
+		// died with its node) and the plan rebinds on the next call, so one
+		// free never drops a frame of presentation for the surviving rows.
+		if (plan_model_lifetime_generation_ !=
+				ObjectModel::lifetime_generation()) {
+			plan_dirty_ = true;
+		}
+		ObjectModel *model = row.model;
+		if (plan_dirty_) {
+			model = Object::cast_to<ObjectModel>(
+					ObjectDB::get_instance(row.node_id));
+			if (model == nullptr) {
+				continue;
+			}
+		}
+		const int base = row.base;
+		uint64_t profile_phase_start = p_profile != nullptr
+				? Time::get_singleton()->get_ticks_usec()
+				: 0;
+		if (p_profile != nullptr) {
+			++p_profile->rows;
+		}
+		stamp_match_terrain(model, p, base);
+		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
+			// Compare the six packed source floats before constructing either
+			// the placement Basis or Transform3D.
+			// Position is already Godot-space (x, z, -y); rotation is
+			// mission-space degrees, built through the ONE placement convention
+			// so a sim-driven entity sits exactly where placement would put it.
+			const bool aim_owns_root =
+					field_i(p, base,
+							Simulation::PF_AIM_OVERLAY_VALID) != 0;
+			const int rotation_field = aim_owns_root
+					? Simulation::PF_AIM_BODY_PITCH_DEG
+					: Simulation::PF_PITCH_DEG;
+			const std::array<float, 6> next_stamp = {
+				p[base + Simulation::PF_POS_X],
+				p[base + Simulation::PF_POS_Y],
+				p[base + Simulation::PF_POS_Z],
+				p[base + rotation_field],
+				p[base + rotation_field + 1],
+				p[base + rotation_field + 2],
+			};
+			// The pass owns these transforms: compare against the last APPLIED
+			// value instead of reading the node property back per row (the aim
+			// leg below runs with drive_root_basis=false, so nothing else
+			// rewrites the root between frames). On a cache miss (fresh plan —
+			// including the every-call rebuild of revisionless fake sources)
+			// fall back to one live read so an unchanged row never re-dirties
+			// the node's tree, exactly like the GDScript live compare did.
+			if (!row.transform_stamp_valid ||
+					row.transform_stamp != next_stamp) {
+				const Transform3D next = model->compose_entity_transform(
+						bms_to_godot_basis(
+								Vector3(next_stamp[3], next_stamp[4],
+										next_stamp[5])),
+						Vector3(next_stamp[0], next_stamp[1], next_stamp[2]));
+				++stat_transform_builds_;
+				if (row.transform_stamp_valid ||
+						model->get_transform() != next) {
+					model->set_transform(next);
+					++stat_moved_;
+				}
+				if (placer_.is_valid()) {
+					// The render node and terrain projection registry consume the
+					// same present pose. The placer owns admission and exact-value
+					// gating, so rejected rows and repeated snapshots remain free.
+					placer_->update_static_terrain_shadow_source_transform(
+							static_cast<MissionData::EntityKind>(row.entity_kind),
+							row.entity_index, next);
+				}
+				row.transform_stamp = next_stamp;
+				row.transform_stamp_valid = true;
+			}
+		}
+		const bool present_visible =
+				field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
+				field_i(p, base,
+						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
+		// Camera submission: retail runs the presentation writers per
+		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
+		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
+		// @ 0x4407d0]. A row the renderer would not submit — sim-hidden,
+		// occlusion-held, or bounds off-screen — skips the aim/part/CTRL
+		// dispatch legs below. The applied stamps keep their last-dispatched
+		// values, so the next submitted frame re-applies exactly what changed
+		// while the row was out (set legs are per-submission re-asserts;
+		// falling edges latched in the publish state still clear).
+		const bool submitted = present_visible &&
+				!model->is_occlusion_hidden() &&
+				model->is_on_screen();
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->core_us += now - profile_phase_start;
+			profile_phase_start = now;
+			if (submitted) {
+				++p_profile->submitted_rows;
+			}
+		}
+		// Aim overlay with the capability lookups hoisted into the row plan and
+		// the no-overlay clear gated to the valid->invalid edge (the node-side
+		// setters no-op on repeats; these gates skip the dispatch itself).
+		bool body_dependency_changed = false;
+		if (submitted && stamp_right_hand_collapsed(model, p, base, row.rhc)) {
+			++stat_rhc_dispatches_;
+			body_dependency_changed = true;
+		}
+		if (submitted) {
+			const int32_t aim_valid =
+					field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID);
+			if (aim_valid != 0) {
+				if (aim_payload_changed(p, base, row.aim_payload,
+						row.aim_payload_valid)) {
+					aim_apply_valid(model, snap, base, false);
+					++stat_aim_dispatches_;
+					body_dependency_changed = true;
+				}
+				row.aim_valid = 1;
+			} else if (row.aim_valid != 0) {
+				model->clear_aim_overlay();
+				++stat_aim_dispatches_;
+				row.aim_valid = 0;
+				row.aim_payload_valid = false;
+				body_dependency_changed = true;
+			} else {
+				row.aim_valid = 0;
+			}
+		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->aim_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
+		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
+			const int32_t active1_code =
+					field_i(p, base, Simulation::PF_ACTIVE1);
+			const int32_t active2_code =
+					field_i(p, base, Simulation::PF_ACTIVE2);
+			// The phase-domain predicate lives with the integrator
+			// (world/ai.h part_anim_phase_active).
+			const int32_t active1 =
+					opennova::world::part_anim_phase_active(active1_code) ? 1 : 0;
+			const int32_t active2 =
+					opennova::world::part_anim_phase_active(active2_code) ? 1 : 0;
+			const int32_t phase1 = active1 != 0
+					? Simulation::decode_present_part_anim_phase(
+							snap, base, 1)
+					: 0;
+			const int32_t phase2 = active2 != 0
+					? Simulation::decode_present_part_anim_phase(
+							snap, base, 2)
+					: 0;
+			const int32_t controls_valid =
+					field_i(p, base,
+							Simulation::PF_EMPLACED_CONTROLS_VALID) == 1
+					? 1
+					: 0;
+			const int32_t vehicle_valid =
+					field_i(p, base,
+							Simulation::PF_VEHICLE_MOTION_VALID) == 1
+					? 1
+					: 0;
+			const int32_t tex_team_valid =
+					field_i(p, base, Simulation::PF_TEX_TEAM_VALID) == 1
+					? 1
+					: 0;
+			const int32_t zone_valid =
+					field_i(p, base, Simulation::PF_ZONE_CTRL_VALID) == 1
+					? 1
+					: 0;
+			const int32_t lfp_valid =
+					field_i(p, base,
+							Simulation::PF_LFP_CAMPPERCENT_VALID) == 1
+					? 1
+					: 0;
+			const int32_t heat_valid =
+					field_i(p, base,
+							Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1
+					? 1
+					: 0;
+			const std::array<int32_t, CTRL_PUBLISH_COUNT>
+					next_ctrl_publish_state = {
+				active1,
+				active2,
+				controls_valid,
+				vehicle_valid,
+				tex_team_valid,
+				zone_valid,
+				lfp_valid,
+				heat_valid,
+			};
+			const bool cold = !row.ctrl_publish_state_valid;
+			const auto was_published = [&](CtrlPublishField field) {
+				return row.ctrl_publish_state[
+							   static_cast<size_t>(field)] != 0;
+			};
+			const bool set_part1 = active1 != 0;
+			const bool set_part2 = active2 != 0;
+			const bool clear_part1 = active1 == 0 &&
+					(cold || was_published(CTRL_PUBLISH_PART1));
+			const bool clear_part2 = active2 == 0 &&
+					(cold || was_published(CTRL_PUBLISH_PART2));
+			// A valid writer executes for every retail model submission. This
+			// reasserts ownership after any intervening producer, while the
+			// model-side setter makes an unchanged owner/value a true no-op.
+			// Omitted writers clear only on a cold/falling edge.
+			const bool emplaced_work = controls_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_EMPLACED);
+			const bool vehicle_work = vehicle_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_VEHICLE);
+			const bool zone_work = tex_team_valid != 0 || zone_valid != 0 ||
+					lfp_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_TEX_TEAM) ||
+					was_published(CTRL_PUBLISH_ZONE) ||
+					was_published(CTRL_PUBLISH_LFP);
+			const bool heat_work = heat_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_HEAT);
+			const bool any_work = set_part1 || set_part2 ||
+					clear_part1 || clear_part2 || emplaced_work ||
+					vehicle_work || zone_work || heat_work;
+			if (any_work) {
+				model->begin_ctrl_update();
+			}
+			// A falling/cold EWEAP release precedes generic phase replay. This
+			// preserves the master compatibility surface for a third-party node
+			// that aliases a part channel onto EWEAP, without the old
+			// unconditional clear/re-add on every valid frame. Production
+			// ObjectModel uses fixed VEHICLE_SPECIAL1/2 and cannot alias it.
+			if (emplaced_work && controls_valid == 0) {
+				emplaced_clear_typed(model);
+				stat_control_dispatches_ += 2;
+			}
+			// PANM phases are integrated by the engine [orig:
+			// Entity_ApplyCommand @ 0x43ab60 case 0x22]. ACTIVE is the
+			// publication bit: inactive releases this presenter's slot.
+			if (set_part1) {
+				model->set_part_phase(1, phase1);
+				++stat_posed_;
+				++stat_part_dispatches_;
+			} else if (clear_part1) {
+				model->clear_part_phase(1);
+				++stat_part_dispatches_;
+			}
+			if (set_part2) {
+				model->set_part_phase(2, phase2);
+				++stat_posed_;
+				++stat_part_dispatches_;
+			} else if (clear_part2) {
+				model->clear_part_phase(2);
+				++stat_part_dispatches_;
+			}
+			if (emplaced_work && controls_valid != 0) {
+				const int applied = emplaced_apply_typed(model, snap, base, false);
+				stat_posed_ += applied;
+				stat_control_dispatches_ += applied;
+			}
+			if (vehicle_work) {
+				const int applied = vehicle_motion_apply_typed(model, snap, base);
+				stat_posed_ += applied;
+				stat_control_dispatches_ += 2;
+			}
+			if (zone_work) {
+				const int applied = zone_team_apply_typed(model, snap, base);
+				stat_posed_ += applied;
+				stat_control_dispatches_ += 3;
+			}
+			if (heat_work) {
+				const int applied = world_heat_apply_typed(model, snap, base);
+				stat_posed_ += applied;
+				++stat_control_dispatches_;
+			}
+			if (any_work) {
+				model->end_ctrl_update();
+			}
+			row.ctrl_publish_state = next_ctrl_publish_state;
+			row.ctrl_publish_state_valid = true;
+		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->controls_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
+		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
+			stamp_section_mask(model, p, base, row.section_visibility_mask);
+			// Death is not disappearance (corpses and husks keep rendering until
+			// the sim despawns via PF_HIDDEN); the local first-person UseGun
+			// parent's own world model is presentation-suppressed. Semantics and
+			// witnesses recorded at the GDScript origin (mission_present_pass.gd)
+			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
+			// Flags&4 husk pick @ 0x413086].
+			// Two-bit visibility ownership: this walk owns the model's
+			// present bit (the sim's intent), the render-occlusion frame owns
+			// its occlusion-hidden bit, and the node's visible flag is their
+			// product — a claimed node stays hidden through a sim show and
+			// releases onto the sim's intent. The node flag is reconciled live
+			// so a foreign write (a Stop restore, a preview) never outlives
+			// one frame.
+			if (model->is_present_visible() != present_visible ||
+					model->is_visible() !=
+							(present_visible && !model->is_occlusion_hidden())) {
+				model->set_present_visible(present_visible);
+			}
+			if (!present_visible) {
+				++stat_hidden_;
+			}
+		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->visibility_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
+		// Unsubmitted models (hidden, occlusion-held, off-screen) skip skeletal
+		// writes: the simulation resolves AI fire origins from its own pose
+		// (world/pose_provider.h), never from a presented skeleton.
+		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && submitted) {
+			if (p_profile != nullptr) {
+				++p_profile->body_rows;
+			}
+			// Main-body skeletal clip: infantry poses to the exact anim-state
+			// phase that produced root motion; PF_BODY_ANIM_SLOT is the coarse
+			// fallback for compatible non-infantry nodes.
+			const int32_t anim_state =
+					field_i(p, base, Simulation::PF_ANIM_STATE);
+			int32_t body_mode = BODY_NONE;
+			int32_t body_selector = -1;
+			int32_t body_phase = 0;
+			int32_t body_source_selector = -1;
+			int32_t body_source_phase = 0;
+			float body_blend_weight = 1.0f;
+			String body_clip_key;
+			String body_source_clip_key;
+			{
+				const String key =
+						anim_state >= 0 ? infantry_key(anim_state) : String();
+				const int32_t source_state = field_i(
+						p, base, Simulation::PF_ANIM_SOURCE_STATE);
+				const String source_key =
+						source_state >= 0 ? infantry_key(source_state) : String();
+				if (!key.is_empty()) {
+					body_selector = anim_state;
+					body_phase = field_i(
+							p, base, Simulation::PF_ANIM_PHASE_TICKS);
+					body_clip_key = key;
+					const float target_weight =
+							p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
+					if (source_state >= 0 && !source_key.is_empty() &&
+							target_weight < 1.0f) {
+						body_mode = BODY_BLEND_AT;
+						body_source_selector = source_state;
+						body_source_phase = field_i(
+								p, base,
+								Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
+						body_source_clip_key = source_key;
+						body_blend_weight = target_weight;
+					} else {
+						body_mode = BODY_CLIP_AT;
+					}
+				} else if (source_state >= 0 && !source_key.is_empty()) {
+					body_mode = BODY_CLIP_AT;
+					body_selector = source_state;
+					body_phase = field_i(
+							p, base,
+							Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
+					body_clip_key = source_key;
+				}
+			}
+			if (body_mode == BODY_NONE) {
+				const int32_t body_anim_slot =
+						field_i(p, base, Simulation::PF_BODY_ANIM_SLOT);
+				if (body_anim_slot >= 0) {
+					body_mode = BODY_SLOT_AT;
+					body_selector = body_anim_slot;
+					body_phase = field_i(
+							p, base, Simulation::PF_ANIM_PHASE_TICKS);
+				}
+			}
+			const bool body_stamp_changed =
+					!row.body_stamp_valid || row.body_mode != body_mode ||
+					row.body_selector != body_selector ||
+					row.body_phase != body_phase ||
+					row.body_source_selector != body_source_selector ||
+					row.body_source_phase != body_source_phase ||
+					row.body_blend_weight != body_blend_weight;
+			const bool force_external_pose =
+					body_dependency_changed &&
+					(body_mode == BODY_CLIP_AT ||
+							body_mode == BODY_BLEND_AT ||
+							body_mode == BODY_SLOT_AT);
+			if (body_stamp_changed || force_external_pose) {
+				switch (body_mode) {
+					case BODY_CLIP_AT:
+						model->play_body_clip_at(body_clip_key, body_phase);
+						++stat_body_dispatches_;
+						break;
+					case BODY_BLEND_AT:
+						model->play_body_blend_at(body_source_clip_key,
+								body_source_phase, body_clip_key, body_phase,
+								body_blend_weight);
+						++stat_body_dispatches_;
+						break;
+					case BODY_SLOT_AT:
+						model->play_body_anim_at(body_selector, body_phase);
+						++stat_body_dispatches_;
+						break;
+					case BODY_SLOT_PLAY:
+					case BODY_NONE:
+						break;
+				}
+				row.body_mode = body_mode;
+				row.body_selector = body_selector;
+				row.body_phase = body_phase;
+				row.body_source_selector = body_source_selector;
+				row.body_source_phase = body_source_phase;
+				row.body_blend_weight = body_blend_weight;
+				row.body_stamp_valid = true;
+			}
+		} else if ((output_channels_ & OUTPUT_BODY_ANIM) != 0) {
+			// Desired state can keep changing while a hidden, non-muzzle row is
+			// ineligible. Keep the applied stamp dirty so visibility catches up.
+			row.body_stamp_valid = false;
+		}
+		if (p_profile != nullptr) {
+			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			p_profile->body_us += now - profile_phase_start;
+			profile_phase_start = now;
+		}
+	}
+}
+
+namespace godot {
+namespace {
+Transform3D mine_transform(const opennova::world::CollisionMatrix &matrix) {
+    const int32_t *m = matrix.m;
+    constexpr float rotation_scale = 1.0f / 4194304.0f;
+    // World mission XYZ -> Godot XZ-Y; model YZX -> mission XYZ.
+    const Basis basis(Vector3(m[1], m[9], -static_cast<double>(m[5])) * rotation_scale,
+            Vector3(m[2], m[10], -static_cast<double>(m[6])) * rotation_scale,
+            Vector3(m[0], m[8], -static_cast<double>(m[4])) * rotation_scale);
+    return Transform3D(basis, Vector3(m[3], m[11], -static_cast<double>(m[7])) *
+            opennova::io::kInvFp16One);
+}
+}
+
+void EntityPresenter::reset_minefields() {
+    for (const auto &entry : minefield_nodes_) {
+        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(entry.second.node)))
+            node->queue_free();
+    }
+    minefield_nodes_.clear();
+    minefield_draws_.clear();
+}
+
+void EntityPresenter::present_minefields() {
+    Simulation *simulation = sim();
+    if (simulation == nullptr || placer_.is_null()) return;
+    simulation->fill_minefield_draw_rows(minefield_draws_);
+    for (auto &entry : minefield_nodes_) entry.second.seen = false;
+    for (const auto &draw : minefield_draws_) {
+        const uint32_t key = (static_cast<uint32_t>(draw.owner.packed) << 4) | draw.slot;
+        auto &entry = minefield_nodes_[key];
+        auto *node = Object::cast_to<ObjectModel>(ObjectDB::get_instance(entry.node));
+        if (node != nullptr && entry.spawn_id != draw.registry_spawn_id) {
+            node->queue_free();
+            node = nullptr;
+        }
+        ObjectModel *source = index_.is_valid() ? index_->resolve(draw.bms_id,
+                opennova::world::spawn_origin_kind(draw.spawn_origin),
+                opennova::world::spawn_origin_index(draw.spawn_origin)) : nullptr;
+        if (source == nullptr) source = resolve_wire_handle(draw.owner.packed);
+        if (node == nullptr) {
+            Node3D *parent = source != nullptr ? source : container();
+            if (parent == nullptr) parent = this;
+            node = placer_->build_model_from_graphic(String(draw.model.c_str()), String(),
+                    parent, String(), String(), true);
+            if (node == nullptr) continue;
+            node->set_name(String("MineMarker_") + String::num_int64(key));
+            node->set_rigid_parts(true);
+            entry.node = node->get_instance_id();
+            entry.spawn_id = draw.registry_spawn_id;
+        }
+        entry.seen = true;
+        node->set_authored_lod_owner(source, true);
+        node->set_active_lod(source != nullptr ? source->get_active_lod() : 0);
+        node->set_global_transform(mine_transform(draw.transform));
+        // Parenting under the source makes this frame's later occlusion
+        // verdict apply to the markers immediately. Their pose stays native.
+        node->set_present_visible(source == nullptr || source->is_present_visible());
+    }
+    for (auto it = minefield_nodes_.begin(); it != minefield_nodes_.end();) {
+        if (it->second.seen) { ++it; continue; }
+        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(it->second.node)))
+            node->queue_free();
+        it = minefield_nodes_.erase(it);
+    }
+}
+} // namespace godot

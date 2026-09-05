@@ -241,9 +241,10 @@ inline std::string unknown_label(const char *prefix, int value) {
 
 // Copy into a fixed-width on-disk field that may use ALL dest_size bytes (no reserved NUL
 // terminator). The format's name1/name2 are 8-byte slots a shipped mission can fill completely,
-// so copy_cstr (which forces dest[dest_size-1] = '\0') would drop the 8th byte and silently
-// truncate an 8-char name on every property round-trip. Values longer than the field are cut to
-// dest_size; shorter values zero-pad the remainder. fixed_string reads it back symmetrically.
+// so a strncpy-style copy that forces dest[dest_size-1] = '\0' would drop the 8th byte and
+// silently truncate an 8-char name on every property round-trip. Values longer than the field
+// are cut to dest_size; shorter values zero-pad the remainder. fixed_string reads it back
+// symmetrically.
 inline void copy_fixed_field(char *dest, size_t dest_size, const std::string &value) {
 	const size_t copy_len = std::min(dest_size, value.size());
 	if (copy_len > 0) {
@@ -251,18 +252,6 @@ inline void copy_fixed_field(char *dest, size_t dest_size, const std::string &va
 	}
 	if (copy_len < dest_size) {
 		std::memset(dest + copy_len, 0, dest_size - copy_len);
-	}
-}
-
-inline void copy_cstr(char *dest, size_t dest_size, const std::string &value) {
-	if (dest_size == 0) {
-		return;
-	}
-	const size_t copy_len = std::min(dest_size - 1, value.size());
-	std::memcpy(dest, value.data(), copy_len);
-	dest[copy_len] = '\0';
-	if (copy_len + 1 < dest_size) {
-		std::memset(dest + copy_len + 1, 0, dest_size - copy_len - 1);
 	}
 }
 

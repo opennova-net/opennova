@@ -7,8 +7,8 @@
 #include <cstdio>
 #include <vector>
 
-#include <net/netsim/client_state.h>
-#include <net/npruntime/minimap_markers.h>
+#include <runtime/replication/client_state.h>
+#include <runtime/inmatch/minimap_markers.h>
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
@@ -42,8 +42,8 @@ struct LocalWorld {
     uint16_t wire_handle() const { return static_cast<uint16_t>(local.packed); }
 };
 
-netsim::ClientMinimapOverlaySlot slot(uint16_t handle, uint8_t param, bool known) {
-    netsim::ClientMinimapOverlaySlot s;
+replication::ClientMinimapOverlaySlot slot(uint16_t handle, uint8_t param, bool known) {
+    replication::ClientMinimapOverlaySlot s;
     s.active = true;
     s.handle = handle;
     s.param = param;
@@ -61,17 +61,17 @@ netsim::ClientMinimapOverlaySlot slot(uint16_t handle, uint8_t param, bool known
 
 void test_banks_walk_in_order_and_the_local_row_is_restored() {
     LocalWorld lw;
-    netsim::ClientMinimapState map;
+    replication::ClientMinimapState map;
     map.transient[0] = slot(500, 2, false);
     map.persistent[1] = slot(501, 4, true);
     map.special[0] = slot(502, 24, false);
-    np::MinimapMarkerInputs in;
+    inmatch::MinimapMarkerInputs in;
     in.map = &map;
     in.world = &lw.w;
     in.local_marker_handle = lw.wire_handle();
     in.local_heading_bam = 0x20000000;
     std::vector<hud::HudMinimapMarker> rows;
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.size() == 4);
     CHECK(rows[0].bank == static_cast<uint8_t>(hud::HudMinimapBank::kTransient));
     CHECK(rows[0].handle == 500);
@@ -97,33 +97,33 @@ void test_banks_walk_in_order_and_the_local_row_is_restored() {
     CHECK(me.entity_known == 1);
     CHECK(me.heading_bam == 0x20000000);
     CHECK(me.x == 10 * 65536 && me.y == 20 * 65536 && me.z == 3 * 65536);
-    CHECK(me.color == netsim::minimap_team_argb(1));
+    CHECK(me.color == replication::minimap_team_argb(1));
     CHECK(me.medic == 0);
 }
 
 void test_a_decoded_regular_row_for_the_local_handle_suppresses_the_restore() {
     LocalWorld lw;
-    netsim::ClientMinimapState map;
+    replication::ClientMinimapState map;
     map.persistent[0] = slot(lw.wire_handle(), 3, true);
-    np::MinimapMarkerInputs in;
+    inmatch::MinimapMarkerInputs in;
     in.map = &map;
     in.world = &lw.w;
     in.local_marker_handle = lw.wire_handle();
     std::vector<hud::HudMinimapMarker> rows;
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.size() == 1);
     CHECK(rows[0].handle == lw.wire_handle());
     // The decoded row resolves its policy against the live local entity.
     CHECK(rows[0].entity_known == 1);
     // An unresolved (entity_known false) regular row does NOT cover the handle.
     map.persistent[0].entity_known = false;
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.size() == 2);
     CHECK(rows[1].icon == 3);
     // A special-bank row never covers it either.
     map.persistent[0].active = false;
     map.special[0] = slot(lw.wire_handle(), 24, true);
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.size() == 2);
     CHECK(rows[0].bank == static_cast<uint8_t>(hud::HudMinimapBank::kSpecial));
     CHECK(rows[1].icon == 3);
@@ -131,22 +131,22 @@ void test_a_decoded_regular_row_for_the_local_handle_suppresses_the_restore() {
 
 void test_no_session_and_no_world() {
     LocalWorld lw;
-    np::MinimapMarkerInputs in;
+    inmatch::MinimapMarkerInputs in;
     in.world = &lw.w;
     in.local_marker_handle = lw.wire_handle();
     std::vector<hud::HudMinimapMarker> rows;
-    np::build_minimap_markers(in, rows); // no session: only the local row
+    inmatch::build_minimap_markers(in, rows); // no session: only the local row
     CHECK(rows.size() == 1);
     CHECK(rows[0].icon == 3);
     in.local_marker_handle = world::EntityHandle::kInvalid; // no wire identity: nothing
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.empty());
-    netsim::ClientMinimapState map;
+    replication::ClientMinimapState map;
     map.transient[0] = slot(500, 2, true);
     in.map = &map;
     in.world = nullptr; // no world: the map rows with unresolved policies, no local row
     in.local_marker_handle = 7;
-    np::build_minimap_markers(in, rows);
+    inmatch::build_minimap_markers(in, rows);
     CHECK(rows.size() == 1);
     CHECK(rows[0].handle == 500);
     CHECK(rows[0].half_x_q16 == 0 && rows[0].half_y_q16 == 0);

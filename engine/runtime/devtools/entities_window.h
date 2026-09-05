@@ -19,7 +19,7 @@
 // strings.
 #pragma once
 
-#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/imgui_pass.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
 
@@ -64,16 +64,15 @@ public:
 	uint16_t selected_handle() const;
 	// The selected row of the held snapshot; null while none or pending.
 	const world::inspect::EntityRow *selected_row() const;
-	uint16_t pending_select_handle() const { return pending_select_handle_; }
 	bool wants_scroll_to_selected() const { return scroll_to_selected_; }
 
-	// The typed request queue the embedder drains (the GameWindowRequest
-	// pattern); the Entity Properties window queues its actions here too, so
-	// one drain serves both. enqueue_request is the one path the drawn
-	// actions feed — and the headless test seam, since clicking a button
+	// The control-request queue the embedder drains into the debug-control
+	// table (ADR 0043 d12); the Entity Properties window queues its actions
+	// here too, so one drain serves both. enqueue_request is the one path the
+	// drawn actions feed — and the headless test seam, since clicking a button
 	// needs a real backend.
-	void enqueue_request(const DebugRequest &request);
-	bool take_request(DebugRequest &request);
+	void enqueue_request(const ControlRequest &request);
+	bool take_request(ControlRequest &request);
 
 	// The filtered, formatted table, for tests and probes (the StatsWindow
 	// row-text seam): row indices address the rows the table would draw.
@@ -122,7 +121,7 @@ private:
 	uint16_t pending_select_handle_ = world::EntityHandle::kInvalid;
 	bool scroll_to_selected_ = false;
 	bool shown_ = false;
-	std::deque<DebugRequest> requests_;
+	std::deque<ControlRequest> requests_;
 };
 
 }  // namespace opennova::devtools

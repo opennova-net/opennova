@@ -19,7 +19,7 @@
 // the hull away and through a heading change. The gun must recompose onto the
 // live hull every tick — rigid carrier-local offset, rotating with the hull.
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>
@@ -33,7 +33,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 constexpr uint16_t kHullHandle = 0x1006; // pool 1 slot 6 (the buggy)
 constexpr uint16_t kGunHandle = 0x1017;  // pool 1 slot 23 (its mounted 50cal)

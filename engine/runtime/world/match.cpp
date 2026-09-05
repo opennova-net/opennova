@@ -1,4 +1,5 @@
 #include <runtime/world/match.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +8,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -15,7 +16,7 @@ namespace {
 
 namespace gt = opennova::game_type;
 
-constexpr int32_t kTicksPerMinute = 60 * 62;
+constexpr int32_t kTicksPerMinute = 60 * io::kTicksPerSecondInt;
 // The objective item ids retail compares the item def's +0x50 type id against.
 // Flags: GameEvent_ProcessScoring @0x52F550 routes a capture by the flag's id
 // (4091 -> the blue team block @0x52f7e1, 4093 -> red @0x52f7ef, 4095 -> the
@@ -204,9 +205,7 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
 // exempts it from the team-kill arm.
 // [orig: GameEvent_PlayerDeath see-all gates @0x51709C..0x5170DA]
 bool ai_sees_all(const World &world, EntityHandle handle) {
-    if (world.ai == nullptr)
-        return false;
-    const AiEntity *ai = world.ai->for_handle(handle);
+    const AiEntity *ai = world.ai.for_handle(handle);
     return ai != nullptr && ai->see_all;
 }
 
@@ -892,8 +891,8 @@ void Match::update_objective_proximity(const World &world) {
             if (!within_2d(player_entity->position, zone->position, radius) ||
                 dz > radius * 0.5f)
                 continue;
-            if (!zone_chain_is_capturable(world, world.zone_chain, 1, *zone) &&
-                !zone_chain_is_capturable(world, world.zone_chain, 2, *zone))
+            if (!world.zones.is_capturable(1, *zone) &&
+                !world.zones.is_capturable(2, *zone))
                 continue;
             in_capturable_entity = true;
             if (live && team_mode && zone->team < 8u)
@@ -1239,7 +1238,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
     bool saw_zone = false;
     bool uniform_zones = true;
     uint8_t uniform_team = 0;
-    for (const EntityHandle handle : world.zone_chain.zones) {
+    for (const EntityHandle handle : world.zones.chain.zones) {
         const Entity *zone = world.registry.get(handle);
         if (zone == nullptr)
             continue;
@@ -1435,7 +1434,7 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // tie. [orig: Server_CheckWinConditions @0x51B49E..0x51B4E6]
         int32_t team1 = 0;
         int32_t team2 = 0;
-        for (const EntityHandle handle : world.zone_chain.zones) {
+        for (const EntityHandle handle : world.zones.chain.zones) {
             const Entity *zone = world.registry.get(handle);
             if (zone == nullptr)
                 continue;
@@ -1478,7 +1477,7 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.team_row_count = scoreboard_team_row_count(rules_);
     if (rules_.game_type == gt::kAdvanceAndSecure ||
         rules_.game_type == gt::kConquerAndControl) {
-        for (const EntityHandle handle : world.zone_chain.zones) {
+        for (const EntityHandle handle : world.zones.chain.zones) {
             const Entity *zone = world.registry.get(handle);
             if (zone == nullptr)
                 continue;

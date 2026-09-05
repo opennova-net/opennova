@@ -108,11 +108,11 @@ int main() {
 		const w::EntityHandle h = w::spawn_player(rig.world, spawn);
 		if (!expect(h.valid(), "spawn_local_player at the origin")) return 1;
 		if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs by name against the retail root")) return 1;
-		std::printf("native-assets: m4 by-name: active=%d clip=%d\n", int(rig.weapon.active), rig.weapon.slot.clip);
-		expect(rig.weapon.active, "the by-name install left an active weapon FSM");
+		std::printf("native-assets: m4 by-name: active=%d clip=%d\n", int(rig.local.weapon.active), rig.local.weapon.slot.clip);
+		expect(rig.local.weapon.active, "the by-name install left an active weapon FSM");
 		expect(!rig.install_weapon("WPN_NOT_A_WEAPON"), "an unknown weapon name does not install");
 
-		inmatch::Session session(rig);
+		inmatch::Session session(rig.role());
 		if (!expect(session.begin_load().applied() && session.complete_load().applied(), "the session loads")) return 1;
 		inmatch::FrameInput frame;
 		frame.delta_seconds = 0.032;
@@ -138,7 +138,7 @@ int main() {
 		for (int round = 0; round < 8; ++round) {
 			rig.tick(8);
 			hitbox_entities = std::max(hitbox_entities,
-					static_cast<int>(rig.hitboxes(rig.player_position(), 80.0f, 96, 24000).size()));
+					static_cast<int>(rig.hitboxes(rig.local.player_position(), 80.0f, 96, 24000).size()));
 		}
 		std::printf("native-assets: native pose: hitbox_entities=%d collision queries=%d declines=%d mounted declines=%d sources=%zu\n",
 				hitbox_entities, rig.collision_queries, rig.collision_declines, rig.mounted_declines,

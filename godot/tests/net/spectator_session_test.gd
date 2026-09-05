@@ -7,23 +7,23 @@ extends GutTest
 func _mission() -> MissionData:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_MARKER, 6094,
-			Vector3.ZERO, Vector3.ZERO).is_empty())
+			Vector3.ZERO, Vector3.ZERO))
 	return mission
 
 
 func _host(mission: MissionData) -> Simulation:
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Spectator Session",
-		"mission_name": "Spectator Session",
-		"mission_file": "SPECTATOR_TEST.BMS",
-		"gametype": 0x30020,
-		"max_players": 4,
-		"spectator_slots": -1,
-		"spectator_password": "watch",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Spectator Session"
+	host_options.mission_name = "Spectator Session"
+	host_options.mission_file = "SPECTATOR_TEST.BMS"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.spectator_slots = -1
+	host_options.spectator_password = "watch"
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	return host
@@ -56,8 +56,6 @@ func test_spectator_role_reaches_in_match_and_latches_from_tag_75() -> void:
 			"S2C 0x75 assigns the spectator's retail team 0")
 	assert_false(joiner.set_local_spectator(false),
 			"a joiner cannot overwrite host-owned spectator state through F3")
-	host.free()
-	joiner.free()
 
 
 func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
@@ -92,5 +90,3 @@ func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
 		OS.delay_msec(2)
 	assert_eq(peers, 0,
 			"the rejected spectator's punted connection is reaped")
-	host.free()
-	joiner.free()

@@ -101,7 +101,7 @@ void test_wac_layers_execute_in_retail_order() {
 	world.load_systems();
 	CHECK(wac.execute_initial(world));
 	CHECK(wac.runs() == 1);
-	CHECK(world.vars.get_mission(1) == 3);
+	CHECK(world.script.vars.get_mission(1) == 3);
 }
 
 void test_absent_layers_are_the_valid_bms_only_mission() {
@@ -146,8 +146,8 @@ void test_retail_two_word_else_if_chain_is_clean_under_strict() {
 	world.add_system(&wac);
 	world.load_systems();
 	CHECK(wac.execute_initial(world));
-	CHECK(world.vars.get_mission(1) == 1); // the taken then-branch
-	CHECK(world.vars.get_mission(2) == 9); // the trailing statement stayed top-level
+	CHECK(world.script.vars.get_mission(1) == 1); // the taken then-branch
+	CHECK(world.script.vars.get_mission(2) == 9); // the trailing statement stayed top-level
 }
 
 void test_strict_mode_blocks_what_the_game_only_warns_on() {

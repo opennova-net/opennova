@@ -1,6 +1,9 @@
 #pragma once
 
+#include "render/visual_layers.h"
+
 #include <cmath>
+#include <memory>
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -31,7 +34,7 @@ class Weather;
 // witnessed water pieces: the height precedence ladder + per-frame inputs
 // (environment/water_frame.h), the proper-mirror reflection view
 // (environment/water_mirror.h), and the noise/strip math already in
-// engine/formats/env behind the WaterCore binding. This node keeps only
+// engine/formats/env behind the WaterCore device helper. This node keeps only
 // device work: the live ArrayMesh strip upload, the animated noise
 // ImageTexture pair, the reflection SubViewport + mirror Camera3D rig on the
 // SAME World3D (Godot renders SubViewports ahead of the sampling viewport,
@@ -43,36 +46,26 @@ class Water : public Node3D {
 	GDCLASS(Water, Node3D)
 
 public:
-	// Visual-layer allocation for the reflection contract (env #30): above
+	// The visual-layer allocation is the renderer's contract
+	// (render/visual_layers.h); these names are the GDScript-visible aliases
+	// the reflection contract (env #30) exposes on the water node: above
 	// water the mirror renders only the flag-0x400 population (vehicles by
 	// item type + authored-Reflective records); below water it is unfiltered.
 	// It never renders the water surface, FP overlay, or a player/person leg.
 	// The witness lives with the mirror view (environment/water_mirror.h).
 	enum {
-		VISUAL_LAYER_WORLD = 1 << 0,
-		VISUAL_LAYER_WATER = 1 << 10,
-		// The retail environment-cube callback draws sky + sun/moon only.
-		// All 20 Godot visual layers are allocated, so it aliases water's bit;
-		// water rejects capture-camera eyes in its shader while the admitted
-		// sky/celestial meshes carry this bit in addition to WORLD.
-		VISUAL_LAYER_ENVIRONMENT_CAPTURE = VISUAL_LAYER_WATER,
-		VISUAL_LAYER_VIEWMODEL = 1 << 11,
-		VISUAL_LAYER_FP_BODY_SHADOW_ONLY = 1 << 12,
-		VISUAL_LAYER_STATIC_SHADOW_CASTER = 1 << 13,
-		VISUAL_LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
-		VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER = 1 << 15,
-		VISUAL_LAYER_WORLD_NO_MIRROR = 1 << 16,
-		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
-				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
-		// The mirror camera's above-water mask; a below-water view adds
-		// WORLD_NO_MIRROR back (retail collects unfiltered there). The
-		// render-slot captures draw through SlotShadow's RenderingDevice pass
-		// and reserve no visual layer.
-		REFLECTION_CULL_MASK = 0xFFFFF &
-				~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL |
-						VISUAL_LAYER_FP_BODY_SHADOW_ONLY |
-						VISUAL_LAYER_SHADOW_CASTER_MASK |
-						VISUAL_LAYER_WORLD_NO_MIRROR),
+		VISUAL_LAYER_WORLD = visual_layers::WORLD,
+		VISUAL_LAYER_WATER = visual_layers::WATER,
+		VISUAL_LAYER_ENVIRONMENT_CAPTURE = visual_layers::ENVIRONMENT_CAPTURE,
+		VISUAL_LAYER_VIEWMODEL = visual_layers::VIEWMODEL,
+		VISUAL_LAYER_FP_BODY_SHADOW_ONLY = visual_layers::FP_BODY_SHADOW_ONLY,
+		VISUAL_LAYER_STATIC_SHADOW_CASTER = visual_layers::STATIC_SHADOW_CASTER,
+		VISUAL_LAYER_DYNAMIC_SHADOW_CASTER = visual_layers::DYNAMIC_SHADOW_CASTER,
+		VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER = visual_layers::TERRAIN_SHADOW_RECEIVER,
+		VISUAL_LAYER_WORLD_NO_MIRROR = visual_layers::WORLD_NO_MIRROR,
+		VISUAL_LAYER_TERRAIN_FOLIAGE = visual_layers::TERRAIN_FOLIAGE,
+		VISUAL_LAYER_SHADOW_CASTER_MASK = visual_layers::SHADOW_CASTER_MASK,
+		REFLECTION_CULL_MASK = visual_layers::REFLECTION_CULL_MASK,
 	};
 
 	void set_environment_path(const NodePath &p_path);
@@ -125,12 +118,11 @@ public:
 	SubViewport *get_reflection_viewport() const { return reflection_viewport_; }
 	Camera3D *get_reflection_camera() const { return reflection_camera_; }
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
-	void _process(double p_delta) override;
 	void _exit_tree() override;
 
 protected:
@@ -181,7 +173,7 @@ private:
 	ObjectID env_node_id_;
 	ObjectID weather_node_id_;
 	ObjectID cached_cam_id_;
-	Ref<WaterCore> water_core_;
+	std::unique_ptr<WaterCore> water_core_;
 	Ref<Image> noise_color_img_;
 	Ref<Image> noise_normal_img_;
 	Ref<ImageTexture> noise_color_tex_;

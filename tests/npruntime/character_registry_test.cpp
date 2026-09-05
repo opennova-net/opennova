@@ -1,16 +1,18 @@
-// Pins the character registry (net/npruntime/character_registry.h) — the
+// Pins the character registry (runtime/inmatch/character_registry.h) — the
 // packed-id decode with its alignment gate, the per-side default walk — and
 // the joiner's profile-to-wire projection (join_character_profile.h): the
 // fresh-profile defaults, a persisted side selection, the class-byte rule.
 
-#include <net/npruntime/character_registry.h>
-#include <net/npruntime/join_character_profile.h>
+#include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/join_character_profile.h>
 
 #include <formats/avatars/avatars.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+using namespace opennova::avatars;
 
 namespace {
 
@@ -114,6 +116,27 @@ int main() {
 		check(p.character_ids[1] == 0x8207, "out-of-range selection falls back");
 		check(p.player_classes[0] == 8, "class 4 keeps the default");
 		check(p.player_classes[1] == 9, "class 9 is kept");
+	}
+
+	// The wire projection: ids and bytes narrowed, a side request outside
+	// {0, 1} is the absent 0xFF.
+	{
+		JoinCharacterProfile p;
+		p.character_ids[0] = 0x0400;
+		p.character_ids[1] = 0x8207;
+		p.player_classes[0] = 6;
+		p.player_classes[1] = 300;
+		p.avatars[0] = 3;
+		p.avatars[1] = -1;
+		const opennova::inmatch::CharacterJoinVars vars = character_join_vars(p);
+		check(vars.char_id[0] == 0x0400 && vars.char_id[1] == 0x8207, "packed ids ride as-is");
+		check(vars.char_class[0] == 6 && vars.char_class[1] == 0xFF, "class bytes clamp to a byte");
+		check(vars.avatar[0] == 3 && vars.avatar[1] == 0, "avatar bytes clamp to a byte");
+		check(vars.team_request == 0xFF, "team_request -1 is the absent 0xFF");
+		p.team_request = 1;
+		check(character_join_vars(p).team_request == 1, "a side request in {0, 1} rides");
+		p.team_request = 2;
+		check(character_join_vars(p).team_request == 0xFF, "a side request past 1 is absent");
 	}
 
 	if (g_failures != 0) {

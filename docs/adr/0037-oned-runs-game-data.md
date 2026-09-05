@@ -80,6 +80,13 @@ different product and is outside this decision.
   the authoring UI does not remove format readers, writers, runtime bindings,
   or their parity tests when other consumers still use them.
 
+*Amended 2026-09-02:* the last dormant authoring surface, `MnuDocument`'s
+mutation / undo half (`apply_widget_patch`, the item and table mutators,
+`add_widget` / `delete_widget`, `capture_state` / `apply_state` /
+`reparent_widget`, `create_empty`; 35 bindings and the state TU), was deleted
+with its GUT mutation tests; the binding is a read + self-I/O document and the
+engine ctest carries the round-trip proof.
+
 ## Verification
 
 - ONED tests pin the settings defaults and the Run, Retail, Stop, restart,

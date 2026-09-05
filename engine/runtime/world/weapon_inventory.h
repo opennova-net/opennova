@@ -7,10 +7,9 @@
 // @ 0x24D4E00, the availability table g_armoryWeaponAvailability @ 0x24D5600) and one
 // per-player copy server-side (slot+464 table / +94408 buffer / +88664 pools). This port
 // gathers the local-player instance into value types; the server-side copy stays in
-// engine/net/npruntime (D-NET-152 shape).
+// engine/runtime/inmatch (D-NET-152 shape).
 // [witness record: docs/net/novaworld-net-re.md §5.57/§5.58 + the loadout grill 2026-07-18]
-#ifndef OPENNOVA_WORLD_WEAPON_INVENTORY_H
-#define OPENNOVA_WORLD_WEAPON_INVENTORY_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -246,6 +245,22 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
                                       int32_t direction,
                                       const WeaponSwitchGates &gates);
 
-} // namespace opennova::world
 
-#endif // OPENNOVA_WORLD_WEAPON_INVENTORY_H
+// The local player's inventory snapshot for the shell/tests as one value the
+// embedder fills from WeaponInventory + the weapon table (the occupied combo
+// slots with their weapon.def names and magazines, the equipped combo and
+// name, the carry flags); its Godot record wraps it by value (ADR 0043 d10).
+struct LocalInventoryView {
+    struct Slot {
+        int32_t combo = 0;
+        std::string name;
+        int32_t clip = 0;
+    };
+    bool valid = false;
+    int32_t equipped_combo = -1;
+    std::string equipped_name;
+    uint32_t carry_flags = 0;
+    std::vector<Slot> slots;
+};
+
+} // namespace opennova::world

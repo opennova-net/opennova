@@ -8,13 +8,14 @@
 // [orig: model CTRL loader @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290;
 //  PANM_SampleTrack @ 0x5B2270; the node-matrix builder is
 //  threedi_panm_runtime.h's threedi_panm_build_node_matrices]
-#ifndef OPENNOVA_THREEDI_PANM_POSE_H
-#define OPENNOVA_THREEDI_PANM_POSE_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 
 #include <cstdint>
 #include <vector>
+
+namespace opennova::threedi {
 
 // A node is "live" when any of its enabled transform families samples a track
 // with a non-zero control high nibble — plus the three rotation modes that
@@ -61,4 +62,5 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                              std::vector<ThreediMatrix4x4> &r_matrices,
                              std::vector<uint8_t> *r_animated);
 
-#endif // OPENNOVA_THREEDI_PANM_POSE_H
+
+} // namespace opennova::threedi

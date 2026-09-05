@@ -21,6 +21,7 @@
 #include <limits>
 
 using namespace opennova::world;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c) \
@@ -52,7 +53,7 @@ void load_transport_sound_profile(World &world) {
             "  enginestop V_TRUCK_STOP\n"
             "  enginereverse V_TRUCK_SHIFT\n"
             "end\n";
-    CHECK(world.sound_profiles.parse(kTransportProfile,
+    CHECK(world.tables.sound_profiles.parse(kTransportProfile,
                                      sizeof(kTransportProfile) - 1) == 1);
 }
 
@@ -138,9 +139,9 @@ struct Rig {
     }
     Entity &veh() { return *w.registry.get(veh_h); }
     Entity &drv() { return *w.registry.get(drv_h); }
-    void mount() { CHECK(entity_process_vehicle_attach(w, drv_h, veh_h, 1)); }
+    void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1)); }
     void tick(int n, const VehicleTraits &t) {
-        for (int i = 0; i < n; ++i) tick_vehicle_motor(w, veh(), t);
+        for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
     }
 };
 
@@ -269,10 +270,10 @@ void test_ctrl_register_projection() {
 void test_boarding_clears_the_scar_ring() {
     Rig r;
     // A scar ring leases before the mount and is found; boarding releases it.
-    CHECK(r.w.scars.ring_for(r.drv_h, 1) != nullptr);
-    CHECK(r.w.scars.find(r.drv_h) != nullptr);
+    CHECK(r.w.out.scars.ring_for(r.drv_h, 1) != nullptr);
+    CHECK(r.w.out.scars.find(r.drv_h) != nullptr);
     r.mount();
-    CHECK(r.w.scars.find(r.drv_h) == nullptr);
+    CHECK(r.w.out.scars.find(r.drv_h) == nullptr);
 }
 
 void test_drive_forward() {
@@ -352,7 +353,7 @@ void test_no_driver_coasts() {
     r.drv().yaw = 0;
     r.tick(30, t);
     CHECK(r.veh().veh.speed > 0);
-    entity_detach_from_vehicle(r.w, r.drv_h);
+    r.w.vehicles.detach(r.drv_h);
     // The 1/32 exponential decay reaches the |speed| < 48 deadzone in ~130 ticks from
     // ~2.6k [orig: @0x48bbf7 the zero-target deadzone].
     r.tick(200, t);
@@ -365,14 +366,14 @@ void test_stale_driver_publishes_control_stop() {
     Rig r;
     const VehicleTraits t = buggy_traits();
     r.mount();
-    r.w.effects.clear();
+    r.w.out.effects.clear();
     r.w.registry.despawn(r.drv_h); // the vehicle-side seat handle now resolves to nothing
 
     r.tick(1, t);
     CHECK(!r.veh().seats[0].occupant.valid());
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1) {
-        const auto &stopped = r.w.effects.entries()[0];
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1) {
+        const auto &stopped = r.w.out.effects.entries()[0];
         CHECK(stopped.kind == "vehicle_control_stopped");
         CHECK(stopped.a == 200);
         CHECK(stopped.b == 77);
@@ -380,7 +381,7 @@ void test_stale_driver_publishes_control_stop() {
         CHECK(stopped.d == r.veh_h.packed);
     }
     r.tick(1, t);
-    CHECK(r.w.effects.entries().size() == 1); // cleared once, never repeated
+    CHECK(r.w.out.effects.entries().size() == 1); // cleared once, never repeated
 }
 
 // The +368 claimant protocol: the FIRST control occupant claims; losing THE claimant
@@ -393,32 +394,32 @@ void test_stale_claimant_stops_despite_second_controller() {
     const VehicleTraits t = buggy_traits();
     const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
-    CHECK(r.w.effects.entries().size() == 1); // one started for the first claim only
-    r.w.effects.clear();
+    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    CHECK(r.w.out.effects.entries().size() == 1); // one started for the first claim only
+    r.w.out.effects.clear();
 
     r.w.registry.despawn(r.drv_h); // the claimant goes away
     r.tick(1, t);
     CHECK(!r.veh().seats[0].occupant.valid());
     CHECK(r.veh().seats[1].occupant == second);
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1)
-        CHECK(r.w.effects.entries()[0].kind == "vehicle_control_stopped");
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1)
+        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_stopped");
     CHECK(!r.veh().primary_occupant.valid());
 
     // The surviving second controller never re-claims in place...
-    r.w.effects.clear();
+    r.w.out.effects.clear();
     r.tick(1, t);
-    CHECK(r.w.effects.entries().empty());
+    CHECK(r.w.out.effects.entries().empty());
 
     // ...but a fresh attach does [orig: the +368 claim runs at attach time only].
-    CHECK(entity_detach_from_vehicle(r.w, second));
-    r.w.effects.clear();
-    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1) {
-        CHECK(r.w.effects.entries()[0].kind == "vehicle_control_started");
-        CHECK(r.w.effects.entries()[0].d == r.veh_h.packed);
+    CHECK(r.w.vehicles.detach(second));
+    r.w.out.effects.clear();
+    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1) {
+        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_started");
+        CHECK(r.w.out.effects.entries()[0].d == r.veh_h.packed);
     }
 }
 
@@ -429,12 +430,12 @@ void test_second_controller_departure_is_silent() {
     const VehicleTraits t = buggy_traits();
     const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
-    r.w.effects.clear();
+    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    r.w.out.effects.clear();
 
-    CHECK(entity_detach_from_vehicle(r.w, second));
+    CHECK(r.w.vehicles.detach(second));
     r.tick(1, t);
-    CHECK(r.w.effects.entries().empty());
+    CHECK(r.w.out.effects.entries().empty());
     CHECK(r.veh().primary_occupant == r.drv_h);
 }
 
@@ -460,22 +461,22 @@ void test_gunner_first_claims_and_stops() {
     gunner_e.alive = true;
     const EntityHandle gunner = r.w.registry.spawn(0, gunner_e);
 
-    CHECK(entity_process_vehicle_attach(r.w, gunner, r.veh_h, 3));
+    CHECK(r.w.vehicles.process_attach(gunner, r.veh_h, 3));
     CHECK(r.veh().primary_occupant == gunner);
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1)
-        CHECK(r.w.effects.entries()[0].kind == "vehicle_control_started");
-    r.w.effects.clear();
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1)
+        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_started");
+    r.w.out.effects.clear();
 
     r.mount(); // the driver arrives second: no re-claim, no event
     CHECK(r.veh().primary_occupant == gunner);
-    CHECK(r.w.effects.entries().empty());
+    CHECK(r.w.out.effects.entries().empty());
 
-    CHECK(entity_detach_from_vehicle(r.w, gunner)); // the claimant leaves
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1) {
-        CHECK(r.w.effects.entries()[0].kind == "vehicle_control_stopped");
-        CHECK(r.w.effects.entries()[0].d == r.veh_h.packed);
+    CHECK(r.w.vehicles.detach(gunner)); // the claimant leaves
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1) {
+        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_stopped");
+        CHECK(r.w.out.effects.entries()[0].d == r.veh_h.packed);
     }
     CHECK(!r.veh().primary_occupant.valid());
     CHECK(r.veh().seats[0].occupant == r.drv_h); // the driver still flies
@@ -488,19 +489,19 @@ void test_multiple_stale_controls_publish_one_stop() {
     const VehicleTraits t = buggy_traits();
     const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
-    r.w.effects.clear();
+    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    r.w.out.effects.clear();
 
     r.w.registry.despawn(r.drv_h);
     r.w.registry.despawn(second);
     r.tick(1, t);
     CHECK(!r.veh().seats[0].occupant.valid());
     CHECK(!r.veh().seats[1].occupant.valid());
-    CHECK(r.w.effects.entries().size() == 1);
-    if (r.w.effects.entries().size() == 1)
-        CHECK(r.w.effects.entries()[0].kind == "vehicle_control_stopped");
+    CHECK(r.w.out.effects.entries().size() == 1);
+    if (r.w.out.effects.entries().size() == 1)
+        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_stopped");
     r.tick(1, t);
-    CHECK(r.w.effects.entries().size() == 1);
+    CHECK(r.w.out.effects.entries().size() == 1);
 }
 
 // A dead vehicle stops responding to the driver [orig: the wreck/dead gates
@@ -543,17 +544,17 @@ void test_npc_claimant_registers_stationary_idle_sound() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0; // an NPC, not the local/remote player body path
     r.mount();
-    r.w.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
+    r.w.out.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
 
     VehicleDriveCmd parked;
     parked.ai_drive = true;
     parked.steer_target_bam = 0;
     parked.cmd_speed = 0;
-    tick_vehicle_motor(r.w, r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t, &parked);
 
-    CHECK(r.w.sound_emitters.size() == 1);
-    if (r.w.sound_emitters.size() == 1) {
-        const SoundEmitterEvent &idle = r.w.sound_emitters[0];
+    CHECK(r.w.out.sound_emitters.size() == 1);
+    if (r.w.out.sound_emitters.size() == 1) {
+        const SoundEmitterEvent &idle = r.w.out.sound_emitters[0];
         CHECK(idle.source_spawn_id == r.veh().registry_spawn_id);
         CHECK(idle.source_handle == r.veh_h.packed);
         CHECK(idle.pos.x == 100.0f);
@@ -581,14 +582,14 @@ void test_controller_without_claimant_is_silent() {
     load_transport_sound_profile(r.w);
     const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
-    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
+    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    CHECK(r.w.vehicles.detach(r.drv_h));
     CHECK(!r.veh().primary_occupant.valid());
     CHECK(r.veh().seats[1].occupant == second);
 
-    r.w.sound_emitters.clear();
-    tick_vehicle_motor(r.w, r.veh(), t);
-    CHECK(r.w.sound_emitters.empty());
+    r.w.out.sound_emitters.clear();
+    r.w.vehicles.tick_motor(r.veh(), t);
+    CHECK(r.w.out.sound_emitters.empty());
 }
 
 // ItemDef_ResolveAllResources copies the profile slots, then a non-empty per-item
@@ -603,16 +604,16 @@ void test_item_soundloop_override_wins_over_profile() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
 
     VehicleDriveCmd parked;
     parked.ai_drive = true;
-    tick_vehicle_motor(r.w, r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t, &parked);
 
-    CHECK(r.w.sound_emitters.size() == 1);
-    if (r.w.sound_emitters.size() == 1) {
-        CHECK(r.w.sound_emitters[0].slot == 0);
-        CHECK(r.w.sound_emitters[0].set_name == "V_TRUCK_CUSTOM_IDLE");
+    CHECK(r.w.out.sound_emitters.size() == 1);
+    if (r.w.out.sound_emitters.size() == 1) {
+        CHECK(r.w.out.sound_emitters[0].slot == 0);
+        CHECK(r.w.out.sound_emitters[0].set_name == "V_TRUCK_CUSTOM_IDLE");
     }
 }
 
@@ -628,15 +629,15 @@ void test_forward_sound_gain_pitch_and_idle_crossfade() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
     r.veh().veh.speed = 1000; // playerSpeed / 32
 
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-    CHECK(r.w.sound_emitters.size() == 2);
-    if (r.w.sound_emitters.size() == 2) {
-        const SoundEmitterEvent &drive = r.w.sound_emitters[0];
-        const SoundEmitterEvent &idle = r.w.sound_emitters[1];
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        const SoundEmitterEvent &drive = r.w.out.sound_emitters[0];
+        const SoundEmitterEvent &idle = r.w.out.sound_emitters[1];
         CHECK(drive.lane == 10);
         CHECK(drive.slot == 1);
         CHECK(drive.set_name == "V_TRUCK_DLP");
@@ -662,16 +663,16 @@ void test_remote_speed_drives_the_same_movement_sound() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
     // The wire-restored register — no local driver, no authority integration.
     r.veh().veh.speed = 1000; // playerSpeed / 32, as above
     r.veh().veh.cmd_speed = 1000;
 
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-    CHECK(r.w.sound_emitters.size() == 2);
-    if (r.w.sound_emitters.size() == 2) {
-        const SoundEmitterEvent &drive = r.w.sound_emitters[0];
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        const SoundEmitterEvent &drive = r.w.out.sound_emitters[0];
         CHECK(drive.lane == 10);
         CHECK(drive.volume_q8_8 == 0x8000);
         CHECK(drive.pitch_q16 == 46694);   // the same witnessed pitch
@@ -691,16 +692,16 @@ void test_zero_speed_row_emits_only_the_idle_lane() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
     r.veh().veh.speed = 0;
     r.veh().veh.cmd_speed = 0;
 
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
     // Stationary: the idle lane at full volume, no motion lane.
     bool idle_full = false;
-    for (size_t i = 0; i < r.w.sound_emitters.size(); ++i) {
-        const SoundEmitterEvent &e = r.w.sound_emitters[i];
+    for (size_t i = 0; i < r.w.out.sound_emitters.size(); ++i) {
+        const SoundEmitterEvent &e = r.w.out.sound_emitters[i];
         CHECK(e.lane != 10);
         if (e.lane == 0 && e.volume_q8_8 == 0xFFFF) idle_full = true;
     }
@@ -720,19 +721,19 @@ void test_forward_sound_gear_pitch_sawtooth() {
             "  Soundloop_1 V_IDLE 1 1\n"
             "  Soundloop_2 V_DRIVE .8 1.2 4\n"
             "end\n";
-    CHECK(r.w.sound_profiles.parse(kGearedProfile,
+    CHECK(r.w.tables.sound_profiles.parse(kGearedProfile,
                                    sizeof(kGearedProfile) - 1) == 1);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
     r.veh().veh.speed = 10000; // gear 1, one quarter through its 8000 band
 
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-    CHECK(!r.w.sound_emitters.empty());
-    if (!r.w.sound_emitters.empty()) {
-        CHECK(r.w.sound_emitters[0].lane == 10);
-        CHECK(r.w.sound_emitters[0].pitch_q16 == 55757);
+    CHECK(!r.w.out.sound_emitters.empty());
+    if (!r.w.out.sound_emitters.empty()) {
+        CHECK(r.w.out.sound_emitters[0].lane == 10);
+        CHECK(r.w.out.sound_emitters[0].pitch_q16 == 55757);
     }
 }
 
@@ -747,36 +748,36 @@ void test_reverse_sound_and_direction_shift_edges() {
     load_transport_sound_profile(r.w);
     r.drv().player_class = 0;
     r.mount();
-    r.w.sound_emitters.clear();
-    r.w.slot_sounds.clear();
+    r.w.out.sound_emitters.clear();
+    r.w.out.slot_sounds.clear();
     r.veh().veh.speed = -16000;
     r.veh().veh.cmd_speed = -32000;
 
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-    CHECK(r.w.sound_emitters.size() == 2);
-    if (r.w.sound_emitters.size() == 2) {
-        CHECK(r.w.sound_emitters[0].lane == 20);
-        CHECK(r.w.sound_emitters[0].set_name == "V_TRUCK_REVSE");
-        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0xFFFF);
-        CHECK(r.w.sound_emitters[0].pitch_q16 == 0x10000);
-        CHECK(r.w.sound_emitters[1].lane == 0);
-        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0x8000);
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        CHECK(r.w.out.sound_emitters[0].lane == 20);
+        CHECK(r.w.out.sound_emitters[0].set_name == "V_TRUCK_REVSE");
+        CHECK(r.w.out.sound_emitters[0].volume_q8_8 == 0xFFFF);
+        CHECK(r.w.out.sound_emitters[0].pitch_q16 == 0x10000);
+        CHECK(r.w.out.sound_emitters[1].lane == 0);
+        CHECK(r.w.out.sound_emitters[1].volume_q8_8 == 0x8000);
     }
     CHECK(r.veh().veh.reverse_sound_latched);
-    CHECK(r.w.slot_sounds.size() == 1);
-    if (r.w.slot_sounds.size() == 1) {
-        CHECK(r.w.slot_sounds[0].slot == 32);
-        CHECK(std::strcmp(r.w.slot_sounds[0].set_name, "V_TRUCK_SHIFT") == 0);
+    CHECK(r.w.out.slot_sounds.size() == 1);
+    if (r.w.out.slot_sounds.size() == 1) {
+        CHECK(r.w.out.slot_sounds[0].slot == 32);
+        CHECK(std::strcmp(r.w.out.slot_sounds[0].set_name, "V_TRUCK_SHIFT") == 0);
     }
 
-    r.w.slot_sounds.clear();
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
-    CHECK(r.w.slot_sounds.empty());
+    r.w.out.slot_sounds.clear();
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    CHECK(r.w.out.slot_sounds.empty());
     r.veh().veh.cmd_speed = 32000;
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
     CHECK(!r.veh().veh.reverse_sound_latched);
-    CHECK(r.w.slot_sounds.size() == 1);
+    CHECK(r.w.out.slot_sounds.size() == 1);
 }
 
 // The claimant detach edge immediately clears both moving lanes and plays the
@@ -788,39 +789,39 @@ void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
     VehicleTraits t = buggy_traits();
     t.sound_profile = "SP_Transport";
     load_transport_sound_profile(r.w);
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.mount();
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
-    r.w.sound_emitters.clear();
-    r.w.slot_sounds.clear();
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    r.w.out.sound_emitters.clear();
+    r.w.out.slot_sounds.clear();
 
-    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
+    CHECK(r.w.vehicles.detach(r.drv_h));
 
-    CHECK(r.w.sound_emitters.size() == 2);
-    if (r.w.sound_emitters.size() == 2) {
-        CHECK(r.w.sound_emitters[0].lane == 10);
-        CHECK(r.w.sound_emitters[0].pitch_q16 == 0);
-        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0);
-        CHECK(r.w.sound_emitters[1].lane == 20);
-        CHECK(r.w.sound_emitters[1].pitch_q16 == 0);
-        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0);
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        CHECK(r.w.out.sound_emitters[0].lane == 10);
+        CHECK(r.w.out.sound_emitters[0].pitch_q16 == 0);
+        CHECK(r.w.out.sound_emitters[0].volume_q8_8 == 0);
+        CHECK(r.w.out.sound_emitters[1].lane == 20);
+        CHECK(r.w.out.sound_emitters[1].pitch_q16 == 0);
+        CHECK(r.w.out.sound_emitters[1].volume_q8_8 == 0);
     }
-    CHECK(r.w.slot_sounds.size() == 1);
-    if (r.w.slot_sounds.size() == 1) {
-        CHECK(r.w.slot_sounds[0].slot == 31);
-        CHECK(std::strcmp(r.w.slot_sounds[0].set_name, "V_TRUCK_STOP") == 0);
+    CHECK(r.w.out.slot_sounds.size() == 1);
+    if (r.w.out.slot_sounds.size() == 1) {
+        CHECK(r.w.out.slot_sounds[0].slot == 31);
+        CHECK(std::strcmp(r.w.out.slot_sounds[0].set_name, "V_TRUCK_STOP") == 0);
     }
 
     // The idle lane was already drained into the host before detach. While its
     // keep-alive expires, later unoccupied motor ticks publish only the moved
     // entity anchor and do not renew any lane controls.
-    r.w.sound_emitters.clear();
+    r.w.out.sound_emitters.clear();
     r.veh().position.x += 5.0f;
     ++r.w.logic_tick;
-    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
-    CHECK(r.w.sound_emitters.size() == 1);
-    if (r.w.sound_emitters.size() == 1) {
-        const SoundEmitterEvent &anchor = r.w.sound_emitters[0];
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    CHECK(r.w.out.sound_emitters.size() == 1);
+    if (r.w.out.sound_emitters.size() == 1) {
+        const SoundEmitterEvent &anchor = r.w.out.sound_emitters[0];
         CHECK(anchor.source_only);
         CHECK(anchor.source_spawn_id == r.veh().registry_spawn_id);
         CHECK(anchor.pos.x == r.veh().position.x);
@@ -839,14 +840,13 @@ void test_hull_collision_clears_motion_lanes_and_forces_full_idle() {
     t.player_speed = 32000;
     t.sound_profile = "SP_Transport";
     load_transport_sound_profile(r.w);
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.drv().player_class = 0;
     r.mount();
 
-    AiSystem ai;
+    AiSystem &ai = r.w.ai;
     CollisionWorld collision;
     ai.collision = &collision;
-    r.w.ai = &ai;
     r.w.registry.configure_pool(2, 4);
 
     Entity wall;
@@ -870,14 +870,14 @@ void test_hull_collision_clears_motion_lanes_and_forces_full_idle() {
     drive.ai_drive = true;
     drive.steer_target_bam = bam_heading_from_mission_yaw_deg(90.0);
     drive.cmd_speed = 1000;
-    r.w.sound_emitters.clear();
-    tick_vehicle_motor(r.w, r.veh(), t, &drive);
+    r.w.out.sound_emitters.clear();
+    r.w.vehicles.tick_motor(r.veh(), t, &drive);
 
-    CHECK(r.w.sound_emitters.size() == 3);
-    if (r.w.sound_emitters.size() == 3) {
-        const SoundEmitterEvent &reverse_clear = r.w.sound_emitters[0];
-        const SoundEmitterEvent &forward_clear = r.w.sound_emitters[1];
-        const SoundEmitterEvent &idle = r.w.sound_emitters[2];
+    CHECK(r.w.out.sound_emitters.size() == 3);
+    if (r.w.out.sound_emitters.size() == 3) {
+        const SoundEmitterEvent &reverse_clear = r.w.out.sound_emitters[0];
+        const SoundEmitterEvent &forward_clear = r.w.out.sound_emitters[1];
+        const SoundEmitterEvent &idle = r.w.out.sound_emitters[2];
         CHECK(reverse_clear.lane == 20);
         CHECK(reverse_clear.pitch_q16 == 0);
         CHECK(reverse_clear.volume_q8_8 == 0);
@@ -900,21 +900,21 @@ void test_claimant_detach_at_water_plane_clears_without_stop_oneshot() {
     VehicleTraits t = buggy_traits();
     t.sound_profile = "SP_Transport";
     load_transport_sound_profile(r.w);
-    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.vehicles.traits.set(r.veh().item_id, t);
     r.w.env.water_z = 10 << 16;
     r.mount();
-    r.w.sound_emitters.clear();
-    r.w.slot_sounds.clear();
+    r.w.out.sound_emitters.clear();
+    r.w.out.slot_sounds.clear();
 
-    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
-    CHECK(r.w.sound_emitters.size() == 2);
-    if (r.w.sound_emitters.size() == 2) {
-        CHECK(r.w.sound_emitters[0].pitch_q16 == 0);
-        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0);
-        CHECK(r.w.sound_emitters[1].pitch_q16 == 0);
-        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0);
+    CHECK(r.w.vehicles.detach(r.drv_h));
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        CHECK(r.w.out.sound_emitters[0].pitch_q16 == 0);
+        CHECK(r.w.out.sound_emitters[0].volume_q8_8 == 0);
+        CHECK(r.w.out.sound_emitters[1].pitch_q16 == 0);
+        CHECK(r.w.out.sound_emitters[1].volume_q8_8 == 0);
     }
-    CHECK(r.w.slot_sounds.empty());
+    CHECK(r.w.out.slot_sounds.empty());
 }
 
 // The portable producer accepts authored/modded int32 values. INT_MIN magnitudes,
@@ -928,16 +928,16 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
         t.sound_profile = "SP_Transport";
         load_transport_sound_profile(r.w);
         r.mount();
-        r.w.sound_emitters.clear();
+        r.w.out.sound_emitters.clear();
         r.veh().veh.speed = std::numeric_limits<int32_t>::min();
 
-        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+        r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-        CHECK(r.w.sound_emitters.size() == 1);
-        if (r.w.sound_emitters.size() == 1) {
-            CHECK(r.w.sound_emitters[0].lane == 20);
-            CHECK(r.w.sound_emitters[0].pitch_q16 == 52428);
-            CHECK(r.w.sound_emitters[0].volume_q8_8 == 0xFFFF);
+        CHECK(r.w.out.sound_emitters.size() == 1);
+        if (r.w.out.sound_emitters.size() == 1) {
+            CHECK(r.w.out.sound_emitters[0].lane == 20);
+            CHECK(r.w.out.sound_emitters[0].pitch_q16 == 52428);
+            CHECK(r.w.out.sound_emitters[0].volume_q8_8 == 0xFFFF);
         }
     }
 
@@ -951,18 +951,18 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
                 "  Soundloop_1 V_IDLE 1 1\n"
                 "  Soundloop_2 V_DRIVE .8 1.2 2147483647\n"
                 "end\n";
-        CHECK(r.w.sound_profiles.parse(kExtremeProfile,
+        CHECK(r.w.tables.sound_profiles.parse(kExtremeProfile,
                                        sizeof(kExtremeProfile) - 1) == 1);
         r.mount();
-        r.w.sound_emitters.clear();
+        r.w.out.sound_emitters.clear();
         r.veh().veh.speed = std::numeric_limits<int32_t>::max();
 
-        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+        r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-        CHECK(!r.w.sound_emitters.empty());
-        if (!r.w.sound_emitters.empty()) {
-            CHECK(r.w.sound_emitters[0].lane == 10);
-            CHECK(r.w.sound_emitters[0].pitch_q16 == 52428);
+        CHECK(!r.w.out.sound_emitters.empty());
+        if (!r.w.out.sound_emitters.empty()) {
+            CHECK(r.w.out.sound_emitters[0].lane == 10);
+            CHECK(r.w.out.sound_emitters[0].pitch_q16 == 52428);
         }
     }
 
@@ -976,18 +976,18 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
                 "  Soundloop_1 V_IDLE 1 1\n"
                 "  Soundloop_2 V_DRIVE -32768 32767\n"
                 "end\n";
-        CHECK(r.w.sound_profiles.parse(kExtremeSpanProfile,
+        CHECK(r.w.tables.sound_profiles.parse(kExtremeSpanProfile,
                                        sizeof(kExtremeSpanProfile) - 1) == 1);
         r.mount();
-        r.w.sound_emitters.clear();
+        r.w.out.sound_emitters.clear();
         r.veh().veh.speed = 0xFFFF;
 
-        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+        r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
 
-        CHECK(!r.w.sound_emitters.empty());
-        if (!r.w.sound_emitters.empty()) {
-            CHECK(r.w.sound_emitters[0].lane == 10);
-            CHECK(r.w.sound_emitters[0].pitch_q16 ==
+        CHECK(!r.w.out.sound_emitters.empty());
+        if (!r.w.out.sound_emitters.empty()) {
+            CHECK(r.w.out.sound_emitters[0].lane == 10);
+            CHECK(r.w.out.sound_emitters[0].pitch_q16 ==
                   std::numeric_limits<int32_t>::max());
         }
     }
@@ -1006,9 +1006,8 @@ static void test_helo_waits_for_its_boarders() {
     World w;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 4);
-    AiSystem ai;
+    AiSystem &ai = w.ai;
     ai.is_authority = true;
-    w.ai = &ai;
 
     Entity helo{};
     helo.net_id = 420;

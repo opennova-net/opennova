@@ -60,24 +60,11 @@ int32_t fog_command_target_q16(int32_t metres, int32_t reference_q16) noexcept {
     return fixed;
 }
 
-uint16_t precipitation_rand16(void *ctx) {
-    return static_cast<WeatherState *>(ctx)->next_prng16_b();
-}
-
 uint32_t pack_rgb(uint32_t rgb) noexcept {
     return rgb & 0x00FFFFFFu;
 }
 
 } // namespace
-
-uint16_t WeatherState::next_prng16_b() noexcept {
-    // [orig: PRNG_Next16_B @ 0x6130f0] s = rol4(s + rol11(s)) ^ 1; low word.
-    const uint32_t rol11 = (prng16_b_state << 11) | (prng16_b_state >> 21);
-    uint32_t next = prng16_b_state + rol11;
-    next = ((next << 4) | (next >> 28)) ^ 1u;
-    prng16_b_state = next;
-    return static_cast<uint16_t>(next);
-}
 
 double WeatherState::tod_hhmm() const {
     // 8.24 hours -> HHMM: the whole hour times 100 plus the minute fraction.
@@ -119,11 +106,8 @@ void WeatherState::seed(const WeatherSeed &seed) {
     // WacScript_InitAndLoad zeroes the color-fade seconds at every load.
     color_fade_ticks = 0;
     overcast_for_tod_q16 = 0;
-    // Precipitation_Reset: the table cleared, the drops re-seeded from the
-    // freshly seeded PRNG_B stream, the kind reset to rain [orig: @ 0x5df3a0;
-    // the B seed @ 0x52460b].
-    prng16_b_state = kPrng16BSeed;
-    precipitation.reset(&precipitation_rand16, this);
+    // The World seeds precipitation before entity initialization; configuration
+    // seeding must not rewind that shared stream or the already-created mines.
     valid = true;
     bump_command();
 }
@@ -380,12 +364,10 @@ void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
         const int32_t dh = static_cast<int32_t>((16u * rand) >> 7);
         e.position.x += static_cast<float>(dx) / 65536.0f;
         e.position.y += static_cast<float>(dy) / 65536.0f;
-        if (world.ai != nullptr) {
-            if (AiEntity *a = world.ai->for_handle(e.handle)) {
-                a->pos[0] += dx;
-                a->pos[1] += dy;
-                if (heading_bam == nullptr) a->heading += dh;
-            }
+        if (AiEntity *a = world.ai.for_handle(e.handle)) {
+            a->pos[0] += dx;
+            a->pos[1] += dy;
+            if (heading_bam == nullptr) a->heading += dh;
         }
         if (heading_bam != nullptr) *heading_bam += dh;
         rand = core.oscillator.reroll() & 0xFFFu;

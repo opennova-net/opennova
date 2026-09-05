@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 
 	// --- P0 baseline: promote results (seats, brains, crews) settle well before
 	// the first event quantum can matter for the kickoffs we watch.
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
 	bool p0_ok = true;
 	std::string p0_detail;
 	for (const VehicleRow &row : kVehicles) {
-		const w::Entity *veh = rig.by_net_id(row.ssn);
+		const w::Entity *veh = rig.world.registry.by_net_id(row.ssn);
 		char line[256];
 		if (veh == nullptr) {
 			p0_ok = false;
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
 			p0_detail += line;
 			continue;
 		}
-		const bool has_brain = rig.ai_for(veh->handle) != nullptr;
+		const bool has_brain = rig.world.ai.for_handle(veh->handle) != nullptr;
 		const bool ctrl = ctrl_seat_occupied(*veh);
 		std::printf("P0 ssn=%u fam=%s seats=%zu brain=%d ctrl_occupied=%d riders=%d mounted=%d\n",
 				unsigned(row.ssn), row.family, veh->seats.size(), int(has_brain), int(ctrl),
@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
 			std::printf("t=%d event %d FIRED (kickoff)\n", tick, ev);
 			for (const VehicleRow &row : kVehicles)
 				if (row.kickoff_event == ev)
-					if (const w::Entity *veh = rig.by_net_id(row.ssn)) kickoff_pos[row.ssn] = veh->position;
+					if (const w::Entity *veh = rig.world.registry.by_net_id(row.ssn)) kickoff_pos[row.ssn] = veh->position;
 		}
 		for (const auto &kv : kDebarkEvents) {
 			const int ev = kv.first;
@@ -180,13 +180,13 @@ int main(int argc, char **argv) {
 		}
 		std::string line;
 		for (const VehicleRow &row : kVehicles) {
-			const w::Entity *veh = rig.by_net_id(row.ssn);
+			const w::Entity *veh = rig.world.registry.by_net_id(row.ssn);
 			if (veh == nullptr) continue;
 			char buf[200];
 			std::snprintf(buf, sizeof(buf), "ssn=%u pos=(%.1f,%.1f,%.2f)", unsigned(row.ssn), veh->position.x,
 					veh->position.y, veh->position.z);
 			line += buf;
-			if (const w::AiEntity *brain = rig.ai_for(veh->handle)) {
+			if (const w::AiEntity *brain = rig.world.ai.for_handle(veh->handle)) {
 				const int wp_ch = brain->brain.f[w::AiBrain::kWpChannel];
 				const int st = brain->brain.cur_state();
 				std::snprintf(buf, sizeof(buf), " st=%d wp=%d node=%d spd=%d", st, wp_ch,
@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
 			std::snprintf(buf, sizeof(buf), "ssn %u: SM state 16 never observed; ", unsigned(row.ssn));
 			p1_detail += buf;
 		}
-		const w::Entity *veh = rig.by_net_id(row.ssn);
+		const w::Entity *veh = rig.world.registry.by_net_id(row.ssn);
 		const float dep = veh != nullptr ? testrig::planar_distance(veh->position, kickoff_pos[row.ssn]) : 0.0f;
 		if (dep < kMinDepartDistance) {
 			p2_ok = false;
@@ -263,7 +263,7 @@ int main(int argc, char **argv) {
 		rig.world.registry.for_each([&](const w::Entity &e) {
 			if (e.handle.pool() != 0 || int(e.group_id) != grp) return;
 			++members;
-			if (const w::AiEntity *brain = rig.ai_for(e.handle))
+			if (const w::AiEntity *brain = rig.world.ai.for_handle(e.handle))
 				if (brain->brain.f[w::AiBrain::kWpChannel] == lst) ++redirected;
 			const auto s = start.find(e.handle.packed);
 			if (s != start.end()) max_walk = std::max(max_walk, testrig::distance(e.position, s->second));

@@ -40,11 +40,7 @@ func _rows(scene: LightScene, patches: Array) -> Array:
 
 func test_a_world_light_reaches_only_the_patch_it_overlaps() -> void:
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)), 0)
 	var rows := _rows(scene, [NEAR_PATCH, FAR_PATCH])
 	assert_eq(rows.size(), 2, "one row list per patch")
 	assert_eq((rows[0] as Array).size(), 1,
@@ -71,23 +67,15 @@ func test_a_world_light_reaches_only_the_patch_it_overlaps() -> void:
 func test_the_authored_terrain_disable_flag_keeps_a_light_off_the_ground() -> void:
 	var scene := LightScene.new()
 	# Flag 0x400 (disable_lightterrain) — the light still lights objects.
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-		"disable_terrain": true,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)
+			.masking(false, true, false)), 0)
 	var rows := _rows(scene, [NEAR_PATCH])
 	assert_eq((rows[0] as Array).size(), 0,
 			"a terrain-disabled light never reaches the terrain pass")
 	# The converse: an object-disabled light still pools on the ground.
 	scene.clear()
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-		"disable_objects": true,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)
+			.masking(false, false, true)), 0)
 	rows = _rows(scene, [NEAR_PATCH])
 	assert_eq((rows[0] as Array).size(), 1,
 			"the object-disable flag does not gate the terrain pass")
@@ -97,12 +85,8 @@ func test_an_owned_light_never_reaches_the_terrain() -> void:
 	# Both light groups are cleared for the terrain batch, so an owned light
 	# (muzzle glow, subobject record) never matches [orig: @0x60967c/@0x609685].
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-		"owner_entity": 77,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)
+			.owned_by(77)), 0)
 	var rows := _rows(scene, [NEAR_PATCH])
 	assert_eq((rows[0] as Array).size(), 0,
 			"an owned pool light lights its owner's draws, never the ground")
@@ -134,11 +118,7 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 	# A light centred on the camera with a radius that certainly spans the
 	# terrain height under it, and certainly not the far sectors.
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(64.0, 27.0, 64.0),
-		"radius": 96.0,
-		"color": Color.WHITE,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(64.0, 27.0, 64.0), 96.0, Color.WHITE)), 0)
 	terrain.set_light_context(scene, 0)
 	terrain.render_frame()
 	assert_gt(terrain.get_patches_active(), 0, "the frame compiled patches")

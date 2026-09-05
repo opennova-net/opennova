@@ -7,6 +7,8 @@
 #include <formats/pff/pff.h>
 #include "pff/pff_test_writer.h"
 
+using namespace opennova::pff;
+
 static int passed = 0;
 static int failed = 0;
 

@@ -20,8 +20,6 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const PlayerOptionsScript := preload("res://game/player_options.gd")
-const OptionsMenuControllerScript := preload("res://game/options_menu_controller.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -41,7 +39,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
-# The gametext table (the original's g_TextGameText — in-game strings + the "WepDes"
+# The gametext table (the original's g_TextGameText — in-game strings + the Strings.SECTION_WEPDES
 # weapon names the HUD/armory/killfeed resolve) [orig: Game_InitSubsystems @0x4a6cd0
 # loads "gametext.bin"].
 @export var game_text_file := "gametext.bin"
@@ -74,8 +72,21 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var exit_control_names := PackedStringArray([
 	"EXIT", "QUIT", "QUIT_GAME", "QUIT_TO_DESKTOP",
 ])
+# The mission-exit Command seam. Retail's in-game ABORT button does NOT leave
+# the mission: its authored actions raise the CONFIRM_EXIT "Are you sure?"
+# panel (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER in the shipped game.mnu), and
+# the exit itself is the engine Command registered on CONFIRM_YES — the same
+# per-(screen,control) seam as the other named controls (docs/mnu/menu-re.md,
+# "The in-game exit confirmation"). Retail's ABORT command arms a
+# confirm-pending latch that CONFIRM_YES checks; here the latch is modeled by
+# reachability — the panel is only shown by ABORT's authored actions, hidden
+# widgets are unclickable, and the engine hotkey scan skips hidden subtrees —
+# so a CONFIRM_YES activation implies an armed ABORT. CONFIRM_NO needs no
+# binding: its authored actions restore MAIN_WRAPPER. Binding ABORT here was
+# the bug that skipped the confirmation (the teardown swapped the document
+# under the emit, so the authored SHOW never dispatched).
 @export var return_control_names := PackedStringArray([
-	"QUIT_TO_MENU", "MAIN_MENU", "ABORT", "ABORT_MISSION",
+	"CONFIRM_YES",
 ])
 # The generic BACK command seam: the actionless named button the original
 # engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY
@@ -165,6 +176,9 @@ var _named_handlers: Dictionary = {}
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
+# The companion wired to the current document (null when the shell's generic
+# wiring runs); the next document swap releases it if it loses ownership.
+var _wired_companion: MenuCompanion = null
 
 
 
@@ -192,8 +206,13 @@ func _process(delta: float) -> void:
 ## MainGame installs its process-lifetime owner before setup; standalone shells
 ## receive a private owner during asset assembly.
 func set_player_options(options: PlayerOptions) -> void:
-	if options != null and _driver == null:
-		_player_options = options
+	if options == null:
+		return
+	if _driver != null:
+		push_warning("set_player_options after setup is ignored; the shell " +
+				"already assembled around its owner")
+		return
+	_player_options = options
 
 
 func set_frame_stats(board: FrameStats) -> void:
@@ -254,7 +273,7 @@ func _assemble_assets() -> void:
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared Strings registry, the way the
 	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
-	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
+	# gametext.bin (g_TextGameText — the Strings.SECTION_WEPDES weapon names + in-game strings
 	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
 	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
 	# -> the menu resource @0x25510F8]).
@@ -262,7 +281,7 @@ func _assemble_assets() -> void:
 		Strings.register_table("menutxt", _text)
 	var gametext := _load_text(game_text_file)
 	if gametext != null:
-		Strings.register_table("gametext", gametext)
+		Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
 	var gameui := _load_text(menu_ui_text_file)
 	if gameui != null:
 		Strings.register_table("gameui", gameui)
@@ -319,8 +338,8 @@ func _assemble_assets() -> void:
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
 	if _player_options == null:
-		_player_options = PlayerOptionsScript.new()
-	_options_controller = OptionsMenuControllerScript.new()
+		_player_options = PlayerOptions.new()
+	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
 	set_process(true)
 
@@ -379,6 +398,11 @@ func open_menu(file: String, target_screen: String) -> bool:
 	if not _driver.open_document(doc, _root, _style, _text, file.get_file(),
 			target_screen):
 		push_warning("MenuShell: menu '%s' has no screens" % file)
+		# The driver may already have swapped its document: nothing parked on
+		# the shared frame by the previous companion can be rebuilt now.
+		if _wired_companion != null:
+			_wired_companion.on_menu_released()
+			_wired_companion = null
 		return false
 	if _options_controller != null:
 		_options_controller.prepare_document()
@@ -457,12 +481,22 @@ func _wire_named_controls() -> void:
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
 	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
-	# than "launch the first mission". The first claimant wins.
+	# than "launch the first mission". The first claimant wins. The previously
+	# wired companion is RELEASED when it loses the document: mounts it parked
+	# on the persistent frame (the PLAYER_INFO avatar preview) would otherwise
+	# outlive their screen, since no later on_menu_built reaches it.
+	var claimant: MenuCompanion = null
 	for companion in _companions:
 		if companion != null and companion.owns_menu(_driver):
-			companion.on_menu_built(_driver, _current_file,
-					_driver.get_current_screen(), _root)
-			return
+			claimant = companion
+			break
+	if _wired_companion != null and _wired_companion != claimant:
+		_wired_companion.on_menu_released()
+	_wired_companion = claimant
+	if claimant != null:
+		claimant.on_menu_built(_driver, _current_file,
+				_driver.get_current_screen(), _root)
+		return
 	var has_mission_list := false
 	for list_name in mission_list_names:
 		var id := _driver.widget_id(list_name)
@@ -743,6 +777,14 @@ func _on_exit_control() -> void:
 
 
 func _on_return_control() -> void:
+	# CONFIRM_YES is registered per (screen, control) in retail — the INGAME,
+	# STAT and DEATH screens each bind their own exit handler
+	# (docs/mnu/menu-re.md "The in-game exit confirmation"). The shell binds
+	# the name, so it answers only while a mission is running; a front-end
+	# document that happened to author the name never leaves a mission that
+	# is not there.
+	if not _in_game:
+		return
 	return_to_menu_requested.emit()
 
 
@@ -825,11 +867,7 @@ func _load_text(file: String) -> RtxtStringFile:
 func _load_style(file: String) -> MnsStyleSheet:
 	if _root == null or file.is_empty():
 		return null
-	var bytes := _root.read_file(file)
-	if bytes.is_empty():
-		return null
-	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null
+	return MenuFrameSurface.load_style(_root, file)
 
 
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
@@ -908,15 +946,6 @@ func get_selected_mission() -> String:
 
 func get_selected_expansion() -> String:
 	return _selected_expansion
-
-
-func get_crosshair_style() -> int:
-	return _player_options.current().crosshair_style \
-			if _player_options != null else PlayerOptions.DEFAULT_CROSSHAIR_STYLE
-
-
-func get_player_options() -> PlayerOptions:
-	return _player_options
 
 
 func get_menu_stack_depth() -> int:

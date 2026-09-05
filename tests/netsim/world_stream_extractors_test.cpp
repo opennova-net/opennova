@@ -1,10 +1,10 @@
-// The per-pool LOAD-TIME spawn-batch extractors (engine/net/netsim entity_wire_bridge) build the
+// The per-pool LOAD-TIME spawn-batch extractors (engine/runtime/replication entity_wire_bridge) build the
 // full world a host streams to a joiner during world-load [orig: Server_SendInitialGameStateToPlayer
 // @0x51bba0, phases 0x10 -> 0x0D -> 0x0C -> 0x20]. Routing is by handle.pool() (pool_for_kind:
 // Organic->0, Item->1, Building->2, Marker->3). This proves each extractor reads the right pool
 // into the right wire batch AND that the batch round-trips its witnessed decoder field-identically.
 
-#include <net/netsim/entity_wire_bridge.h>
+#include <runtime/replication/entity_wire_bridge.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -19,7 +19,7 @@
 namespace {
 
 namespace w = opennova::world;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace nw = opennova;
 
 bool expect(bool cond, const char *msg) {

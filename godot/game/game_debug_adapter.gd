@@ -9,54 +9,119 @@ extends GameMcpAdapter
 ## document state.
 
 const MCP_ENTITY_LIMIT_MAX := 128
-
-var _service: GameMcpService = null
-# The one typed record of shell seams (GameShellSeams): suppliers, state
-# reads, action legs, and capture presentation, all resolved live per call.
-var _seams: GameShellSeams = null
-# The typed debug-control table (ADR 0042 d5), built once over the adopted
-# seams; every row re-resolves its live owner per call.
-var _controls: DebugControls = null
+## The runtime MCP transport (ADR 0043 d12): loaded by path under --mcp-port
+## because the Runtime export excludes godot/game/mcp/ (the endpoint is a
+## debug / Mod Tools capability). The class name never appears in this
+## script, so it parses in every flavour.
+const RUNTIME_MCP_SERVICE_PATH := "res://game/mcp/game_mcp_service.gd"
+const RUNTIME_RENDER_CAPTURE_PATH := "res://game/mcp/game_render_capture.gd"
 
 
-func configure(seams: GameShellSeams) -> void:
-	_seams = seams
-	_controls = DebugControls.new(seams, self)
+## The debug-control table's shell seam (DebugShellHost, ADR 0043 d12): every
+## owner resolves live through the adopted GameShell on each call, and the two
+## shell verbs the table cannot own come back to this adapter.
+class ShellHost:
+	extends DebugShellHost
+
+	var _adapter: GameDebugAdapter = null
+
+	func _init(adapter: GameDebugAdapter) -> void:
+		_adapter = adapter
+
+	func _live_shell() -> GameShell:
+		return _adapter.get_shell() if is_instance_valid(_adapter) else null
+
+	func _world() -> GameWorld:
+		var shell := _live_shell()
+		return shell.get_world() if shell != null else null
+
+	func _runtime() -> MissionRoot:
+		var shell := _live_shell()
+		var value := shell.get_runtime() if shell != null else null
+		return value if value != null and is_instance_valid(value) else null
+
+	func _player_presenter() -> LocalPlayerPresenter:
+		var shell := _live_shell()
+		var value := shell.get_player_presenter() if shell != null else null
+		return value if value != null and is_instance_valid(value) else null
+
+	func _viewport() -> Viewport:
+		if not is_instance_valid(_adapter) or not _adapter.is_inside_tree():
+			return null
+		return _adapter.get_viewport()
+
+	## F3's local Stop button and the runtime_return_to_menu row share the
+	## shell's one gated return leg without classifying leaving a multiplayer
+	## session as an authoritative world mutation.
+	func _return_to_menu() -> Error:
+		if not is_instance_valid(_adapter):
+			return ERR_UNAVAILABLE
+		return _adapter.mcp_game_control("return_to_menu")
+
+	func _has_debug_authority() -> bool:
+		return is_instance_valid(_adapter) and _adapter.has_debug_authority()
 
 
-## Release the shell-capturing Callable graph before its script teardown.
-func release_shell_seams() -> void:
+# The runtime MCP endpoint (GameMcpService), loaded by path; null unflagged.
+var _service: Node = null
+# The game shell (GameShell: suppliers, state reads, action legs, capture
+# presentation), every supplier resolved live per call.
+var _shell: GameShell = null
+# The typed debug-control table (ADR 0043 d12), built once over the adopted
+# shell; every row re-resolves its live owner per call. F3 drives the same
+# instance (MainGame lends it to the DevTools node).
+var _controls: DebugControlTable = null
+
+
+func configure(shell: GameShell) -> void:
+	_shell = shell
+	_controls = DebugControlTable.new()
+	_controls.setup(ShellHost.new(self))
+
+
+## Drop the shell reference and the table's rows before its script teardown.
+func release_shell() -> void:
 	if _controls != null:
 		_controls.clear()
-	if _seams != null:
-		_seams.clear()
 	_controls = null
-	_seams = null
+	_shell = null
 
 
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
-## launch runs none.
+## launch runs none, and a build without the transport (the Runtime export)
+## refuses the flag with a log line.
 func start_runtime_endpoint() -> void:
 	var port := LaunchFlags.mcp_port()
 	if port <= 0:
 		return
-	_service = GameMcpService.new()
+	if not ResourceLoader.exists(RUNTIME_MCP_SERVICE_PATH):
+		push_warning(("--mcp-port %d ignored: this build carries no runtime MCP "
+				+ "transport (%s is not exported; the endpoint is a debug / Mod Tools "
+				+ "capability).") % [port, RUNTIME_MCP_SERVICE_PATH])
+		return
+	var service_script := load(RUNTIME_MCP_SERVICE_PATH) as GDScript
+	if service_script == null:
+		push_warning("Runtime MCP transport failed to load from %s." % RUNTIME_MCP_SERVICE_PATH)
+		return
+	_service = service_script.new()
 	_service.name = "RuntimeMcpService"
 	add_child(_service)
-	var err := _service.setup(self, port)
+	# The transport's class is absent from the Runtime export, so its setup
+	# verb is reached by name: the one dynamic call of the load-by-path seam.
+	var err: Error = _service.call("setup", self, port)
 	if err != OK:
 		push_warning("Runtime MCP failed to start on port %d: %s" % [
 				port, error_string(err)])
 
 
-func get_debug_controls() -> DebugControls:
+func get_debug_controls() -> DebugControlTable:
 	return _controls
 
 
-## The same record configure() adopted; the probe runner drives its suppliers
-## and mission verbs (ADR 0041).
-func get_shell_seams() -> GameShellSeams:
-	return _seams
+## The shell configure() adopted; the probe runner drives its suppliers and
+## mission verbs (ADR 0041).
+func get_shell() -> GameShell:
+	return _shell
 
 
 ## Curated transport snapshot. Dictionaries begin here because this is the
@@ -81,21 +146,23 @@ func get_mcp_game_state() -> Variant:
 		player["team"] = sim.get_local_player_team()
 		player["class"] = sim.get_local_player_class()
 		player["weapon"] = sim.get_local_player_weapon_name()
-		player["weapon_state"] = sim.get_local_player_weapon_state()
+		player["weapon_state"] = sim.get_local_player_weapon_state().to_json_value()
 	return {
 		"shell": {
-			"state": String(_seams.shell_state_source.call()),
-			"world_loading": bool(_seams.world_loading_source.call()),
+			"state": _shell.shell_state_name() if _shell != null else "",
+			"world_loading": _is_world_loading(),
 			"world_loaded": world != null and world.is_loaded(),
 			"mission_file": world.get_loaded_mission_file() \
 					if world != null else "",
-			"dev_tools_open": bool(_seams.dev_tools_open_source.call()),
+			"dev_tools_open": _shell != null and _shell.is_dev_tools_open(),
 		},
 		"session": _session_facts(sim),
 		"runtime": runtime_state,
 		"player": player,
-		"mission": world.get_mission_stats() if world != null else {},
-		"performance": world.get_runtime_perf_counters() if world != null else {},
+		"mission": (world.get_mission_stats().to_json_value()
+				if world != null and world.get_mission_stats() != null else {}),
+		"performance": (world.get_runtime_perf_counters().to_json_value()
+				if world != null else {}),
 		"audio_buses": _audio_bus_state(),
 	}
 
@@ -142,10 +209,10 @@ func get_mcp_render_diagnostics() -> Variant:
 		return {}
 	var viewport := _current_viewport()
 	var camera := viewport.get_camera_3d() if viewport != null else null
-	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
+	var snapshot: GameRenderDiagnostics = GameRenderDiagnostics.sample(world, camera)
 	var value := snapshot.to_json_value()
 	value["shell"] = {
-		"state": String(_seams.shell_state_source.call()),
+		"state": _shell.shell_state_name() if _shell != null else "",
 		"world_loading": _is_world_loading(),
 		"gameplay_camera_available": camera != null and camera.is_current(),
 	}
@@ -186,12 +253,12 @@ func capture_mcp_render_bundle(
 	var diagnostics_source := get_mcp_render_diagnostics
 	match presentation_mode:
 		"world_only":
-			presentation_begin = _seams.render_capture_begin_action
-			presentation_finish = _seams.render_capture_end_action
+			presentation_begin = _shell.mcp_begin_world_only_capture
+			presentation_finish = _shell.mcp_end_world_only_capture
 		"hud_hidden":
-			presentation_begin = _seams.hud_hidden_capture_begin_action
-			presentation_finish = _seams.hud_hidden_capture_end_action
-			if not _seams.hud_hidden_capture_witness_source.is_valid():
+			presentation_begin = _shell.begin_hud_hidden_capture
+			presentation_finish = _shell.finish_hud_hidden_capture
+			if _shell == null:
 				return {"error": "HUD-hidden render capture witness is unavailable in this game shell."}
 			diagnostics_source = func() -> Variant:
 				var diagnostics_value: Variant = get_mcp_render_diagnostics()
@@ -213,12 +280,24 @@ func capture_mcp_render_bundle(
 		return {"error": "%s render capture is unavailable in this game shell." \
 				% presentation_mode.capitalize()}
 
+	# The capture utility lives with the MCP transport (excluded from the
+	# Runtime export, ADR 0043 d12): reached by path like the service, so this
+	# shipped script never names the class.
+	var capture_script: Variant = _render_capture_script()
+	if capture_script == null:
+		return {"error": "Render capture is unavailable in this build (the MCP transport is not shipped)."}
 	var capture_args := args.duplicate(false)
 	if presentation_mode != "full_frame":
-		capture_args[GameRenderCapture.PRESENTATION_BEGIN_OPTION] = presentation_begin
-		capture_args[GameRenderCapture.PRESENTATION_FINISH_OPTION] = presentation_finish
-	return await GameRenderCapture.capture(
+		capture_args[capture_script.PRESENTATION_BEGIN_OPTION] = presentation_begin
+		capture_args[capture_script.PRESENTATION_FINISH_OPTION] = presentation_finish
+	return await capture_script.capture(
 			viewport, diagnostics_source, capture_args, cancel_requested)
+
+
+func _render_capture_script() -> Variant:
+	if not ResourceLoader.exists(RUNTIME_RENDER_CAPTURE_PATH):
+		return null
+	return load(RUNTIME_RENDER_CAPTURE_PATH)
 
 
 ## Bounded MCP counterpart to F3's entity discovery, over the engine's typed
@@ -268,7 +347,7 @@ func get_mcp_game_entity(index: int) -> Variant:
 
 
 func _hud_hidden_capture_witness_json() -> Dictionary:
-	var value: Variant = _seams.hud_hidden_capture_witness_source.call()
+	var value: Variant = _shell.hud_hidden_capture_witness() if _shell != null else null
 	if not (value is HudHiddenCaptureWitness):
 		return {}
 	var witness := value as HudHiddenCaptureWitness
@@ -285,9 +364,7 @@ func _hud_hidden_capture_witness_json() -> Dictionary:
 
 
 func _menu_shell() -> MenuShell:
-	if _seams == null or _seams.menu_shell_source.is_null():
-		return null
-	return _seams.menu_shell_source.call() as MenuShell
+	return _shell.get_menu_shell() if _shell != null else null
 
 
 func mcp_game_menu(args: Dictionary) -> Variant:
@@ -361,32 +438,32 @@ func mcp_game_control(action: String) -> Error:
 				return ERR_UNAVAILABLE
 			runtime.play()
 			# The armory rides the same resume leg as the pause overlay
-			# (_on_resume closes whichever is up and hands play back).
-			if String(_seams.shell_state_source.call()) in ["paused", "armory"]:
-				_seams.resume_action.call()
+			# (resume closes whichever is up and hands play back).
+			if _shell != null and _shell.shell_state_name() in ["paused", "armory"]:
+				_shell.resume()
 		"step":
 			# Same engine verdict as "pause": a net-role session declines the
 			# manual step natively.
 			if runtime == null or not runtime.step_once():
 				return ERR_UNAVAILABLE
 		"open_ingame_menu":
-			if not _seams.open_ingame_menu_action.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var menu_err: Error = _seams.open_ingame_menu_action.call()
+			var menu_err: Error = _shell.mcp_open_ingame_menu()
 			if menu_err != OK:
 				return menu_err
 		"open_armory":
-			if not _seams.open_armory_action.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var armory_err: Error = _seams.open_armory_action.call()
+			var armory_err: Error = _shell.mcp_open_armory()
 			if armory_err != OK:
 				return armory_err
 		"return_to_menu":
 			# The shell's one gated return leg (MainGame.return_to_menu: busy
 			# while a load is pending, unavailable without a loaded world).
-			if not _seams.return_to_menu.is_valid():
+			if _shell == null:
 				return ERR_UNAVAILABLE
-			var menu_err: Error = _seams.return_to_menu.call()
+			var menu_err: Error = _shell.return_to_menu()
 			if menu_err != OK:
 				return menu_err
 		"quit":
@@ -396,54 +473,11 @@ func mcp_game_control(action: String) -> Error:
 	return OK
 
 
-## F3's local Stop button shares the control without classifying leaving a
-## multiplayer session as an authoritative world mutation.
-func debug_return_to_menu() -> Error:
-	return mcp_game_control("return_to_menu")
-
-
-## Process-local audio knobs shared by F3 and runtime MCP.
-func debug_set_audio_bus_volume(bus_name: String, volume_db: float) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	if not is_finite(volume_db) \
-			or volume_db < DebugControls.AUDIO_BUS_VOLUME_MIN_DB \
-			or volume_db > DebugControls.AUDIO_BUS_VOLUME_MAX_DB:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_volume_db(bus, volume_db)
-	return OK
-
-
-func debug_set_audio_bus_mute(bus_name: String, muted: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_mute(bus, muted)
-	return OK
-
-
-func debug_set_audio_bus_solo(bus_name: String, soloed: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_solo(bus, soloed)
-	return OK
-
-
-func debug_set_audio_bus_bypass(bus_name: String, bypassed: bool) -> Error:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus < 0:
-		return ERR_INVALID_PARAMETER
-	AudioServer.set_bus_bypass_effects(bus, bypassed)
-	return OK
-
-
 func has_debug_authority() -> bool:
 	# Authority is the session-role fact: ROLE_JOINER is the one
 	# non-authoritative role; every other session role owns the world.
-	var world := _current_world()
-	var sim: Simulation = world.get_sim() if world != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	return sim != null and int(sim.session_role()) != Simulation.ROLE_JOINER
 
 
@@ -496,11 +530,13 @@ func _network_state(sim: Simulation) -> Dictionary:
 			"diagnostics": sim.get_joiner_network_diagnostics(),
 		}
 	if bool(sim.is_host_listening()):
+		var session := sim.get_host_session_config().to_json_value()
+		session["mission_header_size"] = sim.get_mission_header_size()
 		return {
 			"role": "host",
 			"port": sim.get_host_listen_port(),
 			"peers": sim.get_host_peer_count(),
-			"session": sim.get_host_session_config(),
+			"session": session,
 		}
 	return {"role": "local"}
 
@@ -522,31 +558,26 @@ func _audio_bus_state() -> Array:
 
 
 func _current_world() -> GameWorld:
-	var value: Variant = _seams.world_source.call()
-	return value as GameWorld
+	return _shell.get_world() if _shell != null else null
 
 
-func _current_runtime() -> MissionPresentation:
-	if _seams == null or not _seams.runtime_source.is_valid():
+func _current_runtime() -> MissionRoot:
+	if _shell == null:
 		return null
-	var value: Variant = _seams.runtime_source.call()
-	if value is MissionPresentation and is_instance_valid(value):
+	var value := _shell.get_runtime()
+	if value != null and is_instance_valid(value):
 		return value
 	return null
 
 
 func _is_world_loading() -> bool:
-	return _seams != null and _seams.world_loading_source.is_valid() \
-			and bool(_seams.world_loading_source.call())
+	return _shell != null and _shell.is_world_loading()
 
 
 func _current_viewport() -> Viewport:
 	return get_viewport() if is_inside_tree() else null
 
 
-func _current_scene_tree() -> SceneTree:
-	return get_tree() if is_inside_tree() else null
-
-
 func _deferred_quit() -> void:
-	_seams.quit_action.call()
+	if _shell != null:
+		_shell.request_quit()

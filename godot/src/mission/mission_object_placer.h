@@ -13,14 +13,20 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <runtime/mission/placement_traits.h>
 
 #include <cstdint>
 #include <vector>
 
+#include "mission/mission_data.h" // MissionData::EntityKind
+#include "mission/mission_placement_stats.h"
+#include "mission/static_source_records.h"
 #include "object/item_database.h"
+#include "mission/player_visual_spec.h"
 #include "object/avatar_database.h"
+#include "object/avatar_records.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
 #include "object/skeletal_anim.h"
@@ -28,7 +34,6 @@
 
 namespace godot {
 
-class MissionData;
 
 // Placement of a mission's entities into the runtime 3D scene. Given a parsed
 // MissionData, a resource root, and an item database, it resolves each placed
@@ -80,6 +85,27 @@ public:
 		Ref<ObjectData> object_data;
 		bool active = true;
 	};
+	// The retained static read-back rows behind the get_static_* seams; the
+	// getters mint fresh records from these so no consumer holds the
+	// placer's own row.
+	struct StaticEffectSourceRow {
+		int kind = -1;
+		int entity_index = -1;
+		int bms_id = 0;
+		int item_id = 0;
+		String graphic;
+		Transform3D world_transform;
+		Ref<ObjectData> object_data;
+	};
+	struct StaticLightDrawRow {
+		int source_index = -1;
+		int kind = -1;
+		int entity_index = -1;
+		int bms_id = 0;
+		int item_id = 0;
+		int robj_index = 0;
+		AABB world_bounds;
+	};
 
 	enum {
 		RENDER_LOD = 0,
@@ -116,9 +142,8 @@ public:
 			const Vector3 &rotation_deg);
 
 	// --- witnessed eligibility (engine policy re-exported for shell/tests) -
-	static bool item_casts_dynamic_shadow(int item_type, uint32_t attrib,
-			uint32_t attrib2);
-	static bool item_casts_static_terrain_shadow(int kind,
+	static bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2);
+	static bool item_casts_static_terrain_shadow(MissionData::EntityKind kind,
 			uint32_t entity_attrib, uint32_t item_attrib,
 			uint32_t item_attrib2);
 
@@ -130,15 +155,33 @@ public:
 	// carry "progress" (a per-model Callable pulse, mirroring the original's
 	// per-model loading-screen presents — witness: placement_traits.h
 	// ledger) and "skip_kinds"
-	// (the joiner places the mission minus organics). Returns a stats
-	// Dictionary (placed/batched/animated/unresolved/markers/graphics/
-	// batches/static_bins/static_binned_batches/static_global_batches/
-	// static_instances_retained/static_lod_populations/static_shadow_batches/
-	// authored_occluder_models + per-stage "spans" usec timings).
-	// "batched" and "animated" are the honest individual/batched split:
-	// a multi-RLOD graphic never leaves the batched count on its own.
-	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
+	// (the joiner places the mission minus organics). Returns the placement
+	// census as a MissionPlacementStats record (mission/mission_placement_stats.h).
+	// One placement row: the BMS entity record's placement facts (the mission
+	// document's own entities read straight off its bms::File, or the joiner's
+	// streamed statics the sim stamped at the world-stream fence).
+	struct PlacementRow {
+		int kind = -1;
+		int index = -1;
+		int item_id = 0;
+		int bms_id = 0;
+		int group = -1;
+		int team = 0;
+		uint32_t ai_flags = 0;
+		Vector3 position;     // mission space
+		Vector3 rotation_deg; // (pitch, yaw, roll) as authored
+	};
+	// Place from entity dictionaries in the streamed-record shape (kind, index,
+	// bms_id, item_id, position, rotation_deg, team, group, ai_flags): the
+	// joiner's streamed statics take this entry.
+	Ref<MissionPlacementStats> place_entities(const Array &p_entities, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
+	// Place the mission document's entities, read natively off its bms::File in
+	// the placement order (markers, items, buildings, organics).
+	Ref<MissionPlacementStats> place(const Ref<MissionData> &p_mission, Node3D *p_parent,
+			const Dictionary &p_options = Dictionary());
+	Ref<MissionPlacementStats> place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
+			const Dictionary &p_options);
 
 	// Per-frame RLOD selection for every retained static instance, driven by
 	// GameWorld beside ObjectModel.update_authored_lods. Each instance's
@@ -151,7 +194,6 @@ public:
 	int update_static_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
 			float p_viewport_height);
-	int get_static_lod_switch_count() const { return static_lod_switches_; }
 	// The level currently live for a placed static entity (-1 = below the
 	// sub-pixel floor or no level available, -2 = not a retained static).
 	int get_static_instance_lod(int p_bms_id) const;
@@ -174,7 +216,7 @@ public:
 	// owner-managed entity with no BMS placement (the local-player avatar).
 	ObjectModel *build_animated_model(int p_item_id, Node3D *p_parent);
 	int resolve_player_visual_item_id(int p_runtime_type_id);
-	Dictionary resolve_player_visual_spec(int p_runtime_type_id,
+	Ref<PlayerVisualSpec> resolve_player_visual_spec(int p_runtime_type_id,
 			int p_character_id);
 	ObjectModel *build_player_animated_model(int p_runtime_type_id,
 			Node3D *p_parent, int p_character_id = 0);
@@ -194,19 +236,21 @@ public:
 			bool p_retain_authored_lods = false);
 
 	// --- read-back seams --------------------------------------------------
-	Array get_placed_entity_records() const { return placed_entity_records_; }
-	void set_placed_entity_records(const Array &p_records) {
-		placed_entity_records_ = p_records;
+	// The animated models place() registered, each carrying its EntityRef:
+	// EntityIndex builds from this list (construction-time registration,
+	// never a child scan). Shared by reference so a harness appends its own.
+	TypedArray<ObjectModel> get_placed_models() const { return placed_models_; }
+	void set_placed_models(const TypedArray<ObjectModel> &p_models) {
+		placed_models_ = p_models;
 	}
-	Array get_static_user_point_sources();
-	Array get_static_item_effect_sources();
+	TypedArray<StaticEffectSource> get_static_item_effect_sources();
 	// One row per retained static entity/ROBJ light draw. Row order is the
 	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
 	// descriptors carry the source identity, exact world AABB, and live carve
 	// state. The EffectWorld device selects this row's <=4 lights into the
 	// shared RGBAF atlas [orig: collect_render_objects_for_batch @0x5d8ff7,
 	// see docs/render/render-lighting-re.md].
-	Array get_static_light_draw_sources();
+	TypedArray<StaticLightDrawSource> get_static_light_draw_sources();
 	// Advances whenever a row is appended, the table is reset, or a carve
 	// changes any row's `active` state: consumers rebuild their packed row
 	// arrays only on a change instead of re-reading the rows every frame.
@@ -215,7 +259,7 @@ public:
 	uint64_t get_static_terrain_shadow_source_revision();
 	// Dictionary mirror for focused shell/asset diagnostics. Production
 	// consumers use the typed snapshot above.
-	Array get_static_terrain_shadow_source_diagnostics();
+	TypedArray<StaticTerrainShadowSourceRow> get_static_terrain_shadow_source_diagnostics();
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
@@ -245,7 +289,7 @@ public:
 	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
 	bool show_static_instance(int p_bms_id);
-	bool update_static_terrain_shadow_source_transform(int p_kind,
+	bool update_static_terrain_shadow_source_transform(MissionData::EntityKind p_kind,
 			int p_index, const Transform3D &p_xform);
 	bool set_static_terrain_shadow_replacement(int p_bms_id,
 			const String &p_graphic, const Transform3D &p_xform,
@@ -389,8 +433,6 @@ private:
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
 	Node3D *_ensure_container(Node3D *p_parent);
-	void _record_static_user_point_group(const String &p_graphic,
-			const Array &p_transforms);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
@@ -408,10 +450,9 @@ private:
 	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
 
-	Array placed_entity_records_;
-	Array static_user_point_sources_;
-	Array static_item_effect_sources_;
-	Array static_light_draw_sources_;
+	TypedArray<ObjectModel> placed_models_;
+	Vector<StaticEffectSourceRow> static_item_effect_sources_;
+	Vector<StaticLightDrawRow> static_light_draw_sources_;
 	uint64_t static_light_draw_source_revision_ = 1;
 	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
 	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;

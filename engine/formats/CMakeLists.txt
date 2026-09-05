@@ -17,9 +17,9 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad.cpp
     # bink — native BIKi menu-video decode
     ${CMAKE_CURRENT_SOURCE_DIR}/bink/bink.cpp
-    # bfc1 — compressed container (vendored miniz stays in-tree here)
+    # bfc1 — compressed container (inflates through the vendored miniz,
+    # third_party/miniz, linked below)
     ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/bfc1.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/miniz.c
     # cbin — credits binary
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
     # cpt — terrain height/CDEP container
@@ -39,7 +39,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_weather_core.cpp
     # fnt — bitmap fonts
-    ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.cpp
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
@@ -53,7 +53,7 @@ add_library(opennova_formats STATIC
     # sets (the ADR 0029 acyclicity fold; directory home since ADR 0030).
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission.cpp          # MissionDocument — the document and its edit operations
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms_edit.cpp         # the document's edit operations + typed views over bms::File
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_names.cpp    # BMS event-logic enum display names
@@ -130,6 +130,10 @@ target_include_directories(opennova_formats
 )
 
 target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
+# The BFC1 decoder is miniz's only consumer; the vendored leaf stays private
+# to this group (a STATIC library's PRIVATE deps still ride every downstream
+# link line, so nothing else needs to name it).
+target_link_libraries(opennova_formats PRIVATE opennova_miniz)
 
 # Link math library (needed for sin/cos/floorf in pure C builds; not needed on
 # Windows/MSVC) — carried over from the threedi lib.
@@ -140,11 +144,6 @@ endif()
 # C++17 is the group standard (the per-format C++11 members are C++17-clean).
 target_compile_features(opennova_formats PUBLIC cxx_std_17)
 
-# miniz.c stays as C; fnt.c is C99.
-set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/bfc1/miniz.c
-    PROPERTIES LANGUAGE C)
 set_target_properties(opennova_formats PROPERTIES
-    C_STANDARD 99
-    C_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
 )

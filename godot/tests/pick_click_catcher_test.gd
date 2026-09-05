@@ -2,18 +2,18 @@ extends GutTest
 
 # PickClickCatcher: the overlay-open mouse picker. A left-press ray-picks
 # through the live typed sim into the injected list; everything else passes
-# through untouched. The world seam is typed (ADR 0034): a GameWorld harness
-# lends the catcher a REAL (worldless) Simulation, whose picks are honest
-# misses — provenance stamping is pinned on DebugEntityPicker directly.
+# through untouched. The catcher reads the sim through the narrow WorldView
+# (rule 11): a fake view lends it a REAL (worldless) Simulation, whose picks
+# are honest misses — provenance stamping is pinned on DebugEntityPicker.
 
 
-## Typed world double: IS a GameWorld, lending the catcher a real sim.
-class CatcherWorld:
-	extends GameWorld
-	var sim_override: Simulation = null
+## The narrow world view, lending the catcher a real sim.
+class SimView:
+	extends WorldView
+	var sim_value: Simulation = null
 
-	func get_sim() -> Simulation:
-		return sim_override
+	func _sim() -> Simulation:
+		return sim_value
 
 
 func _make_catcher(list: DebugPickList) -> Dictionary:
@@ -23,16 +23,14 @@ func _make_catcher(list: DebugPickList) -> Dictionary:
 	var camera := Camera3D.new()
 	viewport.add_child(camera)
 	camera.current = true
-	# The world stays off-tree (the GameWorld script class alone has no scene
-	# children); the catcher needs only its typed reference plus a viewport.
-	var world := CatcherWorld.new()
-	world.sim_override = Simulation.new()
-	autofree(world)
-	autofree(world.sim_override)
+	# The catcher needs only its view plus a viewport.
+	var view := SimView.new()
+	view.sim_value = Simulation.new()
+	autofree(view.sim_value)
 	var catcher := PickClickCatcher.new()
 	viewport.add_child(catcher)
-	catcher.setup(world, list)
-	return {"catcher": catcher, "world": world, "viewport": viewport}
+	catcher.setup(view, list)
+	return {"catcher": catcher, "view": view, "viewport": viewport}
 
 
 func test_left_press_ray_picks_through_the_live_sim() -> void:
@@ -110,15 +108,15 @@ func test_picker_stamps_provenance_and_replayable_ray() -> void:
 	# even a worldless miss keeps the stable card shape plus the provenance
 	# fields the snapshot writer replays.
 	var sim := Simulation.new()
-	add_child_autofree(sim)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.current = true
 	var pick := DebugEntityPicker.pick_with_camera(
 			sim, camera, Vector2(10, 10), "mouse_click")
-	assert_false(pick.is_empty(), "the sim always answers the stable card")
-	assert_eq(String(pick.get("source", "")), "mouse_click",
+	assert_not_null(pick, "the sim always answers the stable card")
+	assert_eq(pick.source, "mouse_click",
 			"the card records its input provenance")
-	assert_true(pick.has("ray_origin_godot"), "the card records the replayable ray")
-	assert_true(pick.has("ray_dir_godot"))
-	assert_false(bool(pick.get("hit", true)), "worldless picks are honest misses")
+	assert_eq(pick.ray_origin_godot, camera.project_ray_origin(Vector2(10, 10)),
+			"the card records the replayable ray")
+	assert_eq(pick.ray_dir_godot, camera.project_ray_normal(Vector2(10, 10)))
+	assert_false(pick.hit, "worldless picks are honest misses")

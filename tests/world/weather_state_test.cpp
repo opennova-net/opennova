@@ -36,7 +36,8 @@ w::WeatherSeed seed_800() {
 }
 
 void test_seed_installs_the_snapshot_and_zeroes_the_transients() {
-	w::WeatherState ws;
+	w::World world;
+	auto &ws = world.weather;
 	ws.command_quake(3);
 	ws.command_flash();
 	ws.core.hit_dim.intensity = 0xA000;
@@ -59,7 +60,7 @@ void test_seed_installs_the_snapshot_and_zeroes_the_transients() {
 		const uint32_t sum = b + rol11;
 		b = ((sum << 4) | (sum >> 28)) ^ 1u;
 	}
-	CHECK(ws.prng16_b_state == b);
+	CHECK(world.prng16_b_state == b);
 	// The pool re-seeded from the B stream (the same draws the test in
 	// tests/environment pins); every slot inside the seed volume.
 	CHECK(ws.precipitation.slots[0].x != 0 || ws.precipitation.slots[0].y != 0);
@@ -328,8 +329,7 @@ void test_sun_fade_extreme_argument_keeps_the_spring_defined() {
 
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::Entity soldier;

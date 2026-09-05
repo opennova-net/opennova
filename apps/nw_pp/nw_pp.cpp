@@ -31,9 +31,10 @@
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
-#include <net/npwire/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/wire_handle.h>
 #include <net/npwire/ingame_decode.h>
+#include <runtime/hud/feed_format.h>
 #include <net/npwire/ingame_message_catalog.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/serverlog_decode.h>
@@ -63,6 +64,8 @@
 #include <base/io/strutil.h>
 
 using namespace opennova;
+using namespace opennova::def;
+using namespace opennova::scr;
 
 namespace {
 
@@ -85,9 +88,9 @@ bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 
 void print_session_packet(const CapturedSessionPacket &packet) {
 	std::printf(
-			"PACKET frame=%d dir=%c session=%d sid=0x%08x seq=%u ack=%u "
+			"PACKET frame=%d dir=%c session=%d participant=%d sid=0x%08x seq=%u ack=%u "
 			"flags=0x%02x records=%zu tags=",
-			packet.frame_index, packet.dir, packet.session,
+			packet.frame_index, packet.dir, packet.session, packet.participant,
 			static_cast<unsigned>(packet.header.session_id),
 			static_cast<unsigned>(packet.header.seq_num),
 			static_cast<unsigned>(packet.header.ack_count),
@@ -283,10 +286,10 @@ void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
 	const std::string body = parity_body_is_material(message.dir, message.tag)
 			? compact_hex(message.payload) : std::string("-");
 	std::printf(
-			"PARITY_EVENT frame=%d ts_ns=%llu dir=%c session=%d tag=0x%02x "
+			"PARITY_EVENT frame=%d ts_ns=%llu dir=%c session=%d participant=%d tag=0x%02x "
 			"settings=%u len=%zu body=%s\n",
 			message.frame_index, static_cast<unsigned long long>(ts_nanos), message.dir,
-			message.session, static_cast<unsigned>(tag),
+			message.session, message.participant, static_cast<unsigned>(tag),
 			message.settings_update ? 1u : 0u, message.payload.size(), body.c_str());
 }
 
@@ -1312,10 +1315,10 @@ void print_tag_1e(const std::vector<uint8_t> &body) {
 		            body.size(), to_hex_sample(body.data(), body.size()).c_str());
 		return;
 	}
-	const GameEventKind k = game_event_kind(r.event_type);
-	const char *kind = k == GameEventKind::Kill ? "KILL"
-	                 : k == GameEventKind::Objective ? "OBJECTIVE" : "event";
-	const char *key = game_event_strcnd_key(r.event_type);
+	const hud::GameEventKind k = hud::game_event_kind(r.event_type);
+	const char *kind = k == hud::GameEventKind::Kill ? "KILL"
+	                 : k == hud::GameEventKind::Objective ? "OBJECTIVE" : "event";
+	const char *key = hud::game_event_strcnd_key(r.event_type);
 	auto idx = [](uint8_t i) {
 		return i == 0xFF ? std::string("none") : ("p0/s" + std::to_string(unsigned(i)));
 	};

@@ -1,4 +1,5 @@
 #include "cbin/cbin_credits_resource.h"
+#include "util/color_convert.h"
 
 #include <cstdio>
 #include <cstring>
@@ -42,12 +43,6 @@ uint32_t color_to_cbin(const Color &c) {
 	uint32_t g = static_cast<uint32_t>(c.g * 255) & 0xFF;
 	uint32_t b = static_cast<uint32_t>(c.b * 255) & 0xFF;
 	return (r << 16) | (g << 8) | b;
-}
-
-// Convert CBIN RGB24 to Godot Color.
-Color cbin_to_color(uint32_t rgb) {
-	return Color(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f,
-			(rgb & 0xFF) / 255.0f);
 }
 
 CbinJustify to_godot_justify(opennova::cbin::Justify j) {
@@ -113,10 +108,7 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 				break;
 			}
 			case opennova::cbin::EntryType::Color: {
-				const float r = ((src.color >> 16) & 0xFF) / 255.0f;
-				const float g = ((src.color >> 8) & 0xFF) / 255.0f;
-				const float b = (src.color & 0xFF) / 255.0f;
-				current_color = Color(r, g, b);
+				current_color = opennova::color_from_rgb24(src.color);
 				break;
 			}
 			case opennova::cbin::EntryType::Newline: {
@@ -901,7 +893,7 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 				Ref<CbinTextEntry> text_entry;
 				text_entry.instantiate();
 				text_entry->set_text(underscore_to_space(item.text));
-				text_entry->set_color(cbin_to_color(item.color));
+				text_entry->set_color(opennova::color_from_rgb24(item.color));
 				text_entry->set_justify(to_godot_justify(item.justify));
 				if (!item.font.empty()) {
 					String font_name(item.font.c_str());
@@ -1015,12 +1007,7 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 		UtilityFunctions::push_warning("CbinCreditsResource: cannot open for writing: ", p_path);
 		return ERR_CANT_OPEN;
 	}
-	PackedByteArray byte_array;
-	byte_array.resize(static_cast<int64_t>(data.size()));
-	if (!data.empty()) {
-		std::memcpy(byte_array.ptrw(), data.data(), data.size());
-	}
-	file->store_buffer(byte_array);
+	file->store_buffer(to_packed_bytes(data));
 	file->close();
 	return OK;
 }

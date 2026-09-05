@@ -1,6 +1,6 @@
 #include "env/mission_environment.h"
 
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include <runtime/environment/water_frame.h>
 
@@ -78,8 +78,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_rain_current);
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
-	ClassDB::bind_method(D_METHOD("get_precipitation_kind"),
-			&MissionEnvironment::get_precipitation_kind);
 	ClassDB::bind_method(D_METHOD("is_raining"), &MissionEnvironment::is_raining);
 	ClassDB::bind_method(D_METHOD("set_overcast_data", "data"),
 			&MissionEnvironment::set_overcast_data);
@@ -239,7 +237,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"),
 			&MissionEnvironment::get_sky_map2_tex);
 
-	ADD_SIGNAL(MethodInfo("env_generation_changed"));
 	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "HOURS_PER_DAY", 24);
@@ -253,7 +250,7 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "TOD_DAY_FIXED24",
 			opennova::env::EnvironmentState::kTodDayFixed24);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"DEFAULT_MINUTES_PER_DAY", 1440);
+			"DEFAULT_MINUTES_PER_DAY", DEFAULT_MINUTES_PER_DAY);
 	ClassDB::bind_integer_constant(get_class_static(), "", "DEFAULT_START_HOUR",
 			12);
 }
@@ -357,7 +354,6 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	const Ref<EnvLightValues> values = _build_light_values();
 	light_state_->publish(values, p_pass_changed);
 	_write_lighting_block_globals(values);
-	emit_signal("env_generation_changed");
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
@@ -423,7 +419,7 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 	Ref<EnvLightValues> defaults = EnvLightValues::retail_noon_defaults();
 	opennova::env::WorldLightValues out;
 	// The engine computes in the render-float axes; the published defaults
-	// are a Godot-world vector, so they cross the env_axes.h swap on the way
+	// are a Godot-world vector, so they cross the util/axes.h swap on the way
 	// in, and the built direction crosses back on the way out (the
 	// 2026-08-20 celestial-axis correction: the identity mapping lit every
 	// object from a direction 90 degrees off in yaw and mirrored — the
@@ -539,10 +535,6 @@ float MissionEnvironment::get_rain_current() const {
 
 float MissionEnvironment::get_overcast_blend() const {
 	return state_.overcast_blend();
-}
-
-int MissionEnvironment::get_precipitation_kind() const {
-	return state_.precipitation_kind();
 }
 
 bool MissionEnvironment::is_raining() const {
@@ -797,7 +789,7 @@ float MissionEnvironment::get_water_height() const {
 }
 
 // The engine state serves the render-float tuple; these Godot-facing getters
-// serve the GODOT-world direction through the env_axes.h swap (2026-08-20).
+// serve the GODOT-world direction through the util/axes.h swap (2026-08-20).
 // Raw-tuple consumers (the opennova_sun_direction global and the terrain
 // u_sun_direction uniform, whose shaders re-swizzle into the engine texture
 // basis; the star-field cull) read state_ directly and never route here.

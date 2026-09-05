@@ -1,10 +1,10 @@
 #pragma once
 
-#include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/env/env_celestial.h>
+
+#include <cstdint>
 
 namespace godot {
 
@@ -13,17 +13,15 @@ namespace godot {
 // visibility window; brightness steps +-16 (dead-band) toward
 // popcount * 32 * fog/1000. All math lives in engine/formats/env; the shell casts the
 // two rays (camera -> camera + sun_dir * 1024 + jitter) against terrain and
-// reports visibility. RE record: docs/env/env-tod-re.md "Celestial bodies".
-class GlareOcclusion : public RefCounted {
-	GDCLASS(GlareOcclusion, RefCounted)
-
+// reports visibility. A C++-only device helper (Celestial's member — its
+// ClassDB row died with the ADR 0043 d10 env-core sweep; env_render_unit pins
+// the window, hysteresis and jitter vectors). RE record: docs/env/env-tod-re.md
+// "Celestial bodies".
+class GlareOcclusion {
 private:
 	opennova::env::GlareOcclusionState state;
 
 	Vector3 jitter_to_godot(uint32_t p_index) const;
-
-protected:
-	static void _bind_methods();
 
 public:
 	// World-space offsets (Godot basis) for this frame's two ray endpoints

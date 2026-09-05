@@ -20,9 +20,9 @@ using namespace opennova::world;
 // engine/runtime/world mirrors these bms::AttribFlags bits beside its mission_attrib_flags
 // field (world stays mission-parser-free); this TU sees both headers, so it pins
 // the mirror values to the canonical enum.
-static_assert(World::kMissionAttribSinglePlayerRespawn ==
+static_assert(MissionTables::kMissionAttribSinglePlayerRespawn ==
               static_cast<uint32_t>(bms::AttribFlags::SinglePlayerRespawn));
-static_assert(World::kMissionAttribEnableNVG ==
+static_assert(MissionTables::kMissionAttribEnableNVG ==
               static_cast<uint32_t>(bms::AttribFlags::EnableNVG));
 
 std::string ai_profile_name_for(
@@ -415,8 +415,9 @@ void init_infantry(AiEntity &ae, const bms::Entity &e) {
 
 } // namespace
 
-PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
+PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
+    AiSystem &ai = world.ai;
     PromoteResult r;
 
     // Pools (pools 0..3 = actors searched by net id, pool 4 = static props),
@@ -435,12 +436,12 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // Centerpoint, helps align commander map grid" — items.def id 102043).
     // [orig: HUD_InitOverlaySystem @0x5a4999 pool-3 scan for
     //  entity+80 == 2043 -> dword_2723EB4]
-    world.map_grid_origin_present = false;
+    world.tables.map_grid_origin_present = false;
     for (const bms::Entity &mk : m.markers) {
-        if (mk.type_id == 2043 && !world.map_grid_origin_present) {
-            world.map_grid_origin_present = true;
-            world.map_grid_origin_x = mk.x;
-            world.map_grid_origin_y = mk.y;
+        if (mk.type_id == 2043 && !world.tables.map_grid_origin_present) {
+            world.tables.map_grid_origin_present = true;
+            world.tables.map_grid_origin_x = mk.x;
+            world.tables.map_grid_origin_y = mk.y;
         }
     }
     for (const bms::Entity &mk : m.markers) {
@@ -496,7 +497,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // recipient) over the pool-3 markers, with the marker waypoint fields.
     // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41 (channel scan) +
     //  Entity_SpawnFromBMSRecord @0x40f0aa (the marker fields); ≤128 entries]
-    world.waypoints.clear();
+    world.script.waypoints.clear();
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
         if ((static_cast<uint32_t>(wr.flags) &
              static_cast<uint32_t>(bms::WaypointFlags::BlueTeam)) == 0)
@@ -522,7 +523,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             e.linked_event = mk.wp_adv_trigger;
             // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
             e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
-            world.waypoints.entries.push_back(e);
+            world.script.waypoints.entries.push_back(e);
         }
         break; // first flagged channel only [orig: the @0x502e53 scan stops on the first hit]
     }
@@ -533,10 +534,10 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // slot arithmetic stays the witnessed form. [orig: byte_A7628B/byte_A76293
     //  = header +0xBC win_conditions / +0xC4 lose_conditions; readers
     //  EventAction_Dispatch @0x454546/@0x454600, HUD_DrawWinConditions @0x5ba9e0]
-    world.subgoals = World::SubgoalState{};
+    world.script.subgoals = SubgoalState{};
     for (int slot = 1; slot <= 8; ++slot) {
-        world.subgoals.win_text_ids[slot] = m.header.win_conditions[slot - 1];
-        world.subgoals.lose_text_ids[slot] = m.header.lose_conditions[slot - 1];
+        world.script.subgoals.win_text_ids[slot] = m.header.win_conditions[slot - 1];
+        world.script.subgoals.lose_text_ids[slot] = m.header.lose_conditions[slot - 1];
     }
 
     // Area-trigger zones -> the registry's area table, registered in array order so the area id ==
@@ -717,7 +718,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             anchor.type = SeatType::Gunner;
             anchor.bone_index = child->emplacement_bone;
             anchor.attachment_frame = true;
-            pose_mounted_occupant(world, *child, *carrier, anchor);
+            world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
 
             std::vector<int32_t> lineage = work.lineage;
             lineage.push_back(attachment.child_type_id);

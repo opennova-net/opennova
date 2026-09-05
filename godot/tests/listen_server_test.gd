@@ -3,7 +3,7 @@ extends GutTest
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
 # Simulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
-# (engine/net/netsim NetSystem) and decoded back (engine/net/novaworld ingame_decode) — instead of
+# (engine/runtime/replication connection fan) and decoded back (engine/net/novaworld ingame_decode) — instead of
 # reading the authoritative AI pool directly. This is the in-Godot end of the Phase 1
 # loopback identity guard (tests/netsim/loopback_identity_test).
 
@@ -92,9 +92,9 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 	for config_value in [0, 6]:
 		var md := MissionData.new()
 		assert_eq(md.create_default(), OK)
-		assert_false(md.add_entity(
+		assert_not_null(md.add_entity(
 				MissionData.KIND_ITEM, 101294,
-				Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+				Vector3(2, 0, 0), Vector3.ZERO))
 
 		var sim := Simulation.new()
 		sim.enable_listen_server(true)
@@ -134,14 +134,13 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		sim.add_local_player_look(80.0, 100.0)
 		sim.step()
 
-		var local: Dictionary = sim.get_local_player_aim_overlay()
-		assert_true(bool(local.get("valid", false)))
-		assert_eq(int(local.get("mount_mode", 0)), 2,
+		var local := sim.get_local_player_aim_overlay()
+		assert_true(local != null)
+		assert_eq(local.mount_mode, 2,
 				"UseGun selects the animation-owned Gunner mode")
-		assert_true(bool(local.get("mount_config_valid", false)))
-		assert_eq(int(local.get("mount_config", -1)), config_value)
-		var local_angles: PackedVector3Array = local.get(
-				"angles", PackedVector3Array())
+		assert_true(local.mount_config_valid)
+		assert_eq(local.mount_config, config_value)
+		var local_angles := local.segment_angles
 		assert_eq(local_angles.size(), 9)
 
 		var snapshot := sim.get_present_snapshot()
@@ -156,7 +155,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 					snapshot[base + Simulation.PF_AIM_BODY_PITCH_DEG],
 					snapshot[base + Simulation.PF_AIM_BODY_YAW_DEG],
 					snapshot[base + Simulation.PF_AIM_BODY_ROLL_DEG])
-			assert_lt(packed_body.distance_to(local.get("body", Vector3.ZERO)), 0.001,
+			assert_lt(packed_body.distance_to(local.body_angles), 0.001,
 					"packed body orientation equals the local selector result")
 			var packed_angles := _packed_aim_angles(snapshot, base)
 			for overlay_class in range(9):
@@ -192,7 +191,6 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 			assert_eq(int(dismounted_snapshot[dismounted_base
 					+ Simulation.PF_RIGHT_HAND_COLLAPSED]), 0,
 					"dismount clears the transient bone-collapse verdict")
-		sim.free()
 
 
 func test_listen_server_present_reads_client_decoded_state() -> void:
@@ -254,7 +252,6 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 			"presented position is the authoritative pool position")
 		matched += 1
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
-	sim.free()
 
 
 func test_items_attachment_follows_through_listen_client() -> void:
@@ -263,7 +260,7 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	var vehicle := md.add_entity(
 			MissionData.KIND_ITEM, 101291,
 			Vector3(10, 0, 0), Vector3.ZERO)
-	assert_false(vehicle.is_empty())
+	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
@@ -292,7 +289,7 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	# The child has no 0x0A callback of its own. Its presented motion comes from
 	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
 	sim.debug_set_world_entity_position(
-			int(vehicle["bms_id"]), Vector3(30, 0, 0))
+			vehicle.bms_id, Vector3(30, 0, 0))
 	sim.step()
 	snapshot = sim.get_present_snapshot()
 	child_base = -1
@@ -305,7 +302,6 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	if child_base >= 0:
 		assert_gt(absf(snapshot[child_base + Simulation.PF_POS_X] - spawn_x), 15.0,
 				"the child follows the decoded carrier instead of freezing at spawn")
-	sim.free()
 
 
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
@@ -416,15 +412,14 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	assert_gt(replacement_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
 			"world replacement invalidates an equal-tick pose cache")
-	sim.free()
 
 
 func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ORGANIC, 5311,
-			Vector3(12, 4, -3), Vector3.ZERO).is_empty())
+			Vector3(12, 4, -3), Vector3.ZERO))
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
@@ -450,7 +445,6 @@ func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
 				snapshot[row_base + Simulation.PF_POS_Y],
 				snapshot[row_base + Simulation.PF_POS_Z])
 		assert_true(state[Simulation.EFFECT_STATE_POSITION].is_equal_approx(expected))
-	sim.free()
 
 
 func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> void:
@@ -504,7 +498,6 @@ func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> vo
 	assert_true(sim.get_present_effect_state_for_wire_handle(
 			absent_handle).is_empty(),
 			"a new epoch retries a formerly missing identity")
-	sim.free()
 
 
 func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
@@ -532,7 +525,6 @@ func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
 			break
 	assert_true(found_player,
 			"the restored host player still replicates through the loopback client")
-	sim.free()
 
 
 func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
@@ -577,7 +569,6 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 			assert_eq(int(snap[base + Simulation.PF_INDEX]), 0xFFFFFF,
 				"player carries the synthetic origin index sentinel")
 	assert_true(found_player, "the auto-spawned local player replicated into the client-decoded present")
-	sim.free()
 
 
 # (P7: test_listen_server_off_uses_ai_pool_present deleted — the no-net AI-pool present is retired;

@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+using namespace opennova::fnt;
+
 using opennova::hud::GameFont;
 using opennova::hud::GameFontState;
 using opennova::hud::HudDrawList;
@@ -23,6 +25,7 @@ using opennova::hud::HudFrameState;
 using opennova::hud::HudLayout;
 using opennova::hud::HudMinimapCompiler;
 using opennova::hud::HudMinimapInput;
+using opennova::hud::HudTri;
 
 namespace {
 
@@ -405,6 +408,54 @@ void test_compiler_crosshair(const fnt_font_t *font) {
 	aimed.aimed_shot_available = true;
 	const HudDrawList &hidden = compiler.compile(aimed, 1024.0f, 768.0f);
 	CHECK(hidden.tris.empty(), "a settled aimed shot hides the reticle");
+}
+
+// The two user crosshair options: colour reaches every reticle tri, and the
+// spread toggle zeroes the arm offsets while still drawing all five regions
+// [orig: the colour into the corner-quad params (dword_25510E0); the
+// g_cfgCrossHairSpread arm @ 0x592b82 with the disabled fldz @ 0x592bcc].
+void test_compiler_crosshair_user_options(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.crosshair_texture_valid = true;
+	layout.crosshair_tex_w = 64;
+	layout.crosshair_tex_h = 64;
+	layout.crosshair_color = 0xFF20FF40u;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	state.weapon.active = true;
+	state.hud_spread_fp16 = 0x400000; // a visibly nonzero spread input
+	state.fov_deg = 80.0f;
+	const HudDrawList &spread_on = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(spread_on.tris.size() == 14, "spread on draws the five regions");
+	bool all_colored = !spread_on.tris.empty();
+	for (const HudTri &tri : spread_on.tris) {
+		if (tri.color != 0xFF20FF40u) all_colored = false;
+	}
+	CHECK(all_colored, "the user colour modulates every reticle tri");
+
+	HudLayout no_spread = layout;
+	no_spread.crosshair_spread_enabled = false;
+	compiler.update_layout(no_spread);
+	// compile() reuses the internal list; copy before compiling again.
+	const HudDrawList spread_off = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(spread_off.tris.size() == 14,
+			"spread off still draws all five regions");
+	HudFrameState centered = state;
+	centered.hud_spread_fp16 = 0;
+	compiler.update_layout(layout);
+	const HudDrawList &zero_input = compiler.compile(centered, 1024.0f, 768.0f);
+	bool same_positions = spread_off.tris.size() == zero_input.tris.size();
+	for (size_t i = 0; same_positions && i < spread_off.tris.size(); ++i) {
+		const HudTri &a = spread_off.tris[i];
+		const HudTri &b = zero_input.tris[i];
+		same_positions = a.a.x == b.a.x && a.a.y == b.a.y &&
+				a.b.x == b.b.x && a.b.y == b.b.y &&
+				a.c.x == b.c.x && a.c.y == b.c.y;
+	}
+	CHECK(same_positions,
+			"spread off collapses to the zero-spread geometry (arms centered)");
 }
 
 // The hud_color_index scheme swap (the D-HUD-20 good-tier residue + the
@@ -1116,6 +1167,12 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 							opennova::hud::half_bright_keep_alpha(downed_gray),
 			"dead without a slot rides table[8] gray");
 	CHECK(gray.glyphs.size() == 11, "no slot, no count");
+	// BRIEF without a count: the three tick lines and no text at all.
+	state.friendly_tag_mode = 3;
+	const HudDrawList &brief_plain = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief_plain.lines.size() == 3 && brief_plain.glyphs.empty(),
+			"BRIEF draws the three tick lines and no text");
+	state.friendly_tag_mode = 2;
 	// The BRIEF ticks draw the bare count one fontH above the point
 	// [orig: "%ld" @0x5a41f0 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
 	state.friendly_tags[0].has_slot = true;
@@ -1869,6 +1926,7 @@ int main() {
 	test_declutter_element_gates(&font);
 	test_compiler_health_and_order(&font);
 	test_compiler_crosshair(&font);
+	test_compiler_crosshair_user_options(&font);
 	test_compiler_hud_color_schemes(&font);
 	test_spinmap_projection_zoom_and_clip();
 	test_spinmap_compass_screen_rotation_matches_retail_heading();

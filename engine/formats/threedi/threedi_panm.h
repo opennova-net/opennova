@@ -6,17 +6,14 @@
 //
 // All functions are pure and allocation-free; buffers are caller-owned.
 
-#ifndef THREEDI_PANM_H
-#define THREEDI_PANM_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <formats/threedi/threedi_3di3.h>
+
+namespace opennova::threedi {
 
 typedef enum ThreediTranslateAxis {
     THREEDI_TRANS_NONE = 0,
@@ -47,8 +44,8 @@ typedef enum ThreediPanmStyle {
 // Packed PANM track units [orig: PANM_SampleTrack @ 0x5B2270]: rotations are
 // signed counts of 1/16384 turn (360/16384 degrees per count); scale,
 // translation, phase and rate are signed 8.8 fixed point (1/256 per count).
-#define THREEDI_PANM_ROTATION_COUNTS_PER_TURN 16384
-#define THREEDI_PANM_VALUE_ONE 256
+inline constexpr int THREEDI_PANM_ROTATION_COUNTS_PER_TURN = 16384;
+inline constexpr int THREEDI_PANM_VALUE_ONE = 256;
 
 static inline float threedi_panm_rotation_deg_from_raw(int32_t raw) {
     return (float)raw * (360.0f / (float)THREEDI_PANM_ROTATION_COUNTS_PER_TURN);
@@ -144,7 +141,7 @@ int threedi_panm_control_uses_register(uint8_t code);
 // carrying a model-local CTRL reference and rewrites that parameter to a
 // global ordinal during model load [orig: loader fixup ThreediGp_LoadCtrlRegisters @ 0x5B4640].
 // Only style 113 subsequently reads the referenced register value.
-#define THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD 0x70
+inline constexpr int THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD = 0x70;
 int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
 
 // --- Generator-style catalog (all consumers) --------------------------------
@@ -155,11 +152,11 @@ int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
 // 0x71..0x75 control-register range differs per consumer (below).
 
 // Raw codes whose 0x7X interpretation varies by retail consumer.
-#define THREEDI_STYLE_CONTROL_SET      0x71
-#define THREEDI_STYLE_CONTROL_ADD      0x72
-#define THREEDI_STYLE_CONTROL_SKEW     0x73
-#define THREEDI_STYLE_CONTROL_MULTIPLY 0x74
-#define THREEDI_STYLE_CONTROL_ROTATE   0x75
+inline constexpr int THREEDI_STYLE_CONTROL_SET = 0x71;
+inline constexpr int THREEDI_STYLE_CONTROL_ADD = 0x72;
+inline constexpr int THREEDI_STYLE_CONTROL_SKEW = 0x73;
+inline constexpr int THREEDI_STYLE_CONTROL_MULTIPLY = 0x74;
+inline constexpr int THREEDI_STYLE_CONTROL_ROTATE = 0x75;
 
 // The retail consumers of the generator-style byte. Their 0x71..0x75 dispatch
 // differs: UV reads the CTRL value for the whole range, RGB/light for
@@ -226,11 +223,7 @@ void threedi_format_panm(const ThreediPartAnimation *p,
 // The table has 11 contiguous 256-byte bands (0..2815). It is built deterministically
 // with the MSVC rand LCG seeded to 1 and contains the precomputed waves used by
 // PANM_SampleTrack.
-#define THREEDI_PANM_WAVE_TABLE_SIZE 2816
+inline constexpr int THREEDI_PANM_WAVE_TABLE_SIZE = 2816;
 const uint8_t *threedi_panm_wave_table(void);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // THREEDI_PANM_H
+} // namespace opennova::threedi

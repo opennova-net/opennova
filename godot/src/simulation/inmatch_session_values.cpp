@@ -12,6 +12,10 @@ void MissionFrameInput::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_camera_sample", "position", "forward",
 			"listener_valid"), &MissionFrameInput::set_camera_sample,
 			DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("get_camera_position"),
+			&MissionFrameInput::get_camera_position);
+	ClassDB::bind_method(D_METHOD("is_listener_valid"),
+			&MissionFrameInput::is_listener_valid);
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
@@ -54,6 +58,15 @@ void MissionFrameInput::set_camera_sample(const Vector3 &p_position,
 	value_.camera.listener_valid = p_listener_valid && p_position.is_finite();
 }
 
+Vector3 MissionFrameInput::get_camera_position() const {
+	return Vector3(value_.camera.position[0], value_.camera.position[1],
+			value_.camera.position[2]);
+}
+
+bool MissionFrameInput::is_listener_valid() const {
+	return value_.camera.listener_valid;
+}
+
 void MissionFrameInput::set_movement(bool p_forward, bool p_back, bool p_left,
 		bool p_right, bool p_lean_left, bool p_lean_right, bool p_jump) {
 	auto &movement = value_.player.movement;
@@ -93,32 +106,9 @@ int64_t MissionFrameInput::get_sequence() const {
 			static_cast<uint64_t>(INT64_MAX)));
 }
 
-void MissionTickOutcome::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_logic_tick"),
-			&MissionTickOutcome::get_logic_tick);
-	ClassDB::bind_method(D_METHOD("get_status"), &MissionTickOutcome::get_status);
-	ClassDB::bind_method(D_METHOD("get_error"), &MissionTickOutcome::get_error);
-	ClassDB::bind_method(D_METHOD("is_terminal"), &MissionTickOutcome::is_terminal);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "logic_tick"), "", "get_logic_tick");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "status"), "", "get_status");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "error"), "", "get_error");
-}
-
-bool MissionTickOutcome::is_terminal() const {
-	return status_ == static_cast<int32_t>(opennova::inmatch::TickStatus::SessionLost) ||
-			status_ == static_cast<int32_t>(opennova::inmatch::TickStatus::Fatal);
-}
-
-void MissionTickOutcome::assign(const opennova::inmatch::TickOutcome &p_value) {
-	logic_tick_ = p_value.logic_tick;
-	status_ = static_cast<int32_t>(p_value.status);
-	error_ = String::utf8(p_value.error.message.c_str());
-}
-
 void MissionFrameOutcome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status"), &MissionFrameOutcome::get_status);
 	ClassDB::bind_method(D_METHOD("get_state"), &MissionFrameOutcome::get_state);
-	ClassDB::bind_method(D_METHOD("get_ticks"), &MissionFrameOutcome::get_ticks);
 	ClassDB::bind_method(D_METHOD("get_ticks_run"), &MissionFrameOutcome::get_ticks_run);
 	ClassDB::bind_method(D_METHOD("get_tick_us"), &MissionFrameOutcome::get_tick_us);
 	ClassDB::bind_method(D_METHOD("get_error"), &MissionFrameOutcome::get_error);
@@ -126,7 +116,6 @@ void MissionFrameOutcome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("did_tick"), &MissionFrameOutcome::did_tick);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "status"), "", "get_status");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "state"), "", "get_state");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "ticks"), "", "get_ticks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ticks_run"), "", "get_ticks_run");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_us"), "", "get_tick_us");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "error"), "", "get_error");
@@ -146,13 +135,7 @@ bool MissionFrameOutcome::is_terminal() const {
 void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value) {
 	status_ = static_cast<int32_t>(p_value.status);
 	state_ = static_cast<int32_t>(p_value.state);
-	ticks_.clear();
-	for (const opennova::inmatch::TickOutcome &tick : p_value.ticks) {
-		Ref<MissionTickOutcome> value;
-		value.instantiate();
-		value->assign(tick);
-		ticks_.push_back(value);
-	}
+	ticks_run_ = static_cast<int32_t>(p_value.ticks.size());
 	tick_us_ = p_value.perf.tick_us;
 	error_ = String::utf8(p_value.error.message.c_str());
 }

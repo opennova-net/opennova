@@ -2,7 +2,11 @@
 
 - **Status**: superseded in part by ADR 0036 (2026-08-22). Decisions 2-6
   remain; decision 1's name, namespace, and location are replaced by the
-  full-cutover `opennova::inmatch::Session`.
+  full-cutover `opennova::inmatch::Session`. **Superseded in full by
+  [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)**: the
+  GDScript `GameFramePipeline` and its device-leg annex become one C++ leg
+  table in `GameWorld`, and the sanctioned `_world: Node` double seam is
+  deleted. This file is the record of the frame-pipeline round.
 - **Amended**: PR #468 (2026-08-11) moved local-player camera/viewmodel
   placement into the pipeline as `present_local_view_frame`; decision 2's
   "MainGame retains the explicit local-player and HUD shell/UI tail" now
@@ -31,7 +35,7 @@ below its two real embedders.
 
 ## Decision
 
-1. `opennova::np::MissionSession` is the portable owner of one mission's
+1. `opennova::inmatch::MissionSession` is the portable owner of one mission's
    lifecycle, network-role policy, fixed cadence, input deposit, and typed
    tick/frame results. Its single internal seam, `MissionTickTarget`, owns the
    concrete mission kernel; Godot's target owns `World`/WAC/BMS/AI/network

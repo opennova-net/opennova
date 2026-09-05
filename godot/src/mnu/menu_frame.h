@@ -22,6 +22,8 @@
 
 namespace godot {
 
+class MenuDrawListStats;
+
 class MnuDocument;
 class MnsStyleSheet;
 class ResourceRoot;
@@ -138,15 +140,11 @@ public:
 	int hit_test(const Vector2 &p_position) const;
 	int list_row_at(int p_index, const Vector2 &p_position) const;
 	int list_visible_rows(int p_index) const;
-	Rect2 combo_popup_rect(int p_index) const;
 	bool combo_popup_contains(int p_index, const Vector2 &p_position) const;
 	int combo_popup_row_at(int p_index, const Vector2 &p_position) const;
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
 	int table_row_at(int p_index, const Vector2 &p_position) const;
 	int hotkey_widget(const String &p_key, bool p_virtual) const;
-	// Multiline wrapped-line counts: x = rows that fit, y = total rows —
-	// scroll range = [0, y - x] (engine multiline_line_counts).
-	Vector2i multiline_line_counts(int p_index) const;
 
 	// Edit-input routing over the engine module (menu/menu_edit.h): applies
 	// the witnessed insert/key ops to the widget's effective text/caret
@@ -189,13 +187,13 @@ public:
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;
 
-	// Activation edges, emitted by process_mouse: "widget_pressed(index)" on
-	// the button-down edge over a claimed widget; "widget_clicked(index)" on
-	// the release edge while the SAME widget still owns the claim (the
-	// standard control-activation contract the Control-tree buttons had).
+	// Activation edge, emitted by process_mouse: "widget_clicked(index)" on
+	// the release edge while the widget claimed on the button-down edge still
+	// owns the claim (the standard control-activation contract the
+	// Control-tree buttons had).
 
 	// Debug/test accessor: compile at the current size and report counts.
-	Dictionary get_draw_list_stats();
+	Ref<MenuDrawListStats> get_draw_list_stats();
 
 	void _draw() override;
 
@@ -203,11 +201,14 @@ protected:
 public:
 	// The retail Options policy tables (engine/runtime/menu/options_policy.h),
 	// re-exported for the shell's appliers: [{control, minimum, maximum, page}],
-	// [{control, value}], the gamma reference and the preset-button names.
+	// [{control, value}], the gamma reference, the preset-button names, the
+	// not-yet-serviced control names and [{control, checked}] their rows show.
 	static Array options_scroll_ranges();
 	static Array video_quality_controls();
 	static int video_gamma_reference();
 	static PackedStringArray video_preset_buttons();
+	static PackedStringArray options_unsupported_controls();
+	static Array options_forced_checks();
 
 protected:
 	static void _bind_methods();
@@ -215,12 +216,12 @@ protected:
 
 private:
 	struct LoadedFont {
-		fnt_font_t font = {};
+		opennova::fnt::fnt_font_t font = {};
 		bool valid = false;
 		std::vector<Ref<Texture2D>> pages;
 		~LoadedFont() {
 			if (valid) {
-				fnt_free(&font);
+				opennova::fnt::fnt_free(&font);
 			}
 		}
 	};
@@ -229,7 +230,6 @@ private:
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
 	void collect_font_names_(const void *p_window,
 			std::vector<String> &r_names) const;
-	void load_assets_();
 	void free_fonts_();
 	Vector2 design_scale_() const;
 

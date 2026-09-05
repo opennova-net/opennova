@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace opennova::hud {
 
@@ -98,5 +99,13 @@ inline std::array<EndRoundStatisticsRow, 4> end_round_statistics_rows(
 	rows[3].value = buf;
 	return rows;
 }
+
+
+// The SP Show Score panel as one value (the embedder's record wraps it by
+// value): the raised-box gate and the four composed rows in draw order.
+struct EndRoundStatisticsPanel {
+	bool raised = false;
+	std::vector<EndRoundStatisticsRow> rows;
+};
 
 } // namespace opennova::hud

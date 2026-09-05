@@ -21,6 +21,7 @@
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/variant/vector3i.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -37,10 +38,13 @@
 #include <cstdint>
 #include <vector>
 
+#include "object/entity_ref.h"
 #include "object/object_data.h"
+#include "object/post_multiply_draw.h"
 #include "object/skeletal_anim.h"
 
 namespace godot {
+
 
 class Terrain;
 class MeshInstance3D;
@@ -187,6 +191,16 @@ public:
 	// [orig: BoneCallback_org0_World @0x4e3940 the body submit gate;
 	// Player_RenderFirstPersonViewModel @0x4ded60, see
 	// docs/world/world-wac-ai-re.md section 13.1].
+	// Which part of a composed player avatar this model is, when it is one:
+	// the placer's body/head submits (the head follows the body's every
+	// presentation call) and the FP rig's arms (which carry the per-submit
+	// camo triplet). Every other model is AVATAR_PART_NONE.
+	enum AvatarPart {
+		AVATAR_PART_NONE = 0,
+		AVATAR_PART_BODY = 1,
+		AVATAR_PART_HEAD = 2,
+		AVATAR_PART_ARMS = 3,
+	};
 	enum PresentationLayer {
 		// The ordinary entity: the mirror-policy world layer plus this model's
 		// shadow-caster markers; casts when it carries a marker.
@@ -267,7 +281,7 @@ private:
 	// time a level's submesh k carries the pair and hidden otherwise.
 	struct SurfaceSlot {
 		MeshInstance3D *instance = nullptr;
-		MeshInstance3D *auxiliary = nullptr;
+		PostMultiplyDraw *auxiliary = nullptr;
 	};
 	// A visual another owner parented under this model and bound to one
 	// authored level (the placer's static shadow siblings): shown only while
@@ -279,6 +293,10 @@ private:
 
 	Ref<ObjectData> object_data_;
 	HashMap<int64_t, Ref<ShaderMaterial>> material_cache_;
+	// The postmultiply proxy paired with a cached material (retail's
+	// multi-pass effects: one logical material, the strip submitted again),
+	// keyed like material_cache_; absent for materials without the pass.
+	HashMap<int64_t, Ref<ShaderMaterial>> postmultiply_cache_;
 	Vector<AlphaStripDraw> alpha_strip_draws_;
 	// level_surfaces_[lod] = that level's submeshes in authored order (empty
 	// for a level the build did not retain); surface_slots_ holds one
@@ -289,7 +307,6 @@ private:
 	// The level the slots currently carry (-1 = none applied since the build).
 	int applied_lod_ = -1;
 	bool skeletal_scene_ = false;
-	HashMap<int64_t, Dictionary> material_defs_;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
@@ -314,6 +331,16 @@ private:
 	// (Dictionary: ObjectData's PANM/material evaluators consume it).
 	Dictionary ctrl_values_;
 	HashMap<String, String> ctrl_value_owners_;
+	// ctrl_values_ converted to the renderer table once per change (the
+	// PANM/material evaluators consume it per frame); the weather FLICKER/
+	// SWING globals are stamped at use because they advance per weather tick,
+	// not per dict change. Every dict mutation path invalidates
+	// (finish_ctrl_change plus the two direct-writer loops).
+	opennova::renderer::ControlRegisterValues ctrl_native_cache_{};
+	bool ctrl_native_cache_valid_ = false;
+	bool ctrl_native_has_flicker_ = false;
+	bool ctrl_native_has_swing_ = false;
+	opennova::renderer::ControlRegisterValues runtime_ctrl_values();
 	// Optional visual parts (a player body's selected head) driven by this
 	// model's presentation calls: every animation/body/part call and every CTRL
 	// register store is forwarded, EXCEPT the registers the composer declared
@@ -334,6 +361,9 @@ private:
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
+    bool exact_owner_lod_ = false;
+    bool geometry_visible_ = true;
+    bool rigid_parts_ = false;
 	ObjectID authored_lod_owner_;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
@@ -357,8 +387,19 @@ private:
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
+	AvatarPart avatar_part_ = AVATAR_PART_NONE;
+	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
+	Vector3i avatar_camo_; // the arms' raw camo triplet for the per-submit FP writer
+	String graphic_name_; // the object graphic the placer built this model from
+	Ref<EntityRef> entity_ref_;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
+	// Two-bit visibility ownership (ADR 0043 d9): the entity presenter's
+	// placed walk owns the sim's intent, the render-occlusion frame owns its
+	// claim, and Node3D::visible is their product (each setter recomputes
+	// it, so the visibility-changed notification fires on every edge).
+	bool present_visible_ = true;
+	bool occlusion_hidden_ = false;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
 	// The last MATCHTERRAIN page state the terrain-frame leg stamped
@@ -370,7 +411,7 @@ private:
 
 	// The one runtime-frame set: every model holding live per-frame work (PANM,
 	// dynamic materials, part/body anim, an env restamp due). The single frame
-	// driver — GameFramePipeline's render_material_frame leg, the menu/ONED
+	// driver — GameWorld's render_material_frame leg, the menu/ONED
 	// process loop — advances this set once per render frame; models add
 	// themselves on wake and drop out on park. Replaces the per-node _process
 	// clock so nothing self-clocks outside that one driver.
@@ -474,7 +515,7 @@ private:
 		int anim_frame = -1;
 	};
 	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
-	// Set by a PresentApplier row plan that retains this model by pointer and
+	// Set by an EntityPresenter row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
 	bool present_planned_ = false;
@@ -556,16 +597,22 @@ private:
 	bool advance_part_anims(double p_delta);
 
 	// --- materials/environment (object_model_materials.cpp) ---
-	void build_material_defs();
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
-	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
-	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
+	Ref<ShaderMaterial> postmultiply_material_for_index(int p_material_array_index) const;
+	// Builds the surface material for the MTRL row at `p_array_index` (-1 = no
+	// row: the FF_ST_OP defaults); `p_material_index` is the surface's own
+	// index, which keys the missing-diffuse hash colour.
+	Ref<ShaderMaterial> create_material(int p_array_index, int p_material_index,
+			Ref<ShaderMaterial> &r_postmultiply);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Color hash_color_for_index(int p_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
+	// One shader parameter written to a material and, when the material
+	// carries the postmultiply pass, to its proxy as well.
 	static void set_material_and_auxiliary_parameter(
-			const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+			const Ref<ShaderMaterial> &p_material,
+			const Ref<ShaderMaterial> &p_auxiliary, const StringName &p_name,
 			const Variant &p_value);
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
@@ -593,7 +640,7 @@ public:
 	~ObjectModel();
 
 	// The one runtime-frame clock: every context's single driver advances the
-	// AWAKE set once per render frame — the game from GameFramePipeline's
+	// AWAKE set once per render frame — the game from GameWorld's
 	// render_material_frame leg, the menu shell and ONED from their one process
 	// loop. Models self-park out of the set the first frame they hold no live
 	// work; there is no per-node _process.
@@ -614,6 +661,18 @@ public:
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
+	void set_avatar_part(AvatarPart p_part) { avatar_part_ = p_part; }
+	AvatarPart get_avatar_part() const { return avatar_part_; }
+	void set_character_id(int p_id) { character_id_ = p_id; }
+	int get_character_id() const { return character_id_; }
+	void set_avatar_camo(const Vector3i &p_camo) { avatar_camo_ = p_camo; }
+	Vector3i get_avatar_camo() const { return avatar_camo_; }
+	void set_graphic_name(const String &p_name) { graphic_name_ = p_name; }
+	String get_graphic_name() const { return graphic_name_; }
+	// The entity identity this model presents; null for models that are no
+	// placed or wire-spawned entity (viewmodels, husk grafts, helpers).
+	void set_entity_ref(const Ref<EntityRef> &p_ref) { entity_ref_ = p_ref; }
+	Ref<EntityRef> get_entity_ref() const { return entity_ref_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;
@@ -721,14 +780,15 @@ public:
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
 	void set_authored_lod_enabled(bool p_enabled);
-	bool is_authored_lod_enabled() const { return authored_lod_enabled_; }
 	// Attachment RLOD: an attached model (the third-person held weapon, the
 	// NVG/binocular items, a mounted child) never runs its own threshold
 	// walk; it draws at its owner's selected level clamped to its own LOD
 	// count (renderer::attachment_lod_index). update_authored_lods applies
 	// the owner's level after the frame's selections; a freed owner reads as
 	// level 0.
-	void set_authored_lod_owner(ObjectModel *p_owner);
+	void set_authored_lod_owner(ObjectModel *p_owner, bool p_exact = false);
+    void set_geometry_visible(bool p_visible);
+    void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;
 	// The retained surface slots (one MeshInstance3D each, sized to the
 	// largest retained level) and the submesh count of one level (0 for a
@@ -768,9 +828,6 @@ public:
 	// until the next rebuild (which frees every child).
 	void add_level_bound_visual(int p_lod_index, VisualInstance3D *p_visual);
 	void set_authored_occluders_enabled(bool p_enabled);
-	bool are_authored_occluders_enabled() const {
-		return authored_occluders_enabled_;
-	}
 	// The retained OccluderInstance3D children the last build created (0 when
 	// authored occluders are off or the model carries no eligible records).
 	// The world decides from this whether to switch Godot's occlusion culling
@@ -790,6 +847,12 @@ public:
 	void advance_runtime_frame(double p_delta);
 	void set_on_screen(bool p_value);
 	bool is_on_screen() const { return on_screen_; }
+	// The two visibility owners' bits: the sim's present intent (default
+	// visible) and the render-occlusion frame's claim (default released).
+	void set_present_visible(bool p_visible);
+	bool is_present_visible() const { return present_visible_; }
+	void set_occlusion_hidden(bool p_hidden);
+	bool is_occlusion_hidden() const { return occlusion_hidden_; }
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();
@@ -798,7 +861,6 @@ public:
 	void clear_ctrl_value(const String &p_name);
 	void set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value);
 	void clear_ctrl_override(const String &p_owner, const String &p_name);
-	void clear_ctrl_values();
 	Dictionary get_ctrl_values() const;
 
 	// --- main-body skeletal + part channels ---
@@ -835,13 +897,17 @@ public:
 	void set_part_phase(int p_channel, int64_t p_phase);
 	void clear_part_phase(int p_channel);
 	void clear_part_anims();
-	Dictionary get_active_part_anims() const;
+	// The registers carrying a running PLAYPARTANIM sweep (the sweep's live
+	// phase is the register's value, get_ctrl_values); empty = none running.
+	PackedStringArray get_active_part_anim_registers() const;
 	void set_weapon_channel(const String &p_key, int p_phase_ticks,
 			const String &p_prev_key = String(), int p_prev_phase_ticks = 0,
 			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0);
-	// The applied weapon-channel pose ({key, phase_ticks}; empty when no
-	// channel is held) — presentation-state read-back.
-	Dictionary get_weapon_channel() const;
+	// The applied weapon-channel pose — presentation-state read-back: whether
+	// a channel is held, its clip key and its phase (-1 = not replicated).
+	bool has_weapon_channel() const;
+	String get_weapon_channel_key() const { return wpn_key_; }
+	int get_weapon_channel_phase_ticks() const { return wpn_phase_ticks_; }
 	// The typed present path: p_deltas is kAimOverlayClasses body-relative
 	// per-class rotations; clear drops the overlay.
 	void set_aim_overlay_deltas(const Basis *p_deltas);
@@ -853,9 +919,13 @@ public:
 
 	void set_right_hand_collapsed(bool p_collapsed);
 	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
-	// The active two-channel blend ({source_key, source_time, weight}; empty
-	// when a single channel poses the body) — presentation-state read-back.
-	Dictionary get_body_blend() const;
+	// The active two-channel blend — presentation-state read-back: whether a
+	// second channel is blending (a single channel poses the body otherwise),
+	// its source clip key, its playhead in seconds and the blend weight.
+	bool has_body_blend() const;
+	String get_body_blend_source_key() const { return body_blend_source_key_; }
+	float get_body_blend_source_time() const { return static_cast<float>(body_blend_source_time_); }
+	float get_body_blend_weight() const { return body_blend_weight_; }
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).
@@ -864,4 +934,5 @@ public:
 
 } // namespace godot
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);
+VARIANT_ENUM_CAST(godot::ObjectModel::AvatarPart);
 VARIANT_ENUM_CAST(godot::ObjectModel::PresentationLayer);

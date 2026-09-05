@@ -47,6 +47,8 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_root_gpu": FrameStats.RENDER_ROOT_GPU,
 	"render_water_cpu": FrameStats.RENDER_WATER_CPU,
 	"render_water_gpu": FrameStats.RENDER_WATER_GPU,
+	"render_q3_gpu": FrameStats.RENDER_Q3_GPU,
+	"render_slot_gpu": FrameStats.RENDER_SLOT_GPU,
 }
 # Every FrameStats slot under the World tick (GameWorld.tick legs, the
 # awake-model walk, the occlusion frame, the sim step tree, traces, effects,
@@ -75,6 +77,7 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_main_objects": FrameStats.RENDER_MAIN_OBJECTS,
 	"render_main_draws": FrameStats.RENDER_MAIN_DRAWS,
 	"render_water_objects": FrameStats.RENDER_WATER_OBJECTS,
+	"render_water_draws": FrameStats.RENDER_WATER_DRAWS,
 	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
 	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
 	"render_slot_objects": FrameStats.RENDER_SLOT_OBJECTS,
@@ -504,7 +507,7 @@ static func _counter_per_frame(delta: Dictionary, frame_count: int) -> Dictionar
 	return per_frame
 
 
-static func _build_fingerprint(world: GameWorld, runtime: MissionPresentation, bms: String) -> Dictionary:
+static func _build_fingerprint(world: GameWorld, runtime: MissionRoot, bms: String) -> Dictionary:
 	var signatures := PackedStringArray()
 	var model_count := 0
 	var hidden_count := 0
@@ -519,15 +522,11 @@ static func _build_fingerprint(world: GameWorld, runtime: MissionPresentation, b
 		model_count += 1
 		if not (node as Node3D).is_visible_in_tree():
 			hidden_count += 1
-		if node.has_meta("entity_ref"):
+		var ref: EntityRef = (node as ObjectModel).entity_ref
+		if ref != null:
 			identified_count += 1
-			var ref: Dictionary = node.get_meta("entity_ref")
 			signatures.append("%s|%d|%d|%d|%d" % [
-					node.name,
-					int(ref.get("bms_id", 0)),
-					int(ref.get("kind", -1)),
-					int(ref.get("index", -1)),
-					int(ref.get("item_id", 0))])
+					node.name, ref.bms_id, ref.kind, ref.index, ref.item_id])
 		else:
 			signatures.append("%s|unidentified" % node.get_path())
 	signatures.sort()

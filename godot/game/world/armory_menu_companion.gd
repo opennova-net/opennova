@@ -1,5 +1,5 @@
 class_name ArmoryMenuCompanion
-extends RefCounted
+extends MenuCompanion
 
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
@@ -33,8 +33,6 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
 # @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
-var _driver: MenuDriver
-var _root: ResourceRoot
 var _weapons: WeaponDatabase
 var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
 # The local player's class + the host's class-allow mask feeding the witnessed
@@ -64,18 +62,16 @@ var _current_parent_clips := {}
 var _availability_lookup := Callable()
 var _populating := false
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
-var _slot_rows := {}                 # control name -> Array[Dictionary] (row-1 aligned)
+var _slot_rows := {}                 # control name -> Array[WeaponDef] (row-1 aligned)
 # The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
 # Each authored control selects a count for its definition rather than a weapon row
 # [orig: WeaponDef_UISlotSelectCallback registration args 0/1/2 @0x567020].
-var _grenade_rows: Array = []
+var _grenade_rows: Array[WeaponDef] = []
 # The ACCEPT-hotkey debounce: the opener press that showed the screen must release
 # once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
 # arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
 # Input_HandleMenuKeyRelease @0x4de2d0].
 var _accept_hotkey_armed := false
-# NAME (upper) -> Callable activation routing off the driver.
-var _activation_handlers := {}
 # PRIMARY/SECONDARY/ACCESSORY -> TextureRect mounted over the blank authored
 # *_ICON window. The compiled frame owns no per-widget Control nodes.
 var _icon_mounts := {}
@@ -148,13 +144,18 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 
 
-func on_menu_built(driver: MenuDriver, _file: String, _screen: String, root: ResourceRoot) -> void:
-	_driver = driver
-	_root = root
-	_activation_handlers.clear()
+# The presenter's close() releases the companion: every open rebuilds via
+# on_menu_built, so the hidden frame keeps no icon mounts between shows.
+func on_menu_released() -> void:
+	super()
 	_clear_icon_mounts()
-	if not driver.widget_activated.is_connected(_on_widget_activated):
-		driver.widget_activated.connect(_on_widget_activated)
+
+
+func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
+	# The base wires _driver/_root, the by-name handler table (dispatched
+	# with the stale-document guard) and the widget_activated relay.
+	super(driver, file, screen, root)
+	_clear_icon_mounts()
 	if not driver.widget_value_changed.is_connected(_on_widget_value_changed):
 		driver.widget_value_changed.connect(_on_widget_value_changed)
 	if not driver.screen_changed.is_connected(_on_screen_changed):
@@ -190,7 +191,7 @@ func _ensure_weapons() -> void:
 # [orig: UI_InitWeaponClassSelection @0x567250 — CHARCLASS_MEDIC..ENGINEER,
 # values 5..9 via spin_list_insert_item] lives at engine
 # world/player_loadout.h kArmoryClassCatalog).
-var _class_catalog: Array = WeaponDatabase.armory_class_catalog()
+var _class_catalog: Array[ArmoryClassRow] = WeaponDatabase.armory_class_catalog()
 # Display FALLBACK strings stay godot-side, keyed by the catalog row's text_key.
 const CLASS_FALLBACK_TEXT := {
 	"CHARCLASS_MEDIC": "Medic",
@@ -207,13 +208,13 @@ var _selected_class_value := 0
 
 func _populate_classes() -> void:
 	_selected_class_value = _resolve_selected_class()
-	var spin := _driver.widget_id("PLAYER_CLASS")
+	var spin := _id("PLAYER_CLASS")
 	if spin < 0:
 		return
 	var rows := PackedStringArray()
 	for row_v in _class_catalog:
-		var text_key := String((row_v as Dictionary).get("text_key", ""))
-		rows.append(_menu_text(text_key,
+		var text_key := row_v.text_key
+		rows.append(Strings.menu_text(text_key,
 				String(CLASS_FALLBACK_TEXT.get(text_key, text_key))))
 	_populating = true
 	_driver.set_widget_items(spin, rows)
@@ -245,7 +246,7 @@ func _class_mask() -> int:
 # class can sit outside 5..9 on an unclassed resolve).
 func _class_row_for_value(class_value: int) -> int:
 	for i in _class_catalog.size():
-		if int((_class_catalog[i] as Dictionary).get("value", -1)) == class_value:
+		if _class_catalog[i].value == class_value:
 			return i
 	return -1
 
@@ -256,7 +257,7 @@ func _on_class_changed(index: int) -> void:
 	# The flip is MP-only in the original (the spin is disabled otherwise); saving the
 	# outgoing class's selections into its per-class buffer is the tracked deferral.
 	var row := clampi(index, 0, _class_catalog.size() - 1)
-	_selected_class_value = int((_class_catalog[row] as Dictionary).get("value", 0))
+	_selected_class_value = _class_catalog[row].value
 	_populate_slots()  # the class re-filters every slot list [orig: @0x566f60]
 	_update_weight()
 
@@ -277,19 +278,19 @@ func _populate_slots() -> void:
 		_populate_ammo(slot_name)
 
 
-func _available_slot_weapons(slot: int, team_mask: int) -> Array:
-	var dicts: Array = _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
+func _available_slot_weapons(slot: int, team_mask: int) -> Array[WeaponDef]:
+	var defs := _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
 	if _availability_lookup.is_valid():
-		dicts = dicts.filter(func(w):
-			return int(_availability_lookup.call(String(w.get("name", "")))) != 0)
-	return dicts
+		defs = defs.filter(func(w: WeaponDef) -> bool:
+			return int(_availability_lookup.call(w.name)) != 0)
+	return defs
 
 
 func _fill_slot(control: String, slot: int, team_mask: int) -> void:
-	var combo := _driver.widget_id(control)
+	var combo := _id(control)
 	if combo < 0:
 		return
-	var dicts: Array = _available_slot_weapons(slot, team_mask)
+	var defs := _available_slot_weapons(slot, team_mask)
 	# The map availability term: banned (0) weapons never list; every nonzero value
 	# (allowed / armory-zone-only / mission-allowed) does
 	# [orig: the !g_armoryWeaponAvailability[i] skip @0x566e6b].
@@ -297,16 +298,16 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	# prepended at row 0 [orig: ListWidget_SortRows -> cmp @0x6448a0 with (string, asc);
 	# NONE inserted at 0 @0x566f15].
 	var labeled: Array = []
-	for w in dicts:
+	for w: WeaponDef in defs:
 		labeled.append([_weapon_label(w), w])
 	labeled.sort_custom(func(a, b): return String(a[0]).nocasecmp_to(String(b[0])) < 0)
 	var rows := PackedStringArray()
-	rows.append(_menu_text("NONE", "None"))
-	dicts = []
+	rows.append(Strings.menu_text("NONE", "None"))
+	var sorted: Array[WeaponDef] = []
 	for pair in labeled:
 		rows.append(pair[0])
-		dicts.append(pair[1])
-	_slot_rows[control] = dicts
+		sorted.append(pair[1])
+	_slot_rows[control] = sorted
 	_set_combo_items(combo, rows)
 	# Each slot re-selects its row from the canonical parent tuples [orig: UIList_SelectByValue @0x645240
 	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
@@ -316,8 +317,8 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 		"SECONDARY": current = _current_secondary
 		"ACCESSORY": current = _current_accessory
 	if not current.is_empty():
-		for i in dicts.size():
-			if String(dicts[i].get("name", "")).nocasecmp_to(current) == 0:
+		for i in sorted.size():
+			if sorted[i].name.nocasecmp_to(current) == 0:
 				_driver.select_row(combo, i + 1, false)
 				break
 
@@ -332,27 +333,26 @@ func _populate_grenades(team_mask: int) -> void:
 	# Unlike the three parent lists, availability does not remove a grenade def:
 	# retail assigns class/team/selectable category-3 defs to controls first, then
 	# an unavailable def stops after its zero row [orig: @0x5647a4..0x5648a6].
-	var dicts: Array = _weapons.get_slot_weapons(
+	var defs := _weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, _class_mask(), team_mask)
 	_grenade_rows = []
-	for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
-		_grenade_rows.append(dicts[i])
+	for i in mini(defs.size(), GRENADE_CONTROLS.size()):
+		_grenade_rows.append(defs[i])
 	for i in GRENADE_CONTROLS.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		if combo < 0:
 			continue
-		var w: Dictionary = _grenade_rows[i] if i < _grenade_rows.size() else {}
-		var allowed := not w.is_empty()
+		var w: WeaponDef = _grenade_rows[i] if i < _grenade_rows.size() else null
+		var allowed := w != null
 		if allowed and _availability_lookup.is_valid():
-			allowed = int(_availability_lookup.call(String(w.get("name", "")))) != 0
-		var maxclips := int(w.get("maxclips", 0)) if allowed else 0
+			allowed = int(_availability_lookup.call(w.name)) != 0
+		var maxclips := w.maxclips if allowed else 0
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
 			rows.append(_ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
-		if not w.is_empty():
-			_driver.select_row(combo, _current_grenade_clips(
-					String(w.get("name", "")), maxclips), false)
+		if w != null:
+			_driver.select_row(combo, _current_grenade_clips(w.name, maxclips), false)
 	_update_weight()
 
 
@@ -366,38 +366,38 @@ func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
 	return 0
 
 
-func _weapon_label(w: Dictionary) -> String:
-	var textid := String(w.get("display_textid", ""))
+func _weapon_label(w: WeaponDef) -> String:
+	var textid := w.display_textid
 	if not textid.is_empty():
-		var t: RtxtStringFile = Strings.get_table("gametext")
-		if t != null and t.has_string_in_section("WepDes", textid):
-			return t.get_string_in_section("WepDes", textid)
-	return String(w.get("name", ""))
+		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
+			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
+	return w.name
 
 
-func _ammo_row_label(w: Dictionary, clips: int) -> String:
-	var round_label := String(w.get("round_type", ""))
+# The "<rounds> - <round label>" clip row; a null (unavailable) def rows "0 - ".
+func _ammo_row_label(w: WeaponDef, clips: int) -> String:
+	if w == null:
+		return "%d - " % clips
+	var round_label := w.round_type
 	if not round_label.is_empty():
-		var gametext: RtxtStringFile = Strings.get_table("gametext")
-		if gametext != null and gametext.has_string_in_section("WepDes", round_label):
-			round_label = gametext.get_string_in_section("WepDes", round_label)
-	return "%d - %s" % [
-		clips * int(w.get("clipsize", 0)),
-		round_label,
-	]
+		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
+			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
+	return "%d - %s" % [clips * w.clipsize, round_label]
 
 
-# The slot's selected weapon dict (the WeaponDatabase transport dict; {} = NONE).
-# Public read seam (ADR 0018): tests and diagnostics read the selection here.
-func selected_weapon(control: String) -> Dictionary:
-	var combo := _driver.widget_id(control)
+# The slot's selected weapon.def row (null = NONE). Public read seam (ADR
+# 0018): tests and diagnostics read the selection here.
+func selected_weapon(control: String) -> WeaponDef:
+	var combo := _id(control)
 	if combo < 0:
-		return {}
+		return null
 	var row := _driver.selected_row(combo)
-	var dicts: Array = _slot_rows.get(control, [])
-	if row <= 0 or row > dicts.size():
-		return {}  # NONE
-	return dicts[row - 1]
+	var defs: Array = _slot_rows.get(control, [])
+	if row <= 0 or row > defs.size():
+		return null  # NONE
+	return defs[row - 1]
 
 
 func _on_slot_selected(control: String) -> void:
@@ -411,12 +411,12 @@ func _on_slot_selected(control: String) -> void:
 # clipsize rounds, and serializes as 1; row maxclips-1 is the full load
 # [orig: @0x564c7d..0x564ce4, sprintf "%d - %s"].
 func _populate_ammo(control: String) -> void:
-	var combo := _driver.widget_id(control + "_AMMO1")
+	var combo := _id(control + "_AMMO1")
 	if combo < 0:
 		return
 	var w := selected_weapon(control)
 	var rows := PackedStringArray()
-	var maxclips := int(w.get("maxclips", 0))
+	var maxclips := w.maxclips if w != null else 0
 	for clips in range(1, maxclips + 1):
 		rows.append(_ammo_row_label(w, clips))
 	_set_combo_items(combo, rows)
@@ -427,8 +427,7 @@ func _populate_ammo(control: String) -> void:
 			"PRIMARY": current_name = _current_primary
 			"SECONDARY": current_name = _current_secondary
 			"ACCESSORY": current_name = _current_accessory
-		if (current_name.is_empty()
-				or String(w.get("name", "")).nocasecmp_to(current_name) != 0):
+		if current_name.is_empty() or w.name.nocasecmp_to(current_name) != 0:
 			clips = WeaponDatabase.CLIP_COUNT_DEF_DEFAULT
 		# The shared default-select rule: a saved count picks its row, the -1
 		# sentinel picks the full maxclips row [orig: the fill @0x565cd0].
@@ -440,7 +439,7 @@ func _populate_ammo(control: String) -> void:
 # The slot's selected clip count. Public read seam (ADR 0018), paired with
 # selected_weapon.
 func selected_clips(control: String) -> int:
-	var combo := _driver.widget_id(control + "_AMMO1")
+	var combo := _id(control + "_AMMO1")
 	if combo < 0 or _driver.selected_row(combo) < 0 \
 			or _driver.item_count(combo) == 0:
 		# -1 = the def default; the original's main leg takes adm[23] RAW as the total
@@ -452,12 +451,12 @@ func selected_clips(control: String) -> int:
 func _selected_grenade_loadout() -> Array[Dictionary]:
 	var selected: Array[Dictionary] = []
 	for i in _grenade_rows.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
 		selected.append({
-			"name": String((_grenade_rows[i] as Dictionary).get("name", "")),
+			"name": _grenade_rows[i].name,
 			"ammo_primary": clips,
 			"ammo_secondary": -1,
 			"flags": -1,
@@ -487,32 +486,31 @@ func _update_weight() -> void:
 	var counts := PackedInt32Array()
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
 		var w := selected_weapon(slot_name)
-		if w.is_empty():
+		if w == null:
 			continue
-		indices.append(int(w.get("index", -1)))
+		indices.append(w.index)
 		counts.append(selected_clips(slot_name))  # -1 = the def default (maxclips)
 	var total := _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
-		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var combo := _id(GRENADE_CONTROLS[i])
 		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
-		var grenade := _grenade_rows[i] as Dictionary
 		# The category-3 controls are extra-ammo legs, not parent weapon slots:
 		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c —
 		# the def_extra_ammo_weight term].
-		total += _weapons.extra_ammo_weight(int(grenade.get("index", -1)), clips)
+		total += _weapons.extra_ammo_weight(_grenade_rows[i].index, clips)
 	var band := _weapons.encumbrance_class(total)
-	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
+	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
+		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
-	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
+	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			_menu_text("LBS", "lbs"), encumbrance])
+			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
+			Strings.menu_text("LBS", "lbs"), encumbrance])
 	_update_icons()
 
 
@@ -526,7 +524,7 @@ func _update_icons() -> void:
 	if frame == null:
 		return
 	for control in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var holder := _driver.widget_id(control + "_ICON")
+		var holder := _id(control + "_ICON")
 		if holder < 0:
 			continue
 		var icon_rect: TextureRect = _icon_mounts.get(control)
@@ -539,7 +537,8 @@ func _update_icons() -> void:
 			frame.add_child(icon_rect)
 			_icon_mounts[control] = icon_rect
 		_place_icon_mount(icon_rect, holder)
-		var icon_name := String(selected_weapon(control).get("icon", ""))
+		var selected := selected_weapon(control)
+		var icon_name := selected.icon if selected != null else ""
 		if icon_name.is_empty() or _root == null:
 			icon_rect.texture = null
 		else:
@@ -549,7 +548,7 @@ func _update_icons() -> void:
 
 ## The rendered weight line (public read seam for tests/diagnostics).
 func weight_line() -> String:
-	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+	var label := _id("STATIC_TOTAL_WEIGHT")
 	return _driver.get_widget_text(label) if label >= 0 else ""
 
 
@@ -561,14 +560,17 @@ func weight_line() -> String:
 # host applies the full canonical kit to the sim; the selected slot then remounts
 # its first-person viewmodel.
 func _on_accept() -> void:
+	var primary := selected_weapon("PRIMARY")
+	var secondary := selected_weapon("SECONDARY")
+	var accessory := selected_weapon("ACCESSORY")
 	var loadout := {
 		"player_class": _selected_class_value,
 		"team": _team,
-		"primary": String(selected_weapon("PRIMARY").get("name", "")),
+		"primary": primary.name if primary != null else "",
 		"primary_clips": selected_clips("PRIMARY"),
-		"secondary": String(selected_weapon("SECONDARY").get("name", "")),
+		"secondary": secondary.name if secondary != null else "",
 		"secondary_clips": selected_clips("SECONDARY"),
-		"accessory": String(selected_weapon("ACCESSORY").get("name", "")),
+		"accessory": accessory.name if accessory != null else "",
 		"accessory_clips": selected_clips("ACCESSORY"),
 		"grenades": _selected_grenade_loadout(),
 	}
@@ -606,12 +608,6 @@ func _on_cancel() -> void:
 
 
 # --- Driver relays -----------------------------------------------------------------
-
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	var handler: Callable = _activation_handlers.get(widget_name.to_upper(), Callable())
-	if handler.is_valid():
-		handler.call()
-
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, _value: String) -> void:
 	if _populating:
@@ -653,7 +649,7 @@ func _reposition_icon_mounts() -> void:
 		var mount: TextureRect = _icon_mounts[control]
 		if mount == null or not is_instance_valid(mount):
 			continue
-		var holder := _driver.widget_id(String(control) + "_ICON")
+		var holder := _id(String(control) + "_ICON")
 		if holder >= 0:
 			_place_icon_mount(mount, holder)
 
@@ -670,13 +666,3 @@ func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
 	if rows.size() > 0:
 		_driver.select_row(combo, 0, false)
 	_populating = false
-
-
-func _menu_text(key: String, fallback: String) -> String:
-	# [orig: the armory's menu tokens resolve against the menu resource (game.bin)
-	#  via TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
-	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback

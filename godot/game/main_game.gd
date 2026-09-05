@@ -1,5 +1,5 @@
 class_name MainGame
-extends Node3D
+extends GameShell
 
 # Runtime shell: boots into the game's menu front-end (MenuShell, driving the
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
@@ -11,11 +11,8 @@ extends Node3D
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
-const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
-const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
-const ShellMenuFrontendScript := preload("res://game/shell_menu_frontend.gd")
 const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -29,9 +26,10 @@ const CHANGE_DIR_KEY := KEY_F9
 # armory volume (entity Flags 0x400000, maintained by the collision resolver)
 # [orig: Input_HandleActionBinding_0 case 0xB1 @0x4e0b3f ->
 # UI_OpenMenuScreen("weapon.mnu", "WEAPON"); the parallel action 218 @0x49b8e3
-# ships with no binding row]. Out of zone the key falls through to its use-item
-# leg (unported; our motor separately polls Shift as the run modifier).
-const ARMORY_KEY := KEY_SHIFT
+# ships with no binding row]. Out of zone the key's other arms are the input
+# router's per-frame chain over the polled `useitem` row (the hold latch, the
+# USE+digit seat pick, the mount toggle on release); the shell only matches
+# the press event against that row's live keys (_is_use_item_key).
 # F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
 const DEV_TOOLS_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
@@ -88,7 +86,6 @@ var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (p
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
-var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
@@ -100,16 +97,12 @@ var _quit_requested := false
 var _quit_policy_installed := false
 var _previous_auto_accept_quit := true
 var _shell_presentation := ShellPresentationSessionScript.new()
-# The menu front-end + resource-dir mount flow (a method annex over THIS
-# shell's state — shell_menu_frontend.gd; split for the size ratchet).
-var _frontend: RefCounted
 # One process-lifetime settings owner feeds both menu surfaces and every world
 # or HUD instance constructed during this shell session.
 var _player_options: PlayerOptions = PlayerOptionsScript.new()
 
 
 func _init() -> void:
-	_frontend = ShellMenuFrontendScript.new(self)
 	_player_options.changed.connect(_on_player_options_changed)
 	# The sampler observes the board's capture close edge directly (render-time
 	# measurement is RenderingServer state, not Node-owned state).
@@ -126,15 +119,15 @@ func _init() -> void:
 	_world_load.load_failed.connect(_on_world_load_failed)
 
 
-func get_player_options() -> PlayerOptions:
-	return _player_options
-
-
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
+	# update() applied the device-global audio once already; only the running
+	# Simulation's mouse settings are this listener's to push.
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply(sim)
+	_player_options.apply_mouse(sim)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
+		_hud_presenter.set_crosshair_color(state.crosshair_color)
+		_hud_presenter.set_crosshair_spread_enabled(state.crosshair_spread)
 
 
 func _notification(what: int) -> void:
@@ -190,9 +183,15 @@ func finish_runtime_shutdown() -> void:
 		_world.release_runtime_renderer_resources()
 	if _root != null:
 		_root.clear()
-	VegAssetsScript.clear_cache()
+	# The vegetation asset caches live on the world's foliage dispatcher for
+	# the world's whole life; the shell's exit empties them here.
+	if _world != null:
+		var dispatcher: FoliageDispatcher = _world.get_foliage_dispatcher()
+		if dispatcher != null:
+			dispatcher.clear_asset_cache()
 	if _debug_adapter != null:
-		_debug_adapter.release_shell_seams()
+		_dev_tools.set_debug_control_table(null)
+		_debug_adapter.release_shell()
 
 
 ## True from the menu-to-loading handoff until the world reports success or
@@ -207,6 +206,18 @@ func is_world_loading() -> bool:
 ## into the transient LoadingScreen node.
 func has_loading_background() -> bool:
 	return _world_load.has_background()
+
+
+## The active loading screen's exact real-stage checkpoint, or -1 after the
+## presentation has been released.
+func loading_progress_percent() -> int:
+	return _world_load.progress_percent()
+
+
+## Pixel extent of the active loading surface, or (-1, -1) after release.
+## This is the public render-probe seam for fullscreen coverage (ADR 0018).
+func loading_surface_size() -> Vector2i:
+	return _world_load.surface_size()
 
 
 ## Dismiss an active SP start-mission splash without manufacturing a key or
@@ -233,17 +244,23 @@ func _ready() -> void:
 	var debug_adapter := get_game_debug_adapter()
 	add_child(debug_adapter)
 	debug_adapter.start_runtime_endpoint()
+	# F3 drives the SAME debug-control table MCP's game_debug does (ADR 0043
+	# d12): the windows' control requests drain into it with the shell's
+	# local authority.
+	_dev_tools.set_debug_control_table(debug_adapter.get_debug_controls())
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# owner decides what it means).
 	if not _camera.escape_pressed.is_connected(_on_camera_escape):
 		_camera.escape_pressed.connect(_on_camera_escape)
-	_player_presenter = LocalPlayerPresenterScript.new()
+	_player_presenter = LocalPlayerPresenter.new()
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
-	_player_presenter.setup(_world, _camera, _camera)
-	_world.set_local_view_presenter(_player_presenter)  # D-RORD-8 view leg
+	# setup binds the presenter as the world's local view presenter (the
+	# D-RORD-8 view leg + the fixed-tick weapon drain); the live binding table
+	# is the shell's ControlsBindings model.
+	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
-	# not in the annex's wire_shell, so menu-less entries (the env launch hooks)
+	# not in _wire_shell, so menu-less entries (the env launch hooks)
 	# still get them; the HUD presenter's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
@@ -251,26 +268,39 @@ func _ready() -> void:
 	_armory_presenter = ArmoryPresenter.new()
 	_armory_presenter.name = "ArmoryPresenter"
 	add_child(_armory_presenter)
-	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	_armory_presenter.setup(_world.armory_view(), _player_presenter,
+			_hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
-	_armory_presenter.closed.connect(_on_resume)
+	_armory_presenter.closed.connect(resume)
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
-	_deploy_presenter = DeployScreenPresenter.install(self, _world,
+	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
+	# The one interactive-music context is the shell's (MusicService); the
+	# world names the mission-start open, the mission-end teardown and the
+	# per-frame gamemus var pump through these three signals.
+	_world.music_context_opened.connect(MusicService.open_game_context)
+	_world.music_context_closed.connect(MusicService.stop_context)
+	_world.music_var_changed.connect(MusicService.set_var)
+	# The persisted resource settings behind the world's own mount (the game
+	# path with no injected root).
+	_world.set_resource_root_resolver(SettingsResourceRootResolver.new())
 	_hud_presenter = GameHudPresenter.new()
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
 	_on_player_options_changed(_player_options.current())
 	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
-	_end_round_presenter = EndRoundPresenter.install(self, _world,
+	_end_round_presenter = EndRoundPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
 			_armory_presenter, func() -> void: _state = State.END_ROUND,
 			_leave_screen.bind(State.END_ROUND))
+	# The STAT confirm's Yes exits the mission (the pause menu's same
+	# CONFIRM_YES command), riding the guarded return-to-menu teardown.
+	_end_round_presenter.exit_to_menu_requested.connect(_on_return_to_menu)
 	# Every net-session ENTRY (LAN browser/host, NovaWorld panel + env hooks)
 	# lives on the NetSessionController component; the shell keeps the state
 	# machine, the load pipeline, and the session-presentation states.
@@ -330,7 +360,7 @@ func _input(event: InputEvent) -> void:
 		return
 	var key := event as InputEventKey
 	if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-		_on_resume()
+		resume()
 		get_viewport().set_input_as_handled()
 
 
@@ -340,15 +370,6 @@ func _input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null:
-		return
-	# The USE-ITEM release edge: a latched press runs the mount toggle on RELEASE
-	# [orig: Input_ProcessFrame @0x49d520 consumes the latch on key release
-	# -> Entity_ToggleVehicleMount @0x49d6dc].
-	if not key.pressed and key.keycode == ARMORY_KEY:
-		if _use_latched:
-			_use_latched = false
-			if is_gameplay_input_active() and _try_toggle_mount():
-				get_viewport().set_input_as_handled()
 		return
 	if not key.pressed or key.echo:
 		return
@@ -368,7 +389,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
 			and _world.is_loaded() and (is_gameplay_input_active() \
 			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
-		_use_latched = false  # the chord consumed the Shift press: no mount toggle on release
+		if _player_presenter != null:
+			# The chord consumed the USE hold: no mount toggle on its release.
+			_player_presenter.consume_use_hold()
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
@@ -378,20 +401,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			and _hud_presenter.handle_gameplay_key(key.keycode):
 		get_viewport().set_input_as_handled()
 		return
-	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
-	# weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d] — otherwise the
-	# key is the vehicle mount/dismount toggle on the same witnessed action [orig: the
-	# LABEL_121 latch @0x4e0b71 -> Input_ProcessFrame release edge @0x49d6dc ->
-	# Entity_ToggleVehicleMount @0x436950]. (The vehicle-loadout-volume vehicle.mnu leg
-	# @0x4e0bfe awaits that screen's port.)
-	if key.keycode == ARMORY_KEY and is_gameplay_input_active():
+	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
+	# press opens weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
+	# Every other arm of the key is the input router's per-frame chain over the
+	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
+	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
+	# this arm opens leaves gameplay input inactive, which resets that chain.
+	# (The vehicle-loadout-volume vehicle.mnu arm @0x4e0bfe awaits that screen's
+	# port.)
+	if is_gameplay_input_active() and _is_use_item_key(key.keycode):
 		if _try_open_armory():
-			get_viewport().set_input_as_handled()
-		else:
-			# No zone leg consumed the press: latch — the toggle runs on the release
-			# edge [orig: dword_24C18DC set @0x4e0b71; a press consumed by a zone leg
-			# suppresses the release, our latch-only-on-miss].
-			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
 	# Gameplay keys (B/N/NVG, Z/X/C stance) live on LocalPlayerPresenter; view rows on GameHudPresenter.
@@ -404,10 +423,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # Play reuses the normal gameplay gate and capture route without hiding ImGui.
 func _on_dev_tools_open_changed(open: bool) -> void:
 	_refresh_dev_tools_game_state()
-	if open:
-		# A press begun before F3 must not turn into a mount action when Shift is
-		# released behind the tools.
-		_use_latched = false
+	if open and _player_presenter != null:
+		# A USE hold begun before F3 must not turn into a mount action when the
+		# key is released behind the tools.
+		_player_presenter.consume_use_hold()
 
 
 func _on_dev_tools_game_input_mode_changed(_playing: bool) -> void:
@@ -459,24 +478,39 @@ func _toggle_fullscreen() -> void:
 
 func get_dev_tools() -> DevTools:
 	return _dev_tools
+
+
+# --- The GameShell suppliers (ADR 0043 rule 11): the tooling reads the shell's
+# presenters through these typed getters, never through its privates. ---
+
+func get_world() -> GameWorld:
+	return _world
+
+
+func get_player_presenter() -> LocalPlayerPresenter:
+	return _player_presenter
+
+
+func get_hud_presenter() -> GameHudPresenter:
+	return _hud_presenter
+
+
+func get_menu_shell() -> MenuShell:
+	return _menu_shell
+
+
+func get_armory_presenter() -> ArmoryPresenter:
+	return _armory_presenter
+
+
+func get_deploy_presenter() -> DeployScreenPresenter:
+	return _deploy_presenter
 func get_game_debug_adapter() -> GameDebugAdapter:
 	if _debug_adapter == null:
 		_debug_adapter = GameDebugAdapterScript.new()
-		# ONE typed seams record (GameShellSeams): the factory binds the shell's
-		# public methods by name; the private presenters/state legs are supplied
-		# here. The adapter adopts it in configure() and the probe runner reads
-		# the same record through get_shell_seams() (ADR 0041).
-		var seams := GameShellSeams.for_shell(self,
-				func() -> GameWorld: return _world, _current_runtime,
-				func() -> LocalPlayerPresenter: return _player_presenter,
-				func() -> GameHudPresenter: return _hud_presenter,
-				func() -> MenuShell: return _menu_shell,
-				func() -> ArmoryPresenter: return _armory_presenter,
-				func() -> DeployScreenPresenter: return _deploy_presenter)
-		seams.shell_state_source = _shell_state_name
-		seams.world_loading_source = func() -> bool: return _world_load_pending
-		seams.resume_action = _on_resume
-		_debug_adapter.configure(seams)
+		# The adapter depends on the GameShell surface this class overrides;
+		# the probe runner reads the same shell through get_shell() (ADR 0041).
+		_debug_adapter.configure(self)
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats
@@ -495,9 +529,10 @@ func is_gameplay_input_active() -> bool:
 # The sim's round_end effect arms MissionEndFlow; the flow's beat and screen run
 # from _process.
 func _on_shell_mission_effects(effects: Array) -> void:
-	for e in effects:
-		if e is Dictionary and String(e.get("kind", "")) == "round_end":
-			_end_flow.begin(int(e.get("a", 0)), _world.get_sim() if _world != null else null)
+	for e_v in effects:
+		var e := e_v as MissionEffect
+		if e != null and e.kind == "round_end":
+			_end_flow.begin(e.a, _world.get_sim() if _world != null else null)
 
 
 func _show_end_screen() -> void:
@@ -514,11 +549,11 @@ func _on_end_screen_exit() -> void:
 	_teardown_world_to_menu()
 
 
-func _current_runtime() -> MissionPresentation:
+func get_runtime() -> MissionRoot:
 	return _world.get_runtime() if _world != null else null
 
 
-func _shell_state_name() -> String:
+func shell_state_name() -> String:
 	match _state:
 		State.WORLD:
 			return "world"
@@ -554,12 +589,75 @@ static func can_summon_dir_picker_in(state: int, picker_open: bool) -> bool:
 	return state == State.MENU and not picker_open
 
 
-# --- Menu state (bodies: shell_menu_frontend.gd, the method annex) ------------
+# --- Menu state ---------------------------------------------------------------
 
 # Returns false when the directory would not mount (the picker is raised and
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
-	return _frontend.enter_menu(dir)
+	if _root == null or _root.get_root_dir() != dir:
+		var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
+		if root == null:
+			_request_resource_dir()
+			return false
+		_root = root
+	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower()]
+	if profile_root_key != _profile_root_key:
+		_chosen_avatar = PlayerProfile.load_character_profile(_root)
+		_profile_root_key = profile_root_key
+	# The menu, loading screen, and world are one runtime resource session.
+	# GameWorld must not remount from mutable persisted settings after boot.
+	_world.set_resource_root(_root)
+	_state = State.MENU
+	_shell_presentation.enter_menu(_world, _hud)
+	_wire_shell()
+	if _player_info_companion != null:
+		_player_info_companion.set_persisted_profile(_chosen_avatar)
+	if not _menu_shell.setup(_root):
+		push_warning("MainGame: no menu found in resource dir (looked for %s)"
+				% _menu_shell.main_menu_file)
+	_menu_shell.show_menu()
+	return true
+
+
+# The one-shot MenuShell wiring (every return to the menu re-enters _enter_menu):
+# the five menu intents in this order, then the mp.mnu / player.mnu companions
+# and the LAN browser they drive.
+func _wire_shell() -> void:
+	if _shell_wired:
+		return
+	_shell_wired = true
+	_menu_shell.start_requested.connect(_on_start_requested)
+	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
+	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
+	_menu_shell.resume_requested.connect(resume)
+	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	# Delegate mp.mnu and player.mnu to their respective companions.
+	_mp_companion = MpMenuCompanion.new()
+	_player_info_companion = PlayerInfoMenuCompanion.new()
+	_lan_session = LanSession.new()
+	_lan_session.name = "LanSession"
+	add_child(_lan_session)
+	_mp_companion.set_lan_session(_lan_session)
+	_menu_shell.add_companion(_mp_companion)
+	_menu_shell.add_companion(_player_info_companion)
+	_net.wire_menu_companions(_mp_companion)
+	_player_info_companion.set_persisted_profile(_chosen_avatar)
+	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
+
+
+# PLAYER_INFO ACCEPT persists both side records and the shared callsign, while
+# the selected loadout continues through the existing spawn-kit seam.
+func _on_avatar_chosen(profile: Dictionary) -> void:
+	set_local_player_profile(profile)
+	var typed_name := String(profile.get("name", "")).strip_edges()
+	if not typed_name.is_empty():
+		PlayerProfile.save_callsign(typed_name)
+	if _root != null:
+		var save_error := PlayerProfile.save_character_profile(_root, profile)
+		if save_error != OK:
+			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)"
+					% save_error)
 
 
 # Install the in-memory local-player profile used by the next mission spawn.
@@ -584,33 +682,62 @@ func _try_open_armory() -> bool:
 	return _armory_presenter.try_open()
 
 
-# The USE-ITEM mount toggle: outside the armory volume the same key enters/exits
-# vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
-# [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
-func _try_toggle_mount() -> bool:
-	var runtime := _current_runtime()
-	if runtime == null:
-		return false
-	var sim: Simulation = runtime.get_sim()
-	if sim == null:
-		return false
-	return sim.local_player_toggle_mount()
+# Whether a key event is the `useitem` row's (retail default Shift; catalog row
+# 44, rebindable in Options -> Controls).
+func _is_use_item_key(keycode: Key) -> bool:
+	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
 
-# --- Resource dir picker (first launch; bodies: shell_menu_frontend.gd) -------
+# --- Resource dir picker (first launch) --------------------------------------
 
 func _request_resource_dir() -> void:
-	_frontend.request_resource_dir()
+	if GameRuntimeRoot.is_headless() or _picker != null:
+		return
+	var picker := FileDialog.new()
+	picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	picker.access = FileDialog.ACCESS_FILESYSTEM
+	picker.use_native_dialog = true
+	picker.title = "Select your OpenNova asset directory"
+	picker.dir_selected.connect(_on_dir_selected)
+	picker.canceled.connect(_on_dir_canceled)
+	_picker = picker
+	add_child(picker)
+	picker.popup_centered_ratio(0.6)
 
 
-## The picker's accept leg (the annex carries the doc + body; kept public and
-## name-stable for the lifecycle tests and the ADR-0018 seam).
+func _on_dir_selected(dir: String) -> void:
+	_cleanup_picker()
+	apply_picked_resource_dir(dir, not LaunchFlags.resource_dir().is_empty())
+
+
+## The picker's accept leg. `process_local` is resolved from --resource-dir at
+## the signal callback above: an ONED-selected directory is process-local,
+## so persisting a picker escape would overwrite the game's saved preference.
+## Parameterized for
+## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick
+## would not mount (the picker is re-raised). Public and name-stable for the
+## lifecycle tests.
 func apply_picked_resource_dir(dir: String, process_local: bool) -> bool:
-	return _frontend.apply_picked_resource_dir(dir, process_local)
+	var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
+	if root == null:
+		_request_resource_dir()
+		return false
+	_root = root
+	if not process_local:
+		ResourceDirSettings.set_resource_dir(dir)
+	_enter_menu(dir)
+	return true
+
+
+func _on_dir_canceled() -> void:
+	_cleanup_picker()
+	_request_resource_dir()
 
 
 func _cleanup_picker() -> void:
-	_frontend.cleanup_picker()
+	if _picker != null:
+		_picker.queue_free()
+		_picker = null
 
 
 # --- Menu <-> world transitions ----------------------------------------------
@@ -619,7 +746,7 @@ func _on_start_requested(bms_name: String) -> void:
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
-		{"mission_file": bms_name},
+		LoadingScreenInfo.for_mission(bms_name),
 		_world.load_mission.bind(bms_name))
 
 
@@ -627,11 +754,11 @@ func _on_start_requested(bms_name: String) -> void:
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
-		{"mission_file": bms_name},
+		LoadingScreenInfo.for_mission(bms_name),
 		_world.load_loose_mission.bind(bms_name))
 
 
-## The probe runner's mission verbs (GameShellSeams, ADR 0041): the menu's
+## The probe runner's mission verbs (GameShell, ADR 0041): the menu's
 ## Start path, the saved-BMS path parity captures stage, and the return leg.
 func start_mission(bms_name: String) -> Error:
 	var gate := _mission_start_gate()
@@ -649,7 +776,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 		return ERR_FILE_CANT_OPEN
 	if not profile.is_empty():
 		set_local_player_profile(profile)
-	start_world_load({"mission_file": bms_name},
+	start_world_load(LoadingScreenInfo.for_mission(bms_name),
 			_world.load_mission_data.bind(mission, bms_name))
 	return OK
 
@@ -702,16 +829,15 @@ func join_lan_server(target: JoinTarget) -> void:
 
 ## The common mission-start seam; ShellPresentationSession owns its visibility
 ## transition while this shell owns load state and the operation handoff.
-func start_world_load(load_info: Dictionary, operation: Callable) -> void:
+func start_world_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 	if not _world_load.can_start():
 		return
 	if _lan_session != null:
 		_lan_session.stop()
 	_world_load_pending = true
-	_world.set_local_player_spawn_loadout(_chosen_avatar)
+	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
 	_begin_world_load()
-	if _world_load.start(self, _root, _world,
-			load_info.duplicate(true), operation) == null:
+	if _world_load.start(self, _root, _world, load_info, operation) == null:
 		_on_world_load_failed("mission load handoff could not start")
 
 
@@ -725,7 +851,8 @@ func _begin_world_load() -> void:
 
 func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
-	# calls MusicService.open_game_context, so every live mission entry path
+	# emits music_context_opened into MusicService.open_game_context, so every
+	# live mission entry path
 	# gets the same music); nothing to do here for audio. The witnessed release
 	# then reveals the world + HUD at the tail
 	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final
@@ -800,6 +927,25 @@ func _on_join_deploy_pick_required() -> void:
 ## [orig: Server_TickUpdate linger drain @0x51da04..; g_mission_exit_reason = 3
 ##  @0x51db63; every exit reason lands on the same teardown + nav push
 ##  @0x568654. SP mission end runs the epilog flow instead.]
+# The frame loop's death.mnu DEATH open off the host-driven deploy-map overlay.
+# The once-per-arming open latch, its result-blind stamp, and its clear when
+# the host drops the bit all live on the engine's ClientState
+# (client_state.h deploy_overlay_open_latch; hud-re D-HUD-19) — this leg is
+# the device call. State.WORLD stands in for retail's no-active-menu gate
+# (PAUSED / ARMORY / DEPLOY / END_ROUND all hold a screen), so the latch is
+# never burned under another screen and the open retries on the next clear
+# frame. Closing is the presenter's own affair. NOT yet modeled (hud-re
+# D-HUD-19 residuals): the second open trigger — the local entity's undeployed
+# bit — and the spawn-success suppression gate.
+func _maybe_open_deploy_overlay() -> void:
+	if _state != State.WORLD or _world_load_pending:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null or not bool(sim.take_join_deploy_overlay_open()):
+		return
+	_deploy_presenter.open()
+
+
 func _maybe_exit_round_cycle() -> void:
 	if _state == State.MENU or _world_load_pending or _world == null:
 		return
@@ -881,7 +1027,7 @@ func _on_camera_escape() -> void:
 		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
-		_on_resume()
+		resume()
 
 
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
@@ -897,7 +1043,7 @@ func _pause() -> void:
 	_menu_shell.show_menu()
 
 
-func _on_resume() -> void:
+func resume() -> void:
 	if _state != State.PAUSED and _state != State.ARMORY:
 		return
 	if _armory_presenter != null and _armory_presenter.is_open():
@@ -974,7 +1120,7 @@ func _teardown_world_to_menu() -> void:
 	_dev_tools.set_simulation(null)
 	_world.unload()
 	if _player_presenter != null:
-		_player_presenter.setup(_world, _camera, _camera)
+		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
@@ -1104,6 +1250,7 @@ func _process(delta: float) -> void:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
+	_maybe_open_deploy_overlay()
 	_maybe_exit_round_cycle()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(

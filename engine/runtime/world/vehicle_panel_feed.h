@@ -19,6 +19,7 @@
 
 namespace opennova::world {
 
+class VehicleOccupancySource;
 class World; // the class-key must match world.h (MSVC mangles struct/class apart)
 
 // One entry of retail's 10-slot weapon/seat list [orig: Entity_BuildWeaponSlotList
@@ -65,7 +66,18 @@ int build_vehicle_panel_slots(const World &world, EntityHandle root,
 // health come from the live seat occupant; the digit from the slot list;
 // `own_seat` marks the seat the local player sits in.
 void fill_vehicle_panel_seats(const World &world, EntityHandle root,
-                              EntityHandle local, const DefVehicleHudBlock &block,
-                              std::vector<hud::HudVehicleSeat> &out);
+                              EntityHandle local, const opennova::def::DefVehicleHudBlock &block,
+                              std::vector<hud::HudVehicleSeat> &out,
+                              const VehicleOccupancySource *source = nullptr);
+
+
+// The vehicle the local player rides, re-rooted from an attached gun child to
+// its parent (vehicle_panel_root): shown + the root's items.def id the shell
+// joins to its VEHICLE_HUD block. One value the embedder fills; its Godot
+// record wraps it by value.
+struct VehiclePanelRoot {
+    bool shown = false;
+    int32_t item_id = 0;
+};
 
 } // namespace opennova::world

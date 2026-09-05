@@ -7,8 +7,8 @@
 //  @ 0x57AD40; Config_SetDefaults; dfx2med sub_402770]
 
 #include <formats/mission/bms.h>
-#include <net/npruntime/game_config.h>
-#include <net/npwire/game_type.h>
+#include <runtime/inmatch/game_config.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/session_hello.h>
 
 #include <cstdio>
@@ -79,7 +79,7 @@ int main() {
 			"default-spawn restriction starts disabled");
 	CHECK(game_rules::kDefaultNumTeams == 2, "team-count default");
 	CHECK(game_rules::kMaxCallsignLength == 15, "callsign cap = Name[16]");
-	CHECK(np::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");
+	CHECK(inmatch::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");
 
 	// The BMS game-mode decode priority + single-select encode
 	// [orig: dfx2med sub_402770 decode @ 0x4050c7 / encode @ 0x4031cd].

@@ -11,6 +11,8 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -18,13 +20,17 @@
 
 #include <formats/fnt/fnt.h>
 #include <runtime/hud/hud_config_tokens.h>
+#include <runtime/hud/hud_math.h> // FriendlyTagMode
 #include <runtime/hud/hud_frame.h>
 
 #include <array>
 
 namespace godot {
 
+class HudDrawListStats;
+class RtxtStringFile;
 class Simulation;
+class VehicleHudBlock;
 
 class HudPos;
 class ResourceRoot;
@@ -47,10 +53,17 @@ class HudOverlay : public Control {
 
 public:
 	// The user crosshair-style range; retail loads "cross%02d.tga" (style + 1)
-	// from the player config.
+	// from the player config. The colour default / mask and the spread default
+	// are the engine's (HudLayout, Config_SetDefaults), re-exported so the
+	// options model has one home for them.
 	enum {
 		MIN_CROSSHAIR_STYLE = 0,
 		MAX_CROSSHAIR_STYLE = 24,
+		DEFAULT_CROSSHAIR_COLOR =
+				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorDefault),
+		CROSSHAIR_COLOR_MASK =
+				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorMask),
+		DEFAULT_CROSSHAIR_SPREAD = opennova::hud::HudLayout::kCrosshairSpreadDefault ? 1 : 0,
 	};
 
 	HudOverlay();
@@ -67,6 +80,14 @@ public:
 	// runtime state (messages, fades) survives the layout refresh.
 	void set_crosshair_style(int p_style);
 	int get_crosshair_style() const;
+
+	// The user crosshair colour (0xRRGGBB, forced opaque) and the spread
+	// enable — the other two retail crosshair options; defaults and witness
+	// live on the engine layout fields (hud_frame.h).
+	void set_crosshair_color(int p_rgb);
+	int get_crosshair_color() const;
+	void set_crosshair_spread_enabled(bool p_enabled);
+	bool is_crosshair_spread_enabled() const;
 
 	// Install the equipped weapon's HUD slice (PlayerHudWeaponDef's fields,
 	// passed typed) plus its resolved display name; loads the per-weapon
@@ -102,7 +123,7 @@ public:
 	// Typed cross-class args on the bound API follow the set_minimap_terrain
 	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-			const Dictionary &p_strings, Simulation *p_sim);
+			const Dictionary &p_strings, const Ref<Simulation> &p_sim);
 	// The end-of-round overlay (net-re §5.68): the resolved Impact38 text
 	// ladder (hud/end_round_overlay.h lines the presenter formatted) and the
 	// overlay safe-area top/bottom in design px.
@@ -113,8 +134,8 @@ public:
 	// the Simulation the hull band + seat rows are pulled from natively
 	// (Simulation::fill_vehicle_panel). The block's `interface` silhouette is
 	// loaded per sid (the set_weapon reload idiom). Pass null when hiding.
-	void set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
-			Simulation *p_sim);
+	void set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
+			const Ref<Simulation> &p_sim);
 	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
 	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
@@ -132,30 +153,52 @@ public:
 	// ({under_attack, ready}), and the Simulation the zone rows are pulled
 	// from natively (Simulation::fill_lfp_zones). Pass null when hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-			int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim);
+			int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);
 	void clear_waypoint();
-	void set_objectives(const PackedStringArray &p_texts,
-			const PackedByteArray &p_done);
-	void set_attach_labels(const PackedVector2Array &p_screens,
-			const PackedStringArray &p_texts, const PackedByteArray &p_nearest);
-	// The projected friendly tags (D-HUD-20): parallel typed arrays; the
-	// flags word's layout is hud/friendly_tag_flags.h (medic, speaking,
-	// player-slot entry, dead, has a connection slot, medic request standing,
-	// bits 8..15 = the slot's revive countdown in seconds — retail PlayerSlot
-	// +0x10 / +0x2C, the downed legs of the drawer), packed by the Simulation's
-	// get_friendly_tags feed.
-	void set_friendly_tags(const PackedVector2Array &p_screens,
-			const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
-			const PackedInt32Array &p_entity_ids,
-			const PackedInt32Array &p_health_ratios_fp16,
-			const PackedInt32Array &p_flags);
-	// Mode 0 off / 1 text < 300 m / 2 text always (default) / 3 tick marks
-	// (retail g_friendlyTagsMode; the witnessed rules live in hud_math).
-	void set_friendly_tag_mode(int p_mode);
-	int get_friendly_tag_mode() const;
+	// The objectives panel: the sim's shown win-condition rows resolved
+	// through the mission text table (Simulation::fill_objectives); hidden,
+	// or no sim, clears the panel — the retail toggle's off state.
+	void set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
+			const Ref<Simulation> &p_sim);
+	// The floating attach labels: the sim's selection (distance/LOS/occupancy/
+	// nearest, armory-zone mode; Simulation::fill_attach_labels) projected
+	// through the play camera (its global transform + projection) to overlay
+	// pixels, each with its label text resolved in the gametext table's
+	// Overlays section. Behind-camera points drop at projection, mirroring
+	// the frustum clip.
+	void set_attach_labels(const Transform3D &p_camera_xform,
+			const Projection &p_camera_projection, const Ref<RtxtStringFile> &p_gametext,
+			const Ref<Simulation> &p_sim);
+	// The read seams over the projected labels (tests and probes): the count,
+	// the index of the full-bright nearest label (-1 = none) and a label's
+	// resolved text.
+	int get_attach_label_count() const;
+	int get_attach_label_selected() const;
+	String get_attach_label_text(int p_index) const;
+	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
+	// (Simulation::fill_friendly_tags) lifted, projected through the play
+	// camera with its view distance and fed to the compiler's element; the
+	// environment's live fog distance rides along for the fog cull (the
+	// speaking level stays the dialog-channel follow-up). `shown` false, no
+	// sim, or the OFF mode clears the tags.
+	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
+			const Projection &p_camera_projection, float p_fog_distance_units,
+			const Ref<Simulation> &p_sim);
+	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
+	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
+	enum FriendlyTagMode {
+		FRIENDLY_TAGS_OFF = static_cast<int>(opennova::hud::FriendlyTagMode::kOff),
+		FRIENDLY_TAGS_FAR_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kFarBrief),
+		FRIENDLY_TAGS_FULL = static_cast<int>(opennova::hud::FriendlyTagMode::kFull),
+		FRIENDLY_TAGS_BRIEF = static_cast<int>(opennova::hud::FriendlyTagMode::kBrief),
+	};
+	// The friendly-tags mode (retail g_friendlyTagsMode; the witnessed rules
+	// live in hud_math). Out-of-range values clamp to the last mode.
+	void set_friendly_tag_mode(FriendlyTagMode p_mode);
+	FriendlyTagMode get_friendly_tag_mode() const;
 	void set_hud_color_index(int p_index);
 	int get_hud_color_index() const;
 	// The HUD declutter level 0..3 [orig: the persisted cfg int
@@ -178,6 +221,9 @@ public:
 	// retained overlay buffer.
 	void set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>());
+	// The water mask the last set_minimap_terrain installed (a read seam the
+	// GUT presenter pins use; nothing else reads it).
+	Ref<Texture2D> get_minimap_water_mask() const;
 	void set_minimap_state(const Vector2 &p_mission_position,
 			float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
 			int p_big_zoom_q16, int p_map_mode, bool p_flip_180,
@@ -192,7 +238,7 @@ public:
 
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
-	Dictionary get_draw_list_stats();
+	Ref<HudDrawListStats> get_draw_list_stats();
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
@@ -222,7 +268,8 @@ public:
 	static int next_hud_detail_level(int p_level);
 	static int showhud_flags_default();
 	static int next_showhud_flags(int p_flags);
-	static int friendly_tag_mode_default();
+	static FriendlyTagMode friendly_tag_mode_default();
+	static FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode p_mode);
 	static float friendly_tag_lift();
 
 protected:
@@ -245,24 +292,26 @@ private:
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
 	// Font glyph pages, one namespace per compiler font slot
 	// (opennova::hud::kHudFontSlot*): slot * FNT_MAX_PAGES + page.
-	std::array<Ref<Texture2D>, opennova::hud::kHudFontSlotCount * FNT_MAX_PAGES>
+	std::array<Ref<Texture2D>, opennova::hud::kHudFontSlotCount * opennova::fnt::FNT_MAX_PAGES>
 			page_textures_;
-	fnt_font_t font_ = {};
+	opennova::fnt::fnt_font_t font_ = {};
 	bool font_valid_ = false;
 	// The Arial overlay label pair (engine hud_label_font_choice picks the
 	// faces/scale), loaded lazily per surface-width tier — retail re-inits
 	// its overlay fonts on resolution change.
-	fnt_font_t label_font_ = {};
+	opennova::fnt::fnt_font_t label_font_ = {};
 	bool label_font_valid_ = false;
-	fnt_font_t label_font_bold_ = {};
+	opennova::fnt::fnt_font_t label_font_bold_ = {};
 	bool label_font_bold_valid_ = false;
-	fnt_font_t label_font_large_ = {};
+	opennova::fnt::fnt_font_t label_font_large_ = {};
 	bool label_font_large_valid_ = false;
-	fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
+	opennova::fnt::fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
 	bool label_font_impact38_valid_ = false;
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	uint32_t crosshair_color_ = opennova::hud::HudLayout::kCrosshairColorDefault;
+	bool crosshair_spread_enabled_ = true;
 	bool draw_timing_enabled_ = false;
 	int64_t draw_compile_us_ = 0;
 	int64_t draw_emit_us_ = 0;
@@ -307,10 +356,12 @@ private:
 	// saturated, alpha unchanged (the compass ring's pipeline).
 	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
+	// Stamp the cached colour/spread options into layout_.
+	void apply_crosshair_options_();
 	void clear_font_();
 	// Parse one .fnt through the VFS and upload its pages into the slot's
 	// page-texture namespace; returns parse success.
-	bool load_fnt_(const String &p_name, fnt_font_t &r_font, int p_slot);
+	bool load_fnt_(const String &p_name, opennova::fnt::fnt_font_t &r_font, int p_slot);
 	// (Re)load the Arial label pair when the surface width crosses a retail
 	// breakpoint, and hand the compiler the pair + the witnessed slot scale.
 	void ensure_label_fonts_(float p_surface_w);
@@ -330,3 +381,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::HudOverlay::ShowHudFlag);
+VARIANT_ENUM_CAST(godot::HudOverlay::FriendlyTagMode);

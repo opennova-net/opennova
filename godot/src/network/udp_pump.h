@@ -16,6 +16,8 @@
 
 namespace godot {
 
+class UdpDatagram;
+
 // A thin raw-UDP datagram pump for the co-op-LAN net path. It wraps ONE PacketPeerUDP and moves
 // RAW datagrams between the socket and the in-process net core — nothing more. Sockets + signals
 // live here (the Godot binding); the protocol framing + crypto live in libs (ADR 0010), so this
@@ -25,7 +27,7 @@ namespace godot {
 // A HOST binds a listen port (bind_listen) and learns each joiner's address from the source of
 // its first datagram; a JOINER dials the host (dial). Simulation owns the pump and drives
 // poll() before its receive step and the sends after its emit, routing each datagram to the
-// right engine/net/netsim UdpSessionTransport by source address (a later increment). This is a
+// right engine/runtime/replication UdpSessionTransport by source address (a later increment). This is a
 // RefCounted, not a Node — it never self-processes; its owner drives the cadence (the witnessed
 // poll-before-logic / send-after order, [orig: Game_ProcessMainFrame @0x5263f0, see docs/net/novaworld-net-re.md]).
 class UdpPump : public RefCounted {
@@ -43,6 +45,8 @@ public:
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }
+	// The dialed default destination as a packed PeerAddr (zero before dial).
+	opennova::PeerAddr dialed_host() const;
 	void close();
 
 	// Drain every datagram currently available on the socket into the inbound queue, tagging each
@@ -51,9 +55,9 @@ public:
 
 	bool has_inbound() const { return !inbound_.empty(); }
 	int inbound_count() const { return static_cast<int>(inbound_.size()); }
-	// Pop the next received datagram as {ip:String, port:int, bytes:PackedByteArray}; an empty
-	// Dictionary when none (the GDScript/test form).
-	Dictionary take_inbound();
+	// Pop the next received datagram as a UdpDatagram (network/udp_datagram.h);
+	// null when none (the GDScript/test form).
+	Ref<UdpDatagram> take_inbound();
 	// The native form the Simulation's datagram-socket adapter drains: the
 	// source address already packed at poll time. False when none is queued.
 	bool take_inbound_native(opennova::PeerAddr &from, PackedByteArray &bytes);

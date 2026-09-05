@@ -5,6 +5,8 @@
 #include <string.h>
 #include <formats/mus/mus.h>
 
+using namespace opennova::mus;
+
 static int passed = 0, failed = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { \
     fprintf(stderr, "  FAIL: %s (line %d)\n", msg, __LINE__); ++failed; } \

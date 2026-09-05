@@ -20,7 +20,6 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // The infantry motor (mounted below) requires an AiSystem. Bail BEFORE allocating a pool-0
     // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
-    if (world.ai == nullptr) return EntityHandle{};
 
     // Spawn at FULL health [orig: Entity_InitFromItemDef @0x49e550 — Health = healthMax]: the
     // items.def Player hp when the host's traits sweep resolved it (class-8 Player = 150), else
@@ -28,8 +27,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // denominator reads the spawn value (full => tier 2 => the golden 0x28) even for a joiner
     // spawning AFTER the mission-load sweep. (D-NET-144)
     const int32_t hp = retail_signed_i16(
-        (world.player_has_item_def && world.player_item_hp != 0)
-            ? world.player_item_hp
+        (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
+            ? world.tables.player.item_hp
             : static_cast<int32_t>(spawn.health));
 
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
@@ -47,15 +46,15 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
-    seed.has_item_def = world.player_has_item_def;
-    seed.item_type = world.player_item_type;
-    seed.item_attrib = world.player_item_attrib;
-    seed.armor_impact = retail_signed_i16(world.player_armor_impact);
-    seed.armor_kz = retail_signed_i16(world.player_armor_kz);
-    seed.damage_reduc_pp = world.player_damage_reduc_pp;
-    seed.damage_reduc_max = world.player_damage_reduc_max;
-    seed.radar_sig = world.player_radar_sig; // AI engage caps [orig: @0x40e136]
-    seed.heat_sig = world.player_heat_sig;
+    seed.has_item_def = world.tables.player.has_item_def;
+    seed.item_type = world.tables.player.item_type;
+    seed.item_attrib = world.tables.player.item_attrib;
+    seed.armor_impact = retail_signed_i16(world.tables.player.armor_impact);
+    seed.armor_kz = retail_signed_i16(world.tables.player.armor_kz);
+    seed.damage_reduc_pp = world.tables.player.damage_reduc_pp;
+    seed.damage_reduc_max = world.tables.player.damage_reduc_max;
+    seed.radar_sig = world.tables.player.radar_sig; // AI engage caps [orig: @0x40e136]
+    seed.heat_sig = world.tables.player.heat_sig;
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
@@ -96,8 +95,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
     // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
     // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
-    const int idx = world.ai->attach(h);
-    AiEntity &ae = *world.ai->at(idx);
+    const int idx = world.ai.attach(h);
+    AiEntity &ae = *world.ai.at(idx);
     ae.pos[0] = to_fixed(spawn.position.x);
     ae.pos[1] = to_fixed(spawn.position.y);
     ae.pos[2] = to_fixed(spawn.position.z);

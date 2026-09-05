@@ -6,7 +6,6 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/muzzle_pose.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -26,20 +25,6 @@ Vec3 mission_from_fixed3(const int32_t pos[3]) {
 
 int32_t fixed_from_mission(float v) {
 	return static_cast<int32_t>(v * kFixed16);
-}
-
-SeatRow seat_row(const Seat &seat, int32_t index) {
-	SeatRow row;
-	row.index = index;
-	row.type = static_cast<int32_t>(seat.type);
-	row.retail_slot = static_cast<int32_t>(seat.retail_slot);
-	row.bone_index = static_cast<int32_t>(seat.bone_index);
-	row.pose_index = static_cast<int32_t>(seat.pose_index);
-	row.source_name = seat.source_name;
-	row.local = seat.seat_local;
-	row.yaw_offset = static_cast<int32_t>(seat.yaw_offset);
-	row.occupied = seat.occupant.valid();
-	return row;
 }
 
 // The AI half of the card — the old get_entity_debug body. A scripted remove
@@ -72,7 +57,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.disabled = ent ? ent->disabled : false;
 	d.vehicle_family = -1;
 	if (ent != nullptr) {
-		if (const VehicleTraits *traits = world.vehicle_traits.get(ent->item_id))
+		if (const VehicleTraits *traits = world.vehicles.traits.get(ent->item_id))
 			d.vehicle_family = static_cast<int32_t>(traits->family);
 	}
 	d.body_anim_slot = ent ? ent->body_anim_slot : -1;
@@ -188,7 +173,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.primary_occupant = ve->primary_occupant.valid();
 		// The mover family, so a rotor check can tell "no helicopter here"
 		// from "the helicopter's blades are not turning".
-		const VehicleTraits *vt = world.vehicle_traits.get(ve->item_id);
+		const VehicleTraits *vt = world.vehicles.traits.get(ve->item_id);
 		d.veh_family = vt != nullptr ? static_cast<int32_t>(vt->family) : -1;
 		d.player_control = vt != nullptr && vt->player_control;
 		// Flight-command chain, so a "the helicopter will not move" report can
@@ -278,11 +263,11 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.combat_move_timer = e.inf.combat_move_timer;
 	// The fire-origin readback (probe surface): the launch userpoint on this
 	// body's posed skeleton, resolved now by the sim's own provider — the same
-	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
+	// point the fire pass, LOS rays, and aim eye read (world/pose_provider.h).
 	{
 		int32_t muzzle[3] = {};
-		d.muzzle_valid = world.muzzle_pose_provider != nullptr &&
-				world.muzzle_pose_provider->resolve_muzzle_pose(
+		d.muzzle_valid = world.pose_provider != nullptr &&
+				world.pose_provider->resolve_muzzle_pose(
 						world, e.handle, muzzle);
 		d.muzzle = d.muzzle_valid ? mission_from_fixed3(muzzle) : Vec3{};
 	}
@@ -311,7 +296,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 			: static_cast<int32_t>(spawn_origin_index(ent.spawn_origin));
 	d.item_id = ent.item_id;
 	d.name = ent.name;
-	if (const std::string *item_name = world.item_names.get(ent.item_id))
+	if (const std::string *item_name = world.tables.item_names.get(ent.item_id))
 		d.item_name = *item_name;
 	d.team = static_cast<int32_t>(ent.team);
 	d.alive = ent.alive;
@@ -325,7 +310,7 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	d.item_attrib = static_cast<int64_t>(ent.item_attrib);
 	d.item_attrib2 = static_cast<int64_t>(ent.item_attrib2);
 	d.vehicle_family = -1;
-	if (const VehicleTraits *traits = world.vehicle_traits.get(ent.item_id))
+	if (const VehicleTraits *traits = world.vehicles.traits.get(ent.item_id))
 		d.vehicle_family = static_cast<int32_t>(traits->family);
 	d.has_minimap_model_marker = ent.has_minimap_model_marker;
 	d.is_capture_trigger = ent.is_capture_trigger;
@@ -334,8 +319,8 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 	d.zone_radius = static_cast<int32_t>(ent.zone_radius);
 	d.zone_control = ent.zone_control;
 	d.zone_chain_index = -1;
-	for (size_t i = 0; i < world.zone_chain.zones.size(); ++i) {
-		if (world.zone_chain.zones[i] == h) {
+	for (size_t i = 0; i < world.zones.chain.zones.size(); ++i) {
+		if (world.zones.chain.zones[i] == h) {
 			d.zone_chain_index = static_cast<int32_t>(i);
 			break;
 		}
@@ -353,8 +338,23 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 
 } // namespace
 
-std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) {
+SeatRow seat_row(const Seat &seat, int32_t index) {
+	SeatRow row;
+	row.index = index;
+	row.type = static_cast<int32_t>(seat.type);
+	row.retail_slot = static_cast<int32_t>(seat.retail_slot);
+	row.bone_index = static_cast<int32_t>(seat.bone_index);
+	row.pose_index = static_cast<int32_t>(seat.pose_index);
+	row.source_name = seat.source_name;
+	row.local = seat.seat_local;
+	row.yaw_offset = static_cast<int32_t>(seat.yaw_offset);
+	row.occupied = seat.occupant.valid();
+	return row;
+}
+
+std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 	std::vector<EntityRow> out;
+	const AiSystem *ai = with_brains ? &world.ai : nullptr;
 
 	// AI handle -> pool index, once (the join key; a brain's wire identity IS
 	// its packed EntityHandle).
@@ -397,7 +397,7 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 		row.item_id = e.item_id;
 		row.wire_handle = e.handle.packed;
 		row.name = e.name;
-		if (const std::string *item_name = world.item_names.get(e.item_id))
+		if (const std::string *item_name = world.tables.item_names.get(e.item_id))
 			row.item_name = *item_name;
 		row.health = e.health;
 		row.alive = e.alive;
@@ -437,7 +437,7 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 			row.wire_handle = e->handle.packed;
 			row.name = ent ? ent->name : std::string();
 			if (const std::string *item_name =
-							ent ? world.item_names.get(ent->item_id) : nullptr)
+							ent ? world.tables.item_names.get(ent->item_id) : nullptr)
 				row.item_name = *item_name;
 			row.state_name = ai_state_name(e->brain.f[AiBrain::kCurState]);
 			row.health = ent ? ent->health : 0;
@@ -454,9 +454,10 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 	return out;
 }
 
-EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle handle,
+EntityCard build_entity_card(World &world, bool with_brains, EntityHandle handle,
 		const std::function<std::string(int32_t)> &adm_name_resolver) {
 	EntityCard card;
+	const AiSystem *ai = with_brains ? &world.ai : nullptr;
 	if (!handle.valid()) return card;
 	card.handle = handle.packed;
 	if (const Entity *ent = world.registry.get(handle)) {
@@ -474,8 +475,9 @@ EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle hand
 	return card;
 }
 
-AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
+AiDebugReport ai_debug_report(World &world) {
 	AiDebugReport report;
+	const AiSystem &ai = world.ai;
 
 	// Follower counts over the WHOLE pool (the row cap below never hides a
 	// route's traffic). Channel 0 is "no channel" (ai_waypoint_update_target's
@@ -503,7 +505,7 @@ AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
 		// keeps the overlay label meaningful.
 		row.name = ent ? ent->name : std::string();
 		if (row.name.empty() && ent != nullptr) {
-			if (const std::string *item_name = world.item_names.get(ent->item_id))
+			if (const std::string *item_name = world.tables.item_names.get(ent->item_id))
 				row.name = *item_name;
 		}
 		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
@@ -545,9 +547,9 @@ AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
 		row.aim_heading = e->inf.aim_heading;
 		row.aim_pitch = e->inf.aim_pitch;
 		// The muzzle resolve walks the posed skeleton — engaged brains only.
-		if (row.target_valid && world.muzzle_pose_provider != nullptr) {
+		if (row.target_valid && world.pose_provider != nullptr) {
 			int32_t muzzle[3] = {};
-			row.muzzle_valid = world.muzzle_pose_provider->resolve_muzzle_pose(
+			row.muzzle_valid = world.pose_provider->resolve_muzzle_pose(
 					world, e->handle, muzzle);
 			if (row.muzzle_valid)
 				for (int c = 0; c < 3; ++c) row.muzzle[c] = muzzle[c];
@@ -588,7 +590,7 @@ AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
 
 	for (int g = 0; g < TriggerRelations::kGroups; ++g) {
 		const TriggerRelations::GroupState *state =
-				world.relations.group_or_null(g);
+				world.script.relations.group_or_null(g);
 		if (state == nullptr || state->initial_count <= 0) continue;
 		AiGroupRow grow;
 		grow.id = g;

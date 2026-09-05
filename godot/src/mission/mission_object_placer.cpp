@@ -1,4 +1,8 @@
 #include "mission/mission_object_placer.h"
+
+#include <formats/mission/mission.h> // the entity read the native place() walks
+#include "util/axes.h"
+#include "mission/static_population_instance.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 
@@ -15,6 +19,8 @@
 #include "env/water.h"
 #include "mission/mission_data.h"
 #include "mission/mission_object_placer_keys.h"
+
+using namespace opennova::threedi;
 
 namespace godot {
 
@@ -92,8 +98,7 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("entity_transform", "position", "rotation_deg"),
 			&MissionObjectPlacer::entity_transform);
 	ClassDB::bind_static_method("MissionObjectPlacer",
-			D_METHOD("item_casts_dynamic_shadow", "item_type", "attrib",
-					"attrib2"),
+			D_METHOD("item_casts_dynamic_shadow", "item_type", "attrib2"),
 			&MissionObjectPlacer::item_casts_dynamic_shadow);
 	ClassDB::bind_static_method("MissionObjectPlacer",
 			D_METHOD("item_casts_static_terrain_shadow", "kind",
@@ -103,11 +108,12 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
 	ClassDB::bind_method(
+			D_METHOD("place_entities", "entities", "parent", "options"),
+			&MissionObjectPlacer::place_entities, DEFVAL(Dictionary()));
+	ClassDB::bind_method(
 			D_METHOD("update_static_lods", "camera_transform",
 					"vertical_fov_degrees", "viewport_width", "viewport_height"),
 			&MissionObjectPlacer::update_static_lods);
-	ClassDB::bind_method(D_METHOD("get_static_lod_switch_count"),
-			&MissionObjectPlacer::get_static_lod_switch_count);
 	ClassDB::bind_method(D_METHOD("get_static_instance_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_lod);
 	ClassDB::bind_method(
@@ -135,14 +141,13 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::build_model_from_graphic, DEFVAL(String()),
 			DEFVAL(String()), DEFVAL(false));
 
-	ClassDB::bind_method(D_METHOD("get_placed_entity_records"),
-			&MissionObjectPlacer::get_placed_entity_records);
-	ClassDB::bind_method(D_METHOD("set_placed_entity_records", "records"),
-			&MissionObjectPlacer::set_placed_entity_records);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_entity_records"),
-			"set_placed_entity_records", "get_placed_entity_records");
-	ClassDB::bind_method(D_METHOD("get_static_user_point_sources"),
-			&MissionObjectPlacer::get_static_user_point_sources);
+	ClassDB::bind_method(D_METHOD("get_placed_models"),
+			&MissionObjectPlacer::get_placed_models);
+	ClassDB::bind_method(D_METHOD("set_placed_models", "models"),
+			&MissionObjectPlacer::set_placed_models);
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "placed_models", PROPERTY_HINT_ARRAY_TYPE,
+						 "ObjectModel"),
+			"set_placed_models", "get_placed_models");
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
 			&MissionObjectPlacer::get_static_item_effect_sources);
 	ClassDB::bind_method(D_METHOD("get_static_light_draw_sources"),
@@ -303,11 +308,7 @@ Vector3 MissionObjectPlacer::godot_to_bms_position(const Vector3 &p) {
 }
 
 Basis MissionObjectPlacer::bms_to_godot_basis(const Vector3 &rot_deg) {
-	const opennova::mission::PlacementBasis b =
-			opennova::mission::bms_to_presentation_basis(
-					float(rot_deg.x), float(rot_deg.y), float(rot_deg.z));
-	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
-			Vector3(b.z.x, b.z.y, b.z.z));
+	return ::godot::bms_to_godot_basis(rot_deg);
 }
 
 Transform3D MissionObjectPlacer::entity_transform(const Vector3 &position,
@@ -341,15 +342,13 @@ void MissionObjectPlacer::_configure_item_scale(ObjectModel *p_model,
 
 // --- witnessed eligibility ---------------------------------------------------
 
-bool MissionObjectPlacer::item_casts_dynamic_shadow(int item_type,
-		uint32_t p_attrib, uint32_t attrib2) {
-	(void)p_attrib;
+bool MissionObjectPlacer::item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 	return opennova::mission::item_casts_dynamic_shadow(item_type, attrib2);
 }
 
-bool MissionObjectPlacer::item_casts_static_terrain_shadow(int kind,
+bool MissionObjectPlacer::item_casts_static_terrain_shadow(MissionData::EntityKind kind,
 		uint32_t entity_attrib, uint32_t item_attrib, uint32_t item_attrib2) {
-	return opennova::mission::item_casts_static_terrain_shadow(kind,
+	return opennova::mission::item_casts_static_terrain_shadow(static_cast<int>(kind),
 			entity_attrib, item_attrib, item_attrib2);
 }
 
@@ -372,25 +371,71 @@ bool MissionObjectPlacer::_placement_is_mirror_reflected(
 
 // --- placement ---------------------------------------------------------------
 
-Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
+Ref<MissionPlacementStats> MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
+		Node3D *p_parent, const Dictionary &p_options) {
+	std::vector<PlacementRow> rows;
+	if (p_mission.is_null()) {
+		return place_rows(rows, nullptr, p_options);
+	}
+	// The document's own entities, straight off the bms::File in the
+	// placement order (markers, items, buildings, organics).
+	const opennova::bms::File &file = p_mission->native_file();
+	const opennova::mission::EntityKind kinds[] = {
+		opennova::mission::EntityKind::Marker, opennova::mission::EntityKind::Item,
+		opennova::mission::EntityKind::Building, opennova::mission::EntityKind::Organic
+	};
+	for (const opennova::mission::EntityKind kind : kinds) {
+		const std::vector<opennova::bms::Entity> *list = opennova::mission::entities(file, kind);
+		if (list == nullptr) {
+			continue;
+		}
+		for (size_t i = 0; i < list->size(); ++i) {
+			const opennova::bms::Entity &entity = (*list)[i];
+			const opennova::mission::EntityTransform transform =
+					opennova::mission::entity_transform(entity);
+			PlacementRow row;
+			row.kind = static_cast<int>(kind);
+			row.index = static_cast<int>(i);
+			// item_id is the items.def key (bms type_id + 100000).
+			row.item_id = opennova::mission::entity_item_id(entity);
+			row.bms_id = static_cast<int>(entity.id);
+			row.group = static_cast<int>(entity.group_id);
+			row.team = static_cast<int>(entity.team);
+			row.ai_flags = static_cast<uint32_t>(entity.bmsi_attributes);
+			row.position = Vector3(transform.x, transform.y, transform.z);
+			row.rotation_deg = Vector3(transform.pitch, transform.yaw, transform.roll);
+			rows.push_back(row);
+		}
+	}
+	return place_rows(rows, p_parent, p_options);
+}
+
+Ref<MissionPlacementStats> MissionObjectPlacer::place_entities(const Array &p_entities,
+		Node3D *p_parent, const Dictionary &p_options) {
+	std::vector<PlacementRow> rows;
+	rows.reserve(static_cast<size_t>(p_entities.size()));
+	for (int64_t i = 0; i < p_entities.size(); ++i) {
+		const Dictionary entity = p_entities[i];
+		PlacementRow row;
+		row.kind = int(entity.get("kind", -1));
+		row.index = int(entity.get("index", -1));
+		row.item_id = int(entity.get("item_id", 0));
+		row.bms_id = int(entity.get("bms_id", 0));
+		row.group = int(entity.get("group", -1));
+		row.team = int(entity.get("team", 0));
+		row.ai_flags = uint32_t(entity.get("ai_flags", 0));
+		row.position = entity.get("position", Vector3());
+		row.rotation_deg = entity.get("rotation_deg", Vector3());
+		rows.push_back(row);
+	}
+	return place_rows(rows, p_parent, p_options);
+}
+
+Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<PlacementRow> &p_rows,
 		Node3D *p_parent, const Dictionary &p_options) {
 	_check_epoch();
-	Dictionary stats;
-	stats["placed"] = 0;
-	stats["batched"] = 0;
-	stats["animated"] = 0;
-	stats["unresolved"] = 0;
-	stats["markers"] = 0;
-	stats["graphics"] = 0;
-	stats["batches"] = 0;
-	stats["static_bins"] = 0;
-	stats["static_binned_batches"] = 0;
-	stats["static_global_batches"] = 0;
-	stats["static_instances_retained"] = 0;
-	stats["static_lod_populations"] = 0;
-	stats["static_live_populations"] = 0;
-	stats["static_shadow_batches"] = 0;
-	stats["authored_occluder_models"] = 0;
+	Ref<MissionPlacementStats> stats;
+	stats.instantiate();
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
 	static_lod_profiles_.clear();
@@ -399,23 +444,20 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
 	static_terrain_shadow_replacements_.clear();
-	static_user_point_sources_ = Array();
-	static_item_effect_sources_ = Array();
-	static_light_draw_sources_ = Array();
+	static_item_effect_sources_.clear();
+	static_light_draw_sources_.clear();
 	++static_light_draw_source_revision_;
 	static_terrain_shadow_sources_.clear();
 	static_terrain_shadow_source_rows_.clear();
 	static_terrain_shadow_rows_by_bms_.clear();
 	_bump_static_terrain_shadow_source_revision();
-	placed_entity_records_ = Array();
-	if (p_mission.is_null() || p_parent == nullptr || resource_root_.is_null()) {
+	placed_models_ = TypedArray<ObjectModel>();
+	if (p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
 	}
 	_ensure_item_db();
 
-	// Per-stage usec spans returned in the stats (the editor merges them into
-	// its own load timeline; replaces the old GDScript timeline seam).
-	Dictionary spans;
+	// Per-stage usec spans returned in the stats.
 	Time *clock = Time::get_singleton();
 	uint64_t stage_begin = clock->get_ticks_usec();
 
@@ -475,10 +517,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	Array animated;
 	int markers = 0;
 	int unresolved = 0;
-	const Array entities = p_mission->get_all_entities();
-	for (int i = 0; i < entities.size(); ++i) {
-		const Dictionary entity = entities[i];
-		const int kind = int(entity.get("kind", -1));
+	for (const PlacementRow &entity : p_rows) {
+		const int kind = entity.kind;
 		if (!skip_kinds.is_empty() && skip_kinds.has(kind)) {
 			continue;
 		}
@@ -486,15 +526,14 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			++markers;
 			continue;
 		}
-		const int item_id = int(entity.get("item_id", 0));
+		const int item_id = entity.item_id;
 		const String graphic = _graphic_for(item_id);
 		if (graphic.is_empty()) {
 			++unresolved;
 			continue;
 		}
 		const Transform3D xform = _entity_transform_for_item(
-				entity.get("position", Vector3()),
-				entity.get("rotation_deg", Vector3()), item_id);
+				entity.position, entity.rotation_deg, item_id);
 		if (_needs_individual_node(item_id) ||
 				_graphic_needs_live_panm(graphic)) {
 			Dictionary a;
@@ -502,17 +541,17 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			a["item_id"] = item_id;
 			a["xform"] = xform;
 			a["kind"] = kind;
-			a["index"] = int(entity.get("index", -1));
-			a["bms_id"] = int(entity.get("bms_id", 0));
-			a["group"] = int(entity.get("group", -1));
-			a["team"] = int(entity.get("team", -1));
-			a["ai_flags"] = int(entity.get("ai_flags", 0));
-			a["position"] = entity.get("position", Vector3());
+			a["index"] = entity.index;
+			a["bms_id"] = entity.bms_id;
+			a["group"] = entity.group;
+			a["team"] = entity.team;
+			a["ai_flags"] = static_cast<int>(entity.ai_flags);
+			a["position"] = entity.position;
 			animated.push_back(a);
 			continue;
 		}
 		const bool mirror_reflected = _placement_is_mirror_reflected(
-				uint32_t(entity.get("ai_flags", 0)), item_id);
+				entity.ai_flags, item_id);
 		const String group_key = static_group_key(graphic, mirror_reflected);
 		StaticGroup *group = static_groups.getptr(group_key);
 		if (group == nullptr) {
@@ -523,27 +562,26 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			static_order.push_back(group_key);
 		}
 		group->xforms.push_back(xform);
-		group->shadow_slots.push_back(item_casts_static_terrain_shadow(kind,
-				uint32_t(entity.get("ai_flags", 0)),
+		group->shadow_slots.push_back(item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
+				entity.ai_flags,
 				item_db_->get_attrib(item_id), item_db_->get_attrib2(item_id)));
-		group->bms_ids.push_back(int(entity.get("bms_id", 0)));
+		group->bms_ids.push_back(entity.bms_id);
 		group->item_ids.push_back(item_id);
 		group->kinds.push_back(kind);
-		group->entity_indices.push_back(int(entity.get("index", -1)));
-		group->teams.push_back(int(entity.get("team", 0)));
-		group->entity_attribs.push_back(
-				uint32_t(entity.get("ai_flags", 0)));
+		group->entity_indices.push_back(entity.index);
+		group->teams.push_back(entity.team);
+		group->entity_attribs.push_back(entity.ai_flags);
 		group->attrib2_values.push_back(item_db_->get_attrib2(item_id));
 		Dictionary source;
 		source["kind"] = kind;
-		source["entity_index"] = int(entity.get("index", -1));
-		source["bms_id"] = int(entity.get("bms_id", 0));
+		source["entity_index"] = entity.index;
+		source["bms_id"] = entity.bms_id;
 		source["item_id"] = item_id;
 		source["world_transform"] = xform;
 		group->effect_sources.push_back(source);
 	}
-	stats["markers"] = markers;
-	spans["bucket_entities"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_markers(markers);
+	stats->set_span_bucket_entities_usec(clock->get_ticks_usec() - stage_begin);
 	stage_begin = clock->get_ticks_usec();
 
 	// Opaque and alpha-tested statics are divided into the same 512-world-unit
@@ -618,11 +656,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 					i < group.item_ids.size() ? group.item_ids[i] : 0,
 					graphic, group.xforms[i], shadow_data);
 		}
-		Array xform_array;
-		for (const Transform3D &xform : group.xforms) {
-			xform_array.push_back(xform);
-		}
-		_record_static_user_point_group(graphic, xform_array);
 		Vector<int> effect_source_rows;
 		effect_source_rows.resize(instance_count);
 		for (int i = 0; i < effect_source_rows.size(); ++i) {
@@ -735,12 +768,12 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			global_slots.write[i] = i;
 		}
 
-		const auto tag_static_shadow_source = [&](MultiMeshInstance3D *p_source,
+		const auto tag_static_shadow_source = [&](StaticPopulationInstance *p_source,
 				const Vector<int> &p_slots) {
-			Array shadow_bms_ids;
-			Array shadow_item_ids;
-			Array shadow_attrib2;
-			Array shadow_slots;
+			PackedInt32Array shadow_bms_ids;
+			PackedInt32Array shadow_item_ids;
+			PackedInt64Array shadow_attrib2;
+			PackedByteArray shadow_slots;
 			for (const int slot : p_slots) {
 				shadow_bms_ids.push_back(
 						slot < group.bms_ids.size() ? group.bms_ids[slot] : 0);
@@ -749,15 +782,17 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				shadow_attrib2.push_back(slot < group.attrib2_values.size()
 								? int64_t(group.attrib2_values[slot])
 								: int64_t(0));
-				shadow_slots.push_back(slot < group.shadow_slots.size() &&
-						group.shadow_slots[slot]);
+				shadow_slots.push_back(
+						slot < group.shadow_slots.size() && group.shadow_slots[slot]
+								? 1
+								: 0);
 			}
-			p_source->set_meta("static_shadow_bms_ids", shadow_bms_ids);
-			p_source->set_meta("static_shadow_item_ids", shadow_item_ids);
-			p_source->set_meta("static_shadow_attrib2", shadow_attrib2);
-			p_source->set_meta("static_shadow_slots", shadow_slots);
-			p_source->set_meta("static_shadow_graphic", graphic);
-			p_source->set_meta("static_shadow_batch_key", group_key);
+			p_source->set_shadow_tagged(true);
+			p_source->set_slot_bms_ids(shadow_bms_ids);
+			p_source->set_slot_item_ids(shadow_item_ids);
+			p_source->set_slot_attrib2(shadow_attrib2);
+			p_source->set_slot_casts_shadow(shadow_slots);
+			p_source->set_graphic(graphic);
 		};
 		// One population over a slot list: capacity = the slot count, one
 		// binding per slot joining its retained instance (so a level switch
@@ -808,15 +843,14 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		// Retail draws every selected entity; hidden here means the population
 		// has no live row this frame and the cull can skip it outright.
 		const auto attach_population = [&](int p_population,
-				MultiMeshInstance3D *p_mmi, bool p_shadow_tagged) {
+				StaticPopulationInstance *p_mmi, bool p_shadow_tagged) {
 			StaticPopulation &population = static_populations_.write[p_population];
 			population.instance_node = p_mmi->get_instance_id();
 			population.shadow_tagged = p_shadow_tagged;
 			static_population_by_node_[population.instance_node] = p_population;
 			p_mmi->set_visible(population.live > 0);
 			if (p_shadow_tagged) {
-				p_mmi->set_meta("static_shadow_rows",
-						_static_population_row_slots(population));
+				p_mmi->set_row_slots(_static_population_row_slots(population));
 			}
 		};
 
@@ -858,7 +892,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			const int population_index =
 					build_population(mm, p_slots, p_batch, false);
 
-			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+			StaticPopulationInstance *mmi = memnew(StaticPopulationInstance);
 			mmi->set_multimesh(mm);
 			if (has_population_bounds) {
 				mmi->set_custom_aabb(population_bounds);
@@ -876,12 +910,13 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (p_batch.material.is_valid()) {
 				mmi->set_material_override(p_batch.material);
 			}
-			mmi->set_meta("static_batch_population",
-					p_global ? String("global") : String("bin"));
-			mmi->set_meta("static_batch_lod", p_batch.lod_index);
+			mmi->set_population_kind(p_global
+							? StaticPopulationInstance::POPULATION_GLOBAL
+							: StaticPopulationInstance::POPULATION_BIN);
+			mmi->set_lod_index(p_batch.lod_index);
 			if (!p_global) {
-				mmi->set_meta("static_batch_bin_x", p_bin_x);
-				mmi->set_meta("static_batch_bin_z", p_bin_z);
+				mmi->set_bin_x(p_bin_x);
+				mmi->set_bin_z(p_bin_z);
 			}
 			const bool legacy_name = p_global || bins.size() == 1;
 			mmi->set_name(legacy_name ? vformat("Batch_%s%s_%d", graphic,
@@ -935,7 +970,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			}
 			const int shadow_population =
 					build_population(shadow_mm, p_slots, p_batch, true);
-			MultiMeshInstance3D *shadow_mmi = memnew(MultiMeshInstance3D);
+			StaticPopulationInstance *shadow_mmi = memnew(StaticPopulationInstance);
 			shadow_mmi->set_multimesh(shadow_mm);
 			if (has_shadow_bounds) {
 				shadow_mmi->set_custom_aabb(shadow_bounds);
@@ -946,12 +981,13 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (p_batch.material.is_valid()) {
 				shadow_mmi->set_material_override(p_batch.material);
 			}
-			shadow_mmi->set_meta("static_batch_population",
-					p_global ? String("global") : String("bin"));
-			shadow_mmi->set_meta("static_batch_lod", p_batch.lod_index);
+			shadow_mmi->set_population_kind(p_global
+							? StaticPopulationInstance::POPULATION_GLOBAL
+							: StaticPopulationInstance::POPULATION_BIN);
+			shadow_mmi->set_lod_index(p_batch.lod_index);
 			if (!p_global) {
-				shadow_mmi->set_meta("static_batch_bin_x", p_bin_x);
-				shadow_mmi->set_meta("static_batch_bin_z", p_bin_z);
+				shadow_mmi->set_bin_x(p_bin_x);
+				shadow_mmi->set_bin_z(p_bin_z);
 			}
 			shadow_mmi->set_name(legacy_name
 							? vformat("StaticShadow_%s%s_%d", graphic,
@@ -976,7 +1012,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		batched += instance_count;
 		placed += instance_count;
 	}
-	spans["static_batches"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_span_static_batches_usec(clock->get_ticks_usec() - stage_begin);
 	stage_begin = clock->get_ticks_usec();
 
 	// Animated: an individual ObjectModel per entity.
@@ -998,6 +1034,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		ObjectModel *model = memnew(ObjectModel);
 		model->set_panm_clock(panm_clock_);
 		model->set_name(vformat("Anim_%s_%d", graphic, animated_count));
+		model->set_graphic_name(graphic);
 		model->set_mirror_reflected(_placement_is_mirror_reflected(
 				uint32_t(a.get("ai_flags", 0)), item_id));
 		_configure_item_scale(model, item_id);
@@ -1030,7 +1067,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		if (model->get_authored_occluder_count() > 0) {
 			++authored_occluder_models;
 		}
-		if (item_casts_static_terrain_shadow(kind,
+		if (item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
 					uint32_t(a.get("ai_flags", 0)),
 					item_db_->get_attrib(item_id),
 					item_db_->get_attrib2(item_id))) {
@@ -1040,21 +1077,19 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		// Tag identity on the node in BOTH runtime + editor so EntityIndex
 		// can resolve SSN/group/zone event-action targets back to this live
 		// model.
-		Dictionary ref;
-		ref["kind"] = kind;
-		ref["index"] = int(a.get("index", -1));
-		ref["bms_id"] = int(a.get("bms_id", 0));
-		ref["group"] = int(a.get("group", -1));
-		ref["team"] = int(a.get("team", -1));
-		ref["position"] = a.get("position", Vector3());
-		ref["item_id"] = item_id;
-		ref["graphic"] = graphic;
-		ref["attrib2"] = int64_t(item_db_->get_attrib2(item_id));
-		model->set_meta("entity_ref", ref);
-		Dictionary record;
-		record["model"] = model;
-		record["ref"] = ref;
-		placed_entity_records_.push_back(record);
+		Ref<EntityRef> ref;
+		ref.instantiate();
+		ref->set_kind(kind);
+		ref->set_index(int(a.get("index", -1)));
+		ref->set_bms_id(int(a.get("bms_id", 0)));
+		ref->set_group(int(a.get("group", -1)));
+		ref->set_team(int(a.get("team", -1)));
+		ref->set_position(a.get("position", Vector3()));
+		ref->set_item_id(item_id);
+		ref->set_graphic(graphic);
+		ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
+		model->set_entity_ref(ref);
+		placed_models_.push_back(model);
 		_record_static_terrain_shadow_source(kind,
 				int(a.get("index", -1)), int(a.get("bms_id", 0)),
 				int(a.get("team", 0)),
@@ -1063,25 +1098,24 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		++animated_count;
 		++placed;
 	}
-	spans["animated_models"] = clock->get_ticks_usec() - stage_begin;
+	stats->set_span_animated_models_usec(clock->get_ticks_usec() - stage_begin);
 
-	stats["placed"] = placed;
-	stats["batched"] = batched;
-	stats["animated"] = animated_count;
-	stats["unresolved"] = unresolved;
-	stats["graphics"] = graphics;
-	stats["batches"] = batch_count;
-	stats["static_bins"] = occupied_static_bins.size();
-	stats["static_binned_batches"] = binned_batch_count;
-	stats["static_global_batches"] = global_batch_count;
-	stats["static_instances_retained"] = static_lod_instances_.size();
-	stats["static_lod_populations"] = lod_population_count;
-	stats["static_live_populations"] = get_static_live_population_count();
+	stats->set_placed(placed);
+	stats->set_batched(batched);
+	stats->set_animated(animated_count);
+	stats->set_unresolved(unresolved);
+	stats->set_graphics(graphics);
+	stats->set_batches(batch_count);
+	stats->set_static_bins(static_cast<int>(occupied_static_bins.size()));
+	stats->set_static_binned_batches(binned_batch_count);
+	stats->set_static_global_batches(global_batch_count);
+	stats->set_static_instances_retained(static_cast<int>(static_lod_instances_.size()));
+	stats->set_static_lod_populations(lod_population_count);
+	stats->set_static_live_populations(get_static_live_population_count());
 	// The shadow-only twins a mixed-caster population emits beside its visible
 	// batch: one more geometry instance (and instance-uniform allocation) each.
-	stats["static_shadow_batches"] = shadow_batch_count;
-	stats["authored_occluder_models"] = authored_occluder_models;
-	stats["spans"] = spans;
+	stats->set_static_shadow_batches(shadow_batch_count);
+	stats->set_authored_occluder_models(authored_occluder_models);
 	return stats;
 }
 
@@ -1101,6 +1135,7 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	model->set_panm_clock(panm_clock_);
 	model->set_authored_lod_enabled(true);
 	model->set_name(vformat("PlayerAvatar_%s", graphic));
+	model->set_graphic_name(graphic);
 	// Wire-streamed and avatar builds share this chain: vehicles reflect in
 	// the water mirror, persons and everything else never do (env #30).
 	model->set_mirror_reflected(_item_is_mirror_reflected(p_item_id));
@@ -1118,24 +1153,15 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 
 int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 	_ensure_item_db();
-	if (p_runtime_type_id == PLAYER_RUNTIME_TYPE_ID && item_db_.is_valid() &&
-			item_db_->has_item(PLAYER_VISUAL_ITEM_ID)) {
-		return PLAYER_VISUAL_ITEM_ID;
+	if (item_db_.is_null()) {
+		return p_runtime_type_id;
 	}
-	if (item_db_.is_valid()) {
-		if (item_db_->has_item(p_runtime_type_id)) {
-			return p_runtime_type_id;
-		}
-		if (p_runtime_type_id > 0 &&
-				p_runtime_type_id < MissionData::ITEM_ID_OFFSET) {
-			const int authored_item_id =
-					p_runtime_type_id + MissionData::ITEM_ID_OFFSET;
-			if (item_db_->has_item(authored_item_id)) {
-				return authored_item_id;
-			}
-		}
-	}
-	return p_runtime_type_id;
+	static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
+	static_assert(PLAYER_RUNTIME_TYPE_ID == opennova::mission::kPlayerRuntimeTypeId);
+	static_assert(PLAYER_VISUAL_ITEM_ID == opennova::mission::kPlayerVisualItemId);
+	const ItemDatabase *db = item_db_.ptr();
+	return opennova::mission::resolve_visual_item_id(p_runtime_type_id,
+			[db](int p_id) { return db->has_item(p_id); });
 }
 
 // The player's visual = the combo its packed character id resolves to: head +
@@ -1150,58 +1176,55 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
 // @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the
 // reimpl has no registry validation yet (D-NET-137) and shows the item model.
-Dictionary MissionObjectPlacer::resolve_player_visual_spec(
+Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
 	_ensure_item_db();
 	_ensure_avatar_db();
+	Ref<PlayerVisualSpec> out;
+	out.instantiate();
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	out->set_item_id(item_id);
 	if (avatar_db_.is_valid()) {
-		const Dictionary resolved = avatar_db_->resolve_character_id(
+		const Ref<AvatarComboRow> resolved = avatar_db_->resolve_character_id(
 				p_character_id);
-		if (!resolved.is_empty()) {
-			const Dictionary head = resolved.get("head", Dictionary());
-			const Dictionary body = resolved.get("body", Dictionary());
-			const Dictionary arms = resolved.get("arms", Dictionary());
-			Dictionary out;
-			out["character_id"] = p_character_id & 0xffff;
-			out["item_id"] = resolve_player_visual_item_id(
-					p_runtime_type_id);
-			out["head"] = head.get("graphic", String());
-			out["head_camo"] = head.get("camo", Array());
-			out["body"] = body.get("graphic", String());
-			out["body_camo"] = body.get("camo", Array());
-			out["arms"] = arms.get("graphic", String());
-			out["arms_camo"] = arms.get("camo", Array());
-			out["avatar"] = head.get("voice", 1);
-			out["sex"] = head.get("sex", 0);
-			out["nationality_index"] = resolved.get(
-					"nationality_index", -1);
-			out["division_index"] = resolved.get("division_index", -1);
-			out["combo_index"] = resolved.get("combo_index", -1);
-			out["fallback"] = false;
+		if (resolved.is_valid()) {
+			const Ref<AvatarPartRow> head = resolved->get_head();
+			const Ref<AvatarPartRow> body = resolved->get_body();
+			const Ref<AvatarPartRow> arms = resolved->get_arms();
+			out->set_character_id(p_character_id & 0xffff);
+			out->set_head(head->get_graphic());
+			out->set_head_camo(head->get_camo());
+			out->set_body(body->get_graphic());
+			out->set_body_camo(body->get_camo());
+			if (arms.is_valid()) {
+				out->set_arms(arms->get_graphic());
+				out->set_arms_camo(arms->get_camo());
+			}
+			out->set_avatar(head->get_voice());
+			out->set_sex(head->get_sex());
+			out->set_nationality_index(resolved->get_nationality_index());
+			out->set_division_index(resolved->get_division_index());
+			out->set_combo_index(resolved->get_combo_index());
+			out->set_fallback(false);
 			return out;
 		}
 	}
-	Dictionary out;
-	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
-	out["character_id"] = p_character_id;
-	out["item_id"] = item_id;
-	out["head"] = String();
-	out["body"] = item_db_.is_valid() ? item_db_->get_graphic(item_id) : String();
-	out["arms"] = String();
-	out["fallback"] = true;
+	out->set_character_id(p_character_id);
+	out->set_body(item_db_.is_valid() ? item_db_->get_graphic(item_id) : String());
+	out->set_fallback(true);
 	return out;
 }
 
 ObjectModel *MissionObjectPlacer::build_player_animated_model(
 		int p_runtime_type_id, Node3D *p_parent, int p_character_id) {
 	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
-	const Dictionary spec = resolve_player_visual_spec(
+	const Ref<PlayerVisualSpec> spec = resolve_player_visual_spec(
 			p_runtime_type_id, p_character_id);
-	if (bool(spec.get("fallback", true))) {
+	if (spec->get_fallback()) {
 		return build_animated_model(item_id, p_parent);
 	}
-	const String body_graphic = spec.get("body", String());
-	const String head_graphic = spec.get("head", String());
+	const String body_graphic = spec->get_body();
+	const String head_graphic = spec->get_head();
 	// Retail composes head + body only when BOTH blip model handles are
 	// nonzero; either missing falls to the entity's own item model.
 	// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
@@ -1220,12 +1243,11 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	// Same node naming as the item-model path (PlayerAvatar_<graphic>): the
 	// composed body IS the player's avatar node; the head rides under it.
 	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
-	body->set_meta("avatar_part", "body");
-	body->set_meta("character_id", p_character_id & 0xffff);
-	body->set_meta("player_visual_spec", spec);
+	body->set_avatar_part(ObjectModel::AVATAR_PART_BODY);
+	body->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
 	// @0x5c800f, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Array()),
+	AvatarDatabase::apply_part_camo(body, spec->get_body_camo(),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_scale(body, item_id);
@@ -1245,11 +1267,11 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	}
 	head->set_name(vformat("PlayerAvatarHead_%s",
 			head_graphic.get_file().get_basename()));
-	head->set_meta("avatar_part", "head");
-	head->set_meta("character_id", p_character_id & 0xffff);
+	head->set_avatar_part(ObjectModel::AVATAR_PART_HEAD);
+	head->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
 	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
+	AvatarDatabase::apply_part_camo(head, spec->get_head_camo(),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_shadow(head, item_id);
@@ -1266,8 +1288,7 @@ ObjectModel *MissionObjectPlacer::avatar_head_part(ObjectModel *p_body) {
 	}
 	for (int i = 0; i < p_body->get_child_count(); ++i) {
 		ObjectModel *part = Object::cast_to<ObjectModel>(p_body->get_child(i));
-		if (part != nullptr && part->has_meta("avatar_part") &&
-				String(part->get_meta("avatar_part")) == "head") {
+		if (part != nullptr && part->get_avatar_part() == ObjectModel::AVATAR_PART_HEAD) {
 			return part;
 		}
 	}
@@ -1289,6 +1310,7 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 	model->set_panm_clock(panm_clock_);
 	model->set_authored_lod_enabled(p_retain_authored_lods);
 	model->set_name(vformat("Viewmodel_%s", p_graphic));
+	model->set_graphic_name(p_graphic);
 	p_parent->add_child(model);
 	if (!p_adm_name.is_empty()) {
 		// The ADM names the CLIP SET; the rig table belongs to the equipped
@@ -1370,19 +1392,16 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (item_db_.is_null()) {
 		return false;
 	}
+	// The rule is the engine's (placement_traits.h); the occlusion-record probe
+	// is an asset-cache leg, so it runs only when the cheaper tests said no.
 	const int item_type = item_db_->get_item_type(p_item_id);
-	if (item_type == ItemDatabase::TYPE_PERSON) {
+    if (opennova::mission::uses_submodel_renderer(
+            item_db_->get_render_function(p_item_id).utf8().get_data())) return true;
+	const bool has_anim_def = !item_db_->get_anim_def(p_item_id).is_empty();
+	if (opennova::mission::needs_individual_node(item_type, item_db_->get_attrib2(p_item_id),
+				has_anim_def, false)) {
 		return true;
 	}
-	if (item_casts_dynamic_shadow(item_type, item_db_->get_attrib(p_item_id),
-				item_db_->get_attrib2(p_item_id))) {
-		return true;
-	}
-	if (!item_db_->get_anim_def(p_item_id).is_empty()) {
-		return true;
-	}
-	// Multiple authored RLODs are no reason to leave the batch: the retained
-	// populations select the level per instance (update_static_lods).
 	return _has_occlusion_records(p_item_id);
 }
 
@@ -1428,9 +1447,11 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	if (p_model == nullptr || item_db_.is_null()) {
 		return;
 	}
+    p_model->set_geometry_visible(!opennova::mission::uses_submodel_renderer(
+            item_db_->get_render_function(p_item_id).utf8().get_data()));
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
-			item_db_->get_attrib(p_item_id), item_db_->get_attrib2(p_item_id)));
+			item_db_->get_attrib2(p_item_id)));
 	// The render-slot ground-shadow profile: person-type casters steepen the
 	// drape's depth-clip plane 4x (the shadowztex stage, not the silhouette
 	// projection), and vehicles may author an items.def `shadow` blob decal —
@@ -1900,15 +1921,14 @@ void MissionObjectPlacer::_flush_static_population_changes(
 			continue;
 		}
 		const StaticPopulation &population = static_populations_[population_index];
-		MultiMeshInstance3D *node = Object::cast_to<MultiMeshInstance3D>(
+		StaticPopulationInstance *node = Object::cast_to<StaticPopulationInstance>(
 				ObjectDB::get_instance(population.instance_node));
 		if (node == nullptr) {
 			continue;
 		}
 		node->set_visible(population.live > 0);
 		if (population.shadow_tagged) {
-			node->set_meta("static_shadow_rows",
-					_static_population_row_slots(population));
+			node->set_row_slots(_static_population_row_slots(population));
 		}
 		if (!population.shadow_only) {
 			FrameFx::invalidate_q3_instances(node);

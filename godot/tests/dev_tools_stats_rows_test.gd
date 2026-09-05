@@ -89,15 +89,3 @@ func test_fed_reading_is_readable_by_row_id() -> void:
 	dev_tools.feed_stats_window(10, sums, peaks, samples)
 	assert_eq(dev_tools.stats_row_info("sim"), "1.0 t/f | 12 entities | host")
 	assert_eq(dev_tools.stats_row_info("net"), "3 peers")
-
-
-func test_ai_view_seam_exists_headless() -> void:
-	# The AI window's shell seams: the overlay-state provider setter and the
-	# toggle-request signal exist headless (no ImGui context needed); the
-	# release flavour keeps the setter as a no-op and never emits.
-	var dev_tools: DevTools = add_child_autofree(DevTools.new())
-	assert_true(dev_tools.has_signal("ai_view_request"),
-			"the toggle drain crosses as one bound signal")
-	dev_tools.set_ai_view_state_provider(func() -> Dictionary: return {})
-	dev_tools.set_ai_view_state_provider(Callable())
-	pass_test("the provider setter accepts and clears a Callable")

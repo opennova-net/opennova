@@ -1,11 +1,11 @@
-#ifndef PFF_INTERNAL_H
-#define PFF_INTERNAL_H
+#pragma once
 
 /* engine/formats/pff-internal helpers shared between the reader (pff.cpp) and writer (pff_writer.cpp).
-   Not part of the public API (pff/pff.h). Both translation units compile as C++, so this needs
-   no extern "C". */
+   Not part of the public API (pff/pff.h); lives in namespace opennova::pff beside it. */
 
 #include <stddef.h>
+
+namespace opennova::pff {
 
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
    strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
@@ -14,4 +14,5 @@
    agrees with what the reader expects. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
 
-#endif /* PFF_INTERNAL_H */
+
+} // namespace opennova::pff

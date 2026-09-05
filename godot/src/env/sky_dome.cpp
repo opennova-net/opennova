@@ -1,6 +1,6 @@
 #include "env/sky_dome.h"
 
-#include "env/env_axes.h"
+#include "util/axes.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -61,7 +61,7 @@ void SkyDome::_bind_methods() {
 			&SkyDome::get_sky_material);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&SkyDome::get_mesh_instance);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SkyDome::advance_frame);
@@ -130,7 +130,6 @@ Weather *SkyDome::_weather_node() {
 }
 
 void SkyDome::_ready() {
-	set_process(true);
 	build();
 }
 
@@ -172,10 +171,6 @@ void SkyDome::build() {
 	mesh_instance_->set_mesh(mesh);
 	add_child(mesh_instance_);
 	built_ = true;
-}
-
-void SkyDome::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void SkyDome::advance_frame(double p_delta) {
@@ -228,7 +223,7 @@ void SkyDome::advance_frame(double p_delta) {
 		}
 		// The dome mesh is the engine layout drawn identity into the Godot
 		// world, so its shader dots GODOT-world sun/light vectors: route the
-		// render-float tuples through the env_axes.h swap (2026-08-20 — the
+		// render-float tuples through the util/axes.h swap (2026-08-20 — the
 		// identity mapping put the sun-proximity highlight 90 degrees off in
 		// yaw, the 03tr-sun-sky dome half).
 		sky_material_->set_shader_parameter("u_sun_dir",

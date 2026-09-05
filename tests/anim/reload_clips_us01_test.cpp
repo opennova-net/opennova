@@ -15,7 +15,7 @@
 #include <runtime/anim/aim_overlay.h>
 #include <runtime/simassets/adm_skeletal_clips.h>
 #include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_pose_provider.h>
 #include <runtime/simassets/sim_model_cache.h>
 #include <runtime/world/infantry.h>
 
@@ -24,6 +24,9 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+using namespace opennova::def;
+using namespace opennova::threedi;
 
 namespace {
 

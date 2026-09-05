@@ -125,6 +125,11 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &Terrain::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &Terrain::get_debug_mode);
+	BIND_ENUM_CONSTANT(DEBUG_MODE_NORMAL);
+	BIND_ENUM_CONSTANT(DEBUG_MODE_LOD_COLORS);
+	BIND_ENUM_CONSTANT(DEBUG_MODE_SECTOR_COLORS);
+	BIND_ENUM_CONSTANT(DEBUG_MODE_NORMALS);
+	BIND_ENUM_CONSTANT(DEBUG_MODE_HEIGHTMAP);
 
 	ADD_GROUP("Debug", "debug_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM,
@@ -476,6 +481,9 @@ void Terrain::render_frame() {
 	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
 	// get_light_direction() serves, which would swap x/z a second time.
 	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
+	// The unseeded 45-degree default in GODOT axes; EnvironmentState's
+	// kDefaultSunDirRender is the same numbers in the render basis, which after
+	// the x/z swap points up+east while this points up+south (open grill item).
 	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
 	if (cached_env_node && cached_env_node->is_loaded()) {
 		page_tile_tint = cached_env_node->get_tile_overlay_tint();
@@ -563,7 +571,7 @@ void Terrain::render_frame() {
 		patch_uniforms_stamped[i] = true;
 
 		// Per-instance debug data (only set when a debug mode is active)
-		if (debug_mode > 0) {
+		if (debug_mode != DEBUG_MODE_NORMAL) {
 			rs->instance_geometry_set_shader_parameter(patch_instances[i],
 				"u_instance_lod", static_cast<float>(draw.lod_family));
 			rs->instance_geometry_set_shader_parameter(patch_instances[i],
@@ -592,7 +600,7 @@ void Terrain::render_frame() {
 
 	// Update shader parameters on the single shared material
 	if (terrain_material.is_valid()) {
-		terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
+		terrain_material->set_shader_parameter("u_debug_mode", static_cast<int>(debug_mode));
 	}
 
 	// The below-water modulation inputs (D-TERRAIN-8,
@@ -1232,5 +1240,5 @@ bool Terrain::get_debug_force_leaves() const { return traversal_config.force_lea
 void Terrain::set_debug_force_lod0(bool v) { traversal_config.force_lod0 = v; }
 bool Terrain::get_debug_force_lod0() const { return traversal_config.force_lod0; }
 
-void Terrain::set_debug_mode(int mode) { debug_mode = mode; }
-int Terrain::get_debug_mode() const { return debug_mode; }
+void Terrain::set_debug_mode(DebugMode mode) { debug_mode = mode; }
+Terrain::DebugMode Terrain::get_debug_mode() const { return debug_mode; }

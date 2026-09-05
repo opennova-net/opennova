@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Vocabulary conventions the other gates do not see (CLAUDE.md, ADR 0040).
 
-Three rules, each a tree-wide regex the tree is clean against today, kept so a
-regression fails CI instead of waiting for the next hygiene round:
+One enforced rule plus one advisory count, each a tree-wide regex the tree is
+clean against today, kept so a regression fails CI instead of waiting for the
+next hygiene round (ADR 0043 retired the em-dash and checked-box prose rules:
+they are review concerns, not architecture):
 
   nova-prefix   no `nova_` / `Nova<Upper>` prefix on a file name or an
                 identifier in the code trees (ADR 0040 d1: files, identifiers,
@@ -15,14 +17,6 @@ regression fails CI instead of waiting for the next hygiene round:
                 contract keys still carry it, pinned by validation JSON and
                 provenance tests, so the count is reported for the burn-down
                 and enforced once it reaches zero.
-  em-dash       no U+2014 in public-facing copy: README.md, GOALS.md,
-                launcher/README.md, and the user-visible strings of the web
-                portal (web/src template text and string literals; comments
-                and a bare em-dash placeholder glyph do not count).
-  checked-box   no `- [x]` / `* [x]` row in a tracked Markdown file: a
-                completed entry is deleted, not ticked (the self-declared
-                historical records are exempt: plan/**, docs/maturity-program.md,
-                docs/adr/**).
 
 Modes:
   (default)     summary counts; exit 0 (report mode)
@@ -52,19 +46,6 @@ NOVA_MACRO = re.compile(r"(?<![A-Za-z0-9_])NOVA_[A-Z]")
 # Every survivor: the proper nouns, and the external project's path.
 NOVA_OK = re.compile(r"NovaWorld|NOVAWORLD|Novaworld|NovaLogic|NOVALOGIC|opennova|OpenNova|OPENNOVA"
                      r"|novacrypto|NovaCrypto|onnw/controllers/nova_world")
-
-PUBLIC_COPY = ("README.md", "GOALS.md", "launcher/README.md")
-WEB_PREFIX = "web/src/"
-WEB_SUFFIXES = (".vue", ".ts")
-EM_DASH = "—"
-# A comment line (script, template or style) carries no user-visible text.
-COMMENT_LINE = re.compile(r"^\s*(//|/\*|\*|<!--|#)")
-# `'—'` / `"—"` alone is a placeholder glyph for an empty cell, not copy.
-PLACEHOLDER_GLYPH = re.compile(r"""(['"])—\1""")
-
-CHECKED_BOX = re.compile(r"^\s*[-*]\s+\[[xX]\]")
-HISTORICAL_RECORDS = ("plan/", "docs/maturity-program.md", "docs/adr/")
-
 
 def tracked() -> list[str]:
     out = subprocess.run(["git", "ls-files"], cwd=REPO, check=True, capture_output=True,
@@ -102,44 +83,6 @@ def check_nova_prefix(files: list[str]) -> tuple[list[str], list[str]]:
     return hits, macros
 
 
-def check_em_dash(files: list[str]) -> list[str]:
-    hits: list[str] = []
-    for rel in files:
-        public = rel in PUBLIC_COPY
-        web = rel.startswith(WEB_PREFIX) and rel.endswith(WEB_SUFFIXES)
-        if not (public or web):
-            continue
-        in_block = False
-        for lineno, line in enumerate(read(rel).splitlines(), 1):
-            if web:
-                # Block comments (<!-- --> in templates, /* */ in script) span
-                # lines; a line inside one is not copy.
-                was_in_block = in_block
-                if "<!--" in line or "/*" in line:
-                    in_block = True
-                if "-->" in line or "*/" in line:
-                    in_block = False
-                if was_in_block or "<!--" in line or "/*" in line:
-                    continue
-            if EM_DASH not in line:
-                continue
-            if web and (COMMENT_LINE.match(line) or PLACEHOLDER_GLYPH.sub("", line).find(EM_DASH) < 0):
-                continue
-            hits.append(f"{rel}:{lineno}: {line.strip()[:100]}")
-    return hits
-
-
-def check_checked_box(files: list[str]) -> list[str]:
-    hits: list[str] = []
-    for rel in files:
-        if not rel.endswith(".md") or rel.startswith(HISTORICAL_RECORDS) or "third_party/" in rel:
-            continue
-        for lineno, line in enumerate(read(rel).splitlines(), 1):
-            if CHECKED_BOX.match(line):
-                hits.append(f"{rel}:{lineno}: {line.strip()[:100]}")
-    return hits
-
-
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__,
@@ -152,8 +95,6 @@ def main() -> int:
     nova_hits, nova_macros = check_nova_prefix(files)
     results = {
         "nova-prefix": nova_hits,
-        "em-dash": check_em_dash(files),
-        "checked-box": check_checked_box(files),
     }
     total = sum(len(v) for v in results.values())
     print(f"[conventions] {len(files)} tracked file(s): "
@@ -167,8 +108,7 @@ def main() -> int:
         for hit in nova_macros:
             print(f"[conventions][nova-macro][advisory] {hit}")
     if total and args.enforce:
-        print("[conventions] FAIL: no Nova/nova_ prefix (ADR 0040), no em dashes in public copy, "
-              "and no checked-off checklist rows (CLAUDE.md).")
+        print("[conventions] FAIL: no Nova/nova_ prefix on a file name or identifier (ADR 0040).")
         return 1
     return 0
 

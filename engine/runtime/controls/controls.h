@@ -69,6 +69,16 @@ struct ActionDef {
   // @ 0x55c0c0; KeyBinding_BuildFilteredTable @ 0x54c2b0;
   // UI_BuildKeyBindingLoadoutTable @ 0x559e50].
   uint32_t flags;
+  // The slot-1 modifier VK the catalog defaults carry (entry +24; the slot-2
+  // word at +26 is zero on every row): 17 = VK_CONTROL on seat1..seat10,
+  // ScopeZeroInc, nvggainup/down, gtalk, sqtalk, respawn, command2 and
+  // hudcolor. The keyboard dispatcher's first pass matches only rows whose
+  // modifier key is held; modifier-less rows fire from its fallback pass, so
+  // Ctrl+1 reaches seat1 while a bare 1 reaches Knife
+  // [orig: Input_ProcessKeyboardEvents @0x49d35b..0x49d3a7 (modifier pass),
+  //  @0x49d3ba..0x49d488 (fallback); seat1's row @0x8160D8 +24 = 0x11].
+  // Rows that omit the field aggregate-initialize it to 0.
+  int default_mod = 0;
 };
 
 // The full static catalog (pointer + element count).
@@ -82,6 +92,21 @@ const ActionDef *catalog(std::size_t *out_count);
 //  Player_CycleWeaponSlot @0x4dfe70]
 inline constexpr int kWeaponCategoryFirstRow = 28;
 inline constexpr int kWeaponCategoryCount = 9;
+// The nine categories by the action id they fire (action - 200), in the
+// catalog's row order [orig: the 200..210 cases @0x4e1144].
+enum class WeaponCategory : int {
+  kKnife = 1,
+  kSecondary = 2,
+  kPrimary = 3,
+  kFlashbang = 4,
+  kFragGrenade = 5,
+  kSmokeGrenade = 6,
+  kAccessory = 7,
+  kDetonator = 8,
+  kMedpack = 9,
+};
+static_assert(static_cast<int>(WeaponCategory::kMedpack) == kWeaponCategoryCount,
+              "the category enum spans the catalog's nine rows");
 // The config token of weapon category `index` (0..8), nullptr out of range.
 const char *weapon_category_token(int index);
 

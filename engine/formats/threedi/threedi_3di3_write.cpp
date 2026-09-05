@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::threedi {
+
 #define THREEDI_DEFAULT_VERSION 259u
 
 typedef struct ChunkBuilder ChunkBuilder;
@@ -1698,3 +1700,5 @@ int threedi_3di3_write(const char *path, const Threedi3di3 *model)
     buffer_builder_free(&buf);
     return rc;
 }
+
+} // namespace opennova::threedi

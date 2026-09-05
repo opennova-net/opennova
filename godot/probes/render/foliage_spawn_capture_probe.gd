@@ -126,7 +126,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 	var dispatcher: FoliageDispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
 		mission_name,
-		dispatcher.get_frame_stats() if dispatcher != null else {},
+		dispatcher.get_frame_stats() if dispatcher != null else null,
 		dispatcher.get_total_instances() if dispatcher != null else 0)
 	if not foliage_error.is_empty():
 		_fail(foliage_error)
@@ -209,13 +209,12 @@ func _run_capture(ctx: ProbeContext) -> void:
 
 
 static func runtime_foliage_validation_error(
-		mission_name: String, frame_stats: Dictionary, total_instances: int) -> String:
+		mission_name: String, frame_stats: FoliageFrameStats, total_instances: int) -> String:
 	if mission_name.get_file().get_basename().to_lower() != "00tre":
 		return ""
-	if int(frame_stats.get("runtime_detail_intents", 0)) <= 0:
+	if frame_stats == null or frame_stats.runtime_detail_intents <= 0:
 		return "00TRe exact spawn produced no runtime detail foliage intents"
-	var detail_instances := int(frame_stats.get("detail_high_instances", 0)) \
-		+ int(frame_stats.get("detail_low_instances", 0))
+	var detail_instances := frame_stats.detail_high_instances + frame_stats.detail_low_instances
 	if detail_instances <= 0:
 		return "00TRe exact spawn produced no live detail foliage instances"
 	if total_instances <= 0:
@@ -568,12 +567,12 @@ func _restore_shell() -> void:
 
 func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) -> void:
 	var mission := world.get_loaded_mission()
-	var mission_info: Dictionary = mission.get_info() if mission != null else {}
+	var mission_info: MissionInfo = mission.get_info() if mission != null else null
 	_logv(["[spawn-capture] mission metadata: ", {
 		"environment_ref": mission.get_environment_ref() if mission != null else "",
 		"terrain_ref": mission.get_terrain_ref() if mission != null else "",
-		"start_time_raw_q8_8": int(mission_info.get("start_time", -1)),
-		"minutes_per_day": int(mission_info.get("minutes_per_day", -1)),
+		"start_time_raw_q8_8": mission_info.start_time if mission_info != null else -1,
+		"minutes_per_day": mission_info.minutes_per_day if mission_info != null else -1,
 	}])
 	_logv(["[spawn-capture] environment lighting: ", {
 		"sun_direction": environment.get_sun_direction(),
@@ -622,7 +621,7 @@ func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) 
 	_logv(["[spawn-capture] dispatcher: ", {
 		"present": dispatcher != null,
 		"total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
-		"frame_stats": dispatcher.get_frame_stats() if dispatcher != null else {},
+		"frame_stats": dispatcher.get_frame_stats().to_json_value() if dispatcher != null else {},
 	}])
 	var data := world.get_terrain_data()
 	var terrain: Terrain = world.get_node_or_null("Terrain")

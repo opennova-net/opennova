@@ -72,11 +72,11 @@ void EntitiesWindow::set_directory(EntityDirectorySnapshot snapshot) {
 	apply_pending_selection();
 }
 
-void EntitiesWindow::enqueue_request(const DebugRequest &request) {
+void EntitiesWindow::enqueue_request(const ControlRequest &request) {
 	requests_.push_back(request);
 }
 
-bool EntitiesWindow::take_request(DebugRequest &request) {
+bool EntitiesWindow::take_request(ControlRequest &request) {
 	if (requests_.empty()) {
 		return false;
 	}

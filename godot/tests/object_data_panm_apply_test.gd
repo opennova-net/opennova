@@ -65,17 +65,10 @@ func test_same_time_noise_calls_sample_each_graphic_instance_independently() -> 
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP_NOISE)), OK)
 	assert_gt(data.get_part_anim_count(0), 0,
 			"the fixture carries the LOD0 row turned into a noise probe")
-	var anim := 0
-	var info: Dictionary = data.get_part_anim_info(0, anim)
-	var target_part := int(info.get("transform_as", -1))
-	var part_count := int(data.get_render_lod_info(0).get("part_count", 0))
-	assert_between(target_part, 0, part_count - 1)
-	if target_part < 0 or target_part >= part_count:
-		return
-	var translation: Dictionary = info.get("translation", {})
-	assert_eq(int(translation.get("control", 0)), 0x36,
-			"the fixture authors the translation track as the rand()-backed wave")
-	assert_eq(int(translation.get("end", 0)), 32767)
+	# The row (control 0x36, end 32767, on a live part of the five) is the
+	# minimal_3di_gen ctest's pin ("noise"); the part count is the bone table's.
+	var part_count := data.get_bone_origins(0).size()
+	assert_eq(part_count, 5, "the pump jack's five parts")
 
 	var first_nodes := _nodes(part_count)
 	var second_nodes := _nodes(part_count)

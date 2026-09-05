@@ -18,10 +18,6 @@ extends MenuCompanion
 # retail spectator controls. LAN search/join call the production LanSession
 # discovery seam.
 
-# The mp.mnu screens this companion owns. The shell skips its generic start/mission
-# wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
-const OWNED_SCREENS := ["LAN_MULTI_PLAYER", "MULTI_PLAYER_HOST"]
-
 # The player chose to join the highlighted discovered LAN server. The payload is the
 # typed dial target decoded from the discovery row (JoinTarget.from_lan_row).
 signal lan_join_requested(target: JoinTarget)
@@ -124,16 +120,16 @@ func _refresh_lan_list() -> void:
 	_driver.set_widget_items(id, rows)
 
 
-func _format_server_row(s: Dictionary) -> String:
-	var name := String(s.get("name", "?"))
-	var cur := int(s.get("players", 0))
-	var max_p := int(s.get("max_players", 0))
+func _format_server_row(s: LanServerRow) -> String:
+	var name := s.server_name if not s.server_name.is_empty() else "?"
+	var cur := s.players
+	var max_p := s.max_players
 	# Retail LAN enumeration has not joined the session yet, so map identity is
 	# deliberately absent here; it arrives in the normal post-auth 0x7B stream.
 	# The row format is the witnessed retail pair: with an advertised expansion
 	# variant "%s - %s (%ld/%ld)", else "%s (%ld/%ld)".
 	# [orig: UI_ProcessLANSessionStateMachine @ 0x558de0 sprintf @0x559493/@0x5594b9]
-	var expansion := String(s.get("expansion", "")).strip_edges()
+	var expansion := s.expansion.strip_edges()
 	if expansion.is_empty():
 		return "%s (%d/%d)" % [name, cur, max_p]
 	return "%s - %s (%d/%d)" % [name, expansion, cur, max_p]
@@ -285,7 +281,7 @@ func _on_remove_missions() -> void:
 # the parser-only fallback [orig: get_game_type_abbreviation @0x520fd0].
 func _abbreviation_text(code: int) -> String:
 	var key := String(NetProtocol.game_type_host_abbreviation_key(code))
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if t != null and t.has_string_in_section("GateTypeAbbrev", key):
 		return t.get_string_in_section("GateTypeAbbrev", key)
 	return key
@@ -307,7 +303,7 @@ func _on_host_start() -> void:
 
 
 # Read the host request off the loaded document by control name. Unread controls
-# (rules tab, weapon restrictions, server location) still render. MissionPresentation
+# (rules tab, weapon restrictions, server location) still render. MissionRoot
 # derives the wire game type from the selected mission; the record's Co-op value
 # remains the fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:

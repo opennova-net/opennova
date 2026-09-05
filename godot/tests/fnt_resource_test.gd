@@ -82,7 +82,7 @@ func test_pack_shelf_binding_packs_deterministically() -> void:
 	assert_eq(rects.size(), 6 * 5, "One quintuple per input pair.")
 	if rects.size() != 6 * 5:
 		return
-	# The hand-walked reference layout (mirrors tests/fnt/fnt_pack_test.c).
+	# The hand-walked reference layout (mirrors tests/fnt/fnt_pack_test.cpp).
 	assert_eq(Rect2i(rects[1], rects[2], rects[3], rects[4]), Rect2i(1, 1, 100, 20))
 	assert_eq(Rect2i(rects[6], rects[7], rects[8], rects[9]), Rect2i(102, 1, 100, 30))
 	assert_eq(Rect2i(rects[11], rects[12], rects[13], rects[14]), Rect2i(1, 32, 60, 10))

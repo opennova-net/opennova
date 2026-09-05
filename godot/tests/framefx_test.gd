@@ -15,7 +15,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 101377u) {
+	if (CAMERA_VISIBLE_LAYERS == 232449u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
@@ -116,7 +116,7 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 
 	var camera := Camera3D.new()
 	camera.current = true
-	camera.cull_mask = 101377
+	camera.cull_mask = 232449
 	camera.position = Vector3(0.0, 0.0, 10.0)
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
@@ -206,13 +206,9 @@ func _water_order_particle_scene() -> EffectScene:
 	]:
 		var transform := Transform3D.IDENTITY
 		transform.origin = row[0]
-		var receipt := scene.spawn({
-			"effect_handle": scene.intern(effect.id),
-			"transform": transform,
-			"color_tint": row[1],
-		})
-		assert_eq(int(receipt.get("status", -1)),
-				EffectScene.SPAWN_STATUS_SPAWNED)
+		var request := EffectSpawnRequest.make(scene.intern(effect.id), transform)
+		request.color_tint = row[1]
+		assert_eq(scene.spawn(request).status, EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
 
@@ -253,7 +249,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		await get_tree().process_frame
 
 	var report := renderer.get_backend_report()
-	assert_eq(int(report.get("beauty_camera_mask", -1)), 101377,
+	assert_eq(int(report.get("beauty_camera_mask", -1)), 232449,
 			"the beauty signature admits the first-person viewmodel layer")
 	assert_false(bool(report.get("q3_auxiliary_view", true)))
 	assert_false(bool(report.get("q3_camera_mask", true)))
@@ -276,7 +272,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
-	assert_eq(camera.cull_mask, 101377,
+	assert_eq(camera.cull_mask, 232449,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
 			"no auxiliary far-alpha view exists: pass A rides PRE_TRANSPARENT")
@@ -332,7 +328,7 @@ func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void
 	var renderer := FrameFx.new()
 	viewport.add_child(renderer)
 	assert_not_null(environment.compositor)
-	assert_eq(camera.cull_mask, 101377)
+	assert_eq(camera.cull_mask, 232449)
 
 	renderer.shutdown()
 	var report := renderer.get_backend_report()
@@ -414,7 +410,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			as FrameFxCompositorEffect
 	assert_not_null(first_effect)
 	assert_true(first_effect.enabled)
-	assert_eq(camera.cull_mask, 101377)
+	assert_eq(camera.cull_mask, 232449)
 
 	viewport.remove_child(renderer)
 	assert_null(environment.compositor,
@@ -437,7 +433,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			"re-entry uses a fresh effect after the prior device owner shut down")
 	assert_false(bool(renderer.get_backend_report().get("shutdown", true)),
 			"re-entry clears the shutdown latch")
-	assert_eq(camera.cull_mask, 101377,
+	assert_eq(camera.cull_mask, 232449,
 			"re-entry re-applies the beauty camera signature")
 
 	viewport.remove_child(renderer)
@@ -720,13 +716,13 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	assert_eq(mission.create_default(), OK)
 	var record := mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3.ZERO, Vector3.ZERO)
-	assert_false(record.is_empty())
+	assert_not_null(record)
 	# A second bulb in the same 512-unit bin keeps the population live after
 	# the carve below: the dense populations hide an emptied level, and a
 	# hidden population is (rightly) never compiled or re-read.
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3(2.0, 0.0, 0.0),
-			Vector3.ZERO).is_empty())
+			Vector3.ZERO))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(PLACER_ITEMS_DEF)), OK)
 	var root := ResourceRoot.new()
@@ -739,9 +735,9 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 			}]))
 	var parent := Node3D.new()
 	viewport.add_child(parent)
-	var stats: Dictionary = placer.place(mission, parent)
-	assert_eq(int(stats.get("batched", -1)), 2,
-			"the bulb population is one static batch over two rows: %s" % stats)
+	var stats := placer.place(mission, parent)
+	assert_eq(stats.batched, 2,
+			"the bulb population is one static batch over two rows: %s" % stats.to_json_value())
 	var population := parent.get_node_or_null(
 			"MissionObjects/StaticPopulations/Batch_StaticCrate1_0") as MultiMeshInstance3D
 	assert_not_null(population, "the population is emitted")
@@ -776,7 +772,7 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 
 	# The destruction carve rewrites the population's rows through the
 	# production path (the RLOD switch shares _write_static_instance_slots).
-	var bms_id := int(record.get("bms_id", 0))
+	var bms_id := record.bms_id
 	assert_true(placer.hide_static_instance(bms_id) is Transform3D)
 	renderer.advance_frame()
 	var carved := renderer.get_backend_report()

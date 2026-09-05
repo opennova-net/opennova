@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace opennova::fnt;
+
 namespace opennova::hud {
 
 namespace {
@@ -730,8 +732,13 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 		cx = state.aim_screen_x * kDesignW / w;
 		cy = state.aim_screen_y * kDesignH / h;
 	}
-	const float spread = static_cast<float>(crosshair_spread_px_fp16(
-			state.hud_spread_fp16, state.fov_deg, w));
+	// Spread off zeroes the offset and still draws all five arms
+	// [orig: the g_cfgCrossHairSpread arm @ 0x592b82; the disabled fldz
+	// @ 0x592bcc].
+	const float spread = layout_.crosshair_spread_enabled
+			? static_cast<float>(crosshair_spread_px_fp16(
+					state.hud_spread_fp16, state.fov_deg, w))
+			: 0.0f;
 
 	const float half_w = static_cast<float>(layout_.crosshair_tex_w) * 0.5f;
 	const float half_h = static_cast<float>(layout_.crosshair_tex_h) * 0.5f;
@@ -804,7 +811,11 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 				out[k]->u = (strip[idx[k]][0] - l) / qw;
 				out[k]->v = (strip[idx[k]][1] - t) / qh;
 			}
-			tri.color = 0xFFFFFFFFu;
+			// The user colour [orig: dword_25510E0 into the corner-quad
+			// params]; retail routes it via the specular channel — the
+			// blend-stage witness stays open as D-HUD-8, vertex modulation
+			// is the port's stand-in.
+			tri.color = layout_.crosshair_color;
 			tri.texture = kHudTexCrosshair;
 			draw_list_.tris.push_back(tri);
 		}

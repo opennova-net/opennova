@@ -127,14 +127,14 @@ func _combat_mission() -> MissionData:
 	# Both yaw-zero players therefore
 	# have a Generic Soldier down their own +mission-y lane (host at nine
 	# metres, joiner at eight).
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(20, 9, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -145,12 +145,12 @@ func _peer_duel_mission() -> MissionData:
 	# joiner at (0, 0). Both
 	# yaw-zero players face +mission-y, putting the host directly in the
 	# joiner's fire lane without a debug teleport or invented aim override.
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(4, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -160,22 +160,22 @@ func _vehicle_peer_mission() -> MissionData:
 	# Keep the replicated vehicle well away from both deploy markers. The listen
 	# host presents its authoritative placed row while the joiner presents the
 	# decoded pool-1 wire row; their world poses must remain the same.
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 101291,
-			Vector3(40, 30, 0), Vector3(10, 0, 20)).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101291,
+			Vector3(40, 30, 0), Vector3(10, 0, 20)))
 	# A synthetic cbot with non-zero authored attitude catches first-arm
 	# prediction accidentally replacing the retained spawn Euler with zero. It
 	# sits beside the joiner start so the same real-UDP case can also exercise a
 	# local control-seat body following the final predicted carrier pose.
-	assert_false(md.add_entity(MissionData.KIND_ITEM, 105008,
-			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 105008,
+			Vector3(2, 0, 0), Vector3(13, 0, -17)))
 	# Slot order puts the host at (0, 8), then the joiner at (0, 0), within the
 	# retail four-unit seat scan of the boat.
-	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(4, 0, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -286,67 +286,67 @@ func _install_combat_tables(sim: Simulation) -> void:
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 
 
-func _retail_m4() -> Dictionary:
+func _retail_m4() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_m9() -> Dictionary:
+func _retail_m9() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M9Beretta")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_smoke_grenade() -> Dictionary:
+func _retail_smoke_grenade() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_GRENADESM")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
-func _retail_emplaced_50() -> Dictionary:
+func _retail_emplaced_50() -> WeaponDef:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_EMPLCD50NA")
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _throwable_visual_count(sim: Simulation, item_id: int) -> int:
 	var count := 0
 	for value in sim.get_throwable_visuals():
-		if int((value as Dictionary).get("item_id", 0)) == item_id:
+		if (value as ThrowableVisualRow).item_id == item_id:
 			count += 1
 	return count
 
 
 func _throwable_move_effect(sim: Simulation, item_id: int) -> String:
 	for value in sim.get_throwable_visuals():
-		var visual := value as Dictionary
-		if int(visual.get("item_id", 0)) == item_id:
-			return String(visual.get("move_effect", ""))
+		var visual := value as ThrowableVisualRow
+		if visual.item_id == item_id:
+			return visual.move_effect
 	return ""
 
 
 func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
-	for value in sim.get_local_player_inventory().get("slots", []):
-		var slot: Dictionary = value
-		if String(slot.get("name", "")) == weapon_name:
-			return int(slot.get("clip", -1))
+	for value in sim.get_local_player_inventory().slots:
+		var slot: PlayerInventorySlot = value
+		if slot.name == weapon_name:
+			return slot.clip
 	return -1
 
 
@@ -402,10 +402,10 @@ func _two_organics_with_spawn_zone() -> MissionData:
 	var zone := md.add_entity(
 			MissionData.KIND_ITEM, SPAWN_ZONE_TYPE,
 			Vector3(40, 0, 0), Vector3.ZERO)
-	assert_false(zone.is_empty())
-	if not zone.is_empty():
+	assert_not_null(zone)
+	if zone != null:
 		assert_true(md.set_entity_property_int(
-				MissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
+				MissionData.KIND_ITEM, zone.index, "team", 1))
 	return md
 
 
@@ -452,13 +452,13 @@ func _moving_eweap_userpoint(data: ObjectData) -> Dictionary:
 		"EWEAP_GUNPITCH": 0,
 	})
 	for index in range(data.get_user_point_count()):
-		var info: Dictionary = data.get_user_point_info(index)
-		var part := int(info.get("subobject", -1))
+		var info := data.get_user_point_info(index)
+		var part := info.subobject
 		if not neutral.has(part) or not turned.has(part):
 			continue
 		var rest: Transform3D = neutral[part]
 		var live: Transform3D = turned[part]
-		var authored: Vector3 = info.get("position", Vector3.ZERO)
+		var authored: Vector3 = info.position
 		var point_in_part := rest.affine_inverse() * authored
 		if (live * point_in_part).distance_to(authored) > 0.25:
 			return {"index": index, "info": info}
@@ -470,15 +470,15 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_true(mission.set_header_string("mission_name", "Preload Island"))
 
 	var host := Simulation.new()
-	host.configure_host_session({
-		"server_name": "Preload Host",
-		"mission_name": "Preload Island",
-		"mission_file": "PRELOAD_A1.BMS",
-		"expansion": "jox01",
-		"gametype": 0x30020,
-		"max_players": 4,
-		"class_allow_mask": 0x0155,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Preload Host"
+	host_options.mission_name = "Preload Island"
+	host_options.mission_file = "PRELOAD_A1.BMS"
+	host_options.expansion = "jox01"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host_options.class_allow_mask = 0x0155
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 
@@ -529,14 +529,14 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_eq(host.get_host_peer_count(), 1, "resume did not reconnect")
 	assert_eq(joiner.get_class_allow_mask(), 0x0155,
 			"the joiner consumed the host's S2C 0x76 class policy over real UDP")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	# WAC-equivalent commands on the host's weather home, deliberately unlike
@@ -550,23 +550,24 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "EnvironmentJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
-	var received := {}
+	var received: EnvironmentSnapshot = null
 	for _i in range(1200):
 		host.step()
 		joiner.step()
-		received = joiner.get_weather_state()
-		if int(received.get("fog_target_q16", 0)) == 291 << 16:
+		received = joiner.get_environment_snapshot()
+		if received != null and received.fog_target_metres == 291:
 			break
 		OS.delay_msec(2)
 
-	assert_eq(int(received.get("fog_target_q16", -1)), 291 << 16,
+	assert_not_null(received, "the joiner exposes its environment record")
+	if received == null:
+		return
+	assert_eq(received.fog_target_metres, 291,
 			"the OpenNova joiner folds the host's scheduled phase-2 sample into its weather home")
-	assert_eq(int(received.get("cloud_scroll_rate_target", -1)), 170 << 10)
-	assert_eq(int(received.get("precipitation_kind", -1)), 1)
-	assert_gt(int(received.get("quake_ticks", -1)), 0,
+	assert_eq(received.sky_speed_target, 170)
+	assert_eq(received.precipitation_kind, 1)
+	assert_gt(received.quake_ticks, 0,
 			"the host's quake countdown reaches the joiner")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
@@ -574,7 +575,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host := Simulation.new()
 	# Captured retail Co-op g_GameType: bit 0x20000 makes every phase-3
 	# 0x0A carry a 16-byte objective block before the local-health tail.
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	assert_true(host.load_from_mission_data(mission), "host promoted with the net seam")
 	# A co-op host is playable — it spawns its own pool-0 player (0x14B9), which the joiner must
@@ -615,27 +618,48 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(reached, "joiner reached in-match (handshake -> spawn gate -> 0x0C name-match)")
 	assert_eq(host.get_host_peer_count(), before_peers + 1, "host registered exactly one joiner peer")
 	assert_true(joiner.has_local_player(), "joiner spawned its local player L at the H-learned pose")
+	# Retail's initial join sends no C2S 0x0E: the initial 0x5A grant pair
+	# completes admission and the joiner deploys directly (witnessed on the wire
+	# against a live retail co-op host). The 0x0E spawn pick belongs to the DEATH
+	# flow — drive it there through the authority's real death transaction.
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join deploys with no forced C2S 0x0E")
+	var health_before_death := joiner.get_local_player_health()
+	assert_gt(health_before_death, 0,
+			"the initial authoritative spawn latch keeps local L alive")
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's death transaction killed the joiner")
+	var death_pick_pending := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			death_pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(death_pick_pending,
+			"the death edge re-arms the deploy pick (begin_redeployment)")
+	# A death within 620 ticks of the deployment arms the host's 3-second pick
+	# penalty (silently dropped picks); settle past it so the single zone pick
+	# below is accepted.
+	for _i in range(260):
+		host.step()
+		joiner.step()
 	assert_true(joiner.is_join_deploy_pick_pending(),
-			"spawn-zone join enters gameplay while the player-paced deploy UI remains pending")
-	var health_before_initial_pick := joiner.get_local_player_health()
-	assert_gt(health_before_initial_pick, 0,
-			"the initial authoritative spawn latch keeps local L alive before the pick")
+			"nothing auto-picks while the death pick stays owed")
 	var initial_position := joiner.get_local_player_position()
 	var deploy_rows := joiner.get_deploy_spawn_zones()
 	assert_eq(deploy_rows.size(), 1,
 			"the fixture exposes one team-owned non-default spawn-zone row")
-	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0)) \
+	var zone_param := (deploy_rows[0] as DeployZoneRow).param \
 			if not deploy_rows.is_empty() else 0
 	assert_gt(zone_param, 0)
 	assert_true(joiner.send_deployment_pick(zone_param),
 			"the displaced non-default spawn-zone pick was queued")
 	# Deliberately do not step the host. Input case 12 has now queued C2S 0x0E
 	# and re-armed dword_81474C, but that gameplay hold is not a death signal.
-	# The old single-latch fold forced L to zero on this exact joiner-only step.
 	joiner.step()
 	joiner.step()
-	assert_eq(joiner.get_local_player_health(), health_before_initial_pick,
-			"waiting for the post-pick 0x5A release cannot kill local L")
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"the deploy UI remains pending while the host has not handled the pick")
 	var debug_host_own := host.get_local_player_wire_handle()
@@ -664,25 +688,36 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the host applies the selected non-default zone before releasing the joiner")
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"the host pose is observable before the joiner folds the release")
-	var initial_pick_released := false
-	var initial_pick_pose_snapped := false
+	var death_pick_released := false
+	var death_pick_pose_snapped := false
 	for _i in range(160):
 		host.step()
 		joiner.step()
-		initial_pick_released = not joiner.is_join_deploy_pick_pending()
-		initial_pick_pose_snapped = \
+		death_pick_released = not joiner.is_join_deploy_pick_pending()
+		death_pick_pose_snapped = \
 				joiner.get_local_player_position().distance_to(initial_position) > 5.0
-		if initial_pick_released and initial_pick_pose_snapped:
+		if death_pick_released and death_pick_pose_snapped:
 			break
 		OS.delay_msec(2)
-	assert_true(initial_pick_released,
-			"the ACK-qualified initial-pick 0x5A retires the deploy-screen wait")
-	assert_true(initial_pick_pose_snapped,
+	assert_true(death_pick_released,
+			"the ACK-qualified death-pick 0x5A retires the deploy-screen wait")
+	assert_true(death_pick_pose_snapped,
 			"the post-pick release snaps L to the host's displaced zone pose")
 	assert_lt(absf(joiner.get_local_player_position().x - 40.0), 1.0,
 			"the joiner adopts the selected host spawn-zone x coordinate")
-	assert_eq(joiner.get_local_player_health(), health_before_initial_pick,
-			"the gameplay release preserves the already-live local identity")
+	# The release reuses L; the following fresh positive recipient-health tail
+	# revives it (the same revive mechanics the later default-pick leg pins).
+	var revived_after_zone_pick := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if not joiner.is_local_player_dead() \
+				and joiner.get_local_player_health() > 0:
+			revived_after_zone_pick = true
+			break
+		OS.delay_msec(2)
+	assert_true(revived_after_zone_pick,
+			"the zone deploy revives local L for the gameplay legs below")
 	var h: int = joiner.get_joiner_self_handle()
 	assert_gt(h, 0, "joiner learned its wire handle H")
 
@@ -920,8 +955,6 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(uplink_resumed,
 			"after revival local L resumes 0x0C heading uplinks to the same authority H")
 
-	host.free()
-	joiner.free()
 
 
 func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -> void:
@@ -937,8 +970,8 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"mount exposes a userpoint carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
-	var anchor: Dictionary = moving_anchor["info"]
-	var anchor_name := String(anchor.get("name", ""))
+	var anchor: ModelUserPoint = moving_anchor["info"]
+	var anchor_name := anchor.name
 	# This attachment-specific fixture deliberately keeps the parent and its
 	# synthetic child on distinct wire types (the following UDP/presentation
 	# test uses the real B50 item/type end to end). The authored addeweap row
@@ -949,43 +982,40 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_not_null(attach_db)
 	if attach_db == null:
 		return
-	var carrier_card: Dictionary = attach_db.extract_seat_specs_for_item(
-			root, 105004)
-	assert_eq((carrier_card.get("seats", []) as Array).size(), 1,
+	var carrier_card := attach_db.extract_seat_specs_for_item(root, 105004)
+	assert_eq(carrier_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, 105004,
-			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
+			Vector3(2, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			attach_db, PackedInt32Array([5004])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
 	var def_root := ResourceRoot.new()
 	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
-	var personal: Dictionary = weapons.get_weapon(
+	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: Dictionary = weapons.get_weapon(
+	var mounted: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_EMPLCD50NA"))
 	host.set_local_player_weapon(personal, {})
 	host.drain_local_player_weapon_events()
 	assert_true(host.local_player_toggle_mount())
 	host.step()
 	for raw in host.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
 			host.set_local_player_weapon(mounted, {}, true)
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"host player remains mounted after the local switch commit")
@@ -1007,8 +1037,6 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		OS.delay_msec(2)
 	assert_true(reached, "joiner reached the in-match client view")
 	if not reached:
-		host.free()
-		joiner.free()
 		return
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"join handshake does not detach the host player")
@@ -1051,8 +1079,6 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	var ambiguous_position := _present_position_for_type(joiner, 1419)
 	assert_lt(ambiguous_position.distance_to(joiner_before), 0.01,
 			"ambiguous same-type children retain the rigid decoded fallback")
-	host.free()
-	joiner.free()
 
 
 func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
@@ -1068,36 +1094,34 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 			"mount exposes a real ROBJ carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
-	var yaw_part := int((moving_anchor["info"] as Dictionary).get(
-			"subobject", -1))
+	var yaw_part := (moving_anchor["info"] as ModelUserPoint).subobject
 	# The real B50 item end to end: items.def row 101419 (graphic mount,
 	# primary WPN_EMPLCD50NA) plus the model's authored Usegun userpoint,
 	# through the ONE native extractor on both peers.
 	var root := _native_asset_root()
 	var seat_db := _fixture_items_db()
-	var b50_card: Dictionary = seat_db.extract_seat_specs_for_item(root, 101419)
-	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+	var b50_card := seat_db.extract_seat_specs_for_item(root, 101419)
+	assert_eq(b50_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var mounted_item := mission.add_entity(
 			MissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(mounted_item.is_empty())
-	var mounted_bms_id := int(mounted_item.get("bms_id", 0))
+	assert_not_null(mounted_item)
+	var mounted_bms_id := mounted_item.bms_id
 	assert_gt(mounted_bms_id, 0)
 
 	var host := Simulation.new()
-	host.configure_host_session({
-		"serve_and_play": false,
-		"gametype": 0x30020,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.serve_and_play = false
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			seat_db, PackedInt32Array([1419])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the B50 model source")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1113,8 +1137,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	var host_joiner_index := -1
 	for ai_index in range(host.get_entity_count()):
@@ -1132,27 +1154,27 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		"WPN_EMPLCD50NA": mounted,
 	}
 	assert_true(joiner.apply_local_player_loadout(
-			[{"name": "WPN_M4AUTO"}], 8))
+			[WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(personal, {})
 	for _settle in range(80):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
-	assert_false(bool(joiner.get_local_player_view().get("mounted", true)))
+	assert_false(joiner.get_local_player_view().mounted)
 
 	assert_true(joiner.local_player_toggle_mount(),
 			"Shift queues the joiner's C2S 0x26 attach")
-	assert_false(bool(joiner.get_local_player_view().get("mounted", true)),
+	assert_false(joiner.get_local_player_view().mounted,
 			"attach is not locally predicted before the authority echo")
 	var mounted_echoed := false
 	for _tick in range(180):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if bool(joiner.get_local_player_view().get("mounted", false)) \
+		if joiner.get_local_player_view().mounted \
 				and host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 1:
@@ -1162,8 +1184,6 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_true(mounted_echoed,
 			"host validated H's seat and 0x0A attached local L with active gun controls")
 	if not mounted_echoed:
-		joiner.free()
-		host.free()
 		return
 
 	# Make the phase-8 witness deliberately non-default after both peers have
@@ -1176,9 +1196,9 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		host.step()
 		joiner.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var joined_ammo: Dictionary = joiner.get_local_player_weapon_state()
-		if int(joined_ammo.get("clip", -999)) == 7 \
-				and int(joined_ammo.get("reserve", -999)) == 19:
+		var joined_ammo := joiner.get_local_player_weapon_state()
+		if joined_ammo.clip == 7 \
+				and joined_ammo.reserve == 19:
 			phase8_ammo_applied = true
 			break
 		OS.delay_msec(1)
@@ -1192,7 +1212,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 	var authority_yaw_before := float(host.entity_card_by_ai_index(
@@ -1208,12 +1228,10 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_false(visual_before_record.is_empty(),
 			"the joined client presents the real emplaced item type 1419")
 	if not visual_parts.has(yaw_part) or visual_before_record.is_empty():
-		joiner.free()
-		host.free()
 		return
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
-	assert_eq(PresentApplier.emplaced_apply(
+	assert_eq(EntityPresenter.emplaced_apply(
 			visual, visual_before_snap, visual_before_base, false), 2,
 			"production presentation consumes both decoded B50 controls")
 	var visual_yaw_before: Basis = (
@@ -1253,7 +1271,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	if not visual_after_record.is_empty():
 		var visual_after_snap: PackedFloat32Array = visual_after_record["snapshot"]
 		var visual_after_base := int(visual_after_record["base"])
-		assert_eq(PresentApplier.emplaced_apply(
+		assert_eq(EntityPresenter.emplaced_apply(
 				visual, visual_after_snap, visual_after_base, false), 2)
 		var visual_yaw_after: Basis = (
 				visual_parts[yaw_part] as Node3D).transform.basis
@@ -1267,19 +1285,19 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 	assert_true(joiner.local_player_toggle_mount(),
 			"a mounted Shift queues C2S 0x27 immediately")
-	assert_true(bool(joiner.get_local_player_view().get("mounted", false)),
+	assert_true(joiner.get_local_player_view().mounted,
 			"detach also waits for the authority echo")
 	var detached_echoed := false
 	for _tick in range(180):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if not bool(joiner.get_local_player_view().get("mounted", true)) \
+		if not joiner.get_local_player_view().mounted \
 				and not host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 0:
@@ -1288,14 +1306,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		OS.delay_msec(2)
 	assert_true(detached_echoed,
 			"host echo retires both the local mount and parent gun controls")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1308,19 +1326,16 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_eq(joiner.get_join_assigned_team(), 1,
 			"the pre-spawn 0x04 advertises the co-op team the host entity received")
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
-	assert_eq(String(joiner.get_local_player_inventory().get(
-			"equipped_name", "")), "WPN_M4AUTO",
+	assert_eq(joiner.get_local_player_inventory().equipped_name, "WPN_M4AUTO",
 			"the host's team-filtered 0x5A preserves the accepted co-op weapon")
 
 	var host_target := _organic_index_at_x(host, 0.0)
@@ -1329,8 +1344,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_gte(joiner_target, 0, "joiner retained its visual copy of the target")
 	var host_health_before := host.entity_card_by_ai_index(host_target).get_health()
 	var joiner_health_before := joiner.entity_card_by_ai_index(joiner_target).get_health()
-	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
-	var fired_before := int(before_fire.get("fired_serial", 0))
+	var before_fire := joiner.get_local_player_weapon_state()
+	var fired_before := before_fire.fired_serial
 	joiner.drain_round_impacts()
 	host.drain_round_impacts()
 	joiner.drain_fire_presentation_events()
@@ -1347,8 +1362,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 		joiner_fire_events.append_array(joiner.drain_fire_presentation_events())
 		OS.delay_msec(2)
 
-	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+	var after_fire := joiner.get_local_player_weapon_state()
+	assert_eq(after_fire.fired_serial, fired_before + 1,
 			"one local weapon action fired")
 	assert_lt(host.entity_card_by_ai_index(host_target).get_health(),
 			host_health_before,
@@ -1363,45 +1378,52 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_eq(joiner_fire_events.size(), 1,
 			"one predicted fire presentation event was emitted")
 	if joiner_fire_events.size() == 1:
-		assert_true(bool((joiner_fire_events[0] as Dictionary).get(
-				"is_local_player", false)),
+		assert_true((joiner_fire_events[0] as FirePresentationEvent).is_local_player,
 				"the predicted event maps local L even though wire attribution uses H")
 
 	# The joiner has spent one round. One reload action must queue one C2S 0x25;
 	# only the requester's echoed S2C 0x49 may refill it, and it is applied once.
-	var spent_clip := int(after_fire.get("clip", -1))
-	var reload_before := int(after_fire.get("reload_serial", 0))
-	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	var spent_clip := after_fire.clip
+	var reload_before := after_fire.reload_serial
+	var applied_before := after_fire.reload_applied_serial
 	assert_lt(spent_clip, 30, "the fire consumed one local magazine round")
 	joiner.set_local_player_weapon_input(false, false, true)
 	joiner.step()
-	var awaiting_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(awaiting_echo.get("reload_serial", 0)), reload_before + 1,
+	var awaiting_echo := joiner.get_local_player_weapon_state()
+	assert_eq(awaiting_echo.reload_serial, reload_before + 1,
 			"the local action queued one C2S 0x25 before the host pumped")
-	assert_eq(int(awaiting_echo.get("reload_applied_serial", 0)), applied_before,
+	assert_eq(awaiting_echo.reload_applied_serial, applied_before,
 			"the request cannot eagerly apply its own refill")
-	assert_eq(int(awaiting_echo.get("clip", -1)), spent_clip,
+	assert_eq(awaiting_echo.clip, spent_clip,
 			"ammo remains spent until S2C 0x49 returns")
 	for _tick in range(120):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+	var reloaded := joiner.get_local_player_weapon_state()
+	assert_eq(reloaded.reload_serial, reload_before + 1,
 			"one reload action queues exactly one C2S 0x25")
-	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+	assert_eq(reloaded.reload_applied_serial, applied_before + 1,
 			"the echoed S2C 0x49 applies exactly once")
-	assert_eq(int(reloaded.get("clip", -1)), 30,
+	assert_eq(reloaded.clip, 30,
 			"only the echoed reload notification refills the joiner's clip")
 
-	joiner.free()
-	host.free()
 
 
 # Kill the joiner's player entity on the AUTHORITY through the real death
 # transaction (route_round_deaths) and pump until the joiner's recipient-local
-# 0x0A tail reads dead.
+# 0x0A tail reads dead. The kill targets the joiner's wire handle, so first
+# pump until the 0x0C name-match binds it.
 func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
+	var self_bound := joiner.get_joiner_self_handle() > 0
+	for _tick in range(400):
+		if self_bound:
+			break
+		host.step()
+		joiner.step()
+		self_bound = joiner.get_joiner_self_handle() > 0
+		OS.delay_msec(2)
+	assert_true(self_bound, "the joiner bound its wire handle before the kill")
 	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
 			"the host queued the joiner's death")
 	for _tick in range(120):
@@ -1421,7 +1443,9 @@ func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
 func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1433,22 +1457,18 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	assert_false(joiner.is_local_player_dead(), "the joiner deploys alive")
 	assert_false(joiner.request_local_player_medic(),
 			"an alive player cannot call a medic")
 	# The 0x81 hit-confirm edge is consume-once: nothing landed, nothing plays.
-	assert_true(joiner.take_score_feedback().is_empty(),
+	assert_null(joiner.take_score_feedback(),
 			"no score delta landed on the fresh joiner")
 	assert_eq(joiner.local_medic_request_serial(), 0)
 
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's rounds killed the joiner's entity")
 	if not joiner.is_local_player_dead():
-		joiner.free()
-		host.free()
 		return
 	joiner.step()
 	assert_true(joiner.request_local_player_medic(),
@@ -1467,8 +1487,6 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 			"the cooldown counts one per 62.5 Hz tick")
 	assert_eq(joiner.local_medic_request_serial(), 1,
 			"no second call rode the cooldown")
-	joiner.free()
-	host.free()
 
 
 # The camera arbiter enters the death lerp camera (mode 4) on the joiner's
@@ -1478,7 +1496,9 @@ func test_joiner_medic_call_is_gated_on_death_and_the_310_tick_cooldown() -> voi
 func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1490,22 +1510,18 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
-	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive on foot: first person")
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	if not joiner.is_local_player_dead():
-		joiner.free()
-		host.free()
 		return
 	joiner.step()
-	var view: Dictionary = joiner.get_local_player_view()
-	assert_eq(int(view.get("camera_mode", -1)), 4,
+	var view := joiner.get_local_player_view()
+	assert_eq(view.camera_mode, 4,
 			"the dead joiner's arbiter resolves the death lerp camera")
-	assert_true(bool(view.get("camera_pose_valid", false)),
+	assert_true(view.camera_pose_valid,
 			"mode 4 composes a camera pose")
 	# The deployment release: pick the default spawn and pump until the host
 	# releases; the respawned player is alive again -> first person.
@@ -1526,10 +1542,8 @@ func test_joiner_death_enters_the_lerp_camera_and_the_deploy_release_leaves_it()
 		OS.delay_msec(1)
 	assert_true(alive, "the release brought the joiner back alive")
 	joiner.step()
-	assert_eq(int(joiner.get_local_player_view().get("camera_mode", -1)), 0,
+	assert_eq(joiner.get_local_player_view().camera_mode, 0,
 			"alive again: the arbiter returns to first person")
-	joiner.free()
-	host.free()
 
 
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
@@ -1543,13 +1557,14 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# zero-offset ctrlx userpoint, the exact shape the old hand table carried.
 	var root := _native_asset_root()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the drivable model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1567,8 +1582,6 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(_drive_pair_to_match(host, joiner),
 			"vehicle observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var joiner_player: EntityCard = null
@@ -1667,7 +1680,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	for _tick in range(180):
 		joiner.step()
 		host.step()
-		if bool(joiner.get_local_player_view().get("mounted", false)):
+		if joiner.get_local_player_view().mounted:
 			mounted_echoed = true
 			break
 		OS.delay_msec(2)
@@ -1695,14 +1708,14 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				"the mounted watercraft produced enough predicted moving frames")
 		joiner.set_player_input(false, false, false, false, false, false, false)
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> void:
 	var mission := _peer_duel_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1715,12 +1728,10 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(_drive_pair_to_match(host, joiner),
 			"animation-isolation joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(_retail_m4(), {})
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(8):
@@ -1731,26 +1742,24 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_false(remote_before.is_empty(),
 			"the joiner presents the listen host as a remote player")
 	if remote_before.is_empty():
-		joiner.free()
-		host.free()
 		return
 	var before_snap: PackedFloat32Array = remote_before["snapshot"]
 	var before_base := int(remote_before["base"])
 	var host_anim_before := int(before_snap[
 			before_base + Simulation.PF_ANIM_STATE])
-	var host_weapon_before: Dictionary = host.get_local_player_weapon_state()
-	var host_fired_before := int(host_weapon_before.get("fired_serial", 0))
+	var host_weapon_before := host.get_local_player_weapon_state()
+	var host_fired_before := host_weapon_before.fired_serial
 	# The viewmodel clip channel is SEPARATE from the fire channel: the first-person
 	# parts are re-posed every tick from (anim_key, anim_variant, anim_advance_ticks) and
 	# a play event bumps play_serial without necessarily bumping fired_serial
 	# [play write site: Simulation weapon_fsm_tick play_anim leg]. A remote shot
 	# that perturbs any of these makes the host's own gun re-scrub its clip.
-	var host_play_before := int(host_weapon_before.get("play_serial", 0))
-	var host_anim_key_before := String(host_weapon_before.get("anim_key", ""))
-	var host_anim_variant_before := int(host_weapon_before.get("anim_variant", 0))
-	var host_anim_advance_before := int(host_weapon_before.get("anim_advance_ticks", 0))
+	var host_play_before := host_weapon_before.play_serial
+	var host_anim_key_before := host_weapon_before.anim_key
+	var host_anim_variant_before := host_weapon_before.anim_variant
+	var host_anim_advance_before := host_weapon_before.anim_advance_ticks
 	var joiner_play_before := int(
-			joiner.get_local_player_weapon_state().get("play_serial", 0))
+			joiner.get_local_player_weapon_state().play_serial)
 	var joiner_wire_handle := joiner.get_joiner_self_handle()
 	var host_wire_handle := host.get_local_player_wire_handle()
 	var joiner_player_position := joiner.get_local_player_position()
@@ -1780,31 +1789,29 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		OS.delay_msec(2)
 	joiner.set_local_player_weapon_input(false, false, false)
 
-	assert_eq(int(host.get_local_player_weapon_state().get(
-			"fired_serial", 0)), host_fired_before,
+	assert_eq(host.get_local_player_weapon_state().fired_serial, host_fired_before,
 			"the joiner's C2S fire does not advance the host's local weapon FSM")
 	# The viewmodel channel, asserted independently of the fire channel. Falsifiability
 	# is carried by the joiner-side pin below: the shooter's OWN play channel must move
 	# in the same window, so a run where nothing fired cannot satisfy both.
-	var host_weapon_after: Dictionary = host.get_local_player_weapon_state()
-	assert_eq(int(host_weapon_after.get("play_serial", 0)), host_play_before,
+	var host_weapon_after := host.get_local_player_weapon_state()
+	assert_eq(host_weapon_after.play_serial, host_play_before,
 			"the joiner's shot does not play a clip on the host's own viewmodel")
-	assert_eq(String(host_weapon_after.get("anim_key", "")), host_anim_key_before,
+	assert_eq(host_weapon_after.anim_key, host_anim_key_before,
 			"the joiner's shot does not re-key the host's viewmodel clip")
-	assert_eq(int(host_weapon_after.get("anim_variant", 0)), host_anim_variant_before,
+	assert_eq(host_weapon_after.anim_variant, host_anim_variant_before,
 			"the joiner's shot does not consume a variant from the host's clip ring")
 	# anim_advance_ticks is the playhead the first-person parts are posed at every
 	# tick (the counter-gated channel position). It must keep advancing with the
 	# host's own pump; a remote shot that resets the advance count drops it back
 	# toward zero (re-scrubbing the clip), and an unsigned wrap sends it huge
 	# (clamping a one-shot to its tail).
-	var host_anim_advance_after := int(host_weapon_after.get("anim_advance_ticks", 0))
+	var host_anim_advance_after := host_weapon_after.anim_advance_ticks
 	assert_gte(host_anim_advance_after, host_anim_advance_before,
 			"the host's viewmodel playhead never rewinds when a remote player fires")
 	assert_lt(host_anim_advance_after - host_anim_advance_before, 1000,
 			"the host's viewmodel playhead advances by its own elapsed ticks, not a wrap")
-	assert_gt(int(joiner.get_local_player_weapon_state().get(
-			"play_serial", 0)), joiner_play_before,
+	assert_gt(joiner.get_local_player_weapon_state().play_serial, joiner_play_before,
 			"the SHOOTER's own viewmodel did play its fire clip (guards the pins above)")
 	assert_eq(observed_remote_states.size(), 1,
 			"the joiner's shot does not request a second body state on the remote host")
@@ -1814,8 +1821,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var authoritative_joiner_events: Array = []
 	var misattributed_host_events: Array = []
 	for value in host_fire_events:
-		var event: Dictionary = value
-		var shooter_handle := int(event.get("shooter_handle", -1))
+		var event: FirePresentationEvent = value
+		var shooter_handle := event.shooter_handle
 		if shooter_handle == joiner_wire_handle:
 			authoritative_joiner_events.append(event)
 		elif shooter_handle == host_wire_handle:
@@ -1825,10 +1832,10 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(misattributed_host_events.is_empty(),
 			"the same equipped gun never reattributes the shot to the listen host")
 	if authoritative_joiner_events.size() == 1:
-		var authoritative: Dictionary = authoritative_joiner_events[0]
-		assert_false(bool(authoritative.get("is_local_player", true)),
+		var authoritative: FirePresentationEvent = authoritative_joiner_events[0]
+		assert_false(authoritative.is_local_player,
 				"the authority treats the packet shooter as its remote joiner")
-		var origin: Vector3 = authoritative.get("origin", Vector3.INF)
+		var origin := authoritative.origin
 		assert_lt(origin.distance_to(joiner_player_position), 3.0,
 				"the authoritative muzzle event stays at the joiner's player")
 		assert_gt(origin.distance_to(host_player_position), 5.0,
@@ -1837,8 +1844,8 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var predicted_joiner_events: Array = []
 	var remote_host_events: Array = []
 	for value in joiner_fire_events:
-		var event: Dictionary = value
-		var shooter_handle := int(event.get("shooter_handle", -1))
+		var event: FirePresentationEvent = value
+		var shooter_handle := event.shooter_handle
 		if shooter_handle == joiner_wire_handle:
 			predicted_joiner_events.append(event)
 		elif shooter_handle == host_wire_handle:
@@ -1848,18 +1855,17 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(remote_host_events.is_empty(),
 			"the joiner never presents its own shot as a remote-host shot")
 	if predicted_joiner_events.size() == 1:
-		assert_true(bool((predicted_joiner_events[0] as Dictionary).get(
-				"is_local_player", false)),
+		assert_true((predicted_joiner_events[0] as FirePresentationEvent).is_local_player,
 				"wire attribution H resolves back to the joiner's local L")
 
-	joiner.free()
-	host.free()
 
 
 func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1872,12 +1878,10 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var smoke := _retail_smoke_grenade()
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_GRENADESM"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_GRENADESM")], 8))
 	host.set_local_player_weapon(smoke, {})
 	for _settle in range(20):
 		host.step()
@@ -1905,8 +1909,6 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	assert_gte(first_seen, 0,
 			"the host's production smoke round crossed tag-2 into joiner flight")
 	if first_seen < 0:
-		joiner.free()
-		host.free()
 		return
 
 	var host_arm_sounds := 0
@@ -1921,10 +1923,10 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 		joiner_move_effect_survived_arm = joiner_move_effect_survived_arm \
 				and _throwable_move_effect(joiner, 1875) == "Effect_SmokeToss"
 		for value in host.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				host_arm_sounds += 1
 		for value in joiner.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				joiner_arm_sounds += 1
 		OS.delay_msec(1)
 
@@ -1959,10 +1961,10 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 		host.step()
 		joiner.step()
 		for value in host.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				host_fuse_sounds += 1
 		for value in joiner.drain_round_impacts():
-			if String((value as Dictionary).get("sound", "")) == "EXPLO_SMOK_GREN":
+			if (value as RoundImpactRow).sound == "EXPLO_SMOK_GREN":
 				joiner_fuse_sounds += 1
 		if _throwable_visual_count(host, 1875) == 0 \
 				and _throwable_visual_count(joiner, 1875) == 0:
@@ -1978,14 +1980,14 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 			"joiner releases the replicated smoke grenade on the same fuse")
 	assert_eq(host_fuse_sounds, 1, "authority presents one actual fuse event")
 	assert_eq(joiner_fuse_sounds, 1, "joiner presents one actual fuse event")
-	joiner.free()
-	host.free()
 
 
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -1998,13 +2000,11 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var m4 := _retail_m4()
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(m4, {})
 	joiner.set_local_player_weapon(m4, {})
 	for _settle in range(3):
@@ -2020,58 +2020,56 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var spent: Dictionary = host.get_local_player_weapon_state()
-	assert_lt(int(spent.get("clip", -1)), 30,
+	var spent := host.get_local_player_weapon_state()
+	assert_lt(spent.clip, 30,
 			"the listen host spent a magazine round before reloading")
-	var host_reload_before := int(spent.get("reload_serial", 0))
-	var host_applied_before := int(spent.get("reload_applied_serial", 0))
-	var expected_reload_combo := int(host.get_local_player_inventory().get(
-			"equipped_combo", -1))
-	var joiner_received_before := int(joiner.get_local_player_weapon_state().get(
-			"reload_received_serial", 0))
+	var host_reload_before := spent.reload_serial
+	var host_applied_before := spent.reload_applied_serial
+	var expected_reload_combo := host.get_local_player_inventory().equipped_combo
+	var joiner_received_before := joiner.get_local_player_weapon_state().reload_received_serial
 
 	host.set_local_player_weapon_input(false, false, true)
 	host.step()
-	var immediate: Dictionary = host.get_local_player_weapon_state()
-	assert_eq(int(immediate.get("reload_serial", 0)), host_reload_before + 1,
+	var immediate := host.get_local_player_weapon_state()
+	assert_eq(immediate.reload_serial, host_reload_before + 1,
 			"the listen-host action emitted one local reload request")
-	assert_eq(int(immediate.get("reload_applied_serial", 0)),
+	assert_eq(immediate.reload_applied_serial,
 			host_applied_before + 1,
 			"authority applied the local refill once at action start")
-	assert_eq(int(immediate.get("clip", -1)), 30,
+	assert_eq(immediate.clip, 30,
 			"the authority refill completed immediately")
 
 	for _tick in range(30):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var host_after: Dictionary = host.get_local_player_weapon_state()
-	var joiner_after: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(host_after.get("reload_serial", 0)), host_reload_before + 1,
+	var host_after := host.get_local_player_weapon_state()
+	var joiner_after := joiner.get_local_player_weapon_state()
+	assert_eq(host_after.reload_serial, host_reload_before + 1,
 			"the loopback echo does not start another host reload")
-	assert_eq(int(host_after.get("reload_applied_serial", 0)),
+	assert_eq(host_after.reload_applied_serial,
 			host_applied_before + 1,
 			"the loopback S2C 0x49 does not refill the authority twice")
-	assert_eq(int(host_after.get("clip", -1)), 30,
+	assert_eq(host_after.clip, 30,
 			"the host magazine remains full after its loopback echo")
-	assert_eq(int(joiner_after.get("reload_received_serial", 0)),
+	assert_eq(joiner_after.reload_received_serial,
 			joiner_received_before + 1,
 			"the remote peer decoded exactly one relayed S2C 0x49")
-	assert_eq(int(joiner_after.get("reload_received_entity", -1)),
+	assert_eq(joiner_after.reload_received_entity,
 			host.get_local_player_wire_handle(),
 			"the relay names the listen host's player entity")
-	assert_eq(int(joiner_after.get("reload_received_param", -1)),
+	assert_eq(joiner_after.reload_received_param,
 			expected_reload_combo,
 			"the relay carries the retail category*65+rank slot combo")
 
-	joiner.free()
-	host.free()
 
 
 func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2084,13 +2082,11 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	assert_true(joiner.apply_local_player_loadout([
-		{"name": "WPN_M4AUTO"},
-		{"name": "WPN_M9Beretta"},
+		WeaponKitEntry.make("WPN_M4AUTO"),
+		WeaponKitEntry.make("WPN_M9Beretta"),
 	], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
@@ -2111,17 +2107,15 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the secondary starts with its independent full magazine")
 
-	var before_reload: Dictionary = joiner.get_local_player_weapon_state()
-	var reload_before := int(before_reload.get("reload_serial", 0))
-	var applied_before := int(before_reload.get("reload_applied_serial", 0))
+	var before_reload := joiner.get_local_player_weapon_state()
+	var reload_before := before_reload.reload_serial
+	var applied_before := before_reload.reload_applied_serial
 	joiner.set_local_player_weapon_input(false, false, true)
 	joiner.step()
 	joiner.set_local_player_weapon_input(false, false, false)
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"the M4 reload request was queued before the host pumped")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_applied_serial", 0)), applied_before,
+	assert_eq(joiner.get_local_player_weapon_state().reload_applied_serial, applied_before,
 			"the joiner cannot apply the refill before the echo")
 
 	# Let the first reload action reach its retail DONE seam, but intercept it
@@ -2131,15 +2125,14 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	# weapon switch rather than that separate input-timing rule.
 	var reload_finished := false
 	for _tick in range(120):
-		var reload_state: Dictionary = joiner.get_local_player_weapon_state()
-		if (int(reload_state.get("current", -1)) == 4
-				and int(reload_state.get("phase", -1)) == 4):
+		var reload_state := joiner.get_local_player_weapon_state()
+		if (reload_state.current_action == 4
+				and reload_state.phase == 4):
 			reload_finished = true
 			break
 		joiner.step()
 	assert_true(reload_finished, "the first M4 reload action reached DONE without an echo")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"the delayed host pump has not started a second reload request")
 
 	# Switch the authoritative inventory selection while the echo is withheld.
@@ -2149,8 +2142,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	var switched := false
 	for _tick in range(120):
 		joiner.step()
-		if String(joiner.get_local_player_inventory().get(
-				"equipped_name", "")) == "WPN_M9Beretta":
+		if joiner.get_local_player_inventory().equipped_name == "WPN_M9Beretta":
 			switched = true
 			break
 	assert_true(switched, "the joiner switched to its secondary before the echo")
@@ -2166,19 +2158,16 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+	var after_echo := joiner.get_local_player_weapon_state()
+	assert_eq(after_echo.reload_applied_serial, applied_before + 1,
 			"the delayed S2C 0x49 applies exactly once")
-	assert_eq(String(joiner.get_local_player_inventory().get(
-			"equipped_name", "")), "WPN_M9Beretta",
+	assert_eq(joiner.get_local_player_inventory().equipped_name, "WPN_M9Beretta",
 			"the late echo does not change the selected weapon")
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), 30,
 			"the payload-addressed M4 slot receives the delayed refill")
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the currently equipped secondary is not refilled by the M4 echo")
 
-	joiner.free()
-	host.free()
 
 
 func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
@@ -2186,10 +2175,10 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	var host := Simulation.new()
 	# This regression isolates receive-before-actions ordering, so deliver the
 	# authority echo on the next test tick instead of waiting on retail cadence.
-	host.configure_host_session({
-		"gametype": 0x30020,
-		"send_holdoff_ticks": 1,
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.send_holdoff_ticks = 1
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2202,11 +2191,9 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2215,15 +2202,15 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	# Empty the magazine through the real local FSM/C2S fire path. Stop pumping
 	# the host on the exact joiner frame that queues the empty-slot reload, so its
 	# one C2S 0x25 is present but the echoed S2C 0x49 cannot yet exist.
-	var before: Dictionary = joiner.get_local_player_weapon_state()
-	var reload_before := int(before.get("reload_serial", 0))
-	var applied_before := int(before.get("reload_applied_serial", 0))
+	var before := joiner.get_local_player_weapon_state()
+	var reload_before := before.reload_serial
+	var applied_before := before.reload_applied_serial
 	joiner.set_local_player_weapon_input(true, true, false)
 	var first_reload_queued := false
 	for _tick in range(400):
 		joiner.step()
-		var state: Dictionary = joiner.get_local_player_weapon_state()
-		if int(state.get("reload_serial", 0)) == reload_before + 1:
+		var state := joiner.get_local_player_weapon_state()
+		if state.reload_serial == reload_before + 1:
 			first_reload_queued = true
 			break
 		host.step()
@@ -2231,10 +2218,9 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	joiner.set_local_player_weapon_input(false, false, false)
 	assert_true(first_reload_queued,
 			"emptying the M4 queued its first automatic C2S 0x25")
-	assert_eq(int(joiner.get_local_player_weapon_state().get("clip", -1)), 0,
+	assert_eq(joiner.get_local_player_weapon_state().clip, 0,
 			"the regression reaches the empty-magazine reload path")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_applied_serial", 0)), applied_before,
+	assert_eq(joiner.get_local_player_weapon_state().reload_applied_serial, applied_before,
 			"the withheld host cannot have echoed the refill")
 
 	# Hold the authority still while the first local reload animation reaches its
@@ -2243,16 +2229,15 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	# before weapon actions, as retail Client_ProcessNetworkFrame does.
 	var reload_finished := false
 	for _tick in range(160):
-		var state: Dictionary = joiner.get_local_player_weapon_state()
-		if int(state.get("current", -1)) == 4 \
-				and int(state.get("phase", -1)) == 4:
+		var state := joiner.get_local_player_weapon_state()
+		if state.current_action == 4 \
+				and state.phase == 4:
 			reload_finished = true
 			break
 		joiner.step()
 	assert_true(reload_finished,
 			"the first empty-magazine reload reached DONE with its echo withheld")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"only the original reload request exists at the DONE boundary")
 
 	# Let the host consume that one request and place its one 0x49 echo on the
@@ -2264,22 +2249,22 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	OS.delay_msec(2)
 	for _tick in range(4):
 		joiner.step()
-	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+	var after_echo := joiner.get_local_player_weapon_state()
+	assert_eq(after_echo.reload_applied_serial, applied_before + 1,
 			"the single delayed S2C 0x49 was applied")
-	assert_eq(int(after_echo.get("reload_serial", 0)), reload_before + 1,
+	assert_eq(after_echo.reload_serial, reload_before + 1,
 			"recv-before-actions prevents a second same-slot C2S 0x25")
-	assert_eq(int(after_echo.get("clip", -1)), 30,
+	assert_eq(after_echo.clip, 30,
 			"the payload-addressed magazine was refilled once")
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> void:
 	var mission := _peer_duel_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2292,11 +2277,9 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	assert_true(_drive_pair_to_match(host, joiner),
 			"peer shooter reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2333,13 +2316,10 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	assert_eq(joiner_impacts.size(), 1,
 			"the shooter predicts exactly one visual impact on the decoded peer")
 	if joiner_impacts.size() == 1:
-		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
-				"position", Vector3.ZERO)
+		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
 				"the visual impact lands on the host, never a self-H/local-L alias")
 
-	joiner.free()
-	host.free()
 
 
 # Moving decoded non-player infantry collide at their DECODED wire pose. This is
@@ -2351,23 +2331,25 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	var host_mission := MissionData.new()
 	assert_eq(host_mission.create_default(), OK)
-	assert_false(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	var joiner_mission := MissionData.new()
 	assert_eq(joiner_mission.create_default(), OK)
-	assert_false(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
+			Vector3(0, 12, 0), Vector3.ZERO))
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(host_mission))
 	_install_combat_tables(host)
@@ -2380,11 +2362,9 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"ghost-pose shooter reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
-	assert_true(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
@@ -2411,8 +2391,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_eq(joiner_impacts.size(), 1,
 			"the shooter predicts exactly one visual impact on the decoded AI")
 	if joiner_impacts.size() == 1:
-		var predicted_hit: Vector3 = (joiner_impacts[0] as Dictionary).get(
-				"position", Vector3.ZERO)
+		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
 				"the visual impact lands at the DECODED wire pose (mission y=8), "
 				+ "never at the complete-BMS fixture copy (y=12)")
@@ -2423,18 +2402,18 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 				ghost_health_before,
 				"the complete-BMS fixture AI never takes client damage")
 
-	joiner.free()
-	host.free()
 
 
 func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
-	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(_retail_m4(), {})
 
 	var joiner := Simulation.new()
@@ -2445,8 +2424,6 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	var host_target := _organic_index_at_x(host, 20.0)
@@ -2477,8 +2454,6 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_eq(joiner_impacts.size(), 1,
 			"decoded S2C 0x0A tag-2 fire re-simulates one visual impact")
 
-	joiner.free()
-	host.free()
 
 
 func test_joiner_off_by_default() -> void:
@@ -2488,7 +2463,6 @@ func test_joiner_off_by_default() -> void:
 	assert_eq(sim.get_joiner_phase(), -1, "no joiner phase when not joining")
 	assert_false(sim.is_joined_in_match(), "not in a match")
 	assert_eq(sim.get_joiner_self_handle(), 0, "no wire handle when not joining")
-	sim.free()
 
 
 # The REAL shell ordering (game_world runtime start -> the spawn-loadout apply):
@@ -2499,7 +2473,9 @@ func test_joiner_off_by_default() -> void:
 func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2510,13 +2486,13 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
 
-	# Mirror _apply_local_player_spawn_loadout: apply, then sync the FSM only on
+	# Mirror LocalPlayerVisuals.apply_local_player_spawn_loadout: apply, then sync the FSM only on
 	# success + a valid inventory — the shell's exact gate chain.
-	var applied := bool(joiner.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
+	var applied := bool(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	var inventory_valid := false
 	if applied:
-		var inventory: Dictionary = joiner.get_local_player_inventory()
-		inventory_valid = bool(inventory.get("valid", false))
+		var inventory := joiner.get_local_player_inventory()
+		inventory_valid = inventory.valid
 		if inventory_valid:
 			joiner.set_local_player_weapon(_retail_m4(), {})
 
@@ -2528,8 +2504,6 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 	for _settle in range(3):
 		joiner.step()
@@ -2538,41 +2512,39 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(applied, "the pre-spawn kit apply must latch, not drop, the kit")
 	assert_true(inventory_valid,
 			"the pre-spawn inventory must be valid so the shell arms the FSM")
-	var at_spawn: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(at_spawn.get("fired_serial", 0)), 0,
+	var at_spawn := joiner.get_local_player_weapon_state()
+	assert_eq(at_spawn.fired_serial, 0,
 			"a join-wait click fires no phantom pre-spawn round")
-	assert_eq(int(at_spawn.get("clip", -1)), 30,
+	assert_eq(at_spawn.clip, 30,
 			"the joiner deploys with a full magazine")
 
-	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
-	var fired_before := int(before_fire.get("fired_serial", 0))
+	var before_fire := joiner.get_local_player_weapon_state()
+	var fired_before := before_fire.fired_serial
 	joiner.set_local_player_weapon_input(false, true, false)
 	for _tick in range(20):
 		joiner.step()
 		host.step()
 		OS.delay_msec(2)
-	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+	var after_fire := joiner.get_local_player_weapon_state()
+	assert_eq(after_fire.fired_serial, fired_before + 1,
 			"the joiner can fire with a kit applied before spawn")
-	var spent_clip := int(after_fire.get("clip", -1))
+	var spent_clip := after_fire.clip
 	assert_lt(spent_clip, 30, "the fire consumed one magazine round")
 
-	var reload_before := int(after_fire.get("reload_serial", 0))
-	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	var reload_before := after_fire.reload_serial
+	var applied_before := after_fire.reload_applied_serial
 	joiner.set_local_player_weapon_input(false, false, true)
 	for _tick in range(120):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+	var reloaded := joiner.get_local_player_weapon_state()
+	assert_eq(reloaded.reload_serial, reload_before + 1,
 			"the joiner can reload with a kit applied before spawn")
-	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+	assert_eq(reloaded.reload_applied_serial, applied_before + 1,
 			"the echoed S2C 0x49 refilled the pre-spawn-kit joiner")
-	assert_eq(int(reloaded.get("clip", -1)), 30, "the clip refilled to capacity")
+	assert_eq(reloaded.clip, 30, "the clip refilled to capacity")
 
-	joiner.free()
-	host.free()
 
 
 func _subrate_walk_mission() -> MissionData:
@@ -2589,12 +2561,12 @@ func _subrate_walk_mission() -> MissionData:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(8):
-		assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
-				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+		assert_not_null(md.add_entity(MissionData.KIND_ORGANIC, 5311,
+				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 8, 0), Vector3.ZERO))
+	assert_not_null(md.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(0, 0, 0), Vector3.ZERO))
 	return md
 
 
@@ -2605,7 +2577,10 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	# per-class chase - never hold-then-teleport at the wire cadence.
 	var mission := _subrate_walk_mission()
 	var host := Simulation.new()
-	host.configure_host_session({"gametype": 0x30020, "bandwidth": 100})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.entity_send_budget = 100
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
@@ -2620,8 +2595,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	assert_true(_drive_pair_to_match(host, joiner),
 			"glide observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	# Move the host player authoritatively at run speed (the GUT anim fixtures
@@ -2652,8 +2625,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 		OS.delay_msec(2)
 
 	if samples.size() < 32:
-		joiner.free()
-		host.free()
 		return
 	var total := 0.0
 	var max_step := 0.0
@@ -2680,8 +2651,6 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	assert_lt(lag_end, 2.0,
 			"the presented pose tracks within the snap threshold of truth")
 
-	joiner.free()
-	host.free()
 
 
 func _present_pose_for_type(sim: Simulation, type_id: int) -> Dictionary:
@@ -2711,32 +2680,31 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
 	# would hide any carrier-frame recomposition error on the joiner.
-	assert_false(mission.add_entity(MissionData.KIND_ITEM, 101419,
-			Vector3(2, 12, 0), Vector3(0, 0, 135)).is_empty())
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 101419,
+			Vector3(2, 12, 0), Vector3(0, 0, 135)))
 	var gunner := mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(2, 11, 0), Vector3.ZERO)
-	assert_false(gunner.is_empty())
-	var gunner_ssn := int(gunner.get("bms_id", 0))
+	assert_not_null(gunner)
+	var gunner_ssn := gunner.bms_id
 	assert_gt(gunner_ssn, 0)
 	# Deploy markers away from the emplacement so neither player spawns into it.
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
+	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(20, 0, 0), Vector3.ZERO))
+	assert_not_null(mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
+			Vector3(24, 0, 0), Vector3.ZERO))
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
-	assert_false(mission.add_event(0, 0, 0).is_empty())
-	assert_false(mission.add_event_action(0,
-			{"action_type": 37, "param1": gunner_ssn}).is_empty())
+	assert_not_null(mission.add_event(0, 0, 0))
+	assert_not_null(mission.add_event_action(0,
+			MissionEventAction.make(37, 0, gunner_ssn)))
 
 	var fixture_def_root := ResourceRoot.new()
 	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)
 	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
-	var b50_card: Dictionary = fixture_item_db.extract_seat_specs_for_item(
-			root, 101419)
-	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+	var b50_card := fixture_item_db.extract_seat_specs_for_item(root, 101419)
+	assert_eq(b50_card.get_seats().size(), 1,
 			"mount exposes its authored Usegun seat")
 
 	var host := Simulation.new()
@@ -2770,8 +2738,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq(header.size(), 616,
 			"the joiner received the host's S2C 0x0B mission header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(header), OK)
@@ -2783,13 +2749,11 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# NOTE deliberately NO joiner seat-spec install (and no asset root): the
 	# live header-only joiner only gains seat specs when GameWorld's
 	# admission-boundary prewarm runs install_seat_specs_for_type_ids over the
-	# streamed types (game_world.gd) — this test pins what the present must do
+	# streamed types (GameWorld) — this test pins what the present must do
 	# for a carrier whose spec has not been installed.
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
-		joiner.free()
-		host.free()
 		return
 
 	# The event fired on the host's 16th tick, long before admission completed;
@@ -2814,8 +2778,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_true(host_mounted,
 			"the BMS AttachToEmplaced event seated the AI on the emplacement")
 	if not host_mounted:
-		joiner.free()
-		host.free()
 		return
 
 	# Let the mounted pose ride a few full wire records before judging.
@@ -2826,11 +2788,10 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 
 	# Lockstep sampling window. The host's seated gunner is the truth; the
 	# joiner's presented row must sit on it — not orbit it, not hover over it.
-	# The applier exposes the exact ROOT basis the wire walk gives an
-	# aim-capable body node (present_one_wire_row), so the NODE facing is
+	# The presenter's static exposes the exact ROOT basis the wire walk gives
+	# an aim-capable body node (present_one_wire_row), so the NODE facing is
 	# sampled too — PF_YAW alone stays sane while the aim-overlay body frame
 	# is what actually spins a rendered gunner.
-	var applier := PresentApplier.new()
 	var worst_distance := 0.0
 	var worst_vertical := 0.0
 	var worst_yaw_disagreement := 0.0
@@ -2863,10 +2824,10 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 		var host_record := _present_record_for_type(host, 5311)
 		var joiner_record := _present_record_for_type(joiner, 5311)
 		if not host_record.is_empty() and not joiner_record.is_empty():
-			var host_body: Basis = applier.aim_root_basis(
+			var host_body: Basis = EntityPresenter.aim_root_basis(
 					host_record["snapshot"], int(host_record["base"]),
 					Basis.IDENTITY)
-			var joiner_body: Basis = applier.aim_root_basis(
+			var joiner_body: Basis = EntityPresenter.aim_root_basis(
 					joiner_record["snapshot"], int(joiner_record["base"]),
 					Basis.IDENTITY)
 			worst_body_disagreement = maxf(worst_body_disagreement,
@@ -2913,5 +2874,3 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_lt(worst_joiner_body_step, 25.0,
 			"joiner's rendered gunner BODY holds its facing (no spin)")
 
-	joiner.free()
-	host.free()

@@ -3,8 +3,7 @@
 // simulation internals (ADR 0028) — every input is world state, and both the
 // legacy render/collision paths and the engine-side pose provider consume the
 // same derivations (ADR 0016 one-impl).
-#ifndef OPENNOVA_WORLD_MOUNT_CONTROLS_H
-#define OPENNOVA_WORLD_MOUNT_CONTROLS_H
+#pragma once
 
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -48,7 +47,7 @@ inline bool world_model_heat_glow_for(
 			seat.bone_index == 0 || seat.occupant != child->handle)
 		return false;
 	const WeaponTableEntry *weapon =
-			world.weapons.by_index(carrier.primary_weapon_slot_adm);
+			world.tables.weapons.by_index(carrier.primary_weapon_slot_adm);
 	if (weapon == nullptr) return false;
 	const int32_t tick = static_cast<int32_t>(world.logic_tick);
 	r_heat_glow = weapon_slot_world_heat_glow(
@@ -61,15 +60,6 @@ struct EmplacedWeaponControls {
 	uint16_t gun_yaw = 0;
 	uint16_t gun_pitch = 0;
 };
-
-inline uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam) {
-	// Retail stores the high word of the wrapped parent-minus-occupant angle:
-	// occupant Yaw/Pitch = parent Yaw/Pitch - turret control.
-	// [orig: Entity_UpdateTransformAndTurret @0x441251..0x441263,
-	//  @0x441298..0x4412b3]
-	const int32_t delta = opennova::io::bam_sub(parent_bam, occupant_bam);
-	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
-}
 
 // Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
 // (the "360" gun family) — no effective window; 0 tells callers to skip.
@@ -100,18 +90,17 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 
 inline bool emplaced_weapon_controls_for(
 		const World &world,
-		AiSystem *ai,
 		const Entity &mount,
 		EmplacedWeaponControls &out) {
 	out = EmplacedWeaponControls{};
-	if (ai == nullptr || !mount.primary_weapon_owner.valid()) return false;
+	if (!mount.primary_weapon_owner.valid()) return false;
 	const Entity *occupant = world.registry.get(mount.primary_weapon_owner);
 	if (occupant == nullptr || !occupant->alive || occupant->health <= 0 ||
 			!occupant->mounted ||
 			occupant->mount_type != SeatType::Gunner ||
 			occupant->mount_target != mount.handle)
 		return false;
-	const AiEntity *gunner = ai->for_handle(occupant->handle);
+	const AiEntity *gunner = world.ai.for_handle(occupant->handle);
 	if (gunner == nullptr) return false;
 
 	// The parent owns the embedded weapon/model while the organic owns live look.
@@ -136,7 +125,7 @@ inline bool emplaced_weapon_controls_for(
 			mount.emplacement_right_limit_bam,
 			mount.emplacement_left_limit_bam,
 			mount.primary_weapon_slot_adm != kAdmSlotNone
-					? world.weapons.by_index(mount.primary_weapon_slot_adm)
+					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
 					: nullptr);
 	if (window.per_seat) {
 		emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
@@ -159,5 +148,3 @@ inline bool emplaced_weapon_controls_for(
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_MOUNT_CONTROLS_H

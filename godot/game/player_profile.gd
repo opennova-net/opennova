@@ -71,27 +71,27 @@ static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	var path := weapon_profile_path(root)
 	if path.is_empty() or not FileAccess.file_exists(path):
 		return profile
-	var summary: Dictionary = Simulation.read_weapon_profile_summary(path)
-	if not bool(summary.get("loaded", false)):
+	var summary := Simulation.read_weapon_profile_summary(path)
+	if summary == null or not summary.loaded:
 		return profile
 	var db := AvatarDatabase.new()
 	if db.load_from_resource_root(root, "Avatars.def") != OK or not db.is_loaded():
 		return profile
 	var sides: Array[Dictionary] = [{}, {}]
 	for side in 2:
-		var raw: Dictionary = summary.get("blue" if side == 0 else "red", {})
-		var packed := int(raw.get("avatar_packed", -1))
-		var resolved: Dictionary = db.resolve_character_id(packed, side)
-		if resolved.is_empty():
+		var raw: WeaponProfileSide = summary.blue if side == 0 else summary.red
+		var packed := raw.avatar_packed
+		var resolved := db.resolve_character_id(packed, side)
+		if resolved == null:
 			continue
 		sides[side] = {
 			"team": side,
-			"nationality": int(resolved.get("nationality_index", -1)),
-			"division": int(resolved.get("division_index", -1)),
-			"combo": int(resolved.get("combo_index", -1)),
-			"player_class": int(raw.get("player_class", 8)),
-			"avatar_a": int(raw.get("avatar_a", 0)),
-			"avatar_b": int(raw.get("avatar_b", 0)),
+			"nationality": resolved.nationality_index,
+			"division": resolved.division_index,
+			"combo": resolved.combo_index,
+			"player_class": raw.player_class,
+			"avatar_a": raw.avatar_a,
+			"avatar_b": raw.avatar_b,
 			"avatar_packed": packed,
 		}
 	profile["side_profiles"] = sides

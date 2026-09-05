@@ -17,6 +17,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/world/occlusion_feed.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -591,6 +592,99 @@ void test_negative_static_slot_fog_collection() {
 }
 
 // ---------------------------------------------------------------------------
+// The static pose memo behind collect_buildings caches only pure derivations
+// (the placed bound sphere, the record world positions) behind value keys:
+// a steady frame reproduces the identical admission, and a changed pose (the
+// guard for a husk swap or any future mover) recomputes rather than reading
+// a stale center. The latch is held high so the PRNG stream stays untouched.
+void test_static_pose_memo_recomputes_on_pose_change() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), OcclusionModel{});
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    Entity *entity = rig.world.registry.get(building);
+    CHECK(entity != nullptr);
+    if (entity == nullptr) return;
+    entity->occlusion_latch = 200;
+    const OcclusionFrameCamera cam = rig.camera(15.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    // Steady frame: the memo hit reproduces the same admission.
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    // The static proximity slot keeps its load-time coords, so only the
+    // memoized placed sphere sees the move: a stale memo (center still ahead
+    // at x=20) would keep the building batched, the recompute must drop it
+    // behind the camera's near plane (camera x=15 looking +X).
+    entity->position = {5.0f, 10.0f, 0.0f};
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(!rig.ow.building_batched(building));
+    // And back: the guard re-admits at the original pose.
+    entity->position = {20.0f, 10.0f, 0.0f};
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+}
+
+// ---------------------------------------------------------------------------
+// The results-identical pin for the pose memo: two identical scenes, one
+// with the memo off (every derivation recomputed), driven through the same
+// frames — moves, a return, a steady hold — must batch the same buildings.
+// The latch is held high so the PRNG stream is not the oracle.
+void test_static_pose_memo_matches_the_unmemoized_walk() {
+    Rig memo_rig;
+    Rig plain_rig;
+    plain_rig.ow.set_static_pose_memo_enabled(false);
+    std::vector<EntityHandle> memo_buildings, plain_buildings;
+    const double xs[] = {20.0, 26.0, 33.0, 40.0};
+    const double ys[] = {10.0, 14.0, 6.0, 10.0};
+    for (int k = 0; k < 4; ++k) {
+        memo_buildings.push_back(memo_rig.add_building(
+            xs[k], ys[k], building_collision(2, 2, 3), OcclusionModel{}));
+        plain_buildings.push_back(plain_rig.add_building(
+            xs[k], ys[k], building_collision(2, 2, 3), OcclusionModel{}));
+    }
+    memo_rig.rebuild();
+    plain_rig.rebuild();
+    memo_rig.ow.init_mission(memo_rig.world, memo_rig.cw);
+    plain_rig.ow.init_mission(plain_rig.world, plain_rig.cw);
+    const OcclusionFrameCamera cam = memo_rig.camera(15.0, 10.0, 1.5);
+    auto hold_latches = [&](Rig &rig, const std::vector<EntityHandle> &hs) {
+        for (EntityHandle h : hs) {
+            Entity *entity = rig.world.registry.get(h);
+            if (entity != nullptr) entity->occlusion_latch = 200;
+        }
+    };
+    auto move = [&](Rig &rig, const std::vector<EntityHandle> &hs, int k, float x) {
+        Entity *entity = rig.world.registry.get(hs[static_cast<size_t>(k)]);
+        if (entity != nullptr) entity->position = {x, entity->position.y, 0.0f};
+    };
+    int agreements = 0;
+    for (int frame = 0; frame < 8; ++frame) {
+        if (frame == 2) { move(memo_rig, memo_buildings, 1, 5.0f); move(plain_rig, plain_buildings, 1, 5.0f); }
+        if (frame == 4) { move(memo_rig, memo_buildings, 1, 26.0f); move(plain_rig, plain_buildings, 1, 26.0f); }
+        if (frame == 5) { move(memo_rig, memo_buildings, 3, 4.0f); move(plain_rig, plain_buildings, 3, 4.0f); }
+        hold_latches(memo_rig, memo_buildings);
+        hold_latches(plain_rig, plain_buildings);
+        memo_rig.ow.build_frame(memo_rig.world, memo_rig.cw, cam);
+        plain_rig.ow.build_frame(plain_rig.world, plain_rig.cw, cam);
+        for (int k = 0; k < 4; ++k) {
+            const bool a = memo_rig.ow.building_batched(memo_buildings[static_cast<size_t>(k)]);
+            const bool b = plain_rig.ow.building_batched(plain_buildings[static_cast<size_t>(k)]);
+            CHECK(a == b);
+            agreements += (a == b) ? 1 : 0;
+        }
+    }
+    CHECK(agreements == 32);
+    // The scripted moves did change the answer, so the agreement is not vacuous.
+    CHECK(!memo_rig.ow.building_batched(memo_buildings[3]));
+    CHECK(memo_rig.ow.building_batched(memo_buildings[0]));
+}
+
+// ---------------------------------------------------------------------------
 void test_indoor_masks_and_gate() {
     Rig rig;
     const EntityHandle building =
@@ -843,6 +937,23 @@ void test_forced_visible_bits() {
     CHECK(rig.ow.section_mask(building) == (0xFFFFFFFFu << 5));
 }
 
+// The feed's building verdict word round-trips the full 32-bit mask (its top
+// bit included) beside the visible flag, and an all-ones mask never reads as
+// visible on its own.
+void test_building_visibility_feed_word() {
+    const int64_t hidden_full = pack_building_visibility(0xFFFFFFFFu, false);
+    CHECK(building_visibility_mask(hidden_full) == 0xFFFFFFFFu);
+    CHECK(!building_visibility_visible(hidden_full));
+    const int64_t visible_full = pack_building_visibility(0xFFFFFFFFu, true);
+    CHECK(building_visibility_mask(visible_full) == 0xFFFFFFFFu);
+    CHECK(building_visibility_visible(visible_full));
+    const int64_t visible_none = pack_building_visibility(0u, true);
+    CHECK(building_visibility_mask(visible_none) == 0u);
+    CHECK(building_visibility_visible(visible_none));
+    CHECK(visible_none == (int64_t(1) << kBuildingVisibleBit));
+    CHECK(pack_building_visibility(0x80000001u, false) == int64_t(0x80000001u));
+}
+
 } // namespace
 
 int main() {
@@ -851,12 +962,15 @@ int main() {
     test_tilted_pose_weld();
     test_outdoor_masks();
     test_negative_static_slot_fog_collection();
+    test_static_pose_memo_recomputes_on_pose_change();
+    test_static_pose_memo_matches_the_unmemoized_walk();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();
     test_toc_occlusion();
     test_three_ray_latch();
     test_camera_blink_query();
     test_forced_visible_bits();
+    test_building_visibility_feed_word();
     if (failures == 0) std::printf("occlusion_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

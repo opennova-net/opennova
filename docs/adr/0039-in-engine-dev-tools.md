@@ -120,13 +120,20 @@ integration is not a one-off.
    F3 opens the ImGui tools. What survives under `godot/game/debug/` has other
    owners: the MCP `game_debug` control plane (`DebugSession` and its catalog
    [since ADR 0042 d5 the typed `DebugControls` table,
-   `godot/game/debug/debug_controls.gd`; the `DebugSession` family is gone]),
+   `godot/game/debug/debug_controls.gd` (since ADR 0043 slice G12: the C++ `godot/src/devtools/debug_control_table`); the `DebugSession` family is gone]),
    the world-owned debug views and pick nodes (`DebugViewSet` itself is at
    `godot/game/world/debug_view_set.gd`) and the three
    samplers (retyped to `FrameStats`); the env-var probes that survived this
    cut went with ADR 0041 (2026-08-27) as `game_probe` tools under
    `godot/probes/` or gated ctests. Retired page features return as engine
    windows when wanted; `TODO.md` carries the list.
+   *Amended 2026-09-02:* the GDScript world-space debug views and their
+   `DebugViewSet` owner were retired too, in favour of the ImGui windows (the
+   AI, Rays and Physics windows keep their data panes and capture controls;
+   their "show world overlay" toggles and the shell-mirrored view state went
+   with the views). The windows have no world-space overlay yet; under this
+   item's rule an overlay returns as an engine window when wanted, and
+   `TODO.md` lists the overlays with no ImGui home.
 7. **Not an editor.** The tools inspect and, later, control a running game.
    ADR 0037 stands: no authoring, no project state, no asset database.
 

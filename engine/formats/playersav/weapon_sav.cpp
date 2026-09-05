@@ -319,4 +319,13 @@ void clamp_classes(File &f)
     }
 }
 
+bool profile_or_defaults(const uint8_t *data, size_t size, Record &slot0) {
+    slot0 = make_defaults().slots[0];
+    File parsed;
+    if (!read(data, size, parsed)) return false;
+    clamp_classes(parsed);
+    slot0 = parsed.slots[0];
+    return true;
+}
+
 }  // namespace opennova::playersav

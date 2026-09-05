@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/npruntime/lan_discovery.h>
+#include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
 
 #include "net_sockets.h"
@@ -27,7 +27,7 @@ struct Options {
 
 struct Result {
 	Status status = Status::Timeout;
-	np::LanDiscoveryServer server;
+	opennova::LanDiscoveryServer server;
 	net::Endpoint source;
 	int probes_sent = 0;
 };

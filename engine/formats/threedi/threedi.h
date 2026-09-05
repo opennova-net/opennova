@@ -1,5 +1,4 @@
-#ifndef THREEDI_H
-#define THREEDI_H
+#pragma once
 
 // Minimal 3DI chunk reader/builder API.
 // Chunks are represented as a simple tree mirroring the 3DI on-disk layout.
@@ -7,9 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::threedi {
 
 typedef struct ThreediChunk {
     char id[5];                // FourCC, null-terminated.
@@ -39,8 +36,4 @@ int threedi_read_memory(const uint8_t *data, size_t size, ThreediFile *out_file)
 // Recursively free a ThreediFile and its chunks.
 void threedi_free_file(ThreediFile *file);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // THREEDI_H
+} // namespace opennova::threedi

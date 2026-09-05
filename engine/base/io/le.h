@@ -4,8 +4,7 @@
 // format parser used to roll locally. Callers are responsible for bounds; for
 // a bounds-checked cursor use io/byte_reader.h.
 
-#ifndef OPENNOVA_IO_LE_H
-#define OPENNOVA_IO_LE_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -114,5 +113,3 @@ inline void append_f32_le(std::vector<uint8_t> &out, float f)
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_LE_H

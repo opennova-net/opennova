@@ -30,6 +30,7 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
 #include "common/retail_mission_files.h"
@@ -223,9 +224,9 @@ void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
     }
     Entity *ent = w.registry.get(e->handle);
     ent->equipped_adm_index = adm;
-    if (w.weapons.entries.size() <= adm) w.weapons.entries.resize(adm + 1u);
-    w.weapons.entries[adm].valid = true;
-    w.weapons.entries[adm].special_hold = special_hold;
+    if (w.tables.weapons.entries.size() <= adm) w.tables.weapons.entries.resize(adm + 1u);
+    w.tables.weapons.entries[adm].valid = true;
+    w.tables.weapons.entries[adm].special_hold = special_hold;
 }
 
 void test_recoil_and_weapon_weight_kernels() {
@@ -1509,10 +1510,10 @@ void test_local_player_swims_on_the_plane() {
     CHECK((ent->flags & kEntityFlagInAir) == 0);
     CHECK((ent->flags & 0x200000u) != 0);
     CHECK(!e->inf.airborne);
-    CHECK(world.water_crossings.events.size() == 2);
-    if (!world.water_crossings.events.empty()) {
-        CHECK(world.water_crossings.events[0].water_z == fx(5.0));
-        CHECK(!world.water_crossings.events[0].airborne);
+    CHECK(world.out.water_crossings.events.size() == 2);
+    if (!world.out.water_crossings.events.empty()) {
+        CHECK(world.out.water_crossings.events[0].water_z == fx(5.0));
+        CHECK(!world.out.water_crossings.events[0].airborne);
     }
 
     // The buoyant rise from deep water: z climbs every tick by the witnessed
@@ -1531,7 +1532,7 @@ void test_local_player_swims_on_the_plane() {
         prev_z = e->pos[2];
     }
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
-    CHECK(world.water_crossings.events.size() == 2);
+    CHECK(world.out.water_crossings.events.size() == 2);
 
     // Near the surface: the line water + base/2 - eye/2 clamps from above and
     // clears the dive bit; the body rides UNDER the plane, not on the bed.
@@ -1917,7 +1918,7 @@ void test_player_weapon_hold_kinds() {
     give_held_weapon(w, e, /*adm=*/5, /*special_hold=*/0);
     uint32_t tick = 1;
     auto select = [&](int kind) {
-        w.weapons.entries[5].special_hold = kind;
+        w.tables.weapons.entries[5].special_hold = kind;
         tick = run_to_next_selection(ai, w, tick);
     };
 
@@ -2825,8 +2826,8 @@ void test_infantry_parity_pins_2026_08_28() {
     // Mission-load defaults: fall-damage tolerance 13, accuracy spread 10.
     {
         World w;
-        CHECK(w.wac_values.fallmps == 13);
-        CHECK(w.wac_values.accuracy_spread == 10);
+        CHECK(w.script.wac_values.fallmps == 13);
+        CHECK(w.script.wac_values.accuracy_spread == 10);
     }
     // Landing damage is authority-only: a joiner's own body lands unharmed.
     {
@@ -2835,7 +2836,7 @@ void test_infantry_parity_pins_2026_08_28() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true; // the motor runs locally for the joiner's own body
         e->pos[0] = fx(100);
@@ -2860,7 +2861,7 @@ void test_infantry_parity_pins_2026_08_28() {
         w.registry.configure_pool(0, 4);
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         Entity body{};
         body.alive = true;
         body.health = 30000;
@@ -2951,8 +2952,7 @@ void test_infantry_parity_pins_2026_08_28() {
 void test_pre_attack_wins_when_previously_idle() {
     World w;
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
                  anim_state::kIdle2, anim_state::kIdle3, anim_state::kAttack,
@@ -3007,8 +3007,7 @@ void test_combat_fixture_acquires_a_target() {
     // has capacity 0 and the candidate loop never iterates -- no acquisition, with
     // every other gate looking fine.
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
                  anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
@@ -3080,8 +3079,7 @@ void test_combat_fixture_acquires_a_target() {
 void test_out_of_range_enemy_is_approached() {
     World w;
     w.registry.configure_pool(0, 16);
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     TestSource src;
     src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
                  anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
@@ -3130,11 +3128,11 @@ int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weap
     if (!rig.install_weapon(weapon)) return -1;
     // The hold kind is re-read every selection pass from the entity's OWN
     // equipped index (the single wire byte at entity+0x2B0) [orig: @0x4b5dba].
-    const int idx = rig.world.weapons.index_of(weapon);
+    const int idx = rig.world.tables.weapons.index_of(weapon);
     if (idx >= 0)
-        if (Entity *pe = rig.player()) pe->equipped_adm_index = static_cast<uint8_t>(idx);
+        if (Entity *pe = rig.local.player()) pe->equipped_adm_index = static_cast<uint8_t>(idx);
     for (int t = 0; t < settle_ticks; ++t) rig.tick();
-    return rig.player_ai() != nullptr ? rig.player_ai()->inf.wpn_state : -1;
+    return rig.local.player_ai() != nullptr ? rig.local.player_ai()->inf.wpn_state : -1;
 }
 
 // Burst-fire then press R; returns the first weapon-channel state that differs
@@ -3142,18 +3140,18 @@ int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weap
 int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, int wait_ticks,
         int *r_never_seen, int never_state) {
     for (int t = 0; t < 20; ++t) {
-        rig.set_weapon_input(true, t == 0, false);
+        rig.local.set_weapon_input(true, t == 0, false);
         rig.tick();
     }
-    rig.set_weapon_input(false, false, false);
+    rig.local.set_weapon_input(false, false, false);
     for (int t = 0; t < 10; ++t) rig.tick();
-    rig.set_weapon_input(false, false, true);
+    rig.local.set_weapon_input(false, false, true);
     rig.tick();
-    rig.set_weapon_input(false, false, false);
+    rig.local.set_weapon_input(false, false, false);
     int seen = -1;
     for (int t = 0; t < wait_ticks; ++t) {
         rig.tick();
-        const int st = rig.player_ai()->inf.wpn_state;
+        const int st = rig.local.player_ai()->inf.wpn_state;
         if (st == never_state) *r_never_seen = 1;
         if (seen < 0 && st != hold) seen = st;
         if (seen >= 0 && st != never_state) break;
@@ -3163,7 +3161,7 @@ int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, 
 
 void wait_slot_idle(opennova::testrig::RetailMissionRig &rig, int max_ticks) {
     for (int t = 0; t < max_ticks; ++t) {
-        if (rig.weapon.slot.current == weapon_action::kIdle && t > 5) return;
+        if (rig.local.weapon.slot.current == weapon_action::kIdle && t > 5) return;
         rig.tick();
     }
 }
@@ -3188,10 +3186,10 @@ static void test_retail_weapon_channel_holds() {
         ++failures;
         return;
     }
-    CHECK(rig.has_local_player());
-    CHECK(rig.inventory_valid);
-    if (!rig.has_local_player() || rig.player_ai() == nullptr) return;
-    const AiEntity *pa = rig.player_ai();
+    CHECK(rig.local.has_local_player());
+    CHECK(rig.local.inventory_valid);
+    if (!rig.local.has_local_player() || rig.local.player_ai() == nullptr) return;
+    const AiEntity *pa = rig.local.player_ai();
 
     // Pistol: special_hold -> the pistol hold; its reload is reload2.
     const int pistol = retail_hold_state(rig, "WPN_colt45", 40);
@@ -3213,9 +3211,9 @@ static void test_retail_weapon_channel_holds() {
     std::printf("weapon_channel: WPN_KNIFE hold state %d (%s) hold_kind %d\n", knife,
             knife >= 0 ? kInfantryAnimNames[knife] : "?", pa->inf.wpn_hold_kind);
     CHECK(knife == anim_state::kHoldKnife);
-    rig.set_weapon_input(true, true, false);
+    rig.local.set_weapon_input(true, true, false);
     rig.tick();
-    rig.set_weapon_input(false, false, false);
+    rig.local.set_weapon_input(false, false, false);
     int attack_at = -1;
     int32_t phase_a = 0, phase_b = 0;
     for (int t = 0; t < 30; ++t) {
@@ -3247,19 +3245,33 @@ static void test_retail_weapon_channel_holds() {
     int unused = 0;
     const int rifle_reload = retail_fire_then_reload(rig, rifle, 40, &unused, -1);
     std::printf("weapon_channel: rifle reload state %d (%s) slot action %d\n", rifle_reload,
-            rifle_reload >= 0 ? kInfantryAnimNames[rifle_reload] : "?", rig.weapon.slot.current);
+            rifle_reload >= 0 ? kInfantryAnimNames[rifle_reload] : "?", rig.local.weapon.slot.current);
     CHECK(rifle_reload == anim_state::kReload);
-    CHECK(rig.weapon.slot.current == weapon_action::kReload); // mid-reload: FSM in RELOAD
+    CHECK(rig.local.weapon.slot.current == weapon_action::kReload); // mid-reload: FSM in RELOAD
     phase_a = pa->inf.wpn_clip_phase;
     for (int t = 0; t < 4; ++t) rig.tick();
     phase_b = pa->inf.wpn_clip_phase;
     CHECK(phase_b > phase_a);      // the body playhead advances
     wait_slot_idle(rig, 600);
     for (int t = 0; t < 40; ++t) rig.tick();
-    CHECK(rig.weapon.slot.current == weapon_action::kIdle);
+    CHECK(rig.local.weapon.slot.current == weapon_action::kIdle);
     CHECK(pa->inf.wpn_state == pa->inf.anim_state || pa->inf.wpn_state == anim_state::kIdle);
-    std::printf("weapon_channel: post-reload slot %d body %d primary %d\n", rig.weapon.slot.current,
+    std::printf("weapon_channel: post-reload slot %d body %d primary %d\n", rig.local.weapon.slot.current,
             pa->inf.wpn_state, pa->inf.anim_state);
+}
+
+// ChangeAI sub 17's CLIMBER slot bit reaches the ladder entry gate through
+// LadderResolveIO::ai_wants_climb — the bit's one retail reader
+// [orig: aiRuntime+4 & 0x400 @0x4b326a, Entity_MovementCollisionResolver].
+static void test_climber_bit_feeds_the_ladder_gate() {
+    AiEntity e{};
+    const LadderResolveIO off = make_ladder_resolve_io(e, 0);
+    CHECK(!off.ai_wants_climb);
+    e.slot.f[AiSlot::kBehaviorFlags] |= static_cast<int32_t>(AiSlot::kClimber);
+    const LadderResolveIO on = make_ladder_resolve_io(e, 0);
+    CHECK(on.ai_wants_climb);
+    e.slot.f[AiSlot::kBehaviorFlags] &= ~static_cast<int32_t>(AiSlot::kClimber);
+    CHECK(!make_ladder_resolve_io(e, 0).ai_wants_climb);
 }
 
 int main() {
@@ -3465,8 +3477,8 @@ int main() {
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
         if (!ai.relmat_calls.empty())
             CHECK(ai.relmat_calls[0].channel == 1 && ai.relmat_calls[0].node == 0);
-        CHECK(w.relations.group_visited(4, 1, 0));
-        CHECK(w.relations.single_visited(8, 1, 0));
+        CHECK(w.script.relations.group_visited(4, 1, 0));
+        CHECK(w.script.relations.single_visited(8, 1, 0));
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
         CHECK(e->pos[0] == 241653);                 // walk->idle blend has settled
@@ -3478,8 +3490,8 @@ int main() {
         CHECK(e->slot.f[38] == 1);                  // one-shot end pins the last node
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 20);          // end-of-path cooldown
-        CHECK(w.relations.group_visited(4, 1, 1));
-        CHECK(w.relations.single_visited(8, 1, 1));
+        CHECK(w.script.relations.group_visited(4, 1, 1));
+        CHECK(w.script.relations.single_visited(8, 1, 1));
 
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 320, 1200); // parked: cooldown re-arms, never moves again
@@ -3602,7 +3614,7 @@ int main() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3630,7 +3642,7 @@ int main() {
         World w; // a hop (2 gravity steps, vel -832 > -1057) lands without damage
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 1;
+        w.script.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3651,7 +3663,7 @@ int main() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        w.wac_values.fallmps = 0;
+        w.script.wac_values.fallmps = 0;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3861,10 +3873,12 @@ int main() {
         CHECK(e->inf.vel[1] != 0);
     }
 
-    // ---- player slide damp: a GROUNDED player's horizontal slide decays by (63*v)>>6 each tick
-    //      (org2 block A, no deadzone), so a slope-slide impulse settles instead of drifting
-    //      forever — the player's slide was previously never damped. [orig: @0x4b7949;
-    //      D-INF-9]
+    // ---- player slide damp, CORRECTED SENSE (2026-08-26 kong differential): the selector
+    //      Flags&0x2000 is IN-AIR (pinned by the same function's jump set / landing clear /
+    //      selection skip @0x4b70b8). A GROUNDED player decays by (7v+4)>>3 with the abs<=8
+    //      snap [orig: @0x4b7982] -- ground kills a slide in ~10 ticks; the AIRBORNE arm is
+    //      the momentum-preserving (63*v)>>6, no deadzone [orig: @0x4b7949]. The previous
+    //      pin here asserted the arms SWAPPED (the old D-INF-9 reading).
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         TestSource src;
@@ -3885,13 +3899,70 @@ int main() {
 
         e->inf.vel[0] = 6400;
         e->inf.vel[1] = -6400;
-        run_ticks(ai, w, 1, 2); // one grounded tick: org2 (63*v)>>6, NOT the NPC (7v+4)>>3 (=5600)
-        CHECK(e->inf.vel[0] == (63 * 6400) >> 6);  // 6300
-        CHECK(e->inf.vel[1] == (63 * -6400) >> 6); // -6300
+        run_ticks(ai, w, 1, 2); // one grounded tick: (7v+4)>>3 [orig: @0x4b7982], NOT (63*v)>>6 (=6300)
+        CHECK(e->inf.vel[0] == (7 * 6400 + 4) >> 3);  // 5600
+        CHECK(e->inf.vel[1] == ((7 * -6400 + 4) >> 3)); // arithmetic shift floors: -5600
 
-        run_ticks(ai, w, 2, 300); // ...and it keeps decaying (the drift bug is fixed)
-        CHECK(e->inf.vel[0] >= 0 && e->inf.vel[0] < 100);
-        CHECK(e->inf.vel[1] <= 0 && e->inf.vel[1] > -100);
+        run_ticks(ai, w, 2, 80); // 6400*(7/8)^n <= 8 at n~50; the abs<=8 snap then ZEROES it
+        CHECK(e->inf.vel[0] == 0);
+        CHECK(e->inf.vel[1] == 0);
+    }
+
+    // ---- airborne STEER, before the decay [orig: @0x4b78b7..0x4b790f]: while
+    //      the moving bit is held, the slide pair takes -ftol(cos/sin(angle)
+    //      * -64.0f), angle = (heading high word) * dbl_7C9BC0 + dir *
+    //      dbl_7C9BB0, THEN the (63*v)>>6 decay runs over the steered value.
+    {
+        Field low([](int) { return static_cast<uint16_t>(0); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+        World w;
+        AiSystem ai;
+        ai.terrain = &low.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100); e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // far above the field: stays airborne
+        e->inf.airborne = true;
+        e->inf.player_moving = true;
+        e->inf.player_move_dir_index = 0;
+        e->heading = 0; // high word 0 -> angle 0 -> (cos,sin) = (1,0)
+        e->inf.vel[0] = 0;
+        e->inf.vel[1] = 0;
+
+        run_ticks(ai, w, 1, 2);
+        // Steer first: v = 0 - ftol(1.0f * -64.0f) = 64; decay then yields
+        // (63*64)>>6 = 63. Decay-before-steer would leave 64.
+        CHECK(e->inf.vel[0] == 63);
+        CHECK(e->inf.vel[1] == 0); // sin(0) truncates to zero
+
+        // The heading term is the SIGNED HIGH WORD of the look heading
+        // [orig: movsx word entity+0x12 @0x4b78c5]: 0x4000 lands the push on
+        // the sin axis (angle ~ pi/2 -> cos truncates to 0). The local-player
+        // look yaw is mouse-instant off target_heading, so drive that.
+        // 0x4000 * dbl_7C9BC0 = 1.5707954 (just short of pi/2), so the x87
+        // double sin is 0.99999999... and ftol(sin * -64.0) truncates to -63,
+        // not -64 — narrowing the sin to float first would round it to 1.0
+        // and push 64. Steer 63, then the decay: (63*63)>>6 = 62.
+        e->inf.airborne = true;
+        e->inf.target_heading = 0x40000000;
+        e->inf.vel[0] = 0;
+        e->inf.vel[1] = 0;
+        run_ticks(ai, w, 2, 3);
+        CHECK(e->inf.vel[0] == 0);
+        CHECK(e->inf.vel[1] == 62);
+
+        // Without the moving bit only the momentum decay runs.
+        e->inf.airborne = true;
+        e->inf.player_moving = false;
+        e->inf.vel[0] = 6400;
+        e->inf.vel[1] = 0;
+        run_ticks(ai, w, 3, 4);
+        CHECK(e->inf.vel[0] == (63 * 6400) >> 6); // 6300 — no steer, no deadzone
     }
 
     // ---- stance: crouch/prone select the stance gait + idle clips (player). The
@@ -4343,6 +4414,7 @@ int main() {
     test_player_weapon_attack_stamp();
     test_player_arms_dip();
     test_player_weapon_channel_ticks_while_dead();
+    test_climber_bit_feeds_the_ladder_gate();
     test_ai_weapon_channel_advances_without_selection();
     test_weapon_channel_consumer_gate_and_switch_identity();
     test_death_presentation();

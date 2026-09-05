@@ -103,6 +103,20 @@ int main() {
         TEST_EXPECT(fade.region == 1);
         TEST_EXPECT(fade.adjacent == 0);
         TEST_EXPECT(std::fabs(fade.blend - 0.2001f) < 0.005f);
+        // Just before the 10h cut: morning, fading out toward day.
+        const opennova::audio::TimeOfDayRegion fade_out = time_of_day_region(9.98f);
+        TEST_EXPECT(fade_out.region == 0);
+        TEST_EXPECT(fade_out.adjacent == 1);
+        TEST_EXPECT(fade_out.blend > 0.1f && fade_out.blend < 0.5f);
+        // Night wraps past midnight, holds full volume up to the 4h cut (the
+        // wrapped region's far edge never blends [orig: @ 0x40820f]), and the
+        // cut instant itself is still night at full blend; mid-region is full.
+        TEST_EXPECT(time_of_day_region(0.5f).region == 3);
+        TEST_EXPECT(time_of_day_region(3.99f).region == 3);
+        TEST_EXPECT(time_of_day_region(3.98f).blend == 1.0f);
+        TEST_EXPECT(time_of_day_region(4.0f).region == 3);
+        TEST_EXPECT(time_of_day_region(4.0f).blend == 1.0f);
+        TEST_EXPECT(time_of_day_region(12.0f).blend == 1.0f);
     }
 
     // --- Cohort stagger: a marker registers only when its cohort's tick elapses ---

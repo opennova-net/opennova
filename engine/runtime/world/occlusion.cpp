@@ -99,9 +99,9 @@ RenderMatrix render_matrix_multiply(const RenderMatrix &a, const RenderMatrix &b
 
 // [orig: Math_FixedPointToFloat3_YNegated @ 0x611210]
 void render_float_from_fixed(const int32_t p[3], float out[3]) {
-    out[0] = static_cast<float>(-p[1]) * (1.0f / 65536.0f);
-    out[1] = static_cast<float>(p[2]) * (1.0f / 65536.0f);
-    out[2] = static_cast<float>(p[0]) * (1.0f / 65536.0f);
+    out[0] = static_cast<float>(-p[1]) * (io::kInvFp16One);
+    out[1] = static_cast<float>(p[2]) * (io::kInvFp16One);
+    out[2] = static_cast<float>(p[0]) * (io::kInvFp16One);
 }
 
 // [orig: Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200 — roll (float Z), then
@@ -149,9 +149,9 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
     }
     RenderMatrix t{};
     t.m[0] = t.m[5] = t.m[10] = t.m[15] = 1.0f;
-    t.m[12] = static_cast<float>(-pos[1]) * (1.0f / 65536.0f);
-    t.m[13] = static_cast<float>(pos[2]) * (1.0f / 65536.0f);
-    t.m[14] = static_cast<float>(pos[0]) * (1.0f / 65536.0f);
+    t.m[12] = static_cast<float>(-pos[1]) * (io::kInvFp16One);
+    t.m[13] = static_cast<float>(pos[2]) * (io::kInvFp16One);
+    t.m[14] = static_cast<float>(pos[0]) * (io::kInvFp16One);
     return render_matrix_multiply(acc, t);
 }
 
@@ -232,6 +232,9 @@ void OcclusionWorld::init_mission(World &world, CollisionWorld &collision,
 // attrib2 bit 6 "weldable".]
 void OcclusionWorld::register_exterior_faces(World &world, CollisionWorld &collision) {
     registry_.clear();
+    // Mission portal init: the pose memo's model pointers must never survive
+    // into a reloaded mission's allocations.
+    static_pose_memo_.clear();
     const int32_t buildings = collision.static_building_count();
     for (int32_t i = 0; i < buildings; ++i) {
         const CollisionWorld::StaticSlotView slot = collision.static_slot(i);
@@ -398,7 +401,7 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
 
     float center[3];
     render_float_from_fixed(center_fixed, center);
-    const float radius = static_cast<float>(radius_fixed) * (1.0f / 65536.0f);
+    const float radius = static_cast<float>(radius_fixed) * (io::kInvFp16One);
     for (int32_t p = 0; p < cam.frustum_count; ++p) {
         const float d = center[0] * cam.frustum[p][0] + center[1] * cam.frustum[p][1] +
                         center[2] * cam.frustum[p][2] + cam.frustum[p][3];
@@ -498,23 +501,49 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         // Bound sphere: local center from the collision bounds, placed through
         // the static heading transform. [orig: Entity_ComputeBoundingSphere
         // @ 0x5c6c53 + the pose transform @ 0x5c6c6a-0x5c6c94]
-        int32_t center_local[3], radius;
-        bound_sphere_fixed(*cm, center_local, radius);
+        // Statics do not move, so the placed sphere memoizes behind its pose/
+        // model value keys; a guard miss (husk swap, a mover) recomputes the
+        // identical way.
         int32_t epos[3];
         entity_pos_fixed(*e, epos);
-        const CollisionMatrix pose = collision_matrix_from_heading(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw)), epos);
-        int32_t center_world[3];
-        pose.transform_point(center_local, center_world);
+        if (static_pose_memo_.size() <= static_cast<size_t>(i)) {
+            static_pose_memo_.resize(static_cast<size_t>(buildings));
+        }
+        StaticPoseMemo &memo = static_pose_memo_[static_cast<size_t>(i)];
+        const int32_t inst_model_id = instance_model_id(slot.h);
+        const bool pose_hit = static_pose_memo_enabled_ &&
+                              memo.handle_packed == slot.h.packed &&
+                              memo.cm == cm && memo.model_id == inst_model_id &&
+                              memo.yaw == e->yaw &&
+                              memo.pitch == e->pitch && memo.roll == e->roll &&
+                              memo.pos[0] == epos[0] && memo.pos[1] == epos[1] &&
+                              memo.pos[2] == epos[2];
+        if (!pose_hit) {
+            int32_t center_local[3];
+            bound_sphere_fixed(*cm, center_local, memo.radius);
+            const CollisionMatrix pose = collision_matrix_from_heading(
+                bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw)), epos);
+            pose.transform_point(center_local, memo.center_world);
+            memo.handle_packed = slot.h.packed;
+            memo.cm = cm;
+            memo.model_id = inst_model_id;
+            memo.yaw = e->yaw;
+            memo.pitch = e->pitch;
+            memo.roll = e->roll;
+            memo.pos[0] = epos[0];
+            memo.pos[1] = epos[1];
+            memo.pos[2] = epos[2];
+            memo.records_valid = false;
+        }
 
-        if (!sphere_in_view(cam, center_world, radius)) continue;
+        if (!sphere_in_view(cam, memo.center_world, memo.radius)) continue;
 
         // Three-ray latch — buildings run it too. [orig: @ 0x5c6cd9-0x5c6d0d]
         if (e->occlusion_latch != 0) {
             --e->occlusion_latch;
         } else {
-            if (outdoors && !three_rays_clear(collision, cam, center_world, radius,
-                                              world.logic_tick))
+            if (outdoors && !three_rays_clear(collision, cam, memo.center_world,
+                                              memo.radius, world.logic_tick))
                 continue; // culled this frame; re-probed next
             e->occlusion_latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
         }
@@ -533,7 +562,20 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         if (inst == nullptr) continue;
         const OcclusionModel *m = model(inst->model_id);
         if (m == nullptr || m->records.empty()) continue;
-        const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
+        // The record WORLD positions ride the same memo (pure of pose +
+        // model); the type/radius bytes read live each pass — the weld pass
+        // rewrites types in place.
+        if (!memo.records_valid || memo.model_id != inst->model_id ||
+            memo.record_world.size() != m->records.size()) {
+            const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
+            memo.record_world.resize(m->records.size());
+            for (size_t r = 0; r < m->records.size(); ++r) {
+                world_mat.transform_point(m->records[r].pos,
+                                          memo.record_world[r].data());
+            }
+            memo.model_id = inst->model_id;
+            memo.records_valid = true;
+        }
         for (int32_t r = 0; r < static_cast<int32_t>(m->records.size()); ++r) {
             const OcclusionPortalFace &rec = m->records[r];
             // type 0 collects; ANY type >= 1 sets the batch open flag (the RE
@@ -543,8 +585,8 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
                 appended.open_flag = true;
                 if (rec.type != kOccRecOpen) continue;
             }
-            float rec_world[3];
-            world_mat.transform_point(rec.pos, rec_world);
+            const float *rec_world =
+                    memo.record_world[static_cast<size_t>(r)].data();
             // Sphere-vs-frustum stand-in for the viewport clip (D-OCC-12).
             // [orig: Viewport_TransformAndClipPoint @ 0x5c6e42, radius * 65536]
             bool in_view = true;
@@ -1068,7 +1110,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
             abs32(cand_cm->min[2]) > abs32(cand_cm->max[2]) ? cand_cm->min[2] : cand_cm->max[2]);
         radius_fixed = corner;
     }
-    const float radius = static_cast<float>(radius_fixed) * (1.0f / 65536.0f);
+    const float radius = static_cast<float>(radius_fixed) * (io::kInvFp16One);
 
     // Camera-inside early rule. [orig: @ 0x5c4662-0x5c4721]
     const int32_t window_groups = static_cast<int32_t>(window_groups_.size());
@@ -1164,12 +1206,12 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
             // 8-corner collision-AABB refinement. [orig: @ 0x5c490e-0x5c4a4d —
             // the corner components swizzle the mission-axis bounds into the
             // 3DI float model frame: X = -y, Y = z, Z = x.]
-            const float min_x = static_cast<float>(-cand_cm->min[1]) * (1.0f / 65536.0f);
-            const float max_x = static_cast<float>(-cand_cm->max[1]) * (1.0f / 65536.0f);
-            const float min_y = static_cast<float>(cand_cm->min[2]) * (1.0f / 65536.0f);
-            const float max_y = static_cast<float>(cand_cm->max[2]) * (1.0f / 65536.0f);
-            const float min_z = static_cast<float>(cand_cm->min[0]) * (1.0f / 65536.0f);
-            const float max_z = static_cast<float>(cand_cm->max[0]) * (1.0f / 65536.0f);
+            const float min_x = static_cast<float>(-cand_cm->min[1]) * (io::kInvFp16One);
+            const float max_x = static_cast<float>(-cand_cm->max[1]) * (io::kInvFp16One);
+            const float min_y = static_cast<float>(cand_cm->min[2]) * (io::kInvFp16One);
+            const float max_y = static_cast<float>(cand_cm->max[2]) * (io::kInvFp16One);
+            const float min_z = static_cast<float>(cand_cm->min[0]) * (io::kInvFp16One);
+            const float max_z = static_cast<float>(cand_cm->max[0]) * (io::kInvFp16One);
             const RenderMatrix cand_mat = render_matrix_from_entity_pose(*cand);
             bool all_corners_inside = true;
             for (int32_t corner = 0; corner < 8 && all_corners_inside; ++corner) {
@@ -1414,18 +1456,27 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
         center_world[1] = epos[1];
         center_world[2] = epos[2];
     }
+    return sphere_render_visible(collision, cam, center_world, radius,
+                                 ent.occlusion_latch, world.logic_tick);
+}
+
+bool OcclusionWorld::sphere_render_visible(const CollisionWorld &collision,
+                                           const OcclusionFrameCamera &cam,
+                                           const int32_t center_world[3],
+                                           int32_t radius, uint8_t &latch,
+                                           uint32_t logic_tick) {
     if (!sphere_in_view(cam, center_world, radius)) return false;
 
     // Three-ray latch, outdoors only. [orig: @ 0x5c7125-0x5c7162]
     const bool outdoors = (~cam.local_blink_flags & 0x2u) != 0;
-    if (ent.occlusion_latch != 0) {
-        --ent.occlusion_latch;
+    if (latch != 0) {
+        --latch;
         return true;
     }
     if (outdoors && !three_rays_clear(collision, cam, center_world, radius,
-                                      world.logic_tick))
+                                      logic_tick))
         return false;
-    ent.occlusion_latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
+    latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
     return true;
 }
 

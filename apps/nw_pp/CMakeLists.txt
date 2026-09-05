@@ -12,8 +12,12 @@
 
 add_executable(nw_pp nw_pp.cpp)
 
+# The wire group for the decode, and the runtime group for the one HUD policy
+# it prints beside the bytes (the 0x1E feed kind -> STRCND key table,
+# runtime/hud/feed_format).
 target_link_libraries(nw_pp
     PRIVATE
+        opennova_runtime
         opennova_net
         opennova_formats
         opennova_base

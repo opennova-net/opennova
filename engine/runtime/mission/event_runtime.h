@@ -10,8 +10,7 @@
 // and drives the SAME entities + variable store the WAC VM uses (the dword_C6B240
 // mission-variable array is literally shared: BMS MisvarChange and WAC set(V#)
 // mutate one store).
-#ifndef OPENNOVA_MISSION_EVENT_RUNTIME_H
-#define OPENNOVA_MISSION_EVENT_RUNTIME_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -126,5 +125,3 @@ private:
 };
 
 } // namespace opennova::mission
-
-#endif // OPENNOVA_MISSION_EVENT_RUNTIME_H

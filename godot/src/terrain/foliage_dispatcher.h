@@ -4,17 +4,23 @@
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+
+#include "terrain/foliage_frame_stats.h"
 
 #include <formats/foliage/runtime.h>
 #include <runtime/renderer/foliage_frame.h>
@@ -27,11 +33,37 @@
 namespace godot {
 
 class Image;
+class ObjectData;
 class RenderingServer;
+class ResourceRoot;
 class Terrain;
 class Weather;
 class TerrainData;
 class TerrainTileInfo;
+
+// One top-level *veg*.3di graphic of a resource root
+// (FoliageDispatcher.list_graphics): the lower-cased basename and the
+// resolved model path (the logical VFS name or the on-disk path in its real
+// case).
+class VegGraphicRow : public RefCounted {
+  GDCLASS(VegGraphicRow, RefCounted)
+
+public:
+  String get_basename() const { return basename_; }
+  void set_basename(const String &p_value) { basename_ = p_value; }
+  String get_model_path() const { return model_path_; }
+  void set_model_path(const String &p_value) { model_path_ = p_value; }
+  String get_scene_path() const { return scene_path_; }
+  void set_scene_path(const String &p_value) { scene_path_ = p_value; }
+
+protected:
+  static void _bind_methods();
+
+private:
+  String basename_;
+  String model_path_;
+  String scene_path_;
+};
 
 // Godot render applier for the portable foliage frame (ADR 0033 R2).
 //
@@ -64,6 +96,59 @@ public:
   // slot. No placeholder geometry is manufactured.
   void configure_slots(const Array &p_defs, const Array &p_meshes,
                        const Array &p_fd_textures);
+
+  // --- The vegetation asset resolver (the former veg_assets.gd, ADR 0043
+  //     slice G10, folded here as INSTANCE state). Vegetation .3di are not
+  //     bundled; runtime and editor callers pass the same flat ResourceRoot
+  //     used for terrain/env/credits. The caches (meshes, :fd textures,
+  //     model paths, the per-root graphics listing) are keyed by root +
+  //     graphic, survive mission reloads (the dispatcher lives under the
+  //     world's Terrain for the world's whole life) and die with it;
+  //     clear_asset_cache() empties them explicitly (the shell's exit) and
+  //     every cache-reading verb self-clears them when the global cache
+  //     epoch moved (check_asset_cache_epoch). ---
+  // The load plan's foliage stage: resolve every def's mesh and :fd texture
+  // through this dispatcher's caches, then configure_slots over the three
+  // parallel arrays.
+  void configure_slots_from_defs(const Ref<ResourceRoot> &p_resource_root,
+                                 const Array &p_defs);
+  void clear_asset_cache();
+  // Lifecycle diagnostic: the shell can prove that every retained renderer
+  // registry was emptied without exposing any cache for mutation (a cache
+  // reader: it runs the epoch self-clear first).
+  int asset_cache_entry_count();
+  // Enumerate all top-level *veg*.3di graphics in the resource root, sorted
+  // by basename (a caller-safe copy of the cached listing).
+  TypedArray<VegGraphicRow> list_graphics(const Ref<ResourceRoot> &p_resource_root,
+                                          bool p_force_refresh = false);
+  // Resolve each def's `graphic` name to the first Mesh built from its .3di.
+  // Returns an Array parallel to `defs`; a null entry disables that retail
+  // slot. The fresh dispatcher never manufactures placeholder geometry.
+  Array resolve_slot_meshes(const Ref<ResourceRoot> &p_resource_root,
+                            const Array &p_defs);
+  // Build the per-def ":fd" textures. Returns an Array parallel to `defs`;
+  // unsupported diffuses fall back to the raw texture (the retail filter's
+  // wrap masks assume pow2 dimensions of at least four), null entries stay
+  // null.
+  Array resolve_slot_fd_textures(const Ref<ResourceRoot> &p_resource_root,
+                                 const Array &p_defs);
+  // The ":fd" texture for one graphic: retail's alpha-filtered, progressively
+  // gray mip chain of the model's OWN diffuse that BOTH foliage tiers bind
+  // [orig: Foliage_LoadDefAssets @ 0x601260 tail; bound by
+  // Foliage_DrawModelTileSlot @ 0x601d90 and the expanded detail tier alike]
+  // -- the model diffuse through the witnessed custom mip pipeline
+  // (bake_fd_image), cached per root+model.
+  Ref<Texture2D> load_fd_texture(const Ref<ResourceRoot> &p_resource_root,
+                                 const String &p_graphic);
+  // Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to one Mesh
+  // containing every surface of every LOD0 submesh built from the matching
+  // top-level .3di. Returns null if not resolvable.
+  Ref<Mesh> load_mesh(const Ref<ResourceRoot> &p_resource_root,
+                      const String &p_graphic);
+  // Merge all geometry that build_lod_submeshes(0) emits. ArrayMesh surface
+  // arrays are copied into a private resource so callers never mutate
+  // ObjectData's shared submesh cache.
+  static Ref<ArrayMesh> aggregate_lod0_submeshes(const Array &p_submeshes);
 
   // The owning Terrain, wired by the game at world load. Supplies the native
   // detail-cell handoff and composed surface textures when available.
@@ -118,7 +203,8 @@ public:
 
   void reset();
   int get_total_instances() const;
-  Dictionary get_frame_stats() const;
+  // One snapshot of this frame's counters (terrain/foliage_frame_stats.h).
+  Ref<FoliageFrameStats> get_frame_stats() const;
   // Device-only diagnostics for tests and live inspection. `draws` is the
   // active draw-list order; the retained RenderingServer RIDs stay opaque.
   Dictionary get_backend_report() const;
@@ -150,46 +236,9 @@ protected:
 
 private:
   struct FrameStats {
-    int64_t frame_calls = 0;
-    int64_t detail_cells = 0;
-    int64_t silhouette_anchors_input = 0;
-    int64_t silhouette_anchors_visible = 0;
-    int64_t runtime_detail_intents = 0;
-    int64_t runtime_silhouette_intents = 0;
-    int64_t detail_high_instances = 0;
-    int64_t detail_low_instances = 0;
-    int64_t silhouette_instances = 0;
-    int64_t detail_vertices = 0;
-    int64_t silhouette_vertices = 0;
-    int64_t render_batches = 0;
-    int64_t detail_cache_hits = 0;
-    int64_t detail_cache_misses = 0;
-    int64_t detail_cache_regenerations = 0;
-    int64_t detail_cache_evictions = 0;
-    int64_t detail_cache_residents = 0;
-    int64_t detail_cache_submissions = 0;
-    int64_t model_cache_hits = 0;
-    int64_t model_cache_misses = 0;
-    int64_t model_cache_regenerations = 0;
-    int64_t model_cache_evictions = 0;
-    int64_t model_cache_residents = 0;
-    int64_t model_cache_submissions = 0;
-    int64_t detail_mesh_hits = 0;
-    int64_t detail_mesh_uploads = 0;
-    int64_t model_mesh_hits = 0;
-    int64_t model_mesh_uploads = 0;
-    int64_t backend_instance_creates = 0;
-    int64_t backend_scenario_writes = 0;
-    int64_t backend_configuration_writes = 0;
-    int64_t backend_base_writes = 0;
-    int64_t backend_material_writes = 0;
-    int64_t backend_material_parameter_writes = 0;
-    int64_t backend_uniform_writes = 0;
-    int64_t backend_visibility_writes = 0;
-    int64_t terrain_scene_counter = 0;
-    bool native_detail_source = false;
-    bool preview_detail_source = false;
-    bool path_blocker_available = false;
+#define FOLIAGE_FRAME_COUNTER_MEMBER(m_type, m_name) m_type m_name = {};
+    FOLIAGE_FRAME_COUNTERS(FOLIAGE_FRAME_COUNTER_MEMBER)
+#undef FOLIAGE_FRAME_COUNTER_MEMBER
   };
 
   struct MeshCacheKey {
@@ -221,6 +270,32 @@ private:
     int64_t instances = 0;
     int64_t vertices = 0;
   };
+
+  // The vegetation asset caches (see the resolver block above), keyed
+  // "<root dir>|<root instance id>|<basename>" so two live mounts of one
+  // directory never alias.
+  HashMap<String, Ref<Mesh>> asset_mesh_cache_;
+  HashMap<String, Ref<Texture2D>> asset_fd_texture_cache_;
+  HashMap<String, String> asset_model_path_cache_;
+  HashMap<String, TypedArray<VegGraphicRow>> asset_graphics_cache_by_root_;
+  // The global cache epoch (ResourceRoot.cache_epoch) the caches above were
+  // built under; any root mount/rescan/clear moves it and the next access
+  // self-clears.
+  uint64_t asset_cache_epoch_ = 0;
+  // The self-clear at the top of every cache-reading verb: the same clear
+  // as clear_asset_cache() when the epoch moved since the caches were built.
+  void check_asset_cache_epoch();
+  static Ref<Texture2D> _mesh_albedo_texture(const Ref<Mesh> &p_mesh);
+  // Load the diffuse (slot 1, falling back to detail slot 2) texture for a
+  // .3di material, the same row resolution ObjectModel's material builder
+  // uses. Returns null if the material has no resolvable texture.
+  static Ref<Texture2D> _load_diffuse_texture(const Ref<ObjectData> &p_data,
+                                              int p_material_index);
+  String _find_model_path(const Ref<ResourceRoot> &p_resource_root,
+                          const String &p_basename);
+  static String _asset_root_key(const Ref<ResourceRoot> &p_resource_root);
+  static String _asset_cache_key(const String &p_root_key,
+                                 const String &p_basename);
 
   opennova::renderer::FoliageFrameCompiler compiler_;
   std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS>
@@ -304,6 +379,7 @@ private:
   bool material_inputs_written_ = false;
 
   FrameStats frame_stats_{};
+  int64_t backend_server_writes() const;
   int64_t total_frame_calls_ = 0;
 
   opennova::renderer::FoliageSlotGeometry

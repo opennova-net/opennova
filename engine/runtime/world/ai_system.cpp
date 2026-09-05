@@ -1,5 +1,5 @@
 #include <runtime/world/ai.h>
-#include <base/io/perf_clock.h>
+#include <runtime/devtools/tick_profile.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -28,20 +28,6 @@ using namespace detail; // the shared AI helpers, unqualified as before
 
 namespace {
 
-class ScopedAiPerfTimer {
-public:
-    explicit ScopedAiPerfTimer(uint64_t *target) : target_(target) {
-        if (target_ != nullptr) start_ = io::perf_now_us();
-    }
-    ~ScopedAiPerfTimer() {
-        if (target_ != nullptr) *target_ += io::perf_now_us() - start_;
-    }
-
-private:
-    uint64_t *target_ = nullptr;
-    uint64_t start_ = 0;
-};
-
 // Apply only the carrier-owned body frame. This is deliberately separate from
 // pose_if_mounted's input, gunner-look, animation, and wire-state work so the
 // authority can repeat the pose after its later pool-1 vehicle motor without
@@ -49,7 +35,7 @@ private:
 int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
                                           Entity &occupant, Entity &vehicle,
                                           const Seat &seat) {
-    pose_mounted_occupant(world, occupant, vehicle, seat);
+    world.vehicles.pose_mounted_occupant(occupant, vehicle, seat);
     // Capture the resolved seat orientation before an independent LOOK mirror
     // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
     // the generic degree helper rounds differently at non-cardinal headings.
@@ -366,16 +352,12 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
 }
 
 void AiSystem::tick(World &world, const TickContext &ctx) {
-    tick_profiled(world, ctx, nullptr);
-}
-
-void AiSystem::tick_profiled(World &world, const TickContext &ctx,
-                             AiTickPerf *perf) {
-    if (perf != nullptr) *perf = {};
     // AI does not run during the BMS pre-mission script pass: that invocation only
     // settles initial scripted state (EventFlags PreMission), it does not step brains.
     if (ctx.phase != TickPhase::Gameplay) return;
-    uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+    // The phases lap onto the SIM_AI_* rows of the world's profile (ADR 0043
+    // d5); an inactive profile reads no clock.
+    devtools::ProfileLap lap(world.profile);
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
@@ -394,7 +376,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             if (victim_entity != nullptr &&
                 (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
                 victim->slot.bytes()[AiSlot::kAlertByte] = 2;
-                world.relations.group(victim_entity->group_id).alert =
+                world.script.relations.group(victim_entity->group_id).alert =
                         TriggerRelations::kAlertRed;
             }
             // Self-damage does not stamp a reaction or attacker. Retail tests the
@@ -415,11 +397,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         }
     }
     world.round_sim.hits.clear();
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->reactions_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_REACTIONS);
     // Rebuild the pool-0/1 proximity tables once per tick, before any entity update
     // (the pool-2 statics table rebuilds only on its registry/instance edges).
     // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildProximityLists_Pool01
@@ -461,11 +439,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             });
         }
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->collision_tables_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_COLLISION);
     // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
     // entity==g_local_player branch (line below, no authority guard) motor-sims the
     // joiner's own player from input, while NPC think/select stays authority-gated. A
@@ -476,9 +450,9 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
     // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
-        ScopedAiPerfTimer entity_timer(perf == nullptr ? nullptr
-                : (e.inf.active ? &perf->infantry_entities_us
-                                : &perf->other_entities_us));
+        const devtools::ProfileScope entity_scope(
+                world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
+                                            : devtools::Slot::SIM_AI_OTHER_ENTITIES);
         if (e.inf.active) {
             // Joiners retain seat-follow presentation for wire-owned peers. The
             // authority continues into the remote org2 animation/collision tail:
@@ -500,7 +474,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
             // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
             // Entity_UpdateInfantryAI @0x4b9910]
-            tick_infantry(e, world, ctx.logic_tick, perf);
+            tick_infantry(e, world, ctx.logic_tick);
             continue;
         }
         // Non-infantry mounted controllers retain the seat-follow shortcut.
@@ -519,7 +493,7 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
             // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
-                    ent != nullptr ? world.vehicle_traits.get(ent->item_id) : nullptr;
+                    ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
             const bool motor_driven = vt != nullptr &&
                     (vt->physics != 0 ||
                      vehicle_family_uses_direct_air_mover(vt->family));
@@ -530,255 +504,10 @@ void AiSystem::tick_profiled(World &world, const TickContext &ctx,
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->entities_us = now - phase_start;
-        phase_start = now;
-    }
-    // Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
-    // `physics` selector non-zero) runs its family's drive core — ground/bike
-    // through the cveh core, watercraft through the cbot mover — consuming a
-    // mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
-    // here: a joiner's local copies are wire-posed (the vehicle compact record
-    // read side), and the driver's client-side prediction leg is the retail
-    // client's concern, not this host loop's.
-    // [orig: the per-class tick from Entity_UpdateAllEntities ->
-    // Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
-    // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
-    // authority drive gates @0x48b0ff / @0x48DF8C]
-    if (is_authority && !world.vehicle_traits.empty()) {
-        uint64_t vehicle_phase_start = perf != nullptr ? io::perf_now_us() : 0;
-        vehicle_pass_handles_.clear();
-        world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
-            // Ground/water rows are selector-gated. Direct CHel/cpln rows are
-            // admitted regardless of the selector — they branch to the shared
-            // aircraft mover below, never through tick_vehicle_motor.
-            if (traits == nullptr) return;
-            if (traits->physics == 0 &&
-                !vehicle_family_uses_direct_air_mover(traits->family)) return;
-            vehicle_pass_handles_.push_back(e.handle);
-        });
-        if (perf != nullptr) {
-            const uint64_t now = io::perf_now_us();
-            perf->vehicle_scan_us = now - vehicle_phase_start;
-            vehicle_phase_start = now;
-        }
-        for (const EntityHandle h : vehicle_pass_handles_) {
-            Entity *veh = world.registry.get(h);
-            if (veh == nullptr) continue;
-            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
-            if (traits == nullptr) continue;
-            // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
-            // stamps every mover carries; rider deltas read (current - saved)].
-            stamp_saved_live_pose(*veh);
-            // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
-            // class table routes them to the shared aircraft mover, whose AI
-            // brain leg and physics live in one function. A live PLAYER pilot
-            // drives through the predicted path instead. [orig: the class table
-            // dispatch -> Entity_UpdateAircraftPhysics @0x490310, never the
-            // ground core @0x48af00]
-            if (vehicle_family_uses_direct_air_mover(traits->family)) {
-                if (!veh->veh.net_predicted) {
-                    Entity *actrl = resolve_vehicle_controller(world, *veh);
-                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
-                                             actrl->health > 0;
-                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
-                                         actrl->player_class != 0;
-                    if (aplayer) {
-                        // A PLAYER pilot still runs the shared mover: retail has
-                        // ONE aircraft function, and its occupant-input block
-                        // (our stage_air_vehicle_input) stages the same
-                        // fwd/lat/steer/altitude registers the AI leg fills.
-                        // Skipping the mover here left a player in the pilot
-                        // seat with no physics at all - the aircraft simply did
-                        // not respond.
-                        // [orig: Entity_UpdateAircraftPhysics @0x490310 — the
-                        //  input gate is `(occ->Flags & 0x100) && (occ ==
-                        //  g_local_player_entity || is_authority)`, not a
-                        //  separate mover]
-                        aircraft_client_tick(world, *veh, *traits);
-                    } else {
-                        chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
-                                      *traits);
-                        aircraft_client_tick(world, *veh, *traits);
-                    }
-                }
-                else {
-                    // A predicted row skips the mover, so the mover's tail call
-                    // never runs for it. Retail's client has no such skip — it
-                    // runs the aircraft function (and therefore the tail) for
-                    // every vehicle it is not driving, seeding the drive
-                    // command from the wire — so advancing the accumulator here
-                    // restores that, it does not add a new one.
-                    // [orig: the HELO twin @0x48FA70 called from the aircraft
-                    //  mover's tail @0x4905A6; the not-driven client leg is
-                    //  @0x48B7F0]
-                    vehicle_part_anim_tick(world, *veh, *traits);
-                }
-                if (AiEntity *ve = for_handle(h)) {
-                    ve->pos[0] = to_fixed(veh->position.x);
-                    ve->pos[1] = to_fixed(veh->position.y);
-                    ve->pos[2] = to_fixed(veh->position.z);
-                    ve->heading = veh->veh.yaw_seeded
-                            ? veh->veh.yaw_bam
-                            : bam_heading_from_mission_yaw_deg(
-                                      static_cast<double>(veh->yaw));
-                }
-                continue;
-            }
-            // Stage the drive input class the motor will consume: a live PLAYER controller
-            // keeps the occupant leg; an AI controller (or none) routes through the brain
-            // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
-            // switch inside Entity_UpdateVehiclePhysics @0x48b949-0x48c034]
-            VehicleDriveCmd cmd;
-            if (traits->player_control) {
-                Entity *ctrl = resolve_vehicle_controller(world, *veh);
-                // A DEAD controller parks the vehicle. The infantry death edge detaches
-                // first; this guard preserves the same result if the vehicle pass happens
-                // to observe the controller earlier in the frame.
-                // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-                const bool ctrl_alive =
-                        ctrl != nullptr && ctrl->alive && ctrl->health > 0;
-                const bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
-                                         ctrl->player_class != 0;
-                if (player_ctrl) {
-                    // A player drive freezes the SM mover exactly like the parked leg —
-                    // the route never advances under a human driver [orig: the player
-                    // leg forces SM state 22 too @0x48b993 / the boat leg @0x48DFF5].
-                    if (AiEntity *ve = for_handle(h)) {
-                        ve->brain.f[AiBrain::kCurState] = 22;
-                        ve->brain.f[AiBrain::kPendState] = 22;
-                    }
-                } else if (traits->family == VehicleFamily::Watercraft) {
-                    watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
-                                        *traits, cmd);
-                } else {
-                    vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
-                                     cmd);
-                }
-            }
-            // Per-family motor dispatch, the class-table split [orig:
-            // Entity_DispatchPhysics_cbot @0x48EFA3 -> the cbot mover @0x48D480
-            // vs _cveh @0x48efc0 -> the ground core @0x48af00].
-            if (traits->family == VehicleFamily::Watercraft) {
-                tick_watercraft_motor(world, *veh, *traits, &cmd);
-            } else {
-                tick_vehicle_motor(world, *veh, *traits, &cmd);
-            }
-            // Mirror the integrated transform back into the brain entity — one struct in
-            // the original; the SM mover and the present snapshot read pos[]/heading.
-            if (AiEntity *ve = for_handle(h)) {
-                ve->pos[0] = to_fixed(veh->position.x);
-                ve->pos[1] = to_fixed(veh->position.y);
-                ve->pos[2] = to_fixed(veh->position.z);
-                ve->heading = veh->veh.yaw_seeded
-                        ? veh->veh.yaw_bam
-                        : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
-            }
-        }
-        if (perf != nullptr) {
-            const uint64_t now = io::perf_now_us();
-            perf->vehicle_motors_us = now - vehicle_phase_start;
-            vehicle_phase_start = now;
-        }
-        // Pool-0 bodies were seat-posed in the entity loop above, before these
-        // pool-1 motors advanced their carriers. Recompose only their carrier-
-        // owned frame now so the authority snapshot writes a stable seat-local
-        // offset against the vehicle's final same-tick pose. Retail's compact
-        // writer consumes that final pair; leaving the earlier body pose here
-        // makes every remote rider trail by one vehicle motor step.
-        for (int i = 0; i < count(); ++i)
-            refresh_mounted_pose(*at(i), world);
-        if (perf != nullptr)
-            perf->vehicle_riders_us = io::perf_now_us() - vehicle_phase_start;
-    }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->authority_vehicles_us = now - phase_start;
-        phase_start = now;
-    }
-    // A joiner does not integrate its replicated pool-1 vehicle copies here, but
-    // retail still executes the per-entity ground callback's presentation leg on
-    // clients. Evaluate sound from the current wire/local state after the authority
-    // motor pass, leaving position, heading, and motor accumulators untouched.
-    // Collision contact is authority-physics state and therefore unavailable on
-    // this path; an explicit replicated collision bit can replace `false` later.
-    // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
-    // @0x48d181..0x48d1c4]
-    if (!is_authority && !world.vehicle_traits.empty()) {
-        vehicle_pass_handles_.clear();
-        world.registry.for_each_in_pool(1, [&](const Entity &e) {
-            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
-            if (traits == nullptr) return;
-            // Ground/water/bike rows retain their selector gate. CHel/cpln
-            // dispatch directly and therefore remain eligible at physics=0.
-            if (traits->physics == 0 &&
-                !vehicle_family_uses_direct_air_mover(traits->family)) return;
-            vehicle_pass_handles_.push_back(e.handle);
-        });
-        for (const EntityHandle h : vehicle_pass_handles_) {
-            Entity *veh = world.registry.get(h);
-            if (veh == nullptr) continue;
-            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
-            if (traits == nullptr) continue;
-            // Mover-entry savedLivePose, stamped BEFORE the prediction gates
-            // so a frozen/parked hull reads as zero rider delta — retail
-            // stamps in every mover prologue regardless of the later bails
-            // [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
-            // @0x4b530b../@0x4ba47f..].
-            stamp_saved_live_pose(*veh);
-            // The joiner-side family prediction (net-re §5.38e B-facet, all
-            // four families landed): each mover chases the staged wire target
-            // and predicts between records from the mirrored speed/steer
-            // registers — the client-executed subset of its family mover
-            // [orig: cbot @0x48D480; CHel/cpln via the @0x45D6F0 thunk;
-            // ground @0x48af00 core]. The embedding sim clears net_predicted
-            // for wire-frozen rows (bit0 / dead-pose / carried), so a wreck
-            // never keeps driving (D-NET-66).
-            if (veh->veh.net_predicted && veh->health > 0 &&
-                    traits->family == VehicleFamily::Watercraft) {
-                watercraft_client_tick(world, *veh, *traits);
-            } else if (veh->veh.net_predicted && veh->health > 0 &&
-                    (traits->family == VehicleFamily::Helicopter ||
-                     traits->family == VehicleFamily::Plane)) {
-                aircraft_client_tick(world, *veh, *traits);
-            } else if (veh->veh.net_predicted && veh->health > 0 &&
-                    (traits->family == VehicleFamily::Ground ||
-                     traits->family == VehicleFamily::Bike ||
-                     traits->family == VehicleFamily::Tank)) {
-                // Runs the motor core, whose tail already ticks the movement
-                // sound — skip the separate sound call below for this row.
-                // Bikes and tanks ride the same entry; the core branches on
-                // the family tag for the witnessed cbik deltas (gravity 250,
-                // vZ up-cap, contact-gated integration, always-applied yaw)
-                // and the ctan deltas (gravity 250, contact-gated integration
-                // with the ±2·decel reversal clamps, full-basis velocity,
-                // parked-gated yaw with the airborne quarter-rate)
-                // [orig: @0x483FE0 / @0x488AB0 vs @0x48AF00].
-                ground_client_tick(world, *veh, *traits);
-                continue;
-            }
-            // The shared aircraft mover has no movement-sound call. In retail,
-            // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
-            // ground/bike/water paths, but neither CHel @0x490310 nor cpln's
-            // thunk calls it. Physicsless air rows are newly eligible above, so
-            // keep them out of the ground-sound presentation tail in every
-            // prediction/death state.
-            if (vehicle_family_uses_direct_air_mover(traits->family)) continue;
-            update_ground_vehicle_sound(world, *veh, *traits,
-                                        /*wrecked=*/veh->health <= 0,
-                                        /*collided=*/false);
-        }
-    }
-    if (perf != nullptr) {
-        const uint64_t now = io::perf_now_us();
-        perf->client_vehicles_us = now - phase_start;
-        phase_start = now;
-    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
+    world.vehicles.tick_motors(is_authority, lap);
     events.process_timed(*this, world);
-    if (perf != nullptr)
-        perf->events_us = io::perf_now_us() - phase_start;
+    lap.mark(devtools::Slot::SIM_AI_EVENTS);
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
@@ -803,13 +532,13 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // here as well would run one slot twice per frame. Remote players and
         // NPC gunners remain owned by this global world pump.
         // [orig: one WeaponAction_ProcessAllEntities walk @0x542690]
-        if (world.external_local_mounted_weapon_pump &&
+        if (world.rules.external_local_mounted_weapon_pump &&
             owner->handle == world.cached.local_player)
             continue;
         AiEntity *gunner = for_handle(owner->handle);
         if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) continue;
         const WeaponTableEntry *weapon =
-                world.weapons.by_index(mount->primary_weapon_slot_adm);
+                world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
         if (weapon == nullptr || weapon->ammo_index < 0) continue;
 
         WeaponFsmInputs inputs;
@@ -841,8 +570,8 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // @0x50c1f4]; the m/c fields anchor the effect legs, not the round.
         int32_t fire[6];
         const uint8_t userpoint = weapon_userpoint_byte(*mount, /*slot=*/0, /*field=*/0);
-        const bool posed = userpoint != 0 && world.muzzle_pose_provider != nullptr &&
-                world.muzzle_pose_provider->resolve_userpoint_transform(
+        const bool posed = userpoint != 0 && world.pose_provider != nullptr &&
+                world.pose_provider->resolve_userpoint_transform(
                         world, mount->handle, userpoint, fire);
         if (!posed) {
             fire[0] = to_fixed(mount->position.x);
@@ -867,7 +596,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (occ == nullptr || !occ->mounted || occ->health <= 0) return false;
     Entity *veh = world.registry.get(occ->mount_target);
     if (veh == nullptr) {              // vehicle gone -> auto-dismount, resume normal AI
-        entity_detach_from_vehicle(world, e.handle);
+        world.vehicles.detach(e.handle);
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
@@ -1063,6 +792,8 @@ int32_t part_anim_rate_from_seconds(double seconds) {
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     switch (sub_type) {
         case 0x20: // AIUSEWPZ [orig: @0x43B0E5]
+            // Declared residual: brain+432 has no reader here yet (the
+            // waypoint-zone routing consumer is unported).
             comp.f[AiBrain::kUseWaypointZones] = 1;
             break;
         case 0x21: // AICLEARWPZ [orig: @0x43B0F7]

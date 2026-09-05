@@ -25,10 +25,6 @@ protected:
 public:
 	void set_name(const String &p_value);
 	String get_name() const;
-	void set_reverse(bool p_value);
-	bool get_reverse() const;
-	void set_inverse(bool p_value);
-	bool get_inverse() const;
 	void set_present(bool p_value);
 	bool get_present() const;
 

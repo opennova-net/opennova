@@ -1,5 +1,4 @@
-#ifndef MUS_DECODE_H
-#define MUS_DECODE_H
+#pragma once
 
 /* Internal shared MUS bytecode decoder.
 
@@ -18,6 +17,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+namespace opennova::mus {
 
 /* Operand types match the Python decompiler:
      0 = u8 (8-bit immediate)
@@ -190,4 +191,5 @@ static void free_instructions(Instruction *insts, int count) {
     }
 }
 
-#endif /* MUS_DECODE_H */
+
+} // namespace opennova::mus

@@ -36,14 +36,15 @@
 // open D-INF-13 question (docs/divergence-ledger.md): its bone-table source, whether it
 // carries the FP builder's bone-0 padding loop @0x40c5a1, and its frame map.
 
-#ifndef OPENNOVA_ANIM_SAMPLE_H
-#define OPENNOVA_ANIM_SAMPLE_H
+#pragma once
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-struct BadFile;  // bad/bad.h
+namespace opennova::bad {
+struct BadFile;  // formats/bad/bad.h
+}
 
 namespace opennova::anim {
 
@@ -128,8 +129,8 @@ struct Clip {
 // ClipBone.name is empty for rows past the .bad's records -- embedders synthesize names.
 // This is what makes broken BadBone.position corpora irrelevant: 12 of 43 JO viewmodel
 // rigs ship zeroed/stale positions and retail renders them all (data sweep 2026-07-09).
-Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
-                 bool model_bind = false, const BadFile *bind_source = nullptr,
+Clip sample_clip(const opennova::bad::BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
+                 bool model_bind = false, const opennova::bad::BadFile *bind_source = nullptr,
                  const std::vector<int> &model_parents = {});
 
 // Reconstruct the BadBone.position table from the MODEL's bone table + the skeleton
@@ -148,7 +149,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
 // whose SHIPPED positions are zeroed/stale (12 of 43 JO viewmodel rigs) rebuild the
 // exact healthy table from data that never rots: the model pivots and the bind
 // rotations. This native function is the sole implementation.
-std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
+std::vector<Vec3> positions_from_model(const opennova::bad::BadFile &bind_bad,
                                        const std::vector<int> &model_parents,
                                        const std::vector<Vec3> &model_rel_positions);
 
@@ -166,5 +167,3 @@ Quat bad_channel_quat(float x, float y, float z, float w);
 Quat mat3_to_quat(const float m[9]);
 
 }  // namespace opennova::anim
-
-#endif  // OPENNOVA_ANIM_SAMPLE_H

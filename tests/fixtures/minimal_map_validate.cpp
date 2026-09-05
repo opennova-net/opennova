@@ -10,13 +10,15 @@
 // and its offline kit equips the AK-47 by its real weapon identity.
 //
 // `--write` is deliberately a surgical editor rather than a generator: it loads the committed
-// ONED-authored mission through MissionDocument, adds the AK kit row when the mission has no kit
-// (the PR #610 starting state) or changes only the first row's name, and emits it through the
-// production BMS writer. Existing rows and fields are otherwise preserved.
+// ONED-authored mission, adds the AK kit row when the mission has no kit (the PR #610 starting
+// state) or changes only the first row's name, and emits it through the production BMS writer
+// (bms::write, from scratch). Existing rows and fields are otherwise preserved.
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
 #include <formats/env/env.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include <algorithm>
@@ -117,13 +119,15 @@ int main(int argc, char **argv) {
 			return fail == 0 ? 0 : 1;
 		}
 
-		opennova::mission::MissionDocument doc;
-		if (!doc.load_bms_bytes(committed.data(), committed.size())) {
-			CHECK(false, doc.last_error().c_str());
+		opennova::bms::File doc;
+		std::string error;
+		if (!opennova::bms::parse(committed.data(), committed.size(), doc, error)) {
+			CHECK(false, error.c_str());
 			return 1;
 		}
 
-		std::vector<opennova::mission::WeaponLoadoutEntry> loadout = doc.weapon_loadout();
+		std::vector<opennova::mission::WeaponLoadoutEntry> loadout =
+				opennova::mission::weapon_loadout(doc);
 		std::string previous_weapon;
 		bool weapon_changed = false;
 		if (write_mode && (loadout.empty() || loadout.front().name != kFirstPlayerWeapon)) {
@@ -139,7 +143,7 @@ int main(int argc, char **argv) {
 				previous_weapon = loadout.front().name;
 				loadout.front().name = kFirstPlayerWeapon;
 			}
-			CHECK(doc.set_weapon_loadout(loadout), doc.last_error().c_str());
+			CHECK(opennova::mission::set_weapon_loadout(doc, loadout, error), error.c_str());
 			weapon_changed = fail == 0;
 		}
 		CHECK(!loadout.empty(), "the mission carries an offline weapon kit");
@@ -147,41 +151,40 @@ int main(int argc, char **argv) {
 			CHECK(loadout.front().name == kFirstPlayerWeapon,
 			      "the first offline weapon is WPN_AK47AUTO (the actual AK identity)");
 
-		const size_t markers = doc.entity_count(opennova::mission::EntityKind::Marker);
 		int player_starts = 0;
 		int blue_starts = 0;
 		int red_starts = 0;
-		for (size_t i = 0; i < markers; ++i) {
-			opennova::mission::EntityRecord rec{};
-			if (!doc.get_entity(opennova::mission::EntityKind::Marker, i, rec)) continue;
-			if (rec.item_id == kPlayerStartItemId) ++player_starts;
-			if (rec.item_id == kBlueTeamStartItemId) ++blue_starts;
-			if (rec.item_id == kRedTeamStartItemId) ++red_starts;
+		for (const opennova::bms::Entity &rec : doc.markers) {
+			const int item_id = opennova::mission::entity_item_id(rec);
+			if (item_id == kPlayerStartItemId) ++player_starts;
+			if (item_id == kBlueTeamStartItemId) ++blue_starts;
+			if (item_id == kRedTeamStartItemId) ++red_starts;
 		}
 		// A mission without one loads completely and then strands you with nowhere to spawn;
 		// retail's own missions carry exactly one (00TRa.bms: 1331 entities, one 106001).
 		CHECK(player_starts == 1, "the map places exactly one 106001 player start");
 		CHECK(blue_starts >= 1, "the map places a Blue Team start (106003) for host/join");
 		CHECK(red_starts >= 1, "the map places a Red Team start (106004) for host/join");
-		CHECK(doc.info().terrain == kMapBase, "the header points at the minimal terrain");
+		const opennova::mission::MissionInfo info = opennova::mission::mission_info(doc);
+		CHECK(info.terrain == kMapBase, "the header points at the minimal terrain");
 
-		const int start_hour = doc.info().start_time / kQ8_8Hour;
+		const int start_hour = info.start_time / kQ8_8Hour;
 		CHECK(start_hour >= kDaylightFirstHour && start_hour <= kDaylightLastHour,
 		      "the mission starts in daylight (start_time is Q8.8 HOURS; 0 means midnight, and "
 		      "the header overrides the .env's own curtime)");
 
 		if (write_mode && weapon_changed && fail == 0) {
 			std::vector<uint8_t> generated;
-			CHECK(doc.write_bms_bytes(generated), doc.last_error().c_str());
+			CHECK(opennova::bms::write(doc, generated, error), error.c_str());
 
 			// Never replace the committed mission until the produced bytes parse and carry the edit.
-			opennova::mission::MissionDocument verify;
+			opennova::bms::File verify;
 			if (fail == 0)
-				CHECK(verify.load_bms_bytes(generated.data(), generated.size()),
+				CHECK(opennova::bms::parse(generated.data(), generated.size(), verify, error),
 				      "rewritten mnml.bms parses");
 			if (fail == 0) {
 				const std::vector<opennova::mission::WeaponLoadoutEntry> written_loadout =
-						verify.weapon_loadout();
+						opennova::mission::weapon_loadout(verify);
 				CHECK(!written_loadout.empty() && written_loadout.front().name == kFirstPlayerWeapon,
 				      "rewritten mnml.bms keeps WPN_AK47AUTO first");
 			}

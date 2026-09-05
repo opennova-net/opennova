@@ -17,6 +17,7 @@
 
 using namespace opennova;
 using namespace opennova::world;
+using namespace opennova::def;
 
 static int failures = 0;
 #define CHECK(c) \
@@ -223,6 +224,10 @@ int main() {
     tank->bob = 219;
     tank->flip = 220;
     tank->scale_q16 = 0x18000;
+    std::strcpy(tank->particlefxw3.effect, "fx_sml_wk");
+    std::strcpy(tank->particlefxw3.userpoint, "FX00");
+    std::strcpy(tank->particlefxw4.effect, "fx_sml_wk_f");
+    std::strcpy(tank->particlefxw4.userpoint, "FX01");
     std::strcpy(tank->sound_profile, "SP_Tank");
     std::strcpy(tank->soundloops[0], "LP_TANK");
     std::strcpy(rifle->ammo_closeattack, "AT_RIFLE");
@@ -272,13 +277,13 @@ int main() {
     simassets::resolve_item_traits(w, file, wire_class);
 
     // ---- the Player template block (D-NET-144) ----
-    CHECK(w.player_has_item_def);
-    CHECK(w.player_item_hp == 100);
-    CHECK(w.player_item_type == 3);
-    CHECK(w.player_armor_impact == 3);
-    CHECK(w.player_armor_kz == 4);
-    CHECK(w.player_damage_reduc_pp == 0.25f);
-    CHECK(w.player_damage_reduc_max == 10.0f);
+    CHECK(w.tables.player.has_item_def);
+    CHECK(w.tables.player.item_hp == 100);
+    CHECK(w.tables.player.item_type == 3);
+    CHECK(w.tables.player.armor_impact == 3);
+    CHECK(w.tables.player.armor_kz == 4);
+    CHECK(w.tables.player.damage_reduc_pp == 0.25f);
+    CHECK(w.tables.player.damage_reduc_max == 10.0f);
 
     // ---- entity stamps ----
     const Entity *tank_e = w.registry.get(tank_h);
@@ -295,9 +300,9 @@ int main() {
     CHECK(tank_e->uniform_scale_q16 == 0x18000);
     // The display-name table: once per distinct id, the def row's name; an
     // unknown id has no row.
-    CHECK(w.item_names.get(500) != nullptr && *w.item_names.get(500) == "S5 Tank");
-    CHECK(w.item_names.get(510) != nullptr && *w.item_names.get(510) == "S5 Rifleman");
-    CHECK(w.item_names.get(999) == nullptr);
+    CHECK(w.tables.item_names.get(500) != nullptr && *w.tables.item_names.get(500) == "S5 Tank");
+    CHECK(w.tables.item_names.get(510) != nullptr && *w.tables.item_names.get(510) == "S5 Rifleman");
+    CHECK(w.tables.item_names.get(999) == nullptr);
 
     const Entity *rifle_e = w.registry.get(rifle_h);
     CHECK(rifle_e != nullptr);
@@ -331,7 +336,7 @@ int main() {
     CHECK(unknown_e->sub_type != 0xFF);
 
     // ---- the death-trait table ----
-    const ItemDeathTraits *bt = w.item_death_traits.get(520);
+    const ItemDeathTraits *bt = w.tables.item_death_traits.get(520);
     CHECK(bt != nullptr);
     if (bt != nullptr) {
         CHECK(bt->unit_type == 5);
@@ -356,13 +361,13 @@ int main() {
         CHECK(bt->particlefire == "pf_bunker");
         CHECK(bt->particleother == "po_bunker");
     }
-    const ItemDeathTraits *busht = w.item_death_traits.get(530);
+    const ItemDeathTraits *busht = w.tables.item_death_traits.get(530);
     CHECK(busht != nullptr && busht->is_decoration);
-    const ItemDeathTraits *tankt = w.item_death_traits.get(500);
+    const ItemDeathTraits *tankt = w.tables.item_death_traits.get(500);
     CHECK(tankt != nullptr && !tankt->has_husk);
 
     // ---- the vehicle-trait table: every slot's sentinel in its own field ----
-    const VehicleTraits *vt = w.vehicle_traits.get(500);
+    const VehicleTraits *vt = w.vehicles.traits.get(500);
     CHECK(vt != nullptr);
     if (vt != nullptr) {
         CHECK(vt->physics == 2);
@@ -395,8 +400,12 @@ int main() {
         CHECK(vt->sound_profile == "SP_Tank");
         CHECK(vt->sound_loops[0] == "LP_TANK");
         CHECK(vt->sound_loops[1].empty());
+        CHECK(vt->wake_w3.effect == "fx_sml_wk");
+        CHECK(vt->wake_w3.userpoint == "FX00");
+        CHECK(vt->wake_w4.effect == "fx_sml_wk_f");
+        CHECK(vt->wake_w4.userpoint == "FX01");
     }
-    const VehicleTraits *apc_vt = w.vehicle_traits.get(501);
+    const VehicleTraits *apc_vt = w.vehicles.traits.get(501);
     CHECK(apc_vt != nullptr);
     if (apc_vt != nullptr) {
         CHECK(apc_vt->family == VehicleFamily::Ground);
@@ -404,14 +413,14 @@ int main() {
     }
     // CHel rows legitimately omit the ground physics selector and still land
     // (direct air mover); the case-folded fourcc accepts mixed-case CHelScout.
-    const VehicleTraits *helo_vt = w.vehicle_traits.get(502);
+    const VehicleTraits *helo_vt = w.vehicles.traits.get(502);
     CHECK(helo_vt != nullptr);
     if (helo_vt != nullptr) {
         CHECK(helo_vt->family == VehicleFamily::Helicopter);
         CHECK(helo_vt->physics == 0);
     }
     // A ground row without the physics selector lands NO traits row.
-    CHECK(w.vehicle_traits.get(503) == nullptr);
+    CHECK(w.vehicles.traits.get(503) == nullptr);
     (void)apc_h; (void)helo_h; (void)truck_h; (void)bush_h; (void)player_h;
 
     // ---- the throwable class scan ----
@@ -439,22 +448,21 @@ int main() {
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.
     simassets::resolve_item_traits(w, file, wire_class);
-    CHECK(w.vehicle_traits.get(500) != nullptr);
+    CHECK(w.vehicles.traits.get(500) != nullptr);
     CHECK(w.registry.get(tank_h)->health == -25536);
 
     // ---- resolve_ai_weapons: the D-AI-5 seed + sound-profile bind ----
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     const int rifle_ai = ai.attach(rifle_h);
     const int player_ai = ai.attach(player_h);
-    CHECK(w.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
+    CHECK(w.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
     AmmoTableEntry at_null;
     at_null.name = "AT_NULL";
     at_null.valid = true;
     AmmoTableEntry at_rifle;
     at_rifle.name = "AT_RIFLE";
     at_rifle.valid = true;
-    w.ammo.entries = {at_null, at_rifle};
+    w.tables.ammo.entries = {at_null, at_rifle};
 
     CHECK(simassets::resolve_ai_weapons(w, file) == 1);
     AiEntity *rifle_b = ai.at(rifle_ai);
@@ -481,20 +489,20 @@ int main() {
     // no mission AI still binds every replicated type; the tank def has no
     // AiEntity here and still binds. [orig: ItemDef_ResolveAllResources
     // @ 0x49e5f0 resolves the sound region for each def]
-    const audio::OrganicSoundProfile *rifle_op = w.organic_sound_profiles.get(510);
+    const audio::OrganicSoundProfile *rifle_op = w.tables.organic_sound_profiles.get(510);
     CHECK(rifle_op != nullptr);
     if (rifle_op != nullptr) {
         CHECK(rifle_op->primary == 1); // SP_Test
         CHECK(rifle_op->female == 2);  // SP_TestFemale
     }
-    const audio::OrganicSoundProfile *tank_op = w.organic_sound_profiles.get(500);
+    const audio::OrganicSoundProfile *tank_op = w.tables.organic_sound_profiles.get(500);
     CHECK(tank_op != nullptr);
     // "SP_Tank" is not in the profile table: the witnessed find-miss binds the
     // array base [orig: SoundProfile_FindSlotByName @ 0x526e30].
     if (tank_op != nullptr) CHECK(tank_op->primary == 0);
     // An unauthored pair stays -1 — the emit side falls to "default".
     const audio::OrganicSoundProfile *player_op =
-            w.organic_sound_profiles.get(5305);
+            w.tables.organic_sound_profiles.get(5305);
     CHECK(player_op != nullptr);
     if (player_op != nullptr) {
         CHECK(player_op->primary == -1);
@@ -513,7 +521,7 @@ int main() {
             CHECK(w.commands.set_entity_item_attrib(
                     rifle_h, authored | DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SPAWNPOINT, 0x2000u));
             CHECK(rifle_override->is_spawn_point);
-            CHECK(w.item_death_traits.get(510) == nullptr || !w.item_death_traits.get(510)->no_die);
+            CHECK(w.tables.item_death_traits.get(510) == nullptr || !w.tables.item_death_traits.get(510)->no_die);
             simassets::resolve_item_traits(w, file, wire_class);
             rifle_override = w.registry.get(rifle_h);
             CHECK(rifle_override != nullptr && rifle_override->item_attrib == authored);

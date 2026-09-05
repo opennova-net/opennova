@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 // The ground-vehicle suspension spring leg: crash tests, sink growth, the
 // spring-energy loop, the crash latch and the tick tail.
 // [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 — the extend loop
@@ -33,7 +34,7 @@ int32_t wrap_mul(int32_t a, int32_t b) {
 // a row handed loose traits (tests, lib embedders) clamps the loose copy.
 int32_t &shock_field(World &world, const Entity &veh, const VehicleTraits &traits,
                      int32_t &loose) {
-	if (VehicleTraits *entry = world.vehicle_traits.get_mutable(veh.item_id))
+	if (VehicleTraits *entry = world.vehicles.traits.get_mutable(veh.item_id))
 		if (entry->shock == traits.shock) return entry->shock;
 	loose = traits.shock;
 	return loose;
@@ -102,9 +103,8 @@ int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits) {
 	return static_cast<int32_t>(static_cast<float>(traits.flip) * 0.01f * 65536.0f);
 }
 
-void vehicle_suspension_crash_tests(World &world, Entity &veh,
-                                    const VehicleTraits &traits, int32_t up_z16,
-                                    SuspensionFamily family) {
+void VehicleSystem::suspension_crash_tests(Entity &veh, const VehicleTraits &traits, int32_t up_z16, SuspensionFamily family) {
+    World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	const bool airborne = (veh.flags & kEntityFlagInAir) != 0;
 	const bool bit = (veh.flags & kEntityFlagSuspensionCrashed) != 0;
@@ -122,7 +122,7 @@ void vehicle_suspension_crash_tests(World &world, Entity &veh,
 		}
 		// (b) the authority's hard fall vs the client's replicated bit in the
 		// air [orig: tracked @0x47d771..0x47d7a8; tank @0x47778d..0x4777bf].
-		const bool fall = world.logic_authority
+		const bool fall = world.rules.logic_authority
 				? std::abs(m.slide_z) > kCrashFallVzAbove
 				: (airborne && bit);
 		if (fall) {
@@ -137,7 +137,7 @@ void vehicle_suspension_crash_tests(World &world, Entity &veh,
 	//  it went airborne and requests for the next ten ticks; past them the
 	//  stamp clears and the row counts as respawned.
 	const bool settle_term = family == SuspensionFamily::Tank && m.settle_2f0 != 0;
-	if (!world.logic_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
+	if (!world.rules.logic_authority && m.fresh_2f1 == 0 && m.crashed == 0 &&
 	    !settle_term) {
 		if (airborne && m.airborne_stamp_2f8 == 0) m.airborne_stamp_2f8 = world.logic_tick;
 		if (world.logic_tick - m.airborne_stamp_2f8 < kClientCrashWindowTicks) {
@@ -168,10 +168,8 @@ void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheel
 		if (!contact[k]) m.plat_acc[k] += growth;
 }
 
-void vehicle_suspension_grounded_loop(World &world, Entity &veh,
-                                      const VehicleTraits &traits, int wheels,
-                                      int32_t depth[4], const bool contact[4],
-                                      int32_t growth, int32_t corner_adj[4]) {
+void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]) {
+    World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	if (traits.spring == 0) return; // [orig: @0x47e973 — no suspension def'd]
 	// minDepth over the wheel pads [orig: var_26C @0x47e8f0-region, 100000 init].
@@ -237,9 +235,8 @@ void vehicle_suspension_grounded_loop(World &world, Entity &veh,
 	}
 }
 
-void vehicle_suspension_airborne_loop(World &world, Entity &veh,
-                                      const VehicleTraits &traits, int wheels,
-                                      int32_t growth, int32_t corner_adj[4]) {
+void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t growth, int32_t corner_adj[4]) {
+    World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	if (m.settle_2f0 != 0) return; // [orig: @0x47e283..0x47e28a]
 	const int32_t travel = conform_travel_from_def(traits.spring_comp);
@@ -261,17 +258,18 @@ void vehicle_suspension_airborne_loop(World &world, Entity &veh,
 	}
 }
 
-bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants) {
+bool VehicleSystem::suspension_arm(Entity &veh, bool eject_occupants) {
+    World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	// The gate: a crash request pending and not yet crashed
 	// [orig: `cmp [+2EDh],0; jz` @0x46b1a6 then `cmp [+2ECh],0; jnz` @0x46b1b9].
 	if (m.crash_request == 0 || m.crashed != 0) return false;
 	// The one-shot role pick [orig: @0x46b1c5..0x46b1db] — consumed by the
 	// (residual) impulse dump.
-	m.susp_rate_pick = world.logic_authority ? kSuspensionDisableRateAuthority
+	m.susp_rate_pick = world.rules.logic_authority ? kSuspensionDisableRateAuthority
 	                                           : kSuspensionDisableRateNonAuthority;
 	m.byte_2ef = 0; // [orig: @0x46b1db]
-	if (world.logic_authority) {
+	if (world.rules.logic_authority) {
 		veh.flags |= kEntityFlagSuspensionCrashed; // [orig: @0x46b1ed]
 	} else if ((veh.flags & kEntityFlagSuspensionCrashed) == 0) {
 		return false; // [orig: the `test Flags, 0x10` skip @0x46b1f3]
@@ -286,7 +284,7 @@ bool vehicle_suspension_arm(World &world, Entity &veh, bool eject_occupants) {
 		for (Seat &s : veh.seats) {
 			if (!s.occupant.valid()) continue;
 			const EntityHandle occ = s.occupant;
-			(void)entity_detach_from_vehicle(world, occ);
+			(void)world.vehicles.detach(occ);
 		}
 		m.has_been_driven = 0; // [orig: the bike seed's +0x3DE clear @0x468bb1]
 	}

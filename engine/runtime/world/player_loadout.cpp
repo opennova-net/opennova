@@ -9,6 +9,8 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {
@@ -45,7 +47,7 @@ void local_loadout_set_spawn_kit(World &world, LocalPlayerLoadout &loadout,
     if (filter_by_availability && !kit.empty()) {
         // The SP .bms promote leg: availability-filter with the knife fallback
         // [orig: Mission_LoadBMSFile @ 0x40f7ae..0x40f95c].
-        kit = weapon_kit_filter_by_availability(kit, world.weapons,
+        kit = weapon_kit_filter_by_availability(kit, world.tables.weapons,
                                                 loadout.availability);
     }
     loadout.spawn_kit_set = !kit.empty();
@@ -57,7 +59,7 @@ void local_loadout_apply_availability_pairs(
         const std::vector<std::pair<std::string, int32_t>> &pairs) {
     loadout.availability.reset(); // [orig: the all-1 default @ 0x551c86]
     if (pairs.empty()) return;
-    weapon_availability_apply_pairs(loadout.availability, world.weapons, pairs);
+    weapon_availability_apply_pairs(loadout.availability, world.tables.weapons, pairs);
 }
 
 bool local_loadout_promote_mission_rules(
@@ -67,7 +69,7 @@ bool local_loadout_promote_mission_rules(
     // THE GATE [orig: @ 0x40f694 `cmp is_in_session, 0` -> the fseek pair
     // @ 0x40f6b2 / @ 0x40f6e1]: a live session — listen host or joiner alike —
     // never promotes either chunk; the MP kit comes from the profile page.
-    if (world.mp_session) return false;
+    if (world.rules.mp_session) return false;
     if (!availability_rows.empty())
         local_loadout_apply_availability_pairs(world, loadout,
                 availability_rows);
@@ -81,11 +83,11 @@ void local_loadout_sync_damage_classes(World &world,
                                        const LocalPlayerLoadout &loadout) {
     Entity *e = world.registry.get(world.cached.local_player);
     if (e == nullptr) return;
-    e->ammo_damage_class.assign(world.ammo.entries.size(), 0);
+    e->ammo_damage_class.assign(world.tables.ammo.entries.size(), 0);
     const std::vector<WeaponKitEntry> kit =
             loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default();
-    weapon_kit_build_damage_classes(kit, world.weapons,
-            world.ammo.entries.size(), e->ammo_damage_class);
+    weapon_kit_build_damage_classes(kit, world.tables.weapons,
+            world.tables.ammo.entries.size(), e->ammo_damage_class);
 }
 
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
@@ -94,7 +96,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     // [orig: Player_InitPlayer @ 0x4e15f0 — the full leg sequence in the
     //  header note.] Entity-optional: a joiner rebuilds before L spawns.
     Entity *e = world.registry.get(world.cached.local_player);
-    const WeaponTable &table = world.weapons;
+    const WeaponTable &table = world.tables.weapons;
     local_loadout_sync_damage_classes(world, loadout);
     if (table.empty()) return;
     const std::vector<WeaponKitEntry> kit =
@@ -146,7 +148,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     std::vector<WeaponKitEntry> accepted;
     for (const WeaponKitEntry &entry : kit) {
         if (entry.name.empty()) continue;
-        const int idx = world.weapons.index_of(entry.name.c_str());
+        const int idx = world.tables.weapons.index_of(entry.name.c_str());
         if (idx < 0) continue;
         // The per-entry availability validation [orig: the server 0x2F gate
         // @ 0x515a3f — 0 drops the entry; 2 requires the armory zone, which
@@ -169,7 +171,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // the main leg; the first different-class sub-variant takes ammo_secondary
     // with the x clipsize fallback [orig: @ 0x566166 vs @ 0x566209;
     // WeaponSlot_SetAmmoCount @ 0x540b50].
-    const WeaponTable &table = world.weapons;
+    const WeaponTable &table = world.tables.weapons;
     for (const WeaponKitEntry &entry : loadout.spawn_kit) {
         const int adm = table.index_of(entry.name.c_str());
         if (adm < 0) continue;
@@ -207,6 +209,21 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
 
 // [orig: Armory_ResolveSelectedClass @0x5642f0] The scan-up + gunner fallback
 // against the host allow mask; a class with its bit set opens as-is.
+void weapon_slot_indices(const DefWeaponDef *rows, size_t count, int slot,
+                         int32_t class_mask, int32_t team_mask,
+                         std::vector<int32_t> &out) {
+    out.clear();
+    for (size_t i = 0; i < count; ++i) {
+        const DefWeaponDef &w = rows[i];
+        if (w.weapon_class_slot != slot) continue;
+        // [orig: populate_weapon_slot_lists @0x560430] gate.
+        if (w.loadout_selectable == 0) continue;
+        if ((w.charfilter_mask & class_mask) == 0) continue;
+        if ((w.teamfilter_mask & team_mask) == 0) continue;
+        out.push_back(static_cast<int32_t>(i));
+    }
+}
+
 int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask) {
     // The &31 mirrors x86 shl's hardware count masking for an out-of-range
     // class byte (and keeps the C++ shift defined).

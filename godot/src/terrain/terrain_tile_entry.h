@@ -41,7 +41,6 @@ public:
 
 	void set_cell(int cell_x, int cell_z);
 
-	Dictionary to_dictionary() const;
 
 	void copy_from_native(const opennova::TilOverlayEntry &entry);
 	opennova::TilOverlayEntry to_native() const;

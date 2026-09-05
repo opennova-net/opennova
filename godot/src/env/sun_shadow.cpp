@@ -24,13 +24,11 @@ void SunShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&SunShadow::advance_frame);
 
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_DYNAMIC", PROJECTION_DYNAMIC);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PROJECTION_STATIC_TERRAIN", PROJECTION_STATIC_TERRAIN);
+	BIND_ENUM_CONSTANT(PROJECTION_DYNAMIC);
+	BIND_ENUM_CONSTANT(PROJECTION_STATIC_TERRAIN);
 }
 
-void SunShadow::set_projection_mode(int p_mode) {
+void SunShadow::set_projection_mode(ProjectionMode p_mode) {
 	projection_mode_ = p_mode;
 	_apply_projection_masks();
 }
@@ -46,7 +44,7 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 void SunShadow::_ready() {
 	// The light's OWN visual layer decides which views render it - and
 	// therefore which views re-render the directional shadow
-	// atlas. The beauty camera (0x18C01) and the water mirror (0x8001) need
+	// atlas. The beauty camera (0x38C01) and the water mirror (0x8001) need
 	// it. Focused Q3 attaches resolved beauty depth and renders only typed
 	// self-lit draws, so it never submits this Light3D or pays another shadow
 	// atlas render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the beauty
@@ -67,7 +65,6 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
 	_apply_projection_masks();
-	set_process(true);
 	_update_direction();
 }
 
@@ -96,10 +93,6 @@ void SunShadow::_apply_projection_masks() {
 	}
 }
 
-void SunShadow::_process(double p_delta) {
-	advance_frame(p_delta);
-}
-
 void SunShadow::advance_frame(double p_delta) {
 	_update_direction();
 	(void)p_delta;
@@ -118,7 +111,7 @@ void SunShadow::_update_direction() {
 		return;
 	}
 	set_visible(true);
-	// get_light_direction serves the Godot-axes vector: the env_axes x/z
+	// get_light_direction serves the Godot-axes vector: the util/axes.h x/z
 	// swap of the raw getter tuple g = (-Y_bms, Z_bms, X_bms) IS the
 	// (g2, g1, g0) surface->light reduction, applied once at the getter
 	// [orig: Environment_GetLightDirectionFloat @0x57d870;

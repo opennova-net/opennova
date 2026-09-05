@@ -36,14 +36,14 @@
 // Raycasts test ONLY type-1 volumes [orig: Entity_RaycastCollisionModel @ 0x413060];
 // the blink point query tests ONLY type-8 volumes of building-kind entities
 // [orig: Entity_TestCollisionSections @ 0x4aef90].
-#ifndef OPENNOVA_WORLD_COLLISION_H
-#define OPENNOVA_WORLD_COLLISION_H
+#pragma once
 
 #include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
+#include <runtime/devtools/tick_profile.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::terrain {
@@ -374,8 +374,8 @@ inline constexpr uint32_t kTouchChangeTeam = 0x200;
 inline constexpr uint32_t kTouchVehicleLoadout = 0x400;
 inline constexpr uint32_t kTouchFlagGrounded = 0x800;
 
-// Collision-face flag bits [orig: face tests @0x4e5073-family; the GDScript
-// debug view mirrors these in hitbox_debug_view.gd].
+// Collision-face flag bits [orig: face tests @0x4e5073-family]; the F3 hitbox
+// report (godot/src/simulation/hitbox_debug_report.h) carries them per face.
 inline constexpr uint32_t kFaceFlagBothSides = 0x1;
 inline constexpr uint32_t kFaceFlagNeverHit = 0x100;
 inline constexpr uint32_t kFaceFlagDoubleSided = 0x800;
@@ -548,9 +548,11 @@ struct LadderResolveIO {
     int32_t tick_start_z = 0;
     bool prone = false;  // MoveOrder 0x100 [orig: entry-bump pick @ 0x4b3330]
     bool crouch = false; // MoveOrder 0x200 [orig: @ 0x4b3340]
-    // The AI climb order — the third fresh-entry qualifier besides previous
-    // contact and the player class bit. No reimpl writer yet (the AI move-order
-    // layer rides its own slice). [orig: aiRuntime word1 & 0x400 @ 0x4b325d]
+    // The AI climb qualifier — the third fresh-entry arm besides previous
+    // contact and the player class bit. make_ladder_resolve_io feeds it from
+    // the slot's CLIMBER bit (ChangeAI sub 17); the AI move-order half of the
+    // retail test is unported. [orig: var_60 @ 0x4b3257 || Flags & 0x100
+    // @ 0x4b325f || aiRuntime+4 & 0x400 @ 0x4b326a]
     bool ai_wants_climb = false;
     bool is_local_player = false;
     // View + body pose channels (BAM32). view_yaw/view_pitch are entity
@@ -593,32 +595,7 @@ struct ContactResult {
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, LadderContact &ladder, ContactResult &out);
 
-// Embedder/model callback for the final world-space matrix array consumed by every
-// collision walk. Matrix slot i corresponds to COBJ/collision section i by
-// ordinal; COBJ::parent_subobject_index is hierarchy metadata, not a selector.
-// [orig: model+168 callback -> one 16-dword matrix per COBJ, consumed in lockstep
-// by Physics_RaycastAgainstBoneCollision @ 0x4e4cb0.]
-class ICollisionSectionMatrixProvider {
-public:
-    virtual ~ICollisionSectionMatrixProvider() = default;
-    // An embedder may learn about dynamic entities after its mission-start model
-    // sweep (notably the local player deploy). Give query callers one shared,
-    // idempotent way to attach that entity before choosing an unresolved
-    // fallback. Returning true means the provider attached a usable instance.
-    virtual bool ensure_collision_instance(World &world, EntityHandle entity) {
-        (void)world;
-        (void)entity;
-        return false;
-    }
-    // View construction may cache this result. Implementations must treat the
-    // queried CollisionWorld's model/instance/pose state as read-only here;
-    // late attachment belongs in ensure_collision_instance().
-    virtual bool build_section_matrices(World &world, EntityHandle entity,
-                                        int32_t model_id,
-                                        const CollisionMatrix &entity_world,
-                                        const CollisionModel &model,
-                                        std::vector<CollisionMatrix> &out) = 0;
-};
+class IPoseProvider; // runtime/world/pose_provider.h: the embedder's live pose seam
 
 // ---------------------------------------------------------------------------
 // Projectile trace shared by authoritative and explicitly visual-only rounds.
@@ -706,6 +683,7 @@ struct ProjectileTrace {
     uint32_t ammo_flags = 0;
     // The additional per-projectile exclusion carried by the retail ray context.
     EntityHandle extra_ignore;
+    EntityHandle mount_ignore; // explicit ray[18], used by the lndm ground query
     // Remote decoded proxies (person + dynamic) are a client-presentation input
     // only. The caller opts in explicitly for a VisualOnly round and supplies
     // the wire shooter identity for the normal flag-4-aware self-collision rule.
@@ -729,6 +707,7 @@ struct ProjectileTrace {
 };
 
 struct ProjectileHit {
+    int32_t distance_q16 = 0;
     ProjectileHitClass hit_class = ProjectileHitClass::None;
     EntityHandle geometry_entity;
     int32_t t_q16 = 0x10000;
@@ -776,24 +755,6 @@ public:
         int64_t person_survivors = 0;
         int64_t static_faces = 0;
         int64_t dynamic_faces = 0;
-    };
-    struct RaycastPerf {
-        uint64_t calls = 0;
-        uint64_t terrain_us = 0;
-        uint64_t sector_us = 0;
-        uint64_t sector_candidates = 0;
-    };
-    struct RaycastPrepPerf {
-        uint64_t candidate_collect_us = 0;
-        uint64_t grid_publish_us = 0;
-        uint64_t grid_span_us = 0;
-        uint64_t grid_bucket_us = 0;
-        uint64_t grid_workspace_us = 0;
-    };
-    struct ResolvePerf {
-        uint64_t contacts_us = 0;
-        uint64_t repulsion_us = 0;
-        uint64_t ground_us = 0;
     };
     // Opt-in ray-debug capture: every segment query records one event into a
     // per-category ring while enabled (dev tooling — the F3 ray view/window
@@ -955,9 +916,9 @@ public:
     void remove_entity_instance(EntityHandle h);
     // Attach the husk-stage collision model (swapped in while Flags & 4).
     void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
-    // Install the model-animation callback that supplies final per-section
+    // Install the embedder's pose seam that supplies final per-section
     // matrices. Null restores the static shared-entity-matrix fallback.
-    void set_section_matrix_provider(ICollisionSectionMatrixProvider *provider);
+    void set_pose_provider(IPoseProvider *provider);
     // Resolve an embedder-owned late-spawn instance on demand. Existing instances
     // never call the provider, so repeated round/F3 queries are idempotent.
     bool ensure_entity_instance(World &world, EntityHandle h);
@@ -1016,6 +977,9 @@ public:
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
     // snapshots at the normal tick seam before tracing.
+    int32_t minefield_ground(const World &world, EntityHandle source,
+                             FixedVec3 position, bool indoors) const;
+
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;
 
@@ -1151,20 +1115,30 @@ public:
     // don't exist in our world yet (organics are pool 0, unwalked, like retail).
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                        EntityHandle exclude_a, EntityHandle exclude_b);
+    // Terrain plus the querying entity's building-candidate slice. A null
+    // second entity permits a buried endpoint; height_offset raises/lowers the
+    // terrain ray and shrinks/inflates the solid clip. Audio and blasts share
+    // this distinct retail query [orig: Entity_CheckLineOfSightTerrainAndEntities
+    // @ 0x53B130; Physics_CheckTerrainLineOfSight @ 0x53B080].
+    bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
+                         const int32_t start[3], const int32_t end[3],
+                         int32_t height_offset);
     // Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
     // then reuse retail's entity-resident matrix equivalent without observing
     // a pre-movement pose.
     bool raycast_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
-                              EntityHandle exclude_a, EntityHandle exclude_b,
-                              RaycastPerf *perf = nullptr);
+                              EntityHandle exclude_a, EntityHandle exclude_b);
+    // Sector candidates the most recent raycast_clear / raycast_clear_cached
+    // visited (the broad-phase's exactness, pinned by the collision ctest).
+    uint64_t last_los_sector_candidates() const { return last_los_sector_candidates_; }
     // Publish an exact broad-phase over the final live target bounds for a
     // caller-declared stable world phase. The replication fan prepares once
     // after movement/destruction, then every recipient ray queries only cells
     // intersecting its segment while retaining the original exact solid clip.
-    void prepare_cached_raycast_queries(World &world,
-                                        RaycastPrepPerf *perf = nullptr);
+    // Its phases lap onto the SIM_REPLICATION_QUERY_* rows of world.profile.
+    void prepare_cached_raycast_queries(World &world);
     void reset_query_view_cache();
 
     // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
@@ -1253,7 +1227,7 @@ public:
                            EntityHandle *out_ground = nullptr,
                            const LadderResolveIO *ladder_io = nullptr,
                            const int32_t *eye_offset = nullptr,
-                           ResolvePerf *perf = nullptr);
+                           devtools::TickProfile *profile = nullptr);
 
     // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
     // decoded remote row that has NO world entity — retail runs remote
@@ -1508,6 +1482,9 @@ private:
     struct CandidateSlice {
         int32_t start = 0;
         int32_t count = 0;
+        // The source position the slice was built at (wire slices only): a
+        // row that has moved past its pad since then needs a fresh build.
+        int32_t built_pos[3] = {0, 0, 0};
     };
     struct StableLosCandidate {
         EntityHandle h;
@@ -1597,7 +1574,8 @@ private:
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
     bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                             EntityHandle exclude_a, EntityHandle exclude_b,
-                            bool cache_target_views, RaycastPerf *perf);
+                            bool cache_target_views);
+    uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
                                         bool person_faces_only) const;
@@ -1621,15 +1599,9 @@ private:
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
                       int32_t &radius_out, bool solid_only) const;
 
-    // One sound-occlusion LOS ray (terrain + building legs); true = clear.
-    // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
-    bool sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
-                         const int32_t start[3], const int32_t end[3],
-                         int32_t height_offset);
-
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
-    ICollisionSectionMatrixProvider *section_matrix_provider_ = nullptr; // non-owning host seam
+    IPoseProvider *pose_provider_ = nullptr; // non-owning embedder seam
 
     std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;
@@ -1667,6 +1639,33 @@ private:
     const ReplicaPeer *replica_peers_ = nullptr;
     int32_t replica_peer_count_ = 0;
     uint16_t replica_exclude_handle_ = 0xFFFF;
+    // A cell index over the staged peer table, rebuilt once per (table, pump
+    // tick): the repulsion loop only ever moves a row for peers within 30% of
+    // the summed radii, so each resolve gathers the peers of the cells that
+    // reach can touch and walks them in table order — the same peers, the
+    // same order, the same pushes as the full walk (see the exactness guard
+    // beside the walk). Pure acceleration; no witnessed rule lives here.
+    struct ReplicaPeerIndex {
+        const ReplicaPeer *src = nullptr;
+        int32_t count = 0;
+        uint32_t tick = 0;
+        int32_t max_radius = 0;
+        std::unordered_map<uint64_t, std::vector<int32_t>> cells;
+        std::vector<int32_t> gathered;
+    };
+    ReplicaPeerIndex replica_peer_index_;
+    bool replica_peer_index_enabled_ = true;
+    void stage_replica_peer_index(const ReplicaPeer *peers, int32_t count,
+                                  uint32_t tick);
+
+public:
+    // Test seam: the full table walk stays reachable so the cell gather can
+    // be proven equivalent against it.
+    void set_replica_peer_index_enabled(bool enabled) {
+        replica_peer_index_enabled_ = enabled;
+    }
+
+private:
     int32_t replica_source_bound_radius_q16_ = 0;
     // Staged like replica_peers_: the calling row's retail-Flags mirror. The
     // resolver's flag latch sites and the ground probe's indoors gate read and
@@ -1675,5 +1674,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_COLLISION_H

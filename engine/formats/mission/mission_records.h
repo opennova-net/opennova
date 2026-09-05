@@ -1,11 +1,9 @@
 #pragma once
 
-// Internal to engine/runtime/mission — not part of the public interface. Split out of
-// mission.cpp (quality campaign W3-1); the bodies are unchanged.
+// Internal to engine/formats/mission, not part of the public interface.
 //
-// Conversions between the on-disk bms:: structs and the typed records the editor
-// edits (ADR 0017), plus the entity-vector plumbing they share. The facade owns the
-// document; this owns the shape of what comes out of it.
+// Conversions between the on-disk bms:: structs and the typed event-logic views
+// bms_edit.cpp hands out (ADR 0017, ADR 0043 slice E11).
 
 #include <formats/mission/mission.h>
 
@@ -15,52 +13,8 @@
 
 namespace opennova::mission::detail {
 
-// Shared with the facade (mission.cpp): the chain-entry ceiling its insert guards
-// enforce, the AI attribute bits it validates ai_flags against, and the int-property
-// table set_entity_property_int walks. constexpr at namespace scope, so each TU gets
-// its own copy and there is no ODR question.
-constexpr int kMaxEventChainEntries = 20;
-
-constexpr uint32_t kKnownAiAttributeMask =
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfLessThan) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfMoreThan) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Multiplayer) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::FlyingOrganic) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::EngineRunning) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::AdvancedAmmo) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Indestructible) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::NavigationWaypoint) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Reflective) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::NoShadow);
-
-// The editable int properties, mapping each editor/dictionary key to its EntityProperties member.
-// Single source of truth for set_entity_property_int: adding an int field is one row here. Only
-// `group` differs from its member name (group_id); every other key equals its member.
-struct EntityIntField {
-	const char *name;
-	int EntityProperties::*member;
-};
-constexpr EntityIntField kEntityIntFields[] = {
-	{"group", &EntityProperties::group_id},
-	{"waypoint_id", &EntityProperties::waypoint_id},
-	{"wp_number", &EntityProperties::wp_number},
-	{"team", &EntityProperties::team},
-	{"ai_flags", &EntityProperties::ai_flags},
-	{"perception", &EntityProperties::perception},
-	{"accuracy", &EntityProperties::accuracy},
-	{"alert_state", &EntityProperties::alert_state},
-	{"min_engagement_distance", &EntityProperties::min_engagement_distance},
-	{"max_engagement_distance", &EntityProperties::max_engagement_distance},
-	{"max_attack_distance", &EntityProperties::max_attack_distance},
-	{"spawn_count", &EntityProperties::spawn_count},
-	{"max_simultaneous", &EntityProperties::max_simultaneous},
-	{"no_less_than", &EntityProperties::no_less_than},
-	{"map_symbol", &EntityProperties::map_symbol},
-};
+// (The chain-entry ceiling, the known AI attribute mask and the editable
+// int-property table live beside their one user in bms_edit.cpp.)
 
 AreaTriggerRecord to_area_trigger_record(const bms::AreaTrigger &area, size_t index);
 
@@ -100,20 +54,11 @@ void add_trigger_area_reference(const MissionTriggerRecord &trigger,
 
 int next_entity_id(const bms::File &file);
 
-EntityRecord to_record(const bms::Entity &entity, EntityKind kind, size_t index);
-
 void apply_transform(bms::Entity &entity, const EntityTransform &transform);
-
-void apply_properties(bms::Entity &entity, const EntityProperties &properties);
-
-EntityProperties properties_from_record(const EntityRecord &record);
 
 bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,
                                 int item_id,
                                 const EntityTransform &transform);
-
-std::vector<bms::Entity> *entities_for(bms::File &file, EntityKind kind);
-const std::vector<bms::Entity> *entities_for(const bms::File &file, EntityKind kind);
 
 } // namespace opennova::mission::detail

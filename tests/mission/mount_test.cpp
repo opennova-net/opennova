@@ -114,10 +114,10 @@ static void test_mount_config_lifecycle() {
     gun.emplaced_config = 0;
     gun.seats[0].bone_index = 7;
     gun.primary_weapon.assign(1, 'x');
-    w.weapons.entries.resize(2);
-    w.weapons.entries[1].name.assign(1, 'x');
-    w.weapons.entries[1].clipsize = -1;
-    w.weapons.entries[1].valid = true;
+    w.tables.weapons.entries.resize(2);
+    w.tables.weapons.entries[1].name.assign(1, 'x');
+    w.tables.weapons.entries[1].clipsize = -1;
+    w.tables.weapons.entries[1].valid = true;
     const EntityHandle gh = w.registry.spawn(1, gun);
     Entity soldier = make_soldier(100, 0.f, 0.f, 0.f);
     soldier.equipped_adm_index = 7;
@@ -177,10 +177,10 @@ static void test_wire_mount_config_lifecycle() {
     const EntityHandle sh =
             w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-    CHECK(entity_process_vehicle_attach(w, sh, gh, 7));
+    CHECK(w.vehicles.process_attach(sh, gh, 7));
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 6);
-    CHECK(entity_detach_from_vehicle(w, sh));
+    CHECK(w.vehicles.detach(sh));
     CHECK(!w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
 }
@@ -200,7 +200,7 @@ static void test_wire_attach_rejects_unknown_model_bone() {
     const EntityHandle sh =
             w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-    CHECK(!entity_process_vehicle_attach(w, sh, gh, 9));
+    CHECK(!w.vehicles.process_attach(sh, gh, 9));
     CHECK(!w.registry.get(sh)->mounted);
     CHECK(!w.registry.get(gh)->seats[0].occupant.valid());
 }
@@ -227,13 +227,11 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     gun.seats[0].bone_index = 7;
     const EntityHandle target = w.registry.spawn(1, gun);
 
-    auto ai_fixture = std::make_unique<AiSystem>();
-    AiSystem &ai = *ai_fixture;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
     const int mounted_ai_index = ai.attach(mounted);
     AiEntity *mounted_ai = ai.at(mounted_ai_index);
 
-    CHECK(entity_process_vehicle_attach(w, mounted, target, 7));
+    CHECK(w.vehicles.process_attach(mounted, target, 7));
     CHECK(w.registry.get(mounted)->mounted_config_valid);
     w.registry.despawn(target);
     CHECK(!ai.pose_if_mounted(*mounted_ai, w));
@@ -247,7 +245,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     replacement.emplaced_config = 6;
     replacement.seats[0].bone_index = 7;
     const EntityHandle replacement_target = w.registry.spawn(1, replacement);
-    CHECK(entity_process_vehicle_attach(w, mounted, replacement_target, 7));
+    CHECK(w.vehicles.process_attach(mounted, replacement_target, 7));
     Entity *mounted_entity = w.registry.get(mounted);
     mounted_entity->health = 0;
     mounted_entity->deathtime_ticks = 120;
@@ -320,9 +318,9 @@ int main() {
             w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
             CHECK(w.commands.mount(100, 200));
-            CHECK(w.effects.entries().size() == 1);
-            if (w.effects.entries().size() == 1) {
-                const auto &started = w.effects.entries()[0];
+            CHECK(w.out.effects.entries().size() == 1);
+            if (w.out.effects.entries().size() == 1) {
+                const auto &started = w.out.effects.entries()[0];
                 CHECK(started.kind == "vehicle_control_started");
                 CHECK(started.a == 200);
                 CHECK(started.b == 77);
@@ -330,9 +328,9 @@ int main() {
             }
 
             CHECK(w.commands.dismount(100));
-            CHECK(w.effects.entries().size() == 2);
-            if (w.effects.entries().size() == 2) {
-                const auto &stopped = w.effects.entries()[1];
+            CHECK(w.out.effects.entries().size() == 2);
+            if (w.out.effects.entries().size() == 2) {
+                const auto &stopped = w.out.effects.entries()[1];
                 CHECK(stopped.kind == "vehicle_control_stopped");
                 CHECK(stopped.a == 200);
                 CHECK(stopped.b == 77);
@@ -362,16 +360,16 @@ int main() {
         CHECK(w.registry.get(c1)->mount_type == SeatType::Driver);
         CHECK(w.registry.get(vh)->seats[0].occupant == c0);
         CHECK(w.registry.get(vh)->seats[1].occupant == c1);
-        CHECK(w.effects.entries().size() == 1);
-        if (w.effects.entries().size() == 1)
-            CHECK(w.effects.entries()[0].kind == "vehicle_control_started");
+        CHECK(w.out.effects.entries().size() == 1);
+        if (w.out.effects.entries().size() == 1)
+            CHECK(w.out.effects.entries()[0].kind == "vehicle_control_started");
 
         CHECK(w.commands.dismount(100)); // the claimant departs -> stop, c1 still seated
-        CHECK(w.effects.entries().size() == 2);
-        if (w.effects.entries().size() == 2)
-            CHECK(w.effects.entries()[1].kind == "vehicle_control_stopped");
+        CHECK(w.out.effects.entries().size() == 2);
+        if (w.out.effects.entries().size() == 2)
+            CHECK(w.out.effects.entries()[1].kind == "vehicle_control_stopped");
         CHECK(w.commands.dismount(101)); // the non-claimant departure is silent
-        CHECK(w.effects.entries().size() == 2);
+        CHECK(w.out.effects.entries().size() == 2);
     }
 
     // The accepted wire attach/detach path publishes the same controlling-seat edges.
@@ -385,17 +383,17 @@ int main() {
         const EntityHandle vh = w.registry.spawn(1, vehicle);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        CHECK(entity_process_vehicle_attach(w, sh, vh, 7));
-        CHECK(w.effects.entries().size() == 1);
-        if (w.effects.entries().size() == 1) {
-            const auto &started = w.effects.entries()[0];
+        CHECK(w.vehicles.process_attach(sh, vh, 7));
+        CHECK(w.out.effects.entries().size() == 1);
+        if (w.out.effects.entries().size() == 1) {
+            const auto &started = w.out.effects.entries()[0];
             CHECK(started.kind == "vehicle_control_started");
             CHECK(started.a == 200 && started.b == 77 && started.c == 0x01000003);
         }
-        CHECK(entity_detach_from_vehicle(w, sh));
-        CHECK(w.effects.entries().size() == 2);
-        if (w.effects.entries().size() == 2) {
-            const auto &stopped = w.effects.entries()[1];
+        CHECK(w.vehicles.detach(sh));
+        CHECK(w.out.effects.entries().size() == 2);
+        if (w.out.effects.entries().size() == 2) {
+            const auto &stopped = w.out.effects.entries()[1];
             CHECK(stopped.kind == "vehicle_control_stopped");
             CHECK(stopped.a == 200 && stopped.b == 77 && stopped.c == 0x01000003);
         }
@@ -411,18 +409,18 @@ int main() {
         const EntityHandle c0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
 
-        CHECK(entity_process_vehicle_attach(w, c0, vh, 7));
-        CHECK(entity_process_vehicle_attach(w, c1, vh, 9));
-        CHECK(w.effects.entries().size() == 1);
-        if (w.effects.entries().size() == 1)
-            CHECK(w.effects.entries()[0].kind == "vehicle_control_started");
+        CHECK(w.vehicles.process_attach(c0, vh, 7));
+        CHECK(w.vehicles.process_attach(c1, vh, 9));
+        CHECK(w.out.effects.entries().size() == 1);
+        if (w.out.effects.entries().size() == 1)
+            CHECK(w.out.effects.entries()[0].kind == "vehicle_control_started");
 
-        CHECK(entity_detach_from_vehicle(w, c0)); // the claimant departs -> stop
-        CHECK(w.effects.entries().size() == 2);
-        if (w.effects.entries().size() == 2)
-            CHECK(w.effects.entries()[1].kind == "vehicle_control_stopped");
-        CHECK(entity_detach_from_vehicle(w, c1)); // the non-claimant departure is silent
-        CHECK(w.effects.entries().size() == 2);
+        CHECK(w.vehicles.detach(c0)); // the claimant departs -> stop
+        CHECK(w.out.effects.entries().size() == 2);
+        if (w.out.effects.entries().size() == 2)
+            CHECK(w.out.effects.entries()[1].kind == "vehicle_control_stopped");
+        CHECK(w.vehicles.detach(c1)); // the non-claimant departure is silent
+        CHECK(w.out.effects.entries().size() == 2);
     }
 
     // A passenger is occupancy, not vehicle control; mount, dismount, and restore stay silent.
@@ -434,12 +432,12 @@ int main() {
         w.registry.spawn(1, make_vehicle(200, SeatType::Passenger));
         w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         CHECK(w.commands.mount(100, 200));
-        CHECK(w.effects.entries().empty());
+        CHECK(w.out.effects.entries().empty());
         const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
         CHECK(w.commands.dismount(100));
-        CHECK(w.effects.entries().empty());
+        CHECK(w.out.effects.entries().empty());
         w.restore(*occupied);
-        CHECK(w.effects.entries().empty());
+        CHECK(w.out.effects.entries().empty());
     }
 
     // Teardown can remove the vehicle before the occupant is detached. The occupant's cached
@@ -452,13 +450,13 @@ int main() {
         const EntityHandle vh = w.registry.spawn(1, make_vehicle(200, SeatType::Controller));
         w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         CHECK(w.commands.mount(100, 200));
-        w.effects.clear();
+        w.out.effects.clear();
         w.registry.despawn(vh);
 
         CHECK(w.commands.dismount(100));
-        CHECK(w.effects.entries().size() == 1);
-        if (w.effects.entries().size() == 1) {
-            const auto &stopped = w.effects.entries()[0];
+        CHECK(w.out.effects.entries().size() == 1);
+        if (w.out.effects.entries().size() == 1) {
+            const auto &stopped = w.out.effects.entries()[0];
             CHECK(stopped.kind == "vehicle_control_stopped");
             CHECK(stopped.a == 200);
             CHECK(stopped.b == 77);
@@ -523,8 +521,7 @@ int main() {
         w.registry.configure_pool(1, 16);
         const EntityHandle gh = w.registry.spawn(1, make_gun(200, 10.f, 20.f, 5.f, 0));
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -571,10 +568,9 @@ int main() {
         w.registry.get(gh)->emplaced_config_valid = true;
         w.registry.get(gh)->emplaced_config = 3;
 
-        AiSystem ai;
+        AiSystem &ai = w.ai;
         ClipSource clips;
         ai.root_motion = &clips;
-        w.ai = &ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -616,9 +612,7 @@ int main() {
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        auto aip = std::make_unique<AiSystem>();
-        AiSystem &ai = *aip;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         AiEntity *ae = ai.at(idx);
         ae->inf.active = true;
@@ -677,9 +671,7 @@ int main() {
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
 
-        auto aip = std::make_unique<AiSystem>();
-        AiSystem &ai = *aip;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         AiEntity *ae = ai.at(idx);
         ae->inf.active = true;
@@ -736,8 +728,7 @@ int main() {
         vehicle.seats.push_back(passenger);
         const EntityHandle vh = w.registry.spawn(1, vehicle);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
-        AiSystem ai;
-        w.ai = &ai;
+        AiSystem &ai = w.ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;
@@ -795,7 +786,7 @@ int main() {
         // round-robin; see event_runtime_test).
         for (int i = 0; i < 16; ++i) w.run_logic_tick(true);
 
-        CHECK(w.effects.count("unported_action") == 0);
+        CHECK(w.out.effects.count("unported_action") == 0);
         CHECK(w.commands.find_mounted_on(200) == 100);
     }
 
@@ -839,9 +830,9 @@ int main() {
         CHECK(w.registry.get(sh1)->mounted);
         CHECK(w.registry.get(vh)->seats[0].occupant == sh0);
         CHECK(w.registry.get(vh)->seats[1].occupant == sh1);
-        CHECK(w.effects.entries().size() == 1);
-        if (w.effects.entries().size() == 1) {
-            const auto &started = w.effects.entries()[0];
+        CHECK(w.out.effects.entries().size() == 1);
+        if (w.out.effects.entries().size() == 1) {
+            const auto &started = w.out.effects.entries()[0];
             CHECK(started.kind == "vehicle_control_started");
             CHECK(started.a == 200);
             CHECK(started.b == 77);

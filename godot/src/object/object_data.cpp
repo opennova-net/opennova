@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 using namespace novaobj;
+using namespace opennova::threedi;
 
 namespace {
 

@@ -1,7 +1,7 @@
 # Porting the per-frame S2C 0x0A emit (faithful, IDA-driven)
 
 The in-match replication core is the per-frame S2C `0x0A`. The retail host builds it in a small,
-fully-witnessed chain; our job is to port that chain into `engine/net/netsim` **structurally**, not to invent
+fully-witnessed chain; our job is to port that chain into `engine/runtime/replication` **structurally**, not to invent
 a broadcast. This doc is the runbook + current state so you can continue without re-deriving.
 
 Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F flood context), and
@@ -36,7 +36,7 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 
 | piece | status | where |
 |---|---|---|
-| phase counter (`playerSlot+100566`) | DONE | `netsim::Connection::s2c_phase`; advanced in `emit_connection_s2c` |
+| phase counter (`playerSlot+100566`) | DONE | `replication::Connection::s2c_phase`; advanced in `emit_connection_s2c` |
 | header sub-block dispatch (`phase & 3`) | DONE | `build_0a_frame` switch, `connection_fan.cpp` |
 | sub-block 1 (server-status, C6EAE4 fall-dmg) | DONE | load-bearing; first send is phase 1 |
 | sub-block 0 (weapon) | DONE (golden steady: slots 0, uniformMask 8) | recipient weapon-slot model pending |
@@ -52,14 +52,14 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | 0x5A ammo bytes (real counts) | DONE (D-NET-141; index rule CLOSED §5.57) | `world::WeaponTable` fed via `Simulation::load_weapon_table`; rules in `weapon_table_build.cpp` [orig: WeaponSlot_GetTotalClips @0x5425F0]; table-less hosts keep the echo fallback |
 | C2S 0x25 → S2C 0x49 reload relay | DONE (D-NET-142) | dispatch case 0x25 stages the relayed 0x49 on EVERY in-match transport incl. the requester [orig: @0x514DF0 → SendFiltered @0x4C87E0]; host-side clip bookkeeping deferred |
 | off-14/15/16 anim bytes (LIVE states + ratio + adm index) | DONE (D-NET-143 → D-NET-159) | off-14/15 = the motor mirror (`AiSystem::mirror_wire_anim`, pending-wins); the AUTHORITY selection runs for net-snapped peers from the replicated input (`remote_player_body_anim` [orig: @0x4B40E0]); stance rides C2S 0x1D → `Entity::net_stance_bits` + the tail echo; off-16 = `Entity::equipped_adm_index` (category<11-gated [orig: @0x4C20A3]). Deferred inside D-NET-159: run/jog promotion (ADM gait class), prone lean, real .adm channel rate for data-less hosts, deathAnim variants |
-| joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
+| joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::tables.player.item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
 | **grounded-on-entity carrier replication** | DONE (D-NET-151; v27 user-confirmed) | the player record's carrier = mount-else-`groundEntity` [orig: @0x4c0a08] with CARRIER-LOCAL pos + local yaw byte; the uplink apply lifts local→world via the 22-bit pose transforms [orig: @0x4c1de1/@0x43BD00] and mirrors the carrier into `Entity::ground_target`; flags bits 2-4 are a REPLACE, not an xor [orig: @0x4c1e4d]. `apply_player_intent` + `build_0a_frame` + `ClientReplicaPipeline`; pinned by `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo, pose_transform_roundtrip) |
 | **C2S 0x06 fire → tag-2 round-event echo** | DONE (D-NET-152; **live-verified v28 + the v30 positive witness** — 95/95 0x06 armory-resolved, no reload wedge; v30: 25 tag-2 round-events on the wire with two observers, every fire echoed exactly once; rounds select FIRST in the frame budget since D-NET-154) | dispatch case 0x06 (anti-spoof + armory clip authority + `world::RoundRing` append [orig: @0x513310 → Server_ClientFiredRound @0x50baa0 → the adm fire action → RoundData_AddRound @0x4fdb40]); 0x25 refills the clip [orig: WeaponSlot_ReloadAmmo @0x541720]; netsim `select_round_events` = per-connection watermark + own-shooter skip + line-of-fire scoring [orig: @0x4ffee0] feeding `build_0a_frame`'s tag-2 records [orig: NetPacket_SerializeRoundEvent @0x504820]. Pinned by `npruntime_client_fire_test` + `netsim_two_peer_fanout` (round_event_fanout). Deferred: round SPAWN + damage (RoundData_SpawnRound @0x4ec0d0), fire-rate stamp (adm[276] unparsed), ammo pools, cease-fire |
 | deploy gate / eye-pos ref / budget ramp | partial | the deploy-screen HOLD + release are DONE (D-NET-156: `Connection::respawn_pending` → flags1 bit1 + hidden bit; 0x0E dead-or-pending gate; the 0x5A+0x61+0x1E release bundle — D-NET-156 tail); eye-pos anchor + budget ramp still not ported |
 | victim death cycle (tail health + dead bit) | DONE (D-NET-160; verify v34) | the 0x0A tail carries the recipient's LIVE health (`FrameHeaderState::tail_health` [orig: @0x4305df]); `route_round_deaths` sets the entity dead bit (flags\|=2 → record byte13 0x02 [orig: @0x4c1005]; the 1→0 edge = the client spawn hook [orig: @0x4c1109]), lifted by the deploy/respawn reset |
 | vehicle attach/detach (C2S 0x26/0x27) | DONE (D-NET-157; emplacements live-verified v33) | dispatch → `world::entity_process_vehicle_attach/_detach` [orig: @0x502390/@0x4FC980 → @0x435AA0/@0x4946D0]; the 0x0A mounted branch echoes bone byte0 + carrier + the tail mount handle |
 | **vehicle DRIVE (host motor off the driver's replicated input)** | DONE — ground family (D-NET-161; verify v35). The round-15 witness REFUTED the prior model: NO vehicle uplink exists (modes 3/4 return −1; the client serializes only g_local_player_entity @0x42c482; golden 344/344), the §5.13 flags&4 short form is the DEAD-pose (wreck) form, and vehicle +0x1CC is an effect-emitter handle, not a session grant | `world::tick_vehicle_motor` [orig: @0x48af00] per pool-1 traits entity in the AiSystem tick; items.def physics parse [orig: @0x49d870] -> `world::VehicleTraits`; `drain_connection_c2s` stays player-only (CORRECT). Deferred: air/helo family (Super Pumas parked), skid, vehicle collision, water, autopilot, engine states, wheel-contact pitch/roll |
-| **AS capture loop (slice 2: contact/control/timed capture/0x6F/0x53/0x6C/0x1E/0x40/0x81)** | DONE (D-NET-162; exact CT producer 2026-08-23) | `CollisionWorld` publishes exact authored type-10 contacts from authority player-body resolves; `world::zone_capture_contact_tick` + `zone_capture_second_tick` own requests, active timed entries, conversion, scoring, takeover options, requester-local Points refresh, and host/client wire. Spawn waves/0x6E and proximity bits are also ported. Residual mandate: only the documented 0x40 overlay tails and unwitnessed 0x6F recipient filter remain |
+| **AS capture loop (slice 2: contact/control/timed capture/0x6F/0x53/0x6C/0x1E/0x40/0x81)** | DONE (D-NET-162; exact CT producer 2026-08-23) | `CollisionWorld` publishes exact authored type-10 contacts from authority player-body resolves; `world::zone_capture_contact_tick` + `ZoneSystem::capture_second_tick` own requests, active timed entries, conversion, scoring, takeover options, requester-local Points refresh, and host/client wire. Spawn waves/0x6E and proximity bits are also ported. Residual mandate: only the documented 0x40 overlay tails and unwitnessed 0x6F recipient filter remain |
 | body motor for net-snapped peers | DONE (D-NET-159; live: death anims seen by others in v33) | `AiSystem::remote_player_body_anim` runs the anim selection for wire-snapped peers on the authority (position stays wire-owned); hidden entities skip [orig: @0x4b411b] |
 | platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
 
@@ -283,7 +283,7 @@ target) in net-re D-NET-146.
   the resolve_item_traits stamp, `world::tick_vehicle_motor` (the ground-family authority
   core; buggy drives, helos = tracked deferral), `Entity::net_analog_*` through
   PlayerIntent, the AiSystem vehicle pass. SLICE 2 (D-NET-162):
-  `world::zone_capture_contact_tick` + `zone_capture_second_tick` (per-tick requests,
+  `world::zone_capture_contact_tick` + `ZoneSystem::capture_second_tick` (per-tick requests,
   secure latch + the @0x501120 delta formula, instant flips via neutral, timed ACTIVE
   entries, attrib2 conversion, and enforcement) + the npruntime block (0x6F change-gated
   + deploy refresh, 0x1E zone family, timed-only 0x53, change-gated 0x6C,
@@ -355,5 +355,5 @@ numbering").
   source, defer with a tracked D-NET divergence rather than guessing bytes. D-NET-134 is closed: phase 2
   uses the live mission/runtime environment owner and quantizes only at the wire boundary.
 - Never carry raw capture bytes through the encoder (ADR 0003).
-- After a `engine/net/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
+- After a `engine/runtime/replication` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
   kill the running Godot instance first) before a live test.

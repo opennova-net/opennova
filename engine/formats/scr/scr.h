@@ -1,15 +1,12 @@
-#ifndef SCR_H
-#define SCR_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::scr {
 
-#define SCR_HEADER_SIZE 4
+inline constexpr int SCR_HEADER_SIZE = 4;
 
 /* Known encryption keys used by NovaLogic games. In Jointops.exe the key is
    per CALL SITE, not derived from the version byte (D-SCR-2): every
@@ -17,9 +14,9 @@ extern "C" {
    and the HLSL .fx loader hardcodes 0xA55B1EED
    [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060, key at 0x5AE0C0].
    0xABEEFACE does not appear in Jointops.exe at all (earlier-title key). */
-#define SCR_KEY_DEFAULT  0xABEEFACEu  /* JO Demo, most .def files */
-#define SCR_KEY_JO_DFX2  0x2A5A8EADu  /* JO/DFX2 Combined Arms */
-#define SCR_KEY_SHADERS  0xA55B1EEDu  /* .fx shader files */
+inline constexpr uint32_t SCR_KEY_DEFAULT = 0xABEEFACEu;  /* JO Demo, most .def files */
+inline constexpr uint32_t SCR_KEY_JO_DFX2 = 0x2A5A8EADu;  /* JO/DFX2 Combined Arms */
+inline constexpr uint32_t SCR_KEY_SHADERS = 0xA55B1EEDu;  /* .fx shader files */
 
 /* Check if data starts with a valid SCR container header.
    Returns 1 if SCR, 0 otherwise. */
@@ -57,8 +54,4 @@ int scr_encrypt_buf(const uint8_t *data, size_t size,
 int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* SCR_H */
+} // namespace opennova::scr

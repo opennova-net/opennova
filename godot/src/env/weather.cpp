@@ -82,6 +82,13 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
 			&Weather::command_time_of_day_minutes);
 	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Weather::command_fog_type);
+	ClassDB::bind_method(D_METHOD("command_sky_height", "height_raw"), &Weather::command_sky_height);
+	ClassDB::bind_method(D_METHOD("command_sun_fade", "percent", "seconds"), &Weather::command_sun_fade);
+	ClassDB::bind_method(D_METHOD("command_color_fade", "seconds"), &Weather::command_color_fade);
+	ClassDB::bind_method(D_METHOD("command_wind_scale", "value"), &Weather::command_wind_scale);
+	ClassDB::bind_method(D_METHOD("command_weather_color", "target", "rgb"),
+			&Weather::command_weather_color);
+	ClassDB::bind_method(D_METHOD("command_lightning_color", "rgb"), &Weather::command_lightning_color);
 	ClassDB::bind_method(D_METHOD("set_wind_duration", "seconds"),
 			&Weather::set_wind_duration);
 	ClassDB::bind_method(D_METHOD("get_wind_duration"),
@@ -129,10 +136,8 @@ void Weather::_bind_methods() {
 			D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
 			&Weather::get_water_uv_state);
 
-	// The externally-callable render-frame drive (the _process body): a
-	// GDExtension virtual override is invisible to has_method and cannot be
-	// called from GDScript, and binding the `_process` name would displace
-	// the engine's virtual hook — so the test harness drives frames here.
+	// The render-frame drive: the frame pipeline's environment leg and the
+	// tests call it; the node never self-clocks through a process callback.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Weather::advance_frame);
 
@@ -221,8 +226,6 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 }
 
 void Weather::_ready() {
-	set_process_priority(-10);
-	set_process(true);
 	_resolve_environment();
 }
 
@@ -232,10 +235,6 @@ void Weather::_exit_tree() {
 
 Weather::~Weather() {
 	bind_simulation(nullptr);
-}
-
-void Weather::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void Weather::advance_frame(double p_delta) {
@@ -506,6 +505,34 @@ void Weather::command_time_of_day_minutes(int p_minute_of_day) {
 
 void Weather::command_fog_type(int p_type) {
 	OPENNOVA_WEATHER_NODE_COMMAND(command_fog_type(p_type), command_fog_type(p_type));
+}
+
+void Weather::command_sky_height(int p_height_raw) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_sky_height(p_height_raw), command_sky_height(p_height_raw));
+}
+
+void Weather::command_sun_fade(int p_percent, int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_sun_fade(p_percent, p_seconds),
+			command_sun_fade(p_percent, p_seconds));
+}
+
+void Weather::command_color_fade(int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_color_fade(p_seconds), command_color_fade(p_seconds));
+}
+
+void Weather::command_wind_scale(int p_value) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_wind_scale(p_value), set_wind_scale(p_value));
+}
+
+void Weather::command_weather_color(int p_target, int p_rgb) {
+	const auto target = static_cast<opennova::world::WeatherColorTarget>(p_target);
+	const auto rgb = static_cast<uint32_t>(p_rgb);
+	OPENNOVA_WEATHER_NODE_COMMAND(command_weather_color(p_target, p_rgb), command_block_color(target, rgb));
+}
+
+void Weather::command_lightning_color(int p_rgb) {
+	const auto rgb = static_cast<uint32_t>(p_rgb);
+	OPENNOVA_WEATHER_NODE_COMMAND(command_lightning_color(p_rgb), command_lightning_color(rgb));
 }
 
 #undef OPENNOVA_WEATHER_NODE_COMMAND

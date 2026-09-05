@@ -35,12 +35,12 @@ struct EnvsMarker {
 
 // The envs dispatch predicate: ai_function or move_function == "envs",
 // compared case-insensitively. Unknown ids are not envs.
-bool item_is_envs(const DefItemsFile &items, int32_t item_id);
+bool item_is_envs(const opennova::def::DefItemsFile &items, int32_t item_id);
 
 // Every envs-class placed entity across all pools, in the canonical entity
 // walk order (markers, items, buildings, organics), with its four authored
 // time-of-day slot set names.
 std::vector<EnvsMarker> resolve_envs_markers(
-		const bms::File &mission, const DefItemsFile &items);
+		const bms::File &mission, const opennova::def::DefItemsFile &items);
 
 } // namespace opennova::audio

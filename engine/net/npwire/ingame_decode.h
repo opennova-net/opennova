@@ -11,7 +11,7 @@
 // Single decoder shared between:
 //   - tests/novaworld (the inline-pcap and fixture replays)
 //   - apps/nw_pp                                   (pretty-printer)
-//   - engine/net/npruntime + engine/net/netsim                 (the in-match runtime's fold paths)
+//   - engine/runtime/inmatch + engine/runtime/replication                 (the in-match runtime's fold paths)
 //   - any future replay tool                       (re-emit captured C2S)
 //
 // Convention: every conditional field is left default-constructed when its
@@ -1023,30 +1023,6 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 //  Server_SendRandomSeedToPlayer @0x5101a0 (value @0x5101d4, disarm @0x510237);
 //  gate PlayerSlot_IsActive @0x4fc760]
 bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out);
-
-// Coarse classification of a 0x1E event_type, derived structurally from the
-// handler's switch [orig: 0x426270]. Drives the viewer's kill-feed styling.
-enum class GameEventKind : uint8_t {
-	Other = 0,     // single-actor canned / misc HUD message
-	Kill,          // attacker killed victim (the kill feed proper)
-	Objective,     // flag / capture / zone control / camp events
-	// A death with NO killer: suicide (1/2/3, the emitter picks 1+rand(3)) and
-	// the killer-less deaths (22/23/25/26 "$A is dead/died/drowned."). The
-	// handler leaves the victim/aux slots LITERAL ZERO on these
-	// [orig: GameEvent_PlayerDeath @0x516DD0 leaves v41/v42 = 0], so a consumer
-	// that reads them charges the death to entity 0 (the host) — they must be
-	// ignored for this kind.
-	SelfDeath,
-	// The medic lines, drawn in their own light blue 0xFF008CEE and NOT kills
-	// [orig: cases 38 "$B has revived $A." @0x42640F / 45 "…medical
-	// attention…" @0x426442 / the emitterless 39 @0x426456 — one shared post].
-	Medic,
-};
-GameEventKind game_event_kind(uint8_t event_type);
-
-// The witnessed "Canned Msg" string key (e.g. "STRCND04") an event_type maps to,
-// or nullptr when the type has none. Faithful to the 0x426270 switch.
-const char *game_event_strcnd_key(uint8_t event_type);
 
 // S2C 0x26 — entity kill replication. Fixed 4 B `[u16 victim_slot][u16 attacker]`.
 // [orig: NapiNPClientMsg_0x026 @ 0x42EC30 → Entity_KillBySlotId(victim, attacker, 0)

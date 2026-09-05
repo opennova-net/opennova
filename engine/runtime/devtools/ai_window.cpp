@@ -53,8 +53,7 @@ void AiWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
 		// Drop the records so a closed window holds nothing; the embedder's
-		// needs_ai_debug gate stops the pushes on the same edge. Queued
-		// requests survive — the drain is unconditional.
+		// needs_ai_debug gate stops the pushes on the same edge.
 		snapshot_ = AiDebugSnapshot{};
 		detail_ = EntityDetailSnapshot{};
 		format_snapshot();
@@ -89,32 +88,6 @@ void AiWindow::clear_detail() {
 bool AiWindow::detail_valid() const {
 	return detail_.card.valid && detail_.card.has_ai &&
 			detail_.card.handle == entities_.selected_handle();
-}
-
-void AiWindow::toggle_element(AiViewRequest::Element element, bool enabled) {
-	AiViewRequest request;
-	request.element = element;
-	request.enabled = enabled;
-	requests_.push_back(request);
-}
-
-bool AiWindow::take_request(AiViewRequest &request) {
-	if (requests_.empty()) return false;
-	request = requests_.front();
-	requests_.pop_front();
-	return true;
-}
-
-bool AiWindow::element_enabled(AiViewRequest::Element element) const {
-	const AiOverlayState &overlay = snapshot_.overlay;
-	switch (element) {
-		case AiViewRequest::Element::Master: return overlay.master;
-		case AiViewRequest::Element::Labels: return overlay.labels;
-		case AiViewRequest::Element::Routes: return overlay.routes;
-		case AiViewRequest::Element::Targets: return overlay.targets;
-		case AiViewRequest::Element::Rings: return overlay.rings;
-	}
-	return false;
 }
 
 const char *AiWindow::group_text(int row) const {
@@ -244,34 +217,6 @@ void AiWindow::format_detail() {
 			static_cast<float>(d.profile_approach_cap) / 65536.0f);
 }
 
-void AiWindow::draw_overlay_strip() {
-	const AiOverlayState &overlay = snapshot_.overlay;
-	ImGui::BeginDisabled(!overlay_available());
-	// Requests-out / pushed-truth: a click queues one toggle and the box
-	// follows the next snapshot's overlay state (the embedder re-pushes
-	// immediately after draining).
-	bool master = overlay.master;
-	if (ImGui::Checkbox("World overlay", &master))
-		toggle_element(AiViewRequest::Element::Master, master);
-	ImGui::SameLine();
-	bool labels = overlay.labels;
-	if (ImGui::Checkbox("Labels", &labels))
-		toggle_element(AiViewRequest::Element::Labels, labels);
-	ImGui::SameLine();
-	bool routes = overlay.routes;
-	if (ImGui::Checkbox("Routes", &routes))
-		toggle_element(AiViewRequest::Element::Routes, routes);
-	ImGui::SameLine();
-	bool targets = overlay.targets;
-	if (ImGui::Checkbox("Targets", &targets))
-		toggle_element(AiViewRequest::Element::Targets, targets);
-	ImGui::SameLine();
-	bool rings = overlay.rings;
-	if (ImGui::Checkbox("Rings", &rings))
-		toggle_element(AiViewRequest::Element::Rings, rings);
-	ImGui::EndDisabled();
-}
-
 void AiWindow::draw_detail_pane() {
 	ImGui::SeparatorText("Selected brain");
 	if (detail_lines_.empty()) {
@@ -308,7 +253,6 @@ void AiWindow::draw_tables() {
 }
 
 void AiWindow::draw(ImGuiPass &, uint64_t) {
-	draw_overlay_strip();
 	ImGui::TextUnformatted(counters_.c_str());
 	if (!snapshot_.valid) return;
 	draw_detail_pane();

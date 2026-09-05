@@ -40,7 +40,7 @@ func _visible_slot_count(instances: Array[MeshInstance3D]) -> int:
 	var count := 0
 	for instance in instances:
 		if instance.visible and instance.mesh != null \
-				and not bool(instance.get_meta("_opennova_auxiliary_draw", false)):
+				and not (instance is PostMultiplyDraw):
 			count += 1
 	return count
 
@@ -58,7 +58,7 @@ func test_authored_lod_switch_swaps_the_level_onto_the_retained_slots() -> void:
 	add_child_autofree(model)
 	model.set_authored_lod_enabled(true)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the pump fixture carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -97,7 +97,7 @@ func test_preview_lod_switch_keeps_the_single_lod_memory_contract() -> void:
 	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1)
 	if lod_count <= 1:
 		return
@@ -114,6 +114,8 @@ func test_preview_lod_switch_keeps_the_single_lod_memory_contract() -> void:
 	assert_eq(model.get_level_surface_count(0), 0,
 			"the preview still retains only its selected level")
 	assert_eq(model.get_surface_slot_count(), model.get_level_surface_count(1))
+	# Rebuilding queues the previous preview subtree for deletion.
+	await get_tree().process_frame
 
 
 func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> void:
@@ -124,7 +126,7 @@ func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> voi
 	add_child_autofree(parent)
 	parent.set_authored_lod_enabled(true)
 	parent.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(parent.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := parent.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the parent carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -165,7 +167,7 @@ func test_level_bound_visual_follows_the_owner_switch() -> void:
 	add_child_autofree(model)
 	model.set_authored_lod_enabled(true)
 	model.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(model.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := model.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1)
 	if lod_count <= 1:
 		return
@@ -196,7 +198,7 @@ func test_attachment_takes_its_owner_level_clamped_to_its_own_count() -> void:
 	add_child_autofree(owner)
 	owner.set_authored_lod_enabled(true)
 	owner.set_object_data(_data(PUMP_3DI))
-	var lod_count := int(owner.get_object_data().get_summary().get("lod_count", 0))
+	var lod_count := owner.get_object_data().get_lod_count()
 	assert_gt(lod_count, 1, "the owner carries multiple authored RLODs")
 	if lod_count <= 1:
 		return
@@ -229,7 +231,7 @@ func test_attachment_takes_its_owner_level_clamped_to_its_own_count() -> void:
 	single.position = Vector3(0.0, 0.0, 50.0)
 	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
 	assert_eq(single.get_active_lod(),
-			mini(lod_count - 1, int(single.get_object_data().get_summary().get("lod_count", 1)) - 1),
+			mini(lod_count - 1, single.get_object_data().get_lod_count() - 1),
 			"the owner's level clamps to the attachment's own count")
 
 	# A freed owner reads as level 0.
@@ -269,3 +271,47 @@ func test_closed_authored_records_create_section_owned_occluders() -> void:
 	for node in occluders:
 		assert_true((node as OccluderInstance3D).visible,
 				"clearing the section verdict restores the occluder")
+
+
+func test_exact_owner_lod_skips_a_missing_marker_level() -> void:
+	var source := ObjectModel.new()
+	add_child_autofree(source)
+	source.set_authored_lod_enabled(true)
+	source.set_object_data(_data(PUMP_3DI))
+	source.position = Vector3(0, 0, 50)
+	var marker := ObjectModel.new()
+	add_child_autofree(marker)
+	marker.set_authored_lod_enabled(true)
+	marker.set_object_data(_data("res://../fixtures/threedi/synth/crate.3di"))
+	marker.set_authored_lod_owner(source, true)
+	source.set_active_lod(1)
+	ObjectModel.update_authored_lods(Transform3D.IDENTITY, 60, 640, 480)
+	assert_eq(marker.get_active_lod(), 1, "callback LOD is not clamped")
+	assert_eq(_visible_slot_count(_own_instances(marker)), 0)
+	source.set_active_lod(0)
+	ObjectModel.update_authored_lods(Transform3D.IDENTITY, 60, 640, 480)
+	assert_gt(_visible_slot_count(_own_instances(marker)), 0)
+
+func test_hidden_source_geometry_survives_lod_switches() -> void:
+	var source := ObjectModel.new()
+	add_child_autofree(source)
+	source.set_authored_lod_enabled(true)
+	source.set_object_data(_data(PUMP_3DI))
+	source.set_geometry_visible(false)
+	source.set_active_lod(1)
+	assert_true(source.is_present_visible(), "source remains available to visibility and LOD")
+	assert_eq(_visible_slot_count(_own_instances(source)), 0)
+	source.set_active_lod(0)
+	assert_eq(_visible_slot_count(_own_instances(source)), 0)
+
+func test_rigid_marker_parts_ignore_live_panm_and_rest_offsets() -> void:
+	var marker := ObjectModel.new()
+	add_child_autofree(marker)
+	marker.set_authored_lod_enabled(true)
+	marker.set_object_data(_data(PUMP_3DI))
+	marker.set_rigid_parts(true)
+	for level in [0, 1, 0]:
+		marker.set_active_lod(level)
+		ObjectModel.advance_awake_frame(0.125)
+		for part in marker.get_render_part_nodes().values():
+			assert_true((part as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))

@@ -1,7 +1,7 @@
 extends GutTest
 
 ## The mission loading screen (LoadingScreen): the sidecar-image rule, the
-## game-type text mapping, the progress-bar smoothing and fill arithmetic, and
+## game-type text mapping, exact stage progress and fill arithmetic, and
 ## the SP-vs-MP text split — each against the witnessed original behavior
 ## [orig: render_loading_screen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
 ## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
@@ -21,17 +21,17 @@ func after_each() -> void:
 # --- sidecar image name [orig: 0x521d66/0x521dab] -----------------------------
 
 func test_sidecar_name_replaces_bms_extension() -> void:
-	assert_eq(LoadingScreen.sidecar_image_name("00TRg.bms"), "00TRg.pcx")
-	assert_eq(LoadingScreen.sidecar_image_name("TDH_I5A.BMS"), "TDH_I5A.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("00TRg.bms"), "00TRg.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("TDH_I5A.BMS"), "TDH_I5A.pcx")
 
 
 func test_sidecar_name_appends_when_no_extension() -> void:
 	# Path_ReplaceOrAppendExtension appends when there is nothing to replace.
-	assert_eq(LoadingScreen.sidecar_image_name("dvxi5"), "dvxi5.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("dvxi5"), "dvxi5.pcx")
 
 
 func test_sidecar_name_uses_the_file_part_only() -> void:
-	assert_eq(LoadingScreen.sidecar_image_name("maps/ASH_I5A.bms"), "ASH_I5A.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("maps/ASH_I5A.bms"), "ASH_I5A.pcx")
 
 
 # --- background resolution [orig: exists probe @ 0x521db5, fallback @ 0x521e20] ---
@@ -43,11 +43,11 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var bg := LoadingScreen.resolve_background(root, "00TRg.bms")
-	assert_eq(String(bg["name"]).to_lower(), "00trg.pcx", "sidecar wins when present")
-	assert_true(bool(bg["custom"]))
+	assert_eq(bg.name.to_lower(), "00trg.pcx", "sidecar wins when present")
+	assert_true(bg.custom)
 	bg = LoadingScreen.resolve_background(root, "OTHER.bms")
-	assert_eq(String(bg["name"]), "loadscrn.pcx", "missing sidecar falls back")
-	assert_false(bool(bg["custom"]))
+	assert_eq(bg.name, "loadscrn.pcx", "missing sidecar falls back")
+	assert_false(bg.custom)
 
 
 func test_background_decodes_sidecar_from_language_archive_without_loose_mode() -> void:
@@ -60,7 +60,7 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 	assert_eq(root.mount_runtime(dir, "", false, "jo"), OK,
 			"the retail archive table mounts with loose lookup disabled")
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(),
 			"setup decodes the mission sidecar found only in language.pff")
 
@@ -76,7 +76,7 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 	assert_eq(root.mount_runtime(dir), OK,
 		"packed-default mode would normally select the archived PCX")
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 
 	assert_true(screen.has_background())
 	var texture := LoadingScreen.load_background_texture(root, "00trg.pcx")
@@ -89,52 +89,29 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 # --- game-type -> LoadingText key [orig: switch @ 0x51f30b-0x51f3a6] -----------
 
 func test_gametype_keys_match_the_witnessed_switch() -> void:
-	assert_eq(LoadingScreen.gametype_text_key(0), "LTGT_DM")
-	assert_eq(LoadingScreen.gametype_text_key(0x10000), "LTGT_TDM")
-	assert_eq(LoadingScreen.gametype_text_key(0x10020), "LTGT_COOP")
-	assert_eq(LoadingScreen.gametype_text_key(0x30020), "LTGT_COOP",
+	assert_eq(HudPos.loading_gametype_text_key(0), "LTGT_DM")
+	assert_eq(HudPos.loading_gametype_text_key(0x10000), "LTGT_TDM")
+	assert_eq(HudPos.loading_gametype_text_key(0x10020), "LTGT_COOP")
+	assert_eq(HudPos.loading_gametype_text_key(0x30020), "LTGT_COOP",
 		"the 0x20000 bit is masked out of the coop compare")
-	assert_eq(LoadingScreen.gametype_text_key(0x00001), "LTGT_KOTH")
-	assert_eq(LoadingScreen.gametype_text_key(0x10001), "LTGT_TKOTH")
-	assert_eq(LoadingScreen.gametype_text_key(0x90002), "LTGT_SD")
-	assert_eq(LoadingScreen.gametype_text_key(0x10002), "LTGT_AD")
-	assert_eq(LoadingScreen.gametype_text_key(0x10004), "LTGT_CTF")
-	assert_eq(LoadingScreen.gametype_text_key(0x10008), "LTGT_FB")
-	assert_eq(LoadingScreen.gametype_text_key(0x10010), "LTGT_AAS")
-	assert_eq(LoadingScreen.gametype_text_key(0x50010), "LTGT_CAC")
+	assert_eq(HudPos.loading_gametype_text_key(0x00001), "LTGT_KOTH")
+	assert_eq(HudPos.loading_gametype_text_key(0x10001), "LTGT_TKOTH")
+	assert_eq(HudPos.loading_gametype_text_key(0x90002), "LTGT_SD")
+	assert_eq(HudPos.loading_gametype_text_key(0x10002), "LTGT_AD")
+	assert_eq(HudPos.loading_gametype_text_key(0x10004), "LTGT_CTF")
+	assert_eq(HudPos.loading_gametype_text_key(0x10008), "LTGT_FB")
+	assert_eq(HudPos.loading_gametype_text_key(0x10010), "LTGT_AAS")
+	assert_eq(HudPos.loading_gametype_text_key(0x50010), "LTGT_CAC")
 
 
 func test_unknown_gametype_yields_no_key() -> void:
 	# The original leaves the line empty for an unlisted type (LABEL_29 with a
 	# null lookup) — never a wrong label.
-	assert_eq(LoadingScreen.gametype_text_key(-1), "")
-	assert_eq(LoadingScreen.gametype_text_key(0xDEAD), "")
+	assert_eq(HudPos.loading_gametype_text_key(-1), "")
+	assert_eq(HudPos.loading_gametype_text_key(0xDEAD), "")
 
 
-# --- bar smoothing [orig: 0x586c3f] --------------------------------------------
-
-func test_displayed_value_catches_up_to_reported() -> void:
-	# Our present() runs at the coarse progress-emit cadence, not the original's
-	# high-frequency pump, so the displayed value must catch up to reported in
-	# one draw or the bar never leaves ~10 (D-LOADSCR-1). A big jump lands ON
-	# reported, not one step past a stale value.
-	assert_eq(LoadingScreen.step_displayed(6, 26), 26, "a reported jump catches the bar up")
-	assert_eq(LoadingScreen.step_displayed(50, 100), 100, "a jump to 100 fills the bar")
-
-
-func test_displayed_value_leads_reported_by_at_most_ten() -> void:
-	# Once caught up, the bar creeps +1 ahead per draw (the witnessed liveness
-	# lead for a grinding stage that pulses one reported value), capped at +10.
-	assert_eq(LoadingScreen.step_displayed(0, 0), 1, "creep ahead of a stalled 0")
-	assert_eq(LoadingScreen.step_displayed(26, 26), 27, "creep one point ahead")
-	assert_eq(LoadingScreen.step_displayed(9, 0), 10)
-	assert_eq(LoadingScreen.step_displayed(10, 0), 10, "cap at reported + 10")
-	assert_eq(LoadingScreen.step_displayed(36, 26), 36, "cap the lead at reported + 10")
-
-
-func test_displayed_value_caps_at_hundred() -> void:
-	assert_eq(LoadingScreen.step_displayed(99, 100), 100)
-	assert_eq(LoadingScreen.step_displayed(100, 100), 100)
+# --- exact stage progress ------------------------------------------------------
 
 
 # --- bar fill arithmetic [orig: v8 @ 0x5d4c40] ----------------------------------
@@ -142,19 +119,19 @@ func test_displayed_value_caps_at_hundred() -> void:
 func test_bar_fill_span_matches_the_original_arithmetic() -> void:
 	var x := 368
 	var w := 286
-	var empty := LoadingScreen.bar_fill_span(x, w, 0)
+	var empty := HudPos.loading_bar_fill_span(x, w, 0)
 	assert_eq(empty.y, empty.x, "0%% -> empty fill")
-	var full := LoadingScreen.bar_fill_span(x, w, 100)
+	var full := HudPos.loading_bar_fill_span(x, w, 100)
 	assert_eq(full.x, x + 3)
 	assert_eq(full.y - full.x, w, "100%% fills exactly the inner width")
-	var half := LoadingScreen.bar_fill_span(x, w, 50)
+	var half := HudPos.loading_bar_fill_span(x, w, 50)
 	assert_eq(half.y - half.x, 144, "50%% of the 286 bar = 50*(286+2)/100 = 144")
 
 
 # --- setup: SP draws no session text, MP does [orig: gate @ 0x521ebe] -----------
 
 func test_sp_setup_loads_image_only() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_false(screen.has_session_overlay())
 	assert_eq(screen.session_overlay_lines(), PackedStringArray(["", "", "", ""]))
 
@@ -162,14 +139,8 @@ func test_sp_setup_loads_image_only() -> void:
 func test_mp_setup_carries_the_session_variables() -> void:
 	if not _register_gametext_fixture():
 		return
-	var screen := _setup_screen({
-		"mission_file": "00TRg.bms",
-		"in_session": true,
-		"server_name": "DEMOHOST",
-		"mission_name": "Trainingsmission",
-		"game_type": 0x10010,
-		"custom_text": "Welcome aboard",
-	})
+	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "DEMOHOST",
+			"Trainingsmission", 0x10010, "Welcome aboard"))
 	assert_true(screen.has_session_overlay())
 	var lines := screen.session_overlay_lines()
 	assert_eq(lines[0], "DEMOHOST")
@@ -179,33 +150,48 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	Strings.register_table("gametext", null)
 
 
-func test_present_tracks_reported_progress_then_leads() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+func test_present_tracks_exact_stage_progress() -> void:
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	screen.set_progress(50)
-	# Unthrottled while the displayed value trails the reported one; the first
-	# present catches the bar up to reported (not one step past a stale 0), so
-	# the bar reflects real progress at our coarse present() cadence.
 	screen.present()
 	assert_eq(screen.displayed_progress(), 50,
-		"the bar catches up to the reported value in one present")
-	# Once caught up, an immediate re-present is throttled (no 100 ms elapsed,
-	# reported unchanged, not trailing) — the bar holds, not double-steps.
+		"the bar displays the exact real stage checkpoint")
 	screen.present()
-	assert_eq(screen.displayed_progress(), 50, "an immediate re-present is throttled")
-	# The witnessed liveness lead (+1 past reported while a stage grinds) advances
-	# on a due draw; force one to exercise it without the 100 ms wait.
+	assert_eq(screen.displayed_progress(), 50, "an immediate re-present holds")
 	screen.present(true)
-	assert_eq(screen.displayed_progress(), 51, "a due draw leads reported by one")
+	assert_eq(screen.displayed_progress(), 50,
+		"a forced window-pump redraw cannot invent progress")
+
+
+func test_canvas_layer_screen_tracks_viewport_resize() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var layer := CanvasLayer.new()
+	viewport.add_child(layer)
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
+	layer.add_child(screen)
+	await get_tree().process_frame
+	assert_eq(screen.presented_size(), Vector2i(320, 180),
+		"a CanvasLayer loading screen initially fills its viewport")
+	assert_true((screen.size * screen.scale).is_equal_approx(Vector2(320, 180)))
+
+	viewport.size = Vector2i(640, 360)
+	await get_tree().process_frame
+	assert_eq(screen.presented_size(), Vector2i(640, 360),
+		"the loading image refits when fullscreen changes the viewport")
+	assert_true((screen.size * screen.scale).is_equal_approx(Vector2(640, 360)),
+		"the submitted loading image is transformed across the full new surface")
 
 
 func test_background_availability_is_publicly_observable() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(),
 		"tests and owners can observe whether setup found loading art")
 
 
 func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
 	var preparable := screen.has_method("prepare_for_blocking_load")
 	assert_true(preparable,
@@ -219,12 +205,12 @@ func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 	assert_true(prepared)
 	assert_gte(Engine.get_process_frames(), frame_before + 2,
 		"one ordinary frame must complete before the blocking load begins")
-	assert_gt(screen.displayed_progress(), 0,
-		"preparation submits a non-empty progress bar with the registered frame")
+	assert_eq(screen.displayed_progress(), 0,
+		"preparation cannot invent progress before the first real stage")
 
 
 func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	var preparable := screen.has_method("prepare_for_blocking_load")
 	assert_true(preparable)
 	if not preparable:
@@ -235,7 +221,7 @@ func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
 
 
 func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
-	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
 	var operation := WorldLoadOperation.new()
 	assert_true(operation.cancel())
@@ -245,7 +231,7 @@ func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
 
 # --- helpers -------------------------------------------------------------------
 
-func _setup_screen(info: Dictionary) -> LoadingScreen:
+func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	var dir := _make_temp_dir("loadscreen_setup")
 	_write_test_pcx(dir.path_join("00trg.pcx"))
 	_write_test_pcx(dir.path_join("loadscrn.pcx"))

@@ -2,7 +2,7 @@ extends GutTest
 
 # Pins the NetProtocol bound constants to the witnessed hex (the retail
 # LTGT_* code words, docs/interface/loading-screen-re.md). The engine home
-# (engine/net/npwire/game_type.h) carries the witnesses and the
+# (engine/base/gameprofile/game_type.h) carries the witnesses and the
 # C++ static_asserts pin the binding against it — this leg proves the values
 # actually reach GDScript through the re-export chain, and that the
 # HostSessionConfig aliases serve the same values.

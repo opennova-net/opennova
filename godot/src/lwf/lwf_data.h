@@ -40,6 +40,10 @@ class LwfData : public RefCounted {
 private:
 	Array sets_;                    // editable tree (live; getters deep-copy)
 	PackedByteArray original_bytes_; // for byte-exact save when unmodified
+	// The parsed structs behind the tree (the runtime read seam, engine_file());
+	// stale once the tree is edited, rebuilt from it on the next read.
+	opennova::lwf::File file_;
+	bool file_stale_ = false;
 	String source_path_;
 	String last_error_;
 	bool loaded_ = false;
@@ -47,11 +51,12 @@ private:
 
 	bool decode_into_tree(const PackedByteArray &bytes);
 	PackedByteArray encode_current(String &r_error) const;
+	// Re-normalize the editable tree into a canonical opennova::lwf::File:
+	// dedup the shared singles table, then rebuild multis/playlists/sndparms
+	// (the fold both save and the runtime read seam share).
+	void build_file_from_tree(opennova::lwf::File &r_file) const;
 
 	// Live (shared-ref) accessors into sets_; empty container on bad index.
-	Dictionary set_ref(int p_si) const;
-	Dictionary layer_ref(int p_si, int p_li) const;
-	Dictionary member_ref(int p_si, int p_li, int p_mi) const;
 
 protected:
 	static void _bind_methods();
@@ -100,6 +105,12 @@ public:
 	// --- read (deep copies) ---
 	int get_set_count() const;
 	Dictionary get_set(int p_si) const;
+	// C++-side seam (not bound): the sound profile as the engine's formats/lwf
+	// structs. Unedited, the parse result itself; after an edit the tree is
+	// re-normalized into it (the same fold save writes). The runtime sound
+	// bank (audio/sound_bank) reads sets/layers/members through this rather
+	// than the Dictionary tree.
+	const opennova::lwf::File &engine_file();
 
 	// --- scalar edits ---
 	void set_set_field(int p_si, const String &p_key, const Variant &p_value);

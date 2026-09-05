@@ -7,8 +7,7 @@
 // paths of Server_ClientFiredRound @0x50baa0 — a NET primary fire reaches it through the
 // adm 'fire' action -> Entity_FireWeaponAndSendPacket @0x42bd80 -> local re-entry);
 // consumed per-recipient by Server_BuildRoundEventListForPlayer @0x4ffee0.]
-#ifndef OPENNOVA_WORLD_ROUND_RING_H
-#define OPENNOVA_WORLD_ROUND_RING_H
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -74,5 +73,3 @@ struct RoundRing {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ROUND_RING_H

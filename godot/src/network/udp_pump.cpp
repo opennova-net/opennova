@@ -1,4 +1,5 @@
 #include "network/udp_pump.h"
+#include "network/udp_datagram.h"
 
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -157,14 +158,13 @@ bool UdpPump::take_inbound_native(opennova::PeerAddr &from, PackedByteArray &byt
 	return true;
 }
 
-Dictionary UdpPump::take_inbound() {
-	Dictionary d;
-	if (inbound_.empty()) return d;
+Ref<UdpDatagram> UdpPump::take_inbound() {
+	if (inbound_.empty()) return Ref<UdpDatagram>();
 	Inbound in = std::move(inbound_.front());
 	inbound_.pop_front();
-	d["ip"] = in.ip;
-	d["port"] = in.port;
-	d["bytes"] = in.bytes;
+	Ref<UdpDatagram> d;
+	d.instantiate();
+	d->assign(in.ip, in.port, in.bytes);
 	return d;
 }
 
@@ -176,6 +176,17 @@ int UdpPump::send_to(const String &ip, int port, const PackedByteArray &bytes) {
 	// what we put on the wire, not what we attempted.
 	if (err == OK) record_(false, ip, port, bytes);
 	return static_cast<int>(err);
+}
+
+opennova::PeerAddr UdpPump::dialed_host() const {
+	opennova::PeerAddr addr;
+	if (dest_port_ == 0) return addr;
+	const PackedStringArray octets = dest_ip_.split(".");
+	if (octets.size() != 4) return addr;
+	return opennova::peer_addr_from_octets(
+			{static_cast<uint8_t>(octets[0].to_int()), static_cast<uint8_t>(octets[1].to_int()),
+					static_cast<uint8_t>(octets[2].to_int()), static_cast<uint8_t>(octets[3].to_int())},
+			static_cast<uint16_t>(dest_port_));
 }
 
 int UdpPump::send_to_host(const PackedByteArray &bytes) {

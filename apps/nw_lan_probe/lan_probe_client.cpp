@@ -21,7 +21,7 @@ Result wait_for_server(const Options &options) {
 		return result;
 	}
 
-	const std::vector<uint8_t> probe = np::build_lan_discovery_probe(options.client_index);
+	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(options.client_index);
 	using Clock = std::chrono::steady_clock;
 	const auto deadline = Clock::now() + std::chrono::milliseconds(options.timeout_ms);
 	auto next_send = Clock::now();
@@ -57,8 +57,8 @@ Result wait_for_server(const Options &options) {
 			continue;
 		}
 
-		np::LanDiscoveryServer server;
-		if (!np::parse_lan_discovery_reply(
+		opennova::LanDiscoveryServer server;
+		if (!opennova::parse_lan_discovery_reply(
 				bytes.data(), static_cast<size_t>(received), server)) {
 			continue;
 		}

@@ -28,41 +28,33 @@ func should_skip_script():
 	return false
 
 
-class ArmoryWorldHarness:
-	extends GameWorld
+# The armory's world view, faked over a REAL spawned simulation and the staged
+# retail menu root; the viewmodel verbs record what ACCEPT drove (rule 11: a
+# fake of the ArmoryWorldView interface through its virtual hooks).
+class FakeArmoryView:
+	extends ArmoryWorldView
 	var root: ResourceRoot
 	var weapons: WeaponDatabase
-	var sim: Simulation
+	var sim_value: Simulation
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
-	func get_sim() -> Simulation:
-		return sim
+	func _sim() -> Simulation:
+		return sim_value
 
-	func get_resource_root() -> ResourceRoot:
+	func _resource_root() -> ResourceRoot:
 		return root
 
-	func get_weapon_database() -> WeaponDatabase:
+	func _weapon_database() -> WeaponDatabase:
 		return weapons
 
-	func local_player_viewmodel_def() -> PlayerViewmodelDef:
-		return null
-
-	func set_local_player_weapon_by_name(weapon_name: String,
-			_preserve_slot_state: bool = false) -> bool:
+	func _set_local_player_weapon_by_name(weapon_name: String,
+			_preserve_slot_state: bool) -> bool:
 		set_weapon_calls.append(weapon_name)
 		return true
 
-	func clear_local_player_weapon() -> void:
+	func _clear_local_player_weapon() -> void:
 		clear_calls += 1
-
-
-class CapturePlayerPresenter:
-	extends LocalPlayerPresenter
-	var refresh_calls := 0
-
-	func refresh_viewmodel() -> void:
-		refresh_calls += 1
 
 
 func before_each() -> void:
@@ -124,33 +116,27 @@ func _real_sim(entity_team: int = 2) -> Simulation:
 	return sim
 
 
-func _make_world(sim: Simulation, weapons: WeaponDatabase) -> ArmoryWorldHarness:
-	var world := ArmoryWorldHarness.new()
-	# GameWorld's _ready resolves its $Terrain child by name (the scene always
-	# carries one); the bare harness supplies it the same way host_punt's does.
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	world.root = _make_root()
-	world.weapons = weapons
-	world.sim = sim
-	add_child_autofree(world)
-	return world
+func _make_world(sim: Simulation, weapons: WeaponDatabase) -> FakeArmoryView:
+	var view := FakeArmoryView.new()
+	view.root = _make_root()
+	view.weapons = weapons
+	view.sim_value = sim
+	return view
 
 
-func _weapon_display_text(row: Dictionary) -> String:
-	var textid := String(row.get("display_textid", ""))
+func _weapon_display_text(row: WeaponDef) -> String:
+	var textid := row.display_textid
 	var gametext: RtxtStringFile = Strings.get_table("gametext")
 	if gametext != null and not textid.is_empty() \
 			and gametext.has_string_in_section("WepDes", textid):
 		return gametext.get_string_in_section("WepDes", textid)
-	return String(row.get("name", ""))
+	return row.name
 
 
 func _loadout_names(sim: Simulation) -> Array[String]:
 	var names: Array[String] = []
 	for value in sim.get_local_player_loadout():
-		names.append(String((value as Dictionary).get("name", "")))
+		names.append((value as WeaponKitEntry).name)
 	return names
 
 
@@ -172,17 +158,20 @@ func test_out_of_zone_try_open_is_the_silent_gate() -> void:
 
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var weapons := _make_weapons()
-	var red_rifleman: Array = weapons.get_slot_weapons(
+	var red_rifleman: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(red_rifleman.size(), 0, "fixture has a red rifleman primary")
-	var equipped := String((red_rifleman[0] as Dictionary).get("name", ""))
+	var equipped := red_rifleman[0].name
 
 	var sim := _real_sim(2)
-	assert_true(sim.apply_local_player_loadout([{"name": equipped}], 8),
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make(equipped)], 8),
 			"the real simulation owns the equipped rifleman context")
 	var world := _make_world(sim, weapons)
-	var player_presenter := CapturePlayerPresenter.new()
+	# A REAL local-player presenter (no world behind it): the FP refreshes the
+	# armory drives are read through its viewmodel generation.
+	var player_presenter := LocalPlayerPresenter.new()
 	add_child_autofree(player_presenter)
+	var refresh_start := player_presenter.viewmodel_generation()
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(1600, 900)
@@ -234,36 +223,37 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
-	assert_eq(player_presenter.refresh_calls, 2, "both equip and unequip rebuild the FP view")
+	assert_eq(player_presenter.viewmodel_generation() - refresh_start, 2,
+			"both equip and unequip rebuild the FP view")
 
 
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
-	var rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_ACCESSORY, 8, 1)
+	var rows: Array[WeaponDef] = weapons.get_slot_weapons(WeaponDatabase.SLOT_ACCESSORY, 8, 1)
 	assert_gt(rows.size(), 0, "the fixture has an equippable red rifleman accessory")
-	var expected := String((rows[0] as Dictionary).get("name", ""))
+	var expected := rows[0].name
 	assert_eq(expected, "WPN_SATCHEL_CHARGE", "the minimized fixture row is the satchel")
-	var primary_rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 1)
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the fixture has a primary beside the satchel")
-	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
+	var primary := primary_rows[0].name
 	assert_eq(primary, "WPN_AK47AUTO",
 		"the minimized primary expands the non-selectable WPN_AK47 subclass")
 	const PRIMARY_CLIPS := 3
 	const ACCESSORY_CLIPS := 1
 	assert_true(simulation.apply_local_player_loadout([
-		{"name": primary, "ammo_primary": PRIMARY_CLIPS},
-		{"name": expected, "ammo_primary": ACCESSORY_CLIPS}], 8),
+		WeaponKitEntry.make(primary, PRIMARY_CLIPS),
+		WeaponKitEntry.make(expected, ACCESSORY_CLIPS)], 8),
 		"the real simulation owns the primary + satchel kit before the armory opens")
 	var canonical_names := _loadout_names(simulation)
 	assert_eq(canonical_names, [primary, expected] as Array[String],
 		"the armory transport preserves only the selectable parent tuples")
 	assert_does_not_have(canonical_names, "WPN_AK47",
 		"the primary's hidden subclass is not part of the canonical armory buffer")
-	var inventory: Dictionary = simulation.get_local_player_inventory()
+	var inventory := simulation.get_local_player_inventory()
 	var inventory_names: Array[String] = []
-	for value in inventory.get("slots", []):
-		inventory_names.append(String((value as Dictionary).get("name", "")))
+	for value in inventory.slots:
+		inventory_names.append((value as PlayerInventorySlot).name)
 	assert_has(inventory_names, expected, "the authoritative inventory still contains the satchel")
 	assert_has(inventory_names, "WPN_AK47",
 		"the expanded runtime pool contains the misleading hidden subclass")
@@ -283,13 +273,13 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	assert_gt(driver.selected_row(accessory), 0,
 		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
 	assert_eq(driver.item_text(accessory, driver.selected_row(accessory)),
-		_weapon_display_text(rows[0] as Dictionary),
+		_weapon_display_text(rows[0] as WeaponDef),
 		"the selected accessory row is exactly the canonical satchel parent")
 	var primary_combo := driver.widget_id("PRIMARY")
 	assert_gt(driver.selected_row(primary_combo), 0,
 		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
 	assert_eq(driver.item_text(primary_combo, driver.selected_row(primary_combo)),
-		_weapon_display_text(primary_rows[0] as Dictionary),
+		_weapon_display_text(primary_rows[0] as WeaponDef),
 		"the selected primary row is exactly WPN_AK47AUTO")
 	var primary_ammo := driver.widget_id("PRIMARY_AMMO1")
 	var accessory_ammo := driver.widget_id("ACCESSORY_AMMO1")
@@ -300,9 +290,8 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
-	for value in simulation.get_local_player_loadout():
-		var row := value as Dictionary
-		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	for row: WeaponKitEntry in simulation.get_local_player_loadout():
+		accepted_by_name[row.name] = row.ammo_primary
 	assert_eq(int(accepted_by_name.get(primary, -1)), PRIMARY_CLIPS,
 		"untouched ACCEPT converts the primary row back to the canonical clip count")
 	assert_eq(int(accepted_by_name.get(expected, -1)), ACCESSORY_CLIPS,
@@ -312,20 +301,17 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
-	var grenade_rows: Array = weapons.get_slot_weapons(
+	var grenade_rows: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_GRENADE, 8, 1)
 	assert_eq(grenade_rows.size(), 3,
 		"the real weapon.def fixture has three selectable red rifleman grenades")
-	var primary_rows: Array = weapons.get_slot_weapons(
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(
 			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the canonical kit has a normal equipped primary")
-	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
-	var kit: Array[Dictionary] = [{"name": primary}]
+	var primary := primary_rows[0].name
+	var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(primary)]
 	for i in grenade_rows.size():
-		kit.append({
-			"name": String((grenade_rows[i] as Dictionary).get("name", "")),
-			"ammo_primary": i + 1,
-		})
+		kit.append(WeaponKitEntry.make(grenade_rows[i].name, i + 1))
 	assert_true(simulation.apply_local_player_loadout(kit, 8),
 		"the authoritative simulation owns all three grenade tuples before first open")
 
@@ -344,23 +330,22 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 		var grenade_combo := driver.widget_id(combo_name)
 		assert_gte(grenade_combo, 0, "weapon.mnu authors %s" % combo_name)
 		assert_eq(driver.item_count(grenade_combo),
-			int((grenade_rows[i] as Dictionary).get("maxclips", 0)) + 1,
+			grenade_rows[i].maxclips + 1,
 			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
 		assert_eq(driver.selected_row(grenade_combo), i + 1,
 			"%s preselects the authoritative canonical grenade count" % combo_name)
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
-	for value in simulation.get_local_player_loadout():
-		var row := value as Dictionary
-		accepted_by_name[String(row.get("name", ""))] = int(row.get("ammo_primary", -1))
+	for row: WeaponKitEntry in simulation.get_local_player_loadout():
+		accepted_by_name[row.name] = row.ammo_primary
 	assert_true(accepted_by_name.has(primary),
 		"untouched ACCEPT keeps the normal primary beside the grenade tuples")
 	var inventory_names: Array[String] = []
-	for value in simulation.get_local_player_inventory().get("slots", []):
-		inventory_names.append(String((value as Dictionary).get("name", "")))
+	for value in simulation.get_local_player_inventory().slots:
+		inventory_names.append((value as PlayerInventorySlot).name)
 	for i in grenade_rows.size():
-		var grenade_name := String((grenade_rows[i] as Dictionary).get("name", ""))
+		var grenade_name := grenade_rows[i].name
 		assert_eq(int(accepted_by_name.get(grenade_name, -1)), i + 1,
 			"untouched ACCEPT preserves %s and its selected count" % grenade_name)
 		assert_has(inventory_names, grenade_name,
@@ -373,7 +358,9 @@ func test_multiplayer_open_is_live() -> void:
 	# server-authoritatively, so the armory opens in MP like retail
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94].
 	var sim := _real_sim(2)
-	sim.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the MP armory rides a real listen host")
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
@@ -391,10 +378,10 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 	var sim := _real_sim(2)
 	assert_true(sim.apply_local_player_loadout([], 8),
 			"the staged player carries the disallowed rifleman class")
-	sim.configure_host_session({
-		"gametype": 0x30020,
-		"class_allow_mask": 1 << 9, # rifleman disallowed; engineer is next allowed
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.class_allow_mask = 1 << 9  # rifleman disallowed; engineer is next allowed
+	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the session class policy rides a real host")
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()

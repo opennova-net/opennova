@@ -21,8 +21,7 @@
 // containers (a vector of AiEntity, a direct AiProfile/AiScheduler member, a static
 // StateRow table). Struct bodies are modeled as int32 f[N] + named indices so the
 // ported handlers index fields exactly as the decompiler does (b.f[4], b.f[5], ...).
-#ifndef OPENNOVA_WORLD_AI_H
-#define OPENNOVA_WORLD_AI_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -33,13 +32,17 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/world.h>
+#include <runtime/world/system.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
 
 namespace opennova::world {
+
+class World;
+struct VehicleDriveCmd;
+struct VehicleTraits;
 
 // ----------------------------------------------------------------------------
 // AI state ids. [orig: Entity_LookupAIStateName @0x455cc0 string table.] States
@@ -215,13 +218,17 @@ struct AiSlot {
     // Named dword indices (the behavior/accuracy controls and the
     // perception/attack ranges the infantry motor reads) plus the alert byte.
     enum Idx : int {
-        kBehaviorFlags = 1, // BLIND 1 / COWARD 8 / BERSERK 0x200 [byte +4]
+        kBehaviorFlags = 1, // BLIND 1 / COWARD 8 / BERSERK 0x200 / CLIMBER 0x400 [byte +4]
         kAimErrorPrimary = 10,   // 100 - authored accuracy 2 [byte +40]
         kAimErrorSecondary = 11, // 100 - authored accuracy 1 [byte +44]
         kAttackRange = 15, // max attack range [byte +60]
         kEngageMin = 16,   // minimum engagement range [byte +64]
         kSightRange = 17,  // perception/sight range [byte +68]
     };
+    // Behavior-word bits the motor reads back. CLIMBER is ChangeAI sub 17's
+    // write [orig: case 0x11 @0x43af36] and the ladder gate's third fresh-entry
+    // qualifier [orig: aiRuntime+4 & 0x400 @0x4b326a] — its one retail reader.
+    static constexpr uint32_t kClimber = 0x400;
     // The per-entity ALERT byte at controller+0x88 (0 green / 1 yellow / 2
     // red) — the state the SingleAtRed/YellowAlert triggers read and the
     // ChangeAI command family writes; the AI reset/patrol enters clear it
@@ -257,7 +264,7 @@ struct AiProfile {
     int32_t fire_interval_b = 0;  // +156: secondary fire interval (word +210 gate)
     // The two .aip weapon def blocks the fire-transform solver reads
     // (profile+120 primary / +152 secondary; engine/formats/aip WeaponBlock).
-    // ammo_index is the world.ammo row resolved from the authored weapon NAME
+    // ammo_index is the world.tables.ammo row resolved from the authored weapon NAME
     // at the item-traits sweep (-1 = unresolved -> the leg cannot fire), the
     // sibling of the D-AI-5 infantry seed. [orig: AIProfile_ParseProperty
     // "primary_weap" -> AmmoDef_LookupByName -> profile+148 @0x45e0xx]
@@ -267,7 +274,7 @@ struct AiProfile {
         uint32_t flags = 0;       // block+16: aip::kWeapon* mask
         int32_t facing_bam = 0;   // block+20: yaw bias
         int32_t pitch_bam = 0;    // block+24: pitch bias
-        int32_t ammo_index = -1;  // resolved world.ammo row for block+28's name
+        int32_t ammo_index = -1;  // resolved world.tables.ammo row for block+28's name
         std::string ammo_name;    // authored "*_weap" value, pre-resolution
     };
     WeaponFire fire_a;
@@ -280,7 +287,7 @@ struct AiProfile {
     // One ammo id + clip stands in for the four anim-fire weapon bytes (+0x358..0x35B —
     // JO riflemen author all four = the rifle round) until the block-copy writer is
     // witnessed. -1 = unarmed (the pass never fires).
-    int32_t ammo_primary = -1;    // world.ammo index [orig: items.def ammo_closeattack family]
+    int32_t ammo_primary = -1;    // world.tables.ammo index [orig: items.def ammo_closeattack family]
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
     // Indices into world.sound_profiles (the def's sound_profile pair, resolved
     // at the host's item-traits sweep; -1 = unresolved -> the table's
@@ -528,6 +535,25 @@ struct StateRow {
 // be resolved (channel 0, missing count) or the type is unknown.
 int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTable &nav);
 
+// The spawn-anchor proximity test [orig: Entity_IsBoneInProximity @0x434F90 —
+// the "bone" is the entity's own +0x24C spawn pose; a spawn PARENT (+0x264)
+// lifts it to world first and a dead parent fails the test]: planar deltas
+// full, the Z delta HALVED, 3D length <= 8 u (0x80000). Consumers: the minAI
+// crew clamp and Entity_CanEnterVehicle's at-spawn arm. Body in ai_waypoints.cpp.
+bool vehicle_at_spawn_anchor(const Entity &veh);
+
+// The rider count [orig: Entity_CountMountedEntities @0x435970 — live pool-0
+// entities with an ItemDef whose ground link (+0x28) is the vehicle, or whose
+// ground link's own ground link is (a body on a carried gun)]. Body in
+// ai_waypoints.cpp.
+int count_mounted_entities(const World &world, const Entity &veh);
+
+// A PLAYER driver whose head is under the water plane hands the boat to the
+// AI leg [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF —
+// `occupant->Position.z + CameraOffset.z <= Env_WaterHeightFixed`]. Body in
+// ai_waypoints.cpp.
+bool watercraft_driver_submerged(const World &world, const Entity &occ);
+
 // [orig: Entity_ApplyCommand @0x43ab60] Apply the command arms which write the
 // 812-byte brain directly: AIUSEWPZ/AICLEARWPZ (subs 0x20/0x21) and
 // PLAYPARTANIM (sub 0x22). Controller-slot/entity-flag mutations and commands
@@ -613,30 +639,6 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
                         int primary_max, int secondary_max, int cand_primary_max,
                         int cand_secondary_max, int visibility, int cand_flags);
 
-// Optional attribution for one AiSystem gameplay tick. World only supplies this
-// while the F3 capture window is active; ordinary ticks keep the original path
-// free of clock reads.
-struct AiTickPerf {
-    uint64_t reactions_us = 0;
-    uint64_t collision_tables_us = 0;
-    uint64_t entities_us = 0;
-    uint64_t infantry_entities_us = 0;
-    uint64_t infantry_remote_us = 0;
-    uint64_t infantry_combat_us = 0;
-    uint64_t infantry_animation_us = 0;
-    uint64_t infantry_collision_us = 0;
-    uint64_t infantry_collision_contacts_us = 0;
-    uint64_t infantry_collision_repulsion_us = 0;
-    uint64_t infantry_collision_ground_us = 0;
-    uint64_t other_entities_us = 0;
-    uint64_t authority_vehicles_us = 0;
-    uint64_t vehicle_scan_us = 0;
-    uint64_t vehicle_motors_us = 0;
-    uint64_t vehicle_riders_us = 0;
-    uint64_t client_vehicles_us = 0;
-    uint64_t events_us = 0;
-};
-
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
@@ -644,7 +646,6 @@ public:
 
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
-    void tick_profiled(World &world, const TickContext &ctx, AiTickPerf *perf);
 
     // Re-seed every brain to the captured spawn baseline + clear the transient queues.
     // [Drives World::restore: load_systems() calls on_load on Play->Stop, so the AI
@@ -725,7 +726,7 @@ public:
 
     // ---- P2: GROUND combat + targeting ----
     std::vector<RelOpCall> rel_ops;        // recorded engagement relation-matrix ops (trace;
-                                           // the APPLY now writes world.relations — D-AI-3)
+                                           // the APPLY now writes world.script.relations — D-AI-3)
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
     uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
@@ -816,8 +817,7 @@ public:
     // Snapshot-fan variant: identical LOS semantics, with collision target
     // matrices reused inside a server-declared stable query epoch.
     bool line_of_sight_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
-                                    EntityHandle from, EntityHandle to,
-                                    CollisionWorld::RaycastPerf *perf = nullptr) const;
+                                    EntityHandle from, EntityHandle to) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
@@ -916,9 +916,10 @@ public:
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
     //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
     //    delta + delta/8, and fill `out` (ai_drive = true).
-    // Tracked deferrals (D-NET-161): the minAI crew health clamp, the
-    // wait-for-boarders stop, the handbrake byte-973 latch and the aim-lock stop.
-    // (The pool-1 collision-avoid brake is ported inline.)
+    // The pool-1 collision-avoid brake, the minAI crew health clamp and the
+    // wait-for-boarders stop are inline; the parked branch runs the stuck
+    // escalation; the handbrake byte-973 latch and the crashed stop sit in
+    // tick_vehicle_motor past the input block.
     void vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                           const VehicleTraits &traits, VehicleDriveCmd &out);
 
@@ -931,11 +932,10 @@ public:
     //    delta clamp, 0.75x speed damps at 15/30/45 deg of residual turn, steer =
     //    heading + delta (no delta/8 term), the slip counter-steer + its 4-tier
     //    speed damps, and the shared pool-1 avoid brake.
-    // Tracked deferrals (D-NET-161): the minAI crew health clamp
-    // (@0x48E27F..0x48E2C7, def minai/criticalHp), the aiComp[135] <- brain[127]
-    // target mirror (unmodeled slot), the wait-for-boarders stop
-    // (@0x48E75B..0x48E7EC, rides the boarding think) and the stuck check
-    // (AI_CheckVehicleStuckState @0x465290).
+    // The minAI crew health clamp (@0x48E27F..0x48E2C7), the wait-for-boarders
+    // stop (@0x48E75B..0x48E7EC) and the parked leg's stuck check
+    // (AI_CheckVehicleStuckState @0x465290) are inline; the aiComp[135] <-
+    // brain[127] mirror stays an unmodeled slot (D-NET-161).
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
 
@@ -955,6 +955,25 @@ public:
     void chel_ai_drive(World &world, Entity &veh, const Entity *controller,
                        const VehicleTraits &traits);
 
+    // The driverless stuck escalation every family's parked leg runs
+    // [orig: AI_CheckVehicleStuckState @0x465290 — call sites: the ground parked
+    //  stamp @0x48c01e, the boat parked leg @0x48e808, the air parked block
+    //  @0x491c5e]. The +0x148 counter climbs once per call while the entity's
+    //  think cooldown is not 1; on the authority, every 16th count past 32 a
+    //  live pool-0 body within (both bound radii + 12 u) resets it, and past
+    //  3410 counts a hull more than 12 u from its spawn anchor is nudged upward
+    //  (slideDecay += 1024 per check) until 3720, then killed (Health = 0).
+    //  Body in ai_waypoints.cpp.
+    void check_vehicle_stuck(World &world, Entity &veh);
+
+    // The minAI crew clamp at the head of every AI-driver leg [orig: ground
+    //  @0x48bc4e..0x48bc94, boat @0x48E27F..0x48E2C7, air @0x4915b2..0x4915e2]:
+    //  `minAI > 1`, the hull is no longer at its spawn anchor
+    //  (Entity_IsBoneInProximity @0x434F90) and fewer than minAI bodies ride it
+    //  (Entity_CountMountedEntities @0x435970) -> Health = min(Health,
+    //  criticalHp). Undercrewed AI hulls bleed to critical once they move off.
+    void apply_min_ai_crew_clamp(World &world, Entity &veh, const VehicleTraits &traits);
+
     // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
     // and wrapping SUB for every other nonzero direction. Clamp/stop only on
     // strict upper/negative overshoot; an exact endpoint remains active.
@@ -967,8 +986,7 @@ public:
     // Order: anim root advance -> death edge -> ground resample (every 8) -> think +
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
-    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
-                       AiTickPerf *perf = nullptr);
+    void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
     // 32-tick staged perception -> target commit, then per-tick reactions (the attack
     // anims), move modes, and the lead+error aim solution. Authority + alive only.
@@ -1129,19 +1147,14 @@ private:
     void rebuild_handle_index();
     // The one LOS body behind line_of_sight_clear / line_of_sight_clear_cached.
     bool line_of_sight_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
-                                  EntityHandle from, EntityHandle to, bool cached,
-                                  CollisionWorld::RaycastPerf *perf) const;
+                                  EntityHandle from, EntityHandle to, bool cached) const;
 
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     std::vector<int> handle_to_ai_index_;
-    std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
-                                                     // motor pass (reused, no realloc)
     std::vector<EntityHandle> mounted_weapon_handles_; // global UseGun pump scratch
     std::vector<AiCandidate> scan_candidates_;       // acquire_target feed scratch (reused)
     bool baseline_captured_ = false;
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_AI_H

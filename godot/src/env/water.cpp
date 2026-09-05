@@ -75,7 +75,7 @@ void Water::_bind_methods() {
 			&Water::get_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_reflection_camera"),
 			&Water::get_reflection_camera);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Water::advance_frame);
@@ -107,6 +107,8 @@ void Water::_bind_methods() {
 			VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_WORLD_NO_MIRROR", VISUAL_LAYER_WORLD_NO_MIRROR);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_TERRAIN_FOLIAGE", VISUAL_LAYER_TERRAIN_FOLIAGE);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
@@ -189,7 +191,6 @@ void Water::set_world_rendering_enabled(bool p_value) {
 }
 
 void Water::release_runtime_renderer_resources() {
-	set_process(false);
 	world_rendering_enabled_ = false;
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server != nullptr) {
@@ -391,9 +392,8 @@ void Water::_exit_tree() {
 }
 
 void Water::_ready() {
-	set_process(true);
-	if (water_core_.is_null()) {
-		water_core_.instantiate();
+	if (!water_core_) {
+		water_core_ = std::make_unique<WaterCore>();
 	}
 	_recompute_terrain_water_fallback();
 	_apply_environment_water_height();
@@ -435,8 +435,8 @@ void Water::build() {
 		mesh_instance_ = nullptr;
 	}
 	built_ = false;
-	if (water_core_.is_null()) {
-		water_core_.instantiate();
+	if (!water_core_) {
+		water_core_ = std::make_unique<WaterCore>();
 	}
 	water_material_.instantiate();
 	Ref<Shader> shader = ResourceLoader::get_singleton()->load(
@@ -448,7 +448,7 @@ void Water::build() {
 	water_material_->set_render_priority(opennova::renderer::kRungWater);
 
 	// The witnessed screen-marched strip mesh is LIVE (env #29): every frame
-	// rebuilds the surface from WaterCore.strip_build, so the mesh starts
+	// rebuilds the surface from WaterCore::strip_build, so the mesh starts
 	// empty. Remaining variants: the LOW tier (water detail <= 1 sin-table Y
 	// displacement) and the nightvision redraw.
 	Ref<ArrayMesh> mesh;
@@ -474,7 +474,7 @@ void Water::build() {
 	built_ = true;
 
 	// The witnessed per-frame noise texture pair (created once, updated per
-	// frame; math behind the WaterCore binding).
+	// frame; math behind the WaterCore device helper).
 	const int size = water_core_->get_texture_size();
 	water_core_->update(0);
 	noise_color_img_ = Image::create_from_data(size, size, false,
@@ -558,10 +558,6 @@ void Water::build() {
 	water_material_->set_shader_parameter("u_reflection", rtt);
 	water_material_->set_shader_parameter("u_has_reflection", false);
 	_sync_render_activity();
-}
-
-void Water::_process(double p_delta) {
-	advance_frame(p_delta);
 }
 
 void Water::advance_frame(double p_delta) {

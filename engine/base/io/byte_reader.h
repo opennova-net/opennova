@@ -14,8 +14,7 @@
 // the first truncation (rather than keep reading) wants a latching cursor
 // instead; see engine/net/npwire/wire_cursor.h.
 
-#ifndef OPENNOVA_IO_BYTE_READER_H
-#define OPENNOVA_IO_BYTE_READER_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -121,5 +120,3 @@ private:
 
 } // namespace io
 } // namespace opennova
-
-#endif // OPENNOVA_IO_BYTE_READER_H

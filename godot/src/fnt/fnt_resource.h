@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_FNT_RESOURCE_H
-#define OPENNOVA_FNT_RESOURCE_H
+#pragma once
 
 #include <godot_cpp/classes/font_file.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -22,13 +21,13 @@ public:
 	// FNT format facts, single-sourced from engine/formats/fnt (ENG-4): editor scripts
 	// alias these instead of re-declaring the numbers.
 	enum {
-		FIRST_CHAR = FNT_FIRST_CHAR,
-		GLYPH_COUNT = FNT_GLYPH_COUNT,
-		TEXTURE_WIDTH = FNT_TEXTURE_WIDTH,
-		TEXTURE_HEIGHT = FNT_TEXTURE_HEIGHT,
-		MAX_PAGES = FNT_MAX_PAGES,
-		PACK_PAD = FNT_PACK_PAD,
-		MAGIC = FNT_MAGIC, /* "FNT0" little-endian — the header 4CC */
+		FIRST_CHAR = opennova::fnt::FNT_FIRST_CHAR,
+		GLYPH_COUNT = opennova::fnt::FNT_GLYPH_COUNT,
+		TEXTURE_WIDTH = opennova::fnt::FNT_TEXTURE_WIDTH,
+		TEXTURE_HEIGHT = opennova::fnt::FNT_TEXTURE_HEIGHT,
+		MAX_PAGES = opennova::fnt::FNT_MAX_PAGES,
+		PACK_PAD = opennova::fnt::FNT_PACK_PAD,
+		MAGIC = opennova::fnt::FNT_MAGIC, /* "FNT0" little-endian — the header 4CC */
 	};
 
 	FntResource();
@@ -58,7 +57,7 @@ public:
 	Ref<FontFile> to_font_file() const;
 
 private:
-	fnt_font_t font_;
+	opennova::fnt::fnt_font_t font_;
 	bool valid_ = false;
 
 	void _clear();
@@ -67,5 +66,3 @@ private:
 };
 
 } // namespace godot
-
-#endif // OPENNOVA_FNT_RESOURCE_H

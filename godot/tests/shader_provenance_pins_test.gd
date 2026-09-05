@@ -166,15 +166,16 @@ func test_validation_scope_is_the_locked_highest_quality_retail_profile() -> voi
 	assert_eq(String(retail_profile["id"]), String(scope["fixture_contract"]))
 	assert_eq(int(retail_profile["required_values"]["shader_usage_level"]), 2)
 
-	# The pinned values are the engine's (runtime/menu/options_policy.h);
-	# the shell script only selects and locks the authored widgets.
-	var policy := _read_repo(String(scope["locked_menu_policy"]))
-	_contains_all(policy, [
-		"{\"SHADERUSAGE\", \"2\"}",
-		"{\"TERRAINPOLY\", \"3\"}",
-		"{\"OBJECTTEX\", \"3\"}",
-		"{\"SHADOWQUALITY\", \"3\"}",
-	], "the locked menu policy")
+	# The pinned values are the engine's (runtime/menu/options_policy.h, the
+	# file the provenance contract names) and are asserted as the values the
+	# binding exports, not as source text, so the header can be reformatted.
+	var exported: Dictionary = {}
+	for row: Dictionary in MenuFrame.video_quality_controls():
+		exported[String(row["control"])] = String(row["value"])
+	assert_eq(exported.get("SHADERUSAGE", ""), "2", "the locked menu policy pins SHADERUSAGE")
+	assert_eq(exported.get("TERRAINPOLY", ""), "3", "the locked menu policy pins TERRAINPOLY")
+	assert_eq(exported.get("OBJECTTEX", ""), "3", "the locked menu policy pins OBJECTTEX")
+	assert_eq(exported.get("SHADOWQUALITY", ""), "3", "the locked menu policy pins SHADOWQUALITY")
 	var shell := _read_repo(String(scope["locked_menu_shell"]))
 	_contains_all(shell, [
 		"MenuFrame.video_quality_controls()",
@@ -914,7 +915,7 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(frame_renderer, [
 		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
-		"kBeautyCameraMask = 0x00018C01u",
+		"kBeautyCameraMask = 0x00038C01u",
 		"DATA_FORMAT_R8G8B8A8_UNORM", "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
 		"1.0f / 2048.0f", "* 0.50", "* 0.46", "* 0.35", "* 0.19",
 		"Vector2i(kFrameFxSide, kFrameFxSide), 90.0f", "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",

@@ -23,18 +23,6 @@ bool is_space(char c) noexcept {
 	return std::isspace(static_cast<unsigned char>(c)) != 0;
 }
 
-std::string_view trim(std::string_view value) noexcept {
-	std::size_t begin = 0;
-	while (begin < value.size() && is_space(value[begin])) {
-		++begin;
-	}
-	std::size_t end = value.size();
-	while (end > begin && is_space(value[end - 1])) {
-		--end;
-	}
-	return value.substr(begin, end - begin);
-}
-
 std::string trim_str(std::string_view value) { return opennova::strutil::trim(value); }
 
 std::string lowercase(std::string_view value) { return opennova::strutil::to_lower(value); }
@@ -535,7 +523,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 	out = ParticleFile();
 	error = ParseError();
 
-	// Slurp; trim trailing NUL bytes (observed in 30MM/airexp/ambfx/df_exp).
+	// Slurp; opennova::strutil::trim_view trailing NUL bytes (observed in 30MM/airexp/ambfx/df_exp).
 	std::string buffer{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 	while (!buffer.empty() && buffer.back() == '\0') {
 		buffer.pop_back();
@@ -563,7 +551,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 		++line_number;
 		pos = newline == std::string::npos ? buffer.size() + 1 : newline + 1;
 
-		const std::string_view line = trim(raw);
+		const std::string_view line = opennova::strutil::trim_view(raw);
 		if (line.empty()) {
 			continue;
 		}

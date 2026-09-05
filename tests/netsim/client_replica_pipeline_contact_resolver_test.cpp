@@ -8,7 +8,7 @@
 // [orig: vertical add @0x4B7CE0..0x4B7CEF then the resolver call @0x4B7CF4
 //  and lift @0x4B7CFE..0x4B7D0A; Entity_MovementCollisionResolver @0x4B2BD0]
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <runtime/world/infantry.h>
 
@@ -22,7 +22,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kRowA = 0x0005;

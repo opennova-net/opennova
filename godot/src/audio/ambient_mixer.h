@@ -8,6 +8,8 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <vector>
+
 #include <runtime/audio/ambient_mixer.h>
 
 namespace godot {
@@ -17,14 +19,15 @@ class Simulation;
 // Thin Godot binding over opennova::audio::AmbientMixer: the placed-marker ambient
 // emitter system at the witnessed split cadence — staggered tick&7 eval/registration
 // on the logic-tick clock, per-frame live-slot mix (docs/audio/lwf-dbf-sound-re.md
-// §driver cadence, D-SND-16). The GDScript mission audio (mission_audio.gd)
+// §driver cadence, D-SND-16). The mission audio (audio/mission_audio)
 // feeds resolved marker/layer data at setup, pumps the clocks, and binds the ranked
 // result to its persistent AudioStreamPlayer3D channels; occlusion routes to the
 // Simulation natively (tests inject a Callable override — the typed seam).
 //
-// The curve family is exposed as statics so the GDScript sound bank keeps its
-// public seams (calc_distance_volume / emitter_layer_volume /
-// crossfade_volume_byte / time_of_day_region) as one-line delegates.
+// The curve family is exposed as statics (the sound bank's pinned seams
+// calc_distance_volume / emitter_layer_volume read the same engine functions);
+// the time-of-day region and the crossfade byte are consumed natively (ctest
+// ambient_mixer pins them) and are not bound.
 class AmbientMixer : public RefCounted {
 	GDCLASS(AmbientMixer, RefCounted)
 
@@ -45,7 +48,7 @@ protected:
 
 public:
 	void clear();
-	void set_occlusion_provider(Simulation *provider);
+	void set_occlusion_provider(const Ref<Simulation> &provider);
 	void set_occlusion_override(const Callable &override);
 
 	// One placed marker: `slot_keys` maps region 0..3 to an index into `sets`
@@ -71,22 +74,26 @@ public:
 
 	// Ranked candidates: [candidate_id, vol, pitch_q16, x, y, z], stride 6.
 	PackedFloat32Array mix(const Vector3 &listener);
+	// C++-side seam (not bound): the same ranked mix as the engine's own rows
+	// (audio/mission_audio binds them to its channels without the float
+	// transport).
+	const std::vector<opennova::audio::AmbientCandidate> &mix_rows(const Vector3 &listener);
 
 	int live_slot_count() const;
 	int64_t clock_tick() const;
 	int marker_count() const;
 
 	// The witnessed curve family (see engine/runtime/audio/ambient_mixer.h for the [orig]
-	// map); statics so sound_bank.gd's pinned seams delegate here.
+	// map); statics so the GUT pins over the curve keep a bound home.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);
 	static int oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
 			int64_t falloff_q16, int member_vol, int clamp_vol);
 	static int emitter_layer_volume(int64_t dist_q16, int falloff_u, int min_u,
 			int vol_byte, int member_vol, int clamp_vol);
-	static int crossfade_volume_byte(float blend);
-	// { "region": int, "adjacent": int, "blend": float }
-	static Dictionary time_of_day_region(float hours);
+	// A 16.16 word (the mix rows' pitch_q16, the emitter registrations) as a
+	// float factor (io/fixed.h kFp16One).
+	static float q16_to_float(int q16);
 	// The global sound-bank load chain in the engine's slot order
 	// (audio/bank_chain.h): the expansion pair when one is active, then the
 	// four static banks. The shell iterates this instead of re-minting the

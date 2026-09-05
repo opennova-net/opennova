@@ -32,9 +32,9 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var audio = MissionAudio.new(root, item_db)
+	var audio = MissionAudio.create(root, item_db)
 	var stats := audio.setup(mission, "00TRa.bms", container)
-	gut.p("JO 00TRa mission audio: %s" % str(stats.to_dict()))
+	gut.p("JO 00TRa mission audio: %s" % str(stats.to_json_value()))
 
 	gut.p("bank exposes %d sound sets" % audio.get_bank().get_set_names().size())
 	assert_gt(int(stats.banks_loaded), 0, "the mission .LWF / game.lwf / gamelocl.LWF load")

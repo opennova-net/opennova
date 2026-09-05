@@ -57,13 +57,13 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.has_terrain(), "the mission terrain loaded (the ground solve needs it)")) return 1;
 
 	while (rig.world.logic_tick < static_cast<uint32_t>(kSettleTick)) rig.tick();
 
 	for (const uint16_t ssn : kTruckSsns) {
-		const w::Entity *veh = rig.by_net_id(ssn);
+		const w::Entity *veh = rig.world.registry.by_net_id(ssn);
 		char msg[96];
 		std::snprintf(msg, sizeof(msg), "ssn %u is in the world", unsigned(ssn));
 		if (!expect(veh != nullptr, msg)) continue;
@@ -87,7 +87,7 @@ int main() {
 	// in retail either.
 	const w::Entity *drop = nullptr;
 	for (const uint16_t ssn : kTruckSsns) {
-		const w::Entity *veh = rig.by_net_id(ssn);
+		const w::Entity *veh = rig.world.registry.by_net_id(ssn);
 		if (veh != nullptr && veh->alive && !veh->hidden && veh->handle.pool() == 1) {
 			drop = veh;
 			break;
@@ -97,7 +97,7 @@ int main() {
 		const w::EntityHandle handle = drop->handle;
 		const uint16_t ssn = drop->net_id;
 		const w::Vec3 pos = drop->position;
-		rig.set_entity_position(handle, w::Vec3{pos.x + 0.5f, pos.y, pos.z + 2.0f});
+		rig.world.commands.set_entity_position(handle, w::Vec3{pos.x + 0.5f, pos.y, pos.z + 2.0f});
 		rig.tick(310);
 		const w::Entity *after = rig.world.registry.get(handle);
 		if (expect(after != nullptr, "the lifted truck is still in the world")) {

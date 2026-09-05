@@ -41,10 +41,10 @@ static void test_execution_cadence() {
     w.load_systems();
     for (int i = 0; i < WacSystem::kTicksPerExecution - 1; ++i)
         w.run_logic_tick(/*is_authority=*/true);
-    CHECK(w.vars.get_mission(1) == 0); // 61 ticks: not yet
+    CHECK(w.script.vars.get_mission(1) == 0); // 61 ticks: not yet
     CHECK(sys.runs() == 0);
     w.run_logic_tick(/*is_authority=*/true);
-    CHECK(w.vars.get_mission(1) == 1); // the 62nd tick executes the program
+    CHECK(w.script.vars.get_mission(1) == 1); // the 62nd tick executes the program
     CHECK(sys.runs() == 1);
 }
 
@@ -61,7 +61,7 @@ static void test_initial_execution_and_runtime_state() {
 
     CHECK(sys.execute_initial(w));
     CHECK(!sys.execute_initial(w));
-    CHECK(w.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
     CHECK(sys.runs() == 1);
     CHECK(sys.vm().time() == 1);
     const WacSystem::RuntimeState startup = sys.capture_runtime_state();
@@ -71,7 +71,7 @@ static void test_initial_execution_and_runtime_state() {
     CHECK(sys.runs() == 1);
     w.run_logic_tick(/*is_authority=*/true);
     CHECK(sys.runs() == 2);
-    CHECK(w.vars.get_mission(1) == 1); // the initial edge remains active
+    CHECK(w.script.vars.get_mission(1) == 1); // the initial edge remains active
 
     w.load_systems();
     CHECK(sys.runs() == 0);
@@ -81,7 +81,7 @@ static void test_initial_execution_and_runtime_state() {
     for (int i = 0; i < WacSystem::kTicksPerExecution; ++i)
         w.run_logic_tick(/*is_authority=*/true);
     CHECK(sys.runs() == 2);
-    CHECK(w.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(1) == 1);
 }
 
 static void test_var_math() {
@@ -98,11 +98,11 @@ static void test_var_math() {
     w.load_systems();
 
     run(w, sys, 1);
-    CHECK(w.vars.get_mission(1) == 5);
-    CHECK(w.vars.get_mission(2) == 1); // inc fires once on the rising edge
+    CHECK(w.script.vars.get_mission(1) == 5);
+    CHECK(w.script.vars.get_mission(2) == 1); // inc fires once on the rising edge
 
     run(w, sys, 5);
-    CHECK(w.vars.get_mission(2) == 1); // edge semantics: does not re-fire while eq stays true
+    CHECK(w.script.vars.get_mission(2) == 1); // edge semantics: does not re-fire while eq stays true
 }
 
 static void test_ssn_kill() {
@@ -133,9 +133,9 @@ static void test_temporal_past() {
     w.load_systems();
 
     run(w, sys, 3); // logic_tick reaches 0,1,2 during execution -> not yet >= 3
-    CHECK(w.vars.get_mission(5) == 0);
+    CHECK(w.script.vars.get_mission(5) == 0);
     run(w, sys, 2); // now logic_tick hits 3
-    CHECK(w.vars.get_mission(5) == 1);
+    CHECK(w.script.vars.get_mission(5) == 1);
 }
 
 static void test_else_branch() {
@@ -149,11 +149,11 @@ static void test_else_branch() {
     w.load_systems();
 
     run(w, sys, 1);
-    CHECK(w.vars.get_mission(2) == 2); // v1==0 -> else
+    CHECK(w.script.vars.get_mission(2) == 2); // v1==0 -> else
 
-    w.vars.set_mission(1, 1);
+    w.script.vars.set_mission(1, 1);
     run(w, sys, 1);
-    CHECK(w.vars.get_mission(2) == 1); // v1!=0 -> then
+    CHECK(w.script.vars.get_mission(2) == 1); // v1!=0 -> then
 }
 
 static void test_environment() {
@@ -180,7 +180,7 @@ static void test_paren_less_and_effects() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.effects.count("dropflare") == 1);
+    CHECK(w.out.effects.count("dropflare") == 1);
 }
 
 // `flash` is a weather handler now: it arms the short lightning sequencer
@@ -195,7 +195,7 @@ static void test_flash_arms_the_weather_home() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.effects.count("flash") == 0);
+    CHECK(w.out.effects.count("flash") == 0);
     CHECK(w.weather.core.lightning.timer_a == 16);
 }
 
@@ -210,10 +210,10 @@ static void test_wac_wave_emits_dialog_wav() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.effects.count("dialog_wav") == 1);
-    CHECK(w.effects.count("wave") == 0); // not the unrouted default-case kind
+    CHECK(w.out.effects.count("dialog_wav") == 1);
+    CHECK(w.out.effects.count("wave") == 0); // not the unrouted default-case kind
     bool carried_filename = false;
-    for (const Effect &e : w.effects.entries())
+    for (const Effect &e : w.out.effects.entries())
         if (e.kind == "dialog_wav" && e.str == "brief1") carried_filename = true;
     CHECK(carried_filename);
 }
@@ -238,15 +238,15 @@ static void test_wac_text_and_console_use_distinct_effect_channels() {
     w.load_systems();
     run(w, sys, 1);
 
-    CHECK(w.effects.count("text") == 3);
-    CHECK(w.effects.count("debug_text") == 3);
+    CHECK(w.out.effects.count("text") == 3);
+    CHECK(w.out.effects.count("debug_text") == 3);
     bool saw_local_text = false;
     bool saw_peer_text = false;
     bool saw_numbered_text = false;
     bool saw_local_debug = false;
     bool saw_peer_debug = false;
     bool saw_numbered_debug = false;
-    for (const Effect &e : w.effects.entries()) {
+    for (const Effect &e : w.out.effects.entries()) {
         saw_local_text |= e.kind == "text" && e.str == "local_text" && e.a == 0;
         saw_peer_text |= e.kind == "text" && e.str == "peer_text" && e.a == 0;
         saw_numbered_text |= e.kind == "text" && e.str == "numbered_text" && e.a == 7;
@@ -272,9 +272,9 @@ static void test_authority_gate() {
     // 62 non-authority ticks: the divider never advances, scripting skipped.
     for (int i = 0; i < WacSystem::kTicksPerExecution; ++i)
         w.run_logic_tick(/*is_authority=*/false);
-    CHECK(w.vars.get_mission(9) == 0);
+    CHECK(w.script.vars.get_mission(9) == 0);
     run(w, sys, 1); // one authoritative execution
-    CHECK(w.vars.get_mission(9) == 1);
+    CHECK(w.script.vars.get_mission(9) == 1);
 }
 
 // ---- round outcome (world-wac-ai-re §20) ----
@@ -294,21 +294,21 @@ static void test_lose_ends_round_with_banner_key() {
 
     run(w, sys, 1);
     CHECK(!w.match.outcome().ended); // no green kills yet
-    CHECK(w.effects.count("lose") == 0);
+    CHECK(w.out.effects.count("lose") == 0);
 
     w.kill_stats.greenkills_by_player = 1;
     run(w, sys, 1);
     CHECK(w.match.outcome().ended);
     CHECK(w.match.outcome().winner_team == 2);
-    CHECK(w.effects.count("lose") == 1);
-    CHECK(w.effects.count("round_end") == 1);
-    for (const Effect &e : w.effects.entries()) {
+    CHECK(w.out.effects.count("lose") == 1);
+    CHECK(w.out.effects.count("round_end") == 1);
+    for (const Effect &e : w.out.effects.entries()) {
         if (e.kind == "lose") { CHECK(e.a == 0); CHECK(e.str == "STRMISC_KILLEDGREEN"); }
         if (e.kind == "round_end") CHECK(e.a == 2);
     }
 
     run(w, sys, 2); // the latch: no second round_end even while the condition holds
-    CHECK(w.effects.count("round_end") == 1);
+    CHECK(w.out.effects.count("round_end") == 1);
 }
 
 // Lose(n) for n outside {0,1} is a witnessed NO-OP [orig: WacAction_Lose returns 0
@@ -322,8 +322,8 @@ static void test_lose_other_team_noop() {
     w.load_systems();
     run(w, sys, 3);
     CHECK(!w.match.outcome().ended);
-    CHECK(w.effects.count("lose") == 0);
-    CHECK(w.effects.count("round_end") == 0);
+    CHECK(w.out.effects.count("lose") == 0);
+    CHECK(w.out.effects.count("round_end") == 0);
 }
 
 // win(team) ends the round straight through, and the outcome builtins
@@ -348,15 +348,15 @@ static void test_win_and_outcome_builtins() {
 
     run(w, sys, 1);
     CHECK(!w.match.outcome().ended);
-    CHECK(w.vars.get_mission(1) == 0); // GameOver stays 0 pre-round-end
-    CHECK(w.vars.get_mission(4) == 1); // humans visible from the first execution
+    CHECK(w.script.vars.get_mission(1) == 0); // GameOver stays 0 pre-round-end
+    CHECK(w.script.vars.get_mission(4) == 1); // humans visible from the first execution
 
     run(w, sys, 3); // past(2) fires -> win(1); the builtins read it the same pass
     CHECK(w.match.outcome().ended);
     CHECK(w.match.outcome().winner_team == 1);
-    CHECK(w.vars.get_mission(1) == 1); // GameOver
-    CHECK(w.vars.get_mission(2) == 1); // WinVar
-    CHECK(w.vars.get_mission(3) == 0); // LoseVar stays 0 on a win
+    CHECK(w.script.vars.get_mission(1) == 1); // GameOver
+    CHECK(w.script.vars.get_mission(2) == 1); // WinVar
+    CHECK(w.script.vars.get_mission(3) == 0); // LoseVar stays 0 on a win
 }
 
 // 04TR.WAC's outcome block, verbatim (JOX corpus): greenkills -> Lose(0).
@@ -380,7 +380,7 @@ static void test_04tr_outcome_block_greenkills() {
     CHECK(w.match.outcome().ended);
     CHECK(w.match.outcome().winner_team == 2);
     bool green_banner = false;
-    for (const Effect &e : w.effects.entries())
+    for (const Effect &e : w.out.effects.entries())
         green_banner |= e.kind == "lose" && e.a == 0 && e.str == "STRMISC_KILLEDGREEN";
     CHECK(green_banner);
 }
@@ -404,10 +404,10 @@ static void test_04tr_outcome_block_blue_priority() {
     run(w, sys, 1);
     CHECK(w.match.outcome().ended);
     bool blue_banner = false;
-    for (const Effect &e : w.effects.entries())
+    for (const Effect &e : w.out.effects.entries())
         blue_banner |= e.kind == "lose" && e.a == 1 && e.str == "STRMISC_KILLEDBLUE";
     CHECK(blue_banner);
-    CHECK(w.effects.count("lose") == 1); // the green branch never also fires
+    CHECK(w.out.effects.count("lose") == 1); // the green branch never also fires
 }
 
 static void test_wac_spatial_wounded_and_mount_predicates() {
@@ -459,23 +459,22 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
     w.load_systems();
 
     run(w, sys, 1);
-    CHECK(w.vars.get_mission(1) == 1);
-    CHECK(w.vars.get_mission(2) == 1); // inclusive distance boundary
-    CHECK(w.vars.get_mission(3) == 1);
-    CHECK(w.vars.get_mission(4) == 1);
-    CHECK(w.vars.get_mission(5) == 1);
-    CHECK(w.vars.get_mission(6) == 1);
-    CHECK(w.vars.get_mission(7) == 0);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1); // inclusive distance boundary
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(4) == 1);
+    CHECK(w.script.vars.get_mission(5) == 1);
+    CHECK(w.script.vars.get_mission(6) == 1);
+    CHECK(w.script.vars.get_mission(7) == 0);
 
     w.registry.get(local_h)->mount_type = SeatType::Gunner;
     run(w, sys, 1);
-    CHECK(w.vars.get_mission(7) == 1);
+    CHECK(w.script.vars.get_mission(7) == 1);
 }
 
 static void test_wac_accuracy_guard_speed_and_group_remove() {
     BehaviorWorld w;
-    AiSystem ai;
-    w.ai = &ai;
+    AiSystem &ai = w.ai;
 
     Entity single{};
     single.net_id = 42;
@@ -525,7 +524,8 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     CHECK(single_ai.slot.f[AiSlot::kAimErrorPrimary] == 20);
     CHECK(group_ai.slot.f[AiSlot::kAimErrorSecondary] == 40);
     CHECK(group_ai.slot.f[AiSlot::kAimErrorPrimary] == 50);
-    CHECK((w.registry.get(single_h)->flags & 0x40u) != 0);
+    CHECK((w.registry.get(single_h)->flags & kEntityFlagMounted) != 0);
+    CHECK((w.registry.get(single_h)->engine_flags & kEntityFlagMounted) != 0);
     CHECK(!w.commands.ssn_exists(44));
     CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 0);
     CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 0);

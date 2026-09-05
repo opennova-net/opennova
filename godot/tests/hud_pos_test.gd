@@ -113,6 +113,7 @@ func test_panel_anchors() -> void:
 			"HUDVEHSTANCEPOS 0 272 from the fixture.")
 	assert_eq(hud.get_lfp_flags(), Vector2i(1020, 27),
 			"LFP_FLAGS 1020 , 27 from the fixture.")
-	var block: Dictionary = hud.get_vehicle_hud("dbuggy1")
-	assert_eq(String(block.get("interface", "")), "h_buggya.tga",
-			"The buggy's VEHICLE_HUD block resolves by sid.")
+	var block := hud.get_vehicle_hud("dbuggy1")
+	assert_not_null(block, "The buggy's VEHICLE_HUD block resolves by sid.")
+	if block != null:
+		assert_eq(block.interface_texture, "h_buggya.tga")

@@ -15,6 +15,8 @@
 #include <cstring>
 #include <string>
 
+using namespace opennova::fnt;
+
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
 using opennova::menu::MenuFrameState;
@@ -1746,13 +1748,16 @@ void test_hotkey_widget(const fnt_font_t *font) {
 	CHECK(c.hotkey_widget("VK_ESCAPE", false, st) == -1,
 			"a virtual name never matches as a character");
 	const MenuDrawList &draw = c.compile(st, 1.0f, 1.0f);
-	CHECK(draw.underlines.size() == 1,
-			"the label mnemonic emits one underline segment");
-	if (draw.underlines.size() == 1) {
-		CHECK(draw.underlines[0].x0 == 8.5f &&
-				draw.underlines[0].x1 == 16.5f &&
-				draw.underlines[0].y == 34.5f,
-				"the underline lands under the marked label byte");
+	// The mnemonic rides retail's caret leg: no underline markup, one extra
+	// '_' glyph stretched to the marked char, at prefix width + the two gap
+	// terms (8 + 2 + 2 = 12 -> vertex 11.5)
+	// [orig: draw_text_with_cursor @0x6533b0 — gated adds @0x6534dc/0x653562].
+	CHECK(draw.underlines.empty(),
+			"the label mnemonic draws a glyph, not an underline segment");
+	CHECK(draw.glyphs.size() == 5, "the four label glyphs plus the mnemonic '_'");
+	if (draw.glyphs.size() == 5) {
+		CHECK(draw.glyphs[4].x_top_left == 11.5f,
+				"the '_' lands at the marked byte's prefix offset");
 	}
 	// VK_RETURN and VK_ENTER are interchangeable.
 	CHECK(c.hotkey_widget("VK_RETURN", true, st) == 4,

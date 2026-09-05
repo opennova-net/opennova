@@ -46,7 +46,12 @@ LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
     lio.tick_start_z = tick_start_z;
     lio.prone = inf.stance == InfantryState::Stance::kProne;   // MoveOrder 0x100
     lio.crouch = inf.stance == InfantryState::Stance::kCrouch; // MoveOrder 0x200
-    lio.ai_wants_climb = false; // the AI move-order writer rides its slice
+    // The CLIMBER behavior bit (ChangeAI sub 17) is the third fresh-entry
+    // qualifier at the ladder gate [orig: aiRuntime+4 & 0x400 @0x4b3267..
+    // 0x4b3271, Entity_MovementCollisionResolver]. The AI move-order arm of
+    // the same test (var_60 @0x4b3257) stays unported: declared, not bridged.
+    lio.ai_wants_climb =
+        (static_cast<uint32_t>(e.slot.f[AiSlot::kBehaviorFlags]) & AiSlot::kClimber) != 0;
     lio.is_local_player = inf.is_local_player;
     if (inf.is_local_player) {
         lio.view_yaw = &inf.target_heading; // entity+0x10 = the mouse yaw

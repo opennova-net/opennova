@@ -49,6 +49,42 @@ void ScarPresenterStats::_bind_methods() {
 	STAT_BIND(ScarPresenterStats, strips_unsupported)
 }
 
+void FirePresentStats::_bind_methods() {
+	STAT_BIND(FirePresentStats, fires)
+	STAT_BIND(FirePresentStats, sounds)
+	STAT_BIND(FirePresentStats, effects)
+	STAT_BIND(FirePresentStats, tracer_peak)
+}
+
+void DestructionPresentStats::_bind_methods() {
+	STAT_BIND(DestructionPresentStats, husk_swaps)
+	STAT_BIND(DestructionPresentStats, no_husk)
+	STAT_BIND(DestructionPresentStats, pieces_peak)
+	STAT_BIND(DestructionPresentStats, debris_triangles)
+	STAT_BIND(DestructionPresentStats, effects)
+	STAT_BIND(DestructionPresentStats, sounds)
+	STAT_BIND(DestructionPresentStats, glass_points)
+	STAT_BIND(DestructionPresentStats, crackles)
+}
+
+void ThrowablePresentStats::_bind_methods() {
+	STAT_BIND(ThrowablePresentStats, live)
+	STAT_BIND(ThrowablePresentStats, move_effects)
+	STAT_BIND(ThrowablePresentStats, move_effect_transforms)
+}
+
+void ScarPresentStats::_bind_methods() {
+	STAT_BIND(ScarPresentStats, slots_live)
+	STAT_BIND(ScarPresentStats, slots_culled)
+	STAT_BIND(ScarPresentStats, rings_leased)
+	STAT_BIND(ScarPresentStats, batches)
+	STAT_BIND(ScarPresentStats, world_surfaces)
+	STAT_BIND(ScarPresentStats, entity_meshes)
+	STAT_BIND(ScarPresentStats, textures_missing)
+	STAT_BIND(ScarPresentStats, strips_unsupported)
+	STAT_BIND(ScarPresentStats, owners_unresolved)
+}
+
 #undef STAT_BIND
 
 } // namespace godot

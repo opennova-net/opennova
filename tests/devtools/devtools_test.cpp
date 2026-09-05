@@ -4,11 +4,10 @@
 // on its visibility edges and formats a drained window, and the ImGui ABI
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
 #include <runtime/devtools/ai_debug_snapshot.h>
-#include <runtime/devtools/ai_view_request.h>
 #include <runtime/devtools/ai_window.h>
-#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/control_request.h>
+#include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
-#include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/rays_window.h>
@@ -32,15 +31,29 @@
 #include <cstring>
 #include <utility>
 
+using namespace opennova::def;
+
 using opennova::devtools::AiDebugSnapshot;
-using opennova::devtools::AiViewRequest;
 using opennova::devtools::AiWindow;
 using opennova::devtools::CaptureWindow;
-using opennova::devtools::DebugRequest;
+using opennova::devtools::ControlArg;
+using opennova::devtools::ControlRequest;
 using opennova::devtools::EntitiesWindow;
 using opennova::devtools::EntityDetailSnapshot;
-using opennova::devtools::EnvironmentRequest;
 using opennova::devtools::EnvironmentSnapshot;
+namespace control_id = opennova::devtools::control_id;
+
+// A drained control request names a row by its wire id (the constants are
+// string literals, so the check compares text, never addresses).
+static bool is_control(const ControlRequest &request, const char *id) {
+	return std::strcmp(request.id, id) == 0;
+}
+
+// The Entity Properties toggles: one set_entity_item_attrib request carrying
+// [wire handle, attrib, attrib2].
+static bool is_attrib_request(const ControlRequest &request) {
+	return is_control(request, control_id::kSetEntityItemAttrib) && request.args.size() == 3;
+}
 using opennova::devtools::EnvironmentWindow;
 using opennova::devtools::PhysicsRequest;
 using opennova::devtools::PhysicsSnapshot;
@@ -261,18 +274,27 @@ void test_game_window_orders_play_interact_and_close_requests() {
 	CHECK(game.take_request(request) && request == GameWindowRequest::EnterInteract,
 			"losing Play availability forces Interact");
 
+	// The spectator checkbox is a debug-control row: it leaves as a
+	// local_spectator control request (the table's authority gate decides),
+	// never as an input-mode request.
+	ControlRequest control;
 	CHECK(!game.spectator_available() && !game.spectator_active(),
 			"spectator mutation starts unavailable and off");
 	game.request_spectator(true);
-	CHECK(!game.take_request(request), "an unavailable spectator toggle queues nothing");
+	CHECK(!game.take_control_request(control), "an unavailable spectator toggle queues nothing");
 	game.set_spectator_state(true, false);
 	game.request_spectator(true);
-	CHECK(game.take_request(request) && request == GameWindowRequest::EnableSpectator,
-			"the F3 control requests the authoritative spectator transition");
+	CHECK(game.take_control_request(control) && is_control(control, control_id::kLocalSpectator) &&
+					control.args.size() == 1 && control.args[0].kind == ControlArg::Kind::Bool &&
+					control.args[0].b,
+			"the F3 control requests the authoritative spectator transition by its row id");
+	CHECK(!game.take_request(request), "the row request never rides the input-mode queue");
 	game.set_spectator_state(true, true);
 	game.request_spectator(false);
-	CHECK(game.take_request(request) && request == GameWindowRequest::DisableSpectator,
+	CHECK(game.take_control_request(control) && is_control(control, control_id::kLocalSpectator) &&
+					!control.args[0].b,
 			"the F3 control requests returning to a player");
+	CHECK(!game.take_control_request(control), "the control queue drains exactly once");
 }
 
 void test_default_workspace_layout_is_created_once_and_preserves_user_layout() {
@@ -584,13 +606,14 @@ void test_entities_window_formats_the_pushed_directory() {
 			"the visibility close drops the held snapshot (a closed window costs nothing)");
 }
 
-// The DebugRequest channel: enqueue/take round-trips the typed payloads in
-// order and drains exactly once; needs_entity_directory gates on (pass open
-// && window open) so the embedder can skip building snapshots nobody shows.
-void test_entities_debug_request_queue_and_gating() {
+// The control-request channel (ADR 0043 d12): enqueue/take round-trips the
+// row ids and their typed positional payloads in order and drains exactly
+// once; needs_entity_directory gates on (pass open && window open) so the
+// embedder can skip building snapshots nobody shows.
+void test_entities_control_request_queue_and_gating() {
 	GameDevTools tools;
-	DebugRequest request;
-	CHECK(!tools.take_debug_request(request), "fresh tools hold no debug request");
+	ControlRequest request;
+	CHECK(!tools.take_control_request(request), "fresh tools hold no control request");
 	CHECK(!tools.needs_entity_directory(), "closed pass: no directory needed");
 	tools.entities_window().open = true;
 	CHECK(!tools.needs_entity_directory(), "window open inside a closed pass still needs none");
@@ -600,27 +623,22 @@ void test_entities_debug_request_queue_and_gating() {
 	CHECK(!tools.needs_entity_directory(), "closing the window drops the need");
 	tools.entities_window().open = true;
 
-	DebugRequest health;
-	health.kind = DebugRequest::Kind::SetEntityHealth;
-	health.target.packed = 0x3001;
-	health.health = 25;
-	tools.entities_window().enqueue_request(health);
-	DebugRequest teleport;
-	teleport.kind = DebugRequest::Kind::TeleportLocalPlayer;
-	teleport.pos[0] = 100.0f;
-	teleport.pos[1] = 200.0f;
-	teleport.pos[2] = 5.0f;
-	teleport.yaw = 90.0f;
-	teleport.pitch = -10.0f;
-	tools.entities_window().enqueue_request(teleport);
-	CHECK(tools.take_debug_request(request) && request.kind == DebugRequest::Kind::SetEntityHealth &&
-					request.target.packed == 0x3001 && request.health == 25,
-			"the health request round-trips first");
-	CHECK(tools.take_debug_request(request) && request.kind == DebugRequest::Kind::TeleportLocalPlayer &&
-					request.pos[0] == 100.0f && request.pos[1] == 200.0f && request.pos[2] == 5.0f &&
-					request.yaw == 90.0f && request.pitch == -10.0f,
+	tools.entities_window().enqueue_request({control_id::kSetEntityHealth,
+			{ControlArg::integer(7), ControlArg::integer(25)}});
+	tools.entities_window().enqueue_request({control_id::kTeleportLocalPlayer,
+			{ControlArg::vector3(100.0f, 200.0f, 5.0f), ControlArg::number(90.0),
+					ControlArg::number(-10.0)}});
+	CHECK(tools.take_control_request(request) && is_control(request, control_id::kSetEntityHealth) &&
+					request.args.size() == 2 && request.args[0].kind == ControlArg::Kind::Int &&
+					request.args[0].i == 7 && request.args[1].i == 25,
+			"the health request round-trips first, by row id and ai_index");
+	CHECK(tools.take_control_request(request) && is_control(request, control_id::kTeleportLocalPlayer) &&
+					request.args.size() == 3 && request.args[0].kind == ControlArg::Kind::Vec3 &&
+					request.args[0].v[0] == 100.0f && request.args[0].v[1] == 200.0f &&
+					request.args[0].v[2] == 5.0f && request.args[1].kind == ControlArg::Kind::Float &&
+					request.args[1].f == 90.0 && request.args[2].f == -10.0,
 			"the teleport request follows with its payload");
-	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
+	CHECK(!tools.take_control_request(request), "the queue drains exactly once");
 }
 
 namespace {
@@ -845,21 +863,20 @@ void test_entity_properties_window_card_and_attrib_toggles() {
 	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with a detail card");
 	ImGui::Render();
 
-	DebugRequest request;
-	CHECK(!tools.take_debug_request(request), "no request before a toggle");
+	ControlRequest request;
+	CHECK(!tools.take_control_request(request), "no request before a toggle");
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
 	CHECK(properties.detail_attrib() == DEF_ITEM_ATTRIB_AIDATA, "the toggle clears the bit locally");
-	CHECK(tools.take_debug_request(request) &&
-					request.kind == DebugRequest::Kind::SetEntityItemAttrib &&
-					request.target.packed == 0x3001 && request.attrib == DEF_ITEM_ATTRIB_AIDATA &&
-					request.attrib2 == DEF_ITEM_ATTRIB2_FARP,
-			"one request carries both full words behind the selected handle");
+	CHECK(tools.take_control_request(request) && is_attrib_request(request) &&
+					request.args[0].i == 0x3001 && request.args[1].i == DEF_ITEM_ATTRIB_AIDATA &&
+					request.args[2].i == DEF_ITEM_ATTRIB2_FARP,
+			"one set_entity_item_attrib request carries both full words behind the selected handle");
 	properties.toggle_item_attrib2(DEF_ITEM_ATTRIB2_LANDMINE);
-	CHECK(tools.take_debug_request(request) &&
-					request.attrib == DEF_ITEM_ATTRIB_AIDATA &&
-					request.attrib2 == (DEF_ITEM_ATTRIB2_FARP | DEF_ITEM_ATTRIB2_LANDMINE),
+	CHECK(tools.take_control_request(request) && is_attrib_request(request) &&
+					request.args[1].i == DEF_ITEM_ATTRIB_AIDATA &&
+					request.args[2].i == (DEF_ITEM_ATTRIB2_FARP | DEF_ITEM_ATTRIB2_LANDMINE),
 			"the second word toggles the same way");
-	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
+	CHECK(!tools.take_control_request(request), "the queue drains exactly once");
 
 	// A re-push re-seeds the edit words (the engine truth wins).
 	tools.set_entity_detail(detail_for(0x3001, DEF_ITEM_ATTRIB_NODIE, 0));
@@ -872,8 +889,8 @@ void test_entity_properties_window_card_and_attrib_toggles() {
 	tools.set_entity_detail(detail_for(0x1002, 0, 0));
 	CHECK(properties.detail_valid(), "its own card lands");
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NOSCAR);
-	CHECK(tools.take_debug_request(request) && request.target.packed == 0x1002 &&
-					request.attrib == DEF_ITEM_ATTRIB_NOSCAR,
+	CHECK(tools.take_control_request(request) && is_attrib_request(request) &&
+					request.args[0].i == 0x1002 && request.args[1].i == DEF_ITEM_ATTRIB_NOSCAR,
 			"a brainless row (a vehicle) takes attrib overrides too");
 
 	// An invalid card clears; so does the Properties window's visibility close
@@ -885,7 +902,7 @@ void test_entity_properties_window_card_and_attrib_toggles() {
 	CHECK(!properties.detail_valid(), "the visibility close drops the card");
 	CHECK(tools.selected_entity_handle() == 0x1002, "the selection survives as pending");
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NOSCAR);
-	CHECK(!tools.take_debug_request(request), "a toggle without a card is a no-op");
+	CHECK(!tools.take_control_request(request), "a toggle without a card is a no-op");
 }
 
 // The authority gate: the pushed snapshot says whether this peer owns the
@@ -913,10 +930,10 @@ void test_entity_edits_gate_on_the_pushed_authority() {
 	ImGui::NewFrame();
 	CHECK(tools.pass().draw_frame(1), "the workspace draws read-only");
 	ImGui::Render();
-	DebugRequest request;
+	ControlRequest request;
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
 	properties.toggle_item_attrib2(DEF_ITEM_ATTRIB2_FARP);
-	CHECK(!tools.take_debug_request(request), "a toggle without authority queues nothing");
+	CHECK(!tools.take_control_request(request), "a toggle without authority queues nothing");
 	CHECK(properties.detail_attrib() == DEF_ITEM_ATTRIB_NODISMEMBER, "...and moves no bit");
 
 	// The authority's push with a live wire session: edits work, AIData stays.
@@ -927,9 +944,9 @@ void test_entity_edits_gate_on_the_pushed_authority() {
 	CHECK(entities.authority() && entities.session_live(), "the facts ride the snapshot");
 	CHECK(properties.edits_enabled(), "authority enables the edits");
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_AIDATA);
-	CHECK(!tools.take_debug_request(request), "the AIData bit is locked while a session is live");
+	CHECK(!tools.take_control_request(request), "the AIData bit is locked while a session is live");
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
-	CHECK(tools.take_debug_request(request) && request.attrib == 0,
+	CHECK(tools.take_control_request(request) && is_attrib_request(request) && request.args[1].i == 0,
 			"the other bits toggle under a live session");
 
 	// Single player: AIData toggles too.
@@ -937,7 +954,8 @@ void test_entity_edits_gate_on_the_pushed_authority() {
 	single.authority = true;
 	tools.set_entity_directory(single);
 	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_AIDATA);
-	CHECK(tools.take_debug_request(request) && request.attrib == DEF_ITEM_ATTRIB_AIDATA,
+	CHECK(tools.take_control_request(request) && is_attrib_request(request) &&
+					request.args[1].i == DEF_ITEM_ATTRIB_AIDATA,
 			"AIData toggles without a wire session");
 
 	// An invalid push (the world unloaded) takes the authority with it.
@@ -1349,29 +1367,34 @@ void test_environment_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The EnvironmentRequest channel: enqueue/take round-trips the typed weather
-// commands in order and drains exactly once.
+// The Environment window's control requests: enqueue/take round-trips the
+// weather rows (by wire id, with the WAC arguments) in order through the one
+// GameDevTools drain and drains exactly once.
 void test_environment_request_queue() {
 	GameDevTools tools;
-	EnvironmentRequest request;
-	CHECK(!tools.take_environment_request(request), "fresh tools hold no environment request");
-	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Rain, 100, 5});
-	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::MoveFog, 200, 2});
-	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Flash, 0, 0});
-	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::BlockColor, 2, 0x102030});
-	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Rain &&
-					request.a == 100 && request.b == 5,
+	ControlRequest request;
+	CHECK(!tools.take_control_request(request), "fresh tools hold no control request");
+	tools.environment_window().enqueue_request({control_id::kEnvironmentRain,
+			{ControlArg::integer(100), ControlArg::integer(5)}});
+	tools.environment_window().enqueue_request({control_id::kEnvironmentMoveFog,
+			{ControlArg::integer(200), ControlArg::integer(2)}});
+	tools.environment_window().enqueue_request({control_id::kEnvironmentLightningShort, {}});
+	tools.environment_window().enqueue_request({control_id::kEnvironmentBlockColor,
+			{ControlArg::integer(2), ControlArg::integer(0x102030)}});
+	CHECK(tools.take_control_request(request) && is_control(request, control_id::kEnvironmentRain) &&
+					request.args.size() == 2 && request.args[0].i == 100 && request.args[1].i == 5,
 			"the rain request round-trips first");
-	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::MoveFog &&
-					request.a == 200 && request.b == 2,
+	CHECK(tools.take_control_request(request) && is_control(request, control_id::kEnvironmentMoveFog) &&
+					request.args[0].i == 200 && request.args[1].i == 2,
 			"the move-fog request follows");
-	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Flash,
-			"the flash request follows");
-	CHECK(tools.take_environment_request(request) &&
-					request.kind == EnvironmentRequest::Kind::BlockColor && request.a == 2 &&
-					request.b == 0x102030,
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentLightningShort) && request.args.empty(),
+			"the flash request follows as the short-lightning row");
+	CHECK(tools.take_control_request(request) &&
+					is_control(request, control_id::kEnvironmentBlockColor) && request.args[0].i == 2 &&
+					request.args[1].i == 0x102030,
 			"the block color request carries its target and packed rgb");
-	CHECK(!tools.take_environment_request(request), "the queue drains exactly once");
+	CHECK(!tools.take_control_request(request), "the queue drains exactly once");
 }
 
 // The Rays window formats per-category count rows from the pushed record,
@@ -1390,7 +1413,6 @@ void test_rays_window_formats_the_pushed_record() {
 	snapshot.valid = true;
 	snapshot.logic_tick = 620;
 	snapshot.recording = true;
-	snapshot.view_shown = true;
 	snapshot.category_mask = 0x7FFF;
 	snapshot.ttl_ticks = 93;
 	snapshot.categories[0].name = "Uncategorized";
@@ -1427,8 +1449,8 @@ void test_rays_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL,
-// clear and view-toggle requests in order and drains exactly once.
+// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL
+// and clear requests in order and drains exactly once.
 void test_rays_request_queue() {
 	GameDevTools tools;
 	RaysRequest request;
@@ -1436,7 +1458,6 @@ void test_rays_request_queue() {
 	tools.rays_window().enqueue_request({RaysRequest::Kind::SetCategoryMask, 0x0003});
 	tools.rays_window().enqueue_request({RaysRequest::Kind::SetTtlTicks, 310});
 	tools.rays_window().enqueue_request({RaysRequest::Kind::Clear, 0});
-	tools.rays_window().enqueue_request({RaysRequest::Kind::SetViewShown, 1});
 	CHECK(tools.take_rays_request(request) &&
 					request.kind == RaysRequest::Kind::SetCategoryMask && request.a == 0x0003,
 			"the mask request round-trips first");
@@ -1445,15 +1466,12 @@ void test_rays_request_queue() {
 			"the TTL request follows");
 	CHECK(tools.take_rays_request(request) && request.kind == RaysRequest::Kind::Clear,
 			"the clear request follows");
-	CHECK(tools.take_rays_request(request) &&
-					request.kind == RaysRequest::Kind::SetViewShown && request.a == 1,
-			"the view toggle carries its state for the shell");
 	CHECK(!tools.take_rays_request(request), "the queue drains exactly once");
 }
 
 // The Physics window formats per-kind contact rows from the pushed record,
-// mirrors the capture/view state into its edit controls, and drops everything
-// on the visibility close.
+// mirrors the capture state into its edit controls, and drops everything on
+// the visibility close.
 void test_physics_window_formats_the_pushed_record() {
 	NullBackend backend;
 	GameDevTools tools;
@@ -1467,9 +1485,7 @@ void test_physics_window_formats_the_pushed_record() {
 	snapshot.valid = true;
 	snapshot.logic_tick = 620;
 	snapshot.capturing = true;
-	snapshot.view_shown = true;
 	snapshot.kind_mask = 0x3F;
-	snapshot.boxes_drawn = 42;
 	snapshot.recent = 3;
 	snapshot.kinds[0].name = "Projectile hit";
 	snapshot.kinds[0].held = 12;
@@ -1505,8 +1521,8 @@ void test_physics_window_formats_the_pushed_record() {
 	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
 }
 
-// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear,
-// capture and view-toggle requests in order and drains exactly once.
+// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear
+// and capture requests in order and drains exactly once.
 void test_physics_request_queue() {
 	GameDevTools tools;
 	PhysicsRequest request;
@@ -1514,7 +1530,6 @@ void test_physics_request_queue() {
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetKindMask, 0x0005});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::Clear, 0});
 	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, 1});
-	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetViewShown, 1});
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetKindMask && request.a == 0x0005,
 			"the mask request round-trips first");
@@ -1523,9 +1538,6 @@ void test_physics_request_queue() {
 	CHECK(tools.take_physics_request(request) &&
 					request.kind == PhysicsRequest::Kind::SetCaptureEnabled && request.a == 1,
 			"the capture arm carries its state");
-	CHECK(tools.take_physics_request(request) &&
-					request.kind == PhysicsRequest::Kind::SetViewShown && request.a == 1,
-			"the view toggle carries its state for the shell");
 	CHECK(!tools.take_physics_request(request), "the queue drains exactly once");
 }
 
@@ -1535,9 +1547,6 @@ AiDebugSnapshot ai_snapshot() {
 	AiDebugSnapshot snapshot;
 	snapshot.valid = true;
 	snapshot.logic_tick = 62;
-	snapshot.overlay.available = true;
-	snapshot.overlay.master = true;
-	snapshot.overlay.routes = false;
 	opennova::world::inspect::AiGroupRow group;
 	group.id = 5;
 	group.alert = 2;
@@ -1627,46 +1636,6 @@ void test_ai_window_formats_the_pushed_snapshot() {
 	CHECK(!tools.needs_ai_debug(), "...and the pushes stop on the same edge");
 }
 
-// The overlay toggle strip: requests-out / pushed-truth. A toggle queues one
-// typed request and flips no local state; the checkbox state reads the pushed
-// overlay block; availability follows the snapshot.
-void test_ai_window_toggle_requests() {
-	NullBackend backend;
-	GameDevTools tools;
-	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
-	tools.pass().set_open(true);
-	AiWindow &ai = tools.ai_window();
-	ai.open = true;
-
-	CHECK(!ai.overlay_available(), "no snapshot: the strip is unavailable");
-	tools.set_ai_debug(ai_snapshot());
-	CHECK(ai.overlay_available(), "the pushed overlay state arms the strip");
-	CHECK(ai.element_enabled(AiViewRequest::Element::Master), "master reads pushed truth");
-	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes), "routes reads pushed truth (off)");
-	CHECK(ai.element_enabled(AiViewRequest::Element::Labels), "labels default on");
-
-	AiViewRequest request;
-	CHECK(!tools.take_ai_view_request(request), "no request before a toggle");
-	ai.toggle_element(AiViewRequest::Element::Routes, true);
-	ai.toggle_element(AiViewRequest::Element::Master, false);
-	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes),
-			"a toggle changes no local state (the next push carries the truth)");
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Routes && request.enabled,
-			"the first toggle drains first");
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Master && !request.enabled,
-			"the second follows in order");
-	CHECK(!tools.take_ai_view_request(request), "the queue drains exactly once");
-
-	// Requests queued before a close still drain (the drain is unconditional).
-	ai.toggle_element(AiViewRequest::Element::Rings, false);
-	tools.pass().set_open(false);
-	CHECK(tools.take_ai_view_request(request) &&
-					request.element == AiViewRequest::Element::Rings,
-			"a queued toggle survives the visibility close");
-}
-
 // The deep pane rides the Entities selection and the same detail push the
 // Entity Properties window receives; the widened needs_entity_detail keeps
 // the card flowing for the AI window alone.
@@ -1738,7 +1707,7 @@ int main() {
 	test_external_feed_drives_the_window_without_draining();
 	test_layout_reset_brings_windows_home();
 	test_entities_window_formats_the_pushed_directory();
-	test_entities_debug_request_queue_and_gating();
+	test_entities_control_request_queue_and_gating();
 	test_entities_window_selects_the_picked_handle();
 	test_entity_properties_window_card_and_attrib_toggles();
 	test_entity_edits_gate_on_the_pushed_authority();
@@ -1750,7 +1719,6 @@ int main() {
 	test_environment_window_formats_the_pushed_record();
 	test_environment_request_queue();
 	test_ai_window_formats_the_pushed_snapshot();
-	test_ai_window_toggle_requests();
 	test_ai_window_detail_pane_follows_the_selection();
 	test_rays_window_formats_the_pushed_record();
 	test_rays_request_queue();

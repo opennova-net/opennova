@@ -467,6 +467,15 @@ public:
 	// the group-gated first-3 select with that draw's groups. The snapshot
 	// carries only the collection inputs (retail's flag-bit-2 skip); target
 	// disables stay a select-stage gate exactly as retail applies them.
+	// Broadphase toggle for select_for_draws: the cell index gathers a
+	// superset of each draw's overlap candidates, re-sorts them into slot
+	// order, and runs the identical exact test — the accepted ordered list
+	// (and so the witnessed first-64 truncation) is bit-identical to the
+	// linear scan the toggle falls back to. The linear path stays as the
+	// equivalence-test reference.
+	void set_select_index_enabled(bool enabled) {
+		select_index_enabled_ = enabled;
+	}
 	void select_for_draws(const LightDrawContext *draws, size_t draw_count,
 			const LightSelectionOptions &options,
 			const std::array<float, 3> &ambient_scale,
@@ -481,6 +490,19 @@ public:
 	// already-selected handle set. This lets retained render devices cache the
 	// expensive static-draw broadphase without freezing animated light color.
 	uint64_t selection_revision() const { return selection_revision_; }
+
+	// Companion revision for retained COLOR payloads: bumped when any slot's
+	// blend actually changes (SetBlendAmount value writes and the tick's
+	// mode-2/5 fade ramps) — the mutations that alter select() color output
+	// without moving the selection topology or bumping selection_revision.
+	// A retained device may skip re-evaluating a cached selection whose
+	// slots carry no RgbGen style on frames where neither revision moved and
+	// its own ambient input held.
+	uint64_t color_revision() const { return color_revision_; }
+	// Whether the slot behind a handle carries an active RgbGen style
+	// (style != 0): its select() color varies with time/weather every frame,
+	// so a retained row holding it must re-evaluate per frame.
+	bool slot_gen_active(LightHandle handle) const;
 
 	// The corona billboard walk [orig: EffectWorld_RenderLightCoronas
 	// @ 0x5aaf40, called per world scene @ 0x5c96ad and per mirror scene
@@ -542,11 +564,41 @@ private:
 			bool collect_all_before_cap,
 			std::array<LightHandle, kQueryLimit> &out_handles) const;
 
+	// The slot-order collection snapshot select_for_draws scans (live,
+	// un-hidden slots), plus the 2D cell index over it. Both rebuild lazily
+	// when selection_revision_ moved; mutable because select_for_draws is
+	// const (they cache derived state only).
+	struct CompactSlot {
+		LightHandle handle;
+		std::array<int32_t, 3> aabb_min;
+		std::array<int32_t, 3> aabb_max;
+		std::array<int32_t, 3> position;
+	};
+	void refresh_compact_cache() const;
+
 	std::vector<Slot> slots_;
 	// Never reset by clear(): a handle issued before clear must not alias the
 	// first occupant of the rebuilt slot vector.
 	uint32_t next_generation_ = 1;
 	uint64_t selection_revision_ = 1;
+	uint64_t color_revision_ = 1;
+	bool select_index_enabled_ = true;
+	mutable std::vector<CompactSlot> compact_cache_;
+	mutable uint64_t compact_cache_revision_ = 0;
+	mutable bool compact_cache_valid_ = false;
+	// Cell index: counting-sorted (cell, compact-index) refs over the
+	// horizontal mission plane, oversize spans in their own bucket.
+	mutable std::vector<int32_t> grid_starts_;
+	mutable std::vector<uint32_t> grid_refs_;
+	mutable std::vector<uint32_t> grid_oversize_;
+	mutable int64_t grid_min_x_ = 0;
+	mutable int64_t grid_min_y_ = 0;
+	mutable int32_t grid_cols_ = 0;
+	mutable int32_t grid_rows_ = 0;
+	// Per-draw gather scratch: stamped dedup + the candidate index list.
+	mutable std::vector<uint32_t> gather_stamps_;
+	mutable uint32_t gather_stamp_value_ = 0;
+	mutable std::vector<uint32_t> gather_scratch_;
 	mutable LightSceneReport report_{};
 };
 
@@ -585,6 +637,43 @@ struct ModelLightOwner {
 // every other record — the fire barrels — spawns unowned and lights the
 // world [orig: Entity_SpawnGlowEffects @ 0x56c89f / @ 0x56c8bd].
 ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
+
+// The two witnessed groups one retained static atlas row declares for the
+// per-draw select — the same interior/owner pair the live-model pass stamps
+// per draw context (LightActiveGroups). A BUILDING row is its own interior
+// group at section zero and re-scopes the owner section to the exact ROBJ it
+// draws [orig: Terrain_RenderSectorModels pushes building/section 0 and
+// collect_render_objects_for_batch @ 0x5d8ff7 -> Lighting_SetOwnerLightGroup
+// (0, robjIndex) moves the owner section between the walks]; every other
+// static row is owned by its tagged static owner (section 0) and carries the
+// interior group the blink query at its placement origin resolved — the
+// building it stands inside plus that blink volume's section, the second
+// witnessed group [orig: setup_terrain_effect_for_entity @ 0x5c74a0 ->
+// Lighting_SetInteriorLightGroup @ 0x5a90e0]; outdoors (no hit) both
+// interior words stay zero.
+struct StaticLightRowInputs {
+	bool is_building = false;
+	uint64_t static_owner = 0;        // the row's tagged static owner id
+	int32_t robj_index = 0;           // the ROBJ this row draws (buildings)
+	bool blink_hit = false;           // the placement-origin blink query hit
+	uint64_t blink_owner_entity = 0;  // slot 0's containing building
+	int32_t blink_section = 0;        // and that volume's section
+};
+
+LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs);
+
+// The light_move round glow [orig: RoundData_SpawnRound @ 0x4ec8da — mode 1 /
+// duration -1, terrain disabled (flag 1024), handle at round+0x1B4]: the
+// spawn rides half a radius ABOVE the round [orig: @ 0x4ec8d6], while the
+// per-tick follow re-centers the SAME instance at the RAW round position
+// [orig: the SetPositionAndBounds follow @ 0x4eaa9f -> @ 0x5a9070], and
+// Projectile_ReleaseEffects clears it. Both as the lift along the world up
+// axis, in the presenter's float world units.
+inline constexpr float kRoundGlowSpawnLiftRadiusFraction = 0.5f;
+inline float round_glow_spawn_lift(float radius) {
+	return radius * kRoundGlowSpawnLiftRadiusFraction;
+}
+inline constexpr float kRoundGlowFollowLift = 0.0f;
 
 // The witnessed flicker register value for one light: the position hash into
 // the weather wave ring [orig: Light_TickGenBlock @ 0x5a8ae0 -> the global

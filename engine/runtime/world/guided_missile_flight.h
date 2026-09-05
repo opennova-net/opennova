@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <base/io/tick_rate.h>
 
 namespace opennova::world {
 
@@ -70,7 +71,7 @@ public:
 	// [orig: 39-age divisor @0x446543/@0x446644, clamped >= 1 @0x446548].
 	static constexpr int32_t kBoostFullAge = 39;
 	// [orig: the /0x3E in the speed build @0x446572/@0x446677].
-	static constexpr int32_t kTickDiv = 62;
+	static constexpr int32_t kTickDiv = io::kTicksPerSecondInt;
 	// Turn clamp default (~0.56 deg/tick) [orig: Entity_UpdateTurretAim
 	//  @0x445ccd/@0x445cd1 — the def-field<=0 fallback].
 	static constexpr int32_t kTurnDefault = 6734910;

@@ -11,6 +11,9 @@
 #include <algorithm>
 #include <utility>
 
+using namespace opennova::adm;
+using namespace opennova::bad;
+
 namespace opennova::simassets {
 
 namespace {

@@ -11,23 +11,23 @@ var _toast: Label = null
 func pick_at_crosshair(sim: Simulation, camera: Camera3D,
 		pick_list: DebugPickList, toast_mount: Node) -> void:
 	var pick := DebugEntityPicker.pick_at_crosshair(sim, camera)
-	if pick.is_empty():
+	if pick == null:
 		return
-	if not bool(pick.get("hit", false)):
-		var blocked := String(pick.get("blocked", ""))
+	if not pick.hit:
+		var blocked := pick.blocked
 		if blocked.is_empty():
 			_show_toast(toast_mount, "No entity in range.")
 		else:
 			_show_toast(toast_mount, "No entity (%s, %.0fu)." % [
-					blocked, float(pick.get("distance_units", 0.0))])
+					blocked, pick.distance_units])
 		return
 	pick_list.add(pick)
-	var pick_name := String(pick.get("name", ""))
+	var pick_name := pick.name
 	if pick_name.is_empty():
-		pick_name = String(pick.get("hit_class", "entity"))
+		pick_name = pick.hit_class
 	_show_toast(toast_mount, "Picked: %s #%d  (%.0fu)" % [
-			pick_name, int(pick.get("bms_id", 0)),
-			float(pick.get("distance_units", 0.0))])
+			pick_name, pick.bms_id,
+			pick.distance_units])
 
 
 func _show_toast(mount: Node, text: String) -> void:

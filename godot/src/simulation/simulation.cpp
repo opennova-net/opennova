@@ -3,12 +3,17 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
+#include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
+#include "simulation/hud_view_records.h" // RoundOutcome
+#include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
+#include "util/axes.h"
 
 #include "env/weather.h"
 #include <runtime/environment/environment_state.h>
+#include <base/io/fixed.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
+#include <runtime/inmatch/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -81,9 +86,12 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
-Simulation::Simulation() : session_(*this) {
+Simulation::Simulation() {
+	session_.set_tick_observer(this);
+	// The bare local role from construction; the shell's session choices
+	// (enable_listen_server / enable_host_listen / enable_join) replace it.
+	(void)install_role(std::make_unique<opennova::inmatch::LocalRole>());
 	reset_world();
-	set_process(false);
 }
 
 Simulation::~Simulation() {
@@ -98,13 +106,13 @@ void Simulation::reset_world() {
 	_release_weather_owner();
 	// The drawer's last-camera latch is mission-scoped: a stale one would
 	// hand the next mission's first rain frame a bogus (clamped) streak.
-	precipitation_draw_ = opennova::renderer::PrecipitationDrawState{};
-	joiner_bridge_.reset_world_stream();
+	assets_.precipitation_draw = opennova::renderer::PrecipitationDrawState{};
+	if (joiner_role_ != nullptr) joiner_role_->reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
 	// dead/respawn mirrors cannot tell the next mission's occupant apart
 	// from this one's by epoch: the lifecycle table dies with the world.
-	pool_present_lifecycle_.clear();
+	present_.pool_lifecycle.clear();
 	// One fresh kernel per load (ADR 0042 d3): the world, its systems, the
 	// sim asset caches, the local-player weapon/loadout/view state and the
 	// terrain field store all reset inside it. Retail reloads its model cache
@@ -119,64 +127,61 @@ void Simulation::reset_world() {
 	if (kernel_ != nullptr) {
 		kept_seat_specs = std::move(kernel_->seat_specs);
 		kept_mounted_graphics = std::move(kernel_->mounted_graphics);
-		kept_look_settings = kernel_->look_settings;
+		kept_look_settings = kernel_->local.look_settings;
 	}
 	kernel_ = std::make_unique<opennova::mission::MissionKernel>();
+	role_->bind(*kernel_);
 	kernel_->seat_specs = std::move(kept_seat_specs);
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
-	kernel_->look_settings = kept_look_settings;
+	kernel_->local.look_settings = kept_look_settings;
 	kernel_->set_asset_index(
-			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr);
+			assets_.root.is_valid() ? &assets_.root->native_index() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
-	// Mission-scoped, while weapon_profile_ is player-scoped and outlives every
+	kernel_->profile.set_active(runtime_profiling_enabled_);
+	// Mission-scoped, while player_.weapon_profile is player-scoped and outlives every
 	// load [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup
 	// path, not Game_StartMission]: the RESIDENT BUFFER is rebuilt per mission,
 	// so the next session must re-copy its side's page.
-	weapon_profile_seeded_side_ = -1;
+	player_.weapon_profile_seeded_side = -1;
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
-	hud_map_control_.reset_spawn();
+	player_.hud_map_control.reset_spawn();
 	apply_character_traits_to_world();
 	// The fresh World's per-class ATTRIBUTES words (the medic plate / map
 	// marker feed) come from the retained charattr table [orig: the
 	// process-scoped g_CharAttr outlives every mission, CharAttr_LoadFromDef
 	// @0x412140 runs once at boot; see docs/interface/hud-re.md].
 	sync_class_attribute_flags();
-	kernel_->world.projectile_authority = !joiner_;
-	kernel_->world.mp_session = host_listen_ || joiner_;
+	apply_session_rules();
 	world_installed_ = false;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
-	last_occlusion_build_us_ = 0;
-	last_occlusion_probe_us_ = 0;
-	last_present_snapshot_us_ = 0;
-	last_present_entity_count_ = 0;
+	present_.last_occlusion_build_us = 0;
+	present_.last_occlusion_probe_us = 0;
+	present_.last_snapshot_us = 0;
+	present_.last_entity_count = 0;
 	reset_occlusion_apply_baseline();
-	present_layout_.clear();
-	++present_layout_revision_;
+	present_.layout.clear();
+	++present_.layout_revision;
 	// The retained per-load shell inputs are mission-scoped: drop them with
 	// the world (the boot re-supplies them).
-	collision_item_db_.unref();
-	item_traits_db_.unref();
-	wire_collision_shape_by_type_.clear();
-	infantry_adm_resource_root_.unref();
-	infantry_adm_item_db_.unref();
-	// The decoded-row adm cache indexes the kernel's root-motion registry,
-	// which just died with it.
-	client_row_adm_by_type_.clear();
-	occlusion_culled_bms_.clear();
-	minimap_snapshot_valid_ = false;
+	assets_.collision_item_db.unref();
+	assets_.item_traits_db.unref();
+	assets_.infantry_adm_resource_root.unref();
+	assets_.infantry_adm_item_db.unref();
+	present_.occlusion_culled_bms.clear();
+	present_.minimap_snapshot_valid = false;
 	// Rebuild the kernel's terrain store from the retained TerrainData (the
 	// legacy pre-load set_terrain_height_field seam), then layer the shell-fed
 	// surface extras back on.
-	if (terrain_data_.is_valid() && terrain_data_->is_loaded()) {
-		const std::vector<uint8_t> &charmap = terrain_data_->get_charmap_indices();
+	if (assets_.terrain_data.is_valid() && assets_.terrain_data->is_loaded()) {
+		const std::vector<uint8_t> &charmap = assets_.terrain_data->get_charmap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
-				terrain_data_->get_cpt(), terrain_data_->get_trn(),
+				assets_.terrain_data->get_cpt(), assets_.terrain_data->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
-				terrain_data_->get_charmap_width(),
-				terrain_data_->get_charmap_height());
+				assets_.terrain_data->get_charmap_width(),
+				assets_.terrain_data->get_charmap_height());
 	}
 	apply_terrain_to_ai();
 	// The fresh world's collision/mounted-pose providers wire immediately (the
@@ -199,7 +204,7 @@ void Simulation::seed_weather(const opennova::world::WeatherSeed &p_seed) {
 }
 
 void Simulation::set_weather_render_owner(Weather *p_owner) {
-	weather_owner_id_ = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
+	assets_.weather_owner_id = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
 										: ObjectID();
 	if (kernel_ == nullptr) return;
 	kernel_->weather_render =
@@ -210,10 +215,10 @@ void Simulation::_release_weather_owner() {
 	if (kernel_ != nullptr) {
 		kernel_->weather_render = nullptr;
 	}
-	if (!weather_owner_id_.is_valid()) return;
+	if (!assets_.weather_owner_id.is_valid()) return;
 	Weather *owner = Object::cast_to<Weather>(
-			ObjectDB::get_instance(weather_owner_id_));
-	weather_owner_id_ = ObjectID();
+			ObjectDB::get_instance(assets_.weather_owner_id));
+	assets_.weather_owner_id = ObjectID();
 	if (owner != nullptr) {
 		owner->release_simulation();
 	}
@@ -228,18 +233,20 @@ bool Simulation::settle_weather_mission_start() {
 	return true;
 }
 
-Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
-		const Vector3 &p_camera_right, const Vector3 &p_camera_up,
+const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
+		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 		int p_terrain_light_rgb) {
-	Dictionary out;
-	out["drops"] = 0;
-	if (!world_installed_ || kernel_ == nullptr) return out;
+	if (!world_installed_ || kernel_ == nullptr) {
+		assets_.precipitation_frame.clear();
+		assets_.precipitation_frame.snow = false;
+		return assets_.precipitation_frame;
+	}
 	opennova::world::WeatherState &weather = kernel_->world.weather;
 	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
 	const int32_t cam_q16[3] = {
-		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.x) * 65536.0)),
-		static_cast<int32_t>(std::lround(static_cast<double>(-p_camera.z) * 65536.0)),
-		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.y) * 65536.0)),
+		opennova::io::float_to_fp16_16_round_sat(p_camera.x),
+		opennova::io::float_to_fp16_16_round_sat(-p_camera.z),
+		opennova::io::float_to_fp16_16_round_sat(p_camera.y),
 	};
 	// The per-render update precedes the compile (retail the drawer calls
 	// update_weather_particle_positions first @ 0x5dee65).
@@ -252,71 +259,26 @@ Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
 	camera.up[0] = p_camera_up.x;
 	camera.up[1] = p_camera_up.y;
 	camera.up[2] = p_camera_up.z;
-	opennova::renderer::PrecipitationDrawFrame &frame = precipitation_frame_;
+	opennova::renderer::PrecipitationDrawFrame &frame = assets_.precipitation_frame;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
-			static_cast<uint32_t>(p_terrain_light_rgb), camera, precipitation_draw_, frame);
-	// The positions only: the per-drop uv triple {(0.5, 0), (0, 1), (1, 1)}
-	// is a constant of the streak build the presenter keeps in its static
-	// attribute stream.
-	PackedVector3Array positions;
-	const int64_t verts = static_cast<int64_t>(frame.drops) * 3;
-	positions.resize(verts);
-	Vector3 *pw = positions.ptrw();
-	for (int64_t i = 0; i < verts; ++i) {
-		const float *v = frame.vertices.data() + i * 5;
-		pw[i] = Vector3(v[0], v[1], v[2]);
-	}
-	out["positions"] = positions;
-	out["drops"] = frame.drops;
-	out["color"] = static_cast<int64_t>(frame.color_argb);
-	out["snow"] = frame.snow;
-	return out;
+			static_cast<uint32_t>(p_terrain_light_rgb), camera, assets_.precipitation_draw, frame);
+	return frame;
 }
 
-Array Simulation::drain_weather_sounds() {
-	Array out;
-	if (!world_installed_ || kernel_ == nullptr) return out;
-	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.weather_sounds) {
-		Dictionary d;
-		d["distance"] = static_cast<float>(ev.distance_q16) / 65536.0f;
-		d["bearing"] = static_cast<int>(ev.bearing);
-		out.push_back(d);
-	}
-	kernel_->world.weather_sounds.clear();
-	return out;
+void Simulation::drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_ || kernel_ == nullptr) return;
+	r_events.swap(kernel_->world.out.weather_sounds);
+	kernel_->world.out.weather_sounds.clear();
 }
 
-Dictionary Simulation::get_weather_state() const {
-	Dictionary out;
-	const opennova::world::WeatherState *w = weather_state();
-	if (w == nullptr) return out;
-	out["valid"] = w->valid;
-	out["generation"] = static_cast<int64_t>(w->generation);
-	out["command_generation"] = static_cast<int64_t>(w->command_generation);
-	out["fog_target_q16"] = static_cast<int64_t>(w->fog_target_q16());
-	out["fog_current_q16"] = static_cast<int64_t>(w->fog_current_q16());
-	out["fog_accel_clamp"] = static_cast<int64_t>(w->fog_accel_clamp());
-	out["fog_type"] = w->fog_type;
-	out["tod_fixed24"] = static_cast<int64_t>(w->tod_fixed24);
-	out["tod_advance_per_tick"] = static_cast<int64_t>(w->tod_advance_per_tick);
-	out["quake_ticks"] = static_cast<int64_t>(w->quake_ticks);
-	out["cloud_scroll_rate_target"] = static_cast<int64_t>(w->cloud_scroll_rate_target);
-	out["cloud_scroll_rate"] = static_cast<int64_t>(w->cloud_scroll_rate());
-	out["rain_pct_current_q16"] = static_cast<int64_t>(w->rain_pct_current_q16());
-	out["rain_pct_target_q16"] = static_cast<int64_t>(w->rain_pct_target_q16());
-	out["overcast_blend_q16"] = static_cast<int64_t>(w->overcast_blend_q16());
-	out["overcast_target_q16"] = static_cast<int64_t>(w->overcast_target_q16());
-	out["sun_dim_pct_q16"] = static_cast<int64_t>(w->sun_dim_pct_q16());
-	out["sky_height_q16"] = static_cast<int64_t>(w->sky_height_q16());
-	out["precipitation_kind"] = static_cast<int64_t>(w->precipitation_kind);
-	out["lightning_color"] = static_cast<int64_t>(w->lightning_color);
-	out["color_fade_ticks"] = static_cast<int64_t>(w->color_fade_ticks);
-	out["wind_scale"] = static_cast<int64_t>(w->wind_scale());
-	out["lightning_timer_a"] = w->core.lightning.timer_a;
-	out["lightning_timer_b"] = w->core.lightning.timer_b;
-	out["lightning_level"] = w->core.lightning.level;
-	out["night"] = w->is_night_phase();
+Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
+	opennova::devtools::EnvironmentSnapshot snapshot;
+	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();
+	Ref<EnvironmentSnapshot> out;
+	out.instantiate();
+	out->assign(snapshot);
 	return out;
 }
 
@@ -365,9 +327,10 @@ bool Simulation::native_environment_snapshot(
 	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
 	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
 	out.fov_degrees = static_cast<int32_t>(
-			opennova::world::player_view_fov_h_deg(kernel_->view, 0, 1.0f));
+			opennova::world::player_view_fov_h_deg(kernel_->local.view, 0, 1.0f));
 	out.sky_height_metres = w.sky_height_q16() >> 16;
 	out.sky_speed = w.cloud_scroll_rate() >> 10;
+	out.sky_speed_target = w.cloud_scroll_rate_target >> 10;
 	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
 	out.rain_target_pct = static_cast<int32_t>((100u * w.rain_pct_target_q16()) >> 16);
 	out.overcast_pct = static_cast<int32_t>((100u * w.overcast_blend_q16()) >> 16);
@@ -383,7 +346,7 @@ bool Simulation::native_environment_snapshot(
 	out.lightning_timer_a = core.lightning.timer_a;
 	out.lightning_timer_b = core.lightning.timer_b;
 	out.lightning_level = core.lightning.level;
-	out.authority = !joiner_;
+	out.authority = !is_joiner();
 	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
 	return true;
 }
@@ -391,7 +354,7 @@ bool Simulation::native_environment_snapshot(
 // The MCP/debug rows' commands: authority-gated forwarders into the ONE
 // command layer (world::EntityCommands, ADR 0042 d5).
 #define OPENNOVA_WEATHER_COMMAND(call)                                    \
-	if (!world_installed_ || joiner_ || kernel_ == nullptr) return false; \
+	if (!world_installed_ || is_joiner() || kernel_ == nullptr) return false; \
 	kernel_->world.commands.call;                                         \
 	return true
 
@@ -408,6 +371,14 @@ bool Simulation::command_fog_type(int p_type) { OPENNOVA_WEATHER_COMMAND(set_fog
 bool Simulation::command_lightning_flash() { OPENNOVA_WEATHER_COMMAND(lightning_flash()); }
 bool Simulation::command_lightning_far_flash() { OPENNOVA_WEATHER_COMMAND(lightning_far_flash()); }
 bool Simulation::command_wind_scale(int p_value) { OPENNOVA_WEATHER_COMMAND(set_wind_scale(p_value)); }
+bool Simulation::command_sky_height(int p_height_raw) { OPENNOVA_WEATHER_COMMAND(set_sky_height(p_height_raw)); }
+bool Simulation::command_sun_fade(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(sun_fade(p_percent, p_seconds)); }
+bool Simulation::command_color_fade(int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_color_fade(p_seconds)); }
+bool Simulation::command_weather_color(int p_target, int p_rgb) {
+	OPENNOVA_WEATHER_COMMAND(set_weather_color(
+			static_cast<opennova::world::WeatherColorTarget>(p_target), static_cast<uint32_t>(p_rgb)));
+}
+bool Simulation::command_lightning_color(int p_rgb) { OPENNOVA_WEATHER_COMMAND(set_lightning_color(static_cast<uint32_t>(p_rgb))); }
 
 #undef OPENNOVA_WEATHER_COMMAND
 
@@ -419,10 +390,10 @@ void Simulation::apply_terrain_to_ai() {
 	// The placed-tile override rides the surface view (D-SND-15). With no
 	// charmap the sampler's early return-1 skips the walk exactly like
 	// retail, so attaching the tiles unconditionally is faithful.
-	kernel_->world.surface_map.tiles =
-			surface_tiles_.empty() ? nullptr : surface_tiles_.data();
-	kernel_->world.surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-	kernel_->world.surface_map.tile_surface = tile_surface_table_.data();
+	kernel_->world.tables.surface_map.tiles =
+			assets_.surface_tiles.empty() ? nullptr : assets_.surface_tiles.data();
+	kernel_->world.tables.surface_map.tile_count = static_cast<int32_t>(assets_.surface_tiles.size());
+	kernel_->world.tables.surface_map.tile_surface = assets_.tile_surface_table.data();
 	apply_sound_state_to_world();
 }
 
@@ -433,11 +404,11 @@ void Simulation::apply_terrain_to_ai() {
 // header — not re-applied here.)
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
-	kernel_->world.sound_profiles.clear();
-	if (!sndprof_text_.empty())
-		kernel_->world.sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
-		                             sndprof_text_.size());
-	kernel_->world.env.water_z = env_water_z_q16_;
+	kernel_->world.tables.sound_profiles.clear();
+	if (!assets_.sndprof_text.empty())
+		kernel_->world.tables.sound_profiles.parse(reinterpret_cast<const char *>(assets_.sndprof_text.data()),
+		                             assets_.sndprof_text.size());
+	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
 }
 
@@ -446,7 +417,7 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 	// the engine's one owning cpt/trn(+charmap) field builder (ADR 0042 d4),
 	// living on the kernel; the Ref is retained so a reload (which recreates
 	// the kernel) can rebuild the store from the same source.
-	terrain_data_ = p_terrain;
+	assets_.terrain_data = p_terrain;
 	kernel_->terrain_store.clear();
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
 		const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
@@ -459,64 +430,51 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 }
 
 void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
-	sndprof_text_.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
+	assets_.sndprof_text.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
 	apply_sound_state_to_world();
 }
 
 void Simulation::apply_character_traits_to_world() {
 	if (!kernel_) return;
-	kernel_->world.character_traits.clear();
-	for (const CharacterSexRow &row : character_sex_rows_)
-		kernel_->world.character_traits.set(row.character_id, row.female);
+	kernel_->world.tables.character_traits.clear();
+	for (const CharacterSexRow &row : assets_.character_sex_rows)
+		kernel_->world.tables.character_traits.set(row.character_id, row.female);
 }
 
 void Simulation::set_water_z(double p_water_y) {
-	env_water_z_q16_ = static_cast<int32_t>(p_water_y * 65536.0);
+	assets_.env_water_z_q16 = static_cast<int32_t>(p_water_y * 65536.0);
 	if (kernel_) {
-		kernel_->world.env.water_z = env_water_z_q16_;
+		kernel_->world.env.water_z = assets_.env_water_z_q16;
 		kernel_->sync_water_plane();
 	}
 }
 
-Array Simulation::drain_slot_sounds() {
-	Array out;
-	if (!world_installed_) return out;
-	for (const opennova::world::SoundSlotEvent &ev : kernel_->world.slot_sounds) {
-		Dictionary d;
-		d["set"] = String(ev.set_name);
-		// Mission-frame 16.16 -> godot (x, z, -y), same mapping as the fire drain.
-		d["pos"] = Vector3(static_cast<float>(ev.pos[0]) / 65536.0f,
-		                   static_cast<float>(ev.pos[2]) / 65536.0f,
-		                   static_cast<float>(-ev.pos[1]) / 65536.0f);
-		d["handle"] = ev.source_handle;
-		d["slot"] = ev.slot;
-		out.push_back(d);
-	}
-	kernel_->world.slot_sounds.clear();
-	return out;
+void Simulation::drain_slot_sounds(std::vector<opennova::world::SoundSlotEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_) return;
+	// The rows cross in the mission frame (16.16); the fire pass axis-maps
+	// (x, z, -y) as it plays them, the same mapping as the fire drain.
+	r_events.swap(kernel_->world.out.slot_sounds);
+	kernel_->world.out.slot_sounds.clear();
 }
 
-Array Simulation::drain_sound_emitters() {
-	Array out;
-	if (!world_installed_) return out;
-	const std::vector<opennova::world::SoundEmitterEvent> events =
-			kernel_->world.sound_emitters.drain();
+void Simulation::drain_sound_emitter_events(
+		std::vector<opennova::world::SoundEmitterEvent> &r_events) {
+	r_events.clear();
+	if (!world_installed_) return;
+	// Mission coordinates on the rows; the audio layer axis-maps (x, z, -y)
+	// like every other positional presentation drain.
+	r_events = kernel_->world.out.sound_emitters.drain();
+}
+
+TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
+	TypedArray<SoundEmitterRow> out;
+	std::vector<opennova::world::SoundEmitterEvent> events;
+	drain_sound_emitter_events(events);
 	for (const opennova::world::SoundEmitterEvent &ev : events) {
-		Dictionary d;
-		d["source_spawn_id"] = static_cast<int64_t>(ev.source_spawn_id);
-		d["handle"] = ev.source_handle;
-		d["source_bms_id"] = ev.source_bms_id;
-		// Mission coordinates -> Godot (x, z, -y), matching every other
-		// positional presentation drain.
-		d["pos"] = Vector3(ev.pos.x, ev.pos.z, -ev.pos.y);
-		d["lane"] = ev.lane;
-		d["slot"] = ev.slot;
-		d["lifetime"] = ev.lifetime_ticks;
-		d["emitted_tick"] = ev.emitted_tick;
-		d["pitch_q16"] = ev.pitch_q16;
-		d["volume_q8_8"] = ev.volume_q8_8;
-		d["source_only"] = ev.source_only;
-		d["set"] = String(ev.set_name.c_str());
+		Ref<SoundEmitterRow> d;
+		d.instantiate();
+		d->assign(ev);
 		out.push_back(d);
 	}
 	return out;
@@ -533,86 +491,68 @@ void Simulation::finish_kernel_boot() {
 	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
-	hud_map_control_.set_mission_map_zoom(kernel_->mission.header.map_zoom);
+	player_.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
 	// The score row keys off the mission's game-mode bit, so re-resolve it now
 	// that the flags are known (the config may load before OR after the boot).
 	refresh_score_rules();
-	if (!kernel_->wac_loaded && wac_program_.is_valid() && wac_program_->is_ok())
-		kernel_->wac.set_program(wac_program_->native_program());
+	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
+		kernel_->wac.set_program(assets_.wac_program->native_program());
 }
 
-// The kernel boot's bringup_net_session hook for this sim's role: the listen
-// host stands its npruntime session up between the world wiring and
-// register_mission_systems [orig: SinglePlayer_StartMission @0x561af0]; a
-// joiner (re)builds its non-authority ClientRuntime at the same point. The
-// bare no-net world installs only the decode-view class table.
+// The kernel boot's bringup_net_session hook: the active role's own bring-up
+// (the listen host stands its npruntime session up between the world wiring
+// and the system registration [orig: SinglePlayer_StartMission @0x561af0];
+// a joiner (re)builds its non-authority ClientRuntime at the same point; the
+// bare no-net world installs nothing), then the binding's tail: the live
+// runtime pointer, the retained join inputs on a fresh joiner runtime, the
+// joiner's per-load loadout/zone resets, and the decode-view class table.
 std::function<void()> Simulation::role_bringup_hook() {
-	if (listen_server_ && !joiner_) {
-		return [this] {
-			bringup_host_runtime();
-			install_item_class_resolver();
-		};
-	}
-	if (joiner_) {
-		return [this] {
-			// A retail-style menu join has already authenticated and learned the
-			// map from S2C 0x7B before this local load. Preserve that exact
-			// runtime/socket; rebuilding it here would silently reconnect and
-			// discard the witnessed pre-load session. Direct-loaded callers have
-			// not started yet and retain the historical fresh-runtime reset.
-			if (!joiner_bridge_.started() || !runtime_) {
-				runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
-				runtime_->set_join_request(
-						join_role_, join_spectator_password_);
-				joiner_bridge_.reset_for_runtime_rebuild();
-				install_charattr_challenge_table();
-				install_character_join_vars();
-				install_join_integrity_profile();
-				install_expansion_version_root();
-			}
-			runtime_->set_world_ready(true);
-			// The shell owns the deploy-map screen: a pick-required join parks at
-			// the player's pick instead of auto-answering parameter-0 (headless
-			// ClientRuntime callers keep the auto default). [orig: the DEATH
-			// screen; net-re §5.61]
-			runtime_->set_player_paced_deployment(true);
-			joiner_bridge_.reset_for_load(runtime_->deployment_release_revision());
-			joiner_applied_loadout_revision_ = 0;
-			kernel_->loadout.pending_player_class = -1; // the shell re-applies the kit after each load
-			deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
+	opennova::inmatch::Role &role = active_role();
+	if (host_role_ != nullptr) host_role_->stage_bringup(host_bringup());
+	return [this, &role] {
+		const bool fresh_joiner_runtime = role.bring_up();
+		runtime_ = role.client_runtime();
+		if (fresh_joiner_runtime) {
+			install_charattr_challenge_table();
+			install_character_join_vars();
+			install_join_integrity_profile();
+			install_expansion_version_root();
+		}
+		if (is_joiner()) {
+			net_.joiner_applied_loadout_revision = 0;
+			net_.deploy_zone_registry_built = false; // fresh world -> fresh zone registry
 			// Re-arm the 0x2F submission seam from the carried sim state. The fresh
 			// kernel holds an EMPTY weapon catalog, so this is a deliberate no-op
 			// that leaves the capture-default fallback armed; the real arm happens
 			// when the shell's load_weapon_table lands.
 			push_joiner_loadout_kit();
-			install_item_class_resolver();
-		};
-	}
-	return [this] { install_item_class_resolver(); };
+		}
+		install_item_class_resolver();
+	};
 }
 
 void Simulation::apply_host_session_mission_header(const opennova::bms::File &file) {
 	std::vector<uint8_t> header_blob;
 	std::string error;
 	if (opennova::bms::encode_loaded_header_blob(file, header_blob, error)) {
-		host_session_config_.mission_header_blob = std::move(header_blob);
+		net_.host_session_config.mission_header_blob = std::move(header_blob);
 	} else {
-		host_session_config_.mission_header_blob.clear();
+		net_.host_session_config.mission_header_blob.clear();
 	}
 
 	const std::string mission_name = file.get_mission_name();
 	if (!mission_name.empty()) {
-		host_session_config_.mission_name = mission_name;
-		if (host_session_config_.spawn_names.empty()) {
-			host_session_config_.spawn_names.push_back(mission_name);
+		net_.host_session_config.mission_name = mission_name;
+		if (net_.host_session_config.spawn_names.empty()) {
+			net_.host_session_config.spawn_names.push_back(mission_name);
 		}
 	}
-	// P7: host_session_config_ is consumed at the next load by bringup_host_runtime
-	// (configure_session_runtime + the §5.1 reactive-reply config); nothing to refresh live.
+	// net_.host_session_config is consumed by create_session at the next load through
+	// bringup_host_runtime; there is deliberately nothing to refresh live.
 }
 
 // The production boot (S9/ADR 0042 d3): the kernel owns the ordered step
-// table (mission_kernel.cpp — run_mission_boot's ONE filler); this entry only
+// sequence (MissionKernel::boot, recorded in its boot_trace); this entry only
 // converts the Godot Refs into the kernel's sources (the mounted index, the
 // parsed items.def rows, the terrain documents, the mission text) and runs the
 // binding-side legs the kernel deliberately leaves to the shell (net role
@@ -658,30 +598,30 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	set_terrain_til_data(p_terrain_til);
 	// The previous mission's retained terrain must not rebuild into the fresh
 	// kernel: set_terrain_height_field below builds the store exactly once.
-	terrain_data_.unref();
+	assets_.terrain_data.unref();
 
 	reset_world();
 	if (p_resource_root.is_valid()) set_asset_root(p_resource_root);
 	if (p_item_db.is_valid()) {
 		// Hand the shell's parsed items.def rows over as the kernel's item
 		// table (the Ref pins their lifetime for the kernel's).
-		item_traits_db_ = p_item_db;
+		assets_.item_traits_db = p_item_db;
 		kernel_->set_items_table(&p_item_db->native_items());
 	}
-	joiner_bridge_.set_wire_header_world(p_mission->is_wire_header_only());
-	kernel_->open_document(p_mission->native_document().bms_file(),
+	kernel_->wire_header_world = p_mission->is_wire_header_only();
+	kernel_->open_document(p_mission->native_file(),
 			std::string(p_mission_file_basename.utf8().get_data()), files);
 	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
 	// exactly the ctest embedder's order; the D-SND-15 .TSD tile table rides
 	// beside it.
 	set_terrain_height_field(p_terrain);
-	tile_surface_table_.fill(0);
+	assets_.tile_surface_table.fill(0);
 	if (p_terrain.is_valid() && p_terrain->is_loaded() && files.valid()) {
 		opennova::terrain::SurfaceTileFileSource tile_files;
 		tile_files.has_file = files.has_file;
 		tile_files.read_file = files.read_file;
 		opennova::terrain::resolve_tileset_surface_table(tile_files,
-				p_terrain->get_trn().tilestrip, tile_surface_table_.data());
+				p_terrain->get_trn().tilestrip, assets_.tile_surface_table.data());
 	}
 	apply_terrain_to_ai();
 	// SndProf.def -> the footstep/foley/landing/scream slot table: the kernel
@@ -698,7 +638,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 
 	ms::KernelBootOptions options;
 	options.playable = p_playable;
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
+	// The shell owns the terrain field's parsed-document entry (the store the
+	// setter above built, or none): the kernel never loads one from files here.
+	options.terrain = false;
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
@@ -706,8 +649,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 			? std::string(ms::kDefaultInfantryAdm)
 			: std::string(p_infantry_adm.utf8().get_data());
 	options.people_name_resolver = [this](int32_t index) {
-		const auto it = mission_people_names_.find(index);
-		return it != mission_people_names_.end() ? it->second : std::string();
+		const auto it = net_.mission_people_names.find(index);
+		return it != net_.mission_people_names.end() ? it->second : std::string();
 	};
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -721,12 +664,12 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// net-free boot cannot make: the wire entity classes from the netsim
 	// ItemReplicationCatalog, then the collision Ref retention.
 	if (p_resource_root.is_valid() && p_item_db.is_valid()) {
-		infantry_adm_resource_root_ = p_resource_root;
-		infantry_adm_item_db_ = p_item_db;
+		assets_.infantry_adm_resource_root = p_resource_root;
+		assets_.infantry_adm_item_db = p_item_db;
 	}
 	if (p_item_db.is_valid()) {
 		resolve_item_traits(p_item_db);
-		collision_item_db_ = p_item_db;
+		assets_.collision_item_db = p_item_db;
 	}
 	// score.ini rides the boot's session-data step. DIVERGENCE (placement):
 	// retail loads it far earlier, when it builds the default gametype settings
@@ -736,7 +679,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	if (p_resource_root.is_valid() &&
 			load_score_config(p_resource_root, "score.ini") != OK)
 		UtilityFunctions::push_warning(
-				"MissionPresentation: score.ini not loaded — kill scoring inert (no 0x81)");
+				"MissionRoot: score.ini not loaded — kill scoring inert (no 0x81)");
 	// In a live session the resident kit buffer is the assigned side's profile
 	// page (retail's Game_StartMission copy into restrictionData
 	// [orig: @0x525813]); the kernel's table load built the pool from the
@@ -752,18 +695,18 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;
 	reset_world();
-	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
+	// Do not infer this from the role: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
 	// Only the production 616-byte S2C header needs wire-time materialization.
-	joiner_bridge_.set_wire_header_world(p_mission->is_wire_header_only());
+	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with NO file source: the file-fed boot steps skip and
 	// this stays the bare promote + systems + role bring-up path.
-	kernel_->open_document(p_mission->native_document().bms_file(),
+	kernel_->open_document(p_mission->native_file(),
 			std::string(), opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -779,12 +722,12 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 void Simulation::build_demo_mission() {
 	if (!begin_session_load()) return;
 	reset_world();
-	host_session_config_.mission_file = "demo.bms";
+	net_.host_session_config.mission_file = "demo.bms";
 	kernel_->open_document(make_demo_mission(), std::string(),
 			opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
 	options.playable = false;
-	options.joiner = joiner_;
+	options.joiner = is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -796,130 +739,40 @@ void Simulation::build_demo_mission() {
 	complete_session_load();
 }
 
-bool Simulation::advance_world_tick() {
-	if (!world_installed_) return false;
-	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates
-	// to every 62nd tick and the BMS evaluator quarter-passes every 16th,
-	// inside their systems — exactly where the original keeps those dividers.
-	// A render frame runs 0..N of these; the accumulator that decides N lives
-	// in inmatch::Session [orig: Game_MainLoop @ 0x52b630].
-	const uint64_t sim_start =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-	if (listen_server_) {
-		// The listen frame [orig: Game_ProcessMainFrame @0x5263f0] is the ONE
-		// inmatch::listen_host::frame over the kernel; host_pump wraps it with
-		// the Godot device legs (viewport seam, socket adapter, fold clocks).
-		host_pump();
-		if (runtime_profiling_enabled_)
-			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-		return true;
-	}
-	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
-		joiner_pump();
-		if (runtime_profiling_enabled_)
-			frame_phase_perf_.client_decode_us +=
-					static_cast<int64_t>(last_net_tick_us_);
-		const uint64_t adm_start =
-				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-		kernel_->resolve_new_infantry_adm_ids();
-		if (runtime_profiling_enabled_) {
-			frame_phase_perf_.adm_resolve_us +=
-					static_cast<int64_t>(opennova::io::perf_now_us() - adm_start);
-			last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-		}
-		return true;
-	}
-	// No-net editor/unit path: the kernel's bare authoritative tick (pre-tick
-	// input apply, ONE run_logic_tick, the local view/weapon pumps, the
-	// new-soldier .adm ground), plus the binding's medic-cooldown leg. The
-	// view arbiter's session inputs refresh first (the local-dead bit lives
-	// on the world even without a session).
-	kernel_->view_session_inputs = local_view_session_inputs();
-	opennova::world::LogicTickPerf world_perf;
-	kernel_->tick_no_net(runtime_profiling_enabled_ ? &world_perf : nullptr);
-	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
-	if (runtime_profiling_enabled_) {
-		// The direct tick attributes its world phases onto the same F3 keys
-		// the listen frame's server pump fills.
-		opennova::np::ServerTickPerf &server = frame_phase_perf_.host_session.server;
-		server.world_setup_us += world_perf.setup_us;
-		server.world_scripts_us += world_perf.scripts_us;
-		server.world_ai_us += world_perf.ai_us;
-		server.world_attachments_us += world_perf.attachments_us;
-		server.world_throwables_us += world_perf.throwables_us;
-		server.world_weapons_us += world_perf.weapons_us;
-		server.world_projectiles_us += world_perf.projectiles_us;
-		server.world_destruction_us += world_perf.destruction_us;
-		server.world_housekeeping_us += world_perf.housekeeping_us;
-		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
-	}
-	return true;
-}
-
+// The Godot legs after the role's baseline restore (reset_session): the
+// engine half — the local weapon's epoch resets (the borrowed-UseGun
+// reinstall event), the world + WAC runtime rewind, the view reset, the
+// fresh-soldier .adm re-ground and the shell's item-trait re-stamp — is the
+// kernel's restore; the host role rebuilt its HostClient view from the
+// restored pools and re-armed the minimap scan; the joiner role re-armed its
+// rematerialization fold.
 void Simulation::restore_world_baseline() {
 	if (!world_installed_) return;
-	// The engine half — the local weapon's epoch resets (the borrowed-UseGun
-	// reinstall event), the world + WAC runtime rewind, the view reset, and
-	// the fresh-soldier .adm re-ground — is the kernel's restore.
-	if (!kernel_->restore_baseline()) return;
+	runtime_ = active_role().client_runtime();
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
-	minimap_snapshot_valid_ = false;
-	if (joiner_bridge_.wire_header_world()) {
+	present_.minimap_snapshot_valid = false;
+	if (kernel_->wire_header_world) {
 		// ClientState survives Stop/Start, while the body-empty baseline removes
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		joiner_bridge_.reset_materialization();
-		deploy_zone_registry_built_ = false;
+		net_.deploy_zone_registry_built = false;
 	}
-	// The baseline is captured during the kernel's finish_load, before the
-	// shell supplies items.def traits. Restore those authoritative callback/
-	// health traits first; the encoder and the client classifier must agree on
-	// every 0x0A record width.
-	if (item_traits_db_.is_valid()) resolve_item_traits(item_traits_db_);
-	if (listen_server_ && !joiner_ && runtime_) {
-		// Stop restores the authoritative registry, including NoNetworkCallback
-		// attachment children, but those children never have a live 0x0A body that
-		// could recreate a row erased from the host's decoded ClientState. Start a
-		// fresh HostClient view and replay the same production load batches, in the
-		// witnessed stream order, so restored runtime identities materialize now
-		// instead of inheriting a prior play epoch's rows and handle caches.
-		host_loop_.clear();
-		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
-		install_item_class_resolver();
-		opennova::netsim::ClientReplicaPipeline &view = runtime_->view();
-		view.apply(0x10, opennova::encode_static_entity_batch(
-				opennova::netsim::build_pool2_static_batch(kernel_->world)));
-		view.apply(0x0D, opennova::encode_pool_spawn_batch(
-				opennova::netsim::build_pool1_spawn_batch(kernel_->world)));
-		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				opennova::netsim::build_pool0_organic_batch(
-						kernel_->world, kernel_->world.cached.local_player)));
-		view.apply(0x20, opennova::encode_pool3_sync_batch(
-				opennova::netsim::build_pool3_marker_batch(kernel_->world)));
-		// The restart resets every client view to EMPTY retained map banks,
-		// but each connection's minimap initial scan is a one-shot latch the
-		// first epoch already consumed. Re-arm it so the producer re-sends
-		// the persistent pool-2 building/zone markers to every in-match
-		// connection (the loopback view above and remote joiners alike);
-		// SpawnPoint rows and the pool-1 phase walk re-cover the rest.
-		opennova::np::Server_RearmMinimapInitialScan(ctx_);
-	}
-	if (collision_item_db_.is_valid())
-		resolve_collision_instances(collision_item_db_);
+	if (assets_.collision_item_db.is_valid())
+		resolve_collision_instances(assets_.collision_item_db);
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
 	invalidate_present_effect_pose_cache();
 }
 
-void Simulation::set_wac_program(const Ref<WacProgram> &p_program) {
-	wac_program_ = p_program;
+void Simulation::set_wac_program(std::shared_ptr<WacProgram> p_program) {
+	assets_.wac_program = std::move(p_program);
 	if (!world_installed_) {
 		return; // the next kernel boot applies it (finish_kernel_boot)
 	}
-	if (wac_program_.is_valid() && wac_program_->is_ok()) {
-		kernel_->wac.set_program(wac_program_->native_program());
+	if (assets_.wac_program && assets_.wac_program->is_ok()) {
+		kernel_->wac.set_program(assets_.wac_program->native_program());
 	} else {
 		kernel_->wac.set_program(opennova::wac::Program());
 	}
@@ -940,37 +793,26 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	opennova::wac::CompileEnv env;
 	env.registry = &kernel_->world.registry;
 	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
-	Ref<WacProgram> holder;
-	holder.instantiate();
+	auto holder = std::make_shared<WacProgram>();
 	// Adopt the registry-compiled program into the holder so the retained
 	// WacProgram carries its diagnostics either way.
 	holder->adopt(std::move(program));
-	wac_program_ = holder;
-	if (!wac_program_->is_ok()) {
+	assets_.wac_program = std::move(holder);
+	if (!assets_.wac_program->is_ok()) {
 		return false;
 	}
-	kernel_->wac.set_program(wac_program_->native_program());
+	kernel_->wac.set_program(assets_.wac_program->native_program());
 	return true;
 }
 
 bool Simulation::run_mission_start_wac() {
-	if (!world_installed_ || joiner_) return false;
+	if (!world_installed_ || is_joiner()) return false;
 	return kernel_->wac.execute_initial(kernel_->world);
 }
 
 void Simulation::seal_mission_start_baseline() {
-	if (!world_installed_ || joiner_) return;
+	if (!world_installed_ || is_joiner()) return;
 	kernel_->capture_baseline();
-}
-
-Dictionary Simulation::get_wac_state() const {
-	Dictionary out;
-	out["loaded"] = kernel_ != nullptr && kernel_->wac.vm().loaded();
-	out["paused"] = kernel_ != nullptr && kernel_->wac.paused;
-	out["runs"] = kernel_ != nullptr ? static_cast<int64_t>(kernel_->wac.runs()) : 0;
-	out["event_count"] = kernel_ != nullptr ? kernel_->wac.program().event_count : 0;
-	out["code_size"] = kernel_ != nullptr ? static_cast<int>(kernel_->wac.program().code.size()) : 0;
-	return out;
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
@@ -978,14 +820,17 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	runtime_profiling_enabled_ = p_enabled;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
-	last_present_snapshot_us_ = 0;
-	last_occlusion_build_us_ = 0;
-	last_occlusion_probe_us_ = 0;
+	present_.last_snapshot_us = 0;
+	present_.last_occlusion_build_us = 0;
+	present_.last_occlusion_probe_us = 0;
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
-	frame_phase_perf_ = {};
-	kernel_->collision.set_trace_profile_enabled(p_enabled);
+	if (kernel_ != nullptr) {
+		kernel_->profile.reset();
+		kernel_->profile.set_active(p_enabled);
+		kernel_->collision.set_trace_profile_enabled(p_enabled);
+	}
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
@@ -1017,13 +862,13 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	Dictionary out;
 	out["loaded"] = is_loaded();
 	out["listen_server"] = listen_server_;
-	out["ai_count"] = kernel_ ? kernel_->ai.count() : 0;
-	out["present_entity_count"] = last_present_entity_count_;
+	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
+	out["present_entity_count"] = present_.last_entity_count;
 	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
 	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
-	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
-	out["occlusion_build_us"] = static_cast<int64_t>(last_occlusion_build_us_);
-	out["occlusion_probe_us"] = static_cast<int64_t>(last_occlusion_probe_us_);
+	out["present_snapshot_us"] = static_cast<int64_t>(present_.last_snapshot_us);
+	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
+	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
 	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile).
 	const opennova::world::CollisionWorld::TraceProfile &tp =
@@ -1053,11 +898,11 @@ bool Simulation::is_wac_paused() const {
 }
 
 void Simulation::set_mission_variable(int index, int value) {
-	if (kernel_) kernel_->world.vars.set_mission(index, value);
+	if (kernel_) kernel_->world.script.vars.set_mission(index, value);
 }
 
 Error Simulation::debug_kill_player_entity(int p_handle) {
-	if (!kernel_ || joiner_) return ERR_UNAVAILABLE;
+	if (!kernel_ || is_joiner()) return ERR_UNAVAILABLE;
 	// The engine transaction (EntityCommands::kill_player): the health write
 	// the real damage path makes plus the RoundDeath record, the local player
 	// as the killer.
@@ -1073,7 +918,7 @@ Error Simulation::debug_kill_player_entity(int p_handle) {
 // without bypassing the damage/death chain under test.
 Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	if (!kernel_) return ERR_UNAVAILABLE;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
 	return kernel_->world.commands.set_entity_health(e->handle, p_hp)
 			? OK
@@ -1127,7 +972,7 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 // the player when the mission geography defeats straight-line navigation.
 Error Simulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
 	if (!kernel_) return ERR_UNAVAILABLE;
-	AiEntity *e = kernel_->ai.at(p_index);
+	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
 	return kernel_->world.commands.set_entity_position(e->handle,
 				   opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y,
@@ -1155,15 +1000,15 @@ int Simulation::debug_kill_group(int p_group) {
 
 Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
                                                   float p_yaw_deg, float p_pitch_deg) {
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) {
+	if (!kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
-	if (kernel_->player() == nullptr || kernel_->player_ai() == nullptr) {
+	if (kernel_->local.player() == nullptr || kernel_->local.player_ai() == nullptr) {
 		return ERR_UNAVAILABLE;
 	}
 	// The engine owns the full teleport transaction (both position stores, the
 	// input-owned view mirrors, the ladder-latch drop, the resolver reset).
-	kernel_->teleport_local_player(
+	kernel_->local.teleport_local_player(
 			opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y, p_mission_pos.z},
 			p_yaw_deg, p_pitch_deg);
 	return OK;
@@ -1215,22 +1060,25 @@ opennova::world::EntityCommands *Simulation::entity_commands() {
 }
 
 int Simulation::get_mission_variable(int index) const {
-	return kernel_ ? kernel_->world.vars.get_mission(index) : 0;
+	return kernel_ ? kernel_->world.script.vars.get_mission(index) : 0;
 }
 
-Dictionary Simulation::get_round_outcome_debug() const {
-	Dictionary out;
-	if (!kernel_) return out;
-	out["ended"] = kernel_->world.match.outcome().ended;
-	out["winner_team"] = kernel_->world.match.outcome().winner_team;
-	out["bluekills"] = kernel_->world.kill_stats.bluekills_by_player;
-	out["greenkills"] = kernel_->world.kill_stats.greenkills_by_player;
-	out["enemy_kills"] = kernel_->world.kill_stats.enemy_kills_by_player;
-	out["team_kills_by_others"] = kernel_->world.kill_stats.team_kills_by_others;
-	out["friendly_kills_by_others"] = kernel_->world.kill_stats.friendly_kills_by_others;
-	out["enemy_kills_by_others"] = kernel_->world.kill_stats.enemy_kills_by_others;
-	out["humans"] = kernel_->world.cached.humans;
-	out["mp_session"] = kernel_->world.mp_session;
+Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
+	if (!kernel_) return Ref<RoundOutcome>();
+	opennova::world::RoundOutcomeView v;
+	v.ended = kernel_->world.match.outcome().ended;
+	v.winner_team = kernel_->world.match.outcome().winner_team;
+	v.bluekills = kernel_->world.kill_stats.bluekills_by_player;
+	v.greenkills = kernel_->world.kill_stats.greenkills_by_player;
+	v.enemy_kills = kernel_->world.kill_stats.enemy_kills_by_player;
+	v.team_kills_by_others = kernel_->world.kill_stats.team_kills_by_others;
+	v.friendly_kills_by_others = kernel_->world.kill_stats.friendly_kills_by_others;
+	v.enemy_kills_by_others = kernel_->world.kill_stats.enemy_kills_by_others;
+	v.humans = kernel_->world.cached.humans;
+	v.mp_session = kernel_->world.rules.mp_session;
+	Ref<RoundOutcome> out;
+	out.instantiate();
+	out->assign(v);
 	return out;
 }
 
@@ -1271,7 +1119,7 @@ PackedInt32Array snapshot_bank(const opennova::world::World *world, int count,
 	out.resize(count);
 	int32_t *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
-		w[i] = world ? (world->vars.*getter)(i) : 0;
+		w[i] = world ? (world->script.vars.*getter)(i) : 0;
 	}
 	return out;
 }
@@ -1293,11 +1141,11 @@ PackedInt32Array Simulation::get_music_variables_snapshot() const {
 }
 
 void Simulation::set_global_variable(int index, int value) {
-	if (kernel_) kernel_->world.vars.set_global(index, value);
+	if (kernel_) kernel_->world.script.vars.set_global(index, value);
 }
 
 int Simulation::get_global_variable(int index) const {
-	return kernel_ ? kernel_->world.vars.get_global(index) : 0;
+	return kernel_ ? kernel_->world.script.vars.get_global(index) : 0;
 }
 
 PackedByteArray Simulation::get_fired_events_snapshot() const {
@@ -1313,9 +1161,9 @@ PackedByteArray Simulation::get_fired_events_snapshot() const {
 }
 
 void Simulation::set_loco_scale(int p_scale) {
-	if (kernel_) kernel_->ai.loco_scale = p_scale;
+	if (kernel_) kernel_->world.ai.loco_scale = p_scale;
 }
 
 int Simulation::get_loco_scale() const {
-	return kernel_ ? kernel_->ai.loco_scale : 0;
+	return kernel_ ? kernel_->world.ai.loco_scale : 0;
 }

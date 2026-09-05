@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_VFS_DECODE_H
-#define OPENNOVA_VFS_DECODE_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -31,5 +30,3 @@ enum VfsScrPolicy {
 bool vfs_decode_payload(std::vector<uint8_t> &data, int scr_policy = VFS_SCR_VERSION_DETECT);
 
 } // namespace opennova
-
-#endif // OPENNOVA_VFS_DECODE_H

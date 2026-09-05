@@ -1,0 +1,249 @@
+#include <runtime/world/vehicle_system.h>
+
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/vehicle_sound.h>
+#include <runtime/world/world.h>
+
+namespace opennova::world {
+
+// The per-tick motor pass, in the AI tick's slot between the entity loop and the
+// AI event queue [orig: the per-class tick from Entity_UpdateAllEntities].
+void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
+    World &world = world_;
+    // Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
+    // `physics` selector non-zero) runs its family's drive core — ground/bike
+    // through the cveh core, watercraft through the cbot mover — consuming a
+    // mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
+    // here: a joiner's local copies are wire-posed (the vehicle compact record
+    // read side), and the driver's client-side prediction leg is the retail
+    // client's concern, not this host loop's.
+    // [orig: the per-class tick from Entity_UpdateAllEntities ->
+    // Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
+    // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
+    // authority drive gates @0x48b0ff / @0x48DF8C]
+    if (is_authority && !this->traits.empty()) {
+        devtools::ProfileLap vehicle_lap(world.profile);
+        pass_handles_.clear();
+        world.registry.for_each_in_pool(1, [&](const Entity &e) {
+            const VehicleTraits *traits = this->traits.get(e.item_id);
+            // Ground/water rows are selector-gated. Direct CHel/cpln rows are
+            // admitted regardless of the selector — they branch to the shared
+            // aircraft mover below, never through tick_vehicle_motor.
+            if (traits == nullptr) return;
+            if (traits->physics == 0 &&
+                !vehicle_family_uses_direct_air_mover(traits->family)) return;
+            pass_handles_.push_back(e.handle);
+        });
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_SCAN);
+        for (const EntityHandle h : pass_handles_) {
+            Entity *veh = world.registry.get(h);
+            if (veh == nullptr) continue;
+            const VehicleTraits *traits = this->traits.get(veh->item_id);
+            if (traits == nullptr) continue;
+            // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
+            // stamps every mover carries; rider deltas read (current - saved)].
+            stamp_saved_live_pose(*veh);
+            // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
+            // class table routes them to the shared aircraft mover, whose AI
+            // brain leg and physics live in one function. A live PLAYER pilot
+            // drives through the predicted path instead. [orig: the class table
+            // dispatch -> Entity_UpdateAircraftPhysics @0x490310, never the
+            // ground core @0x48af00]
+            if (vehicle_family_uses_direct_air_mover(traits->family)) {
+                if (!veh->veh.net_predicted) {
+                    Entity *actrl = world.vehicles.resolve_controller(*veh);
+                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
+                                             actrl->health > 0;
+                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
+                                         actrl->player_class != 0;
+                    if (aplayer) {
+                        // A PLAYER pilot still runs the shared mover: retail has
+                        // ONE aircraft function, and its occupant-input block
+                        // (our stage_air_vehicle_input) stages the same
+                        // fwd/lat/steer/altitude registers the AI leg fills.
+                        // Skipping the mover here left a player in the pilot
+                        // seat with no physics at all - the aircraft simply did
+                        // not respond.
+                        // [orig: Entity_UpdateAircraftPhysics @0x490310 — the
+                        //  input gate is `(occ->Flags & 0x100) && (occ ==
+                        //  g_local_player_entity || is_authority)`, not a
+                        //  separate mover]
+                        world.vehicles.aircraft_client_tick(*veh, *traits);
+                    } else {
+                        world.ai.chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
+                                      *traits);
+                        world.vehicles.aircraft_client_tick(*veh, *traits);
+                    }
+                }
+                else {
+                    // A predicted row skips the mover, so the mover's tail call
+                    // never runs for it. Retail's client has no such skip — it
+                    // runs the aircraft function (and therefore the tail) for
+                    // every vehicle it is not driving, seeding the drive
+                    // command from the wire — so advancing the accumulator here
+                    // restores that, it does not add a new one.
+                    // [orig: the HELO twin @0x48FA70 called from the aircraft
+                    //  mover's tail @0x4905A6; the not-driven client leg is
+                    //  @0x48B7F0]
+                    world.vehicles.part_anim_tick(*veh, *traits);
+                }
+                if (AiEntity *ve = world.ai.for_handle(h)) {
+                    ve->pos[0] = to_fixed(veh->position.x);
+                    ve->pos[1] = to_fixed(veh->position.y);
+                    ve->pos[2] = to_fixed(veh->position.z);
+                    ve->heading = veh->veh.yaw_seeded
+                            ? veh->veh.yaw_bam
+                            : bam_heading_from_mission_yaw_deg(
+                                      static_cast<double>(veh->yaw));
+                }
+                continue;
+            }
+            // Stage the drive input class the motor will consume: a live PLAYER controller
+            // keeps the occupant leg; an AI controller (or none) routes through the brain
+            // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
+            // switch inside Entity_UpdateVehiclePhysics @0x48b949-0x48c034]
+            VehicleDriveCmd cmd;
+            if (traits->player_control) {
+                Entity *ctrl = world.vehicles.resolve_controller(*veh);
+                // A DEAD controller parks the vehicle. The infantry death edge detaches
+                // first; this guard preserves the same result if the vehicle pass happens
+                // to observe the controller earlier in the frame.
+                // [orig: infantry death detach @0x4b9c57..0x4b9c60]
+                const bool ctrl_alive =
+                        ctrl != nullptr && ctrl->alive && ctrl->health > 0;
+                bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
+                                   ctrl->player_class != 0;
+                // A boat whose PLAYER driver has their head under the water plane
+                // is driven by the AI leg [orig: the submerged-driver cut
+                // @0x48DFD3..0x48DFDF routes to the AI leg @0x48E247].
+                if (player_ctrl && traits->family == VehicleFamily::Watercraft &&
+                    watercraft_driver_submerged(world, *ctrl))
+                    player_ctrl = false;
+                if (player_ctrl) {
+                    // A player drive freezes the SM mover exactly like the parked leg —
+                    // the route never advances under a human driver [orig: the player
+                    // leg forces SM state 22 too @0x48b993 / the boat leg @0x48DFF5].
+                    if (AiEntity *ve = world.ai.for_handle(h)) {
+                        ve->brain.f[AiBrain::kCurState] = 22;
+                        ve->brain.f[AiBrain::kPendState] = 22;
+                    }
+                } else if (traits->family == VehicleFamily::Watercraft) {
+                    world.ai.watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
+                                        *traits, cmd);
+                } else {
+                    world.ai.vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
+                                     cmd);
+                }
+            }
+            // Per-family motor dispatch, the class-table split [orig:
+            // Entity_DispatchPhysics_cbot @0x48EFA3 -> the cbot mover @0x48D480
+            // vs _cveh @0x48efc0 -> the ground core @0x48af00].
+            if (traits->family == VehicleFamily::Watercraft) {
+                world.vehicles.tick_watercraft_motor(*veh, *traits, &cmd);
+            } else {
+                world.vehicles.tick_motor(*veh, *traits, &cmd);
+            }
+            // Mirror the integrated transform back into the brain entity — one struct in
+            // the original; the SM mover and the present snapshot read pos[]/heading.
+            if (AiEntity *ve = world.ai.for_handle(h)) {
+                ve->pos[0] = to_fixed(veh->position.x);
+                ve->pos[1] = to_fixed(veh->position.y);
+                ve->pos[2] = to_fixed(veh->position.z);
+                ve->heading = veh->veh.yaw_seeded
+                        ? veh->veh.yaw_bam
+                        : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+            }
+        }
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_MOTORS);
+        // Pool-0 bodies were seat-posed in the entity loop above, before these
+        // pool-1 motors advanced their carriers. Recompose only their carrier-
+        // owned frame now so the authority snapshot writes a stable seat-local
+        // offset against the vehicle's final same-tick pose. Retail's compact
+        // writer consumes that final pair; leaving the earlier body pose here
+        // makes every remote rider trail by one vehicle motor step.
+        for (int i = 0; i < world.ai.count(); ++i)
+            world.ai.refresh_mounted_pose(*world.ai.at(i), world);
+        vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_RIDERS);
+    }
+    lap.mark(devtools::Slot::SIM_AI_AUTH_VEHICLES);
+    // A joiner does not integrate its replicated pool-1 vehicle copies here, but
+    // retail still executes the per-entity ground callback's presentation leg on
+    // clients. Evaluate sound from the current wire/local state after the authority
+    // motor pass, leaving position, heading, and motor accumulators untouched.
+    // Collision contact is authority-physics state and therefore unavailable on
+    // this path; an explicit replicated collision bit can replace `false` later.
+    // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
+    // @0x48d181..0x48d1c4]
+    if (!is_authority && !this->traits.empty()) {
+        pass_handles_.clear();
+        world.registry.for_each_in_pool(1, [&](const Entity &e) {
+            const VehicleTraits *traits = this->traits.get(e.item_id);
+            if (traits == nullptr) return;
+            // Ground/water/bike rows retain their selector gate. CHel/cpln
+            // dispatch directly and therefore remain eligible at physics=0.
+            if (traits->physics == 0 &&
+                !vehicle_family_uses_direct_air_mover(traits->family)) return;
+            pass_handles_.push_back(e.handle);
+        });
+        for (const EntityHandle h : pass_handles_) {
+            Entity *veh = world.registry.get(h);
+            if (veh == nullptr) continue;
+            const VehicleTraits *traits = this->traits.get(veh->item_id);
+            if (traits == nullptr) continue;
+            // Mover-entry savedLivePose, stamped BEFORE the prediction gates
+            // so a frozen/parked hull reads as zero rider delta — retail
+            // stamps in every mover prologue regardless of the later bails
+            // [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
+            // @0x4b530b../@0x4ba47f..].
+            stamp_saved_live_pose(*veh);
+            // The joiner-side family prediction (net-re §5.38e B-facet, all
+            // four families landed): each mover chases the staged wire target
+            // and predicts between records from the mirrored speed/steer
+            // registers — the client-executed subset of its family mover
+            // [orig: cbot @0x48D480; CHel/cpln via the @0x45D6F0 thunk;
+            // ground @0x48af00 core]. The embedding sim clears net_predicted
+            // for wire-frozen rows (bit0 / dead-pose / carried), so a wreck
+            // never keeps driving (D-NET-66).
+            if (veh->veh.net_predicted && veh->health > 0 &&
+                    traits->family == VehicleFamily::Watercraft) {
+                world.vehicles.watercraft_client_tick(*veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    (traits->family == VehicleFamily::Helicopter ||
+                     traits->family == VehicleFamily::Plane)) {
+                world.vehicles.aircraft_client_tick(*veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    (traits->family == VehicleFamily::Ground ||
+                     traits->family == VehicleFamily::Bike ||
+                     traits->family == VehicleFamily::Tank)) {
+                // Runs the motor core, whose tail already ticks the movement
+                // sound — skip the separate sound call below for this row.
+                // Bikes and tanks ride the same entry; the core branches on
+                // the family tag for the witnessed cbik deltas (gravity 250,
+                // vZ up-cap, contact-gated integration, always-applied yaw)
+                // and the ctan deltas (gravity 250, contact-gated integration
+                // with the ±2·decel reversal clamps, full-basis velocity,
+                // parked-gated yaw with the airborne quarter-rate)
+                // [orig: @0x483FE0 / @0x488AB0 vs @0x48AF00].
+                world.vehicles.ground_client_tick(*veh, *traits);
+                continue;
+            }
+            // The shared aircraft mover has no movement-sound call. In retail,
+            // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
+            // ground/bike/water paths, but neither CHel @0x490310 nor cpln's
+            // thunk calls it. Physicsless air rows are newly eligible above, so
+            // keep them out of the ground-sound presentation tail in every
+            // prediction/death state.
+            if (vehicle_family_uses_direct_air_mover(traits->family)) continue;
+            world.vehicles.update_ground_sound(*veh, *traits,
+                                        /*wrecked=*/veh->health <= 0,
+                                        /*collided=*/false);
+        }
+    }
+    lap.mark(devtools::Slot::SIM_AI_CLIENT_VEHICLES);
+}
+
+} // namespace opennova::world

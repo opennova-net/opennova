@@ -2,8 +2,7 @@
 // boolean/comparison expressions (faithful to Script_Compile's keyword/operator
 // set and "left to right" ordering). Error-tolerant: records diagnostics and
 // resyncs rather than aborting, so the shipped corpus (with typos) parses.
-#ifndef OPENNOVA_WAC_PARSER_H
-#define OPENNOVA_WAC_PARSER_H
+#pragma once
 
 #include <string_view>
 #include <vector>
@@ -21,5 +20,3 @@ struct ParseResult {
 ParseResult parse(std::string_view source);
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_PARSER_H

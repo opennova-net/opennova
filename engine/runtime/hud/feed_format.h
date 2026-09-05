@@ -1,9 +1,36 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace opennova::hud {
+
+// Coarse classification of a 0x1E event_type, derived structurally from the
+// handler's switch [orig: 0x426270]. Drives the viewer's kill-feed styling.
+enum class GameEventKind : uint8_t {
+	Other = 0,     // single-actor canned / misc HUD message
+	Kill,          // attacker killed victim (the kill feed proper)
+	Objective,     // flag / capture / zone control / camp events
+	// A death with NO killer: suicide (1/2/3, the emitter picks 1+rand(3)) and
+	// the killer-less deaths (22/23/25/26 "$A is dead/died/drowned."). The
+	// handler leaves the victim/aux slots LITERAL ZERO on these
+	// [orig: GameEvent_PlayerDeath @0x516DD0 leaves v41/v42 = 0], so a consumer
+	// that reads them charges the death to entity 0 (the listen server's own
+	// player) — they must be ignored for this kind.
+	SelfDeath,
+	// The medic lines, drawn in their own light blue 0xFF008CEE and NOT kills
+	// [orig: cases 38 "$B has revived $A." @0x42640F / 45 "…medical
+	// attention…" @0x426442 / the emitterless 39 @0x426456 — one shared post].
+	Medic,
+};
+GameEventKind game_event_kind(uint8_t event_type);
+
+// The witnessed "Canned Msg" string key (e.g. "STRCND04") an event_type maps to,
+// or nullptr when the type has none. Faithful to the 0x426270 switch.
+const char *game_event_strcnd_key(uint8_t event_type);
 
 // THE FEED LINE POLICY — how one S2C 0x1E game event becomes the sentence and
 // the color retail posts to its message feed
@@ -114,11 +141,71 @@ std::string feed_format_camp_line(const std::string &tmpl,
 // key and the line is dropped. Returns "" when the type is not a camp event.
 std::string feed_camp_key(uint8_t event_type, uint8_t team);
 
+// The two camp events, the only 0x1E types whose slots are not actors: the
+// attacker byte is the LEVEL and the victim byte the TEAM (see feed_camp_key).
+inline constexpr uint8_t kFeedEventFullyCamped = 59;
+inline constexpr uint8_t kFeedEventLostCamp = 60;
+inline bool feed_event_is_camp(uint8_t event_type) {
+	return event_type == kFeedEventFullyCamped || event_type == kFeedEventLostCamp;
+}
+
 // The WPNames key for a camp event's level slot: the wire attacker byte is the
 // level index and the key is built from index PLUS ONE
 // [orig: sprintf(key, "STRWPNAME%03d", v141 + 1) @0x4272EC/@0x4273F1 — unlike
 //  the LFP cases 50-53/58, which use the raw index].
 std::string feed_camp_wpname_key(uint8_t level_index);
+
+// The MP verbose toggle: a line the local player took no part in posts only
+// while it is on. Retail seeds it on from the session settings; the keybind
+// that flips it (STRMISC_VERBOSE_ON/OFF) is unported, so the seed stands
+// [orig: g_MpVerbose2 @0x24D2154, seeded verbose-on from the session settings
+//  @0x551D0F; the flip keybind @0x49B78F].
+inline constexpr bool kMpVerboseDefault = true;
+
+// One folded 0x1E game event as the feed reads it: the wire slots plus the
+// GameEventKind byte (replication::ClientGameEvent, minus the position, without
+// the net include).
+struct FeedEventInput {
+	uint8_t event_type = 0;
+	uint8_t attacker_index = 0xFF;
+	uint8_t victim_index = 0xFF;
+	uint8_t aux_index = 0xFF;
+	uint8_t kind = 0;
+};
+
+// One feed row — everything the presenter needs to post the line: the compose
+// form it branches on (`camp`), the "Canned Msg" key, the resolved actor
+// names, the aux actor's name when the local player earned the bonus, the
+// camp level's WPNames key, the packed ARGB color and whether the local
+// player took part.
+struct FeedRow {
+	uint8_t event_type = 0;
+	uint8_t kind = 0;    // GameEventKind
+	bool camp = false;
+	bool own = false;
+	std::string key;
+	std::string attacker;    // empty on camp rows
+	std::string victim;      // empty on camp rows
+	std::string extra;       // the aux actor's name, only when it is the local player
+	std::string wpname_key;  // camp rows only
+	uint32_t color = kFeedColorWhite;
+};
+
+// The roster lookup a row resolves actor names through: a wire index (a pool-0
+// INDEX) -> display name, "" when unknown. Never called for 0xFF.
+using FeedNameLookup = std::function<std::string(uint8_t)>;
+
+// Fold this frame's game events into feed rows — one per line the original
+// posts to its message feed. `self_handle` is the local player's entity
+// handle (0xFFFF = none; a pool-0 INDEX on the wire is the handle
+// (0<<12)|index, so the slots compare directly). Suppressed types never
+// surface; a camp event whose team is outside 1/2, or a type keyed at runtime
+// by team/gametype (no STRCND key), draws nothing.
+// [orig: NetPacket_HandleGameEvent @0x426270 — the LFP result set formats and
+//  returns @0x42702E-@0x42716D; 58 posts to the tip system only @0x427202]
+void feed_event_rows(const FeedEventInput *events, std::size_t count,
+                     uint16_t self_handle, bool mp_verbose,
+                     const FeedNameLookup &name_of, std::vector<FeedRow> &out);
 
 // Strip retail's inline text markup (`<cRRGGBB>` colour, `<b>` bold — every
 // `<...>` run) from a string: the byte walk that drops each '<'..'>' span and

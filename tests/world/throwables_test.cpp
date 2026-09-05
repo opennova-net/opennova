@@ -150,12 +150,12 @@ enum : int {
 };
 
 void seed_ammo(World &w) {
-    w.ammo.entries.resize(kAmmoCount);
-    auto &null_e = w.ammo.entries[kAmmoNull];
+    w.tables.ammo.entries.resize(kAmmoCount);
+    auto &null_e = w.tables.ammo.entries[kAmmoNull];
     null_e.name = "AT_NULL";
     null_e.valid = true;
 
-    auto &nade = w.ammo.entries[kAmmoGrenade];
+    auto &nade = w.tables.ammo.entries[kAmmoGrenade];
     nade.name = "grenadehe";
     nade.valid = true;
     nade.flags = kUseOwnMove | kForceTracer;
@@ -169,7 +169,7 @@ void seed_ammo(World &w) {
     nade.tracer_item_friendly = kItemFrag;
     nade.tracer_item_enemy = kItemFrag;
 
-    auto &satchel = w.ammo.entries[kAmmoSatchel];
+    auto &satchel = w.tables.ammo.entries[kAmmoSatchel];
     satchel.name = "satchel";
     satchel.valid = true;
     satchel.flags = kUseOwnMove | kNoAge | kForceTracer;
@@ -179,7 +179,7 @@ void seed_ammo(World &w) {
     satchel.tracer_item_friendly = kItemSatchel;
     satchel.tracer_item_enemy = 0; // retail falls back to the friendly item
 
-    auto &boom = w.ammo.entries[kAmmoSatchelBoom];
+    auto &boom = w.tables.ammo.entries[kAmmoSatchelBoom];
     boom.name = "satchelboom";
     boom.valid = true;
     boom.flags = kInstantKillzone;
@@ -189,13 +189,13 @@ void seed_ammo(World &w) {
     boom.kz_minradius = 5.0f;
     boom.kz_maxradius = 15.0f;
 
-    auto &det = w.ammo.entries[kAmmoDetonator];
+    auto &det = w.tables.ammo.entries[kAmmoDetonator];
     det.name = "AMMO_DETONATOR";
     det.valid = true;
     det.flags = kDetonateSatchels;
     det.velocity = 0;
 
-    auto &clay = w.ammo.entries[kAmmoClaymore];
+    auto &clay = w.tables.ammo.entries[kAmmoClaymore];
     clay.name = "claymore";
     clay.valid = true;
     clay.flags = kUseOwnMove | kNoAge | kForceTracer;
@@ -209,7 +209,7 @@ void seed_ammo(World &w) {
     clay.tracer_item_friendly = kItemClaymore;
     clay.tracer_item_enemy = kItemClaymore;
 
-    auto &claykz = w.ammo.entries[kAmmoClayKz];
+    auto &claykz = w.tables.ammo.entries[kAmmoClayKz];
     claykz.name = "claymorekillzone";
     claykz.valid = true;
     claykz.flags = kInstantKillzone;
@@ -220,7 +220,7 @@ void seed_ammo(World &w) {
     claykz.kz_maxradius = 30.0f;
     claykz.kz_pieslice_bam = 12 * 11930464;
 
-    auto &shrap = w.ammo.entries[kAmmoClayShrap];
+    auto &shrap = w.tables.ammo.entries[kAmmoClayShrap];
     shrap.name = "claymoreshrapnel";
     shrap.valid = true;
     shrap.flags = kClaymoreFan;
@@ -231,7 +231,7 @@ void seed_ammo(World &w) {
     shrap.min_damage = 55;
     shrap.max_damage = 55;
 
-    auto &avmine = w.ammo.entries[kAmmoAvMine];
+    auto &avmine = w.tables.ammo.entries[kAmmoAvMine];
     avmine.name = "AV_Mine";
     avmine.valid = true;
     avmine.flags = kUseOwnMove | kNoAge | kForceTracer;
@@ -244,7 +244,7 @@ void seed_ammo(World &w) {
     avmine.tracer_item_friendly = kItemAvMine;
     avmine.tracer_item_enemy = kItemAvMine;
 
-    auto &avkz = w.ammo.entries[kAmmoAvMineKz];
+    auto &avkz = w.tables.ammo.entries[kAmmoAvMineKz];
     avkz.name = "AV_Minekillzone";
     avkz.valid = true;
     avkz.flags = kInstantKillzone;
@@ -254,7 +254,7 @@ void seed_ammo(World &w) {
     avkz.kz_minradius = 5.0f;
     avkz.kz_maxradius = 15.0f;
 
-    auto &bullet = w.ammo.entries[kAmmoBullet];
+    auto &bullet = w.tables.ammo.entries[kAmmoBullet];
     bullet.name = "testbullet";
     bullet.valid = true;
     bullet.flags = 0x100u; // no gravity
@@ -390,7 +390,7 @@ void test_tracer_item_binding_fallbacks() {
     }
     {
         Rig rig;
-        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
         ammo.flags = kUseOwnMove;
         ammo.tracer_rate = 2;
         const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 5}, 0, 0);
@@ -478,7 +478,7 @@ void test_motor_sweep_ignores_non_pool_domains() {
         // Keep the grenade motor's separate ground-clamp leg out of this
         // sweep-only regression. Pre-fix motor_item_sweep overwrote this flag
         // and still let generic trace terrain win.
-        rig.w.ammo.entries[kAmmoGrenade].flags |= 0x80u;
+        rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u;
         if (water_occluder) rig.w.env.water_z = to_fixed(2.0);
 
         if (person_occluder) {
@@ -543,7 +543,7 @@ void test_control_and_bounce_share_prng16_stream() {
 // expiry head].
 void test_grenade_bounce_and_fuse() {
     Rig rig(0); // ground at 0
-    rig.w.ammo.entries[kAmmoGrenade].max_age_ticks = 150; // short fuse for the test
+    rig.w.tables.ammo.entries[kAmmoGrenade].max_age_ticks = 150; // short fuse for the test
     const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
     CHECK(slot >= 0);
     // fly until the first ground contact (~40 ticks of -167 Q16 gravity from 2 u)
@@ -586,10 +586,10 @@ void test_grenade_bounce_samples_charmap_surface() {
     static const uint8_t raster[4] = {6, 6, 6, 6}; // charmap type 6 = grass
     static const int mapped_grid[256] = {1};
     Rig rig(0);
-    rig.w.surface_map.data = raster;
-    rig.w.surface_map.width = 2;
-    rig.w.surface_map.height = 2;
-    rig.w.surface_map.sector_grid = mapped_grid;
+    rig.w.tables.surface_map.data = raster;
+    rig.w.tables.surface_map.width = 2;
+    rig.w.tables.surface_map.height = 2;
+    rig.w.tables.surface_map.sector_grid = mapped_grid;
     const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
     CHECK(slot >= 0);
     rig.tick(80);
@@ -601,7 +601,7 @@ void test_grenade_bounce_samples_charmap_surface() {
 void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
-        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
         ammo.max_age_ticks = 5;
         ammo.arm_age_ticks = 2;
         const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
@@ -624,7 +624,7 @@ void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
         rig.w.env.water_z = to_fixed(10.0);
-        auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+        auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
         ammo.max_age_ticks = 5;
         const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 5}, 0, 0);
         CHECK(slot >= 0);
@@ -641,7 +641,7 @@ void test_grenade_fuse_tick_boundaries() {
 // [orig: the expiry head requires the motor-armed 0x1000 flag].
 void test_ballistic_expiry_is_silent() {
     Rig rig(0);
-    auto &m203 = rig.w.ammo.entries[kAmmoGrenade];
+    auto &m203 = rig.w.tables.ammo.entries[kAmmoGrenade];
     m203.flags = 0; // plain ballistic kz round
     m203.tracer_item_friendly = 0;
     m203.tracer_item_enemy = 0;
@@ -657,7 +657,7 @@ void test_ballistic_expiry_is_silent() {
 // must not leak into the next ballistic occupant of that slot.
 void test_round_slot_reuse_clears_throwable_state() {
     Rig rig(0);
-    auto &ammo = rig.w.ammo.entries[kAmmoGrenade];
+    auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
     ammo.max_age_ticks = 4;
     const int thrown = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
     CHECK(thrown == 0);
@@ -716,7 +716,7 @@ void test_placed_device_pose_and_ballistic_damage() {
     round.pitch_bam = 0x20000000;
     round.roll_bam = static_cast<int32_t>(0xC0000000u);
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                            rig.w.ammo.entries[kAmmoSatchel]));
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
     PlacedDevice &device = rig.w.throwables.devices[0];
@@ -771,7 +771,7 @@ void test_parented_device_follows_parent_yaw() {
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
     round.yaw_bam = 0;
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                            rig.w.ammo.entries[kAmmoSatchel]));
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
     Entity *carrier = rig.w.registry.get(parent);
@@ -814,7 +814,7 @@ void test_parented_device_adopts_parent_pitch() {
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 1}, parent);
     round.yaw_bam = 0;
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                            rig.w.ammo.entries[kAmmoSatchel]));
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
     Entity *carrier = rig.w.registry.get(parent);
     CHECK(carrier != nullptr);
     stamp_saved_live_pose(*carrier);
@@ -845,7 +845,7 @@ void test_device_and_owner_handle_reuse() {
         Rig rig(0);
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                                rig.w.ammo.entries[kAmmoSatchel]));
+                                                rig.w.tables.ammo.entries[kAmmoSatchel]));
         const EntityHandle old_handle = rig.w.throwables.devices[0].entity;
         const uint64_t old_id = rig.w.throwables.devices[0].entity_spawn_id;
         rig.w.registry.despawn(old_handle);
@@ -868,7 +868,7 @@ void test_device_and_owner_handle_reuse() {
         Rig rig(0);
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                                rig.w.ammo.entries[kAmmoSatchel]));
+                                                rig.w.tables.ammo.entries[kAmmoSatchel]));
         const EntityHandle device_handle = rig.w.throwables.devices[0].entity;
         rig.w.registry.despawn(rig.thrower);
         Entity new_owner_seed;
@@ -895,7 +895,7 @@ void test_parent_handle_reuse_detaches_device() {
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                            rig.w.ammo.entries[kAmmoSatchel]));
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
     const Vec3 last_pos = rig.w.throwables.devices[0].pos;
     rig.w.registry.despawn(parent);
     parent_seed.position = Vec3{100, 100, 100};
@@ -918,18 +918,18 @@ void test_world_tick_uses_retail_device_order() {
     // has already run before the projectile pool creates it.
     {
         Rig rig(0);
-        rig.w.terrain = &rig.flat.field;
+        rig.w.tables.terrain = &rig.flat.field;
         const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 0}, 0, 0);
         CHECK(slot >= 0);
         rig.w.run_logic_tick();
         CHECK(!rig.w.round_sim.rounds[size_t(slot)].active);
         CHECK(rig.w.throwables.devices.size() == 1);
         CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
-              rig.w.ammo.entries[kAmmoSatchel].max_age_ticks);
+              rig.w.tables.ammo.entries[kAmmoSatchel].max_age_ticks);
         CHECK(rig.w.throwables.events.spawns.size() == 1);
         rig.w.run_logic_tick();
         CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
-              rig.w.ammo.entries[kAmmoSatchel].max_age_ticks - 1);
+              rig.w.tables.ammo.entries[kAmmoSatchel].max_age_ticks - 1);
         CHECK(rig.w.throwables.events.spawns.empty());
     }
 
@@ -948,7 +948,7 @@ void test_world_tick_uses_retail_device_order() {
         round.pos = Vec3{20, 20, 2};
         round.yaw_bam = 0;
         CHECK(rig.w.throwables.place_from_round(rig.w, round,
-                                                rig.w.ammo.entries[kAmmoClaymore]));
+                                                rig.w.tables.ammo.entries[kAmmoClaymore]));
         rig.w.throwables.devices[0].think_delay_ticks = 0;
         Entity enemy;
         enemy.kind = EntityKind::Organic;
@@ -985,7 +985,7 @@ void test_per_owner_same_item_device_caps() {
             LiveRound round = make_satchel_round(
                     rig, Vec3{20.0f + static_cast<float>(i), 20, 2});
             CHECK(rig.w.throwables.place_from_round(
-                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+                    rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
             PlacedDevice &d = rig.w.throwables.devices.back();
             d.think_delay_ticks = -10;
             if (i == 0) first = d.entity;
@@ -993,7 +993,7 @@ void test_per_owner_same_item_device_caps() {
         rig.w.throwables.events.clear();
         LiveRound fourth = make_satchel_round(rig, Vec3{24, 20, 2});
         CHECK(rig.w.throwables.place_from_round(
-                rig.w, fourth, rig.w.ammo.entries[kAmmoSatchel]));
+                rig.w, fourth, rig.w.tables.ammo.entries[kAmmoSatchel]));
         CHECK(active_count(rig.w.throwables) == 3);
         CHECK(rig.w.registry.get(first) == nullptr);
         CHECK(rig.w.throwables.events.spawns.size() == 1);
@@ -1015,7 +1015,7 @@ void test_per_owner_same_item_device_caps() {
             round.think = ThrowClass::kClaymore;
             round.motor = ThrowClass::kClaymore;
             CHECK(rig.w.throwables.place_from_round(
-                    rig.w, round, rig.w.ammo.entries[kAmmoClaymore]));
+                    rig.w, round, rig.w.tables.ammo.entries[kAmmoClaymore]));
             rig.w.throwables.devices.back().think_delay_ticks = -i - 1;
             if (i == 3) oldest = rig.w.throwables.devices.back().entity;
         }
@@ -1026,7 +1026,7 @@ void test_per_owner_same_item_device_caps() {
         fifth.think = ThrowClass::kClaymore;
         fifth.motor = ThrowClass::kClaymore;
         CHECK(rig.w.throwables.place_from_round(
-                rig.w, fifth, rig.w.ammo.entries[kAmmoClaymore]));
+                rig.w, fifth, rig.w.tables.ammo.entries[kAmmoClaymore]));
         CHECK(active_count(rig.w.throwables) == 4);
         CHECK(rig.w.registry.get(oldest) == nullptr);
     }
@@ -1040,7 +1040,7 @@ void test_per_owner_same_item_device_caps() {
             LiveRound round = make_satchel_round(
                     rig, Vec3{20.0f + static_cast<float>(i), 28, 2});
             CHECK(rig.w.throwables.place_from_round(
-                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+                    rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
         }
         CHECK(active_count(rig.w.throwables) == 4);
         CHECK(rig.w.throwables.events.removes.empty());
@@ -1053,11 +1053,11 @@ void test_per_owner_same_item_device_caps() {
         other_owner.owner = other;
         other_owner.shooter_handle = other.packed;
         CHECK(rig.w.throwables.place_from_round(
-                rig.w, other_owner, rig.w.ammo.entries[kAmmoSatchel]));
+                rig.w, other_owner, rig.w.tables.ammo.entries[kAmmoSatchel]));
         LiveRound other_item = make_satchel_round(rig, Vec3{31, 28, 2});
         other_item.item_type_id = kItemSatchel + 100;
         CHECK(rig.w.throwables.place_from_round(
-                rig.w, other_item, rig.w.ammo.entries[kAmmoSatchel]));
+                rig.w, other_item, rig.w.tables.ammo.entries[kAmmoSatchel]));
         CHECK(active_count(rig.w.throwables) == 6);
 
         // Age zero becomes -1 before think and keeps decreasing while armed.
@@ -1291,7 +1291,7 @@ void test_placed_device_cap_evicts_oldest_armed() {
     auto place = [&](int extra_age_ticks) -> bool {
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         if (!rig.w.throwables.place_from_round(
-                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]))
+                    rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]))
             return false;
         // Age the new device by hand: negative = armed for that many ticks.
         rig.w.throwables.devices.back().think_delay_ticks = extra_age_ticks;
@@ -1324,7 +1324,7 @@ void test_placed_device_cap_evicts_oldest_armed() {
     auto place_arming = [&]() -> bool {
         LiveRound round = make_satchel_round(arming, Vec3{20, 20, 2});
         return arming.w.throwables.place_from_round(
-                arming.w, round, arming.w.ammo.entries[kAmmoSatchel]);
+                arming.w, round, arming.w.tables.ammo.entries[kAmmoSatchel]);
     };
     for (int i = 0; i < 4; ++i) CHECK(place_arming());
     int arming_live = 0;
@@ -1344,7 +1344,7 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
         round.think = ThrowClass::kClaymore;
         round.motor = ThrowClass::kClaymore;
         if (!rig.w.throwables.place_from_round(
-                    rig.w, round, rig.w.ammo.entries[kAmmoClaymore]))
+                    rig.w, round, rig.w.tables.ammo.entries[kAmmoClaymore]))
             return false;
         rig.w.throwables.devices.back().think_delay_ticks = age;
         return true;
@@ -1353,7 +1353,7 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     // A same-owner SATCHEL does not count toward the claymore total.
     LiveRound satchel = make_satchel_round(rig, Vec3{20, 20, 2});
     CHECK(rig.w.throwables.place_from_round(
-            rig.w, satchel, rig.w.ammo.entries[kAmmoSatchel]));
+            rig.w, satchel, rig.w.tables.ammo.entries[kAmmoSatchel]));
     rig.w.throwables.events.removes.clear();
     int live_clay = 0;
     for (const PlacedDevice &d : rig.w.throwables.devices)
@@ -1374,7 +1374,7 @@ void test_armed_device_age_keeps_falling() {
     Rig rig(0);
     LiveRound round = make_satchel_round(rig, Vec3{20, 20, 1});
     CHECK(rig.w.throwables.place_from_round(
-            rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+            rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
     CHECK(rig.w.throwables.devices.size() == 1);
     // The tick compacts the vector, so re-fetch the row each step.
     rig.w.throwables.devices[0].think_delay_ticks = 1;

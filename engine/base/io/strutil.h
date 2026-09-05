@@ -4,8 +4,7 @@
 // to inline per-file. ASCII-only on purpose: NovaLogic asset names and keys
 // are ASCII, and locale-dependent tolower would change matching behavior.
 
-#ifndef OPENNOVA_IO_STRUTIL_H
-#define OPENNOVA_IO_STRUTIL_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -25,6 +24,19 @@ inline std::string to_lower(std::string_view s)
     std::string out(s);
     for (char &c : out)
         c = ascii_tolower(c);
+    return out;
+}
+
+inline char ascii_toupper(char c)
+{
+    return (c >= 'a' && c <= 'z') ? (char)(c - ('a' - 'A')) : c;
+}
+
+inline std::string to_upper(std::string_view s)
+{
+    std::string out(s);
+    for (char &c : out)
+        c = ascii_toupper(c);
     return out;
 }
 
@@ -103,5 +115,3 @@ inline bool hex_to_bytes(std::string_view hex, std::vector<uint8_t> &out)
 
 } // namespace strutil
 } // namespace opennova
-
-#endif // OPENNOVA_IO_STRUTIL_H

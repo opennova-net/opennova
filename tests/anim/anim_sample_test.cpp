@@ -21,6 +21,8 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 
+using namespace opennova::bad;
+
 using opennova::anim::Quat;
 using opennova::anim::Vec3;
 

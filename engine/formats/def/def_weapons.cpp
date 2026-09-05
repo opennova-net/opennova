@@ -14,6 +14,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 /* ========================================================================= */
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
@@ -266,6 +268,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 consume_value_str(trimmed, tlen, 7, cw.hudicon, sizeof(cw.hudicon));
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "hudclipgfx", 10)) {
+                /* HUDCLIPGFX: offset x/y + texture [orig: WeaponDefs_ParseLineCallback
+                   @0x54427f]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
@@ -276,6 +280,9 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 }
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "hudrndgfx", 9)) {
+                /* HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor, texture
+                   [orig: WeaponDefs_ParseLineCallback @0x5442fc -> weapon
+                   +644/+648/+652/+656/+727]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
@@ -547,3 +554,5 @@ void def_free_weapons(DefWeaponsFile *f) {
     free(f->ammo_class_lines);
     memset(f, 0, sizeof(*f));
 }
+
+} // namespace opennova::def

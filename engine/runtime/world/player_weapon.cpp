@@ -20,6 +20,8 @@
 #include <cmath>
 #include <cstdio>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {
@@ -37,7 +39,7 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
 	if (w.usegun_slot_active && w.usegun_mount.valid()) {
 		Entity *mount = world.registry.get(w.usegun_mount);
 		if (mount != nullptr) {
-			if (WeaponSlotState *slot = resolve_mounted_ammo_slot(world, *mount))
+			if (WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(*mount))
 				return slot;
 		}
 	}
@@ -50,7 +52,7 @@ const WeaponSlotState *active_local_weapon_slot(const World &world,
 		const Entity *mount = world.registry.get(w.usegun_mount);
 		if (mount != nullptr) {
 			if (const WeaponSlotState *slot =
-					resolve_mounted_ammo_slot(world, *mount))
+					world.vehicles.resolve_mounted_ammo_slot(*mount))
 				return slot;
 		}
 	}
@@ -93,8 +95,8 @@ bool local_usegun_switch_is_instant(const World &world,
 			 w.usegun_switch == LocalUseGunSwitch::kSwap)
 			? w.usegun_pending_weapon_adm
 			: w.usegun_saved_adm;
-	const WeaponTableEntry *from = world.weapons.by_index(from_adm);
-	const WeaponTableEntry *to = world.weapons.by_index(to_adm);
+	const WeaponTableEntry *from = world.tables.weapons.by_index(from_adm);
+	const WeaponTableEntry *to = world.tables.weapons.by_index(to_adm);
 	const int32_t flags = (from != nullptr ? from->flags : 0) |
 			(to != nullptr ? to->flags : 0);
 	return (flags & weapon_flag::kEmplaced) != 0;
@@ -143,7 +145,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	if (select_parent) {
 		Entity *mount = world.registry.get(w.usegun_pending_mount);
 		WeaponSlotState *resolved_slot = mount != nullptr
-				? resolve_mounted_ammo_slot(world, *mount)
+				? world.vehicles.resolve_mounted_ammo_slot(*mount)
 				: nullptr;
 		uint8_t resolved_adm =
 				mount != nullptr ? mount->primary_weapon_slot_adm : 0xFF;
@@ -174,7 +176,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 
 	player->equipped_adm_index = next_adm;
-	const WeaponTableEntry *next_def = world.weapons.by_index(next_adm);
+	const WeaponTableEntry *next_def = world.tables.weapons.by_index(next_adm);
 	// SWITCHFROM draws the committed target through TryQueueSwitchTo. SWITCHRANK
 	// swaps directly and must not disturb a persistent target slot's current
 	// action/phase/next fields. [orig: commits @0x543475 / @0x543539]
@@ -211,7 +213,7 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 			? world.registry.get(player->mount_target)
 			: nullptr;
 	WeaponSlotState *mounted_slot = mounted_parent != nullptr
-			? resolve_mounted_ammo_slot(world, *mounted_parent)
+			? world.vehicles.resolve_mounted_ammo_slot(*mounted_parent)
 			: nullptr;
 	uint8_t mounted_adm = mounted_parent != nullptr
 			? mounted_parent->primary_weapon_slot_adm
@@ -229,8 +231,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 			player->use_gun_slot_swapped && mounted_slot != nullptr &&
 			mounted_adm != 0xFF;
 	const auto same_category = [&](uint8_t p_from, uint8_t p_to) {
-		const WeaponTableEntry *from = world.weapons.by_index(p_from);
-		const WeaponTableEntry *to = world.weapons.by_index(p_to);
+		const WeaponTableEntry *from = world.tables.weapons.by_index(p_from);
+		const WeaponTableEntry *to = world.tables.weapons.by_index(p_to);
 		return from != nullptr && to != nullptr &&
 				from->category == to->category;
 	};
@@ -312,8 +314,13 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// one. Latch it instead and replay exactly one event at the joiner spawn block.
 	if (e != nullptr) e->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
 	const WeaponTableEntry *def =
-			world.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
-	w.start_in_switchto = true;
+			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+	// SWITCHRANK commits in place; only a holster (or an initial mount) queues
+	// the target's draw. Treating a fire-mode change as SWITCHFROM inserted a
+	// second animation and its draw lockout after the mode-switch action.
+	// [orig: WeaponAction_SwitchRank @0x543500 vs SwitchFrom @0x543475]
+	w.start_in_switchto = !w.active ||
+			active_local_weapon_slot(world, w)->current != weapon_action::kSwitchRank;
 	if (e == nullptr) {
 		w.presentation_pending = true;
 		return;
@@ -516,7 +523,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 		if (inventory != nullptr) {
 			const WeaponInventorySlot *eq = inventory->slot(inventory->equipped_combo);
 			const WeaponTableEntry *def = (eq != nullptr && eq->adm_index >= 0)
-					? world.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+					? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 					: nullptr;
 			if (def != nullptr && strutil::iequals(data.name, def->name)) {
 				w.slot.clip = eq->clip;
@@ -608,7 +615,7 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	const WeaponInventorySlot *slot = inventory.slot(inventory.equipped_combo);
 	if (slot == nullptr || slot->adm_index < 0) return false;
 	const WeaponTableEntry *def =
-			world.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	if (def == nullptr) return false;             // no Def [orig: @0x4dcbda]
 	// The ammo leg, for defs that carry the flag: an empty pool hides the
 	// weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0,
@@ -954,14 +961,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// other anim side effect drives the .3di control registers)
 		// [orig: WeaponAction_Fire @ 0x542bbc..0x542bea; ActionSlot_TryAllocCtrlRegAnim
 		//  @ 0x401f00 -> dword_83FCE8].
-		AiEntity *p = world.ai != nullptr
-				? world.ai->for_handle(world.cached.local_player)
-				: nullptr;
+		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) {
 			const int stamped = w.attack_kind == 1 ? anim_state::kKnifeAttack
 					: w.attack_kind == 2 ? anim_state::kGrenadeAttack : -1;
-			const int ring = (stamped >= 0 && world.ai->root_motion != nullptr)
-					? world.ai->root_motion->variant_count(p->inf.adm_id, stamped) : 1;
+			const int ring = (stamped >= 0 && world.ai.root_motion != nullptr)
+					? world.ai.root_motion->variant_count(p->inf.adm_id, stamped) : 1;
 			infantry_weapon_attack_stamp(p->inf, w.attack_kind, ring);
 		}
 		// Local/SP fire already passed the same FSM/ammo authority that the remote
@@ -974,7 +979,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		Entity *shooter = world.registry.get(world.cached.local_player);
 		if (shooter != nullptr && p != nullptr) {
 			const uint8_t adm_index = shooter->equipped_adm_index;
-			const WeaponTableEntry *adm = world.weapons.by_index(adm_index);
+			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
 				Vec3 origin = shooter->position;
 				if (w.eye_valid) {
@@ -1040,7 +1045,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
 				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
 				round_event.slot_byte = w.pending_throw_charge;
-				if (io.is_authority) world.rounds.add(round_event);
+				if (io.is_authority) world.out.rounds.add(round_event);
 
 				RoundSpawnParams round;
 				round.owner = world.cached.local_player;
@@ -1109,7 +1114,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			// [orig: WeaponAction_Reload @0x543108..0x543157]
 			Entity *mount = world.registry.get(w.usegun_mount);
 			WeaponSlotState *mounted_slot = mount != nullptr
-					? resolve_mounted_ammo_slot(world, *mount)
+					? world.vehicles.resolve_mounted_ammo_slot(*mount)
 					: nullptr;
 			Entity *slot_owner = mount;
 			uint8_t mounted_adm =
@@ -1125,7 +1130,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				}
 			}
 			const WeaponTableEntry *mounted_def =
-					world.weapons.by_index(mounted_adm);
+					world.tables.weapons.by_index(mounted_adm);
 			if (mounted_slot != nullptr && slot_owner != nullptr &&
 					mounted_def != nullptr) {
 				io.reload.valid = true;
@@ -1143,9 +1148,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// locked clip plays to its end). In the original the stamp lives inside the
 		// refill itself; the SP/listen-host loopback applies it at reload start.
 		// [orig: WeaponSlot_ReloadAmmo @ 0x54173c; world-wac-ai-re.md §14.8.5]
-		AiEntity *p = world.ai != nullptr
-				? world.ai->for_handle(world.cached.local_player)
-				: nullptr;
+		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) p->inf.reload_anim_ticks = 80;
 	}
 	// --- the slot-pool bridge: the pool model is authoritative for ammo -------------
@@ -1159,7 +1162,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		WeaponInventory &inventory = *io.inventory;
 		WeaponInventorySlot *eq = inventory.slot(inventory.equipped_combo);
 		const WeaponTableEntry *eq_def = (eq != nullptr && eq->adm_index >= 0)
-				? world.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
+				? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 				: nullptr;
 		if (eq != nullptr && eq_def != nullptr) {
 			if (ev.reload_applied) {
@@ -1168,7 +1171,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// §5.58] — overriding the FSM's single-class transfer (D-WPN-2).
 				// eq->clip still holds the pre-reload remaining rounds (mirrored on
 				// the previous tick); the refund below consumes it.
-				weapon_inventory_reload_slot(world.weapons, inventory,
+				weapon_inventory_reload_slot(world.tables.weapons, inventory,
 						inventory.equipped_combo);
 				active_slot.clip = eq->clip;
 			} else {
@@ -1182,7 +1185,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			if (ev.action_finished == weapon_action::kRecoil &&
 					eq_def->has_switchcategory) {
 				handle_weapon_switch_outcome(world, w, io.inventory,
-						weapon_switch_to_handle(world.weapons, inventory,
+						weapon_switch_to_handle(world.tables.weapons, inventory,
 								eq_def->switchcategory *
 										weapon_combo::kRanksPerCategory,
 								local_weapon_switch_gates(world, w,
@@ -1214,6 +1217,42 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// Devtools instrumentation, last: the slot has finished mirroring, so the
 	// sample is the state this tick actually ends on.
 	weapon_trace_record(w, active_slot, ev, world.logic_tick);
+}
+
+WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
+	WeaponInstallData data;
+	data.name = row.weapon_name;
+	data.animadm = row.animadm;
+	data.flags = row.flags;
+	data.flags2 = row.flags2;
+	data.heat_per_shot = row.heat_per_shot;
+	data.heat_decay_per_tick = row.heat_decay_per_tick;
+	data.heat_glow_threshold = row.heat_glow_threshold;
+	data.scope_max_mag = row.scope_max_mag;
+	data.attack_anim = row.attack_anim;
+	data.run_anim = row.run_anim;
+	data.clipsize = row.clipsize;
+	data.startrounds = row.startrounds;
+	// The ACTION rows, verbatim, for the weapon-FSM bake plus the per-ACTION
+	// audio/effect hooks [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows;
+	// bound by Anim_InitActions @ 0x541fa0].
+	data.rows.reserve(row.actions_count);
+	for (size_t a = 0; a < row.actions_count; ++a) {
+		const DefWeaponAction &act = row.actions[a];
+		WeaponFsmActionRow r;
+		std::snprintf(r.name, sizeof(r.name), "%s", act.name);
+		std::snprintf(r.anim, sizeof(r.anim), "%s", act.anim);
+		std::snprintf(r.function, sizeof(r.function), "%s", act.function);
+		r.delaystart = act.delaystart;
+		r.delayend = act.delayend;
+		std::snprintf(r.soundset, sizeof(r.soundset), "%s", act.soundset);
+		std::snprintf(r.soundsetend, sizeof(r.soundsetend), "%s", act.soundsetend);
+		std::snprintf(r.particle, sizeof(r.particle), "%s", act.particle);
+		std::snprintf(r.particleuserpoint, sizeof(r.particleuserpoint), "%s",
+				act.particleuserpoint);
+		data.rows.push_back(r);
+	}
+	return data;
 }
 
 } // namespace opennova::world

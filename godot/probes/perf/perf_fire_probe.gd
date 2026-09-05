@@ -152,7 +152,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 # --- the attribution legs -----------------------------------------------------------
 
-func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentation) -> Dictionary:
+func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionRoot) -> Dictionary:
 	var ctx := _ctx
 	var legs := {}
 	# HUD-canvas A/B: hide the WHOLE HUD layer. Ticks still run - this
@@ -176,11 +176,11 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentati
 	# Existing presenter options provide state-safe A/Bs without a production
 	# probe branch: freeze transform/visibility/body submission independently
 	# while simulation, body posing and muzzle feedback continue normally.
-	var present := runtime.get_present_applier()
+	var present := runtime.get_entity_presenter()
 	if present != null:
 		var channels := present.get_output_channels()
-		for leg in [["xformoff", PresentApplier.OUTPUT_TRANSFORM], ["visoff", PresentApplier.OUTPUT_VISIBILITY],
-				["bodyoff", PresentApplier.OUTPUT_BODY_ANIM]]:
+		for leg in [["xformoff", EntityPresenter.OUTPUT_TRANSFORM], ["visoff", EntityPresenter.OUTPUT_VISIBILITY],
+				["bodyoff", EntityPresenter.OUTPUT_BODY_ANIM]]:
 			present.set_output_channels(channels & ~int(leg[1]))
 			await ctx.wait_ms(500)
 			legs[leg[0]] = await _measure(leg[0], 3000)
@@ -196,13 +196,10 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentati
 	var reflection: SubViewport = water.get_reflection_viewport() if water != null else null
 	if water != null and reflection != null:
 		await ctx.wait_ms(500)
-		var was_processing := water.is_processing()
 		var was_mode := reflection.render_target_update_mode
-		water.set_process(false)
 		reflection.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		legs["reflhardoff"] = await _measure("reflhardoff", 3000)
 		reflection.render_target_update_mode = was_mode
-		water.set_process(was_processing)
 	# Particle fixed-tick A/B (advance_fixed_tick runs per 62 Hz tick - 8-9x per
 	# frame at low FPS).
 	world.set_perf_probe_skip_effect_tick(true)
@@ -313,16 +310,16 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 	if runtime != null:
 		var rc := runtime.get_perf_counters()
 		rt = "sim=%.2f present=%.2f fx=%.2f ticks=%d" % [
-				float(rc.get("sim_us", 0)) / 1000.0, float(rc.get("present_us", 0)) / 1000.0,
-				float(rc.get("effects_us", 0)) / 1000.0, int(rc.get("ticks", 0))]
+				float(rc.sim_us) / 1000.0, float(rc.present_us) / 1000.0,
+				float(rc.effects_us) / 1000.0, rc.ticks]
 	var parts := "-"
 	var effect_world := _ctx.effect_world()
 	if effect_world != null:
 		var groups: Array = effect_world.get_debug_group_report()
 		var alive := 0
 		for g_v in groups:
-			for e_v in (g_v as Dictionary).get("emitters", []):
-				alive += int((e_v as Dictionary).get("alive", 0))
+			for e_v in (g_v as EffectGroupReport).emitters:
+				alive += (e_v as EffectEmitterReport).alive
 		parts = "%d/%d" % [groups.size(), alive]
 	var spans := ""
 	var shell := _ctx.game()
@@ -334,18 +331,13 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]
 	var world := _ctx.world()
 	if world != null and not _world_skipped:
-		var gg := world.get_perf_probe_spans()
-		if not gg.is_empty():
-			spans += " gw{occl_r=%.1f occl_f=%.1f iris=%.1f weather=%.1f blink=%.1f}" % [
-					float(gg.get("occl_restore", 0)) / 1000.0,
-					float(gg.get("occl_frame", 0)) / 1000.0,
-					float(gg.get("iris", 0)) / 1000.0,
-					float(gg.get("weather", 0)) / 1000.0,
-					float(gg.get("blink", 0)) / 1000.0]
-		var pc := world.get_runtime_perf_counters()
+		# The per-leg world spans (occlusion, iris, weather, blink) are the F3
+		# Stats board's WORLD_* rows now (the leg table banks them); the typed
+		# tick counters stay on the world.
+		var pc: RuntimePerfCounters = world.get_runtime_perf_counters()
 		spans += " gwtick{total=%.1f foliage=%.1f runtime=%.1f audio=%.1f}" % [
-				float(pc.get("tick_us", 0)) / 1000.0, float(pc.get("foliage_us", 0)) / 1000.0,
-				float(pc.get("runtime_us", 0)) / 1000.0, float(pc.get("audio_us", 0)) / 1000.0]
+				float(pc.tick_us) / 1000.0, float(pc.foliage_us) / 1000.0,
+				float(pc.runtime_us) / 1000.0, float(pc.audio_us) / 1000.0]
 		var sim := world.get_sim()
 		if sim != null:
 			var sc: Dictionary = sim.get_runtime_perf_counters()
@@ -413,21 +405,16 @@ func _equip_clip_weapon(forced: String) -> String:
 	var world := ctx.world()
 	if sim == null or world == null:
 		return ""
-	ctx.log("spawn inventory: %s" % str((sim.get_local_player_inventory() as Dictionary).get("slots", [])))
+	ctx.log("spawn inventory: %s" % str(sim.get_local_player_inventory().slots))
 	var candidates: Array = WEAPON_CANDIDATES.duplicate()
 	if not forced.is_empty():
 		candidates.push_front(forced)
 	for weapon_name in candidates:
-		var kit: Array[Dictionary] = [{
-			"name": weapon_name,
-			"ammo_primary": -1,
-			"ammo_secondary": -1,
-			"flags": -1,
-		}]
+		var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(weapon_name)]
 		if not bool(sim.apply_local_player_loadout(kit, 0)):
 			continue
-		var inventory: Dictionary = sim.get_local_player_inventory()
-		var equipped := String(inventory.get("equipped_name", ""))
+		var inventory := sim.get_local_player_inventory()
+		var equipped := inventory.equipped_name
 		if equipped.is_empty():
 			continue
 		# Mirror the armory's post-apply install exactly: world weapon THEN the

@@ -1,4 +1,5 @@
 #include <formats/til/til_tsd.h>
+#include <base/io/strutil.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -15,18 +16,6 @@ const char *const til_tsd_surface_names[TIL_TSD_SURFACE_NAME_COUNT] = {
 };
 
 namespace {
-
-bool ieq(const char *a, const char *b) {
-	while (*a && *b) {
-		char ca = *a, cb = *b;
-		if (ca >= 'a' && ca <= 'z') ca -= 32;
-		if (cb >= 'a' && cb <= 'z') cb -= 32;
-		if (ca != cb) return false;
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
 
 bool ieq_prefix(const char *s, const char *prefix, size_t n) {
 	for (size_t i = 0; i < n; ++i) {
@@ -45,7 +34,7 @@ void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 	// unbounded walk is bounded at the 20 real entries here) [orig: @ 0x604c23].
 	uint8_t ordinal = 0;
 	for (int i = 0; i < TIL_TSD_SURFACE_NAME_COUNT; ++i) {
-		if (ieq(value, til_tsd_surface_names[i])) {
+		if (strutil::iequals(value, til_tsd_surface_names[i])) {
 			ordinal = static_cast<uint8_t>(i);
 			break;
 		}

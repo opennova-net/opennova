@@ -92,9 +92,9 @@ func _capture(file_name: String, wait_s: float) -> Dictionary:
 	var particles := 0
 	var emitters := 0
 	for group_v in _fx.get_debug_group_report():
-		for emitter_v in (group_v as Dictionary).get("emitters", []):
+		for emitter_v in (group_v as EffectGroupReport).emitters:
 			emitters += 1
-			particles += int((emitter_v as Dictionary).get("alive", 0))
+			particles += (emitter_v as EffectEmitterReport).alive
 	var row := {
 		"file": file_name,
 		"live_groups": _fx.live_group_count(),

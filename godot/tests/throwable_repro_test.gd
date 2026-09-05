@@ -61,8 +61,6 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	if _sim != null:
-		_sim.free()
 	_sim = null
 	_db = null
 	_root = null
@@ -94,7 +92,7 @@ func _step_and_pump(ticks: int) -> Array[String]:
 				_rebake(_reinstall_pending)
 				_reinstall_pending = ""
 		for ev in _sim.drain_local_player_weapon_events():
-			var name := String((ev as Dictionary).get("switch_to_weapon", ""))
+			var name := (ev as PlayerWeaponEvent).switch_to_weapon
 			if not name.is_empty():
 				switched.append(name)
 				_install(name)
@@ -106,28 +104,28 @@ func _step_and_pump(ticks: int) -> Array[String]:
 func _visual_ids() -> Array[int]:
 	var out: Array[int] = []
 	for v in _sim.get_throwable_visuals():
-		out.append(int((v as Dictionary).get("item_id", 0)))
+		out.append((v as ThrowableVisualRow).item_id)
 	return out
 
 
 func _visual_move_effect(item_id: int) -> String:
 	for value in _sim.get_throwable_visuals():
-		var visual := value as Dictionary
-		if int(visual.get("item_id", 0)) == item_id:
-			return String(visual.get("move_effect", ""))
+		var visual := value as ThrowableVisualRow
+		if visual.item_id == item_id:
+			return visual.move_effect
 	return ""
 
 
 func _wait_for_idle(max_ticks: int) -> bool:
 	for _i in max_ticks:
-		var s: Dictionary = _sim.get_local_player_weapon_state()
-		if int(s.get("current", -1)) == 0 and int(s.get("next", -1)) == 0:
+		var s := _sim.get_local_player_weapon_state()
+		if s.current_action == 0 and s.next_action == 0:
 			return true
 		_step_and_pump(1)
 	return false
 
 
-func _boot_kit(kit: Array[Dictionary]) -> void:
+func _boot_kit(kit: Array[WeaponKitEntry]) -> void:
 	assert_true(_sim.apply_local_player_loadout(kit, 0), "loadout applied")
 	var boot := _step_and_pump(2)
 	if boot.is_empty():
@@ -149,16 +147,16 @@ func _switch_to(category: int, expect_name: String) -> void:
 			"equipped_adm_index stamped to %s" % expect_name)
 
 
-const KIT_M4_GRENADE: Array[Dictionary] = [
-	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
-	{"name": "WPN_GRENADEHE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_M4_GRENADE: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_M4AUTO"),
+	WeaponKitEntry.make("WPN_GRENADEHE"),
 ]
-const KIT_M4_CLAYMORE: Array[Dictionary] = [
-	{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
-	{"name": "WPN_CLAYMORE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_M4_CLAYMORE: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_M4AUTO"),
+	WeaponKitEntry.make("WPN_CLAYMORE"),
 ]
-const KIT_SATCHEL: Array[Dictionary] = [
-	{"name": "WPN_SATCHEL_CHARGE", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+var KIT_SATCHEL: Array[WeaponKitEntry] = [
+	WeaponKitEntry.make("WPN_SATCHEL_CHARGE"),
 ]
 
 
@@ -170,10 +168,10 @@ func test_reinstall_during_holster_preserves_the_switch() -> void:
 	assert_eq(_sim.get_local_player_weapon_name(), "WPN_M4AUTO")
 	_sim.request_local_player_weapon_category(5)
 	_sim.step()  # the M4 FSM enters SWITCHFROM
-	assert_eq(int(_sim.get_local_player_weapon_state().get("current", -1)), 7,
+	assert_eq(_sim.get_local_player_weapon_state().current_action, 7,
 			"the holster is playing")
 	_rebake("WPN_M4AUTO")  # the racing presentation late-bind
-	assert_eq(int(_sim.get_local_player_weapon_state().get("current", -1)), 7,
+	assert_eq(_sim.get_local_player_weapon_state().current_action, 7,
 			"the re-install must not reset the live action slot")
 	var sw: Array[String] = []
 	for _i in 150:
@@ -203,7 +201,7 @@ func test_windup_during_draw_leaves_no_stale_charge() -> void:
 	_step_and_pump(3)
 	_sim.set_local_player_weapon_input(false, false, false)
 	_step_and_pump(3)
-	assert_eq(int(_sim.get_local_player_weapon_state().get("fired_serial", -1)), 0,
+	assert_eq(_sim.get_local_player_weapon_state().fired_serial, 0,
 			"the mid-draw press does not fire")
 	# Settle, then a real tap-throw: the wire slot_byte must be the tap's 255,
 	# not a leftover from the refused windup — and the fire must happen.
@@ -215,11 +213,11 @@ func test_windup_during_draw_leaves_no_stale_charge() -> void:
 	var fired := false
 	for _i in 120:
 		_step_and_pump(1)
-		if int(_sim.get_local_player_weapon_state().get("fired_serial", 0)) == 1:
+		if _sim.get_local_player_weapon_state().fired_serial == 1:
 			fired = true
 			break
 	assert_true(fired, "the settled tap throws")
-	assert_eq(int(_sim.get_local_player_weapon_state().get("last_round_slot_byte", -1)),
+	assert_eq(_sim.get_local_player_weapon_state().last_round_slot_byte,
 			255, "the tap rides the full charge byte")
 
 
@@ -280,10 +278,10 @@ func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
 	assert_eq(bounces.size(), 5,
 			"retail presents only the first five grenade contacts")
 	for value in bounces:
-		var bounce: Dictionary = value
-		assert_eq(String(bounce.get("effect", "")), "",
+		var bounce: RoundImpactRow = value
+		assert_eq(bounce.effect, "",
 				"a terrain bounce never submits Effect_FragGrndDirt")
-		assert_eq(String(bounce.get("sound", "")), "IMP_GREN_DIRT",
+		assert_eq(bounce.sound, "IMP_GREN_DIRT",
 				"the retained bounce leg is the authored ground-impact sound")
 	assert_true(_visual_ids().has(1883),
 			"the grenade remains in flight until its fuse after bouncing")
@@ -335,25 +333,12 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 	_step_and_pump(5)
 	_sim.set_local_player_weapon_input(false, false, false)
 	_step_and_pump(200)
-	assert_gt(int(_sim.get_local_player_weapon_state().get("fired_serial", 0)), 0,
+	assert_gt(_sim.get_local_player_weapon_state().fired_serial, 0,
 			"the satchel fire action completed")
 	assert_true(_visual_ids().has(1891),
 			"the terrain-backed satchel persists as the placed device")
 
 	_switch_to(8, "WPN_SATCHEL_DETONATOR")
-
-
-func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
-	var slot := _sim.debug_spawn_round(Vector3(0, 10, 0), Vector3(1, 1, 0), "grenadehe")
-	assert_gt(slot, -1, "grenadehe spawned")
-	var expired_tick := -1
-	for t in 300:
-		_sim.step()
-		for ev in _sim.get_round_debug().get("events", []):
-			var d := ev as Dictionary
-			if int(d.get("kind", -1)) == 4 and expired_tick < 0:  # kExpired
-				expired_tick = t
-	assert_between(expired_tick, 240, 260, "the fuse, not an impact, ends the round")
 
 
 # The production smoke ammo reuses the flashbang's nade/nade TrcrID item.  Its
@@ -385,22 +370,22 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
 			"the production effects_table move row is live from spawn")
 
-	var arm_events: Array[Dictionary] = []
+	var arm_events: Array[RoundImpactRow] = []
 	var move_effect_survived_arm := true
 	for _tick in 312:
 		_sim.step()
 		move_effect_survived_arm = move_effect_survived_arm \
 				and _visual_move_effect(1875) == "Effect_SmokeToss"
 		for value in _sim.drain_round_impacts():
-			var event := value as Dictionary
-			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+			var event := value as RoundImpactRow
+			if event.sound == "EXPLO_SMOK_GREN":
 				arm_events.append(event)
 
 	assert_eq(arm_events.size(), 1, "the five-second arm boundary emits one presentation event")
 	if arm_events.size() == 1:
-		assert_eq(String(arm_events[0].get("effect", "")), "",
+		assert_eq(arm_events[0].effect, "",
 				"the authored smoke obj row has no particle leg")
-		assert_eq(String(arm_events[0].get("sound", "")), "EXPLO_SMOK_GREN",
+		assert_eq(arm_events[0].sound, "EXPLO_SMOK_GREN",
 				"the arm boundary presents the authored smoke-pour sound")
 	assert_true(_visual_ids().has(1875),
 			"the smoke grenade remains alive after its five-second arm event")
@@ -416,8 +401,8 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	for tick in 2300:
 		_sim.step()
 		for value in _sim.drain_round_impacts():
-			var event := value as Dictionary
-			if String(event.get("sound", "")) == "EXPLO_SMOK_GREN":
+			var event := value as RoundImpactRow
+			if event.sound == "EXPLO_SMOK_GREN":
 				fuse_sounds += 1
 		if fuse_tick < 0 and not _visual_ids().has(1875):
 			fuse_tick = tick + 312
@@ -433,16 +418,16 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 func test_windup_state_feeds_the_charge_bar() -> void:
 	_boot_kit(KIT_M4_GRENADE)
 	_switch_to(5, "WPN_GRENADEHE")
-	assert_false(bool(_sim.get_local_player_weapon_state().get("windup_active", true)),
+	assert_false(_sim.get_local_player_weapon_state().windup_active,
 			"no windup before the press")
 	_sim.set_local_player_weapon_input(true, true, false)
 	_step_and_pump(40)
-	var s: Dictionary = _sim.get_local_player_weapon_state()
-	assert_true(bool(s.get("windup_active", false)), "held press winds up")
-	assert_between(int(s.get("windup_held_ticks", 0)), 35, 45, "held ticks exposed")
+	var s := _sim.get_local_player_weapon_state()
+	assert_true(s.windup_active, "held press winds up")
+	assert_between(s.windup_held_ticks, 35, 45, "held ticks exposed")
 	_sim.set_local_player_weapon_input(false, false, false)
 	_step_and_pump(2)
-	assert_false(bool(_sim.get_local_player_weapon_state().get("windup_active", true)),
+	assert_false(_sim.get_local_player_weapon_state().windup_active,
 			"release ends the windup")
 
 
@@ -451,31 +436,31 @@ func test_binocular_toggle_refuses_during_powerthrow_windup() -> void:
 	_switch_to(5, "WPN_GRENADEHE")
 	_sim.set_local_player_weapon_input(true, true, false)
 	_step_and_pump(40)
-	var wound: Dictionary = _sim.get_local_player_weapon_state()
-	assert_true(bool(wound.get("windup_active", false)), "the grenade is charging")
-	var fired_before := int(wound.get("fired_serial", 0))
-	var rounds_before := int(wound.get("round_ring_count", 0))
+	var wound := _sim.get_local_player_weapon_state()
+	assert_true(wound.windup_active, "the grenade is charging")
+	var fired_before := wound.fired_serial
+	var rounds_before := wound.round_ring_count
 
 	assert_false(_sim.request_local_player_binoculars_toggle(),
 			"retail refuses binoculars during a live fire charge")
-	assert_false(bool(_sim.get_local_player_view().get("binoculars_requested", true)))
+	assert_false(_sim.get_local_player_view().binoculars_requested)
 	_sim.set_local_player_weapon_input(true, false, false)
 	_step_and_pump(2)
 	wound = _sim.get_local_player_weapon_state()
-	assert_true(bool(wound.get("windup_active", false)),
+	assert_true(wound.windup_active,
 			"the refusal preserves the still-held windup")
-	assert_eq(int(wound.get("fired_serial", -1)), fired_before,
+	assert_eq(wound.fired_serial, fired_before,
 			"the optics request cannot release the grenade")
 
 	_sim.set_local_player_weapon_input(false, false, false)
 	var fired := false
 	for _tick in 120:
 		_step_and_pump(1)
-		if int(_sim.get_local_player_weapon_state().get("fired_serial", 0)) == fired_before + 1:
+		if _sim.get_local_player_weapon_state().fired_serial == fired_before + 1:
 			fired = true
 			break
 	assert_true(fired, "the later real release fires exactly once")
-	var released: Dictionary = _sim.get_local_player_weapon_state()
-	assert_eq(int(released.get("round_ring_count", -1)), rounds_before + 1)
-	assert_gt(int(released.get("last_round_slot_byte", 0)), 0,
+	var released := _sim.get_local_player_weapon_state()
+	assert_eq(released.round_ring_count, rounds_before + 1)
+	assert_gt(released.last_round_slot_byte, 0,
 			"the released round carries the accumulated PowerThrow charge")

@@ -3,7 +3,10 @@
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
 
+#include <base/io/log.h>
+
 #include <cstdio>
+#include <cstdlib>
 
 namespace opennova {
 
@@ -129,6 +132,21 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 			out.host_ip = decoded;
 		}
 	}
+	// CK decodes (its own url_cipher key) to a decimal the retail client atol()s
+	// into the game-session BT join field; a NovaWorld host rejects a wrong BT
+	// with code 9. Re-serialize through atol like retail so leading zeros / stray
+	// bytes normalize; a missing/garbage CK keeps the "0" LAN default.
+	// [orig: parse_connection_query_string @0x54dfb0 CK arm; net_config.bt =
+	//  atol(decoded CK) @0x569b8e]
+	if (!out.ck.empty()) {
+		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
+		out.app_id = std::to_string(std::atol(decoded_ck.c_str()));
+		// Lifecycle trace (kInfo -> MCP log ring): the CK -> APPID derivation.
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+				"joi: CK='%s' decoded='%s' APPID='%s' host=%s:%s",
+				out.ck.c_str(), decoded_ck.c_str(), out.app_id.c_str(),
+				out.host_ip.c_str(), out.host_port.c_str());
+	}
 	if (out.host_ip.empty()) out.host_ip = out.ni;
 	if (out.host_port.empty()) out.host_port = out.np;
 	out.ok = !out.host_ip.empty() && !out.host_port.empty();
@@ -153,6 +171,23 @@ void CookieJar::merge_set_cookie_values(
 const std::string *CookieJar::find(const std::string &name) const {
 	auto it = values_.find(name);
 	return it == values_.end() ? nullptr : &it->second;
+}
+
+std::vector<uint8_t> CookieJar::build_prefixed_blob(const std::string &prefix) const {
+	std::vector<uint8_t> blob;
+	for (const std::string &name : order_) {
+		if (name.size() < prefix.size() ||
+		    name.compare(0, prefix.size(), prefix) != 0) {
+			continue;
+		}
+		const auto it = values_.find(name);
+		const std::string &value = it == values_.end() ? name : it->second;
+		blob.insert(blob.end(), name.begin(), name.end());
+		blob.push_back(0);
+		blob.insert(blob.end(), value.begin(), value.end());
+		blob.push_back(0);
+	}
+	return blob;
 }
 
 std::vector<std::string> CookieJar::cookie_header_lines() const {

@@ -1,4 +1,6 @@
 #include "hud/hud_pos.h"
+#include "util/color_convert.h"
+#include "hud/vehicle_hud_block.h"
 
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
@@ -7,6 +9,8 @@
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
+
+using namespace opennova::def;
 
 // The GDScript-facing mirrors are pinned to the engine's witnessed values —
 // a drifted copy here would silently split the native expiry policy from the
@@ -121,8 +125,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
 	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
-	ClassDB::bind_static_method("HudPos", D_METHOD("power_throw_progress_fp16", "held_ticks"), &HudPos::power_throw_progress_fp16);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &HudPos::loading_bar_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &HudPos::crosshair_total_spread_fp16);
@@ -135,7 +137,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_sidecar_image_name", "mission_file"), &HudPos::loading_sidecar_image_name);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed", "displayed", "reported"), &HudPos::loading_present_due);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
@@ -365,42 +367,23 @@ Array HudPos::get_static_frames() const {
 
 // One VEHICLE_HUD block by items.def sid, case-insensitively -- matching the
 // _stricmp the original commits the block with. The witness for the block and
-// its grammar lives with the parse, in engine/formats/def/def.h; this is only
-// the projection into a Dictionary.
+// its grammar lives with the parse, in engine/formats/def/def.h; this only
+// hands the block out.
 //
-// An unknown sid returns an EMPTY dictionary rather than a default-filled one:
-// a vehicle with no authored panel draws none.
-Dictionary HudPos::get_vehicle_hud(const String &p_sid) const {
-	Dictionary out;
-	if (!loaded_ || p_sid.is_empty()) return out;
+// An unknown sid returns NULL rather than a default-filled block: a vehicle
+// with no authored panel draws none.
+Ref<VehicleHudBlock> HudPos::get_vehicle_hud(const String &p_sid) const {
+	if (!loaded_ || p_sid.is_empty()) return Ref<VehicleHudBlock>();
 	const String want = p_sid.to_lower();
 	for (size_t i = 0; i < file_.hud.vehicle_huds_count; ++i) {
 		const DefVehicleHudBlock &v = file_.hud.vehicle_huds[i];
 		if (String::utf8(v.sid).to_lower() != want) continue;
-		out["sid"] = String::utf8(v.sid);
-		out["icon"] = String::utf8(v.icon);
-		out["interface"] = String::utf8(v.interface_texture);
-		out["static_texture"] = String::utf8(v.static_texture);
-		out["driver"] = Vector2i(v.driver_x, v.driver_y);
-		Array emplace;
-		for (int e = 0; e < v.emplace_count; ++e)
-			emplace.push_back(Vector2i(v.emplace_x[e], v.emplace_y[e]));
-		out["emplace"] = emplace;
-		Array seats;
-		for (int st = 0; st < v.seat_count; ++st)
-			seats.push_back(Vector2i(v.seat_x[st], v.seat_y[st]));
-		out["seats"] = seats;
+		Ref<VehicleHudBlock> out;
+		out.instantiate();
+		out->assign(v);
 		return out;
 	}
-	return out;
-}
-
-Dictionary HudPos::get_parachute_icon() const {
-	return loaded_ ? graphic_to_dict(file_.hud.parachute_icon) : Dictionary();
-}
-
-Dictionary HudPos::get_armor_icon() const {
-	return loaded_ ? graphic_to_dict(file_.hud.armor_icon) : Dictionary();
+	return Ref<VehicleHudBlock>();
 }
 
 Rect2i HudPos::get_spinmap_bounds() const {
@@ -521,8 +504,8 @@ Dictionary HudPos::to_dictionary() const {
 	out["colors"] = get_colors();
 	out["stances"] = get_stances();
 	out["static_frames"] = get_static_frames();
-	out["parachute_icon"] = get_parachute_icon();
-	out["armor_icon"] = get_armor_icon();
+	out["parachute_icon"] = loaded_ ? graphic_to_dict(h.parachute_icon) : Dictionary();
+	out["armor_icon"] = loaded_ ? graphic_to_dict(h.armor_icon) : Dictionary();
 
 	Array declutter;
 	for (size_t i = 0; i < h.declutter_count; ++i) {
@@ -651,16 +634,8 @@ bool HudPos::heat_bar_is_horizontal(const Vector2 &p_bar_size) {
 	return opennova::hud::heat_bar_is_horizontal(p_bar_size.x, p_bar_size.y);
 }
 
-int HudPos::power_throw_progress_fp16(int p_held_ticks) {
-	return opennova::hud::power_throw_progress_fp16(p_held_ticks);
-}
-
 int HudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
 	return opennova::hud::power_fill_span(p_progress_fp16, p_extent_px);
-}
-
-int HudPos::loading_bar_step(int p_displayed, int p_reported) {
-	return opennova::hud::loading_bar_step(p_displayed, p_reported);
 }
 
 String HudPos::loading_fallback_image() { return opennova::hud::kLoadingFallbackImage; }
@@ -674,10 +649,8 @@ String HudPos::loading_sidecar_image_name(const String &p_mission_file) {
 			p_mission_file.utf8().get_data()).c_str());
 }
 
-bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed,
-		int p_displayed, int p_reported) {
-	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed,
-			p_displayed, p_reported);
+bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed) {
+	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed);
 }
 
 Vector2i HudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {
@@ -733,8 +706,7 @@ double HudPos::loading_msg_body_y_frac() {
 
 Color HudPos::loading_msg_label_color() {
 	const uint32_t rgb = opennova::hud::kLoadingMsgLabelRgb;
-	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
-			(rgb & 0xFFu) / 255.0f);
+	return opennova::color_from_rgb24(rgb);
 }
 
 Vector2i HudPos::loading_bar_pos() {
@@ -747,15 +719,12 @@ Vector2i HudPos::loading_bar_size() {
 
 Color HudPos::loading_bar_border_gray() {
 	const uint32_t rgb = opennova::hud::kLoadingBarBorderGray;
-	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
-			(rgb & 0xFFu) / 255.0f);
+	return opennova::color_from_rgb24(rgb);
 }
 
 Color HudPos::loading_bar_fill_color() {
 	const uint32_t argb = opennova::hud::kLoadingBarFillArgb;
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
+	return opennova::color_from_argb(argb);
 }
 
 String HudPos::loading_splash_arrow_image() {
@@ -778,9 +747,7 @@ Color HudPos::loading_splash_continue_color(bool p_phase_on) {
 	const uint32_t argb = opennova::hud::half_bright_argb(p_phase_on
 			? opennova::hud::kSplashContinueColorOn
 			: opennova::hud::kSplashContinueColorOff);
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
+	return opennova::color_from_argb(argb);
 }
 
 // --- first-person view effects (hud/view_effects.h) -------------------------

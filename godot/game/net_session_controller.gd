@@ -15,6 +15,9 @@ var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
+var _menu_visible_before_novaworld := false
+var _menu_key_input_before_novaworld := false
+var _novaworld_menu_state_captured := false
 var _join_role_prompt: Control
 var _join_role_password: LineEdit
 var _join_role_target: JoinTarget
@@ -23,6 +26,7 @@ var _spectator_probe_target: JoinTarget
 var _spectator_probe_serial := 0
 
 const SPECTATOR_PREFLIGHT_SECONDS := 1.0
+const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func _exit_tree() -> void:
@@ -104,17 +108,11 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	# JO), not a session template or a value copied from one capture.
 	var root := _resource_root()
 	config.expansion = root.get_expansion() if root != null else ""
-	var load_info := {
-		"mission_file": config.mission,
-		"in_session": true,
-		"server_name": config.server_name,
-		"mission_name": _resolve_mission_title(config.mission),
-		"game_type": config.game_type,
-		"custom_text": config.custom_text,
-	}
+	var load_info := LoadingScreenInfo.make(config.mission, true, config.server_name,
+			_resolve_mission_title(config.mission), config.game_type, config.custom_text)
 	_shell.start_world_load(
 		load_info,
-		_world.load_mission_as_host.bind(config))
+		_world.load_mission_as_host.bind(config.to_session_options()))
 
 
 ## Public entry for "join this server" — the seam behind the LAN browser's
@@ -127,6 +125,13 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 func join_lan_server(target: JoinTarget) -> void:
 	if target == null:
 		return
+	# `--integrity-profile` is the operator opt-in for EVERY joiner entry (the
+	# NovaWorld browser included), not just the --lan-join launch. The default
+	# stays empty: silence is the parity-safe anti-cheat posture — a canned
+	# profile answering a different host corpus is the one reply that punts
+	# (D-NET-181).
+	if target.integrity_profile.strip_edges().is_empty():
+		target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
 	if target.role_explicit:
@@ -148,7 +153,7 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# Joiner: the retail client obtains the full session-variable set from the
 	# connect stream before wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
-	# them with the authoritative post-auth record before starting MissionPresentation.
+	# them with the authoritative post-auth record before starting MissionRoot.
 	# Retail also holds the screen through the post-world-load connection/game-start
 	# waits [orig: NapiClient_WaitForDisconnect @ 0x42cb20 then
 	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime
@@ -156,12 +161,8 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# (docs/interface/loading-screen-re.md, the load-flow case matrix).
 	if target.player_name.is_empty():
 		target.player_name = resolve_player_callsign()
-	var load_info := {
-		"mission_file": target.mission,
-		"in_session": true,
-		"server_name": target.server_name,
-		"game_type": target.game_type,
-	}
+	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
+			target.game_type, "")
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
@@ -183,7 +184,7 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	var err := int(_spectator_probe.start_browsing(
 			target.host_ip, target.port, target.port))
 	if err != OK:
-		_finish_spectator_preflight(_spectator_probe, target, serial, {})
+		_finish_spectator_preflight(_spectator_probe, target, serial, null)
 		return
 	get_tree().create_timer(SPECTATOR_PREFLIGHT_SECONDS).timeout.connect(
 			_on_spectator_preflight_timeout.bind(serial))
@@ -198,10 +199,10 @@ func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
 			or rows.is_empty()
 	):
 		return
-	var row: Dictionary = rows[0]
+	var row: LanServerRow = rows[0]
 	for candidate in rows:
-		var typed := candidate as Dictionary
-		if int(typed.get("port", -1)) == target.port:
+		var typed := candidate as LanServerRow
+		if typed.port == target.port:
 			row = typed
 			break
 	_finish_spectator_preflight(probe, target, serial, row)
@@ -217,23 +218,23 @@ func _on_spectator_preflight_timeout(serial: int) -> void:
 	var target := _spectator_probe_target
 	if probe == null or target == null:
 		return
-	_finish_spectator_preflight(probe, target, serial, {})
+	_finish_spectator_preflight(probe, target, serial, null)
 
 
 func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
-		serial: int, row: Dictionary) -> void:
+		serial: int, row: LanServerRow) -> void:
 	if (
 			probe != _spectator_probe
 			or target != _spectator_probe_target
 			or serial != _spectator_probe_serial
 	):
 		return
-	if not row.is_empty():
-		target.server_flags = int(row.get("server_flags", 0))
+	if row != null:
+		target.server_flags = row.server_flags
 		if target.server_name.is_empty():
-			target.server_name = String(row.get("server_name", row.get("name", "")))
+			target.server_name = row.server_name
 		if target.game_type < 0:
-			target.game_type = int(row.get("gametype", -1))
+			target.game_type = row.gametype
 	_cancel_spectator_probe()
 	if target.allows_spectators():
 		_show_join_role_prompt(target)
@@ -253,7 +254,7 @@ func _cancel_spectator_probe() -> void:
 # Retail exposes this decision after enumeration whenever P2 bit 0x2000 is
 # set. The password control appears only with P2 bit 0x4000; Player never sends
 # JSPP. The witnessed BuildFlags bits live engine-side
-# (engine/net/npruntime/server_initial_state.cpp; docs/net/novaworld-net-re.md
+# (engine/runtime/inmatch/server_initial_state.cpp; docs/net/novaworld-net-re.md
 # section 5.0e).
 func _show_join_role_prompt(target: JoinTarget) -> void:
 	_dismiss_join_role_prompt()
@@ -367,17 +368,20 @@ func resolve_player_callsign() -> String:
 
 # --- NovaWorld (online multiplayer) ---------------------------------------------
 
-# The menu's NovaWorld control: open the panel over the hidden menu.
+# The menu's NovaWorld control: open the panel over the authored multiplayer
+# screen. The full-rect panel blocks pointer input; suspend the MenuShell's
+# unhandled-key path as well so Enter/Escape cannot activate controls behind
+# the compact overlay.
 func open_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		return
-	_novaworld_panel = NovaWorldPanel.new()
+	_capture_menu_behind_novaworld()
+	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel
 	# Dev default: localhost. A prod build sets the server host from the
 	# resolved server IP before showing the panel.
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
-	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
+	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
-	_menu_shell.hide_menu()
 	_panel_layer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
@@ -389,19 +393,42 @@ func open_novaworld_panel() -> void:
 
 func _on_novaworld_closed() -> void:
 	_dismiss_novaworld_panel()
-	_menu_shell.show_menu()
 
 
 func _dismiss_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		_novaworld_panel.queue_free()
 		_novaworld_panel = null
+	_restore_menu_after_novaworld()
+
+
+func _capture_menu_behind_novaworld() -> void:
+	if _menu_shell == null:
+		return
+	_menu_visible_before_novaworld = _menu_shell.visible
+	_menu_key_input_before_novaworld = _menu_shell.is_processing_unhandled_key_input()
+	_novaworld_menu_state_captured = true
+	# show_menu only changes presentation/process state; it keeps the current
+	# .mnu document, screen, and back stack intact behind the overlay.
+	_menu_shell.show_menu()
+	_menu_shell.set_process_unhandled_key_input(false)
+
+
+func _restore_menu_after_novaworld() -> void:
+	if not _novaworld_menu_state_captured or _menu_shell == null:
+		return
+	_menu_shell.set_process_unhandled_key_input(_menu_key_input_before_novaworld)
+	if _menu_visible_before_novaworld:
+		_menu_shell.show_menu()
+	else:
+		_menu_shell.hide_menu()
+	_novaworld_menu_state_captured = false
 
 
 # The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
 # available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
 # the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + the NovaWorld channel,
-# so net_session_drive._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+# so SessionDrive::maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
@@ -418,14 +445,10 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	config.player_name = resolve_player_callsign()
 	if config.server_name.is_empty():
 		config.server_name = "OpenNova Host"
-	_shell.start_world_load({
-		"mission_file": mission,
-		"in_session": true,
-		"server_name": config.server_name,
-		"mission_name": _resolve_mission_title(mission),
-		"game_type": config.game_type,
-		"custom_text": config.custom_text,
-	}, _world.load_mission_as_host.bind(config))
+	_shell.start_world_load(
+			LoadingScreenInfo.make(mission, true, config.server_name,
+					_resolve_mission_title(mission), config.game_type, config.custom_text),
+			_world.load_mission_as_host.bind(config.to_session_options()))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match

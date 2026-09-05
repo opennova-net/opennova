@@ -1,21 +1,28 @@
 #include "hud/hud_overlay.h"
+#include "util/color_convert.h"
+#include "hud/hud_draw_list_stats.h"
+#include "hud/vehicle_hud_block.h"
 
-#include "hud/friendly_tag_flags.h"
 #include "hud/hud_pos.h"
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain_data.h"
+#include "util/axes.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
-#include <net/npwire/game_type.h> // the conquest arm of the zone panel
+#include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
 #include <godot_cpp/classes/image.hpp>
+#include <base/io/fixed.h>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
 #include <algorithm>
@@ -28,6 +35,11 @@
 using namespace godot;
 
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
+#include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
+
+using namespace opennova::def;
+using namespace opennova::fnt;
 
 namespace {
 
@@ -76,27 +88,6 @@ void fragment() {
 }
 )";
 
-int32_t q16_from_world(real_t value) {
-	const double scaled = static_cast<double>(value) * 65536.0;
-	return static_cast<int32_t>(std::clamp(scaled,
-			static_cast<double>(std::numeric_limits<int32_t>::min()),
-			static_cast<double>(std::numeric_limits<int32_t>::max())));
-}
-
-Color argb_to_color(uint32_t argb) {
-	return Color(((argb >> 16) & 0xFFu) / 255.0f, ((argb >> 8) & 0xFFu) / 255.0f,
-			(argb & 0xFFu) / 255.0f, ((argb >> 24) & 0xFFu) / 255.0f);
-}
-
-uint32_t color_to_argb(const Color &c) {
-	const auto channel = [](float v) {
-		const int b = static_cast<int>(v * 255.0f + 0.5f);
-		return static_cast<uint32_t>(std::clamp(b, 0, 255));
-	};
-	return (channel(c.a) << 24) | (channel(c.r) << 16) | (channel(c.g) << 8) |
-			channel(c.b);
-}
-
 HudPosRecord pos_record4(const Vector4i &v) {
 	HudPosRecord r;
 	r.x = v.x;
@@ -113,42 +104,6 @@ HudPosRecord pos_record2(const Vector2i &v) {
 	r.y = v.y;
 	r.present = true;
 	return r;
-}
-
-// HudPos::get_vehicle_hud's Dictionary back into the def block the engine
-// feed reads (field widths are the block's own: 16-byte sid, 32-byte names,
-// the 4/8 pair caps).
-void copy_fixed(char *dst, size_t cap, const String &src) {
-	const CharString utf8 = src.utf8();
-	snprintf(dst, cap, "%s", utf8.get_data());
-}
-
-DefVehicleHudBlock vehicle_hud_block_from_dict(const Dictionary &d) {
-	DefVehicleHudBlock block{};
-	copy_fixed(block.sid, sizeof(block.sid), d.get("sid", String()));
-	copy_fixed(block.icon, sizeof(block.icon), d.get("icon", String()));
-	copy_fixed(block.interface_texture, sizeof(block.interface_texture),
-			d.get("interface", String()));
-	copy_fixed(block.static_texture, sizeof(block.static_texture),
-			d.get("static_texture", String()));
-	const Vector2i driver = d.get("driver", Vector2i());
-	block.driver_x = driver.x;
-	block.driver_y = driver.y;
-	const Array emplace = d.get("emplace", Array());
-	for (int64_t i = 0; i < emplace.size() && i < DEF_VEHICLE_HUD_MAX_EMPLACE; ++i) {
-		const Vector2i p = emplace[i];
-		block.emplace_x[i] = p.x;
-		block.emplace_y[i] = p.y;
-		block.emplace_count = static_cast<int>(i) + 1;
-	}
-	const Array seats = d.get("seats", Array());
-	for (int64_t i = 0; i < seats.size() && i < DEF_VEHICLE_HUD_MAX_SEATS; ++i) {
-		const Vector2i p = seats[i];
-		block.seat_x[i] = p.x;
-		block.seat_y[i] = p.y;
-		block.seat_count = static_cast<int>(i) + 1;
-	}
-	return block;
 }
 
 HudRectRecord rect_record(const Rect2i &rect) {
@@ -174,11 +129,21 @@ int HudOverlay::showhud_flags_default() { return static_cast<int>(opennova::hud:
 int HudOverlay::next_showhud_flags(int p_flags) {
 	return static_cast<int>(opennova::hud::next_showhud_flags(static_cast<uint32_t>(p_flags)));
 }
-int HudOverlay::friendly_tag_mode_default() { return opennova::hud::kFriendlyTagModeDefault; }
+HudOverlay::FriendlyTagMode HudOverlay::friendly_tag_mode_default() {
+	return static_cast<FriendlyTagMode>(opennova::hud::kFriendlyTagModeDefault);
+}
+HudOverlay::FriendlyTagMode HudOverlay::next_friendly_tag_mode(FriendlyTagMode p_mode) {
+	return static_cast<FriendlyTagMode>(opennova::hud::next_friendly_tag_mode(
+			static_cast<opennova::hud::FriendlyTagMode>(p_mode)));
+}
 float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUnits; }
 
 void HudOverlay::_bind_methods() {
 	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
+	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_OFF);
+	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_FAR_BRIEF);
+	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_FULL);
+	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_BRIEF);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_color_index_default"), &HudOverlay::hud_color_index_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_color_index", "index"), &HudOverlay::clamp_hud_color_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_color_index", "index"), &HudOverlay::next_hud_color_index);
@@ -189,11 +154,18 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_mode_default"), &HudOverlay::friendly_tag_mode_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_lift"), &HudOverlay::friendly_tag_lift);
 	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
+	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);
+	ClassDB::bind_method(D_METHOD("get_crosshair_color"), &HudOverlay::get_crosshair_color);
+	ClassDB::bind_method(D_METHOD("set_crosshair_spread_enabled", "enabled"),
+			&HudOverlay::set_crosshair_spread_enabled);
+	ClassDB::bind_method(D_METHOD("is_crosshair_spread_enabled"),
+			&HudOverlay::is_crosshair_spread_enabled);
 	ClassDB::bind_method(D_METHOD("set_weapon", "weapon_name", "display_name", "round_type",
 								  "clipsize", "rounds_per_icon", "clipgfx_texture", "clipgfx_offset",
 								  "rndgfx_texture", "rndgfx_offset", "rndgfx_step"),
@@ -231,11 +203,18 @@ void HudOverlay::_bind_methods() {
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("clear_waypoint"), &HudOverlay::clear_waypoint);
-	ClassDB::bind_method(D_METHOD("set_objectives", "texts", "done"), &HudOverlay::set_objectives);
-	ClassDB::bind_method(D_METHOD("set_attach_labels", "screens", "texts", "nearest"),
+	ClassDB::bind_method(D_METHOD("set_objectives", "shown", "mission_text", "sim"),
+			&HudOverlay::set_objectives);
+	ClassDB::bind_method(D_METHOD("set_attach_labels", "camera_xform", "camera_projection",
+								  "gametext", "sim"),
 			&HudOverlay::set_attach_labels);
-	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_units",
-								  "names", "entity_ids", "health_ratios_fp16", "flags"),
+	ClassDB::bind_method(D_METHOD("get_attach_label_count"), &HudOverlay::get_attach_label_count);
+	ClassDB::bind_method(D_METHOD("get_attach_label_selected"),
+			&HudOverlay::get_attach_label_selected);
+	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
+			&HudOverlay::get_attach_label_text);
+	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
+								  "camera_projection", "fog_distance_units", "sim"),
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
@@ -258,6 +237,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_showhud_flags);
 	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
+	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
+			&HudOverlay::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
 			"altitude_wu", "heading_bam", "zoom_q16", "big_zoom_q16",
 			"map_mode", "flip_180", "snapshot"),
@@ -275,6 +256,9 @@ void HudOverlay::_bind_methods() {
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
+	BIND_CONSTANT(DEFAULT_CROSSHAIR_COLOR);
+	BIND_CONSTANT(CROSSHAIR_COLOR_MASK);
+	BIND_CONSTANT(DEFAULT_CROSSHAIR_SPREAD);
 }
 
 HudOverlay::HudOverlay() {
@@ -539,37 +523,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.map_coords_y = static_cast<float>(map_coords.y);
 	layout_.map_coords_off = map_coords.z;
 
-	// The HUDDECLUT mask table from the parsed rows [orig:
-	// HUD_ParseHudposToken @0x59F370 -> byte_2723CE0, see
-	// docs/interface/hud-re.md]. A file that authors ANY known row is applied
-	// faithfully — an unauthored slot then stays hidden at every level, like
-	// retail's zeroed table. A file with NO declutter rows at all (the test
-	// harness's minimal layouts; retail never ships one) keeps the module's
-	// all-visible default instead of blanking the whole HUD.
+	// The HUDDECLUT mask table from the parsed rows: the engine's
+	// declutter_from_hudpos (see docs/interface/hud-re.md); a file with no
+	// declutter rows keeps the module's all-visible default.
 	{
-		opennova::hud::HudDeclutter authored;
-		authored.begin_authoring();
-		bool any_row = false;
-		for (int slot = 0; slot < opennova::hud::kDeclutterSlotCount; ++slot) {
-			const PackedByteArray row = p_hudpos->get_declutter_flags(
-					String(opennova::hud::declutter_token_name(slot)));
-			if (row.size() < 4) {
-				continue;
-			}
-			int flags[4];
-			for (int i = 0; i < 4; ++i) {
-				flags[i] = row[i] != 0 ? 1 : 0;
-			}
-			authored.set_mask(slot,
-					opennova::hud::HudDeclutter::mask_from_flags(flags));
-			any_row = true;
-		}
 		const int level = declutter_.level();
-		if (any_row) {
-			declutter_ = authored;
-		} else {
-			declutter_ = opennova::hud::HudDeclutter();
-		}
+		opennova::hud::HudDeclutter authored;
+		declutter_ = opennova::hud::declutter_from_hudpos(p_hudpos->native_file(), authored)
+				? authored
+				: opennova::hud::HudDeclutter();
 		declutter_.set_level(level);
 		apply_declutter_();
 	}
@@ -579,7 +541,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		if (!colors.has(key)) {
 			return fallback;
 		}
-		return color_to_argb(colors[key]);
+		return opennova::argb_from_color(colors[key]);
 	};
 	layout_.health_border = color_of("health_border", layout_.health_border);
 	layout_.tag_good = color_of("tagcolor_good", layout_.tag_good);
@@ -691,6 +653,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
+	apply_crosshair_options_();
 	// Retail uploads the strip at its authored resolution with its full
 	// box-filtered mip chain; the default spinmap badges then sample near the
 	// 16px level. A mipless upload aliases the source into a visibly broken
@@ -751,6 +714,41 @@ void HudOverlay::set_crosshair_style(int p_style) {
 
 int HudOverlay::get_crosshair_style() const {
 	return crosshair_style_;
+}
+
+void HudOverlay::set_crosshair_color(int p_rgb) {
+	crosshair_color_ = static_cast<uint32_t>(p_rgb) & opennova::hud::HudLayout::kCrosshairColorMask;
+	if (!configured_) {
+		return; // picked up by configure()
+	}
+	apply_crosshair_options_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
+int HudOverlay::get_crosshair_color() const {
+	return static_cast<int>(crosshair_color_);
+}
+
+void HudOverlay::set_crosshair_spread_enabled(bool p_enabled) {
+	crosshair_spread_enabled_ = p_enabled;
+	if (!configured_) {
+		return; // picked up by configure()
+	}
+	apply_crosshair_options_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
+bool HudOverlay::is_crosshair_spread_enabled() const {
+	return crosshair_spread_enabled_;
+}
+
+void HudOverlay::apply_crosshair_options_() {
+	// The stored RGB forced opaque; the semantics and defaults live on the
+	// engine layout fields (hud_frame.h).
+	layout_.crosshair_color = 0xFF000000u | crosshair_color_;
+	layout_.crosshair_spread_enabled = crosshair_spread_enabled_;
 }
 
 void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display_name,
@@ -846,7 +844,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-		const Dictionary &p_strings, Simulation *p_sim) {
+		const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
@@ -862,7 +860,7 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_c
 	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
 	// Rows come straight from the netsim projection — no script-side
 	// Dictionary round-trip to drop fields or lose the score sign.
-	if (p_shown && p_sim != nullptr) {
+	if (p_shown && p_sim.is_valid()) {
 		p_sim->fill_scoreboard_rows(sb.rows);
 		sb.team_count = p_sim->scoreboard_team_count();
 	} else {
@@ -907,23 +905,23 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	queue_redraw();
 }
 
-void HudOverlay::set_vehicle_panel(bool p_shown, const Dictionary &p_block, int p_stance,
-		Simulation *p_sim) {
+void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
+		const Ref<Simulation> &p_sim) {
 	opennova::hud::HudVehiclePanelState &vp = state_.vehicle_panel;
-	if (!p_shown) {
+	if (!p_shown || p_block.is_null()) {
 		vp = opennova::hud::HudVehiclePanelState{};
 		textures_[opennova::hud::kHudTexVehiclePanel] = Ref<Texture2D>();
 		vehicle_panel_sid_ = String();
 		queue_redraw();
 		return;
 	}
-	const DefVehicleHudBlock block = vehicle_hud_block_from_dict(p_block);
+	const DefVehicleHudBlock &block = p_block->native();
 	// The silhouette is per item: reload the slot when the rider's vehicle
 	// changes (the set_weapon per-weapon art idiom).
-	const String sid = p_block.get("sid", String());
+	const String sid = p_block->get_sid();
 	if (sid != vehicle_panel_sid_ || textures_[opennova::hud::kHudTexVehiclePanel].is_null()) {
 		textures_[opennova::hud::kHudTexVehiclePanel] =
-				load_hud_texture_(p_block.get("interface", String()));
+				load_hud_texture_(p_block->get_interface_texture());
 		vehicle_panel_sid_ = sid;
 	}
 	const Ref<Texture2D> silhouette = textures_[opennova::hud::kHudTexVehiclePanel];
@@ -945,7 +943,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Dictionary &p_block, int 
 	// included [orig: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
 	// texture's w/h, see docs/interface/hud-re.md].
 	bool riding = true;
-	if (p_sim != nullptr) {
+	if (p_sim.is_valid()) {
 		riding = p_sim->fill_vehicle_panel(block, vp);
 	} else {
 		vp.seats.clear();
@@ -974,7 +972,7 @@ void HudOverlay::set_message_log_title(const String &p_title) {
 }
 
 void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-		int p_frame_counter, const Dictionary &p_strings, Simulation *p_sim) {
+		int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
 	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
@@ -990,7 +988,7 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	lp.under_attack_text =
 			String(p_strings.get("under_attack", "")).utf8().get_data();
 	lp.ready_text = String(p_strings.get("ready", "")).utf8().get_data();
-	if (p_shown && p_sim != nullptr) {
+	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
 	} else {
 		lp.shown = false;
@@ -1004,9 +1002,9 @@ void HudOverlay::set_waypoint(const String &p_name, int p_distance_m,
 	state_.waypoint.present = true;
 	state_.waypoint.name = p_name.utf8().get_data();
 	state_.waypoint.distance_m = p_distance_m;
-	state_.waypoint.world_x = q16_from_world(p_mission_position.x);
-	state_.waypoint.world_y = q16_from_world(p_mission_position.y);
-	state_.waypoint.world_z = q16_from_world(p_altitude_wu);
+	state_.waypoint.world_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.waypoint.world_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
+	state_.waypoint.world_z = opennova::io::float_to_fp16_16_sat(p_altitude_wu);
 	queue_redraw();
 }
 
@@ -1015,75 +1013,192 @@ void HudOverlay::clear_waypoint() {
 	queue_redraw();
 }
 
-void HudOverlay::set_objectives(const PackedStringArray &p_texts,
-		const PackedByteArray &p_done) {
+namespace {
+
+// The play camera's projection of a world point to overlay pixels: false when
+// the point is behind the near plane (Camera3D::is_position_behind's test),
+// else Camera3D::unproject_position's math over the viewport's visible size.
+bool project_to_overlay(const Transform3D &p_camera, const Projection &p_projection,
+		const Vector2 &p_viewport_size, const Vector3 &p_world, Vector2 &r_screen) {
+	const Vector3 eyedir = -p_camera.basis.get_column(2).normalized();
+	if (eyedir.dot(p_world - p_camera.origin) < p_projection.get_z_near()) {
+		return false;
+	}
+	Plane p(p_camera.xform_inv(p_world), 1.0f);
+	p = p_projection.xform4(p);
+	if (p.d == 0.0f) {
+		return false;
+	}
+	p.normal /= p.d;
+	r_screen = Vector2((p.normal.x * 0.5f + 0.5f) * p_viewport_size.x,
+			(-p.normal.y * 0.5f + 0.5f) * p_viewport_size.y);
+	return true;
+}
+
+String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
+		const String &p_fallback) {
+	if (p_gametext.is_valid() &&
+			p_gametext->has_string_in_section("Overlays", StringName(p_key))) {
+		return p_gametext->get_string_in_section("Overlays", StringName(p_key));
+	}
+	return p_fallback;
+}
+
+// The label text per seat type, resolved in the gametext table's Overlays
+// section with the witnessed missing-string fallbacks. The Gunner label
+// prefers the weapon's attachtextid key: a PRESENT key resolves even to an
+// empty string (the original stores the parse-time GameText_GetString result,
+// "" on a miss, and draws it) — only an ABSENT key falls to the STROVER_USEGUN
+// default.
+// [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
+//  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
+//  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
+//  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
+//  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
+String attach_label_text(const Ref<RtxtStringFile> &p_gametext,
+		opennova::world::SeatType p_seat_type, const std::string &p_attach_text_key) {
+	using opennova::world::SeatType;
+	switch (p_seat_type) {
+		case SeatType::Passenger: // sitex [orig: dword_2723860]
+			return overlay_text(p_gametext, "STROVER_SIT", "!sit");
+		case SeatType::Controller:
+		case SeatType::Driver:
+			// ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
+			return overlay_text(p_gametext, "STROVER_CONTROL", "!Control");
+		case SeatType::Gunner: // UseGun [orig: def+0x3A0 else dword_2723868]
+			if (p_attach_text_key.empty()) {
+				return overlay_text(p_gametext, "STROVER_USEGUN", "!UseGun");
+			}
+			// the witnessed empty-label quirk (parse-miss stores "")
+			return overlay_text(p_gametext, String::utf8(p_attach_text_key.c_str()), "");
+		case SeatType::ArmoryPoint: // armory [orig: dword_272386C]
+			return overlay_text(p_gametext, "STROVER_USEARMORY", "!UseArmory");
+		default:
+			return String();
+	}
+}
+
+} // namespace
+
+void HudOverlay::set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
+		const Ref<Simulation> &p_sim) {
 	state_.objectives.clear();
-	state_.objectives.reserve(static_cast<size_t>(p_texts.size()));
-	for (int64_t i = 0; i < p_texts.size(); ++i) {
-		opennova::hud::HudObjectiveRow row;
-		row.text = p_texts[i].utf8().get_data();
-		row.done = i < p_done.size() && p_done[i] != 0;
-		state_.objectives.push_back(row);
+	if (p_shown && p_sim.is_valid()) {
+		p_sim->fill_objectives(p_mission_text, state_.objectives);
 	}
 	queue_redraw();
 }
 
-void HudOverlay::set_attach_labels(const PackedVector2Array &p_screens,
-		const PackedStringArray &p_texts, const PackedByteArray &p_nearest) {
+// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
+//  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
+void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
+		const Projection &p_camera_projection, const Ref<RtxtStringFile> &p_gametext,
+		const Ref<Simulation> &p_sim) {
 	state_.attach_labels.clear();
-	const int64_t count = std::min(p_screens.size(), p_texts.size());
-	state_.attach_labels.reserve(static_cast<size_t>(count));
-	for (int64_t i = 0; i < count; ++i) {
-		opennova::hud::HudAttachLabel label;
-		label.screen_x = p_screens[i].x;
-		label.screen_y = p_screens[i].y;
-		label.text = p_texts[i].utf8().get_data();
-		label.nearest = i < p_nearest.size() && p_nearest[i] != 0;
-		state_.attach_labels.push_back(label);
+	std::vector<opennova::world::AttachLabel> labels;
+	if (p_sim.is_valid() && p_sim->fill_attach_labels(labels) && !labels.empty()) {
+		const Viewport *viewport = get_viewport();
+		const Vector2 viewport_size =
+				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
+		state_.attach_labels.reserve(labels.size());
+		for (const opennova::world::AttachLabel &l : labels) {
+			const Vector3 world_pos = mission_to_godot(l.world_pos);
+			Vector2 screen;
+			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+						world_pos, screen)) {
+				continue; // [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
+			}
+			opennova::hud::HudAttachLabel label;
+			label.screen_x = screen.x;
+			label.screen_y = screen.y;
+			label.text = attach_label_text(p_gametext, l.type, l.attach_text_key).utf8().get_data();
+			label.nearest = l.nearest;
+			state_.attach_labels.push_back(label);
+		}
 	}
 	queue_redraw();
 }
 
-void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
-		const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
-		const PackedInt32Array &p_entity_ids,
-		const PackedInt32Array &p_health_ratios_fp16,
-		const PackedInt32Array &p_flags) {
+int HudOverlay::get_attach_label_count() const {
+	return static_cast<int>(state_.attach_labels.size());
+}
+
+int HudOverlay::get_attach_label_selected() const {
+	for (size_t i = 0; i < state_.attach_labels.size(); ++i) {
+		if (state_.attach_labels[i].nearest) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+String HudOverlay::get_attach_label_text(int p_index) const {
+	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
+		return String();
+	}
+	return String::utf8(state_.attach_labels[static_cast<size_t>(p_index)].text.c_str());
+}
+
+// [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
+//  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
+//  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
+//  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
+		const Projection &p_camera_projection, float p_fog_distance_units,
+		const Ref<Simulation> &p_sim) {
 	state_.friendly_tags.clear();
-	const int64_t count = std::min(p_screens.size(), p_dists_units.size());
-	state_.friendly_tags.reserve(static_cast<size_t>(count));
-	for (int64_t i = 0; i < count; ++i) {
-		opennova::hud::HudFriendlyTag tag;
-		tag.screen_x = p_screens[i].x;
-		tag.screen_y = p_screens[i].y;
-		tag.dist_q16 = q16_from_world(p_dists_units[i]);
-		if (i < p_names.size()) tag.name = p_names[i].utf8().get_data();
-		if (i < p_entity_ids.size())
-			tag.entity_id = static_cast<uint16_t>(p_entity_ids[i]);
-		if (i < p_health_ratios_fp16.size())
-			tag.health_ratio_fp16 = p_health_ratios_fp16[i];
-		const int32_t flags = i < p_flags.size() ? p_flags[i] : 0;
-		tag.medic = (flags & friendly_tag_flags::kMedic) != 0;
-		tag.speaking = (flags & friendly_tag_flags::kSpeaking) != 0;
-		tag.player = (flags & friendly_tag_flags::kPlayer) != 0;
-		tag.dead = (flags & friendly_tag_flags::kDead) != 0;
-		tag.has_slot = (flags & friendly_tag_flags::kHasSlot) != 0;
-		tag.medic_request = (flags & friendly_tag_flags::kMedicRequest) != 0;
-		tag.revive_seconds = static_cast<uint8_t>(
-				(flags >> friendly_tag_flags::kReviveShift) & friendly_tag_flags::kReviveMax);
-		state_.friendly_tags.push_back(tag);
+	set_friendly_tag_env(p_fog_distance_units, 0);
+	std::vector<opennova::world::FriendlyTagSource> tags;
+	if (p_shown && p_sim.is_valid() &&
+			state_.friendly_tag_mode != static_cast<int>(opennova::hud::FriendlyTagMode::kOff) &&
+			p_sim->fill_friendly_tags(tags) && !tags.empty()) {
+		const Viewport *viewport = get_viewport();
+		const Vector2 viewport_size =
+				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
+		state_.friendly_tags.reserve(tags.size());
+		for (const opennova::world::FriendlyTagSource &t : tags) {
+			// The anchor: the entity position + the eye height above its origin
+			// (16.16 -> float) + the tag lift; the anchor witness lives at the
+			// gather (friendly_tags.h).
+			Vector3 world_pos = mission_to_godot(t.position);
+			world_pos.y += static_cast<float>(t.eye_offset_z) / 65536.0f +
+					opennova::hud::kFriendlyTagLiftUnits;
+			Vector2 screen;
+			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+						world_pos, screen)) {
+				continue; // [orig: the nonzero-clip bail @0x5a3b80]
+			}
+			opennova::hud::HudFriendlyTag tag;
+			tag.screen_x = screen.x;
+			tag.screen_y = screen.y;
+			tag.dist_q16 = opennova::io::float_to_fp16_16_sat(
+					p_camera_xform.origin.distance_to(world_pos));
+			tag.name = t.name;
+			tag.entity_id = t.net_id;
+			tag.health_ratio_fp16 = t.health_ratio_fp16;
+			tag.medic = t.medic;
+			// The speaking pulse is the overlay's own env feed, not a sim fact.
+			tag.speaking = false;
+			tag.player = t.player;
+			// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
+			tag.dead = t.dead;
+			tag.has_slot = t.has_slot;
+			tag.medic_request = t.medic_request;
+			tag.revive_seconds = t.revive_seconds;
+			state_.friendly_tags.push_back(tag);
+		}
 	}
 	queue_redraw();
 }
 
-void HudOverlay::set_friendly_tag_mode(int p_mode) {
+void HudOverlay::set_friendly_tag_mode(FriendlyTagMode p_mode) {
 	state_.friendly_tag_mode =
-			CLAMP(p_mode, 0, opennova::hud::kFriendlyTagModeCount - 1);
+			CLAMP(static_cast<int>(p_mode), 0, opennova::hud::kFriendlyTagModeCount - 1);
 	queue_redraw();
 }
 
-int HudOverlay::get_friendly_tag_mode() const {
-	return state_.friendly_tag_mode;
+HudOverlay::FriendlyTagMode HudOverlay::get_friendly_tag_mode() const {
+	return static_cast<FriendlyTagMode>(state_.friendly_tag_mode);
 }
 
 void HudOverlay::set_hud_color_index(int p_index) {
@@ -1124,9 +1239,13 @@ void HudOverlay::set_showhud_flags(int p_flags) {
 
 void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 		int p_speaking_level255) {
-	const int32_t fog_q16 = q16_from_world(p_fog_distance_units);
+	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
 	state_.speaking_level255 = p_speaking_level255;
+}
+
+Ref<Texture2D> HudOverlay::get_minimap_water_mask() const {
+	return textures_[opennova::hud::kHudTexMapWater];
 }
 
 void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
@@ -1176,9 +1295,9 @@ void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,
 		float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
 		int p_big_zoom_q16, int p_map_mode, bool p_flip_180,
 		const PackedInt32Array &p_snapshot) {
-	state_.minimap.player_x = q16_from_world(p_mission_position.x);
-	state_.minimap.player_y = q16_from_world(p_mission_position.y);
-	state_.minimap.player_z = q16_from_world(p_altitude_wu);
+	state_.minimap.player_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.minimap.player_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
+	state_.minimap.player_z = opennova::io::float_to_fp16_16_sat(p_altitude_wu);
 	state_.minimap.player_heading_bam = static_cast<int32_t>(p_heading_bam);
 	state_.minimap.zoom_q16 = std::clamp(p_zoom_q16,
 			opennova::hud::kSpinmapZoomMin, opennova::hud::kSpinmapZoomMax);
@@ -1236,8 +1355,8 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 	// The grid-label origin: the mission's type-2043 marker entity, if one
 	// exists (witness at HudMinimapInput::grid_origin_x).
 	state_.minimap.grid_origin_present = p_present;
-	state_.minimap.grid_origin_x = q16_from_world(p_mission_position.x);
-	state_.minimap.grid_origin_y = q16_from_world(p_mission_position.y);
+	state_.minimap.grid_origin_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
+	state_.minimap.grid_origin_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
 	queue_redraw();
 }
 
@@ -1257,8 +1376,9 @@ Vector2 HudOverlay::draw_surface_() const {
 	return Vector2(1024.0f, 768.0f);
 }
 
-Dictionary HudOverlay::get_draw_list_stats() {
-	Dictionary out;
+Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
+	Ref<HudDrawListStats> out;
+	out.instantiate();
 	int64_t quads_filled = 0;
 	int64_t quads_wire = 0;
 	int64_t quads_textured = 0;
@@ -1324,68 +1444,65 @@ Dictionary HudOverlay::get_draw_list_stats() {
 		big_map_labels = static_cast<int64_t>(list.big_map.labels.size());
 		big_map_glyphs = static_cast<int64_t>(list.big_map_glyphs.size());
 	}
-	out["quads"] = quads_filled + quads_wire;
-	out["quads_filled"] = quads_filled;
-	out["quads_wire"] = quads_wire;
-	out["quads_textured"] = quads_textured;
-	out["quads_additive"] = quads_additive;
-	out["tris"] = tris;
-	out["lines"] = lines;
-	out["glyphs"] = glyphs;
-	out["underlines"] = underlines;
-	out["elements_drawn"] = elements;
-	out["map_visible"] = map_visible;
-	out["map_backing_tris"] = map_backing_tris;
-	out["map_terrain_tris"] = map_terrain_tris;
-	out["map_footprint_tris"] = map_footprint_tris;
-	out["map_sprites"] = map_sprites;
-	out["map_lines_under"] = map_lines_under;
-	out["map_lines"] = map_lines;
-	out["map_labels"] = map_labels;
-	out["big_map_visible"] = big_map_visible;
-	out["big_map_backing_tris"] = big_map_backing_tris;
-	out["big_map_terrain_tris"] = big_map_terrain_tris;
-	out["big_map_footprint_tris"] = big_map_footprint_tris;
-	out["big_map_sprites"] = big_map_sprites;
-	out["big_map_lines_under"] = big_map_lines_under;
-	out["big_map_lines"] = big_map_lines;
-	out["big_map_labels"] = big_map_labels;
-	out["big_map_glyphs"] = big_map_glyphs;
+	out->set_quads(quads_filled + quads_wire);
+	out->set_quads_filled(quads_filled);
+	out->set_quads_wire(quads_wire);
+	out->set_quads_textured(quads_textured);
+	out->set_quads_additive(quads_additive);
+	out->set_tris(tris);
+	out->set_lines(lines);
+	out->set_glyphs(glyphs);
+	out->set_underlines(underlines);
+	out->set_elements_drawn(elements);
+	out->set_map_visible(map_visible);
+	out->set_map_backing_tris(map_backing_tris);
+	out->set_map_terrain_tris(map_terrain_tris);
+	out->set_map_footprint_tris(map_footprint_tris);
+	out->set_map_sprites(map_sprites);
+	out->set_map_lines_under(map_lines_under);
+	out->set_map_lines(map_lines);
+	out->set_map_labels(map_labels);
+	out->set_big_map_visible(big_map_visible);
+	out->set_big_map_backing_tris(big_map_backing_tris);
+	out->set_big_map_terrain_tris(big_map_terrain_tris);
+	out->set_big_map_footprint_tris(big_map_footprint_tris);
+	out->set_big_map_sprites(big_map_sprites);
+	out->set_big_map_lines_under(big_map_lines_under);
+	out->set_big_map_lines(big_map_lines);
+	out->set_big_map_labels(big_map_labels);
+	out->set_big_map_glyphs(big_map_glyphs);
 	const Ref<Texture2D> map_icons = textures_[opennova::hud::kHudTexMapIcons];
 	const Ref<Image> map_icon_image =
 			map_icons.is_valid() ? map_icons->get_image() : Ref<Image>();
-	out["map_icon_mipmaps"] =
-			map_icon_image.is_valid() && map_icon_image->has_mipmaps();
-	out["map_icon_width"] =
-			map_icon_image.is_valid() ? map_icon_image->get_width() : 0;
-	out["map_icon_height"] =
-			map_icon_image.is_valid() ? map_icon_image->get_height() : 0;
-	out["map_texture_filter"] = map_top_sampling_configured_
+	out->set_map_icon_mipmaps(map_icon_image.is_valid() && map_icon_image->has_mipmaps());
+	out->set_map_icon_width(map_icon_image.is_valid() ? map_icon_image->get_width() : 0);
+	out->set_map_icon_height(map_icon_image.is_valid() ? map_icon_image->get_height() : 0);
+	out->set_map_texture_filter(map_top_sampling_configured_
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["map_texture_repeat"] = map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_map_texture_repeat(map_top_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["map_water_texture_filter"] = map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_map_water_texture_filter(map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["map_water_texture_repeat"] = map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_map_water_texture_repeat(map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["big_map_texture_filter"] = big_map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_big_map_texture_filter(big_map_top_sampling_configured_
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["big_map_texture_repeat"] = big_map_top_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_big_map_texture_repeat(big_map_top_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
-	out["big_map_water_texture_filter"] = big_map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
+	out->set_big_map_water_texture_filter(big_map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
-	out["big_map_water_texture_repeat"] = big_map_water_sampling_configured_
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
+	out->set_big_map_water_texture_repeat(big_map_water_sampling_configured_
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
-			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
 	return out;
 }
 
@@ -1615,7 +1732,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	// elements over the bars/frames the same walk emitted).
 	for (const opennova::hud::HudQuad &quad : p_list.quads) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		const Color color = argb_to_color(quad.color);
+		const Color color = opennova::color_from_argb(quad.color);
 		if (!quad.filled) {
 			draw_rect(rect, color, false, -1.0f);
 			continue;
@@ -1667,12 +1784,12 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		uvs.set(1, Vector2(tri.b.u, tri.b.v));
 		uvs.set(2, Vector2(tri.c.u, tri.c.v));
 		PackedColorArray colors;
-		colors.push_back(argb_to_color(tri.color));
+		colors.push_back(opennova::color_from_argb(tri.color));
 		draw_polygon(points, colors, uvs, tex);
 	}
 	for (const opennova::hud::HudLine &line : p_list.lines) {
 		draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
-				argb_to_color(line.color), line.width);
+				opennova::color_from_argb(line.color), line.width);
 	}
 	// Glyph quads carry explicit corner geometry (the italic pass shears the
 	// top edge), so each renders as a polygon over its page texture, keeping
@@ -1698,12 +1815,12 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		uvs.set(2, Vector2(glyph.u1, glyph.v1));
 		uvs.set(3, Vector2(glyph.u0, glyph.v1));
 		PackedColorArray colors;
-		colors.push_back(argb_to_color(glyph.color));
+		colors.push_back(opennova::color_from_argb(glyph.color));
 		draw_polygon(points, colors, uvs, page);
 	}
 	for (const opennova::hud::GameFontUnderline &underline : p_list.underlines) {
 		draw_line(Vector2(underline.x0, underline.y), Vector2(underline.x1, underline.y),
-				argb_to_color(underline.color), 1.0f);
+				opennova::color_from_argb(underline.color), 1.0f);
 	}
 }
 
@@ -1754,7 +1871,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		uvs.push_back(Vector2(tri.a.u, tri.a.v));
 		uvs.push_back(Vector2(tri.b.u, tri.b.v));
 		uvs.push_back(Vector2(tri.c.u, tri.c.v));
-		const Color color = argb_to_color(tri.color);
+		const Color color = opennova::color_from_argb(tri.color);
 		colors.push_back(color);
 		colors.push_back(color);
 		colors.push_back(color);
@@ -1765,7 +1882,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	const auto push_quad = [&](const Vector2 *corner, const Vector2 *uv,
 			uint32_t argb) {
 		const int base = static_cast<int>(points.size());
-		const Color color = argb_to_color(argb);
+		const Color color = opennova::color_from_argb(argb);
 		for (int i = 0; i < 4; ++i) {
 			points.push_back(corner[i]);
 			uvs.push_back(uv[i]);
@@ -1823,7 +1940,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		for (const opennova::hud::HudMapLine &line : lines) {
 			line_points.set(li * 2, Vector2(line.x0, line.y0));
 			line_points.set(li * 2 + 1, Vector2(line.x1, line.y1));
-			line_colors.set(li, argb_to_color(line.color));
+			line_colors.set(li, opennova::color_from_argb(line.color));
 			++li;
 		}
 		rs->canvas_item_add_multiline(top_item, line_points, line_colors, 1.0f);

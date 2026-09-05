@@ -9,6 +9,7 @@
 //  WeaponAction_Reload @ 0x5430b0 / WeaponAction_Recoil @ 0x542dd0]
 #pragma once
 
+#include <formats/def/def.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/vehicle_mount.h>
@@ -192,8 +193,8 @@ struct LocalPlayerWeapon {
     bool trace_armed = false;
 };
 
-// The plain install payload — both embedder feeders (the retained weapon.def
-// row and the legacy dictionary seam) build exactly this.
+// The plain install payload: weapon_install_data_from_def fills the row half
+// from the retained weapon.def parse; the feeder adds the clip rings.
 struct WeaponInstallData {
     std::string name;
     std::string animadm;
@@ -211,6 +212,12 @@ struct WeaponInstallData {
     // Per-key clip-variant lengths in seconds (keys any case; stored lowered).
     std::vector<std::pair<std::string, std::vector<float>>> clip_rings;
 };
+
+// The row half of a WeaponInstallData from a parsed weapon.def entry: the
+// scalar slice the FSM bake reads plus the ACTION rows mirrored as
+// WeaponFsmActionRow. The clip-variant rings are the caller's (the kernel's
+// .adm clip index, or the embedder's own read).
+WeaponInstallData weapon_install_data_from_def(const opennova::def::DefWeaponDef &row);
 
 // The pump's wire-side outputs: the embedder's net layer consumes these — the
 // joiner's C2S 0x06 fired descriptor inputs and the 0x25 reload request. The
@@ -343,5 +350,74 @@ std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w);
 // consumer compares against its cursor to notice a restarted logic clock.
 uint32_t weapon_trace_samples_since(const LocalPlayerWeapon &w, uint32_t after_tick,
                                     bool take_all, std::vector<WeaponTraceSample> &out);
+
+
+// The local player's equipped-weapon FSM view for one tick, as one value the
+// embedder fills (Simulation::get_local_player_weapon_state carries the
+// field witnesses): the action ladder position, the FP clip channel, the last
+// action's audio/effect legs, the event serials, the magazine, heat and
+// recoil, the HUD crosshair spread in retail's integer domains, the
+// PowerThrow windup, the emplaced-gun controls, the round-ring diagnostics
+// and the 3P body weapon channel. `active` false = no weapon FSM installed
+// (every other field reads its default). Its Godot record wraps it by value
+// (ADR 0043 d10).
+struct LocalPlayerWeaponView {
+    bool active = false;
+    int32_t current_action = 0;
+    int32_t next_action = 0;
+    int32_t phase = 0;
+    int32_t switch_deferred_action = -1;
+    bool switch_in_flight = false;
+    int32_t pending_combo = 0;
+    std::string anim_key;
+    int32_t anim_variant = 0;
+    int32_t anim_advance_ticks = 0;
+    int32_t play_serial = 0;
+    int32_t action_serial = 0;
+    int32_t action_started = -1;
+    std::string action_soundset;
+    std::string action_particle;
+    std::string action_particle_userpoint;
+    int32_t action_end_serial = 0;
+    std::string action_end_soundset;
+    bool windup_active = false;
+    int32_t windup_held_ticks = 0;
+    int32_t fired_serial = 0;
+    int32_t tracer_counter = 0;
+    int32_t dry_serial = 0;
+    int32_t reload_serial = 0;
+    int32_t reload_applied_serial = 0;
+    int32_t reload_received_serial = 0;
+    int32_t reload_received_entity = 0;
+    int32_t reload_received_param = 0;
+    int32_t unscope_serial = 0;
+    int32_t rescope_serial = 0;
+    int32_t clip = 0;
+    int32_t reserve = 0;
+    int32_t kick = 0;
+    int32_t recoil_pitch_bam = 0;
+    int32_t weapon_weight_spread_bam = 0;
+    bool aimed_shot_available = false;
+    int32_t hud_spread_row = 0;
+    int32_t hud_spread_fp16 = 0;
+    int32_t heat = 0;
+    int32_t heat_glow = 0;
+    bool borrowed_usegun_slot = false;
+    bool emplaced_controls_valid = false;
+    int32_t emplaced_gun_yaw = 0;
+    int32_t emplaced_gun_pitch = 0;
+    int32_t round_ring_count = 0;
+    int32_t last_round_flags = 0;
+    int32_t last_round_subtype = 0;
+    int32_t last_round_slot_byte = 0;
+    int32_t last_round_seq = 0;
+    std::string body_anim_key;
+    int32_t body_anim_phase = 0;
+    std::string body_anim_prev_key;
+    int32_t body_anim_prev_phase = 0;
+    float body_anim_blend_weight = 1.0f;
+    int32_t body_anim_variant = 0;
+    int32_t body_anim_prev_variant = 0;
+};
 
 } // namespace opennova::world

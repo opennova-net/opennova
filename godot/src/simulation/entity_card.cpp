@@ -1,6 +1,7 @@
 #include "simulation/entity_card.h"
+#include "util/axes.h"
 
-#include "simulation/simulation_internal.h" // godot_from_mission_vec3, the ONE axis map
+#include "simulation/simulation_internal.h" // mission_to_godot, the ONE axis map
 
 #include <godot_cpp/variant/array.hpp>
 
@@ -12,15 +13,11 @@ using opennova::world::inspect::AiDetail;
 using opennova::world::inspect::SeatRow;
 using opennova::world::inspect::WorldDetail;
 
-Vector3 godot_from_mission(const opennova::world::Vec3 &p) {
-	return sim_internal::godot_from_mission_vec3(p);
-}
-
 Vector3 raw_mission(const opennova::world::Vec3 &p) {
 	return Vector3(p.x, p.y, p.z);
 }
 
-// The legacy AI card key set (the old Simulation::get_entity_debug shape).
+// The AI card's MCP JSON key set (docs/mcp.md).
 Dictionary ai_json(const AiDetail &d) {
 	Dictionary out;
 	out["kind"] = d.kind;
@@ -76,7 +73,7 @@ Dictionary ai_json(const AiDetail &d) {
 	out["net_id"] = d.net_id;
 	out["wire_handle"] = d.wire_handle;
 	out["ai_health"] = d.ai_health;
-	out["position"] = godot_from_mission(d.mission_position);
+	out["position"] = mission_to_godot(d.mission_position);
 	out["yaw_deg"] = d.yaw_deg;
 	out["state"] = d.state;
 	out["state_name"] = String(d.state_name.c_str());
@@ -140,7 +137,7 @@ Dictionary ai_json(const AiDetail &d) {
 	out["magazine"] = d.magazine;
 	out["combat_target_valid"] = d.combat_target_valid;
 	out["muzzle_valid"] = d.muzzle_valid;
-	out["muzzle"] = d.muzzle_valid ? godot_from_mission(d.muzzle) : Vector3();
+	out["muzzle"] = d.muzzle_valid ? mission_to_godot(d.muzzle) : Vector3();
 	out["death_anim_state"] = d.death_anim_state;
 	out["corpse_timer"] = d.corpse_timer;
 	out["deathtime_ticks"] = d.deathtime_ticks;
@@ -148,7 +145,7 @@ Dictionary ai_json(const AiDetail &d) {
 	return out;
 }
 
-// The legacy world card key set (the old Simulation::get_world_entity_debug shape).
+// The world card's MCP JSON key set (docs/mcp.md).
 Dictionary world_json(const WorldDetail &d) {
 	Dictionary out;
 	out["net_id"] = d.net_id;
@@ -179,7 +176,7 @@ Dictionary world_json(const WorldDetail &d) {
 	out["zone_control"] = d.zone_control;
 	out["zone_chain_index"] = d.zone_chain_index;
 	out["mission_position"] = raw_mission(d.mission_position);
-	out["position"] = godot_from_mission(d.mission_position);
+	out["position"] = mission_to_godot(d.mission_position);
 	out["yaw"] = d.yaw;
 	out["pitch"] = d.pitch;
 	out["roll"] = d.roll;
@@ -199,8 +196,8 @@ Dictionary world_json(const WorldDetail &d) {
 	return out;
 }
 
-// The legacy client card key set (the old Simulation::get_client_entity_debug shape).
-Dictionary replica_json(const opennova::np::ClientReplicaCard &d) {
+// The client card's MCP JSON key set (docs/mcp.md).
+Dictionary replica_json(const opennova::inmatch::ClientReplicaCard &d) {
 	Dictionary out;
 	out["handle"] = d.handle;
 	out["type_id"] = d.type_id;
@@ -237,11 +234,13 @@ Vector3 EntityCardSeat::get_local() const {
 }
 
 void EntityCardSeat::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_index"), &EntityCardSeat::get_index);
 	ClassDB::bind_method(D_METHOD("get_type"), &EntityCardSeat::get_type);
 	ClassDB::bind_method(D_METHOD("get_retail_slot"), &EntityCardSeat::get_retail_slot);
 	ClassDB::bind_method(D_METHOD("get_bone_index"), &EntityCardSeat::get_bone_index);
 	ClassDB::bind_method(D_METHOD("get_pose_index"), &EntityCardSeat::get_pose_index);
 	ClassDB::bind_method(D_METHOD("get_source_name"), &EntityCardSeat::get_source_name);
+	ClassDB::bind_method(D_METHOD("get_local"), &EntityCardSeat::get_local);
 	ClassDB::bind_method(D_METHOD("is_occupied"), &EntityCardSeat::is_occupied);
 }
 
@@ -303,7 +302,7 @@ Vector3 EntityCard::get_mission_position() const {
 }
 
 Vector3 EntityCard::get_position() const {
-	return godot_from_mission(value_.has_ai ? value_.ai.mission_position
+	return mission_to_godot(value_.has_ai ? value_.ai.mission_position
 											: value_.world.mission_position);
 }
 
@@ -350,7 +349,7 @@ TypedArray<EntityCardSeat> EntityCard::get_seats() const {
 }
 
 Dictionary EntityCard::to_json_value() const {
-	// The legacy detail precedence: the AI card when a brain exists, else the
+	// The detail precedence: the AI card when a brain exists, else the
 	// world card; a replica-only row (a joiner handle with no local half)
 	// starts empty like the old empty-detail rows did.
 	Dictionary out;
@@ -419,7 +418,6 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mount_seat_yaw_offset"), &EntityCard::get_mount_seat_yaw_offset);
 	ClassDB::bind_method(D_METHOD("is_mount_target_config_valid"), &EntityCard::is_mount_target_config_valid);
 	ClassDB::bind_method(D_METHOD("get_mount_target_config"), &EntityCard::get_mount_target_config);
-	ClassDB::bind_method(D_METHOD("get_mount_target_seat_count"), &EntityCard::get_mount_target_seat_count);
 	ClassDB::bind_method(D_METHOD("get_mount_target_seats"), &EntityCard::get_mount_target_seats);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_clip"), &EntityCard::get_primary_weapon_clip);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_reserve"), &EntityCard::get_primary_weapon_reserve);

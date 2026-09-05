@@ -10,6 +10,8 @@
 #include <cstring>
 #include <unordered_map>
 
+using namespace opennova::def;
+
 namespace opennova::audio {
 
 namespace {

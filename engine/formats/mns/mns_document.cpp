@@ -1,4 +1,5 @@
 #include <formats/mns/mns_document.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cctype>
@@ -10,13 +11,6 @@ namespace {
 
 bool is_hws(char c) {
 	return c == ' ' || c == '\t';
-}
-
-std::string to_upper(const std::string &s) {
-	std::string result = s;
-	std::transform(result.begin(), result.end(), result.begin(),
-				   [](unsigned char c) { return std::toupper(c); });
-	return result;
 }
 
 // The spec's six forbidden name characters (the quotes in the in-file spec
@@ -445,7 +439,7 @@ Document Document::parse(const char *data, size_t size) {
 		}
 
 		const std::string &name = node.define_lines.front().name;
-		const std::string upper = to_upper(name);
+		const std::string upper = strutil::to_upper(name);
 		if (logical_value(node).empty()) {
 			diag(node.line, Severity::Warning, "empty-value",
 					"macro '" + name + "' has an empty value");
@@ -529,7 +523,7 @@ EvaluationResult Document::evaluate() const {
 	result.diagnostics = diagnostics_;
 	for (const Node &node : nodes_) {
 		if (node.kind != NodeKind::Define) continue;
-		result.sheet.variables[to_upper(node.define_lines.front().name)] =
+		result.sheet.variables[strutil::to_upper(node.define_lines.front().name)] =
 				retail_value(node);
 	}
 	for (const Diagnostic &diagnostic : result.diagnostics) {
@@ -580,22 +574,22 @@ std::vector<Document::Entry> Document::entries() const {
 }
 
 int Document::find_entry(const std::string &name) const {
-	const std::string upper = to_upper(name);
+	const std::string upper = strutil::to_upper(name);
 	const std::vector<Entry> all = entries();
 	int found = -1;
 	for (size_t i = 0; i < all.size(); ++i) {
-		if (to_upper(all[i].name) == upper) found = static_cast<int>(i);
+		if (strutil::to_upper(all[i].name) == upper) found = static_cast<int>(i);
 	}
 	return found;
 }
 
 int Document::find_define_node_(const std::string &name) const {
-	const std::string upper = to_upper(name);
+	const std::string upper = strutil::to_upper(name);
 	int found = -1;
 	for (size_t i = 0; i < nodes_.size(); ++i) {
 		const Node &node = nodes_[i];
 		if (node.kind == NodeKind::Define &&
-				to_upper(node.define_lines.front().name) == upper) {
+				strutil::to_upper(node.define_lines.front().name) == upper) {
 			found = static_cast<int>(i);
 		}
 	}
@@ -751,10 +745,10 @@ bool Document::add_define(const std::string &name, const std::string &value,
 }
 
 bool Document::remove_define(const std::string &name, std::string *error) {
-	const std::string upper = to_upper(name);
+	const std::string upper = strutil::to_upper(name);
 	for (const Node &node : nodes_) {
 		if (node.kind != NodeKind::Define ||
-				to_upper(node.define_lines.front().name) != upper) {
+				strutil::to_upper(node.define_lines.front().name) != upper) {
 			continue;
 		}
 		if (std::any_of(node.define_lines.begin(), node.define_lines.end(),
@@ -770,7 +764,7 @@ bool Document::remove_define(const std::string &name, std::string *error) {
 	for (size_t i = nodes_.size(); i > 0; --i) {
 		const Node &node = nodes_[i - 1];
 		if (node.kind == NodeKind::Define &&
-				to_upper(node.define_lines.front().name) == upper) {
+				strutil::to_upper(node.define_lines.front().name) == upper) {
 			nodes_.erase(nodes_.begin() + static_cast<long>(i - 1));
 			removed = true;
 		}

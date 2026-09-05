@@ -5,6 +5,8 @@
 
 #include "common/test_expect.h"
 
+using namespace opennova::bfc1;
+
 int main() {
     static const uint8_t blob[] = {
         'B', 'F', 'C', '1',

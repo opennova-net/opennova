@@ -1,6 +1,14 @@
 # ADR 0042: Godot is the permanent shell; one mission kernel; engine facts through engine functions
 
 - **Status**: accepted (2026-08-28; maintainer directive — the boundary exploration)
+- **Amended**: [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02)
+  amends d2 (no sanctioned untyped seam; the frame pipeline is C++), d3 (the
+  kernel owns no tick; a `Session` owning a `Role` replaces `TickTarget` +
+  `listen_host::frame` + `tick_no_net`; the "no runtime class" clause is
+  superseded by that consolidation), d5 (the debug-control table is C++ in
+  `godot/src/devtools`), d7 (`godot_orig_cites` is one gauge over the whole
+  Godot side) and takes d8 (netsim/npruntime/inmatch move under `runtime/`).
+  d1, d4, d6 stand.
 - **Owners**: runtime architecture, the Godot layer, tooling (MCP/F3)
 - **Supersedes/updates**: closes ADR 0033's R4 rung and supersedes its d1 device triad; updates
   ADR 0016 (fully historical), ADR 0020 d4 (the terrain-field provider), ADR 0035 (d5 made
@@ -59,7 +67,9 @@ and rejected on evidence, not on precedent.
    specs, ai-profile defaults, the weapon/ammo/score tables, and the local-player frame (the
    cited CanFire verdict, the pre/post-tick pumps, the stance latch, the look accumulator). It is
    the ONE filler of `run_mission_boot`'s functor table (the table stays as the ctest-locked
-   order). `inmatch::listen_host` (`engine/net/inmatch/listen_host.*`) is the host bring-up /
+   order — superseded by ADR 0043 slice E9: the table is gone, `boot()` is the straight-line
+   order and records its steps in `boot_trace`; the kernel also loads the terrain field's
+   file entry itself). `inmatch::listen_host` (`engine/runtime/inmatch/listen_host.*`) is the host bring-up /
    request drain / per-tick frame over a kernel, an `IDatagramSocket&` and plain arguments — the
    one cited `Game_ProcessMainFrame` order. The embedders are `Simulation` (the Godot
    `TickTarget`, which OWNS a kernel), `apps/nw_server` (DedicatedHost), and the ctests
@@ -99,7 +109,11 @@ and rejected on evidence, not on precedent.
    all of `godot/src`; `gd_orig_cites`, now including `godot/probes`) are non-increasing. The marker rewrite that
    let 117 citations leave the pushdown gauge is no longer an exit: only code that moves banks a
    counter. `godot/game/mcp` carries a zero-cite floor (a converter that needs a witness cite is
-   re-deriving).
+   re-deriving). One ratified exception (2026-09-01, the simplification campaign): a cite in a
+   binding's DOC COMMENT whose every address the engine already carries is a duplicate, not a
+   witness, and may become an `(engine: <group/lib/file>)` pointer; the commit that does so says
+   the counter moved by deduplication, and a doc cite the engine does NOT carry stays where it is
+   (it is either a device fact or the ladder's next relocation).
 
 8. **Named options, not slices** (a later maintainer may take them without re-arguing): retiring
    `apps/nw_server` once a headless `--lan-host` serve mode is proven; lifting netsim+npruntime

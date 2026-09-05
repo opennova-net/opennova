@@ -1,11 +1,11 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
 // Game surface, the Stats window (both open by default), the Entities and
 // Entity Properties windows (closed by default, opened by a world pick; the
-// pushed-record/typed-request channel, ADR 0042 d6), the Weapon window (the
-// DCC-style ACTION editor over the equipped weapon's FSM), the Environment,
-// AI, Rays and Physics windows (all closed by default, opened from the
-// "Windows" menu), and ImGui's demo window (the docking/multi-viewport smoke
-// test). Debug builds only (OPENNOVA_DEVTOOLS); the release GDExtension
+// pushed-record / control-request channel, ADR 0042 d6 + ADR 0043 d12), the
+// Weapon window (the DCC-style ACTION editor over the equipped weapon's FSM),
+// the Environment, AI, Rays and Physics windows (all closed by default, opened
+// from the "Windows" menu), and ImGui's demo window (the docking/multi-viewport
+// smoke test). Debug builds only (OPENNOVA_DEVTOOLS); the release GDExtension
 // flavour compiles this out and its DevTools node is inert.
 #pragma once
 
@@ -28,16 +28,14 @@ class RaysWindow;
 class PhysicsWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
-struct DebugRequest;
+struct ControlRequest;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct WeaponDefinitionSnapshot;
 struct WeaponLiveSnapshot;
 struct WeaponRequest;
-struct EnvironmentRequest;
 struct EnvironmentSnapshot;
 struct AiDebugSnapshot;
-struct AiViewRequest;
 struct RaysRequest;
 struct RaysSnapshot;
 struct PhysicsRequest;
@@ -76,15 +74,21 @@ public:
 	// The board the Stats window reads (owned by the embedder; may be null).
 	void set_frame_stats(FrameStatsBoard *board);
 
-	// The Entities window's record/request channel (ADR 0042 d6). The
-	// embedder pushes the directory by value (an invalid snapshot clears; it
-	// carries the authority fact the edits gate on), gated on
-	// needs_entity_directory (pass open && either entity window open) so
-	// nobody builds snapshots no window would show, and drains the windows'
-	// typed debug requests into the engine-backed delegates.
+	// The Entities window's record channel (ADR 0042 d6). The embedder pushes
+	// the directory by value (an invalid snapshot clears; it carries the
+	// authority fact the edits gate on), gated on needs_entity_directory
+	// (pass open && either entity window open) so nobody builds snapshots no
+	// window would show.
 	void set_entity_directory(EntityDirectorySnapshot snapshot);
 	bool needs_entity_directory() const;
-	bool take_debug_request(DebugRequest &request);
+
+	// The ONE control-request drain (ADR 0043 d12): every window's
+	// debug-control invocations — the Game window's spectator toggle, the
+	// Entity Properties actions and attrib toggles, the Environment strip —
+	// in queue order (game, entities, environment), for the embedder to hand
+	// to the debug-control table by wire id. A window's queue is its own; this
+	// only serialises them.
+	bool take_control_request(ControlRequest &request);
 
 	// The selection seam: the shell's world pick (a device event carrying
 	// only the engine handle) opens and focuses the Entities window on that
@@ -106,38 +110,31 @@ public:
 	void set_weapon_definition(WeaponDefinitionSnapshot definition);
 	void set_weapon_live(WeaponLiveSnapshot live);
 	bool needs_weapon_records() const;
-	uint64_t weapon_definition_serial() const;
 	bool take_weapon_request(WeaponRequest &request);
 
-	// The Environment window's record/request channel (the same shape): the
-	// weather page record pushed by value on its cadence while shown, and
-	// the typed weather commands drained into the engine command layer.
+	// The Environment window's record channel (the same shape): the weather
+	// page record pushed by value on its cadence while shown; its weather
+	// commands leave through take_control_request.
 	void set_environment_snapshot(const EnvironmentSnapshot &snapshot);
 	bool needs_environment_snapshot() const;
-	bool take_environment_request(EnvironmentRequest &request);
 
-	// The AI window's record/request channel (the same shape): the AI debug
-	// join pushed by value on its cadence while shown, and the typed overlay
-	// toggles drained into the shell's world-view seam (a request family
-	// whose target is a device, not the engine command layer).
+	// The AI window's record channel (the same shape, records-in only): the
+	// AI debug join pushed by value on its cadence while shown.
 	void set_ai_debug(AiDebugSnapshot snapshot);
 	bool needs_ai_debug() const;
-	bool take_ai_view_request(AiViewRequest &request);
 
 	// The Rays window's record/request channel (the same shape): the ray
 	// capture's counts + filter state pushed by value on its cadence while
-	// shown, and the typed filter/clear/view-toggle requests drained by the
-	// embedder (filter and clear into the Simulation ray-debug seam; the view
-	// toggle out to the shell that owns the 3D view).
+	// shown, and the typed filter/clear requests drained by the embedder into
+	// the Simulation ray-debug seam.
 	void set_rays_snapshot(const RaysSnapshot &snapshot);
 	bool needs_rays_snapshot() const;
 	bool take_rays_request(RaysRequest &request);
 
 	// The Physics window's record/request channel (the same shape): the
-	// contact capture's counts + the shell's collision-view state pushed by
-	// value on its cadence while shown, and the typed mask/clear/capture
-	// requests drained into the Simulation contact-debug seam (the view
-	// toggle out to the shell that owns the 3D view).
+	// contact capture's counts + capture state pushed by value on its cadence
+	// while shown, and the typed mask/clear/capture requests drained into the
+	// Simulation contact-debug seam.
 	void set_physics_snapshot(const PhysicsSnapshot &snapshot);
 	bool needs_physics_snapshot() const;
 	bool take_physics_request(PhysicsRequest &request);

@@ -135,19 +135,6 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
 // @ 0x606720].
 namespace {
 
-class ScopedCollisionLosPerf {
-public:
-    explicit ScopedCollisionLosPerf(uint64_t *target) : target_(target) {
-        if (target_ != nullptr) start_ = io::perf_now_us();
-    }
-    ~ScopedCollisionLosPerf() {
-        if (target_ != nullptr) *target_ += io::perf_now_us() - start_;
-    }
-
-private:
-    uint64_t *target_ = nullptr;
-    uint64_t start_ = 0;
-};
 
 // The LOS march calls the point sampler once per 4-unit texel step — up to
 // ~250 times per ray, three rays per re-probed entity per frame (§3.4) — so
@@ -344,7 +331,7 @@ bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay
 
 bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle exclude_a, EntityHandle exclude_b) {
-    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, false, nullptr);
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, false);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
                          nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
@@ -354,8 +341,8 @@ bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32
 
 bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle exclude_a,
-                                          EntityHandle exclude_b, RaycastPerf *perf) {
-    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, true, perf);
+                                          EntityHandle exclude_b) {
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, true);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
                          nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
@@ -366,12 +353,15 @@ bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
 bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle exclude_a,
                                         EntityHandle exclude_b,
-                                        bool cache_target_views, RaycastPerf *perf) {
+                                        bool cache_target_views) {
     // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
     // and volume inflation are no-ops and are folded out here.]
-    if (perf != nullptr) ++perf->calls;
-    const uint64_t terrain_start = perf != nullptr ? io::perf_now_us() : 0;
+    // The terrain/sector split is attributed only for the replication fan's
+    // cached epoch (the one caller that ever profiled it); the AI's own rays
+    // stay inside their combat span.
+    devtools::ProfileLap lap(cache_target_views ? world.profile : nullptr);
+    last_los_sector_candidates_ = 0;
     const Entity *ea = world.registry.get(exclude_a);
     const Entity *eb = world.registry.get(exclude_b);
 
@@ -384,11 +374,12 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
                               (eb->flags & kEntityFlagIndoors) != 0;
     const bool terrain_hit = !both_indoors && terrain != nullptr && terrain->valid() &&
                              los_terrain_blocked(*terrain, a, b);
-    if (perf != nullptr)
-        perf->terrain_us += io::perf_now_us() - terrain_start;
+    lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_LOS_TERRAIN);
     if (terrain_hit) return false; // [orig: heightmap hit -> return 0 @ 0x539968]
 
-    ScopedCollisionLosPerf sector_timer(perf != nullptr ? &perf->sector_us : nullptr);
+    const devtools::ProfileScope sector_scope(
+            cache_target_views ? world.profile : nullptr,
+            devtools::Slot::SIM_REPLICATION_ENTITY_LOS_SECTOR);
 
     // Sector leg [orig: raycast_against_entity_pool @ 0x538720, pool 2 then pool 1
     // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
@@ -447,7 +438,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     };
 
     auto blocked_by = [&](const Entity &e) -> bool {
-        if (perf != nullptr) ++perf->sector_candidates;
+        ++last_los_sector_candidates_;
         int32_t bp[3];
         int32_t br = 0;
         if (!target_bound(world, e.handle, bp, br, /*solid_only=*/true)) return false;
@@ -461,7 +452,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     if (cache_target_views && stable_los_index_ready_) {
         const std::vector<uint32_t> &indices = stable_los_candidates_for_ray(ray);
         for (uint32_t index : indices) {
-            if (perf != nullptr) ++perf->sector_candidates;
+            ++last_los_sector_candidates_;
             const StableLosCandidate &candidate = stable_los_candidates_[index];
             const Entity *e = world.registry.get(candidate.h);
             if (e != nullptr &&
@@ -503,7 +494,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     return !blocked;
 }
 
-bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
+bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, EntityHandle source,
                                      const int32_t start_in[3], const int32_t end_in[3],
                                      int32_t height_offset) {
     const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
@@ -825,10 +816,10 @@ int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle liste
     if (base > 0xA0000) base = 0xA0000; // min(d/8, 10u) [orig: @ 0x529982]
     // Source z lifted +0x2000 for BOTH rays. [orig: @ 0x52998d / restore @ 0x5299d7]
     const int32_t end[3] = {source_pos[0], source_pos[1], source_pos[2] + 0x2000};
-    const bool ray1_clear = sound_los_clear(world, listener, source, listener_pos, end, 0);
+    const bool ray1_clear = entity_los_clear(world, listener, source, listener_pos, end, 0);
     if (!ray1_clear)
         base = 2 * base + 0x50000; // ray 1 blocked compounds [orig: @ 0x5299b6]
-    const bool ray2_clear = sound_los_clear(world, listener, source, listener_pos, end, -0x8000);
+    const bool ray2_clear = entity_los_clear(world, listener, source, listener_pos, end, -0x8000);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kSoundOcclusion, world.logic_tick,
                          listener_pos, end, nullptr,

@@ -1,5 +1,6 @@
 #include <runtime/devtools/entity_properties_window.h>
 
+#include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
 
 #include <formats/def/def.h> // the items.def attrib keyword + type-name tables (the parser's own)
@@ -8,6 +9,8 @@
 #include <imgui.h>
 
 #include <utility>
+
+using namespace opennova::def;
 
 namespace opennova::devtools {
 
@@ -92,12 +95,11 @@ void EntityPropertiesWindow::toggle_bit(bool second_word, uint32_t bit) {
 		attrib_edit_ ^= bit;
 		detail_.card.world.item_attrib = static_cast<int64_t>(attrib_edit_);
 	}
-	DebugRequest request;
-	request.kind = DebugRequest::Kind::SetEntityItemAttrib;
-	request.target.packed = detail_.card.handle;
-	request.attrib = attrib_edit_;
-	request.attrib2 = attrib2_edit_;
-	entities_.enqueue_request(request);
+	// The handle-keyed row (a brainless row takes overrides too): the table's
+	// set_entity_item_attrib takes the wire handle and both full words.
+	entities_.enqueue_request({control_id::kSetEntityItemAttrib,
+			{ControlArg::integer(detail_.card.handle), ControlArg::integer(attrib_edit_),
+					ControlArg::integer(attrib2_edit_)}});
 }
 
 void EntityPropertiesWindow::toggle_item_attrib(uint32_t bit) {
@@ -128,29 +130,24 @@ void EntityPropertiesWindow::draw_actions() {
 		return;
 	}
 	// The edit seams key on the AI brain (editable = brain + live registry
-	// slot); a brainless row still offers the local-player teleport below.
+	// slot): the table's set_entity_health / set_entity_position rows take
+	// the row's ai_index, the same address MCP's game_entities publishes. A
+	// brainless row still offers the local-player teleport below.
 	ImGui::BeginDisabled(!row->editable);
 	ImGui::SetNextItemWidth(96.0f);
 	ImGui::InputInt("##entity_health", &health_edit_);
 	ImGui::SameLine();
 	if (ImGui::Button("Set health")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::SetEntityHealth;
-		request.target.packed = row->wire_handle;
-		request.health = health_edit_;
-		entities_.enqueue_request(request);
+		entities_.enqueue_request({control_id::kSetEntityHealth,
+				{ControlArg::integer(row->ai_index), ControlArg::integer(health_edit_)}});
 	}
 	ImGui::SetNextItemWidth(240.0f);
 	ImGui::InputFloat3("##entity_pos", pos_edit_, "%.1f");
 	ImGui::SameLine();
 	if (ImGui::Button("Set position")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::SetEntityPosition;
-		request.target.packed = row->wire_handle;
-		request.pos[0] = pos_edit_[0];
-		request.pos[1] = pos_edit_[1];
-		request.pos[2] = pos_edit_[2];
-		entities_.enqueue_request(request);
+		entities_.enqueue_request({control_id::kSetEntityPosition,
+				{ControlArg::integer(row->ai_index),
+						ControlArg::vector3(pos_edit_[0], pos_edit_[1], pos_edit_[2])}});
 	}
 	ImGui::EndDisabled();
 	ImGui::SetNextItemWidth(64.0f);
@@ -160,14 +157,9 @@ void EntityPropertiesWindow::draw_actions() {
 	ImGui::InputFloat("pitch", &pitch_edit_, 0.0f, 0.0f, "%.0f");
 	ImGui::SameLine();
 	if (ImGui::Button("Teleport player here")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::TeleportLocalPlayer;
-		request.pos[0] = pos_edit_[0];
-		request.pos[1] = pos_edit_[1];
-		request.pos[2] = pos_edit_[2];
-		request.yaw = yaw_edit_;
-		request.pitch = pitch_edit_;
-		entities_.enqueue_request(request);
+		entities_.enqueue_request({control_id::kTeleportLocalPlayer,
+				{ControlArg::vector3(pos_edit_[0], pos_edit_[1], pos_edit_[2]),
+						ControlArg::number(yaw_edit_), ControlArg::number(pitch_edit_)}});
 	}
 }
 

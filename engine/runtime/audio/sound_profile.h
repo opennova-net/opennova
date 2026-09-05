@@ -18,8 +18,7 @@
 // SoundBank_FindTriggerByName]. The embedder resolves by NAME at play time
 // (SoundBank is name-keyed), so this store keeps the authored set names
 // and the world emits them directly; an empty slot name is the id-0 no-op.
-#ifndef OPENNOVA_AUDIO_SOUND_PROFILE_H
-#define OPENNOVA_AUDIO_SOUND_PROFILE_H
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -193,5 +192,3 @@ private:
 };
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_SOUND_PROFILE_H

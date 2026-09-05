@@ -1,4 +1,5 @@
 #include <runtime/devtools/rays_window.h>
+#include <base/io/tick_rate.h>
 
 #include <imgui.h>
 
@@ -8,9 +9,8 @@ namespace opennova::devtools {
 
 namespace {
 
-// The view's category palette (godot/game/debug/ray_debug_view.gd
-// CATEGORY_COLORS, enum order) — the window doubles as the legend for the
-// lines drawn in-world; keep the two tables in sync.
+// The ray-category palette (the engine's, in RayDebugCategory enum order):
+// the swatch beside each category row.
 constexpr float kCategoryColors[kRayCategoryCount][3] = {
 	{0.7f, 0.7f, 0.7f},    // Uncategorized
 	{1.0f, 0.35f, 0.15f},  // Projectile
@@ -45,7 +45,6 @@ void RaysWindow::set_snapshot(const RaysSnapshot &snapshot) {
 	snapshot_ = snapshot;
 	// Mirror the authoritative state into the edit controls: a click flips
 	// locally and queues its request, the next push confirms it here.
-	view_edit_ = snapshot_.view_shown;
 	mask_edit_ = snapshot_.category_mask;
 	ttl_edit_ = snapshot_.ttl_ticks;
 	format_rows();
@@ -94,10 +93,6 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		return;
 	}
 
-	if (ImGui::Checkbox("Show rays", &view_edit_)) {
-		enqueue_request({RaysRequest::Kind::SetViewShown, view_edit_ ? 1 : 0});
-	}
-	ImGui::SameLine();
 	ImGui::TextUnformatted(snapshot_.recording ? "(recording)" : "(idle)");
 	ImGui::SameLine();
 	if (ImGui::Button("Clear")) {
@@ -114,10 +109,10 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		enqueue_request({RaysRequest::Kind::SetTtlTicks, ttl_edit_});
 	}
 	ImGui::SameLine();
-	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / 62.0f);
+	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / static_cast<float>(io::kTicksPerSecondInt));
 
 	if (ImGui::SmallButton("All")) {
-		mask_edit_ = 0x7FFF;
+		mask_edit_ = kRayCategoryMaskAll;
 		enqueue_request({RaysRequest::Kind::SetCategoryMask,
 				static_cast<int32_t>(mask_edit_)});
 	}

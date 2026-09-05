@@ -140,13 +140,7 @@ struct WeatherState {
     // one tick.
     int32_t overcast_for_tod_q16 = 0;
 
-    // The precipitation pool and the PRNG_B stream its seed draws from
-    // [orig: PRNG_Next16_B @ 0x6130f0 over dword_31BFBBC, seeded 0x5ADEADA5
-    //  by Game_StartMission @ 0x52460b].
-    static constexpr uint32_t kPrng16BSeed = 0x5ADEADA5u;
-    uint32_t prng16_b_state = kPrng16BSeed;
-    env::PrecipitationField precipitation;
-    uint16_t next_prng16_b() noexcept;
+    env::PrecipitationField precipitation; // seeded by its World before mission entities
 
     // --- the wire projection's reads (native units) -----------------------
     int32_t fog_target_q16() const { return core.scalar_channels.fog_dist_target_fp; }

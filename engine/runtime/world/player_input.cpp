@@ -17,51 +17,52 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in) {
     body.jump = in.jump;
     // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R bits collapse to an
     // 8-way move_direction_index plus a moving bit. There is no heading offset here.
-    if (in.forward) body.direction_bits |= 1;
-    if (in.back) body.direction_bits |= 2;
-    if (in.left) body.direction_bits |= 4;
-    if (in.right) body.direction_bits |= 8;
+    using B = PlayerBodyInput;
+    if (in.forward) body.direction_bits |= B::kDirForward;
+    if (in.back) body.direction_bits |= B::kDirBack;
+    if (in.left) body.direction_bits |= B::kDirLeft;
+    if (in.right) body.direction_bits |= B::kDirRight;
 
     bool moving = body.direction_bits != 0;
-    int index = 0;
+    int index = B::kMoveForward;
     switch (body.direction_bits) {
-        case 1:
-        case 13:
-            index = 0;
+        case B::kDirForward:
+        case B::kDirForward | B::kDirLeft | B::kDirRight:
+            index = B::kMoveForward;
             break;
-        case 2:
-        case 14:
-            index = 4;
+        case B::kDirBack:
+        case B::kDirBack | B::kDirLeft | B::kDirRight:
+            index = B::kMoveBack;
             break;
-        case 3:
-        case 12:
-        case 15:
+        case B::kDirForward | B::kDirBack:
+        case B::kDirLeft | B::kDirRight:
+        case B::kDirForward | B::kDirBack | B::kDirLeft | B::kDirRight:
             moving = false;
-            index = 0;
+            index = B::kMoveForward;
             break;
-        case 4:
-        case 7:
-            index = 2;
+        case B::kDirLeft:
+        case B::kDirForward | B::kDirBack | B::kDirLeft:
+            index = B::kMoveLeft;
             break;
-        case 5:
-            index = 1;
+        case B::kDirForward | B::kDirLeft:
+            index = B::kMoveForwardLeft;
             break;
-        case 6:
-            index = 3;
+        case B::kDirBack | B::kDirLeft:
+            index = B::kMoveBackLeft;
             break;
-        case 8:
-        case 11:
-            index = 6;
+        case B::kDirRight:
+        case B::kDirForward | B::kDirBack | B::kDirRight:
+            index = B::kMoveRight;
             break;
-        case 9:
-            index = 7;
+        case B::kDirForward | B::kDirRight:
+            index = B::kMoveForwardRight;
             break;
-        case 10:
-            index = 5;
+        case B::kDirBack | B::kDirRight:
+            index = B::kMoveBackRight;
             break;
         default:
             moving = false;
-            index = 0;
+            index = B::kMoveForward;
             break;
     }
     body.moving = moving;

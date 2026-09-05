@@ -23,7 +23,11 @@ var _sun_veil: ColorRect
 var _nvg_post: ColorRect
 var _environment: MissionEnvironment
 var _environment_light_state: EnvLightState
-var _info: Dictionary = {}
+# The presenter's per-frame view facts (update_view).
+var _binoculars_view_active := false
+var _binocular_range := 1
+var _nvg_visible := false
+var _nvg_gain := 0
 var _range_display := 0
 
 
@@ -66,7 +70,7 @@ func _ready() -> void:
 	_nvg_post.material = shader_material
 	add_child(_nvg_post, false, Node.INTERNAL_MODE_BACK)
 	_nvg_post.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_nvg_post.visible = bool(_info.get("nvg_visible", false))
+	_nvg_post.visible = _nvg_visible
 	_sync_underwater_murk()
 
 
@@ -116,18 +120,23 @@ func set_resource_root(root: ResourceRoot) -> void:
 	queue_redraw()
 
 
-func update_info(info: Dictionary) -> void:
+func update_view(binoculars_view_active: bool, binocular_range: int,
+		nvg_visible: bool, nvg_gain: int) -> void:
 	# A redraw re-records this item in Godot's deferred flush every frame; the
 	# overlay only changes with its inputs (and the rangefinder easing).
-	var changed := _info != info
-	_info = info
-	if bool(_info.get("binoculars_view_active", false)):
-		var eased := smooth_range_value(
-				_range_display, int(_info.get("binocular_range", 1)))
+	var changed := binoculars_view_active != _binoculars_view_active \
+			or binocular_range != _binocular_range \
+			or nvg_visible != _nvg_visible or nvg_gain != _nvg_gain
+	_binoculars_view_active = binoculars_view_active
+	_binocular_range = binocular_range
+	_nvg_visible = nvg_visible
+	_nvg_gain = nvg_gain
+	if _binoculars_view_active:
+		var eased := smooth_range_value(_range_display, _binocular_range)
 		changed = changed or eased != _range_display
 		_range_display = eased
 	if _nvg_post != null:
-		_nvg_post.visible = bool(_info.get("nvg_visible", false))
+		_nvg_post.visible = _nvg_visible
 	if changed:
 		queue_redraw()
 
@@ -148,9 +157,9 @@ func _notification(what: int) -> void:
 
 func _draw() -> void:
 	var surface := size if size.x > 1.0 and size.y > 1.0 else get_viewport_rect().size
-	if bool(_info.get("nvg_visible", false)):
+	if _nvg_visible:
 		_draw_nvg(surface)
-	if bool(_info.get("binoculars_view_active", false)):
+	if _binoculars_view_active:
 		_draw_binoculars(surface)
 
 
@@ -159,7 +168,7 @@ func _draw_nvg(surface: Vector2) -> void:
 		draw_texture_rect(_nvg_mask, Rect2(Vector2.ZERO, surface), false)
 	if _nvg_scale == null:
 		return
-	var gain := clampi(int(_info.get("nvg_gain", 0)), 0, 4)
+	var gain := clampi(_nvg_gain, 0, 4)
 	var source := Rect2(0.0, float(gain * HudPos.VIEW_DIGIT_CELL),
 			float(HudPos.VIEW_DIGIT_CELL), float(HudPos.VIEW_DIGIT_CELL))
 	draw_texture_rect_region(_nvg_scale,

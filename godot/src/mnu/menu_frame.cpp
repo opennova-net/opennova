@@ -1,4 +1,7 @@
 #include "mnu/menu_frame.h"
+#include "util/color_convert.h"
+#include "mnu/menu_draw_list_stats.h"
+#include "util/string_convert.h"
 
 #include <runtime/menu/options_policy.h>
 
@@ -23,6 +26,8 @@
 #include <string>
 
 using namespace godot;
+using namespace opennova::fnt;
+using opennova::to_std;
 
 // The EDIT_RESULT_* re-exports track menu/menu_edit.h EditKeyResult; pin the
 // documented GDScript contract (0 none / 1 changed / 2 commit) so an engine
@@ -32,16 +37,6 @@ static_assert(MenuFrame::EDIT_RESULT_CHANGED == 1);
 static_assert(MenuFrame::EDIT_RESULT_COMMIT == 2);
 
 namespace {
-
-Color argb_to_color(uint32_t argb) {
-	return Color(((argb >> 16) & 0xFFu) / 255.0f,
-			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
-			((argb >> 24) & 0xFFu) / 255.0f);
-}
-
-std::string to_std(const String &s) {
-	return std::string(s.utf8().get_data());
-}
 
 int positive_mod(int value, int divisor) {
 	const int result = value % divisor;
@@ -148,11 +143,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	// Stylesheet vars + the id text table feed the compiler's resolution.
 	std::map<std::string, std::string> vars;
 	if (p_style.is_valid()) {
-		const Dictionary d = p_style->get_variables();
-		const Array keys = d.keys();
-		for (int64_t i = 0; i < keys.size(); ++i) {
-			const String key = keys[i];
-			vars[to_std(key)] = to_std(String(d[keys[i]]));
+		for (const auto &kv : p_style->variables()) {
+			vars[kv.first] = kv.second;
 		}
 	}
 	compiler_.set_style_vars(vars);
@@ -625,16 +617,6 @@ int MenuFrame::list_visible_rows(int p_index) const {
 	return compiler_.list_visible_rows(p_index, state_);
 }
 
-Rect2 MenuFrame::combo_popup_rect(int p_index) const {
-	opennova::mnu::RectEdges rect;
-	if (!compiler_.combo_popup_rect(p_index, state_, &rect)) {
-		return Rect2();
-	}
-	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
-			static_cast<float>(rect.right - rect.left),
-			static_cast<float>(rect.bottom - rect.top));
-}
-
 bool MenuFrame::combo_popup_contains(int p_index,
 		const Vector2 &p_position) const {
 	if (!configured_) {
@@ -687,15 +669,6 @@ int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {
 		return -1;
 	}
 	return compiler_.hotkey_widget(to_std(p_key), p_virtual, state_);
-}
-
-Vector2i MenuFrame::multiline_line_counts(int p_index) const {
-	int fit = 0;
-	int total = 0;
-	if (configured_) {
-		compiler_.multiline_line_counts(p_index, state_, &fit, &total);
-	}
-	return Vector2i(fit, total);
 }
 
 bool MenuFrame::edit_char(int p_index, int p_unicode) {
@@ -784,7 +757,6 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0 &&
 			claim.scroll_index < 0) {
 		press_claim_ = claim.hovered;
-		emit_signal("widget_pressed", claim.hovered);
 	} else if (!p_button_down && mouse_button_down_) {
 		if (press_claim_ >= 0 && press_claim_ == claim.hovered) {
 			emit_signal("widget_clicked", press_claim_);
@@ -860,8 +832,9 @@ Vector2 MenuFrame::design_scale_() const {
 	return Vector2(1.0f, 1.0f);
 }
 
-Dictionary MenuFrame::get_draw_list_stats() {
-	Dictionary out;
+Ref<MenuDrawListStats> MenuFrame::get_draw_list_stats() {
+	Ref<MenuDrawListStats> out;
+	out.instantiate();
 	int64_t quads = 0;
 	int64_t quads_textured = 0;
 	int64_t lines = 0;
@@ -881,11 +854,11 @@ Dictionary MenuFrame::get_draw_list_stats() {
 		glyphs = static_cast<int64_t>(list.glyphs.size());
 		widgets = list.widgets_drawn;
 	}
-	out["quads"] = quads;
-	out["quads_textured"] = quads_textured;
-	out["lines"] = lines;
-	out["glyphs"] = glyphs;
-	out["widgets_drawn"] = widgets;
+	out->set_quads(quads);
+	out->set_quads_textured(quads_textured);
+	out->set_lines(lines);
+	out->set_glyphs(glyphs);
+	out->set_widgets_drawn(widgets);
 	return out;
 }
 
@@ -921,7 +894,7 @@ void MenuFrame::_draw() {
 	RID target = get_canvas_item();
 	const auto apply_quad = [&](const opennova::menu::MenuQuad &quad) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		const Color color = argb_to_color(quad.color);
+		const Color color = opennova::color_from_argb(quad.color);
 		Ref<Texture2D> tex;
 		if (quad.texture >= 0 &&
 				quad.texture < static_cast<int32_t>(textures_.size())) {
@@ -958,7 +931,7 @@ void MenuFrame::_draw() {
 	};
 	const auto apply_line = [&](const opennova::menu::MenuLine &line) {
 		rs->canvas_item_add_line(target, Vector2(line.x0, line.y0),
-				Vector2(line.x1, line.y1), argb_to_color(line.color), 1.0f);
+				Vector2(line.x1, line.y1), opennova::color_from_argb(line.color), 1.0f);
 	};
 	const auto apply_font_run =
 			[&](const opennova::menu::MenuDrawList::FontRun &run) {
@@ -994,7 +967,7 @@ void MenuFrame::_draw() {
 					uvs.set(2, Vector2(glyph.u1, glyph.v1));
 					uvs.set(3, Vector2(glyph.u0, glyph.v1));
 					PackedColorArray colors;
-					colors.push_back(argb_to_color(glyph.color));
+					colors.push_back(opennova::color_from_argb(glyph.color));
 					rs->canvas_item_add_polygon(target, points, colors, uvs,
 							page->get_rid());
 				}
@@ -1007,7 +980,7 @@ void MenuFrame::_draw() {
 							list.underlines[static_cast<size_t>(i)];
 					rs->canvas_item_add_line(target, Vector2(underline.x0, underline.y),
 							Vector2(underline.x1, underline.y),
-							argb_to_color(underline.color), 1.0f);
+							opennova::color_from_argb(underline.color), 1.0f);
 				}
 			};
 	for (size_t op_index = 0; op_index < list.draw_ops.size(); ++op_index) {
@@ -1070,6 +1043,23 @@ PackedStringArray MenuFrame::video_preset_buttons() {
 	return out;
 }
 
+PackedStringArray MenuFrame::options_unsupported_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kOptionsUnsupportedControls) out.push_back(String(name));
+	return out;
+}
+
+Array MenuFrame::options_forced_checks() {
+	Array out;
+	for (const opennova::menu::OptionsForcedCheck &c : opennova::menu::kOptionsForcedChecks) {
+		Dictionary row;
+		row["control"] = String(c.control);
+		row["checked"] = c.checked;
+		out.push_back(row);
+	}
+	return out;
+}
+
 void MenuFrame::_bind_methods() {
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_scroll_ranges"),
 			&MenuFrame::options_scroll_ranges);
@@ -1077,6 +1067,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::video_quality_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
 			&MenuFrame::video_gamma_reference);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
+			&MenuFrame::options_unsupported_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_forced_checks"),
+			&MenuFrame::options_forced_checks);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_preset_buttons"),
 			&MenuFrame::video_preset_buttons);
 	ClassDB::bind_method(
@@ -1123,8 +1117,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::process_mouse_wheel);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
-	ADD_SIGNAL(MethodInfo("widget_pressed",
-			PropertyInfo(Variant::INT, "index")));
 	ADD_SIGNAL(MethodInfo("widget_clicked",
 			PropertyInfo(Variant::INT, "index")));
 	// The engine pump's CScrollWnd interaction result: a standalone Scroll's
@@ -1165,8 +1157,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::hit_test);
 	ClassDB::bind_method(D_METHOD("list_row_at", "index", "position"),
 			&MenuFrame::list_row_at);
-	ClassDB::bind_method(D_METHOD("combo_popup_rect", "index"),
-			&MenuFrame::combo_popup_rect);
 	ClassDB::bind_method(
 			D_METHOD("combo_popup_contains", "index", "position"),
 			&MenuFrame::combo_popup_contains);
@@ -1178,8 +1168,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::table_row_at);
 	ClassDB::bind_method(D_METHOD("hotkey_widget", "key", "is_virtual"),
 			&MenuFrame::hotkey_widget);
-	ClassDB::bind_method(D_METHOD("multiline_line_counts", "index"),
-			&MenuFrame::multiline_line_counts);
 	ClassDB::bind_method(D_METHOD("edit_char", "index", "unicode"),
 			&MenuFrame::edit_char);
 	ClassDB::bind_method(D_METHOD("edit_key", "index", "key", "shift"),

@@ -36,7 +36,7 @@ func test_play_forward_sweeps_register_to_max() -> void:
 			"31 retail 16 ms ticks use the truncated 1048 phase rate")
 	m.advance_runtime_frame(0.6)   # past the end
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 65536, "keeps retail's exact 1.0 endpoint")
-	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"), "a finished sweep is dropped")
+	assert_false(m.get_active_part_anim_registers().has("VEHICLE_SPECIAL1"), "a finished sweep is dropped")
 
 
 func test_play_reverse_sweeps_to_zero() -> void:
@@ -126,7 +126,7 @@ func test_stop_freezes_and_clears_the_sweep() -> void:
 	m.advance_runtime_frame(0.25)
 	var frozen := int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1))
 	m.play_part_anim(1, 0, 1.0)       # Stop (play_type 0)
-	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"), "stop drops the running sweep")
+	assert_false(m.get_active_part_anim_registers().has("VEHICLE_SPECIAL1"), "stop drops the running sweep")
 	m.advance_runtime_frame(1.0)        # no further movement
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), frozen, "value is frozen at the stop point")
 
@@ -135,7 +135,7 @@ func test_invalid_channel_is_a_noop() -> void:
 	var m := _model()
 	m.play_part_anim(3, 1, 1.0)       # only channels 1 and 2 are valid
 	m.play_part_anim(0, 1, 1.0)
-	assert_true(m.get_active_part_anims().is_empty(), "channels outside {1,2} are ignored")
+	assert_true(m.get_active_part_anim_registers().is_empty(), "channels outside {1,2} are ignored")
 
 
 func test_invalid_play_type_does_not_seed_or_start_a_channel() -> void:
@@ -143,7 +143,7 @@ func test_invalid_play_type_does_not_seed_or_start_a_channel() -> void:
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 12345)
 	m.restart_part_anim(1, 2, 1.0)
 	assert_eq(int(m.get_ctrl_values()["VEHICLE_SPECIAL1"]), 12345)
-	assert_true(m.get_active_part_anims().is_empty(),
+	assert_true(m.get_active_part_anim_registers().is_empty(),
 			"retail ignores play types outside {-1,0,1}")
 
 
@@ -152,7 +152,7 @@ func test_out_of_range_channel_is_a_noop() -> void:
 	# resolves a register [orig: Entity_ApplyCommand @0x43ab60 case 0x22].
 	var m := _model()
 	m.play_part_anim(3, 1, 1.0)
-	assert_true(m.get_active_part_anims().is_empty(), "no register -> no sweep")
+	assert_true(m.get_active_part_anim_registers().is_empty(), "no register -> no sweep")
 
 
 func test_reissue_replaces_the_sweep_from_current_value() -> void:
@@ -161,10 +161,10 @@ func test_reissue_replaces_the_sweep_from_current_value() -> void:
 	m.advance_runtime_frame(0.5)
 	var after_slow := int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1))
 	m.play_part_anim(1, 1, 1.0)       # faster, resuming from the current value (no reset)
-	var anims := m.get_active_part_anims()
-	assert_eq(anims.size(), 1, "still one sweep on channel 1 (replaced, not duplicated)")
-	assert_eq(int((anims["VEHICLE_SPECIAL1"] as Dictionary)["value"]), after_slow,
-			"resumes exactly from the current signed-dword phase")
+	assert_eq(m.get_active_part_anim_registers().size(), 1,
+			"still one sweep on channel 1 (replaced, not duplicated)")
+	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), after_slow,
+			"resumes exactly from the current signed-dword phase (the register is the sweep's phase)")
 
 
 func test_zero_time_uses_retail_wrapping_add_sub() -> void:
@@ -174,19 +174,19 @@ func test_zero_time_uses_retail_wrapping_add_sub() -> void:
 	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", 0)), -2147483648,
 			"zero-time forward adds INT_MIN without a lower clamp")
-	assert_true(m.get_active_part_anims().has("VEHICLE_SPECIAL1"),
+	assert_true(m.get_active_part_anim_registers().has("VEHICLE_SPECIAL1"),
 			"the negative wrapped value does not satisfy the strict upper clamp")
 	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0,
 			"a second wrapping ADD returns to zero")
-	assert_true(m.get_active_part_anims().has("VEHICLE_SPECIAL1"))
+	assert_true(m.get_active_part_anim_registers().has("VEHICLE_SPECIAL1"))
 	m.clear_part_anims()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 0)
 	m.play_part_anim(1, -1, 0.0)
 	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0,
 			"zero-time reverse subtracts INT_MIN, sees a negative result, and clamps low")
-	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"),
+	assert_false(m.get_active_part_anim_registers().has("VEHICLE_SPECIAL1"),
 			"the negative reverse result clears its direction")
 
 

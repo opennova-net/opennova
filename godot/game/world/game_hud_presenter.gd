@@ -29,26 +29,42 @@ var _ui_parent: Node = null
 # PlayerOptions seeds this before the lazy native HUD exists; it survives
 # teardown so the next mission build uses the same process-lifetime choice.
 var _crosshair_style := HudOverlay.MIN_CROSSHAIR_STYLE
+var _crosshair_color: int = PlayerOptions.DEFAULT_CROSSHAIR_COLOR
+var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
 # than it can ever present (net spectators may never acquire a local-player HUD).
 const MAX_PENDING_HUD_MESSAGES := 40
 
-var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
+# HudOverlay, built on the first frame a mission has a local player
+# (ensure_game_hud(); the GUT files build the real one over a staged root).
+var _game_hud: HudOverlay = null
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
 var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
-var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
-var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
+var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
+var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
 var _hud_objective := ""
-var _pending_hud_messages: Array[Dictionary] = []
+var _pending_hud_messages: Array[PendingHudMessage] = []
+
+
+## One queued HUD message: literal text, or a mission-table triggered-text id
+## when the text is empty.
+class PendingHudMessage:
+	extends RefCounted
+	var text: String
+	var text_id: int
+
+	func _init(p_text: String, p_text_id: int) -> void:
+		text = p_text
+		text_id = p_text_id
 # The end-of-round banner line (the WAC Lose cause). Persists until teardown so the
 # MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
@@ -168,12 +184,8 @@ func teardown() -> void:
 	_lfp_panel.reset()
 	_hud_pos = null
 	_pending_hud_messages.clear()
-	Strings.register_table("mission", null)
+	Strings.register_table(Strings.TABLE_MISSION, null)
 	_warned_no_player = false
-
-
-func get_hud():
-	return _game_hud
 
 
 ## The layer every HUD element hangs under (hiding it hides the whole HUD,
@@ -189,7 +201,7 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 			_world.get_terrain_data() if _world != null else null, mask)
 
 
-## The USER crosshair style (Options); cache it even before the lazy HUD exists,
+## The USER crosshair options; cache each even before the lazy HUD exists,
 ## then apply it immediately to an existing HUD.
 func set_crosshair_style(style: int) -> void:
 	_crosshair_style = clampi(style, HudOverlay.MIN_CROSSHAIR_STYLE,
@@ -202,13 +214,27 @@ func crosshair_style() -> int:
 	return _crosshair_style
 
 
+func set_crosshair_color(rgb: int) -> void:
+	_crosshair_color = rgb & PlayerOptions.CROSSHAIR_COLOR_MASK
+	if _game_hud != null:
+		_game_hud.set_crosshair_color(_crosshair_color)
+
+
+func set_crosshair_spread_enabled(enabled: bool) -> void:
+	_crosshair_spread = enabled
+	if _game_hud != null:
+		_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
+
+
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
 # local player (so net spectators, which have none, never get it). Reads the witnessed
 # hudpos.def layout from the world's mounted VFS. The SIGHTS card and the
 # PlayerViewEffects post stack mount as behind-parent children of the overlay,
 # exactly the child-control stack the ported shell HUD carried.
 # [orig: HUD_RenderAllOverlays @0x5a8070]
-func _ensure_game_hud() -> void:
+## Build the overlay if the mission has none yet (update() does it on the first
+## frame with a local player; the GUT files build it over a staged root).
+func ensure_game_hud() -> void:
 	if _game_hud != null:
 		return
 	_game_hud = HudOverlay.new()
@@ -245,6 +271,8 @@ func _ensure_game_hud() -> void:
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_crosshair_style(_crosshair_style)
+	_game_hud.set_crosshair_color(_crosshair_color)
+	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
 	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap
@@ -260,9 +288,9 @@ func _ensure_game_hud() -> void:
 	_map_footprints_next_query_ticks = 0
 	_map_grid_origin_next_query_ticks = 0
 	if sim_for_origin != null:
-		var origin: Dictionary = sim_for_origin.get_hud_map_grid_origin()
-		var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
-		_map_grid_origin_present = bool(origin.get("present", false))
+		var origin := sim_for_origin.get_hud_map_grid_origin()
+		var origin_pos := origin.position
+		_map_grid_origin_present = origin.present
 		_game_hud.set_minimap_grid_origin(
 				Vector2(origin_pos.x, -origin_pos.z), _map_grid_origin_present)
 	else:
@@ -272,10 +300,10 @@ func _ensure_game_hud() -> void:
 	HudTextTables.register(root, _world)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	if t != null and t.has_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"):
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if t != null and t.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
 		_game_hud.set_objectives_header(
-				t.get_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"))
+				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
@@ -289,7 +317,7 @@ func _ensure_game_hud() -> void:
 
 
 # The string tables the HUD resolves against: the current root's gametext table
-# (weapon "WepDes" names), and the per-mission text table (<mission>.bin, falling
+# (weapon Strings.SECTION_WEPDES names), and the per-mission text table (<mission>.bin, falling
 # back to medmssn.bin) for WAC/BMS triggered text.
 # [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
 #  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
@@ -298,7 +326,6 @@ func _ensure_game_hud() -> void:
 ## player is in-world (the shells gate on their own state).
 ## [orig: HUD_BuildEntityInfo @0x4b8440]
 var _perf_probe_enabled := false
-var _perf_probe_spans: Dictionary = {}
 
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
@@ -311,18 +338,15 @@ func set_frame_stats(board: FrameStats) -> void:
 
 
 ## Enables the intentionally costly per-phase clock sampling used by the manual
-## fire probe. Normal HUD frames leave the span transport untouched and empty.
+## fire probe.
 func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_enabled = enabled
-	_perf_probe_spans.clear()
 
 
 func tick(gameplay_input_active: bool = false) -> void:
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := probe_enabled or stats_on
-	if probe_enabled:
-		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
 		return
 	var sim: Simulation = _world.get_sim()
@@ -331,7 +355,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_warned_no_player = true
 			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
 		return
-	_ensure_game_hud()
+	ensure_game_hud()
 	if _game_hud == null:
 		return
 	if stats_on:
@@ -369,7 +393,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 		else:
 			_game_hud.clear_weapon()
 		if _sights_card != null:
-			_sights_card.set_weapon_sights(weapon.sights if weapon != null else [],
+			var sights: Array[WeaponSightRow] = weapon.sights if weapon != null else []
+			_sights_card.set_weapon_sights(sights,
 					_world.get_resource_root() if _world != null else null)
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
@@ -433,9 +458,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 		if origin_ticks >= _map_grid_origin_next_query_ticks:
 			_map_grid_origin_next_query_ticks = \
 					origin_ticks + MAP_FOOTPRINT_QUERY_INTERVAL_TICKS
-			var origin: Dictionary = sim.get_hud_map_grid_origin()
-			if bool(origin.get("present", false)):
-				var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
+			var origin := sim.get_hud_map_grid_origin()
+			if origin.present:
+				var origin_pos := origin.position
 				_map_grid_origin_present = true
 				_game_hud.set_minimap_grid_origin(
 						Vector2(origin_pos.x, -origin_pos.z), true)
@@ -451,15 +476,17 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The HUD binding rows, sampled in retail's catalog order: huddetail (row
-	# 50, default F6) precedes hudcolor (row 76, default F6) in the
-	# first-match-wins key scan, so a shared key fires only huddetail —
-	# poll_hud_keys carries that shadowing; hudcolor stays a live row on its
-	# own key (D-CTRL-4). showhud (row 27) ships unbound.
-	# [orig: the key scan @0x49d42f; huddetail dispatch @0x4E0601; showhud
-	#  dispatch @0x4E0561]
-	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) \
-			or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT)
+	# The HUD binding rows. hudcolor (row 76) defaults to Ctrl+F6 beside
+	# huddetail's bare F6 (row 50): the binding sampler's two passes keep them
+	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and when a remap
+	# lands both rows on one modifier-less key retail's first-match scan fires
+	# only huddetail (row 50 < 76) -- poll_hud_keys carries that shadowing
+	# (D-CTRL-4). showhud (row 27) ships unbound. Ctrl is a binding modifier,
+	# never a chord guard here; Shift/Alt chords stay ours (the debug pick
+	# rides Shift+F6).
+	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
+	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
+	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	poll_hud_keys(ControlsBindings.pressed("huddetail"),
 			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
 			gameplay_input_active)
@@ -507,12 +534,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _sights_card != null:
 		_sights_card.set_card_up(scope_card and not binoculars_view_active)
 	if _view_effects != null:
-		_view_effects.update_info({
-			"binoculars_view_active": binoculars_view_active,
-			"binocular_range": binocular_range,
-			"nvg_visible": nvg_visible,
-			"nvg_gain": nvg_gain,
-		})
+		_view_effects.update_view(binoculars_view_active, binocular_range,
+				nvg_visible, nvg_gain)
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
@@ -535,12 +558,6 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_hud_ticks())
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
-		if probe_enabled:
-			_perf_probe_spans["scalars"] = probe_t1 - probe_t0
-			_perf_probe_spans["attach"] = probe_t2 - probe_t1
-			_perf_probe_spans["waypoint"] = probe_t3 - probe_t2
-			_perf_probe_spans["update_info"] = probe_t4 - probe_t3
-			_perf_probe_spans["flush"] = probe_t5 - probe_t4
 		if stats_on:
 			_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
 			_frame_stats.add(FrameStats.HUD_ATTACH, probe_t2 - probe_t1)
@@ -570,13 +587,13 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	var sim := _world.get_sim()
 	if sim == null:
 		return null
-	var wp: Dictionary = sim.get_waypoint_hud_view()
-	if not bool(wp.get("show", false)) or int(wp.get("current", -1)) < 0:
+	var wp := sim.get_waypoint_hud_view()
+	if not wp.show or wp.current < 0:
 		return null
-	var pos: Vector3 = wp.get("position", Vector3.ZERO)
+	var pos := wp.position
 	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
-	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
+	entry.text_name = _resolve_waypoint_name(wp.name_id)
 	entry.mission_position = Vector2(pos.x, -pos.z)
 	entry.altitude_wu = pos.y
 	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated
@@ -595,146 +612,69 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 #  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
 func _resolve_waypoint_name(name_id: int) -> String:
 	var key := "STRWPNAME%03d" % name_id
-	var mission_table: RtxtStringFile = Strings.get_table("mission")
-	var name := ""
-	if mission_table != null and mission_table.has_string_in_section("WPNames", key):
-		name = mission_table.get_string_in_section("WPNames", key)
+	var name := Strings.lookup_or(Strings.TABLE_MISSION, Strings.SECTION_WPNAMES, key, "")
 	if name.is_empty() or name.nocasecmp_to("null") == 0:
-		var gametext: RtxtStringFile = Strings.get_table("gametext")
-		if gametext != null and gametext.has_string_in_section("WPNames", "STRWPNAMEDEFAULT"):
-			return gametext.get_string_in_section("WPNames", "STRWPNAMEDEFAULT")
-		return ""
+		return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
+				"STRWPNAMEDEFAULT", "")
 	return name
 
 
 # The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
-# armory-zone mode) projected through the play camera to screen pixels, each with its
-# resolved label text, fed to the overlay as parallel typed arrays. Behind-camera
-# points drop at projection, mirroring the frustum clip.
-# [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
-#  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
+# armory-zone mode) projected through the play camera to overlay pixels with the
+# resolved label text — the overlay's own fill (HudOverlay.set_attach_labels
+# carries the witness); no camera clears the labels.
 func _apply_attach_labels() -> void:
 	if _game_hud == null:
 		return
-	var screens := PackedVector2Array()
-	var texts := PackedStringArray()
-	var nearest := PackedByteArray()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim != null:
-		var labels: Array = sim.get_attach_labels()
-		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-				if not labels.is_empty() else null
-		if camera != null:
-			for raw in labels:
-				var l: Dictionary = raw
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(
-						Vector3(l.get("position", Vector3.ZERO)))
-				if camera.is_position_behind(world_pos):
-					continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
-				screens.append(camera.unproject_position(world_pos))
-				texts.append(_attach_label_text(int(l.get("seat_type", 0)),
-						String(l.get("attach_text_key", ""))))
-				nearest.append(1 if bool(l.get("nearest", false)) else 0)
-	_game_hud.set_attach_labels(screens, texts, nearest)
+	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+			if sim != null else null
+	if camera == null:
+		_game_hud.set_attach_labels(Transform3D.IDENTITY, Projection.IDENTITY, null, null)
+		return
+	_game_hud.set_attach_labels(camera.global_transform, camera.get_camera_projection(),
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 
 
 
 
-# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
-# through the play camera with its view distance, fed as parallel typed arrays;
-# the environment's live fog distance rides along for the compiler's fog cull.
-# Behind-camera anchors drop at projection, mirroring the frustum clip.
-# [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
-#  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
-#  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
-#  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
 ## The live HudOverlay node (null until the first in-world HUD frame builds it).
 func get_game_hud() -> HudOverlay:
 	return _game_hud
 
 
+# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
+# through the play camera with the environment's live fog distance — the
+# overlay's own fill (HudOverlay.set_friendly_tags carries the witness); no
+# camera clears the tags.
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
-	var screens := PackedVector2Array()
-	var dists := PackedFloat32Array()
-	var names := PackedStringArray()
-	var ids := PackedInt32Array()
-	var ratios := PackedInt32Array()
-	var flags := PackedInt32Array()
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim != null and _game_hud.get_friendly_tag_mode() != 0:
-		var tags: Array = sim.get_friendly_tags()
-		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-				if not tags.is_empty() else null
-		if camera != null:
-			var cam_pos := camera.global_position
-			for raw in tags:
-				var tag: Dictionary = raw
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(
-						Vector3(tag.get("position", Vector3.ZERO)))
-				world_pos.y += float(tag.get("eye_height", 0.0)) + HudOverlay.friendly_tag_lift()
-				if camera.is_position_behind(world_pos):
-					continue # [orig: the nonzero-clip bail @0x5a3b80]
-				screens.append(camera.unproject_position(world_pos))
-				dists.append(cam_pos.distance_to(world_pos))
-				names.append(String(tag.get("name", "")))
-				ids.append(int(tag.get("entity_id", 0)))
-				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
-				# The flag word is packed by the sim feed (hud/friendly_tag_flags.h).
-				flags.append(int(tag.get("flags", 0)))
 	var fog_distance := 0.0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null
 	if env != null:
 		fog_distance = env.get_fog_distance()
-	_game_hud.set_friendly_tag_env(fog_distance, 0)
-	_game_hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-
-
-# The label text per seat type, resolved in the gametext table's Overlays section with
-# the witnessed missing-string fallbacks. The Gunner label prefers the weapon's
-# attachtextid key: a PRESENT key resolves even to an empty string (the original stores
-# the parse-time GameText_GetString result, "" on a miss, and draws it) — only an
-# ABSENT key falls to the STROVER_USEGUN default.
-# [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
-#  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
-#  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
-#  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
-#  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
-func _attach_label_text(seat_type: int, attach_text_key: String) -> String:
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	match seat_type:
-		1: # sitex [orig: dword_2723860]
-			return _overlays_string(t, "STROVER_SIT", "!sit")
-		2, 5: # ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
-			return _overlays_string(t, "STROVER_CONTROL", "!Control")
-		3: # UseGun [orig: def+0x3A0 else dword_2723868]
-			if attach_text_key.is_empty():
-				return _overlays_string(t, "STROVER_USEGUN", "!UseGun")
-			if t != null and t.has_string_in_section("Overlays", attach_text_key):
-				return t.get_string_in_section("Overlays", attach_text_key)
-			return "" # the witnessed empty-label quirk (parse-miss stores "")
-		4: # armory [orig: dword_272386C]
-			return _overlays_string(t, "STROVER_USEARMORY", "!UseArmory")
-	return ""
-
-
-func _overlays_string(t: RtxtStringFile, key: String, fallback: String) -> String:
-	if t != null and t.has_string_in_section("Overlays", key):
-		return t.get_string_in_section("Overlays", key)
-	return fallback
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+			if sim != null else null
+	if camera == null:
+		_game_hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY,
+				fog_distance, null)
+		return
+	_game_hud.set_friendly_tags(true, camera.global_transform, camera.get_camera_projection(),
+			fog_distance, sim)
 
 
 # The weapon's HUD display name: the raw weapon id resolved in the gametext table's
-# "WepDes" section; a miss is the empty string (the element then draws nothing).
-# [orig: GameText_GetString("WepDes", weapondef+20) @0x593b7f; miss "" @0x51ec00]
+# Strings.SECTION_WEPDES section; a miss is the empty string (the element then draws nothing).
+# [orig: GameText_GetString(Strings.SECTION_WEPDES, weapondef+20) @0x593b7f; miss "" @0x51ec00]
 func _resolve_weapon_display_name(weapon_name: String) -> String:
 	if weapon_name.is_empty():
 		return ""
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	if t != null and t.has_string_in_section("WepDes", weapon_name):
-		return t.get_string_in_section("WepDes", weapon_name)
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, weapon_name):
+		return t.get_string_in_section(Strings.SECTION_WEPDES, weapon_name)
 	return ""
 
 
@@ -745,17 +685,18 @@ func _resolve_weapon_display_name(weapon_name: String) -> String:
 # forms because PreMission effects can arrive before the lazy HUD and its mission
 # table exist. Public with hud_objective_line() as the ADR 0018 read seam.
 func apply_mission_effects(effects: Array) -> void:
-	for e in effects:
-		if not (e is Dictionary):
+	for e_v in effects:
+		var e := e_v as MissionEffect
+		if e == null:
 			continue
-		var kind := String(e.get("kind", ""))
+		var kind := e.kind
 		if kind == "text":
-			var t := String(e.get("str", ""))
+			var t := e.text
 			if not t.is_empty():
 				_hud_objective = t
 				_queue_hud_message(t, 0)
 			else:
-				var text_id := int(e.get("a", 0))
+				var text_id := e.a
 				if text_id != 0:
 					_queue_hud_message("", text_id)
 		elif kind == "lose":
@@ -766,9 +707,9 @@ func apply_mission_effects(effects: Array) -> void:
 			# MISSION FAILED screen composes, cleared at the next round start
 			# @0x5b71b0)]. The effect carries the gametext key; resolve against the
 			# 'Misc' section like the original.
-			var key := String(e.get("str", ""))
+			var key := e.text
 			if not key.is_empty():
-				var line := Strings.lookup_display("gametext", "Misc", key)
+				var line := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Misc", key)
 				_endround_banner = line
 				_queue_hud_message(line, 0)
 		elif kind == "subgoal_won" or kind == "subgoal_lost":
@@ -777,12 +718,11 @@ func apply_mission_effects(effects: Array) -> void:
 			# a LOST subgoal also stamps the persistent banner. [orig: case 14
 			# @0x454543 STRWINMSG chat; case 15 @0x454612 STRLOSEMSG chat +
 			# GameMsg_SetBannerText @0x454647]
-			if int(e.get("c", 0)) != 0:
+			if e.c != 0:
 				var lost := kind == "subgoal_lost"
-				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") \
-						% int(e.get("b", 0))
+				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") % e.b
 				var section := "LoseConditions" if lost else "WinConditions"
-				var t: RtxtStringFile = Strings.get_table("mission")
+				var t: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 				if t != null and t.has_string_in_section(section, msg_key):
 					var line := t.get_string_in_section(section, msg_key)
 					if not line.is_empty():
@@ -798,12 +738,6 @@ func hud_objective_line() -> String:
 ## The stored end-of-round banner (the WAC Lose cause line), for the end screen.
 func endround_banner_line() -> String:
 	return _endround_banner
-
-
-## The waypoint label's current entry (null = label hidden) — the ADR 0018
-## public read seam for probes and diagnostics, as the ADR 0017 typed record.
-func waypoint_hud_entry() -> WaypointHudEntry:
-	return _build_waypoint_entry()
 
 
 ## The objectives-panel toggle, flipped by the shell's objectives key.
@@ -823,11 +757,11 @@ const FRIENDLY_TAG_TOAST_KEYS: Array[String] = ["STRMISC_FRIENDLYTAGS_OFF",
 ## message feed. [orig: Input_HandleActionBinding case 30 @0x49b573 ->
 ##  GameText("Misc", STRMISC_FRIENDLYTAGS_*) -> Chat_AddDebugMessage @0x49bc60]
 func cycle_friendly_tags() -> void:
-	_friendly_tag_mode = (_friendly_tag_mode + 1) % 4
+	_friendly_tag_mode = HudOverlay.next_friendly_tag_mode(_friendly_tag_mode)
 	if _game_hud == null:
 		return
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var key := FRIENDLY_TAG_TOAST_KEYS[_friendly_tag_mode]
 	if t != null and t.has_string_in_section("Misc", key):
 		_game_hud.push_message(t.get_string_in_section("Misc", key))
@@ -840,8 +774,9 @@ func cycle_friendly_tags() -> void:
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
 ## drive). Two reimpl guards: (1) the edge latches from the UNGATED key state,
 ## so a press held across an armory/F3 window cannot re-fire when the gate
-## reopens; (2) a chorded press (Shift/Ctrl/Alt — our debug picks ride
-## Shift+F6) never cycles — the retail row binds the bare key.
+## reopens; (2) a Shift/Alt-chorded press (our debug picks ride Shift+F6)
+## never cycles; Ctrl is the row's own modifier (hudcolor defaults to Ctrl+F6)
+## and the binding sampler already resolved it.
 ## [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
 func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
 	if color_down and not _hud_color_was_down and active and not chorded:
@@ -914,6 +849,16 @@ func hud_detail_level() -> int:
 	return _hud_detail_level
 
 
+## The persisted HUD color-scheme index (the token cycle_hud_color writes).
+func hud_color_index() -> int:
+	return _hud_color_index
+
+
+## The process-lifetime friendly-tags mode (cycle_friendly_tags advances it).
+func friendly_tag_mode() -> int:
+	return _friendly_tag_mode
+
+
 ## Temporarily apply retail's blank HUD declutter level without writing the
 ## user's settings.cfg. The overlay, its PlayerViewEffects child, and the
 ## shell HUD CanvasLayer stay mounted and active; only compiled gameplay HUD
@@ -954,16 +899,11 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 	if _game_hud == null or not is_instance_valid(_game_hud):
 		witness.error = "gameplay HUD is unavailable"
 		return witness
-	var stats: Dictionary = _game_hud.get_draw_list_stats()
-	var gameplay_draw_count := 0
-	for key in [
-		"quads", "tris", "lines", "glyphs", "underlines", "elements_drawn",
-	]:
-		gameplay_draw_count += int(stats.get(key, 0))
-	var map_active := bool(stats.get("map_visible", false))
-	# Fail closed against a stale native extension: absence of the independent
-	# large-map field is treated as active, never as safely hidden.
-	var big_map_active := bool(stats.get("big_map_visible", true))
+	var stats: HudDrawListStats = _game_hud.get_draw_list_stats()
+	var gameplay_draw_count := stats.quads + stats.tris + stats.lines + stats.glyphs \
+			+ stats.underlines + stats.elements_drawn
+	var map_active := stats.map_visible
+	var big_map_active := stats.big_map_visible
 	witness.hud_detail_level = int(_game_hud.get_hud_detail_level())
 	witness.gameplay_hud_visible = gameplay_draw_count > 0 \
 			or map_active or big_map_active
@@ -1003,10 +943,6 @@ func cycle_showhud() -> void:
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_showhud_flags)
 	_apply_fp_gun_visible()
-
-
-func showhud_flags() -> int:
-	return _showhud_flags
 
 
 ## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
@@ -1053,32 +989,18 @@ func _select_third_person(selected: bool) -> void:
 
 func _apply_fp_gun_visible() -> void:
 	if _player_presenter != null:
-		_player_presenter.set_fp_gun_visible((_showhud_flags & 1) != 0)
+		_player_presenter.set_fp_gun_visible(
+				(_showhud_flags & HudOverlay.SHOWHUD_FLAG_GUN) != 0)
 
 
-# The panel's resolved rows: shown win-condition slots with mission-text lines
-# and their completed state, fed typed (an empty pair hides the panel — the
-# retail toggle's off state). [orig: HUD_DrawWinConditions @0x5ba940 — rows from
-# the header table walk, text = mission WinConditions/STRWINCOND%03i]
+# The objectives panel: the sim's shown win-condition rows resolved through
+# the mission text table by the overlay's own fill (Simulation.fill_objectives
+# carries the witness); the toggle's off state clears the panel.
 func _apply_objectives() -> void:
 	if _game_hud == null:
 		return
-	var texts := PackedStringArray()
-	var done := PackedByteArray()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if _objectives_visible and sim != null:
-		var table: RtxtStringFile = Strings.get_table("mission")
-		for raw in sim.get_objectives_view():
-			var row: Dictionary = raw
-			if not bool(row.get("shown", false)):
-				continue
-			var key := "STRWINCOND%03d" % int(row.get("text_id", 0))
-			var text := ""
-			if table != null and table.has_string_in_section("WinConditions", key):
-				text = table.get_string_in_section("WinConditions", key)
-			texts.append(text)
-			done.append(1 if bool(row.get("done", false)) else 0)
-	_game_hud.set_objectives(texts, done)
+	_game_hud.set_objectives(_objectives_visible, Strings.get_table(Strings.TABLE_MISSION), sim)
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.
@@ -1088,14 +1010,14 @@ func pending_hud_message_count() -> int:
 
 
 func _queue_hud_message(text: String, text_id: int) -> void:
-	_pending_hud_messages.append({"text": text, "text_id": text_id})
+	_pending_hud_messages.append(PendingHudMessage.new(text, text_id))
 	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
 		_pending_hud_messages.pop_front()
 
 
 ## The message feed: this frame's folded S2C 0x1E game events, each resolved
 ## into the game's own canned sentence and posted to the SYSTEM ring.
-## The sim hands over the actor names, the "Canned Msg" key and the witnessed
+## The sim hands over the actor names, the Strings.SECTION_CANNED_MSG key and the witnessed
 ## line color; here we look the keys up in gametext and run the witnessed
 ## substitution through the engine formatter, so the sentence is always the
 ## game's own text and never one we compose.
@@ -1107,63 +1029,56 @@ func _flush_feed_events() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	var rows: Array = sim.drain_feed_events()
+	var rows: Array[FeedRow] = sim.drain_feed_events()
 	if rows.is_empty():
 		return
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table == null:
 		return
 	# A missing actor formats as the Client fallback string
 	# [orig: HUD_FormatKillEventMessage null-entity paths @0x422DDA/@0x422E91
 	#  -> GameText_GetString("Client", "STRCLI01") = "Unknown"].
-	var unknown := ""
-	if table.has_string_in_section("Client", "STRCLI01"):
-		unknown = table.get_string_in_section("Client", "STRCLI01")
-	for row in rows:
-		var key := String(row.get("key", ""))
-		if key.is_empty() or not table.has_string_in_section("Canned Msg", key):
-			continue
-		var tmpl := table.get_string_in_section("Canned Msg", key)
+	var unknown := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CLIENT, "STRCLI01", "")
+	for row: FeedRow in rows:
+		var tmpl := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG, row.get_key(), "")
 		if tmpl.is_empty():
 			continue
 		var line := ""
 		# The compose form is the engine's decision (the camp discriminant
-		# rides the row), not an inference from which keys are present.
-		if bool(row.get("camp", false)):
+		# rides the row), not an inference from which fields are filled.
+		if row.is_camp():
 			# Camp line: the template's %s takes the level's WPNames string
 			# [orig: sprintf @0x427327/@0x42736B].
-			var wpname_key := String(row.get("wpname_key", ""))
-			var wpname := ""
-			if table.has_string_in_section("WPNames", wpname_key):
-				wpname = table.get_string_in_section("WPNames", wpname_key)
-			line = String(sim.format_feed_camp_line(tmpl, wpname))
+			var wpname := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
+					row.get_wpname_key(), "")
+			line = sim.format_feed_camp_line(tmpl, wpname)
 		else:
-			var attacker := String(row.get("attacker", ""))
-			var victim := String(row.get("victim", ""))
+			var attacker := row.get_attacker()
+			var victim := row.get_victim()
 			# The bonus re-compose rides STRCND48 ("%s - Bonus for %s") when
 			# the aux actor is the local player [orig: the sprintf @0x422CA2].
-			var extra := String(row.get("extra", ""))
+			var extra := row.get_extra()
 			var bonus_tmpl := ""
-			if not extra.is_empty() and table.has_string_in_section("Canned Msg", "STRCND48"):
-				bonus_tmpl = table.get_string_in_section("Canned Msg", "STRCND48")
-			line = String(sim.format_feed_line(tmpl,
+			if not extra.is_empty():
+				bonus_tmpl = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG,
+						"STRCND48", "")
+			line = sim.format_feed_line(tmpl,
 					attacker if not attacker.is_empty() else unknown,
 					victim if not victim.is_empty() else unknown,
-					extra, bonus_tmpl))
+					extra, bonus_tmpl)
 		if line.is_empty():
 			continue
-		_game_hud.push_feed_line(line, int(row.get("color", -1)))
+		_game_hud.push_feed_line(line, row.get_color())
 
 
 func _flush_pending_hud_messages() -> void:
 	if _game_hud == null:
 		return
 	for pending in _pending_hud_messages:
-		var text := String(pending.get("text", ""))
-		if not text.is_empty():
-			_game_hud.push_message(text)
+		if not pending.text.is_empty():
+			_game_hud.push_message(pending.text)
 		else:
-			_show_triggered_text(int(pending.get("text_id", 0)))
+			_show_triggered_text(pending.text_id)
 	_pending_hud_messages.clear()
 
 
@@ -1173,7 +1088,7 @@ func _show_triggered_text(text_id: int) -> void:
 	if _game_hud == null:
 		return
 	var key := "ID%03d" % text_id
-	var table: RtxtStringFile = Strings.get_table("mission")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 	var text := ""
 	if table != null and table.has_string_in_section("Triggered Text", key):
 		text = table.get_string_in_section("Triggered Text", key)

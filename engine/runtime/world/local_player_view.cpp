@@ -23,6 +23,8 @@
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 
+using namespace opennova::def;
+
 namespace opennova::world {
 
 namespace {
@@ -59,7 +61,7 @@ void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
     // bone list retail returns the full reach untouched (@0x4378c4): the
     // count-0 path, fed here with the world terrain for when the bones land.
     const terrain::TerrainHeightField *terrain =
-        world.ai != nullptr ? world.ai->terrain : nullptr;
+        world.ai.terrain;
     const CameraTerrainSampler sampler = [terrain](int32_t x, int32_t y) -> int32_t {
         if (terrain == nullptr || !terrain->valid()) return INT32_MIN / 2;
         // Engine ground plane (x, y) -> the atlas' (x, -y) sample, the
@@ -99,7 +101,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     t.binocular_pitch_offset_deg = 0.0f;
     v.nvg_gain = kNvgGainMin;
     v.nvg_active = world != nullptr &&
-                   (world->mission_attrib_flags &
+                   (world->tables.mission_attrib_flags &
                     static_cast<uint32_t>(bms::AttribFlags::StartWithNVGOn)) != 0;
     w.nvg_scope_restore = false;
     local_player_view_refresh(world, v);
@@ -124,7 +126,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
     if (mount == nullptr || !mount->has_item_def || mount->item_type == 1u ||
         (mount->item_attrib & kItemAttribEweap) == 0u ||
         (mount->emplacement_attachment_flags & 0x02u) == 0u ||
-        !vehicle_prepare_weapon_slot(world, *mount))
+        !world.vehicles.prepare_weapon_slot(*mount))
         return false;
     const bool use_parent_slot = !mount->primary_weapon_slot.redirect_to_parent_slot;
     Entity *parent = nullptr;
@@ -137,7 +139,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
                       parent->registry_spawn_id == mount->emplacement_parent_spawn_id &&
                       parent->has_item_def && parent->item_type == 1u &&
                       (parent->item_attrib & kItemAttribEweap) != 0u &&
-                      vehicle_prepare_weapon_slot(world, *parent);
+                      world.vehicles.prepare_weapon_slot(*parent);
     }
     if (!route_valid) return false;
     out.applies = true;
@@ -329,7 +331,7 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     // producer floors the head-bone eye before the store the chase reads
     // (D-INF-18; the witnessed walk is player_view_floor_eye_to_terrain).
     if (w.eye_valid) {
-        player_view_floor_eye_to_terrain(world->ai != nullptr ? world->ai->terrain : nullptr,
+        player_view_floor_eye_to_terrain(world->ai.terrain,
                                          (e->flags & kEntityFlagIndoors) != 0, eye);
     }
     player_view_tick(v, eye);
@@ -426,8 +428,8 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
     // [orig: Camera_ComputeThirdPersonView @0x437d10 -- the on-foot person leg
     //  @0x437f9c..0x438031, the TP leg @0x438100..0x4383e2, recoil @0x437fc7,
     //  roll @0x437fe6]
-    if (world == nullptr || world->ai == nullptr || !world->cached.local_player.valid()) return;
-    const AiEntity *p = world->ai->for_handle(world->cached.local_player);
+    if (world == nullptr || !world->cached.local_player.valid()) return;
+    const AiEntity *p = world->ai.for_handle(world->cached.local_player);
     if (p == nullptr) return;
     const Entity *e = world->registry.get(world->cached.local_player);
     out.fp_terms_valid = true;
@@ -465,7 +467,7 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
         anchor_eye[2] = position[2] + static_cast<float>(from_fixed(e->eye_offset_z));
     }
     player_view_compose_camera(v, position, anchor_eye, seated_eye || w.eye_valid,
-                               world->ai != nullptr ? world->ai->terrain : nullptr,
+                               world->ai.terrain,
                                (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
                                p->inf.recoil_pitch, p->inf.torso_roll, p->inf.lean_angle,
                                // The carrier leg: a seated occupant's view rotation is

@@ -1,4 +1,4 @@
-// build_player_uplink (engine/net/netsim) is the JOINER-side inverse of apply_player_intent: it
+// build_player_uplink (engine/runtime/replication) is the JOINER-side inverse of apply_player_intent: it
 // synthesizes the C2S 0x0C extended (type-10) uplink BODY from the joiner's own live
 // local-player state. This proves the full joiner->host round-trip — build the uplink from a
 // source pose, encode it (+ the 5-B sub-header), decode it, and read-apply it to the joiner's
@@ -6,9 +6,9 @@
 // moves on the host). [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
 
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include "conn_fan_test_util.h"
 
@@ -28,7 +28,7 @@
 namespace {
 
 namespace w = opennova::world;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace nw = opennova;
 
 bool expect(bool cond, const char *msg) {
@@ -183,8 +183,7 @@ bool run_roundtrip_to_host_snap() {
 	peer.position = {0.0f, 0.0f, 0.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "host peer spawned")) return false;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 	world.cached.local_player = w::EntityHandle::make(0, 7); // a DIFFERENT handle is the host's own
 
@@ -231,8 +230,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::World source;
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(1, 8);
-	w::AiSystem source_ai_system;
-	source.ai = &source_ai_system;
+	w::AiSystem &source_ai_system = source.ai;
 
 	w::Entity player_seed;
 	player_seed.kind = w::EntityKind::Organic;
@@ -263,8 +261,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	carrier_seed.seats.push_back(seat);
 	const w::EntityHandle source_carrier_h = source.registry.spawn(1, carrier_seed);
 	if (!expect(source_carrier_h.valid(), "source moving carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(
-				source, source_player_h, source_carrier_h, 3),
+	if (!expect(source.vehicles.process_attach(source_player_h, source_carrier_h, 3),
 	            "source player actually mounted")) return false;
 	source_body->heading = 0x61230000;
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
@@ -304,8 +301,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::World host;
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(1, 8);
-	w::AiSystem host_ai_system;
-	host.ai = &host_ai_system;
+	w::AiSystem &host_ai_system = host.ai;
 	host.cached.local_player = w::EntityHandle::make(0, 7);
 	const w::EntityHandle host_player_h = host.registry.spawn(0, player_seed);
 	host_ai_system.attach(host_player_h);
@@ -318,8 +314,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	if (!expect(host_player_h.packed == source_player_h.packed &&
 	                    host_carrier_h.packed == source_carrier_h.packed,
 	            "source and host carrier handles match")) return false;
-	if (!expect(w::entity_process_vehicle_attach(
-				host, host_player_h, host_carrier_h, 3),
+	if (!expect(host.vehicles.process_attach(host_player_h, host_carrier_h, 3),
 	            "host peer actually mounted")) return false;
 	if (!expect(drain_built_uplink(host, host_player_h, up),
 	            "mounted uplink encoded, decoded, and applied")) return false;
@@ -357,8 +352,7 @@ bool run_ground_target_carrier_roundtrip() {
 	w::World source;
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(2, 8);
-	w::AiSystem source_ai_system;
-	source.ai = &source_ai_system;
+	w::AiSystem &source_ai_system = source.ai;
 	w::Entity player_seed;
 	player_seed.kind = w::EntityKind::Organic;
 	player_seed.item_id = 0x14B9;
@@ -405,8 +399,7 @@ bool run_ground_target_carrier_roundtrip() {
 	w::World host;
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(2, 8);
-	w::AiSystem host_ai_system;
-	host.ai = &host_ai_system;
+	w::AiSystem &host_ai_system = host.ai;
 	host.cached.local_player = w::EntityHandle::make(0, 7);
 	const w::EntityHandle host_player_h = host.registry.spawn(0, player_seed);
 	host_ai_system.attach(host_player_h);
@@ -462,13 +455,13 @@ bool run_equipped_adm_ingest_gate() {
 	            "table-less world stores the uplinked byte verbatim")) return false;
 
 	// Armory fed: category < 11 passes, the emplaced band (>= 11) and missing entries do not.
-	world.weapons.entries.resize(12);
-	world.weapons.entries[8].valid = true;
-	world.weapons.entries[8].name = "WPN_T";
-	world.weapons.entries[8].category = 3;
-	world.weapons.entries[11].valid = true;
-	world.weapons.entries[11].name = "WPN_EMPL";
-	world.weapons.entries[11].category = 11;
+	world.tables.weapons.entries.resize(12);
+	world.tables.weapons.entries[8].valid = true;
+	world.tables.weapons.entries[8].name = "WPN_T";
+	world.tables.weapons.entries[8].category = 3;
+	world.tables.weapons.entries[11].valid = true;
+	world.tables.weapons.entries[11].name = "WPN_EMPL";
+	world.tables.weapons.entries[11].category = 11;
 
 	intent.equipped_adm_index = 8;
 	ns::apply_player_intent(world, intent);

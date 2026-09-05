@@ -9,8 +9,7 @@
 // color legs against the same core — one tick, one clock. The shell binding
 // (godot/src/env/weather_core.*) owns only the Godot boxing over this struct.
 // RE record: docs/env/env-tod-re.md.
-#ifndef OPENNOVA_ENV_WEATHER_CORE_H
-#define OPENNOVA_ENV_WEATHER_CORE_H
+#pragma once
 
 #include <formats/env/env_weather.h>
 
@@ -135,5 +134,3 @@ struct WeatherCore {
 };
 
 } // namespace opennova::env
-
-#endif // OPENNOVA_ENV_WEATHER_CORE_H

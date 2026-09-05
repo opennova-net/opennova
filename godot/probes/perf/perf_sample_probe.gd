@@ -14,7 +14,7 @@ const COUNTER_SOURCES := {
 	"audio": ["world", "audio_us"],
 	# the mission-audio tick inside the audio leg
 	"audio_tick": ["audio", "tick_us"],
-	# the session frame (MissionPresentation.get_perf_counters)
+	# the session frame (MissionRoot.get_perf_counters)
 	"sim": ["runtime", "sim_us"],
 	"present": ["runtime", "present_us"],
 	"effects": ["runtime", "effects_us"],
@@ -77,7 +77,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.log("frame wall: avg=%.2fms (%.0f fps) over %d frames" % [float(frame["avg_us"]) / 1000.0, fps, _frame_us.size()])
 	var audio := ctx.world().get_mission_audio()
 	if audio != null:
-		data["mission_audio_counters"] = audio.get_perf_counters()
+		data["mission_audio_counters"] = audio.get_perf_counters().to_json_value()
 	return ProbeVerdict.passed("%d frames sampled at %.0f fps" % [_frame_us.size(), fps], data)
 
 
@@ -92,9 +92,9 @@ func _on_frame() -> void:
 	var runtime := _ctx.runtime()
 	if world == null or runtime == null:
 		return
-	var world_counters: Dictionary = world.get_runtime_perf_counters()
+	var world_counters: Dictionary = world.get_runtime_perf_counters().to_json_value()
 	var audio_counters: Dictionary = world_counters.get("audio", {})
-	var runtime_counters: Dictionary = runtime.get_perf_counters()
+	var runtime_counters: Dictionary = runtime.get_perf_counters().to_json_value()
 	for key in _samples:
 		var source: Array = COUNTER_SOURCES[key]
 		var table: Dictionary

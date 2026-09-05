@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace opennova::def;
+
 // --- weapon.def flags (dword 1) ---
 static_assert(DEF_WEAPON_FLAG_SCOPED == 0x00000001u);
 static_assert(DEF_WEAPON_FLAG_SIGHTED == 0x00000002u);

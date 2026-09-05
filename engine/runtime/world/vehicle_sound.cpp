@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 #include <runtime/world/vehicle_sound.h>
 
 #include <algorithm>
@@ -44,8 +45,8 @@ int64_t rounded_q16_product(int64_t value) {
 const audio::SoundProfile *profile_for(const World &world,
                                        const VehicleTraits &traits) {
     if (!traits.sound_profile.empty())
-        return world.sound_profiles.find(traits.sound_profile.c_str());
-    return world.sound_profiles.find("default");
+        return world.tables.sound_profiles.find(traits.sound_profile.c_str());
+    return world.tables.sound_profiles.find("default");
 }
 
 std::string set_for_slot(const audio::SoundProfile *profile,
@@ -80,7 +81,7 @@ void emit_source_anchor(World &world, const Entity &vehicle) {
     ev.emitted_tick = producer_tick(world);
     ev.lifetime_ticks = kEmitterLifetimeTicks;
     ev.source_only = true;
-    world.sound_emitters.publish(std::move(ev));
+    world.out.sound_emitters.publish(std::move(ev));
 }
 
 void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
@@ -106,7 +107,7 @@ void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
         vehicle.veh.sound_anchor_until_tick =
                 ev.emitted_tick + kEmitterLifetimeTicks;
     }
-    world.sound_emitters.publish(std::move(ev));
+    world.out.sound_emitters.publish(std::move(ev));
 }
 
 void emit_profile_oneshot(World &world, const Entity &vehicle,
@@ -121,7 +122,7 @@ void emit_profile_oneshot(World &world, const Entity &vehicle,
     ev.pos[2] = to_fixed(vehicle.position.z);
     ev.slot = static_cast<uint8_t>(slot);
     std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
-    world.slot_sounds.push_back(ev);
+    world.out.slot_sounds.push_back(ev);
 }
 
 int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
@@ -170,9 +171,8 @@ int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
 
 } // namespace
 
-void update_ground_vehicle_sound(World &world, Entity &vehicle,
-                                 const VehicleTraits &traits, bool wrecked,
-                                 bool collided) {
+void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {
+    World &world = world_;
     const audio::SoundProfile *profile = profile_for(world, traits);
 
     // The PlayerControl ground caller skips the movement-sound function entirely
@@ -270,8 +270,9 @@ void update_ground_vehicle_sound(World &world, Entity &vehicle,
     }
 }
 
-void stop_ground_vehicle_sound(World &world, Entity &vehicle) {
-    const VehicleTraits *traits = world.vehicle_traits.get(vehicle.item_id);
+void VehicleSystem::stop_ground_sound(Entity &vehicle) {
+    World &world = world_;
+    const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
     if (traits == nullptr || !traits->player_control) return;
     const audio::SoundProfile *profile = profile_for(world, *traits);
     emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,

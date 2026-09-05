@@ -30,6 +30,8 @@
 #include <cstring>
 #include <ctime>
 
+using namespace opennova::pff;
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -254,8 +256,9 @@ bool write_and_verify(const fs::path &root, const char *archive,
 // the packed archive's does (ONED's packer: localres.pff).
 //
 // The retail models name .tga textures while the bring-up set carries their witnessed .dds
-// substitutes. Under /d, Texture_LoadByNameWithChannel @ 0x58b52c performs that substitution
-// for loose files, so those .dds files must be copied too. Only shaders stay archived because
+// substitutes. Under /d, Texture_LoadByNameWithChannel @ 0x58b470 (its loose .dds probe
+// @ 0x58b52c) performs that substitution for loose files, so those .dds files must be copied
+// too. Only shaders stay archived because
 // the boot precompiler discovers .fx exclusively through PFF directory walks.
 bool emit_loose_install(const fs::path &out, const fs::path &root, const FileList &loose,
                         const FileList &shaders) {

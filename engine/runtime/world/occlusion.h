@@ -16,9 +16,9 @@
 // The occlusion model data is host-fed PODs from the parsed .3di occlusion IR
 // (the same leaf-consumer seam as CollisionModel, ADR 0020): engine/runtime/world never
 // touches the format stack.
-#ifndef OPENNOVA_WORLD_OCCLUSION_H
-#define OPENNOVA_WORLD_OCCLUSION_H
+#pragma once
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -194,6 +194,25 @@ public:
     // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
     bool entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                const OcclusionFrameCamera &cam);
+    // The same collector gate's view-cull + outdoors three-ray latch over a
+    // bound sphere the caller derived (a decoded wire row: the client-built
+    // pool entities retail's collector walks exactly like the host's own).
+    // `latch` is that row's persistent latch counter. TRUE = render.
+    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — the person
+    // leg's view clip @ 0x5c8e21..0x5c8e68 and latch @ 0x5c8e7b..0x5c8eab,
+    // the model leg's @ 0x5c8f86..0x5c8fd6; the statics collector
+    // Terrain_CollectVisibleEntities_0 @ 0x5c6f20 runs the same latch
+    // @ 0x5c7125-0x5c7162]
+    bool sphere_render_visible(const CollisionWorld &collision,
+                               const OcclusionFrameCamera &cam,
+                               const int32_t center_world[3], int32_t radius,
+                               uint8_t &latch, uint32_t logic_tick);
+    // Bound-sphere derivation from the collision model bounds.
+    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
+    // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported
+    // (statics carry no live scale)]
+    static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
+                                   int32_t &radius);
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +
@@ -235,6 +254,9 @@ public:
     // TOC-culled. Debug-host reads (the F3 occlusion view); no engine consumer.
     int32_t instance_model_id(EntityHandle h) const;
     bool building_batched(EntityHandle h) const;
+    // The results-identical oracle for the static pose memo (tests): off, the
+    // walk recomputes every placed sphere and record position each frame.
+    void set_static_pose_memo_enabled(bool enabled) { static_pose_memo_enabled_ = enabled; }
     int32_t instance_count() const { return static_cast<int32_t>(instances_.size()); }
     int32_t batch_count() const { return static_cast<int32_t>(batch_.size()); }
     int32_t slot_count() const { return static_cast<int32_t>(slots_.size()); }
@@ -348,12 +370,6 @@ private:
     bool three_rays_clear(const CollisionWorld &collision, const OcclusionFrameCamera &cam,
                           const int32_t target[3], int32_t radius,
                           uint32_t debug_tick) const;
-    // Bound-sphere derivation from the collision model bounds.
-    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
-    // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported
-    // (statics carry no live scale)]
-    static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
-                                   int32_t &radius);
     // Batch view cull: forward-depth + sphere-vs-frustum stand-in for the
     // original viewport projector (D-OCC-12).
     bool sphere_in_view(const OcclusionFrameCamera &cam, const int32_t center_fixed[3],
@@ -367,6 +383,36 @@ private:
 
     std::vector<RegistryEntry> registry_; // mission-init scratch
     std::vector<WeldRecord> welds_;       // [orig: g_PortalWeldRecords @ 0x2967250]
+
+    // Steady-state memo for the pure per-static derivations the building walk
+    // recomputed per candidate per frame: the placed bound sphere and the
+    // portal-record world positions are pure functions of the slot's collision
+    // model and pose. Every entry is guarded by value keys (pose bits plus the
+    // model pointer AND the instance's occlusion model id — a collision
+    // model freed and re-allocated at the same address for a different model
+    // cannot alias with an unchanged pose — wholesale-cleared at mission
+    // portal init so a reloaded model can never alias), so a husk swap or any
+    // future mover recomputes on its own. The camera tests, the latch, the
+    // rays, and the witnessed PRNG stream run every frame untouched — caching
+    // any of those would desync the rand stream. set_static_pose_memo_enabled
+    // (false) is the test oracle: the walk recomputes every derivation and
+    // must batch identically.
+    struct StaticPoseMemo {
+        uint16_t handle_packed = 0; // guards the slot-index addressing
+        const CollisionModel *cm = nullptr;
+        float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
+        int32_t pos[3] = {0, 0, 0};
+        int32_t center_world[3] = {0, 0, 0};
+        int32_t radius = 0;
+        int32_t model_id = -1;
+        bool records_valid = false;
+        std::vector<std::array<float, 3>> record_world;
+    };
+    // Indexed by the static building slot index (the walk's own loop
+    // variable) — the load-time table is stable, and the handle guard inside
+    // each entry re-keys it if a slot is ever repopulated.
+    std::vector<StaticPoseMemo> static_pose_memo_;
+    bool static_pose_memo_enabled_ = true;
 
     // Frame state
     std::vector<BatchEntry> batch_;
@@ -409,5 +455,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_OCCLUSION_H

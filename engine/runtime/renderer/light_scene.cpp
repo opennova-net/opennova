@@ -114,6 +114,9 @@ void LightScene::set_blend(LightHandle handle, float amount) {
 	if (slot->hidden != hidden) {
 		++selection_revision_;
 	}
+	if (slot->blend != amount) {
+		++color_revision_;
+	}
 	slot->blend = amount;
 	slot->hidden = hidden;
 }
@@ -136,6 +139,7 @@ void LightScene::set_owner(LightHandle handle, uint64_t owner_entity,
 void LightScene::tick() {
 	// [orig: EffectWorld_TickInstancesAndLightScale @ 0x5aa170]
 	bool selection_changed = false;
+	bool color_changed = false;
 	for (Slot &slot : slots_) {
 		if (!slot.live) {
 			continue;
@@ -159,13 +163,26 @@ void LightScene::tick() {
 		const int32_t mode = slot.params.fade_mode;
 		if (mode != 1 && (mode == 2 || mode == 5) && slot.fade_initial != 0) {
 			// [orig: f14 = d16 / d17 @ 0x5aa1de]
-			slot.blend = static_cast<float>(slot.fade_counter) /
+			const float blend = static_cast<float>(slot.fade_counter) /
 					static_cast<float>(slot.fade_initial);
+			if (blend != slot.blend) {
+				color_changed = true;
+			}
+			slot.blend = blend;
 		}
 	}
 	if (selection_changed) {
 		++selection_revision_;
 	}
+	if (color_changed) {
+		++color_revision_;
+	}
+}
+
+bool LightScene::slot_gen_active(LightHandle handle) const {
+	const Slot *slot = slot_for(handle);
+	return slot != nullptr && slot->params.has_gen &&
+			slot->params.gen.style != 0;
 }
 
 void LightScene::despawn(LightHandle handle) {
@@ -374,6 +391,131 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 	return selected;
 }
 
+namespace {
+
+// The 2D cell index over the compact snapshot's horizontal mission plane.
+// Cell size comfortably exceeds every authored light radius; coordinates
+// beyond the clamped grid fold into the edge cells, which only widens a
+// cell's candidate superset (the exact per-axis test rejects the extras).
+constexpr int64_t kLightGridCellFixed = 64ll << 16; // 64 wu
+constexpr int32_t kLightGridMaxCols = 512;
+constexpr int32_t kLightGridMaxRows = 512;
+// A slot spanning more cells than this joins the shared oversize bucket
+// every gather includes (cheaper than exploding its refs across the grid).
+constexpr int64_t kLightGridOversizeCells = 64;
+
+int32_t light_grid_axis_cell(int64_t value, int64_t origin, int32_t cells) {
+	const int64_t cell = (value - origin) / kLightGridCellFixed;
+	if (cell < 0) {
+		return 0;
+	}
+	if (cell >= cells) {
+		return cells - 1;
+	}
+	return static_cast<int32_t>(cell);
+}
+
+} // namespace
+
+void LightScene::refresh_compact_cache() const {
+	if (compact_cache_valid_ &&
+			compact_cache_revision_ == selection_revision_) {
+		return;
+	}
+	// One pass snapshots the collection inputs in SLOT ORDER — the order the
+	// witnessed first-64 cap depends on [orig: collect_nearby_zones_by_aabb
+	// @ 0x5aa250 scans the table forward and breaks at 64 @ 0x5aa384;
+	// hidden flag bit 2 skipped @ 0x5aa2a4].
+	compact_cache_.clear();
+	compact_cache_.reserve(slots_.size());
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		const Slot &slot = slots_[i];
+		if (!slot.live || slot.hidden) {
+			continue;
+		}
+		compact_cache_.push_back(CompactSlot{
+				LightHandle{static_cast<uint16_t>(i | kHandleFlag),
+						slot.generation},
+				slot.aabb_min, slot.aabb_max, slot.params.position_fixed});
+	}
+	grid_cols_ = 0;
+	grid_rows_ = 0;
+	grid_refs_.clear();
+	grid_oversize_.clear();
+	if (!compact_cache_.empty()) {
+		int64_t min_x = std::numeric_limits<int64_t>::max();
+		int64_t min_y = std::numeric_limits<int64_t>::max();
+		int64_t max_x = std::numeric_limits<int64_t>::min();
+		int64_t max_y = std::numeric_limits<int64_t>::min();
+		for (const CompactSlot &slot : compact_cache_) {
+			min_x = std::min<int64_t>(min_x, slot.aabb_min[0]);
+			min_y = std::min<int64_t>(min_y, slot.aabb_min[1]);
+			max_x = std::max<int64_t>(max_x, slot.aabb_max[0]);
+			max_y = std::max<int64_t>(max_y, slot.aabb_max[1]);
+		}
+		grid_min_x_ = min_x;
+		grid_min_y_ = min_y;
+		grid_cols_ = static_cast<int32_t>(std::min<int64_t>(
+				(max_x - min_x) / kLightGridCellFixed + 1, kLightGridMaxCols));
+		grid_rows_ = static_cast<int32_t>(std::min<int64_t>(
+				(max_y - min_y) / kLightGridCellFixed + 1, kLightGridMaxRows));
+		const size_t cell_count =
+				static_cast<size_t>(grid_cols_) * static_cast<size_t>(grid_rows_);
+		grid_starts_.assign(cell_count + 1, 0);
+		// Counting sort by cell: refs within one cell stay in ascending
+		// compact (= slot) order because both passes walk ascending.
+		auto slot_cells = [&](const CompactSlot &slot, int32_t &c0, int32_t &c1,
+				int32_t &r0, int32_t &r1) {
+			c0 = light_grid_axis_cell(slot.aabb_min[0], grid_min_x_, grid_cols_);
+			c1 = light_grid_axis_cell(slot.aabb_max[0], grid_min_x_, grid_cols_);
+			r0 = light_grid_axis_cell(slot.aabb_min[1], grid_min_y_, grid_rows_);
+			r1 = light_grid_axis_cell(slot.aabb_max[1], grid_min_y_, grid_rows_);
+		};
+		for (const CompactSlot &slot : compact_cache_) {
+			int32_t c0, c1, r0, r1;
+			slot_cells(slot, c0, c1, r0, r1);
+			const int64_t span = static_cast<int64_t>(c1 - c0 + 1) *
+					static_cast<int64_t>(r1 - r0 + 1);
+			if (span > kLightGridOversizeCells) {
+				continue;
+			}
+			for (int32_t r = r0; r <= r1; ++r) {
+				for (int32_t c = c0; c <= c1; ++c) {
+					++grid_starts_[static_cast<size_t>(r) * grid_cols_ + c + 1];
+				}
+			}
+		}
+		for (size_t cell = 1; cell <= cell_count; ++cell) {
+			grid_starts_[cell] += grid_starts_[cell - 1];
+		}
+		grid_refs_.resize(static_cast<size_t>(grid_starts_[cell_count]));
+		std::vector<int32_t> cursor(grid_starts_.begin(),
+				grid_starts_.end() - 1);
+		for (uint32_t idx = 0; idx < compact_cache_.size(); ++idx) {
+			const CompactSlot &slot = compact_cache_[idx];
+			int32_t c0, c1, r0, r1;
+			slot_cells(slot, c0, c1, r0, r1);
+			const int64_t span = static_cast<int64_t>(c1 - c0 + 1) *
+					static_cast<int64_t>(r1 - r0 + 1);
+			if (span > kLightGridOversizeCells) {
+				grid_oversize_.push_back(idx);
+				continue;
+			}
+			for (int32_t r = r0; r <= r1; ++r) {
+				for (int32_t c = c0; c <= c1; ++c) {
+					grid_refs_[static_cast<size_t>(
+							cursor[static_cast<size_t>(r) * grid_cols_ + c]++)] =
+							idx;
+				}
+			}
+		}
+	}
+	gather_stamps_.assign(compact_cache_.size(), 0);
+	gather_stamp_value_ = 0;
+	compact_cache_revision_ = selection_revision_;
+	compact_cache_valid_ = true;
+}
+
 void LightScene::select_for_draws(const LightDrawContext *draws,
 		size_t draw_count,
 		const LightSelectionOptions &options,
@@ -386,28 +528,8 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 	if (draws == nullptr || out == nullptr || draw_count == 0) {
 		return;
 	}
-	// One pass snapshots the collection inputs in SLOT ORDER — the order the
-	// witnessed first-64 cap depends on [orig: collect_nearby_zones_by_aabb
-	// @ 0x5aa250 scans the table forward and breaks at 64 @ 0x5aa384;
-	// hidden flag bit 2 skipped @ 0x5aa2a4].
-	struct CompactSlot {
-		LightHandle handle;
-		std::array<int32_t, 3> aabb_min;
-		std::array<int32_t, 3> aabb_max;
-		std::array<int32_t, 3> position;
-	};
-	std::vector<CompactSlot> compact;
-	compact.reserve(slots_.size());
-	for (size_t i = 0; i < slots_.size(); ++i) {
-		const Slot &slot = slots_[i];
-		if (!slot.live || slot.hidden) {
-			continue;
-		}
-		compact.push_back(CompactSlot{
-				LightHandle{static_cast<uint16_t>(i | kHandleFlag),
-						slot.generation},
-				slot.aabb_min, slot.aabb_max, slot.params.position_fixed});
-	}
+	refresh_compact_cache();
+	const std::vector<CompactSlot> &compact = compact_cache_;
 	struct Candidate {
 		LightHandle handle;
 		uint64_t distance;
@@ -423,7 +545,10 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 							draw.aabb_max_fixed[axis]) >> 1);
 		}
 		size_t count = 0;
-		for (const CompactSlot &slot : compact) {
+		// The exact witnessed admission: full per-axis overlap, saturating
+		// axis-distance sum, the first-64 cap in slot order. Identical for
+		// both enumeration paths; returns false when the cap closes the walk.
+		auto admit = [&](const CompactSlot &slot) -> bool {
 			bool overlaps = true;
 			for (int axis = 0; axis < 3; ++axis) {
 				if (slot.aabb_min[axis] > draw.aabb_max_fixed[axis] ||
@@ -433,7 +558,7 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 				}
 			}
 			if (!overlaps) {
-				continue;
+				return true;
 			}
 			uint64_t distance = 0;
 			for (int axis = 0; axis < 3; ++axis) {
@@ -443,8 +568,57 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 			}
 			candidates[count] = Candidate{slot.handle, distance};
 			++count;
-			if (count >= kQueryLimit) {
-				break; // [orig: @ 0x5aa384]
+			return count < kQueryLimit; // [orig: @ 0x5aa384]
+		};
+		if (select_index_enabled_ && grid_cols_ > 0) {
+			// Gather the cell superset, then re-establish slot order: the
+			// candidate indexes sort ascending, so the exact test runs in the
+			// same enumeration order as the linear scan and the first-64
+			// truncation admits the same slots.
+			gather_scratch_.clear();
+			if (++gather_stamp_value_ == 0) {
+				std::fill(gather_stamps_.begin(), gather_stamps_.end(), 0);
+				gather_stamp_value_ = 1;
+			}
+			const int32_t c0 = light_grid_axis_cell(draw.aabb_min_fixed[0],
+					grid_min_x_, grid_cols_);
+			const int32_t c1 = light_grid_axis_cell(draw.aabb_max_fixed[0],
+					grid_min_x_, grid_cols_);
+			const int32_t r0 = light_grid_axis_cell(draw.aabb_min_fixed[1],
+					grid_min_y_, grid_rows_);
+			const int32_t r1 = light_grid_axis_cell(draw.aabb_max_fixed[1],
+					grid_min_y_, grid_rows_);
+			for (int32_t r = r0; r <= r1; ++r) {
+				for (int32_t c = c0; c <= c1; ++c) {
+					const size_t cell =
+							static_cast<size_t>(r) * grid_cols_ + c;
+					for (int32_t k = grid_starts_[cell];
+							k < grid_starts_[cell + 1]; ++k) {
+						const uint32_t idx = grid_refs_[static_cast<size_t>(k)];
+						if (gather_stamps_[idx] != gather_stamp_value_) {
+							gather_stamps_[idx] = gather_stamp_value_;
+							gather_scratch_.push_back(idx);
+						}
+					}
+				}
+			}
+			for (uint32_t idx : grid_oversize_) {
+				if (gather_stamps_[idx] != gather_stamp_value_) {
+					gather_stamps_[idx] = gather_stamp_value_;
+					gather_scratch_.push_back(idx);
+				}
+			}
+			std::sort(gather_scratch_.begin(), gather_scratch_.end());
+			for (uint32_t idx : gather_scratch_) {
+				if (!admit(compact[idx])) {
+					break;
+				}
+			}
+		} else {
+			for (const CompactSlot &slot : compact) {
+				if (!admit(slot)) {
+					break;
+				}
 			}
 		}
 		// Retail bubble sort == stable ascending order [orig: @ 0x5aa3a8].
@@ -653,6 +827,29 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs) {
 	owner.entity = inputs.blink_owner_entity;
 	owner.section = inputs.blink_section;
 	return owner;
+}
+
+LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs) {
+	LightActiveGroups groups;
+	if (inputs.is_building) {
+		// A building declares itself as interior section zero and re-scopes
+		// the owner section to this exact ROBJ [orig: @ 0x5d8ff7].
+		groups.owner_group_entity = 0;
+		groups.owner_group_section = inputs.robj_index;
+		groups.interior_group_entity = inputs.static_owner;
+		groups.interior_group_section = 0;
+		return groups;
+	}
+	groups.owner_group_entity = inputs.static_owner;
+	groups.owner_group_section = 0;
+	// The blink query at the placement origin names the containing building
+	// + section [orig: Lighting_SetInteriorLightGroup @ 0x5a90e0]; no hit
+	// leaves the interior group empty.
+	if (inputs.blink_hit && inputs.blink_owner_entity != 0) {
+		groups.interior_group_entity = inputs.blink_owner_entity;
+		groups.interior_group_section = inputs.blink_section;
+	}
+	return groups;
 }
 
 int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,

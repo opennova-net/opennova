@@ -1,13 +1,14 @@
 extends GutTest
 
-# ThrowablePresentPass on the typed surfaces (ADR 0034): the visual rows are
-# pure data through the public present_visuals data leg (production present()
-# drains the typed Simulation), the placer/fx/anchors collaborators are real
-# MissionObjectPlacer/EffectWorld/ItemEffectDirector subclasses capturing the
-# typed calls, and the item database is the real fixture items.def
-# (id 101883 = the 3rd-person HE grenade).
-
-const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
+# The throwable present pass (EntityPresenter's ThrowablePresenter member, ADR
+# 0043 d9) on the typed surfaces (ADR 0034): the visual rows are pure data
+# through the public present_throwable_visuals data leg (production
+# present_passes() drains the typed Simulation), the placer is a real
+# MissionObjectPlacer over the injected fixture model, the fx/anchors
+# collaborators are a REAL EffectWorld over an in-memory catalog plus a REAL
+# ItemEffectDirector (ADR 0043 rule 11: their group report, owner-binding
+# census and anchor registry are the read seams), and the item database is the
+# real fixture items.def (id 101883 = the 3rd-person HE grenade).
 
 static var _item_db: ItemDatabase = null
 
@@ -21,6 +22,8 @@ func before_all() -> void:
 
 const ROUND_GRAPHIC := "Frag_3rd"  # fixture items.def 101883's graphic
 const ROUND_MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
+const MOVE_EFFECT := "Effect_SmokeToss"  # the effects_table tag-1 round effect
+const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
 
 # A REAL placer whose round graphic resolves through the injected fixture
@@ -48,72 +51,117 @@ func _thrown_models(root: Node) -> Array:
 	return out
 
 
-class CaptureFx:
-	extends EffectWorld
-	var spawns: Array[Dictionary] = []
-	var stopped: Array[int] = []
-	var released: Array[Variant] = []
-	var next_group_id := 90
-	var allow_spawn := true
-
-	func spawn_effect_owned_request(owner_key: Variant, effect: String,
-			position: Vector3, orientation: Vector3 = Vector3.ZERO) -> Dictionary:
-		next_group_id += 1
-		spawns.append({
-			"owner_key": owner_key,
-			"effect": effect,
-			"position": position,
-			"orientation": orientation,
-		})
-		if not allow_spawn:
-			return {"spawned": false, "effect_handle": 0, "group_id": 0}
-		return {
-			"spawned": true,
-			"effect_handle": 7,
-			"group_id": next_group_id,
-		}
-
-	func stop_group(group_id: int) -> void:
-		stopped.append(group_id)
-
-	func release_effect_binding(owner_key: Variant) -> void:
-		released.append(owner_key)
+# One synthetic in-memory particle catalog authoring the move effect (the
+# effect_world_test recipe): a FOREVEREMIT definition, so a round-bound group
+# stays live until the pass stops it and the report shows the detach.
+func _catalog_file() -> ParticleFile:
+	var def := ParticleDef.new()
+	def.id = "toss dots"
+	def.emit_dur = 0.1
+	def.emit_rate = 50.0
+	def.emit_burst = 4
+	def.age = 0.2
+	def.alpha = 1.0
+	def.scale_value = 1.0
+	def.flags = ParticleDef.FLAG_FOREVER_EMIT
+	var effect := ParticleEffect.new()
+	effect.id = MOVE_EFFECT
+	effect.pdefs = PackedStringArray(["toss dots"])
+	var file := ParticleFile.new()
+	var particles: Array = file.particles
+	particles.append(def)
+	file.particles = particles
+	var effects: Array = file.effects
+	effects.append(effect)
+	file.effects = effects
+	return file
 
 
-class CaptureAnchors:
-	extends ItemEffectDirector
-	var anchors: Dictionary = {}
-
-	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
-		anchors[owner_key] = resolver
-		super.register_effect_anchor(owner_key, resolver)
-
-	func unregister_effect_anchor(owner_key: Variant) -> void:
-		anchors.erase(owner_key)
-		super.unregister_effect_anchor(owner_key)
-
-
-func _make_fx() -> CaptureFx:
-	var fx := CaptureFx.new()
+# A REAL EffectWorld over the in-memory catalog, its owner poses resolved by
+# `anchors` (the production wiring ItemEffectDirector.on_effect_world_started
+# performs for GameWorld's world).
+func _make_fx(anchors: ItemEffectDirector) -> EffectWorld:
+	var fx := EffectWorld.new()
 	add_child_autofree(fx)
+	fx.load_particle_file(_catalog_file())
+	fx.set_owner_position_provider(anchors.resolve_owner_transform)
 	return fx
+
+
+# A REAL EntityPresenter with its throwable pass wired over the placer, the
+# item database and (when given) the effect world + anchor registry.
+func _make_presenter(container: Node3D, placer: MissionObjectPlacer,
+		fx: EffectWorld = null, anchors: ItemEffectDirector = null) -> EntityPresenter:
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(null, null, placer)
+	presenter.setup_passes(container, _item_db, null, null, fx, null, null, anchors)
+	return presenter
+
+
+# The live (still attached) group report row owned by `key`, or {} when none.
+func _live_owned_row(fx: EffectWorld, key: String) -> EffectGroupReport:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key and not row.detached:
+			return row
+	return null
+
+
+# Every group report row owned by `key`, attached or detached.
+func _owned_rows(fx: EffectWorld, key: String) -> Array:
+	var out: Array = []
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as EffectGroupReport
+		if row.owner_key == key:
+			out.append(row)
+	return out
+
+
+# The group report row with `group_id` (a released owner drops its key from
+# the row, so retired groups are found by id), or {} once swept.
+func _row_by_id(fx: EffectWorld, group_id: int) -> EffectGroupReport:
+	for row_v in fx.get_debug_group_report():
+		var row := row_v as EffectGroupReport
+		if int(row.id) == group_id:
+			return row
+	return null
+
+
+# Whether the group with `group_id` is detached; `swept` once the report no
+# longer lists it.
+func _row_detached(fx: EffectWorld, group_id: int, swept: bool = false) -> bool:
+	var row := _row_by_id(fx, group_id)
+	return swept if row == null else row.detached
+
+
+func _emitter_position(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
+		return Vector3.INF
+	return (row.emitters[0] as EffectEmitterReport).position
+
+
+func _emitter_forward(row: EffectGroupReport) -> Vector3:
+	if row == null or row.emitters.is_empty():
+		return Vector3.INF
+	return (row.emitters[0] as EffectEmitterReport).forward
+
+
+# One visual row shaped like Simulation::get_throwable_visuals emits.
+func _row(key: int, item_id: int, pos: Vector3, rotation_deg: Vector3,
+		move_effect: String = "", move_effect_live: bool = true) -> ThrowableVisualRow:
+	return ThrowableVisualRow.make(key, item_id, pos, rotation_deg, move_effect, move_effect_live)
 
 
 func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := _round_placer()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, placer, _item_db)
+	var presenter := _make_presenter(container, placer)
 
 	var position := Vector3(12.5, -4.0, 33.25)
 	for rotation in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(20, 35, -15)]:
-		presenter.present_visuals([{
-			"key": 7,
-			"item_id": 1883,
-			"pos": position,
-			"rotation_deg": rotation,
-		}])
+		presenter.present_throwable_visuals([_row(7, 1883, position, rotation)])
 		assert_eq(_thrown_models(container).size(), 1, "the same live round reuses its model")
 		var model: ObjectModel = _thrown_models(container)[0]
 		assert_eq(model.position, position, "Godot-space position is applied verbatim")
@@ -131,50 +179,58 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := _round_placer()
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, placer, _item_db,
-			func() -> Variant: return fx, anchors)
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var presenter := _make_presenter(container, placer, fx, anchors)
 	var first_pos := Vector3(2, 3, 4)
 	var first_rot := Vector3(15, 35, -12)
-	var row := {
-		"key": 7,
-		"item_id": 1883,
-		"pos": first_pos,
-		"rotation_deg": first_rot,
-		"move_effect": "Effect_SmokeToss",
-	}
+	var row := _row(7, 1883, first_pos, first_rot, MOVE_EFFECT)
+	var owner_key := "throwable-move:7"
 
-	presenter.present_visuals([row])
-	assert_eq(fx.spawns.size(), 1, "the live round spawns one move group")
-	assert_eq(presenter.get_stats().move_effects, 1)
-	var owner_key: Variant = fx.spawns[0].get("owner_key")
-	assert_true(anchors.anchors.has(owner_key), "the live group has a pose resolver")
-	var first_transform: Transform3D = (anchors.anchors[owner_key] as Callable).call()
-	assert_eq(first_transform.origin, first_pos)
-	assert_true(first_transform.basis.is_equal_approx(
-			MissionObjectPlacer.bms_to_godot_basis(first_rot)),
-			"the effect follows the round's complete spin basis")
+	presenter.present_throwable_visuals([row])
+	var live := _live_owned_row(fx, owner_key)
+	assert_not_null(live, "the live round spawns one move group")
+	assert_eq(_owned_rows(fx, owner_key).size(), 1)
+	assert_eq(live.name, MOVE_EFFECT)
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 1)
+	var group_id := int(live.id)
+	assert_true(anchors.has_effect_anchor(owner_key), "the live group has a pose resolver")
+	var first_transform: Variant = anchors.resolve_owner_transform(owner_key)
+	assert_true(first_transform is Transform3D)
+	if first_transform is Transform3D:
+		assert_eq((first_transform as Transform3D).origin, first_pos)
+		assert_true((first_transform as Transform3D).basis.is_equal_approx(
+				MissionObjectPlacer.bms_to_godot_basis(first_rot)),
+				"the effect follows the round's complete spin basis")
 
 	var next_pos := Vector3(-8, 6, 12)
 	var next_rot := Vector3(-20, 110, 32)
-	row["pos"] = next_pos
-	row["rotation_deg"] = next_rot
-	presenter.present_visuals([row])
-	assert_eq(fx.spawns.size(), 1, "pose updates never respawn the move group")
-	var next_transform: Transform3D = (anchors.anchors[owner_key] as Callable).call()
-	assert_eq(next_transform.origin, next_pos)
-	assert_true(next_transform.basis.is_equal_approx(
-			MissionObjectPlacer.bms_to_godot_basis(next_rot)))
+	row = _row(7, 1883, next_pos, next_rot, MOVE_EFFECT)
+	presenter.present_throwable_visuals([row])
+	assert_eq(_owned_rows(fx, owner_key).size(), 1, "pose updates never respawn the move group")
+	var next_transform: Variant = anchors.resolve_owner_transform(owner_key)
+	assert_true(next_transform is Transform3D)
+	if next_transform is Transform3D:
+		assert_eq((next_transform as Transform3D).origin, next_pos)
+		assert_true((next_transform as Transform3D).basis.is_equal_approx(
+				MissionObjectPlacer.bms_to_godot_basis(next_rot)))
+	# The fixed-tick owner sync carries that pose into the particle scene.
+	fx.advance_fixed_tick(0.0)
+	var followed := _live_owned_row(fx, owner_key)
+	assert_almost_eq(_emitter_position(followed), next_pos, POSITION_EPS,
+			"the emitter rides the round's live position")
+	assert_almost_eq(_emitter_forward(followed),
+			MissionObjectPlacer.bms_to_godot_basis(next_rot).z.normalized(), POSITION_EPS,
+			"the emitter forward rides the round's spin basis")
 
-	presenter.present_visuals([])
-	assert_eq(presenter.get_stats().move_effects, 0)
-	assert_false(anchors.anchors.has(owner_key), "round removal retires its anchor")
-	assert_eq(fx.stopped, [91],
+	presenter.present_throwable_visuals([])
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 0)
+	assert_false(anchors.has_effect_anchor(owner_key), "round removal retires its anchor")
+	assert_true(_row_detached(fx, group_id),
 			"round removal stops emission on the exact spawned group")
-	assert_eq(fx.released, [owner_key],
+	assert_false(fx.has_owner_binding(owner_key),
 			"round removal releases its generation-scoped effect identity")
+	assert_true(fx.has_no_owner_bindings())
 	presenter.teardown()
 
 
@@ -185,112 +241,117 @@ func test_released_move_effect_retires_and_respawns_when_live_again() -> void:
 	# @0x4ea019..0x4ea03e; the lazy spawn @0x4e9f58..0x4e9f94].
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, _round_placer(), _item_db,
-			func() -> Variant: return fx, anchors)
-	var row := {
-		"key": 3075,
-		"item_id": 1883,
-		"pos": Vector3(3, 1, 2),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-		"move_effect_live": true,
-	}
-	presenter.present_visuals([row])
-	assert_eq(fx.spawns.size(), 1, "a live emitter spawns its group")
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var presenter := _make_presenter(container, _round_placer(), fx, anchors)
+	var row := _row(3075, 1883, Vector3(3, 1, 2), Vector3.ZERO, MOVE_EFFECT)
+	presenter.present_throwable_visuals([row])
 	var owner_key := "throwable-move:3075"
+	var first := _live_owned_row(fx, owner_key)
+	assert_not_null(first, "a live emitter spawns its group")
+	var first_id := int(first.id)
 
-	row["move_effect_live"] = false
-	row["pos"] = Vector3(3, -1, 2)
-	presenter.present_visuals([row])
-	assert_eq(fx.stopped, [91],
+	row = _row(3075, 1883, Vector3(3, -1, 2), Vector3.ZERO, MOVE_EFFECT, false)
+	presenter.present_throwable_visuals([row])
+	assert_true(_row_detached(fx, first_id),
 			"the released emitter stops its group while the round stays live")
-	assert_eq(fx.released, [owner_key],
+	assert_false(fx.has_owner_binding(owner_key),
 			"the release drops the effect identity so the handle is forgotten")
-	assert_false(anchors.anchors.has(owner_key))
-	assert_eq(presenter.get_stats().move_effects, 0)
-	assert_eq(presenter.get_stats().move_effect_transforms, 0,
+	assert_false(anchors.has_effect_anchor(owner_key))
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 0)
+	assert_eq(presenter.get_throwable_present_stats().move_effect_transforms, 0,
 			"a released round keeps no stale transform")
 
-	row["move_effect_live"] = true
-	row["pos"] = Vector3(3, 1.5, 2)
-	presenter.present_visuals([row])
-	assert_eq(fx.spawns.size(), 2,
+	row = _row(3075, 1883, Vector3(3, 1.5, 2), Vector3.ZERO, MOVE_EFFECT, true)
+	presenter.present_throwable_visuals([row])
+	var resumed_row := _live_owned_row(fx, owner_key)
+	assert_not_null(resumed_row,
 			"surfacing acquires a FRESH group for the same round")
-	assert_eq(int(presenter.get_stats().move_effects), 1)
-	assert_true(anchors.anchors.has(owner_key))
-	var resumed: Transform3D = (anchors.anchors[owner_key] as Callable).call()
-	assert_eq(resumed.origin, Vector3(3, 1.5, 2))
+	var second_id := int(resumed_row.id)
+	assert_ne(second_id, first_id, "the stopped group is never revived")
+	assert_eq(int(presenter.get_throwable_present_stats().move_effects), 1)
+	assert_true(anchors.has_effect_anchor(owner_key))
+	var resumed: Variant = anchors.resolve_owner_transform(owner_key)
+	assert_true(resumed is Transform3D)
+	if resumed is Transform3D:
+		assert_eq((resumed as Transform3D).origin, Vector3(3, 1.5, 2))
 
-	presenter.present_visuals([])
-	assert_eq(fx.stopped, [91, 92], "round removal stops the second group")
+	presenter.present_throwable_visuals([])
+	assert_true(_row_detached(fx, second_id),
+			"round removal stops the second group")
+	assert_true(fx.has_no_owner_bindings())
 	presenter.teardown()
 
 
 func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, _round_placer(), _item_db,
-			func() -> Variant: return fx, anchors)
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var presenter := _make_presenter(container, _round_placer(), fx, anchors)
 	var pos_a := Vector3(1, 2, 3)
 	var pos_b := Vector3(10, 20, 30)
-	var rows := [
-		{
-			"key": 1027,
-			"item_id": 1883,
-			"pos": pos_a,
-			"rotation_deg": Vector3(5, 15, 25),
-			"move_effect": "Effect_SmokeToss",
-		},
-		{
-			"key": 2059,
-			"item_id": 1883,
-			"pos": pos_b,
-			"rotation_deg": Vector3(-5, 70, -25),
-			"move_effect": "Effect_SmokeToss",
-		},
+	var rows: Array[ThrowableVisualRow] = [
+		_row(1027, 1883, pos_a, Vector3(5, 15, 25), MOVE_EFFECT),
+		_row(2059, 1883, pos_b, Vector3(-5, 70, -25), MOVE_EFFECT),
 	]
-	presenter.present_visuals(rows)
+	presenter.present_throwable_visuals(rows)
 
-	assert_eq(fx.spawns.size(), 2)
 	var owner_a := "throwable-move:1027"
 	var owner_b := "throwable-move:2059"
-	var transform_a: Transform3D = (anchors.anchors[owner_a] as Callable).call()
-	var transform_b: Transform3D = (anchors.anchors[owner_b] as Callable).call()
-	assert_eq(transform_a.origin, pos_a,
-			"the first closure captures the first round lifetime")
-	assert_eq(transform_b.origin, pos_b,
-			"the second closure captures the second round lifetime")
+	var row_a := _live_owned_row(fx, owner_a)
+	var row_b := _live_owned_row(fx, owner_b)
+	assert_not_null(row_a)
+	assert_not_null(row_b)
+	assert_eq(fx.get_debug_group_report().size(), 2, "one owned group per round")
+	var id_a := int(row_a.id)
+	var id_b := int(row_b.id)
+	var transform_a: Variant = anchors.resolve_owner_transform(owner_a)
+	var transform_b: Variant = anchors.resolve_owner_transform(owner_b)
+	assert_true(transform_a is Transform3D)
+	assert_true(transform_b is Transform3D)
+	if transform_a is Transform3D:
+		assert_eq((transform_a as Transform3D).origin, pos_a,
+				"the first anchor tracks the first round lifetime")
+	if transform_b is Transform3D:
+		assert_eq((transform_b as Transform3D).origin, pos_b,
+				"the second anchor tracks the second round lifetime")
 
 	var next_a := Vector3(-3, 8, 14)
 	var next_b := Vector3(42, -2, 6)
-	rows[0]["pos"] = next_a
-	rows[1]["pos"] = next_b
-	presenter.present_visuals(rows)
-	transform_a = (anchors.anchors[owner_a] as Callable).call()
-	transform_b = (anchors.anchors[owner_b] as Callable).call()
-	assert_eq(transform_a.origin, next_a)
-	assert_eq(transform_b.origin, next_b)
-	assert_eq(fx.spawns.size(), 2, "two pose updates reuse their own groups")
+	rows[0] = _row(1027, 1883, next_a, Vector3(5, 15, 25), MOVE_EFFECT)
+	rows[1] = _row(2059, 1883, next_b, Vector3(-5, 70, -25), MOVE_EFFECT)
+	presenter.present_throwable_visuals(rows)
+	transform_a = anchors.resolve_owner_transform(owner_a)
+	transform_b = anchors.resolve_owner_transform(owner_b)
+	if transform_a is Transform3D:
+		assert_eq((transform_a as Transform3D).origin, next_a)
+	if transform_b is Transform3D:
+		assert_eq((transform_b as Transform3D).origin, next_b)
+	assert_eq(fx.get_debug_group_report().size(), 2, "two pose updates reuse their own groups")
+	fx.advance_fixed_tick(0.0)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, owner_a)), next_a, POSITION_EPS)
+	assert_almost_eq(_emitter_position(_live_owned_row(fx, owner_b)), next_b, POSITION_EPS,
+			"each group follows only its own round")
 
-	presenter.present_visuals([rows[1]])
-	assert_false(anchors.anchors.has(owner_a))
-	assert_true(anchors.anchors.has(owner_b),
+	presenter.present_throwable_visuals([rows[1]])
+	assert_false(anchors.has_effect_anchor(owner_a))
+	assert_true(anchors.has_effect_anchor(owner_b),
 			"retiring the first round leaves the second anchor live")
-	transform_b = (anchors.anchors[owner_b] as Callable).call()
-	assert_eq(transform_b.origin, next_b)
-	assert_eq(fx.stopped, [91],
+	transform_b = anchors.resolve_owner_transform(owner_b)
+	if transform_b is Transform3D:
+		assert_eq((transform_b as Transform3D).origin, next_b)
+	assert_true(_row_detached(fx, id_a),
 			"only the first round's emitter group stops")
-	assert_eq(fx.released, [owner_a])
+	assert_false(_row_detached(fx, id_b, true),
+			"the second round's group stays attached")
+	assert_false(fx.has_owner_binding(owner_a))
+	assert_true(fx.has_owner_binding(owner_b))
 
-	presenter.present_visuals([])
-	assert_eq(fx.stopped, [91, 92])
-	assert_eq(fx.released, [owner_a, owner_b])
+	presenter.present_throwable_visuals([])
+	assert_true(_row_detached(fx, id_b))
+	assert_true(fx.has_no_owner_bindings(),
+			"both retired rounds released their effect identities")
 	presenter.teardown()
 
 
@@ -300,75 +361,83 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	# see that as a retirement plus a fresh spawn even for the same effect name.
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var fx := _make_fx()
-	var anchors := CaptureAnchors.new()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, _round_placer(), _item_db,
-			func() -> Variant: return fx, anchors)
-	presenter.present_visuals([{
-		"key": 1024, # generation 1, slot 0
-		"item_id": 1883,
-		"pos": Vector3(1, 0, 0),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}])
-	presenter.present_visuals([{
-		"key": 2048, # generation 2, the same slot 0
-		"item_id": 1883,
-		"pos": Vector3(20, 0, 0),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}])
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var presenter := _make_presenter(container, _round_placer(), fx, anchors)
+	# key 1024 = generation 1, slot 0; key 2048 = generation 2, the same slot 0
+	presenter.present_throwable_visuals([
+		_row(1024, 1883, Vector3(1, 0, 0), Vector3.ZERO, MOVE_EFFECT)])
+	var outgoing := _live_owned_row(fx, "throwable-move:1024")
+	assert_not_null(outgoing)
+	var outgoing_id := int(outgoing.id)
+	presenter.present_throwable_visuals([
+		_row(2048, 1883, Vector3(20, 0, 0), Vector3.ZERO, MOVE_EFFECT)])
 
-	assert_eq(fx.spawns.size(), 2,
+	assert_eq(fx.get_debug_group_report().size(), 2,
 			"same-slot replacement starts a fresh effect lifetime")
-	assert_eq(fx.stopped, [91],
+	assert_true(_row_detached(fx, outgoing_id),
 			"the outgoing generation stops instead of teleporting")
-	assert_eq(fx.released, ["throwable-move:1024"],
+	assert_false(fx.has_owner_binding("throwable-move:1024"),
 			"the outgoing generation drops its effect-world token mappings")
-	assert_false(anchors.anchors.has("throwable-move:1024"))
-	assert_true(anchors.anchors.has("throwable-move:2048"))
-	var replacement_transform: Transform3D = \
-			(anchors.anchors["throwable-move:2048"] as Callable).call()
-	assert_eq(replacement_transform.origin, Vector3(20, 0, 0))
+	assert_true(fx.has_owner_binding("throwable-move:2048"))
+	assert_false(anchors.has_effect_anchor("throwable-move:1024"))
+	assert_true(anchors.has_effect_anchor("throwable-move:2048"))
+	var replacement := _live_owned_row(fx, "throwable-move:2048")
+	assert_not_null(replacement, "the incoming generation owns a live group")
+	assert_ne(int(replacement.id), outgoing_id)
+	var replacement_transform: Variant = anchors.resolve_owner_transform("throwable-move:2048")
+	assert_true(replacement_transform is Transform3D)
+	if replacement_transform is Transform3D:
+		assert_eq((replacement_transform as Transform3D).origin, Vector3(20, 0, 0))
 	presenter.teardown()
 
 
 func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var anchors := CaptureAnchors.new()
-	var presenter := ThrowablePresentPass.new()
-	var row := {
-		"key": 1024,
-		"item_id": 1883,
-		"pos": Vector3(9, 8, 7),
-		"rotation_deg": Vector3.ZERO,
-		"move_effect": "Effect_SmokeToss",
-	}
+	var anchors := ItemEffectDirector.new()
+	var placer := _round_placer()
+	var presenter := _make_presenter(container, placer, null, anchors)
+	var row := _row(1024, 1883, Vector3(9, 8, 7), Vector3.ZERO, MOVE_EFFECT)
+	var owner_key := "throwable-move:1024"
 
-	# A missing provider is a normal startup/teardown ordering case. It must not
-	# leave an unowned transform that retirement can never discover.
-	presenter.setup(null, container, _round_placer(), _item_db,
-			Callable(), anchors)
-	presenter.present_visuals([row])
-	assert_eq(presenter.get_stats().move_effects, 0)
-	assert_eq(presenter.get_stats().move_effect_transforms, 0,
-			"a null provider does not leak round transform state")
+	# A missing effect world is a normal startup/teardown ordering case. It must
+	# not leave an unowned transform that retirement can never discover.
+	presenter.present_throwable_visuals([row])
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 0)
+	assert_eq(presenter.get_throwable_present_stats().move_effect_transforms, 0,
+			"a null effect world does not leak round transform state")
+	assert_false(anchors.has_effect_anchor(owner_key))
 
-	var fx := _make_fx()
-	fx.allow_spawn = false
-	presenter.setup(null, container, _round_placer(), _item_db,
-			func() -> Variant: return fx, anchors)
-	presenter.present_visuals([row])
-	assert_eq(fx.spawns.size(), 1, "the provider rejected one real request")
-	assert_eq(fx.released, ["throwable-move:1024"],
+	# The retail master particle switch: every spawn facade answers a rejected
+	# (particles_disabled) receipt, exactly the rejection the pass must clean
+	# up after. The hidden report proves no group was ever created.
+	var fx := _make_fx(anchors)
+	fx.set_particles_hidden(true)
+	presenter.setup_passes(container, _item_db, null, null, fx, null, null, anchors)
+	presenter.present_throwable_visuals([row])
+	assert_true(fx.get_debug_group_report(true).is_empty(),
+			"the rejected request created no group, hidden or otherwise")
+	assert_true(fx.has_no_owner_bindings(),
 			"a rejected native spawn releases its provisional token mappings")
-	assert_true(anchors.anchors.is_empty(),
+	assert_false(anchors.has_effect_anchor(owner_key),
 			"a failed spawn unregisters the provisional owner anchor")
-	assert_eq(presenter.get_stats().move_effects, 0)
-	assert_eq(presenter.get_stats().move_effect_transforms, 0,
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 0)
+	assert_eq(presenter.get_throwable_present_stats().move_effect_transforms, 0,
 			"a failed spawn does not leak round transform state")
+
+	# A catalog miss (no stockeffect fallback authored) is the other rejection:
+	# the facade allocates the owner's slot/owner identities BEFORE the scene
+	# rejects the handle, so the release must actually drop them.
+	fx.set_particles_hidden(false)
+	presenter.present_throwable_visuals([
+		_row(1024, 1883, Vector3(9, 8, 7), Vector3.ZERO, "Effect_NotInCatalog")])
+	assert_true(fx.get_debug_group_report().is_empty())
+	assert_true(fx.has_no_owner_bindings(),
+			"the catalog-miss rejection releases the allocated identities")
+	assert_false(anchors.has_effect_anchor(owner_key))
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 0)
+	assert_eq(presenter.get_throwable_present_stats().move_effect_transforms, 0)
 	presenter.teardown()
 
 
@@ -380,25 +449,52 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := _round_placer()
-	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, placer, _item_db)
+	var presenter := _make_presenter(container, placer)
 
-	presenter.present_visuals([{
-		"key": 19,
-		"item_id": 1883,
-		"pos": Vector3(4, 5, 6),
-		"rotation_deg": Vector3.ZERO,
-	}])
+	presenter.present_throwable_visuals([_row(19, 1883, Vector3(4, 5, 6), Vector3.ZERO)])
 	assert_eq(_thrown_models(container).size(), 1,
 			"the remote flying-round snapshot materializes its TrcrID item")
-	var live_stats := presenter.get_stats()
-	assert_true(live_stats is ThrowablePresentPass.Stats)
+	var live_stats := presenter.get_throwable_present_stats()
+	assert_true(live_stats is ThrowablePresentStats)
 	assert_eq(live_stats.live, 1)
 	var model: ObjectModel = _thrown_models(container)[0]
 	assert_eq(model.position, Vector3(4, 5, 6))
 
-	presenter.present_visuals([])
-	assert_eq(presenter.get_stats().live, 0)
+	presenter.present_throwable_visuals([])
+	assert_eq(presenter.get_throwable_present_stats().live, 0)
 	assert_true(model.is_queued_for_deletion(),
 			"the model retires when the remote visual round slot is gone")
+	presenter.teardown()
+
+
+func test_reset_wire_runtime_state_clears_the_models_and_move_groups() -> void:
+	# The Stop -> Play boundary reaches the throwable pass through the
+	# presenter's one reset (the restart signal's single connect): every
+	# presented model retires, every round-bound move group stops and releases
+	# its anchor + effect identity.
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var presenter := _make_presenter(container, _round_placer(), fx, anchors)
+	var owner_key := "throwable-move:7"
+	presenter.present_throwable_visuals([
+		_row(7, 1883, Vector3(2, 3, 4), Vector3.ZERO, MOVE_EFFECT)])
+	assert_eq(presenter.get_throwable_present_stats().live, 1)
+	assert_eq(presenter.get_throwable_present_stats().move_effects, 1)
+	var live := _live_owned_row(fx, owner_key)
+	assert_not_null(live)
+	var group_id := int(live.id) if live != null else 0
+	var model: ObjectModel = _thrown_models(container)[0]
+
+	presenter.reset_wire_runtime_state()
+
+	var stats := presenter.get_throwable_present_stats()
+	assert_eq(stats.live, 0, "reset frees every presented model")
+	assert_eq(stats.move_effects, 0, "reset stops every move group")
+	assert_eq(stats.move_effect_transforms, 0, "reset forgets every anchor transform")
+	assert_true(model.is_queued_for_deletion())
+	assert_false(anchors.has_effect_anchor(owner_key), "reset retires the move anchor")
+	assert_true(_row_detached(fx, group_id), "reset stops emission on the spawned group")
+	assert_true(fx.has_no_owner_bindings(), "reset releases the effect identity")
 	presenter.teardown()

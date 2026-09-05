@@ -46,7 +46,7 @@ const SPAWN_LIST := "SPAWNPOINTS_LIST"
 signal opened
 signal closed
 
-var _world: GameWorld = null
+var _view: WorldView = null
 var _ui_parent: Node = null
 # The layout source, converted ONCE at setup: a Control parent (test overlays)
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
@@ -64,14 +64,24 @@ var _refresh_accum := 0.0
 # visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
 # compiled list carries labels only, so the node parameter the pick serializes
 # lives here (the old ItemList's item metadata).
-var _spawn_rows: Array = []
+## One visible list row: its stripped label and the node PARAM the pick sends
+## (0 default, index + 1 zone, -1 occupant/blank — never a pick).
+class SpawnRow extends RefCounted:
+	var label: String
+	var param: int
+
+	func _init(p_label: String, p_param: int) -> void:
+		label = p_label
+		param = p_param
+
+var _spawn_rows: Array[SpawnRow] = []
 
 
-func setup(world: GameWorld, ui_parent: Node) -> void:
-	_world = world
+func setup(view: WorldView, ui_parent: Node) -> void:
+	_view = view
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
-	_connect_layout_source()
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func is_open() -> bool:
@@ -80,12 +90,12 @@ func is_open() -> bool:
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam):
 ## `on_opened`/`on_closed` report the screen's cursor ownership.
-static func install(parent: Node, world: GameWorld, ui_parent: Node,
+static func install(parent: Node, view: WorldView, ui_parent: Node,
 		on_opened: Callable, on_closed: Callable) -> DeployScreenPresenter:
 	var presenter := DeployScreenPresenter.new()
 	presenter.name = "DeployScreenPresenter"
 	parent.add_child(presenter)
-	presenter.setup(world, ui_parent)
+	presenter.setup(view, ui_parent)
 	presenter.opened.connect(func() -> void: on_opened.call())
 	presenter.closed.connect(func() -> void: on_closed.call())
 	return presenter
@@ -97,29 +107,35 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The presenter-side spawn row model ({label, param} per visible list row,
+## The presenter-side spawn row model (one SpawnRow per visible list row,
 ## aligned with the compiled list's rows) — ADR 0018 read seam for tests.
-func get_spawn_rows() -> Array:
+func get_spawn_rows() -> Array[SpawnRow]:
 	return _spawn_rows
 
 
 ## ADR 0018 test seams over the row model: append one presenter row (the shape
-## the engine builder emits — an occupant row is {label, param: -1}) and fire
-## the list select the compiled list would raise for a row.
+## the engine builder emits — an occupant row carries param -1) and fire the
+## list select the compiled list would raise for a row.
 func append_spawn_row(label: String, param: int) -> void:
-	_spawn_rows.append({"label": label, "param": param})
+	_spawn_rows.append(SpawnRow.new(label, param))
 
 
 func select_spawn_row(row: int) -> void:
 	_on_widget_value_changed(SPAWN_LIST, "list", row, "")
 
 
-## Open over the live world when the join owes a deployment pick.
+## Open over the live world when the join owes a deployment pick, or when the
+## host drives the deploy-map OVERLAY (0x0F game_flags bit0 / per-frame 0x0A
+## flags1 bit1) — retail opens this same death.mnu DEATH screen for both, and
+## the once-per-arming open latch belongs to the engine's ClientState, like
+## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
+## (engine/runtime/replication/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:
-	if is_open() or _world == null or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null:
 		return false
-	var sim: Simulation = _world.get_sim()
-	if sim == null or not bool(sim.is_join_deploy_pick_pending()):
+	var sim: Simulation = _view.sim()
+	if sim == null or not (bool(sim.is_join_deploy_pick_pending())
+			or bool(sim.is_join_deploy_overlay_active())):
 		return false
 	if not _ensure_menu():
 		return false
@@ -139,6 +155,27 @@ func close() -> void:
 		return
 	_frame.visible = false
 	closed.emit()
+
+
+# Retail's deploy-screen keys 'X' and SPACE route input case 12 (dialogs reset
+# + a 0x0E). On the OVERLAY-only screen (no pick owed) they act as the local
+# dismiss; the DEATH pick flow keeps its list-select picks, so the keys stay
+# inert there rather than inventing an unpicked default send. (The key and
+# case-12 witnesses live in hud-re D-HUD-19; the 0x0E half is unported — see
+# _on_widget_value_changed.)
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_open():
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_X and key.keycode != KEY_SPACE:
+		return
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or bool(sim.is_join_deploy_pick_pending()):
+		return
+	close()
+	get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:
@@ -161,7 +198,7 @@ func _process(delta: float) -> void:
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
 	_driver.tick(Time.get_ticks_msec())
-	var sim: Simulation = _world.get_sim() if _world != null else null
+	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		close()
 		return
@@ -176,12 +213,14 @@ func _process(delta: float) -> void:
 	if bool(sim.is_session_lost()):
 		teardown()
 		return
-	# The screen's lifetime is the server-driven deployment-pending bit, independent
-	# from the active-session/gameplay state. Retail's initial 0x5A grants resume
-	# uplinks before the player picks, while flags1 bit1 keeps this screen visible;
-	# only the host clearing that bit closes it.
-	# [orig: the §5.61 hold chain — g_deploy_screen_active follows the bit every frame].
-	if not bool(sim.is_join_deploy_pick_pending()):
+	# The screen's lifetime: a pending DEATH pick holds it, and so does the
+	# host-driven overlay bit (which follows the per-frame 0x0A flags1 bit1,
+	# set AND cleared). Only both falling closes it — retail's frame loop
+	# closes the latched screen exactly when its two open triggers are gone
+	# (the per-frame fold and close-on-clear witnesses live on
+	# ClientState.deploy_overlay_active and hud-re D-HUD-19).
+	if not bool(sim.is_join_deploy_pick_pending()) \
+			and not bool(sim.is_join_deploy_overlay_active()):
 		close()
 		return
 	# Periodic content refresh: zone security/ownership can change while picking
@@ -207,14 +246,25 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		return
 	if index < 0 or index >= _spawn_rows.size():
 		return
-	var sim: Simulation = _world.get_sim() if _world != null else null
+	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		return
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
 	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick; the
 	#  occupant/blank rows carry node -1 and the callback guards node != -1]
-	var param := int((_spawn_rows[index] as Dictionary).get("param", 0))
+	var param := _spawn_rows[index].param
 	if param == -1:
+		return
+	if not bool(sim.is_join_deploy_pick_pending()):
+		# The OVERLAY-only screen (the player is already deployed — a wave
+		# host): retail's input case 12 resets the dialogs (closing this
+		# screen) and still sends one C2S 0x0E the host is free to drop. The
+		# send half is NOT ported yet: case 12 also re-arms the client uplink
+		# hold, and how a host releases that hold for an already-deployed
+		# player is unwitnessed (the stock wave-join capture carries zero
+		# 0x0E) — silence is the wire-safe posture until a capture pins it.
+		# (The case-12 witnesses live in hud-re D-HUD-19.)
+		close()
 		return
 	sim.send_deployment_pick(param)
 
@@ -230,7 +280,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	var keep_param := -1
 	var selected := _driver.selected_row(list_id)
 	if selected >= 0 and selected < _spawn_rows.size():
-		keep_param = int((_spawn_rows[selected] as Dictionary).get("param", -1))
+		keep_param = _spawn_rows[selected].param
 	# The compiled row set comes from the engine builder (world/deploy_screen_feed):
 	# the Default row, the secured team zones, the whole-list text sort, then
 	# each zone's wave occupants + blank separator at node -1. The row texts
@@ -240,26 +290,24 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	_spawn_rows = []
 	var labels := PackedStringArray()
 	var zone_names := {}
-	for value in sim.get_deploy_spawn_zones():
-		var zone := value as Dictionary
-		var key := String(zone.get("name_key", ""))
-		zone_names[key] = _game_text("WPNames", key, "Spawn Point")
-	for value in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
-			_menu_text("HOME", "Home Base"), zone_names):
-		var row := value as Dictionary
+	for zone: DeployZoneRow in sim.get_deploy_spawn_zones():
+		var key := zone.name_key
+		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
+	for row: DeployListRow in sim.get_deploy_list_rows(Strings.menu_text("DEFAULT_SPAWN_KEY", "D"),
+			Strings.menu_text("HOME", "Home Base"), zone_names):
 		# The compiled list has no inline markup channel yet (the row-style
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
 		# tagged text, so the row order is retail's.
-		var label := _strip_inline_tags(String(row.get("text", "")))
+		var label := _strip_inline_tags(row.text)
 		labels.append(label)
-		_spawn_rows.append({"label": label, "param": int(row.get("value", -1))})
+		_spawn_rows.append(SpawnRow.new(label, row.value))
 	# set_widget_items resets the selection to row 0; restore the previous pick by
 	# parameter without emitting (picks ride user clicks only, never the refill).
 	_driver.set_widget_items(list_id, labels)
 	if keep_param >= 0:
 		for row in _spawn_rows.size():
-			if int((_spawn_rows[row] as Dictionary).get("param", -1)) == keep_param:
+			if _spawn_rows[row].param == keep_param:
 				_driver.select_row(list_id, row, false)
 				break
 	_apply_statics(sim)
@@ -296,39 +344,39 @@ func _hide_team_service_buttons() -> void:
 #    "<STROVER_MEDICTIMER>  <cFF4040><n>" and STROVER_CALLMEDIC formatted with
 #    the MedicReq binding's display string (KeyBinding_FormatDisplayString).
 func _apply_statics(sim: Simulation) -> void:
-	var status: Dictionary = sim.get_deploy_status()
+	var status := sim.get_deploy_status()
 	var title_id := _driver.widget_id("STATIC_LIST_TITLE")
 	if title_id >= 0:
 		_driver.set_widget_shown(title_id, true)
 	var respawn_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
 	if respawn_id >= 0:
-		var kind := int(status.get("queued_kind", 0))
+		var kind := status.queued_kind
 		_driver.set_widget_shown(respawn_id, kind != 0)
 		if kind != 0:
 			# The three sprintf arms are the engine's deploy_status_text
 			# (world/deploy_screen_feed.h), resolved through gametext by the sim.
 			_driver.set_widget_text(respawn_id,
-					sim.get_deploy_status_text(Strings.get_table("gametext")))
+					sim.get_deploy_status_text(Strings.get_table(Strings.TABLE_GAMETEXT)))
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:
-		var show_psp := bool(status.get("show_psp_respawn", false))
+		var show_psp := status.show_psp_respawn
 		_driver.set_widget_shown(psp_id, show_psp)
 		if show_psp:
 			_driver.set_widget_text(psp_id, "%s  <cFF4040>%d" % [
-					_game_text("Overlays", "STROVER_PSPRESPAWN", "Spawn point available in"),
-					int(status.get("hold_seconds", 0))])
+					_game_text(Strings.SECTION_OVERLAYS, "STROVER_PSPRESPAWN", "Spawn point available in"),
+					status.hold_seconds])
 	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
 	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
 	if medic_id >= 0 and call_id >= 0:
-		var show_medic := bool(status.get("show_medic", false))
+		var show_medic := status.show_medic
 		_driver.set_widget_shown(medic_id, show_medic)
 		_driver.set_widget_shown(call_id, show_medic)
 		if show_medic:
 			_driver.set_widget_text(medic_id, "%s  <cFF4040>%d" % [
-					_game_text("Overlays", "STROVER_MEDICTIMER", "Medic time remaining"),
-					int(status.get("revive_seconds", 0))])
+					_game_text(Strings.SECTION_OVERLAYS, "STROVER_MEDICTIMER", "Medic time remaining"),
+					status.revive_seconds])
 			var key_label: String = ControlsBindings.model().display_text_for_token("MedicReq")
-			var call_format := _game_text("Overlays", "STROVER_CALLMEDIC", "Press %s to call a medic")
+			var call_format := _game_text(Strings.SECTION_OVERLAYS, "STROVER_CALLMEDIC", "Press %s to call a medic")
 			_driver.set_widget_text(call_id,
 					call_format % key_label if call_format.contains("%s") else call_format)
 
@@ -339,7 +387,7 @@ func _apply_statics(sim: Simulation) -> void:
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -374,8 +422,8 @@ func _ensure_menu() -> bool:
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	var style := _load_style(root)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
+	var menu_text: RtxtStringFile = Strings.get_table(Strings.TABLE_MENUTXT)
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("DeployScreenPresenter: %s has no screens" % MENU_FILE)
 		teardown()
@@ -405,30 +453,12 @@ func _register_text_tables(root: ResourceRoot) -> void:
 			Strings.register_table(spec[0], loaded)
 
 
-func _menu_text(key: String, fallback: String) -> String:
-	# [orig: TextResource_GetStringWithFallback(g_TextMenuUi, "Menu", key) — the
-	#  DEFAULT_SPAWN_KEY / HOME row-0 tokens @0x5536a0]
-	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback
-
-
 func _game_text(section: String, key: String, fallback: String) -> String:
-	# [orig: GameText_GetString("WPNames", "STRWPNAME%03d") @0x5536a0]
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	# [orig: GameText_GetString(Strings.SECTION_WPNAMES, "STRWPNAME%03d") @0x5536a0]
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if t != null and not key.is_empty() and t.has_string_in_section(section, key):
 		return t.get_string_in_section(section, key)
 	return fallback
-
-
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-
-
-func _connect_layout_source() -> void:
-	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func _recompute_fit() -> void:

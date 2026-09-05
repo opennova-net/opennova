@@ -1,4 +1,5 @@
 #include <net/napi/envelope.h>
+#include <base/io/le.h>
 
 #include <net/novacrypto/crc32.h>
 
@@ -10,18 +11,6 @@ namespace {
 
 constexpr size_t SCATTER_THRESHOLD = 32;
 constexpr size_t HEADER_SIZE = 4;
-
-inline uint32_t read_le32(const uint8_t *p) {
-	return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-			(static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
-}
-
-inline void write_le32(uint8_t *p, uint32_t v) {
-	p[0] = static_cast<uint8_t>(v & 0xFFu);
-	p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
-	p[2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
-	p[3] = static_cast<uint8_t>((v >> 24) & 0xFFu);
-}
 
 // Decode one of retail's two header layouts without mutating the packet. The
 // extended layout keeps its scatter carrier (or direct CRC for a short body)
@@ -37,7 +26,7 @@ bool decode_with_header(const uint8_t *packet, size_t packet_len,
 	if (crc_offset + sizeof(uint32_t) > header_size) return false;
 
 	std::memcpy(out, packet + header_size, payload_len);
-	const uint32_t carrier = read_le32(packet + crc_offset);
+	const uint32_t carrier = io::read_u32_le(packet + crc_offset);
 	uint32_t expected_crc = carrier;
 	if (payload_len >= SCATTER_THRESHOLD) {
 		expected_crc = 0;
@@ -88,7 +77,7 @@ int napi_envelope_encode(const uint8_t *src, size_t src_len,
 		header = crc;
 	}
 
-	write_le32(out, header);
+	io::write_u32_le(out, header);
 	*out_size = src_len + HEADER_SIZE;
 	return 0;
 }
@@ -99,7 +88,7 @@ int napi_envelope_decode(const uint8_t *packet, size_t packet_len,
 		return -1;
 	}
 
-	const uint32_t first_dword = read_le32(packet);
+	const uint32_t first_dword = io::read_u32_le(packet);
 	if (first_dword != 0u) {
 		return decode_with_header(packet, packet_len, HEADER_SIZE,
 				out, out_cap, out_size) ? 0 : -1;

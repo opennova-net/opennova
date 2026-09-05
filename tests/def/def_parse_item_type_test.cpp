@@ -11,6 +11,8 @@
 
 #include <formats/def/def.h>
 
+using namespace opennova::def;
+
 static int type_of(const char *type_token) {
     char buf[256];
     // One minimal begin/end block whose only body line is the `type` token.

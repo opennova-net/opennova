@@ -22,6 +22,21 @@ extends Node
 # RtxtStringFile.format_miss_marker / lookup_with_override statics — the
 # witnesses live at the engine home, engine/formats/rtxt rtxt.h.
 
+## The named tables (the registry below carries the witness) and the RTXT
+## sections the game reads by name; every caller spells them through these.
+const TABLE_GAMETEXT := "gametext"
+const TABLE_MISSION := "mission"
+const SECTION_OVERLAYS := "Overlays"
+const SECTION_WEPDES := "WepDes"
+const SECTION_WPNAMES := "WPNames"
+const SECTION_CANNED_MSG := "Canned Msg"
+const SECTION_CLIENT := "Client"
+const SECTION_LOADING_TEXT := "LoadingText"
+const TABLE_MENUTXT := "menutxt"
+const TABLE_GAMEUI := "gameui"
+const SECTION_MENU := "Menu"
+const SECTION_AVATARS := "Avatars"
+
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
 var _override_table: RtxtStringFile
@@ -99,6 +114,25 @@ func get_override_table() -> RtxtStringFile:
 func lookup(table_name: String, section: String, key: String) -> String:
 	return RtxtStringFile.lookup_with_override(_override_table,
 			_tables.get(table_name.to_lower()), section, key)
+
+
+## The named table's own entry, or `fallback` when the table is absent or
+## lacks the key: no override table and no miss marker, the form the HUD
+## overlay and label lookups take (a table-only has/get pair).
+func lookup_or(table_name: String, section: String, key: String, fallback: String) -> String:
+	var t: RtxtStringFile = get_table(table_name)
+	if t != null and t.has_string_in_section(section, key):
+		return t.get_string_in_section(section, key)
+	return fallback
+
+
+## A menu UI token: menutxt's "Menu" section, then gameui's, else the fallback
+## (the armory, player-info and DEATH-screen tokens all resolve this way).
+## [orig: the menu tokens resolve against the menu resource (game.bin) via
+##  TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
+func menu_text(key: String, fallback: String) -> String:
+	return lookup_or(TABLE_MENUTXT, SECTION_MENU, key,
+			lookup_or(TABLE_GAMEUI, SECTION_MENU, key, fallback))
 
 
 ## lookup() with the {hot} accelerator marker stripped for display (the miss

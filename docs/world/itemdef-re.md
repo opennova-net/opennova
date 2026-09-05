@@ -5,7 +5,7 @@ per-item-type template loaded from `items.def`) and its copy into the 904-byte
 `GamePlayerEntity`. The reimplementation surface is the parsed model
 `DefItemDef` (`engine/formats/def`) and the Godot wrapper
 `ItemDatabase` (`godot/src/object`); the runtime entity copy lands in
-`engine/runtime/world` / `engine/net/netsim`. Binary: retail **Jointops.exe** (IDB
+`engine/runtime/world` / `engine/runtime/replication`. Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the divergence catalog code comments cite as
 `docs/world/itemdef-re.md (D-ITEMDEF-…)`.
@@ -108,7 +108,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x25c–0x266 | `seatMask`/`seatBoneIndex[8]`/`controlBone`/`useGunBone` | u8 | resolved from model bone user-points |
 | 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
 | 0x270 | `foliageDebrisRef` | u32 | `cactdeb`/`palmdeb`/… |
-| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); the slot-A runtime attach is ported (ptl-format-re §4, D-PTL-15) |
+| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); slot A is ported by D-PTL-15 and the watercraft W3/W4 live route by D-PTL-25 |
 | 0x54b–0x60b | `primaryWeapon`/`ammo*`(×4)/`launchups*`(×3) | char[32]/char[16] | weapon-loadout strings |
 | 0x61b | `weaponUserpoints` | char[12][16] | the twelve weapon userpoint NAMES `weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, weaplbup2 .. weaprcup2` (`ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301`): b = fire origin, m = flash anchor, c = casing anchor; r/l/r2/l2 = weapon slots 0/1/2/3 (`Entity_InitBoneReferences @ 0x441470`; world-wac-ai-re §21.5) — `DefItemDef::weapon_userpoints` |
 | 0x6db–0x76b | `soundDeath`/`doorOpenSound`/`doorCloseSound`/`dawnShot`/`dayShot`/`duskShot`/`nightShot` | char[24] | sound names |
@@ -220,11 +220,11 @@ this slice does not claim those behaviors.
 
 ## Open follow-ups (unwitnessed / partial)
 
-- The RUNTIME semantics of the `particleEffects` fxs/fxw1..4 movement tiers
+- The RUNTIME semantics of the remaining `particleEffects` fxs/fxw1/fxw2 tiers
   (`Entity_SpawnBoneEffectsAtMask @ 0x458750` from the movement updaters) and the
   damage-state death/fire/other spawns (ptl-format-re §8); the key→offset map itself
   (0x278–0x54b) is decomposed in the field-map row above and parsed by
-  `engine/formats/def`.
+  `engine/formats/def`. Watercraft W3/W4 are routed by D-PTL-25.
 - The `*_function` class slots (`0x130/0x13c/0x150/0x15c/0x168`) are typed
   `void*` from their single-store witness; the exact class-binding record
   (tag vs resolved fn pointers, and how the chosen class' `fn[3]` lands in

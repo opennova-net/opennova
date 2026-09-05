@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_system.h>
 // The vehicle part-animation tick: the rotor spin machine (ground or helo,
 // by the brain's profile type) and the wheel phase, run at the tail of every
 // family mover.
@@ -19,9 +20,8 @@ namespace {
 // `== 1` twin inside @0x48FA70]. A row with no brain has no profile to read;
 // its family stands in (vehicle_part_anim.h).
 RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &traits) {
-	if (world.ai != nullptr)
-		if (const AiEntity *ai = world.ai->for_handle(veh.handle))
-			return rotor_machine_for_profile(ai->profile.type);
+	if (const AiEntity *ai = world.ai.for_handle(veh.handle))
+		return rotor_machine_for_profile(ai->profile.type);
 	return (traits.family == VehicleFamily::Helicopter ||
 	        traits.family == VehicleFamily::Plane)
 			? RotorMachine::Helo
@@ -30,7 +30,8 @@ RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &t
 
 } // namespace
 
-void vehicle_part_anim_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
+    World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	// A WATERCRAFT runs neither machine: Entity_UpdateWatercraftPhysics
 	// @0x48D480..0x48EF74 has no call to @0x4928B0 or @0x48FA70 (the ground

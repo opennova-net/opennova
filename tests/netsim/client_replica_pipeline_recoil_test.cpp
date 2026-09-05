@@ -5,7 +5,7 @@
 // the next wire sample without becoming an invented wire field.
 // [orig: RoundData_SpawnRound @0x4EC0D0; remote body update]
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -15,7 +15,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 

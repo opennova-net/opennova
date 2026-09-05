@@ -6,6 +6,8 @@
 #include <formats/def/def.h>
 #include "common/test_paths.h"
 
+using namespace opennova::def;
+
 int main(void) {
     const char *test_def =
         "\n"

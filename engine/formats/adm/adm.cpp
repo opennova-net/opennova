@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace opennova::adm {
+
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
@@ -241,3 +243,5 @@ void adm_free(AdmFile *af) {
     af->entries = NULL;
     af->count = 0;
 }
+
+} // namespace opennova::adm

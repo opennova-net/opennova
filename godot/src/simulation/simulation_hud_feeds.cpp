@@ -7,28 +7,30 @@
 // for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape).
 
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
 
+#include <formats/mission/mission.h> // runtime type -> authored item ID
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
-#include <net/netsim/client_state.h>
+#include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/vehicle_panel_feed.h>
 
 using namespace sim_internal;
+using namespace opennova::def;
 
 namespace godot {
 
-Dictionary Simulation::get_vehicle_panel_view() const {
+Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	// The panel describes the vehicle the local player rides — the attached
 	// gun child re-roots to its parent vehicle, and every mount qualifies
 	// (world::vehicle_panel_root carries the witness). The shell joins the
 	// root's items.def sid to its VEHICLE_HUD block; the panel's only gate is
 	// the block's interface texture [orig: HUD_DrawVehicleHealthBars
 	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md].
-	Dictionary out;
-	out["shown"] = false;
-	out["item_id"] = 0;
+	Ref<VehiclePanelView> out;
+	out.instantiate();
 	if (!kernel_->world.cached.local_player.valid()) return out;
 	const opennova::world::Entity *local =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
@@ -38,8 +40,10 @@ Dictionary Simulation::get_vehicle_panel_view() const {
 	const opennova::world::Entity *root =
 			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
 	if (root == nullptr) return out;
-	out["shown"] = true;
-	out["item_id"] = root->item_id;
+	opennova::world::VehiclePanelRoot v;
+	v.shown = true;
+	v.item_id = root->item_id + opennova::mission::kItemIdOffset;
+	out->assign(v);
 	return out;
 }
 
@@ -62,7 +66,8 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 	r_state.hull_health = root->health;
 	r_state.hull_max_health = root->health_max;
 	opennova::world::fill_vehicle_panel_seats(kernel_->world, root_h,
-			kernel_->world.cached.local_player, p_block, r_state.seats);
+			kernel_->world.cached.local_player, p_block, r_state.seats,
+			is_joiner() ? joiner_role_ : nullptr);
 	return true;
 }
 
@@ -98,7 +103,7 @@ bool Simulation::fill_lfp_zones(int p_local_team,
 	// The 0x6B ring slots land in the special bank here, so both are searched.
 	const opennova::world::LfpCaptureFlagsLookup capture_flags =
 			[this](opennova::world::EntityHandle h) -> uint8_t {
-				const opennova::netsim::ClientMinimapState &map =
+				const opennova::replication::ClientMinimapState &map =
 						runtime_->state().minimap;
 				for (const auto &slot : map.transient) {
 					if (slot.active && slot.handle == h.packed) return slot.flags;
@@ -120,40 +125,39 @@ int64_t Simulation::get_session_game_type() const {
 	return runtime_ ? static_cast<int64_t>(runtime_->game_type()) : 0;
 }
 
-Dictionary Simulation::take_score_feedback() {
+Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	// Revision-edge over the replica fold's 0x81 landing: every role's view
 	// folds it (the host's own loopback included), so the edge is
 	// role-agnostic [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
 	// every client, the listen host's own included].
-	Dictionary out;
-	if (!runtime_) return out;
-	const opennova::netsim::ClientState &cs = runtime_->state();
-	if (cs.score_feedback.updates == score_feedback_updates_seen_) return out;
-	score_feedback_updates_seen_ = cs.score_feedback.updates;
+	if (!runtime_) return Ref<ScoreFeedback>();
+	const opennova::replication::ClientState &cs = runtime_->state();
+	if (cs.score_feedback.updates == net_.score_feedback_updates_seen) return Ref<ScoreFeedback>();
+	net_.score_feedback_updates_seen = cs.score_feedback.updates;
 	const opennova::hud::ScoreTone tone =
 			opennova::hud::score_delta_tone(cs.score_feedback.delta, cs.exp_fanfare);
-	out["score"] = cs.score_feedback.score;
-	out["delta"] = cs.score_feedback.delta;
-	out["tone"] = String(opennova::hud::score_tone_set_name(tone));
+	opennova::hud::ScoreFeedbackView v;
+	v.score = cs.score_feedback.score;
+	v.delta = cs.score_feedback.delta;
+	v.tone = tone;
+	Ref<ScoreFeedback> out;
+	out.instantiate();
+	out->assign(v);
 	return out;
 }
 
-Array Simulation::drain_chat_lines() {
+TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
 	// The S2C 0x14 player-chat lines folded by the replica pipeline since the
 	// last drain, each already routed by the witnessed channel table
 	// (hud/feed_format.h): sink 0 = the SYSTEM ring, 1 = the CHAT ring,
 	// 2 = the message queue (no ring), 3 = channel 3 (the unported third ring).
-	Array out;
+	TypedArray<ChatLineRow> out;
 	if (!runtime_) return out;
-	for (const opennova::netsim::ClientChatLine &line :
+	for (const opennova::replication::ClientChatLine &line :
 			runtime_->view().drain_chat_lines()) {
-		Dictionary d;
-		d["text"] = String::utf8(line.text.c_str());
-		d["argb"] = static_cast<int64_t>(
-				opennova::hud::chat_channel_color(line.channel));
-		d["sink"] = static_cast<int>(
-				opennova::hud::chat_channel_sink(line.channel));
-		d["channel"] = static_cast<int>(line.channel);
+		Ref<ChatLineRow> d;
+		d.instantiate();
+		d->assign(line);
 		out.push_back(d);
 	}
 	return out;

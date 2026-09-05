@@ -2,7 +2,7 @@
 #
 # Source of truth: the authored probe3.bms (designer "OpenNova RE"), saved to the
 # JOX game root and read back field-for-field from the live ONED mission model (the
-# same MissionDocument the libs/mission writer serializes). Successor to
+# same bms::File the formats/mission writer serializes). Successor to
 # dvxi3_manifest.txt (probe 2, Team Deathmatch) and dvxi5 (Advance & Secure).
 #
 # Moved to a CO-OP / OBJECTIVE (waypoint) gametype on a fresh terrain (Dvxc1) to

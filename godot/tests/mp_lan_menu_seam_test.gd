@@ -8,14 +8,20 @@ extends GutTest
 # reports). The live two-machine flow (real discovery + a second client spawning)
 # is the manual smoke; this is the unit.
 
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
-# A REAL LanSession (typed seam) whose discovery feed is driven by hand:
-# publish() emits the native servers_changed signal without touching sockets.
-class _LanSessionFeed extends LanSession:
-	func publish(servers: Array) -> void:
-		emit_signal("servers_changed", servers)
+# A REAL LanSession (typed seam) whose discovery feed is driven by hand: the
+# test emits the native servers_changed signal itself, no sockets touched.
+static func _publish(session: LanSession, servers: Array) -> void:
+	session.emit_signal("servers_changed", servers)
+
+
+# One browse row with the counts the LAN list formats.
+static func _lan_row(server_name: String, players: int, max_players: int) -> LanServerRow:
+	var row := LanServerRow.make(server_name, "192.168.1.10", 32768)
+	row.players = players
+	row.max_players = max_players
+	return row
 
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
@@ -111,11 +117,6 @@ func _start_host_config(mission_file: String) -> HostSessionConfig:
 	return get_signal_parameters(mp, "lan_host_start_requested")[0] as HostSessionConfig
 
 
-func test_owned_screens_default() -> void:
-	assert_true(MpMenuCompanion.OWNED_SCREENS.has("LAN_MULTI_PLAYER"))
-	assert_true(MpMenuCompanion.OWNED_SCREENS.has("MULTI_PLAYER_HOST"))
-
-
 func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
 	assert_true(mp.owns_menu(_make_host_driver()),
@@ -182,12 +183,12 @@ func test_start_game_emits_host_config() -> void:
 	assert_eq(config.mission, "alpha.bms")
 	assert_eq(config.channel, HostSessionConfig.CHANNEL_LAN)
 	var session_options := config.to_session_options()
-	assert_eq(String(session_options.get("channel", "")), HostSessionConfig.CHANNEL_LAN,
-		"the FFI options retain the LAN cadence selector")
-	assert_eq(int(session_options.get("lan_mode", 0)), 1,
+	assert_eq(session_options.channel, HostSessionConfig.CHANNEL_LAN,
+		"the session request retains the LAN cadence selector")
+	assert_eq(session_options.lan_mode, 1,
 		"a stock LAN request carries retail g_LanMode 1")
-	assert_eq(int(session_options.get("spectator_slots", 0)), -1)
-	assert_eq(String(session_options.get("spectator_password", "")), "watch")
+	assert_eq(session_options.spectator_slots, -1)
+	assert_eq(session_options.spectator_password, "watch")
 	# SERVERTYPE absent in this stand-in menu -> serve-and-play (dedicated=false). The real
 	# screen's SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is
 	# pinned in test_servertype_value_attr_selects_dedicated_not_the_label below.
@@ -311,16 +312,16 @@ func test_hosted_mission_game_type_reaches_native_session_config() -> void:
 		assert_eq(mission.create_default(), OK)
 		assert_true(mission.set_game_mode(int(row["mode"])))
 		var sim := Simulation.new()
-		var runtime := MissionPresentation.new()
+		var runtime := MissionRoot.new()
 		add_child_autofree(runtime)
 		var container := Node3D.new()
 		add_child_autofree(container)
 		var options := MissionSetupOptions.new()
 		options.simulation = sim
-		options.host_session = config
+		options.host_session = config.to_session_options()
 		options.mission_file = String(row["mission"])
 		assert_gt(int(runtime.setup(mission, container, options)), 0)
-		assert_eq(int(sim.get_host_session_config().get("gametype", -1)),
+		assert_eq(sim.get_host_session_config().game_type,
 				int(row["expected"]),
 				"%s reaches the native wire configuration" % String(row["mission"]))
 
@@ -350,35 +351,35 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_false(config.game_type_auto,
 		"explicit callers stay pinned until a producer opts into mission derivation")
 	var options := config.to_session_options()
-	assert_eq(int(options.get("class_allow_mask", -1)), 0x03FF,
+	assert_eq(options.class_allow_mask, 0x03FF,
 			"ordinary host requests carry retail's all-ten-classes default")
-	assert_eq(int(options.get("respawn_time", -1)), 30)
-	assert_eq(int(options.get("time_limit_minutes", -1)), 10)
-	assert_eq(int(options.get("replay_enabled", -1)), 1)
-	assert_eq(int(options.get("max_team_lives", -1)), 100)
-	assert_eq(int(options.get("score_limit", -1)), 50)
-	assert_eq(int(options.get("max_score", -1)), 5,
+	assert_eq(options.respawn_time, 30)
+	assert_eq(options.time_limit_minutes, 10)
+	assert_eq(options.replay_enabled, 1)
+	assert_eq(options.max_team_lives, 100)
+	assert_eq(options.score_limit, 50)
+	assert_eq(options.max_score, 5,
 			"FlagBall never boots into retail's immediate team-1 zero-limit outcome")
-	assert_eq(int(options.get("koth_delta", -1)), 5)
-	assert_eq(int(options.get("flag_return_ticks", -1)), 210)
-	assert_eq(int(options.get("capture_duration_seconds", -1)), 15)
-	assert_eq(int(options.get("capture_speed_setting", -1)), 1)
-	assert_eq(int(options.get("spawn_wave_time_base", -1)), 0)
-	assert_eq(int(options.get("spawn_wave_time_zone", -1)), 10)
-	assert_eq(int(options.get("default_spawn_requires_no_team_zone", -1)), 0)
-	assert_eq(int(options.get("num_teams", -1)), 2)
-	assert_eq(int(options.get("respawn_timeout", -1)), 5)
-	assert_eq(int(options.get("start_delay", -1)), 0)
-	assert_eq(int(options.get("destroy_buildings", -1)), 0)
-	assert_eq(int(options.get("death_messages", -1)), 1)
-	assert_eq(String(options.get("integrity_profile", "missing")), "",
+	assert_eq(options.koth_delta, 5)
+	assert_eq(options.flag_return_ticks, 210)
+	assert_eq(options.capture_duration_seconds, 15)
+	assert_eq(options.capture_speed_setting, 1)
+	assert_eq(options.spawn_wave_time_base, 0)
+	assert_eq(options.spawn_wave_time_zone, 10)
+	assert_eq(options.default_spawn_requires_no_team_zone, 0)
+	assert_eq(options.num_teams, 2)
+	assert_eq(options.respawn_timeout, 5)
+	assert_eq(options.start_delay, 0)
+	assert_eq(options.destroy_buildings, 0)
+	assert_eq(options.death_messages, 1)
+	assert_eq(options.integrity_profile, "",
 			"ordinary hosts do not infer an integrity corpus from expansion")
 	config.integrity_profile = "retail-revx02-024f56f2-2d087374"
-	assert_eq(String(config.to_session_options().get("integrity_profile", "")),
+	assert_eq(config.to_session_options().integrity_profile,
 			config.integrity_profile,
 			"parity automation can bind both host and client to one witnessed corpus")
 	config.class_allow_mask = 1 << 6
-	assert_eq(int(config.to_session_options().get("class_allow_mask", -1)), 1 << 6,
+	assert_eq(config.to_session_options().class_allow_mask, 1 << 6,
 			"the typed host request forwards a map-specific Soldier Class policy")
 
 
@@ -391,13 +392,9 @@ func test_lan_join_emits_selected_server() -> void:
 	# injected LanSession's servers_changed signal.
 	var session := LanSession.new()
 	mp.set_lan_session(session)
-	session.servers_changed.emit([{
-		"name": "biggy",
-		"host_ip": "192.168.1.10",
-		"port": 32768,
-		"server_flags": JoinTarget.FLAG_ALLOW_SPECTATORS
-				| JoinTarget.FLAG_SPECTATOR_PASSWORD,
-	}])
+	var biggy := LanServerRow.make("biggy", "192.168.1.10", 32768)
+	biggy.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD
+	session.servers_changed.emit([biggy])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
@@ -419,14 +416,14 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	watch_signals(mp)
 	var driver := _make_lan_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var session := _LanSessionFeed.new()
+	var session := LanSession.new()
 	autofree(session)
 	mp.set_lan_session(session)
-	session.publish([{"name": "old", "host_ip": "192.168.1.10", "port": 32768}])
+	_publish(session, [LanServerRow.make("old", "192.168.1.10", 32768)])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.select_row(lan_list, 0)  # single click on the old row
 
-	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
+	_publish(session, [LanServerRow.make("replacement", "192.168.1.11", 32769)])
 	assert_eq(driver.item_count(lan_list), 1,
 		"a servers_changed payload replaces the prior full snapshot instead of appending")
 	assert_eq(driver.item_text(lan_list, 0), "replacement (0/0)")
@@ -439,14 +436,15 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	var mp := MpMenuCompanion.new()
 	var driver := _make_lan_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var previous := _LanSessionFeed.new()
+	var previous := LanSession.new()
 	autofree(previous)
-	var current := _LanSessionFeed.new()
+	var current := LanSession.new()
 	autofree(current)
 	mp.set_lan_session(previous)
 	mp.set_lan_session(current)
-	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])
-	previous.publish([{"name": "stale", "players": 4, "max_players": 4, "mission": "old.bms"}])
+	# (pre-auth rows carry no map identity: LanServerRow has no mission field)
+	_publish(current, [_lan_row("current", 1, 4)])
+	_publish(previous, [_lan_row("stale", 4, 4)])
 
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	assert_eq(driver.item_count(lan_list), 1)

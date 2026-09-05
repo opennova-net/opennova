@@ -11,8 +11,7 @@
 // [orig: the water block of Entity_ProcessWheeledVehiclePhysics and its
 //  light/tracked twins -> CEffectWorld_SpawnEmitterAtPosition +
 //  Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128 = alive players)]
-#ifndef OPENNOVA_WORLD_WATER_CROSS_H
-#define OPENNOVA_WORLD_WATER_CROSS_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -59,5 +58,3 @@ struct WaterCrossQueue {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WATER_CROSS_H

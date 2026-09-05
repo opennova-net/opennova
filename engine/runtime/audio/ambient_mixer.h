@@ -1,7 +1,7 @@
 // Portable ambient sound-marker emitter system: the placed-marker eval/registration
 // at the witnessed staggered tick cadence, the transient emitter slot table, and the
 // per-frame loudest-N candidate ranking — pushed down out of the Godot layer
-// (godot/game/world/mission_audio.gd) so the engine core stays C++ and the
+// (now godot/src/audio/mission_audio) so the engine core stays C++ and the
 // per-frame cost is the live-slot mix, not an every-marker eval
 // (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 //
@@ -22,8 +22,7 @@
 // persistent AudioStreamPlayer3D channels (D-SND-6), and bus/pan/doppler mapping
 // (D-SND-8). Positions are world-space floats (1 unit = 1 game unit); distances enter
 // the witnessed curve as Q16.16, exactly like the GDScript form this replaces.
-#ifndef OPENNOVA_AUDIO_AMBIENT_MIXER_H
-#define OPENNOVA_AUDIO_AMBIENT_MIXER_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -248,5 +247,3 @@ private:
 };
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_AMBIENT_MIXER_H

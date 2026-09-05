@@ -14,8 +14,7 @@
 // to embedder-space bases happens in the embedder layer (single-sourced there); this header owns
 // the blend math and the bone-class map only.
 
-#ifndef OPENNOVA_ANIM_AIM_OVERLAY_H
-#define OPENNOVA_ANIM_AIM_OVERLAY_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -198,5 +197,3 @@ void apply_aim_overlay(const std::vector<int> &parent_index,
                        std::vector<Quat> &local_rotation);
 
 } // namespace opennova::anim
-
-#endif // OPENNOVA_ANIM_AIM_OVERLAY_H

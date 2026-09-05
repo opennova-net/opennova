@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <limits>
 
+using namespace opennova::crt;
+using namespace opennova::threedi;
+
 namespace opennova::renderer {
 namespace {
 

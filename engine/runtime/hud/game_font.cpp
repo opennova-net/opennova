@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstring>
 
+using namespace opennova::fnt;
+
 namespace opennova::hud {
 
 namespace {

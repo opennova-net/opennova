@@ -31,16 +31,15 @@ public:
 		PROJECTION_STATIC_TERRAIN = 1,
 	};
 
-	void set_projection_mode(int p_mode);
-	int get_projection_mode() const { return projection_mode_; }
+	void set_projection_mode(ProjectionMode p_mode);
+	ProjectionMode get_projection_mode() const { return projection_mode_; }
 	void set_environment_node(MissionEnvironment *p_environment);
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
-	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();
@@ -49,9 +48,11 @@ private:
 	void _apply_projection_masks();
 	void _update_direction();
 
-	int projection_mode_ = PROJECTION_DYNAMIC;
+	ProjectionMode projection_mode_ = PROJECTION_DYNAMIC;
 	ObjectID environment_node_id_;
 	Vector3 last_emission_direction_ = Vector3(INFINITY, INFINITY, INFINITY);
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::SunShadow::ProjectionMode);

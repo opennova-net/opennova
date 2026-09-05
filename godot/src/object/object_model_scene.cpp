@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <cstddef>
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 void ObjectModel::rebuild_scene() {
@@ -60,7 +62,7 @@ void ObjectModel::rebuild_scene() {
 	set_notify_transform(false);
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
-	material_defs_.clear();
+	postmultiply_cache_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
 	has_live_panm_ = false;
@@ -77,7 +79,6 @@ void ObjectModel::rebuild_scene() {
 	}
 	od_has_doc_ = true;
 
-	build_material_defs();
 	active_lod_ = clamp_lod_index(active_lod_);
 	const Threedi3di3 &native_model = object_data_->native_model();
 	authored_lod_thresholds_q16_.reserve(native_model.lod_count);
@@ -156,12 +157,11 @@ void ObjectModel::rebuild_scene() {
 			}
 			surface.material = material;
 			// Retail multi-pass effects retain one logical material but submit the
-			// same strip geometry again. Pair those auxiliary materials through
-			// metadata and duplicate geometry only; never duplicate logical rows.
-			if (material.is_valid() &&
-					material->has_meta("_opennova_postmultiply_material")) {
+			// same strip geometry again. Pair the cached proxy by material index
+			// and duplicate geometry only; never duplicate logical rows.
+			if (material.is_valid()) {
 				surface.auxiliary_material =
-						material->get_meta("_opennova_postmultiply_material", Variant());
+						postmultiply_material_for_index(surface.material_index);
 			}
 			// The ROBJ part nodes are the union over every retained level so the
 			// dense PANM apply array and the section mask cover a part the
@@ -351,25 +351,24 @@ void ObjectModel::apply_level_surfaces() {
 			instance->set_material_override(surface.material);
 		}
 		bind_skin(instance, surface.is_skinned);
-		instance->set_visible(true);
+		instance->set_visible(geometry_visible_);
 		// The level's collector decides the Q3 copy (never a per-vertex
 		// skinned level); the registration follows the material's glow
 		// capability and re-reads the swapped mesh once.
-		if (surface.q3_admitted) {
+		if (surface.q3_admitted && geometry_visible_) {
 			FrameFx::register_q3_object_source(instance, surface.material);
 		} else {
 			FrameFx::unregister_q3_source(instance);
 		}
 		if (surface.auxiliary_material.is_valid()) {
-			MeshInstance3D *auxiliary = slot.auxiliary;
+			PostMultiplyDraw *auxiliary = slot.auxiliary;
 			if (auxiliary == nullptr) {
-				auxiliary = memnew(MeshInstance3D);
+				auxiliary = memnew(PostMultiplyDraw);
 				++geometry_instance_count_;
 				++live_geometry_instance_count_;
 				auxiliary->set_name("PostMultiply");
 				auxiliary->set_cast_shadows_setting(presentation_cast_setting(true));
 				auxiliary->set_layer_mask(presentation_layer_mask(true));
-				auxiliary->set_meta("_opennova_auxiliary_draw", true);
 				parent->add_child(auxiliary);
 				slot.auxiliary = auxiliary;
 				// Minted between the terrain-frame and viewmodel legs: it
@@ -385,7 +384,7 @@ void ObjectModel::apply_level_surfaces() {
 				auxiliary->set_material_override(surface.auxiliary_material);
 			}
 			bind_skin(auxiliary, surface.is_skinned);
-			auxiliary->set_visible(true);
+			auxiliary->set_visible(geometry_visible_);
 		} else if (slot.auxiliary != nullptr) {
 			slot.auxiliary->set_visible(false);
 		}

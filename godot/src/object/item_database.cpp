@@ -1,4 +1,5 @@
 #include "object/item_database.h"
+#include "object/item_records.h"
 #include "resource_index/resource_root.h"
 
 #include <formats/mission/mission.h> // kItemIdOffset
@@ -16,6 +17,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::def;
 
 // Pin the GDScript-facing TYPE_* mirror to the engine/formats/def source of truth so the
 // two mappings can never drift again (docs/world/itemdef-re.md D-ITEMDEF-1).
@@ -49,6 +51,8 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &ItemDatabase::has_item);
 	ClassDB::bind_method(D_METHOD("get_vehicle_physics", "id"), &ItemDatabase::get_vehicle_physics);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &ItemDatabase::get_graphic);
+	ClassDB::bind_method(D_METHOD("get_sid", "id"), &ItemDatabase::get_sid);
+	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &ItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_husk", "id"), &ItemDatabase::get_husk);
 	ClassDB::bind_method(D_METHOD("get_huskfinal", "id"), &ItemDatabase::get_huskfinal);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &ItemDatabase::get_anim_def);
@@ -56,27 +60,28 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &ItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
-	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &ItemDatabase::is_ai_capable);
 	ClassDB::bind_method(
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&ItemDatabase::extract_seat_specs_for_item);
 	ClassDB::bind_method(D_METHOD("get_emplacement_attachments", "id"), &ItemDatabase::get_emplacement_attachments);
-	ClassDB::bind_method(D_METHOD("get_emplacement_attachment_markers", "id"), &ItemDatabase::get_emplacement_attachment_markers);
+	ClassDB::bind_method(D_METHOD("get_emplacement_g_slot", "id"), &ItemDatabase::get_emplacement_g_slot);
+	ClassDB::bind_method(D_METHOD("get_emplacement_c_slot", "id"), &ItemDatabase::get_emplacement_c_slot);
+	ClassDB::bind_method(D_METHOD("has_mount_config", "id"), &ItemDatabase::has_mount_config);
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &ItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("resolve_envs_markers", "mission"),
 			&ItemDatabase::resolve_envs_markers);
-	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &ItemDatabase::get_particle_effects);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &ItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &ItemDatabase::get_attrib2);
-	ClassDB::bind_method(D_METHOD("get_item", "id"), &ItemDatabase::get_item);
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
-	ClassDB::bind_method(D_METHOD("get_items"), &ItemDatabase::get_items);
 
 	BIND_CONSTANT(TYPE_VEHICLE);
 	BIND_CONSTANT(TYPE_PERSON);
 	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_POWERUP);
 	BIND_CONSTANT(TYPE_OBJECT);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
+	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
 	BIND_CONSTANT(ATTRIB_POWERUP);
 	BIND_CONSTANT(ATTRIB_PLAYER_CONTROL);
 }
@@ -86,6 +91,9 @@ ItemDatabase::~ItemDatabase() {
 }
 
 void ItemDatabase::release_native_items() {
+	// The index points into the parse: drop it before the rows go away.
+	index_.clear();
+	sorted_ids_ = PackedInt32Array();
 	if (items_file_loaded_) {
 		def_free_items(&items_file_);
 		items_file_loaded_ = false;
@@ -93,12 +101,53 @@ void ItemDatabase::release_native_items() {
 	items_file_ = {};
 }
 
+// Retain the parse (ADR 0028) and index it. The id index walks the rows in
+// file order so a duplicate id resolves to its LAST row; the rows themselves
+// are kept as parsed so the replication catalog can classify duplicates.
+void ItemDatabase::adopt_(const DefItemsFile &p_file) {
+	items_file_ = p_file;
+	items_file_loaded_ = true;
+
+	index_.reserve(items_file_.count);
+	for (size_t i = 0; i < items_file_.count; ++i) {
+		index_[items_file_.entries[i].id] = i;
+	}
+
+	// The index is unordered, so callers that enumerate get a stable order only
+	// if we impose one. Sort by display name (natural, case-insensitive, the
+	// order a user scans a palette), breaking ties by id so the order is total
+	// and reproducible.
+	struct SortKey {
+		String display_name;
+		int id;
+	};
+	std::vector<SortKey> keys;
+	keys.reserve(index_.size());
+	for (const auto &pair : index_) {
+		keys.push_back({String(items_file_.entries[pair.second].display_name), pair.first});
+	}
+	std::sort(keys.begin(), keys.end(), [](const SortKey &a, const SortKey &b) {
+		const int name_cmp = a.display_name.naturalnocasecmp_to(b.display_name);
+		if (name_cmp != 0) {
+			return name_cmp < 0;
+		}
+		return a.id < b.id;
+	});
+	sorted_ids_.resize(static_cast<int>(keys.size()));
+	for (size_t i = 0; i < keys.size(); ++i) {
+		sorted_ids_.set(static_cast<int>(i), keys[i].id);
+	}
+}
+
+const opennova::def::DefItemDef *ItemDatabase::row_(int p_id) const {
+	const auto it = index_.find(p_id);
+	return it == index_.end() ? nullptr : &items_file_.entries[it->second];
+}
+
 Error ItemDatabase::load(const String &path) {
 	++revision;
 	source_path = path;
 	last_error = String();
-	items.clear();
-	replication_definition_records.clear();
 	release_native_items();
 
 	PackedByteArray bytes;
@@ -113,149 +162,13 @@ Error ItemDatabase::load(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 
-	replication_definition_records.reserve(file.count);
-	for (size_t i = 0; i < file.count; ++i) {
-		replication_definition_records.push_back(
-				replication_definition_from_entry(file.entries[i]));
-		items[file.entries[i].id] = item_from_entry(file.entries[i]);
-	}
-
-	// Retain the parse (ADR 0028): the engine-side trait fold reads these
-	// rows directly through native_items().
-	items_file_ = file;
-	items_file_loaded_ = true;
+	adopt_(file);
 	return OK;
-}
-
-ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
-	Item item;
-	item.id = entry.id;
-	item.type = entry.type;
-	item.sid = String(entry.sid);
-	item.attrib = static_cast<uint32_t>(entry.attrib);
-	item.attrib2 = static_cast<uint32_t>(entry.attrib2);
-	item.display_name = String(entry.display_name);
-	item.graphic = String(entry.graphic);
-	item.anim_def = String(entry.anim_def);
-	item.sound_profile = String(entry.sound_profile);
-	item.ai_function = String(entry.ai_function);
-	item.move_function = String(entry.move_function);
-	item.render_function = String(entry.render_function);
-	item.disk_function = String(entry.disk_function);
-	item.default_aip = String(entry.default_aip);
-	item.hp = entry.hp;
-	item.shadow_texture = String(entry.shadow_texture);
-	item.shadow_width = entry.shadow_width;
-	item.shadow_length = entry.shadow_length;
-	item.shadow_offset_x = entry.shadow_offset_x;
-	item.shadow_offset_y = entry.shadow_offset_y;
-	item.light_transfer = entry.light_transfer;
-	item.damage_reduc_pp = entry.damage_reduc_pp;
-	item.damage_reduc_max = entry.damage_reduc_max;
-	item.physics = entry.physics;
-	item.acceleration = entry.acceleration;
-	item.deceleration = entry.deceleration;
-	item.player_speed = entry.player_speed;
-	item.water_speed = entry.water_speed;
-	item.climb_speed = entry.climb_speed;
-	item.turn_roll = entry.turn_roll;
-	item.speed_pitch = entry.speed_pitch;
-	item.max_slope = entry.max_slope;
-	item.slip_slope = entry.slip_slope;
-	item.mass = entry.mass;
-	item.lean = entry.lean;
-	item.lean_velocity = entry.lean_velocity;
-	item.pitch = entry.pitch;
-	item.pitch_velocity = entry.pitch_velocity;
-	item.bob = entry.bob;
-	item.flip = entry.flip;
-	item.turn_rate = entry.turn_rate;
-	item.turn_rate2 = entry.turn_rate2;
-	item.torque = entry.torque;
-	item.unit_type = entry.unit_type;
-	for (int s = 0; s < 7; ++s) {
-		item.soundloops[s] = String(entry.soundloops[s]);
-	}
-	// The per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00].
-	const auto copy_fx = [](Item::ParticleFx &dst, const DefItemParticleFx &src) {
-		dst.effect = String(src.effect);
-		dst.userpoint = String(src.userpoint);
-		dst.secondary_effect = String(src.secondary_effect);
-	};
-	copy_fx(item.particlefx, entry.particlefx);
-	copy_fx(item.particlefxs, entry.particlefxs);
-	copy_fx(item.particlefxw[0], entry.particlefxw1);
-	copy_fx(item.particlefxw[1], entry.particlefxw2);
-	copy_fx(item.particlefxw[2], entry.particlefxw3);
-	copy_fx(item.particlefxw[3], entry.particlefxw4);
-	item.particledeath = String(entry.particledeath);
-	item.particleh2odeath = String(entry.particleh2odeath);
-	item.particlefire = String(entry.particlefire);
-	item.particleother = String(entry.particleother);
-	item.particlespawn = String(entry.particlespawn);
-	item.particlefinale = String(entry.particlefinale);
-	// The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
-	item.ammo_closeattack = String(entry.ammo_closeattack);
-	item.launchups_closeattack = String(entry.launchups_closeattack);
-	item.clipsize = entry.clipsize;
-	item.deathtime_ticks = entry.deathtime_ticks;
-	item.primary_weapon = String(entry.primary_weapon);
-	item.emplacement_attachments.reserve(entry.emplacement_attachments_count);
-	for (size_t i = 0; i < entry.emplacement_attachments_count; ++i) {
-		const DefItemEmplacementAttachment &src = entry.emplacement_attachments[i];
-		Item::EmplacementAttachment dst;
-		dst.userpoint = String(src.userpoint);
-		dst.item_id = src.item_id;
-		dst.down_angle = src.down_angle;
-		dst.up_angle = src.up_angle;
-		dst.right_angle = src.right_angle;
-		dst.left_angle = src.left_angle;
-		dst.angle_count = src.angle_count;
-		dst.kind = src.kind;
-		item.emplacement_attachments.push_back(dst);
-	}
-	item.emplacement_g_slot = entry.emplacement_g_slot;
-	item.emplacement_c_slot = entry.emplacement_c_slot;
-	item.mount_config_valid = entry.phrase_set_valid != 0;
-	item.mount_config = entry.phrase_set;
-	// The destruction/husk block (world-wac-ai-re §24).
-	item.husk = String(entry.husk);
-	item.huskfinal = String(entry.huskfinal);
-	item.sounddeath = String(entry.sounddeath);
-	item.armor_impact = entry.armor_impact;
-	item.armor_blast = entry.armor_blast;
-	item.armor_kz = entry.armor_kz;
-	item.kz = entry.kz;
-	item.model_scale_q16 = entry.scale_q16;
-	item.debris_scale = entry.debris_scale;
-	item.husk_sub_parts = entry.husk_sub_parts;
-	for (int s = 0; s < 16; ++s) {
-		item.husk_sub_part_types[s] = entry.husk_sub_part_types[s];
-	}
-	return item;
-}
-
-ItemDatabase::ReplicationDefinitionRecord
-ItemDatabase::replication_definition_from_entry(
-		const ::DefItemDef &entry) {
-	ReplicationDefinitionRecord record;
-	record.definition_id = entry.id;
-	record.item_type = entry.type;
-	record.attrib = static_cast<uint32_t>(entry.attrib);
-	record.attrib2 = static_cast<uint32_t>(entry.attrib2);
-	record.physics = entry.physics;
-	record.ai_function = String(entry.ai_function);
-	record.move_function = String(entry.move_function);
-	record.render_function = String(entry.render_function);
-	record.disk_function = String(entry.disk_function);
-	return record;
 }
 
 Error ItemDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
 	++revision;
 	last_error = String();
-	items.clear();
-	replication_definition_records.clear();
 	release_native_items();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
@@ -278,23 +191,13 @@ Error ItemDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resource_
 		return ERR_CANT_OPEN;
 	}
 
-	replication_definition_records.reserve(file.count);
-	for (size_t i = 0; i < file.count; ++i) {
-		replication_definition_records.push_back(
-				replication_definition_from_entry(file.entries[i]));
-		items[file.entries[i].id] = item_from_entry(file.entries[i]);
-	}
-
-	// Retain the parse (ADR 0028): the engine-side trait fold reads these
-	// rows directly through native_items().
-	items_file_ = file;
-	items_file_loaded_ = true;
+	adopt_(file);
 	source_path = file_name;
 	return OK;
 }
 
 bool ItemDatabase::is_loaded() const {
-	return !items.empty();
+	return !index_.empty();
 }
 
 String ItemDatabase::get_source_path() const {
@@ -306,365 +209,239 @@ String ItemDatabase::get_last_error() const {
 }
 
 int ItemDatabase::get_count() const {
-	return static_cast<int>(items.size());
+	return static_cast<int>(index_.size());
 }
 
 bool ItemDatabase::has_item(int id) const {
-	return items.find(id) != items.end();
+	return row_(id) != nullptr;
 }
 
 String ItemDatabase::get_graphic(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.graphic;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->graphic);
+}
+
+String ItemDatabase::get_sid(int id) const {
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->sid);
 }
 
 String ItemDatabase::get_anim_def(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.anim_def;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->anim_def);
+}
+
+String ItemDatabase::get_render_function(int id) const {
+    const auto *row = row_(id);
+    return row == nullptr ? String() : String(row->render_function);
 }
 
 String ItemDatabase::get_ai_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.ai_function;
-}
-
-String ItemDatabase::get_default_aip(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.default_aip;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->ai_function);
 }
 
 String ItemDatabase::get_move_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.move_function;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->move_function);
 }
 
 int ItemDatabase::get_item_type(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? static_cast<int>(TYPE_UNKNOWN) : row->type;
 }
 
 int32_t ItemDatabase::get_model_scale_q16(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.model_scale_q16;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->scale_q16;
 }
 
 float ItemDatabase::get_light_transfer(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0.0f : it->second.light_transfer;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0.0f : row->light_transfer;
 }
 
 // items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate
 // (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
 // AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
 bool ItemDatabase::is_ai_capable(int id) const {
-	const auto it = items.find(id);
-	return it != items.end() && (it->second.attrib & 0x100000u) != 0;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row != nullptr && (static_cast<uint32_t>(row->attrib) & 0x100000u) != 0;
 }
 
 // The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. The AS zone
 // traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
 // (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
 uint32_t ItemDatabase::get_attrib(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0u : it->second.attrib;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib);
 }
 
 uint32_t ItemDatabase::get_attrib2(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0u : it->second.attrib2;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib2);
 }
 
 bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
 		Vector4 &r_dims) const {
-	const auto it = items.find(id);
-	if (it == items.end() || it->second.shadow_texture.is_empty()) {
+	const opennova::def::DefItemDef *row = row_(id);
+	if (row == nullptr || row->shadow_texture[0] == '\0') {
 		return false;
 	}
-	r_texture = it->second.shadow_texture;
-	r_dims = Vector4(it->second.shadow_width, it->second.shadow_length,
-			it->second.shadow_offset_x, it->second.shadow_offset_y);
+	r_texture = String(row->shadow_texture);
+	r_dims = Vector4(row->shadow_width, row->shadow_length,
+			row->shadow_offset_x, row->shadow_offset_y);
 	return true;
 }
 
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {
 	PackedInt32Array out;
-	const auto it = items.find(id);
-	if (it == items.end()) return out;
-	const Item &item = it->second;
-	out.push_back(item.physics);
-	out.push_back(item.player_speed);
-	out.push_back(item.acceleration);
-	out.push_back(item.deceleration);
-	out.push_back(item.turn_rate);
-	out.push_back(item.turn_rate2);
-	out.push_back(item.unit_type);
-	out.push_back(item.torque);
-	out.push_back(item.water_speed);
-	out.push_back(item.climb_speed);
-	out.push_back(item.turn_roll);
-	out.push_back(item.speed_pitch);
-	out.push_back(item.max_slope);
-	out.push_back(item.slip_slope);
-	out.push_back(item.mass);
-	out.push_back(item.lean);
-	out.push_back(item.lean_velocity);
-	out.push_back(item.pitch);
-	out.push_back(item.pitch_velocity);
-	out.push_back(item.bob);
-	out.push_back(item.flip);
+	const opennova::def::DefItemDef *row = row_(id);
+	if (row == nullptr) return out;
+	out.push_back(row->physics);
+	out.push_back(row->player_speed);
+	out.push_back(row->acceleration);
+	out.push_back(row->deceleration);
+	out.push_back(row->turn_rate);
+	out.push_back(row->turn_rate2);
+	out.push_back(row->unit_type);
+	out.push_back(row->torque);
+	out.push_back(row->water_speed);
+	out.push_back(row->climb_speed);
+	out.push_back(row->turn_roll);
+	out.push_back(row->speed_pitch);
+	out.push_back(row->max_slope);
+	out.push_back(row->slip_slope);
+	out.push_back(row->mass);
+	out.push_back(row->lean);
+	out.push_back(row->lean_velocity);
+	out.push_back(row->pitch);
+	out.push_back(row->pitch_velocity);
+	out.push_back(row->bob);
+	out.push_back(row->flip);
 	return out;
 }
 
 String ItemDatabase::get_display_name(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.display_name;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->display_name);
 }
 
 // The def-authored closeattack launch userpoint name — the AI muzzle point the
 // placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
 // ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
 String ItemDatabase::get_launchups_closeattack(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.launchups_closeattack;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->launchups_closeattack);
 }
 
-Array ItemDatabase::get_emplacement_attachments(int id) const {
-	Array out;
-	const auto it = items.find(id);
-	if (it == items.end()) {
+TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(int id) const {
+	TypedArray<ItemEmplacementAttachment> out;
+	const opennova::def::DefItemDef *row = row_(id);
+	if (row == nullptr) {
 		return out;
 	}
-	for (size_t i = 0; i < it->second.emplacement_attachments.size(); ++i) {
-		const Item::EmplacementAttachment &attachment =
-				it->second.emplacement_attachments[i];
-		Dictionary row;
-		row["kind"] = attachment.kind;
-		switch (attachment.kind) {
-			case EMPLACEMENT_ADDEWEAP_G:
-				row["key"] = "addeweapG";
-				break;
-			case EMPLACEMENT_ADDEWEAP_C:
-				row["key"] = "addeweapC";
-				break;
-			default:
-				row["key"] = "addeweap";
-				break;
-		}
-		row["userpoint"] = attachment.userpoint;
-		row["item_id"] = attachment.item_id;
-		row["stored_slot"] = static_cast<int>(i + 1);
-		row["angle_count"] = attachment.angle_count;
-		row["has_explicit_limits"] = attachment.angle_count == 4;
-		row["down_limit_bam"] = attachment.down_angle;
-		row["up_limit_bam"] = attachment.up_angle;
-		row["right_limit_bam"] = attachment.right_angle;
-		row["left_limit_bam"] = attachment.left_angle;
-		row["designated_g"] =
-				static_cast<int>(i + 1) == it->second.emplacement_g_slot;
-		row["designated_c"] =
-				static_cast<int>(i + 1) == it->second.emplacement_c_slot;
-		out.push_back(row);
+	for (size_t i = 0; i < row->emplacement_attachments_count; ++i) {
+		const opennova::def::DefItemEmplacementAttachment &attachment = row->emplacement_attachments[i];
+		const int stored_slot = static_cast<int>(i + 1);
+		Ref<ItemEmplacementAttachment> record;
+		record.instantiate();
+		record->assign(attachment.kind, String(attachment.userpoint), attachment.item_id,
+				stored_slot, attachment.angle_count, attachment.down_angle,
+				attachment.up_angle, attachment.right_angle, attachment.left_angle,
+				stored_slot == row->emplacement_g_slot,
+				stored_slot == row->emplacement_c_slot);
+		out.push_back(record);
 	}
 	return out;
 }
 
-Dictionary ItemDatabase::get_emplacement_attachment_markers(int id) const {
-	Dictionary out;
-	const auto it = items.find(id);
-	out["g_slot"] =
-			it == items.end() ? 0 : it->second.emplacement_g_slot;
-	out["c_slot"] =
-			it == items.end() ? 0 : it->second.emplacement_c_slot;
-	return out;
+int ItemDatabase::get_emplacement_g_slot(int id) const {
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->emplacement_g_slot;
 }
 
-Dictionary ItemDatabase::get_mount_config(int id) const {
-	Dictionary out;
-	const auto it = items.find(id);
-	const bool valid = it != items.end() && it->second.mount_config_valid;
-	out["valid"] = valid;
-	out["value"] = valid ? it->second.mount_config : 0;
-	return out;
+int ItemDatabase::get_emplacement_c_slot(int id) const {
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->emplacement_c_slot;
+}
+
+bool ItemDatabase::has_mount_config(int id) const {
+	const opennova::def::DefItemDef *row = row_(id);
+	return row != nullptr && row->phrase_set_valid != 0;
+}
+
+int ItemDatabase::get_mount_config(int id) const {
+	const opennova::def::DefItemDef *row = row_(id);
+	return row != nullptr && row->phrase_set_valid != 0 ? row->phrase_set : 0;
 }
 
 String ItemDatabase::get_husk(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.husk;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->husk);
 }
 
 String ItemDatabase::get_huskfinal(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.huskfinal;
+	const opennova::def::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->huskfinal);
 }
 
-
-// items.def soundloop_1..7 looping ambient set names for "snd:" marker items
-// [orig: ItemDef_ParseProperty @ 0x49eb00, "soundloop_" prefix @ 0x49fec4; the
-// 7-slot count matches the engine's Soundloop_1..7 type table @ 0x7d0788].
 // S13 (ADR 0028): the envs-class dispatch + soundloop slot resolution runs in
 // engine/runtime/audio over the retained items.def parse and the mission's
 // native bms document. The shell applies its own bank-presence filtering.
-TypedArray<Dictionary> ItemDatabase::resolve_envs_markers(
+TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 		const Ref<MissionData> &p_mission) const {
-	TypedArray<Dictionary> out;
+	TypedArray<EnvsMarkerRow> out;
 	if (p_mission.is_null()) return out;
 	const std::vector<opennova::audio::EnvsMarker> markers =
 			opennova::audio::resolve_envs_markers(
-					p_mission->native_document().bms_file(), native_items());
+					p_mission->native_file(), native_items());
 	for (const opennova::audio::EnvsMarker &marker : markers) {
-		Dictionary row;
-		row["position"] = Vector3(marker.x, marker.y, marker.z);
-		row["bms_id"] = marker.bms_id;
-		PackedStringArray slots;
-		slots.resize(4);
-		for (int slot = 0; slot < 4; ++slot)
-			slots.set(slot, String(
-					marker.slot_sets[static_cast<size_t>(slot)].c_str()));
-		row["slot_sets"] = slots;
+		Ref<EnvsMarkerRow> row;
+		row.instantiate();
+		row->assign(marker);
 		out.push_back(row);
 	}
 	return out;
 }
 
-PackedStringArray ItemDatabase::get_sound_loops(int id) const {
-	PackedStringArray out;
-	out.resize(7);
-	const auto it = items.find(id);
-	if (it != items.end()) {
-		for (int s = 0; s < 7; ++s) {
-			out.set(s, it->second.soundloops[s]);
-		}
-	}
-	return out;
-}
-
-// The particle-effect keys as authored, keyed by the ITEMS.DEF key names — the runtime
-// effect-attach pass consumes slot A ("particlefx"); the rest ride along for future
-// consumers. [orig: ItemDef_ParseProperty @ 0x49eb00; runtime witness
-// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
-Dictionary ItemDatabase::get_particle_effects(int id) const {
-	Dictionary out;
-	const auto it = items.find(id);
-	if (it == items.end()) {
+// Slot A ("particlefx") as authored — the one the runtime effect-attach pass
+// consumes (item_records.h carries the witness).
+ItemParticleFx ItemDatabase::get_particle_fx(int id) const {
+	ItemParticleFx out;
+	const opennova::def::DefItemDef *row = row_(id);
+	if (row == nullptr) {
 		return out;
 	}
-	const Item &item = it->second;
-	const auto fx_dict = [](const Item::ParticleFx &fx) {
-		Dictionary d;
-		d["effect"] = fx.effect;
-		d["userpoint"] = fx.userpoint;
-		d["secondary_effect"] = fx.secondary_effect;
-		return d;
-	};
-	out["particlefx"] = fx_dict(item.particlefx);
-	out["particlefxs"] = fx_dict(item.particlefxs);
-	out["particlefxw1"] = fx_dict(item.particlefxw[0]);
-	out["particlefxw2"] = fx_dict(item.particlefxw[1]);
-	out["particlefxw3"] = fx_dict(item.particlefxw[2]);
-	out["particlefxw4"] = fx_dict(item.particlefxw[3]);
-	out["particledeath"] = item.particledeath;
-	out["particleh2odeath"] = item.particleh2odeath;
-	out["particlefire"] = item.particlefire;
-	out["particleother"] = item.particleother;
-	out["particlespawn"] = item.particlespawn;
-	out["particlefinale"] = item.particlefinale;
-	return out;
-}
-
-Dictionary ItemDatabase::item_dictionary(const Item &item) const {
-	Dictionary out;
-	out["id"] = item.id;
-	out["type"] = item.type;
-	out["sid"] = item.sid;
-	out["display_name"] = item.display_name;
-	out["graphic"] = item.graphic;
-	out["anim_def"] = item.anim_def;
-	out["model_scale_q16"] = item.model_scale_q16;
-	out["light_transfer"] = item.light_transfer;
-	out["sound_profile"] = item.sound_profile;
-	out["soundloops"] = get_sound_loops(item.id);
-	out["mount_config_valid"] = item.mount_config_valid;
-	out["mount_config"] = item.mount_config_valid ? item.mount_config : 0;
-	out["emplacement_attachments"] = get_emplacement_attachments(item.id);
-	out["emplacement_attachment_markers"] =
-			get_emplacement_attachment_markers(item.id);
-	return out;
-}
-
-Dictionary ItemDatabase::get_item(int id) const {
-	const auto it = items.find(id);
-	if (it == items.end()) {
-		return Dictionary();
-	}
-	return item_dictionary(it->second);
-}
-
-// The backing store is an unordered_map, so callers that enumerate get a stable
-// order only if we impose one. Sort by display name (case-insensitive, the order a
-// user scans a palette), breaking ties by id so the order is total and reproducible.
-std::vector<const ItemDatabase::Item *> ItemDatabase::sorted_items() const {
-	std::vector<const Item *> out;
-	out.reserve(items.size());
-	for (const auto &pair : items) {
-		out.push_back(&pair.second);
-	}
-	std::sort(out.begin(), out.end(), [](const Item *a, const Item *b) {
-		const int name_cmp = a->display_name.naturalnocasecmp_to(b->display_name);
-		if (name_cmp != 0) {
-			return name_cmp < 0;
-		}
-		return a->id < b->id;
-	});
+	out.valid = true;
+	out.effect = String(row->particlefx.effect);
+	out.userpoint = String(row->particlefx.userpoint);
+	out.secondary_effect = String(row->particlefx.secondary_effect);
 	return out;
 }
 
 PackedInt32Array ItemDatabase::get_item_ids() const {
-	PackedInt32Array out;
-	const std::vector<const Item *> sorted = sorted_items();
-	out.resize(static_cast<int>(sorted.size()));
-	for (size_t i = 0; i < sorted.size(); ++i) {
-		out.set(static_cast<int>(i), sorted[i]->id);
-	}
-	return out;
+	return sorted_ids_;
 }
 
-Array ItemDatabase::get_items() const {
-	Array out;
-	for (const Item *item : sorted_items()) {
-		out.push_back(item_dictionary(*item));
-	}
-	return out;
-}
-
-Dictionary ItemDatabase::extract_seat_specs_for_item(
+Ref<ItemSeatCard> ItemDatabase::extract_seat_specs_for_item(
 		const Ref<ResourceRoot> &p_root, int p_item_id) {
-	Dictionary out;
-	out["item_id"] = p_item_id;
-	out["type_id"] =
+	Ref<ItemSeatCard> out;
+	out.instantiate();
+	const int32_t type_id =
 			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
-	out["display_name"] = String();
-	out["graphic"] = String();
-	out["model"] = String();
-	out["seats"] = Array();
-	out["armory_points"] = Array();
-	out["emplacement_attachments"] = Array();
-	out["primary_weapon"] = String();
-	out["mount_config_valid"] = false;
-	out["mount_config"] = 0;
-	out["error"] = String();
+	out->set_identity(p_item_id, type_id);
 	if (p_root.is_null()) {
-		out["error"] = "missing_resource_root_or_item_db";
+		out->set_error("missing_resource_root_or_item_db");
 		return out;
 	}
 	if (!has_item(p_item_id)) {
-		out["error"] = "item_not_found";
+		out->set_error("item_not_found");
 		return out;
 	}
 	const String graphic = get_graphic(p_item_id);
-	out["display_name"] = get_display_name(p_item_id);
-	out["graphic"] = graphic;
-	if (!graphic.is_empty())
-		out["model"] = graphic.get_file().get_basename() + ".3di";
+	out->set_model(get_display_name(p_item_id), graphic,
+			graphic.is_empty() ? String() : graphic.get_file().get_basename() + ".3di");
 
 	opennova::simassets::SimModelCache models;
 	models.set_index(&p_root->native_index());
@@ -673,57 +450,9 @@ Dictionary ItemDatabase::extract_seat_specs_for_item(
 			native_items(),
 			[&models](const std::string &key) { return models.model_for(key); },
 			{p_item_id}, native);
-	const int32_t type_id =
-			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
-	const opennova::mission::ItemSeatSpec *spec = nullptr;
-	for (const opennova::mission::ItemSeatSpec &candidate : native.specs) {
-		if (candidate.type_id == type_id) {
-			spec = &candidate;
-			break;
-		}
-	}
-	if (spec == nullptr) return out; // no runtime metadata — an empty card
-
-	static const char *kSeatTypeLabels[] = {
-			"none", "passenger", "controller", "gunner", "armory", "driver"};
-	Array seats;
-	for (const opennova::world::Seat &seat : spec->seats) {
-		Dictionary row;
-		const int seat_type = static_cast<int>(seat.type);
-		row["type"] = seat_type;
-		constexpr int kSeatTypeLabelCount =
-				static_cast<int>(sizeof(kSeatTypeLabels) / sizeof(kSeatTypeLabels[0]));
-		row["type_label"] = seat_type >= 0 && seat_type < kSeatTypeLabelCount
-				? String(kSeatTypeLabels[seat_type])
-				: String("none");
-		row["retail_slot"] = seat.retail_slot;
-		row["bone_index"] = seat.bone_index;
-		row["pose_index"] = seat.pose_index;
-		row["yaw_offset"] = seat.yaw_offset;
-		row["local"] = Vector3(seat.seat_local.x, seat.seat_local.y,
-				seat.seat_local.z);
-		row["source_name"] = String(seat.source_name.c_str());
-		row["occupied"] = false;
-		seats.push_back(row);
-	}
-	out["seats"] = seats;
-	Array armory;
-	for (const opennova::world::Vec3 &p : spec->armory_points)
-		armory.push_back(Vector3(p.x, p.y, p.z));
-	out["armory_points"] = armory;
-	Array attachments;
-	for (const opennova::mission::ItemEmplacementAttachmentSpec &attachment :
-			spec->emplacement_attachments) {
-		Dictionary row;
-		row["child_type_id"] = attachment.child_type_id;
-		row["item_id"] = attachment.child_type_id +
-				static_cast<int>(opennova::mission::kItemIdOffset);
-		row["anchor_found"] = attachment.anchor_found;
-		attachments.push_back(row);
-	}
-	out["emplacement_attachments"] = attachments;
-	out["primary_weapon"] = String(spec->primary_weapon.c_str());
-	out["mount_config_valid"] = spec->mount_config_valid;
-	out["mount_config"] = spec->mount_config;
+	const opennova::mission::ItemSeatSpec *spec =
+			opennova::simassets::item_seat_spec_for_type(native.specs,
+					static_cast<uint16_t>(type_id));
+	if (spec != nullptr) out->assign_spec(*spec); // else: no runtime metadata — an empty card
 	return out;
 }

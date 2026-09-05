@@ -62,6 +62,14 @@ Code at it), host 8975 / joiner 8976 for a LAN pair (`scripts/net/run_lan_pair.p
 `.mcp.json` at session start; a game started later is reached with `/mcp`
 reconnect, or through the script clients.
 
+`--mcp-port` is a debug / Mod Tools capability (ADR 0043 d12): the transport
+(`godot/game/mcp/`) ships in the editor, the debug packaging and the Mod
+Tools export, and the Runtime export excludes it (`export_presets.cfg`). A
+Runtime build launched with the flag logs a warning and serves no endpoint;
+the game shell loads the service by path, so nothing else in the shell
+depends on it. The probe object model (`godot/game/probe/`) ships in every
+flavour: the catalog lists in any build that carries the transport.
+
 The `Godot_v4.6.1-stable_win64_console.exe` wrapper stalls when its launching
 shell has no console (a hidden automation shell): launch from a real terminal
 (or `cmd /c`), or point `GODOT_BIN` at the plain runtime executable. The
@@ -79,7 +87,7 @@ from the in-process ring as source `engine`. A headless launch reports
 | `game_state` | the shell, the in-match session (`session.state`/`session.role` from the portable inmatch session), mission, runtime (entity/brain counts, the network role: `host` with its port and peers, `joiner` with its phase and admission, or `local`) and player state |
 | `game_entities` | `op=list` a bounded page of the rendered entity view; `op=inspect` one entity's public debug card (its `ai_index` is the edit target for `game_debug`) |
 | `game_control` | `quit`, pause/step/resume, `open_ingame_menu`, `open_armory`, ...; `quit` cancels a running probe first |
-| `game_debug` | the typed debug-control table (`DebugControls`, ADR 0042 d5) over MCP: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position` (by `ai_index`), `set_entity_item_attrib` (both items.def attrib words on one entity by `wire_handle`), `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, `local_spectator` (confirmation-gated, #601), `third_person_on_foot`, the audio bus actions, `runtime_transport`, `set_mission_variable`, the `environment_*` weather actions + `environment_weather_snapshot` (below); the `net_joiner_diagnostics` check |
+| `game_debug` | the typed debug-control table (`DebugControlTable`, ADR 0043 d12: the one C++ table the F3 windows drive too, so an F3 button and an `op=invoke` land in the same row with the same argument schema and authority gate) over MCP: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position` (by `ai_index`), `set_entity_item_attrib` (both items.def attrib words on one entity by `wire_handle`), `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, `local_spectator` (confirmation-gated, #601), `third_person_on_foot`, the audio bus actions, `runtime_transport`, `set_mission_variable`, the `environment_*` weather actions + `environment_weather_snapshot` (below); the `net_joiner_diagnostics` check |
 | `game_render_diagnostics` | one frame-correlated render snapshot (camera/projection, environment, lights, shadow config, pass counts) |
 | `game_capture_bundle` | the next completed frame as a lossless PNG + diagnostics JSON under `user://render-captures` (`world_only` hides the canvas UI) |
 | `game_menu` | drive the compiled menu: `state`, `press`, `press_at`, `click_at`, `key`, `screen`, `open` |
@@ -98,11 +106,15 @@ that extends `GameProbe` and implements `run(ctx: ProbeContext) -> ProbeVerdict`
 It runs inside the live game, reads typed arguments, logs through `ctx.log`,
 publishes `ctx.progress(...)`, writes artifacts into its run directory and
 returns `ProbeVerdict.passed(summary, data)` or `ProbeVerdict.failed(summary,
-data)`. The catalog (`godot/game/mcp/probe_catalog.gd`, `ProbeCatalog.definitions()`)
-is the single list: each `ProbeDef` carries the name, description, script path,
-JSON-schema input, `needs_window`, `needs_mission` and the timeout. `godot/probes/`
-is source-only — both export presets exclude it, so a shipped build lists every
-probe as `available: false`.
+data)`. The probe object model is four framework types plus one value
+(ADR 0043 d12), all under `godot/game/probe/`: `ProbeDef` (the record, THE
+catalog `ProbeDef.definitions()`, and the typed-argument validation
+`validate_args`), `ProbeRunner` (the runner and its `Run` records), `ProbeContext`,
+`GameProbe`, and the `ProbeVerdict` value. The catalog is the single list: each
+`ProbeDef` carries the name, description, script path, JSON-schema input,
+`needs_window`, `needs_mission` and the timeout. `godot/probes/` is source-only
+— both export presets exclude it, so a shipped build lists every probe as
+`available: false`.
 
 `game_probe`:
 
@@ -121,13 +133,11 @@ probe as `available: false`.
 awaits): `game() world() runtime() sim() presenter() hud_presenter()
 menu_shell() armory_presenter() deploy_presenter() dev_tools() frame_stats()
 viewport() camera() resource_root() effect_world() adapter()`; the waits
-`wait_frames / wait_ms / wait_mission_seconds / wait_for_local_player /
-wait_world_ready`; mission control `start_mission(bms)`,
+`wait_frames / wait_ms / wait_for_local_player / wait_world_ready`; mission control `start_mission(bms)`,
 `start_saved_mission(saved_path, bms, profile)`, `return_to_menu()`,
 `load_saved_mission(...)`; the guarded mutations `set_time_scale`,
-`freeze_shell / unfreeze_shell`, `set_menu_visible`, `set_window_size` and
-`defer_restore(Callable)` — every mutation is undone by `finish()` on every exit
-path; and `capture_png(label, viewport)`, `capture_bundle(args)`,
+`set_window_size` and `defer_restore(Callable)` — every mutation is undone by
+`finish()` on every exit path; and `capture_png(label, viewport)`,
 `artifact(label, path)`, `log(text)`, `progress(dict)`. A stage probe renders on a
 `ProbeStage` (its own `SubViewport` + `World3D`) so the live world never bleeds
 into a capture.
@@ -169,8 +179,8 @@ each schema; the table above is the map, the catalog is the truth.
 
 1. Put the script under `godot/probes/<family>/<name>_probe.gd`, `extends GameProbe`,
    implement `run(ctx)`; read arguments from `ctx.args` only.
-2. Register it in `ProbeCatalog.definitions()` with its schema, preconditions
-   and timeout; the contract test picks it up.
+2. Register it in `ProbeDef.definitions()` (`godot/game/probe/probe_def.gd`)
+   with its schema, preconditions and timeout; the contract test picks it up.
 3. Every mutation goes through a `ctx` setter or `ctx.defer_restore`; never hold
    a `Simulation`/`Node` reference across an `await`.
 4. Log with `ctx.log`, never `print`; publish structured progress with
@@ -186,7 +196,7 @@ each schema; the table above is the map, the catalog is the truth.
 - Looking around from a pose: `game_debug invoke teleport_local_player
   {position, yaw_deg, pitch_deg}` then `local_player_look {dx_px, dy_px}`, then
   `game_capture_bundle` (formerly the bend-capture and render-align probes).
-- Weather: the `environment_rain` / `environment_snow` / `environment_overcast` / `environment_fog_distance` / `environment_move_fog` / `environment_sky_speed` / `environment_quake` / `environment_fog_type` actions take the WAC arguments (`rain 100 5` = `rain(100, 5)`); the F3 Environment window drives the same command layer.
+- Weather: the `environment_rain` / `environment_snow` / `environment_overcast` / `environment_fog_distance` / `environment_move_fog` / `environment_sky_speed` / `environment_quake` / `environment_fog_type` / `environment_sky_height` / `environment_time_of_day_minutes` / `environment_sun_fade` / `environment_color_fade` / `environment_wind_scale` / `environment_block_color` (`target` 0 sun .. 8 gain, packed `rgb`) / `environment_lightning_color` actions take the WAC arguments (`rain 100 5` = `rain(100, 5)`), and `environment_lightning_short` / `environment_lightning_long` are `flash` / `farflash`; the F3 Environment window's buttons invoke the same rows of the same table.
   `environment_weather_snapshot` reads the weather home (the clock, springs,
   sequencers, the smoothed color blocks and the combined terrain light).
 - A time-of-day visual baseline: `game_debug set environment_time_of_day`

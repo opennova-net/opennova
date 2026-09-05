@@ -5,18 +5,21 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include <formats/def/def.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
-#include <vector>
 
 namespace godot {
 
+class EnvsMarkerRow;
+class ItemEmplacementAttachment;
+struct ItemParticleFx;
+class ItemSeatCard;
 class ResourceRoot;
 
 // Thin GDExtension wrapper over engine/formats/def items.def parsing (def_parse_items).
@@ -26,188 +29,33 @@ class ResourceRoot;
 class ItemDatabase : public RefCounted {
 	GDCLASS(ItemDatabase, RefCounted)
 
-public:
-	// Native-only, one-for-one projection of each parsed items.def record needed
-	// to build the immutable wire dispatch catalog. Unlike the public id lookup,
-	// this sequence deliberately preserves duplicate definition ids so the net
-	// layer can classify them as ambiguous and fail closed.
-	struct ReplicationDefinitionRecord {
-		int definition_id = 0;
-		int item_type = 0;
-		uint32_t attrib = 0;
-		uint32_t attrib2 = 0;
-		int physics = 0;
-		String ai_function;
-		String move_function;
-		String render_function;
-		String disk_function;
-	};
-
 private:
-	struct Item {
-		int id = 0;
-		int type = 0;
-		// The items.def `sid` token — the key hudpos.def's VEHICLE_HUD blocks
-		// commit against [orig: HUD_ParseHudposToken @0x59F370 VEHICLE_END
-		// walks the item table by sid; see docs/interface/hud-re.md].
-		String sid;
-		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
-		uint32_t attrib2 = 0; // items.def ItemDefAttrib2 (+0x58); bit 6 = portal-weldable
-		String display_name;
-		String graphic;
-		String anim_def;
-		String sound_profile;
-		// items.def *_function class-tag directives. The net layer maps these to a
-		// §5.10b wire dispatch class (netsim class_from_tag); the placer/
-		// renderer doesn't use them. Stored raw so the object DB stays net-agnostic.
-		String ai_function;
-		String move_function;
-		String render_function;
-		String disk_function;
-		// items.def default_aip (itemDef+0x8B8): the vehicle AI init's profile
-		// name when the placed record's ai_textfile is empty [orig:
-		// Entity_InitVehicleAIFromDef @0x4686C0, the def+0x8B8 arm @0x4687c1;
-		// see docs/world/world-wac-ai-re.md §23].
-		String default_aip;
-		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
-		// Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
-		// (retail ItemDef+0xA0 / +0x11C..+0x128; consumed by the render-slot
-		// drape fallback — docs/render/render-lighting-re.md).
-		String shadow_texture;
-		float shadow_width = 0.0f;
-		float shadow_length = 0.0f;
-		float shadow_offset_x = 0.0f;
-		float shadow_offset_y = 0.0f;
-		float light_transfer = 0.0f; // ItemDef+0x218 interior daylight fraction
-		float damage_reduc_pp = 0.0f;
-		float damage_reduc_max = 0.0f;
-		// Vehicle physics-property block, PRE-SCALED by the engine/formats/def parser exactly like
-		// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Consumed by
-		// the sim's item-traits sweep (world::VehicleTraits). All 0 when absent.
-		int physics = 0;      // +0x8DC selector — non-zero = ground-vehicle motor
-		int acceleration = 0; // +0x8E0
-		int deceleration = 0; // +0x8E4
-		int player_speed = 0; // +0x8E8 (16.16 u/tick)
-		int water_speed = 0;  // +0x8EC (16.16 u/tick — the cbot family's max drive speed)
-		int climb_speed = 0;  // +0x920 (16.16 u/tick vertical clamp — air families)
-		int turn_roll = 0;    // +0x90C raw (air roll-rate cap token)
-		int speed_pitch = 0;
-	int max_slope = 0;  // BAM (deg*11930464) — platform slope-soft
-	int slip_slope = 0; // BAM — platform slope-hard
-	// Platform-solve tuning block (raw def tokens; def.h mass/lean/../flip).
-	int mass = 0;
-	int lean = 0;
-	int lean_velocity = 0;
-	int pitch = 0;
-	int pitch_velocity = 0;
-	int bob = 0;
-	int flip = 0;  // +0x910 raw (air pitch-rate cap token)
-		int turn_rate = 0;    // +0x924 (BAM/tick)
-		int turn_rate2 = 0;   // +0x928
-		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
-		int unit_type = 0;    // minimap icon class [orig: Entity_ClassifyForMinimap @0x50FA70]
-		// items.def soundloop_1..7 — the looping ambient sound-set names for a
-		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
-		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
-		String soundloops[7];
-		// items.def per-item particle-effect keys, verbatim authored names. Anchored
-		// slots carry {effect, userpoint[, secondary]}; the death/fire/other family is
-		// effect-name-only (their anchors are the fixed husk userpoint names Dead/Fire/
-		// Other, resolved at runtime). [orig: ItemDef_ParseProperty @ 0x49eb00
-		// particlefx family @ 0x4a13ad..0x4a179d; mission-start resolve + slot-A attach
-		// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
-		struct ParticleFx {
-			String effect;
-			String userpoint;
-			String secondary_effect;
-		};
-		ParticleFx particlefx;   // slot A — the always-on attached emitter (exhaust)
-		ParticleFx particlefxs;  // slot B — slow/secondary wake tier (movement-driven)
-		ParticleFx particlefxw[4]; // slots C..F — the fxw1..4 wake tiers
-		String particledeath;
-		String particleh2odeath;
-		String particlefire;
-		String particleother;
-		String particlespawn;
-		String particlefinale;
-		// Person-item anim-fire weapon family (world-wac-ai-re §17.4): the
-		// ammo_closeattack round NAME (JO riflemen author all four ammo_* slots =
-		// the rifle round) + clipsize (the magazine reseed). Consumed by the sim's
-		// AI weapon seed (D-AI-5). [orig: ItemDef_ParseProperty @ 0x4a1823 ->
-		// def+0x56B / @ 0x49fa1c -> def+0x894]
-		String ammo_closeattack;
-		// The def-AUTHORED closeattack launch userpoint NAME (the AI muzzle on
-		// the entity's model; JO NPC riflemen author mflash01). Empty when the
-		// item never AI-fires. [orig: ItemDef_ParseProperty launchups_* ->
-		// def+0x5EB/+0x5FB; resolve modelgpm_FindUserpointByName @ 0x5b2170]
-		String launchups_closeattack;
-		int clipsize = 0;
-		// items.def deathtime in TICKS ((62*seconds or 496) + 62, scaled at parse);
-		// 0 = none authored. The corpse timer's seed (entity+0x148 at the infantry
-		// death edge). [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890]
-		int deathtime_ticks = 0;
-		// items.def primary_weapon — the weapon.def entry an ewep emplacement mounts
-		// (the attach label's text source); empty if none authored.
-		// [orig: -> ItemDef+0x54B primaryWeapon; docs/world/itemdef-re.md]
-		String primary_weapon;
-		struct EmplacementAttachment {
-			String userpoint;
-			int item_id = 0;
-			int down_angle = 0;
-			int up_angle = 0;
-			int right_angle = 0;
-			int left_angle = 0;
-			int angle_count = 0;
-			int kind = 0;
-		};
-		std::vector<EmplacementAttachment> emplacement_attachments;
-		int emplacement_g_slot = 0;
-		int emplacement_c_slot = 0;
-		// Mounted skeletal selector metadata: authored items.def phrase_set is the
-		// target itemDef+0x86C dword. Presence is separate because zero is valid.
-		bool mount_config_valid = false;
-		int mount_config = 0;
-		// The destruction/husk block (docs/world/world-wac-ai-re.md §24):
-		// the husk model stages, the death sound, the armor-class words, the kz
-		// death-blast radius, and the per-section debris types.
-		String husk;      // itemDef+0x70 — the destroyed-model stage
-		String huskfinal; // itemDef+0x80 — the final (burned-out) stage
-		String sounddeath;    // -> deathSoundId; Entity_InitDeathSounds @ 0x4939b0
-		int armor_impact = 0; // def+0x190 (-1 = invulnerable)
-		int armor_blast = 0;  // def+0x192
-		int armor_kz = 0;     // compatibility mirror of armor_blast
-		float kz = 0.0f;      // def+0x198 death-blast radius (units)
-		int32_t model_scale_q16 = 0; // def+0x1B8 signed Q16.16; 0 = unscaled
-		float debris_scale = 0.0f; // def+0x1BC (0 = unset -> 1.0)
-		int husk_sub_parts = 0;    // def+0x100
-		uint8_t husk_sub_part_types[16] = {}; // def+0x101[] debris-type rows
-	};
-	std::unordered_map<int, Item> items;
-	std::vector<ReplicationDefinitionRecord> replication_definition_records;
-	// The retained items.def parse (ADR 0028): the sim's engine-side trait
-	// fold (simassets::resolve_item_traits / resolve_ai_weapons) reads
-	// DefItemDef rows directly from here — no Dictionary re-pack. Freed at the
-	// top of every load attempt (the id-keyed map clears there too, so the two
-	// views never diverge) and in the destructor.
-	DefItemsFile items_file_ = {};
+	// The retained items.def parse (ADR 0028): the ONE store. The sim's
+	// engine-side trait fold (simassets::resolve_item_traits /
+	// resolve_ai_weapons) and the netsim replication catalog read DefItemDef
+	// rows directly from here; every accessor below converts at the call.
+	// Freed at the top of every load attempt (the id index clears first) and
+	// in the destructor.
+	opennova::def::DefItemsFile items_file_ = {};
 	bool items_file_loaded_ = false;
+	// id -> row index into items_file_.entries, assigned in file order so a
+	// duplicate id keeps its LAST row (the public lookup collapses duplicates;
+	// the replication catalog walks the rows and keeps them).
+	std::unordered_map<int, size_t> index_;
+	// Every unique id in a stable display order (natural, case-insensitive
+	// display_name, then id), computed once at load so an enumeration is
+	// reproducible across loads (the index is unordered).
+	PackedInt32Array sorted_ids_;
 	String source_path;
 	String last_error;
 	uint64_t revision = 0; // increments before every load attempt
 
 	void release_native_items();
-
-	// The one DefItemDef -> Item copy (both load paths adopt through it, so new
-	// items.def fields land in one place).
-	static Item item_from_entry(const ::DefItemDef &entry);
-	static ReplicationDefinitionRecord replication_definition_from_entry(
-			const ::DefItemDef &entry);
-
-	// Items in a stable display order (by display name, then id), since the backing
-	// store is unordered. Shared by get_item_ids() / get_items().
-	std::vector<const Item *> sorted_items() const;
-	// The one per-item dictionary shape get_item() and get_items() both publish.
-	Dictionary item_dictionary(const Item &item) const;
+	// Retains a successful parse and builds index_ / sorted_ids_ over it (both
+	// load paths adopt through here, so the views can never diverge).
+	void adopt_(const opennova::def::DefItemsFile &p_file);
+	// The row an id resolves to; nullptr for an unknown id.
+	const opennova::def::DefItemDef *row_(int p_id) const;
 
 protected:
 	static void _bind_methods();
@@ -217,7 +65,7 @@ public:
 	// mirroring DefItemType in engine/formats/def/def.h (static_asserts in the
 	// .cpp pin the mirror). Non-injective by engine design: DECORATION==FOLIAGE
 	// and POWERUP==OBJECT share values; 7 is unused, 0 = unset/unknown.
-	// [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]
+	// (engine: formats/def/def.h)
 	enum {
 		TYPE_UNKNOWN = 0,
 		TYPE_VEHICLE = 1,
@@ -248,35 +96,33 @@ public:
 	// Load items.def by flat name through the mounted resource root (VFS), so the item
 	// database resolves from PFF archives at runtime. Mirrors the other *_from_resource_root.
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
-	// The retained parse the engine-side trait fold consumes (empty — entries
-	// nullptr, count 0 — until a load succeeds).
-	const DefItemsFile &native_items() const noexcept { return items_file_; }
+	// The retained parse the engine-side trait fold and the netsim replication
+	// catalog consume (empty — entries nullptr, count 0 — until a load succeeds).
+	const opennova::def::DefItemsFile &native_items() const noexcept { return items_file_; }
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;
+	// The number of unique item ids (a duplicate id counts once).
 	int get_count() const;
 	uint64_t get_revision() const { return revision; }
-	const std::vector<ReplicationDefinitionRecord> &
-	get_replication_definition_records() const noexcept {
-		return replication_definition_records;
-	}
 
 	bool has_item(int id) const;
 	// Model basename without extension (e.g. "tank"); empty if unknown/none.
 	String get_graphic(int id) const;
+	// The items.def `sid` token, the key hudpos.def's VEHICLE_HUD blocks commit
+	// against; empty if unknown/none.
+	String get_sid(int id) const;
 	String get_anim_def(int id) const;
 	// items.def *_function class tags (raw); empty if the item declares none. The
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
-	// items.def default_aip (+0x8B8); empty when unauthored or unknown id.
-	String get_default_aip(int id) const;
+	String get_render_function(int id) const;
 	String get_move_function(int id) const;
-	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
+	// DefItemDef.type (the TYPE_* mirror above); TYPE_UNKNOWN for unknown ids.
 	int get_item_type(int id) const;
 	// Effective authored model scale source, signed Q16.16. Zero is retail's
 	// unscaled sentinel (a visual/collision scale of 1.0).
-	// [orig: ItemDef+0x1B8; Entity_InitFromModel @0x40dc30, see
-	// engine/runtime/simassets/model_builders.cpp]
+	// (engine: formats/def/def.h)
 	int32_t get_model_scale_q16(int id) const;
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
@@ -290,74 +136,59 @@ public:
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;
 	// The raw items.def ItemDefAttrib2 dword (itemDef+0x58); 0 for unknown ids. The
-	// render-occlusion weld pass reads bit 6 ("weldable") [orig: the +88 >> 6 read in
-	// Terrain_RegisterExteriorPortalFaces @ 0x5c5cce].
+	// render-occlusion weld pass reads bit 6 ("weldable") (engine: runtime/simassets/collision_resolve.cpp).
 	uint32_t get_attrib2(int id) const;
 	// The authored items.def `shadow` blob decal (C++ seam for the placer):
 	// false when the item authors none; dims = (width, length, offset_x,
 	// offset_y) in the decal's own units.
 	bool get_shadow_decal(int id, String &r_texture, Vector4 &r_dims) const;
 	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
-	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
-	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty
-	// @0x49d870; consumer Entity_UpdateVehiclePhysics @0x48af00]
+	// deceleration, turn_rate, turn_rate2, unit_type, torque, water_speed, climb_speed,
+	// turn_roll, speed_pitch, max_slope, slip_slope, mass, lean, lean_velocity, pitch,
+	// pitch_velocity, bob, flip]; empty for unknown ids. Feeds the sim's
+	// world::VehicleTraits table (resolve_item_traits). (engine: formats/def/def.h)
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
-	// S16 tooling: the native seat-spec extraction for ONE item, shaped like
-	// the retired GDScript seat_specs_for_item card (the MCP mission tools'
-	// static mount analysis). Static data only — "occupied" is always false;
+	// The native seat-spec extraction for ONE item as an inspection card
+	// (item_records.h ItemSeatCard). Static data only — no seat is occupied;
 	// seats/armory need the model, authored attachment rows survive without
 	// anchors, exactly like the production boot install.
-	Dictionary extract_seat_specs_for_item(
+	Ref<ItemSeatCard> extract_seat_specs_for_item(
 			const Ref<class ResourceRoot> &p_root, int p_item_id);
 	String get_launchups_closeattack(int id) const;
-	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC.
-	// Every Dictionary retains the exact key variant plus source userpoint,
-	// child item id, and optional down/up/right/left limits.
-	Array get_emplacement_attachments(int id) const;
+	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC (the
+	// key variant, source userpoint, child item id, optional limits, the
+	// designated G/C marks); empty for an unknown id.
+	TypedArray<ItemEmplacementAttachment> get_emplacement_attachments(int id) const;
 	// Last stored G/C attachment slot, 1-based; zero means absent.
-	Dictionary get_emplacement_attachment_markers(int id) const;
-	// {valid: bool, value: int} for the target definition's phrase_set +0x86C.
-	// Always returns both fields so absent and authored zero stay distinct.
-	// [orig: parse @ 0x49F9DB..0x49FA0A; mounted consumer @ 0x4B1884]
-	Dictionary get_mount_config(int id) const;
+	int get_emplacement_g_slot(int id) const;
+	int get_emplacement_c_slot(int id) const;
+	// The target definition's phrase_set +0x86C (the mounted skeletal selector):
+	// presence is separate so an authored zero stays distinct from absent.
+	// (engine: formats/def/def.h)
+	bool has_mount_config(int id) const;
+	int get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
-	// [orig: itemDef+0x70/+0x80 -> huskModel/huskFinalModel (+0xF4/+0xF8);
-	// render pick @ 0x413086, pieces prefer huskfinal @ 0x4934af]
+	// (engine: runtime/simassets/collision_resolve.cpp)
 	String get_husk(int id) const;
 	String get_huskfinal(int id) const;
-	// The destruction traits as one bundle: {unit_type, kz, armor_impact,
-	// armor_blast, sounddeath, debris_scale, husk_sub_parts,
-	// husk_sub_part_types (PackedInt32Array), has_husk}. Empty Dictionary =
-	// unknown id. Feeds the sim's item-traits sweep (world::ItemDeathTraits).
-	// [docs/world/world-wac-ai-re.md §24]
-	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
-	// These are the looping ambient sound-set names for "snd:" marker items.
-	PackedStringArray get_sound_loops(int id) const;
 	// S13 (ADR 0028): the envs-class ambient marker resolution over the
-	// retained items.def + the mission's native document
-	// (audio/envs_markers.h). Rows: {position: Vector3 (authored BMS units),
-	// bms_id: int, slot_sets: PackedStringArray(4, "" = silent slot)}.
-	TypedArray<Dictionary> resolve_envs_markers(
+	// retained items.def + the mission's native document (audio/envs_markers.h).
+	TypedArray<EnvsMarkerRow> resolve_envs_markers(
 			const Ref<class MissionData> &p_mission) const;
-	// The item's particle-effect keys as authored, keyed by the ITEMS.DEF key names
-	// ("particlefx"/"particlefxs"/"particlefxw1".."particlefxw4" -> {effect, userpoint,
-	// secondary_effect} sub-dictionaries; "particledeath"/"particleh2odeath"/
-	// "particlefire"/"particleother"/"particlespawn"/"particlefinale" -> effect name).
-	// Empty strings = key absent; empty Dictionary = unknown id. [orig:
-	// ItemDef_ParseProperty @ 0x49eb00; slot-A runtime attach witness
-	// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 ->
-	// Entity_SpawnBoneTrailEffect @ 0x43bef0]
-	Dictionary get_particle_effects(int id) const;
-	Dictionary get_item(int id) const;
+	// The item's slot-A particle effect ("particlefx", the always-on attached
+	// emitter the runtime effect-attach pass consumes); null = unknown id, empty
+	// effect = key absent. Watercraft W3/W4 are copied engine-side into vehicle
+	// traits; particlefxs/W1/W2 and the death/fire/other family remain available
+	// from the retained parse for their separate runtime paths.
+	// Slot A ("particlefx") as authored, the row the runtime effect-attach
+	// pass consumes natively; `valid` false for an unknown item.
+	ItemParticleFx get_particle_fx(int id) const;
 
-	// Enumeration for UI (e.g. the mission editor's place-object palette). Both are
-	// sorted deterministically by (display_name, id) so the list is stable across
-	// loads (the backing store is an unordered_map). get_items() returns the same
-	// per-item dictionaries as get_item(); get_item_ids() is just the ids.
+	// Every item id in a stable display order (natural, case-insensitive
+	// display_name, then id) — sorted_ids_, computed at load.
 	PackedInt32Array get_item_ids() const;
-	Array get_items() const;
 };
 
 } // namespace godot

@@ -6,9 +6,8 @@
 // getters (get_entity_debug / get_world_entity_debug) assembled. The Godot
 // binding forwards these into typed records and converts to JSON only at the
 // MCP boundary; a joiner's decoded replica section is NET level and lives in
-// net/npruntime/client_replica_card.h.
-#ifndef OPENNOVA_WORLD_INSPECT_H
-#define OPENNOVA_WORLD_INSPECT_H
+// runtime/inmatch/client_replica_card.h.
+#pragma once
 
 #include <cstdint>
 #include <functional>
@@ -21,7 +20,6 @@
 namespace opennova::world {
 
 class World;
-class AiSystem;
 
 namespace inspect {
 
@@ -39,6 +37,10 @@ struct SeatRow {
 	bool occupied = false;
 };
 
+// One seat as a row: `index` is its slot in the owning table (-1 for a
+// def-level seat spec that has no live table yet).
+SeatRow seat_row(const Seat &seat, int32_t index);
+
 // The registry/world half of a card — the field set the old
 // get_world_entity_debug Dictionary carried, engine-space.
 struct WorldDetail {
@@ -49,7 +51,7 @@ struct WorldDetail {
 	int32_t source_index = -1; // index within its kind's list
 	int32_t item_id = 0;
 	std::string name;
-	std::string item_name; // items.def display name (world.item_names); empty without a def
+	std::string item_name; // items.def display name (world.tables.item_names); empty without a def
 	int32_t team = -1;
 	bool alive = false;
 	bool hidden = false;
@@ -272,7 +274,7 @@ struct EntityRow {
 	int32_t item_id = 0; // the wire type id
 	uint16_t wire_handle = 0;
 	std::string name;
-	std::string item_name; // items.def display name (world.item_names); empty without a def
+	std::string item_name; // items.def display name (world.tables.item_names); empty without a def
 	std::string state_name;
 	int32_t health = 0;
 	int32_t team = -1;
@@ -285,14 +287,16 @@ struct EntityRow {
 // type (the set the client present streams), each joined to its AI-pool card
 // by handle; AI entities missing from that set (registry-despawned, or a row
 // without a def) are appended as diagnostics. editable = has an AI brain AND
-// a live registry slot — the edit seams key on the ai_index.
-std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai);
+// a live registry slot — the edit seams key on the ai_index. with_brains =
+// false leaves the AI pool out (a joiner's non-authoritative tooling pool
+// never joins the decoded view).
+std::vector<EntityRow> entity_directory(const World &world, bool with_brains);
 
 // The full card for one entity by wire handle. `adm_name_resolver` maps an
 // infantry adm_id to its display name (the embedder's AdmRootMotion owns the
 // table; a bare World has none) — null leaves adm_name empty. Non-const World
 // because the muzzle readback resolves through the live pose provider.
-EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle handle,
+EntityCard build_entity_card(World &world, bool with_brains, EntityHandle handle,
 		const std::function<std::string(int32_t)> &adm_name_resolver = {});
 
 // --- The AI debug join (the F3 AI window's pushed record + the Godot AI
@@ -382,9 +386,7 @@ struct AiDebugReport {
 // The AI-pool walk behind both debug surfaces. Non-const World: the muzzle
 // readback resolves through the live pose provider (build_entity_card's
 // precedent).
-AiDebugReport ai_debug_report(World &world, const AiSystem &ai);
+AiDebugReport ai_debug_report(World &world);
 
 } // namespace inspect
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_INSPECT_H

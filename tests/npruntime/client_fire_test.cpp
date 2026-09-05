@@ -13,15 +13,15 @@
 // rejects further fire until the 0x25 relay refills; a no-clip weapon (clipsize -1) never
 // rejects; a table-less host accepts without bookkeeping.
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -45,8 +45,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -103,43 +103,42 @@ std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t fire_flags, uint8_t adm
 	return b;
 }
 
-int dispatch_fire(np::NapiNPConnection &conn, std::vector<np::NapiNPConnection> &roster,
+int dispatch_fire(inmatch::NapiNPConnection &conn, std::vector<inmatch::NapiNPConnection> &roster,
                   w::World &world, const std::vector<uint8_t> &body) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x06, body));
 	std::vector<ProtocolMessage> replies =
-			np::dispatch_session_replies(np::GameConfig{}, conn, msgs, 100, roster, &world);
+			inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 	return int(replies.size());
 }
 
 void dispatch_gameplay(uint8_t tag, const std::vector<uint8_t> &body,
-		np::NapiNPConnection &conn,
-		std::vector<np::NapiNPConnection> &roster, w::World &world) {
+		inmatch::NapiNPConnection &conn,
+		std::vector<inmatch::NapiNPConnection> &roster, w::World &world) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(tag, body));
-	(void)np::dispatch_session_replies(
-			np::GameConfig{}, conn, msgs, 100, roster, &world);
+	(void)inmatch::dispatch_session_replies(
+			inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
 }
 
 bool check_mounted_slot_select_fire_and_reload() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle shooter =
 			w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "mounted-route shooter spawned")) return false;
 
-	world.weapons.entries.resize(7);
-	w::WeaponTableEntry &child_weapon = world.weapons.entries[5];
+	world.tables.weapons.entries.resize(7);
+	w::WeaponTableEntry &child_weapon = world.tables.weapons.entries[5];
 	child_weapon.name = "WPN_CHILD";
 	child_weapon.category = 3;
 	child_weapon.rank = 2;
 	child_weapon.clipsize = 4;
 	child_weapon.startrounds = 4;
 	child_weapon.valid = true;
-	w::WeaponTableEntry &parent_weapon = world.weapons.entries[6];
+	w::WeaponTableEntry &parent_weapon = world.tables.weapons.entries[6];
 	parent_weapon.name = "WPN_PARENT";
 	parent_weapon.category = 4;
 	parent_weapon.rank = 3;
@@ -175,7 +174,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	player->use_gun_slot_swapped = true;
 	player->equipped_adm_index = 5;
 
-	std::vector<np::NapiNPConnection> roster;
+	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
 
@@ -253,33 +252,32 @@ bool check_mounted_slot_select_fire_and_reload() {
 bool check_duplicate_c2s_session_does_not_refire() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	if (!expect(shooter.valid(), "session replay shooter spawned")) return false;
 
-	world.weapons.entries.resize(6);
-	w::WeaponTableEntry &rifle = world.weapons.entries[5];
+	world.tables.weapons.entries.resize(6);
+	w::WeaponTableEntry &rifle = world.tables.weapons.entries[5];
 	rifle.name = "WPN_TESTRIFLE";
 	rifle.category = 3;
 	rifle.rank = 2;
 	rifle.clipsize = 30;
 	rifle.ammo_index = 0;
 	rifle.valid = true;
-	world.ammo.entries.resize(1);
-	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.ammo.entries[0].velocity = 620;
-	world.ammo.entries[0].max_age_ticks = 248;
-	world.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 248;
+	world.tables.ammo.entries[0].valid = true;
 
 	const PeerAddr peer{0x0100007Fu, 30123};
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
 	const std::string server_scrk = "SERVER-REPLAY-SCRK";
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
-	np::NapiNPConnection conn =
+	inmatch::NapiNPConnection conn =
 			make_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true);
 	conn.peer = peer;
 	conn.client_scrk = client_scrk;
@@ -299,16 +297,16 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	const std::vector<uint8_t> fire_datagram =
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(session_body));
 
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
-	if (!expect(world.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 100);
+	if (!expect(world.out.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
 		return false;
 	const uint16_t combo = uint16_t(3 * 65 + 2);
 	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
 	            "first C2S 0x06 spends one cartridge"))
 		return false;
 
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
-	if (!expect(world.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
+	if (!expect(world.out.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
 		return false;
 	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
 	            "exact duplicate C2S 0x06 does not spend a second cartridge"))
@@ -321,14 +319,14 @@ bool check_duplicate_c2s_session_does_not_refire() {
 		return false;
 	const std::vector<uint8_t> heartbeat_datagram =
 			nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(heartbeat_body));
-	np::handle_server_datagram(ctx, peer, heartbeat_datagram.data(), heartbeat_datagram.size(), 102);
-	np::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 103);
+	inmatch::handle_server_datagram(ctx, peer, heartbeat_datagram.data(), heartbeat_datagram.size(), 102);
+	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 103);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2,
 	            "replayed older C2S packet cannot regress the host ACK latch"))
 		return false;
 
 	std::vector<uint8_t> ack_datagram;
-	if (!expect(np::frame_in_match_s2c(ctx, peer, 0x34, {}, ack_datagram),
+	if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x34, {}, ack_datagram),
 	            "host frames an ACK-bearing S2C packet"))
 		return false;
 	uint8_t opcode = 0;
@@ -352,8 +350,7 @@ int main() {
 
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));        // host
 	const w::EntityHandle hb = w::spawn_remote_player(world, player_spawn(0xFFF1)); // shooter
 	const w::EntityHandle hc = w::spawn_remote_player(world, player_spawn(0xFFF2)); // target
@@ -361,33 +358,33 @@ int main() {
 
 	// Armory: adm 5 = a 30-round rifle (category 3, rank 2 -> combo 197); adm 7 = a
 	// no-clip weapon (clipsize -1, the knife/medpack shape).
-	world.weapons.entries.resize(8);
+	world.tables.weapons.entries.resize(8);
 	{
-		w::WeaponTableEntry &rifle = world.weapons.entries[5];
+		w::WeaponTableEntry &rifle = world.tables.weapons.entries[5];
 		rifle.name = "WPN_TESTRIFLE";
 		rifle.category = 3;
 		rifle.rank = 2;
 		rifle.clipsize = 30;
 		rifle.ammo_index = 0;
 		rifle.valid = true;
-		w::WeaponTableEntry &knife = world.weapons.entries[7];
+		w::WeaponTableEntry &knife = world.tables.weapons.entries[7];
 		knife.name = "WPN_TESTKNIFE";
 		knife.category = 1;
 		knife.rank = 0;
 		knife.clipsize = -1;
 		knife.valid = true;
 	}
-	world.ammo.entries.resize(1);
-	world.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.ammo.entries[0].velocity = 620;
-	world.ammo.entries[0].max_age_ticks = 248;
-	world.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 248;
+	world.tables.ammo.entries[0].valid = true;
 
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -405,9 +402,9 @@ int main() {
 		return 1;
 	int nreplies = dispatch_fire(roster[1], roster, world, body);
 	if (!expect(nreplies == 0, "0x06 draws NO reactive reply")) return 1;
-	if (!expect(world.rounds.count == 1, "one ring event appended")) return 1;
+	if (!expect(world.out.rounds.count == 1, "one ring event appended")) return 1;
 	{
-		const w::RoundEvent &ev = world.rounds.records[0];
+		const w::RoundEvent &ev = world.out.rounds.records[0];
 		if (!expect(ev.shooter_handle == hb.packed, "ring shooter = the connection's entity"))
 			return 1;
 		if (!expect(ev.origin_x == 0x100000 && ev.origin_y == 0x200000 && ev.origin_z == 0x30000,
@@ -457,17 +454,17 @@ int main() {
 	// --- 2. Spoofed shooter (C's handle on B's connection) -> dropped. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hc.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
-	if (!expect(world.rounds.count == 1, "spoofed shooter handle dropped")) return 1;
+	if (!expect(world.out.rounds.count == 1, "spoofed shooter handle dropped")) return 1;
 
 	// --- 3. Unknown adm on an armory-fed host -> dropped [orig: NULL wpn -3]. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 6, 0, 0, 0, 0, 0, 0xFFFF, 2, 12, 0));
-	if (!expect(world.rounds.count == 1, "unknown adm dropped")) return 1;
+	if (!expect(world.out.rounds.count == 1, "unknown adm dropped")) return 1;
 
 	// --- 4. Alt fire appends WITHOUT touching the clip [orig: @0x50bb0d/@0x50be2b]. ---
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, 0xFFFF, 3, 12, 0));
-	if (!expect(world.rounds.count == 2, "alt fire appended")) return 1;
+	if (!expect(world.out.rounds.count == 2, "alt fire appended")) return 1;
 	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 29,
 	            "alt fire leaves the clip untouched"))
 		return 1;
@@ -475,16 +472,16 @@ int main() {
 	// --- 5. The host's own loopback 0x06 is a no-op [orig: @0x50c18d]. ---
 	dispatch_fire(roster[0], roster, world,
 	              fire_body(ha.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 4, 12, 0));
-	if (!expect(world.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
+	if (!expect(world.out.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
 
 	// --- 6. Clip exhaustion rejects; the 0x25 relay refills [orig: @0x541720]. ---
 	roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip = 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 5, 12, 0));
-	if (!expect(world.rounds.count == 3, "last round fires")) return 1;
+	if (!expect(world.out.rounds.count == 3, "last round fires")) return 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 6, 12, 0));
-	if (!expect(world.rounds.count == 3, "empty clip rejects fire (NO AMMO)")) return 1;
+	if (!expect(world.out.rounds.count == 3, "empty clip rejects fire (NO AMMO)")) return 1;
 	{
 		// C2S 0x25 [u16 handle][u16 combo] from B -> relay + host-side refill.
 		std::vector<uint8_t> reload;
@@ -492,7 +489,7 @@ int main() {
 		put_u16(reload, uint16_t(3 * 65 + 2));
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x25, reload));
-		np::dispatch_session_replies(np::GameConfig{}, roster[1], msgs, 101, roster, &world);
+		inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], msgs, 101, roster, &world);
 		// Drain the relayed 0x49s so later checks stay clean.
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;
@@ -505,20 +502,20 @@ int main() {
 		return 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 7, 12, 0));
-	if (!expect(world.rounds.count == 4, "fire works again after the reload")) return 1;
+	if (!expect(world.out.rounds.count == 4, "fire works again after the reload")) return 1;
 
 	// --- 7. A no-clip weapon (clipsize -1) never ammo-rejects [orig: adm+88 == -1]. ---
 	for (int i = 0; i < 3; ++i)
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 0x12, 7, 0, 0, 0, 0, 0, 0xFFFF, uint16_t(10 + i),
 		                        12, 0));
-	if (!expect(world.rounds.count == 7, "no-clip weapon fires freely")) return 1;
+	if (!expect(world.out.rounds.count == 7, "no-clip weapon fires freely")) return 1;
 
 	// --- 8. Table-less host accepts without bookkeeping (the 0x5A echo fallback shape). ---
-	world.weapons.entries.clear();
+	world.tables.weapons.entries.clear();
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 9, 0, 0, 0, 0, 0, 0xFFFF, 20, 12, 0));
-	if (!expect(world.rounds.count == 8, "table-less host accepts the fire")) return 1;
+	if (!expect(world.out.rounds.count == 8, "table-less host accepts the fire")) return 1;
 
 	std::printf("OK\n");
 	return 0;

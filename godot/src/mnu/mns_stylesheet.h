@@ -9,6 +9,8 @@
 #include <formats/mns/mns.h>
 #include <formats/mns/mns_document.h>
 
+#include <unordered_map>
+#include <string>
 #include <vector>
 
 namespace godot {
@@ -45,7 +47,9 @@ public:
 	String get_variable(const String &p_name) const;
 	bool has_variable(const String &p_name) const;
 	String substitute(const String &p_text) const;
-	Dictionary get_variables() const;
+	// The parsed variable table (name -> value) as the native map the menu
+	// frame compiler reads; NOT ClassDB-bound.
+	const std::unordered_map<std::string, std::string> &variables() const;
 
 	// --- Mutation (each successful mutation emits changed exactly once;
 	//     failures and no-ops emit nothing) ---
@@ -88,8 +92,6 @@ public:
 	// the map (documented lossy); the document accessors are the lossless path.
 	void set_native(const opennova::mns::StyleSheet &p_sheet);
 	const opennova::mns::StyleSheet &get_native() const { return sheet_; }
-	void set_native_document(const opennova::mns::Document &p_doc);
-	const opennova::mns::Document &get_native_document() const { return doc_; }
 };
 
 } // namespace godot

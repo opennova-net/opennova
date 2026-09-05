@@ -4,6 +4,8 @@
 #include <math.h>
 #include <formats/sbf/sbf.h>
 
+using namespace opennova::sbf;
+
 #ifndef SBF_FIXTURE_DIR
 #define SBF_FIXTURE_DIR "fixtures/sbf"
 #endif

@@ -14,6 +14,8 @@
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
+namespace opennova::def {
+
 /* ========================================================================= */
 /* Items Parsing                                                             */
 /* ========================================================================= */
@@ -71,8 +73,7 @@ static void parse_item_particle_slot(const char *v, size_t vl, DefItemParticleFx
    but the key that writes unk591 is an unresolved indirect string in the
    decompilation (`off_7C7D78`), so its identity with our `bob`
    field is NOT witnessed for defaulting purposes and `bob` is deliberately
-   left at 0. Retail's tireSlip = 5 and handBrake = 1 have no field in our
-   record at all. Both are named divergences, not oversights. */
+   left at 0. */
 static void apply_item_def_defaults(DefItemDef *d) {
     d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
     d->torque = 3;         /* [orig: torque] */
@@ -86,6 +87,8 @@ static void apply_item_def_defaults(DefItemDef *d) {
     d->pitch = 1;          /* [orig: pitch] */
     d->pitch_velocity = 5; /* [orig: pitchVelocity] */
     d->flip = 45;          /* [orig: flip] */
+    d->hand_brake = 1;     /* [orig: handBrake] */
+    d->tire_slip = 5;      /* [orig: tireSlip] */
 }
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
@@ -237,11 +240,12 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "disk_function", 13)) {
             consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
             parsed = 1;
-        /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5): only the
-           closeattack name is kept — JO riflemen author all four ammo_* slots to the same
-           rifle round. [orig: ItemDef_ParseProperty 'ammo_closeattack' @ 0x4a1823 -> def+0x56B] */
+        /* [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
         } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
             consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "ammo_marker3", 12)) {
+            consume_value_str(trimmed, tlen, 12, current.ammo_marker3, sizeof(current.ammo_marker3));
             parsed = 1;
         /* The closeattack launch USERPOINT name (the AI muzzle; see def.h)
            [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB] */
@@ -447,6 +451,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
             current.flip = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "hand_brake", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.hand_brake = parse_int_n(v, vl); /* raw +0x944 [orig: key @0x7c7d60] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "tire_slip", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.tire_slip = parse_int_n(v, vl); /* raw +0x940 [orig: key @0x7c7d6c] */
+            parsed = 1;
         /* The suspension spring block — raw atol [orig: spring_comp @0x49dbd4,
            spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98 — the last is
            parsed for PARITY only: retail never reads +0x918 outside the parser,
@@ -512,6 +524,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "criticaldrain", 13)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
             current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "noncriticalregen", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            current.non_critical_regen = parse_int_n(v, vl); /* i16 raw at +0x184 */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "radarsig", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
@@ -774,3 +790,5 @@ void def_free_items(DefItemsFile *f) {
     free(f->entries);
     memset(f, 0, sizeof(*f));
 }
+
+} // namespace opennova::def

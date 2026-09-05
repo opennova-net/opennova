@@ -6,8 +6,10 @@
 #include <godot_cpp/classes/visual_instance3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -15,11 +17,16 @@
 
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
+#include <runtime/world/present_passes.h>
 
 #include <vector>
 
+#include "env/env_file.h"
+#include "env/mission_environment.h"
+#include "object/entity_index.h"
 #include "object/object_model.h"
-#include "simulation/present_stats.h"
+#include "simulation/entity_presenter.h"
+#include "simulation/simulation.h"
 
 namespace godot {
 
@@ -83,6 +90,10 @@ void ScarPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &ScarPresenter::clear);
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&ScarPresenter::get_stats_record);
+	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
+			&ScarPresenter::reset_runtime_state);
+	ClassDB::bind_method(D_METHOD("get_present_stats"),
+			&ScarPresenter::get_present_stats);
 }
 
 void ScarPresenter::_notification(int p_what) {
@@ -211,22 +222,24 @@ void ScarPresenter::clear() {
 	stat_vertices_ = 0;
 }
 
-void ScarPresenter::present(const Dictionary &p_draw_list, const Dictionary &p_owner_nodes) {
+void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictionary &p_owner_nodes) {
 	stat_textures_missing_ = 0;
 	stat_strips_unsupported_ = 0;
-	const PackedVector3Array vertices = p_draw_list.get("vertices", PackedVector3Array());
-	const PackedVector2Array uvs = p_draw_list.get("uvs", PackedVector2Array());
-	const PackedColorArray colors = p_draw_list.get("colors", PackedColorArray());
-	const PackedInt32Array owners = p_draw_list.get("batch_owner", PackedInt32Array());
-	const PackedInt32Array textures = p_draw_list.get("batch_texture", PackedInt32Array());
-	const PackedInt32Array sections = p_draw_list.get("batch_section", PackedInt32Array());
-	const PackedInt32Array flags = p_draw_list.get("batch_flags", PackedInt32Array());
-	const PackedInt32Array firsts = p_draw_list.get("batch_first", PackedInt32Array());
-	const PackedInt32Array counts = p_draw_list.get("batch_count", PackedInt32Array());
-	const PackedStringArray strip_names =
-			p_draw_list.get("strip_names", PackedStringArray());
-	const PackedInt32Array strip_mode_words =
-			p_draw_list.get("strip_mode_words", PackedInt32Array());
+	if (p_draw_list.is_null()) {
+		clear();
+		return;
+	}
+	const PackedVector3Array &vertices = p_draw_list->get_vertices();
+	const PackedVector2Array &uvs = p_draw_list->get_uvs();
+	const PackedColorArray &colors = p_draw_list->get_colors();
+	const PackedInt32Array &owners = p_draw_list->get_batch_owner();
+	const PackedInt32Array &textures = p_draw_list->get_batch_texture();
+	const PackedInt32Array &sections = p_draw_list->get_batch_section();
+	const PackedInt32Array &flags = p_draw_list->get_batch_flags();
+	const PackedInt32Array &firsts = p_draw_list->get_batch_first();
+	const PackedInt32Array &counts = p_draw_list->get_batch_count();
+	const PackedStringArray &strip_names = p_draw_list->get_strip_names();
+	const PackedInt32Array &strip_mode_words = p_draw_list->get_strip_mode_words();
 	const int64_t batch_count = owners.size();
 	if (batch_count == 0 || textures.size() != batch_count ||
 			sections.size() != batch_count || flags.size() != batch_count ||
@@ -378,6 +391,124 @@ Ref<ScarPresenterStats> ScarPresenter::get_stats_record() const {
 	stats->textures_missing = stat_textures_missing_;
 	stats->strips_unsupported = stat_strips_unsupported_;
 	return stats;
+}
+
+// --- The present pass --------------------------------------------------------
+
+void ScarPresenter::present_frame(Simulation *p_sim, const Vector3 &p_camera,
+		MissionEnvironment *p_environment, EntityIndex *p_index, EntityPresenter *p_wire) {
+	if (p_sim == nullptr) {
+		return;
+	}
+	Vector3 camera;
+	if (p_camera.is_finite()) {
+		camera = p_camera;
+	}
+	float fog_distance = 0.0f;
+	Color terrain_light(1, 1, 1);
+	if (p_environment != nullptr) {
+		fog_distance = p_environment->get_fog_distance();
+		// Env_TerrainLightCombined = light * 0xB5/256 + sky (env-tod-re.md
+		// "Derived render colors"; the same chain the water surface lights by).
+		const Vector3 sun = p_environment->get_sun_light();
+		const Vector3 sky = p_environment->get_sky_ambient();
+		terrain_light = EnvFile::combine_terrain_light(
+				Color(sun.x, sun.y, sun.z), Color(sky.x, sky.y, sky.z));
+	}
+	present_draw_list(p_sim->get_scar_draw_list(camera, fog_distance, terrain_light),
+			p_index, p_wire);
+}
+
+void ScarPresenter::present_draw_list(const Ref<ScarDrawList> &p_draw_list,
+		EntityIndex *p_index, EntityPresenter *p_wire) {
+	if (p_draw_list.is_null()) {
+		return;
+	}
+	stat_slots_live_ = p_draw_list->get_slots_live();
+	stat_slots_culled_ = p_draw_list->get_slots_culled();
+	stat_rings_leased_ = p_draw_list->get_rings_leased();
+	Dictionary owner_nodes;
+	resolve_owner_nodes_(p_draw_list, p_index, p_wire, owner_nodes);
+	present(p_draw_list, owner_nodes);
+}
+
+void ScarPresenter::reset_runtime_state() {
+	clear();
+	stat_textures_missing_ = 0;
+	stat_strips_unsupported_ = 0;
+	stat_slots_live_ = 0;
+	stat_slots_culled_ = 0;
+	stat_rings_leased_ = 0;
+	stat_owners_unresolved_ = 0;
+}
+
+Ref<ScarPresentStats> ScarPresenter::get_present_stats() const {
+	Ref<ScarPresentStats> stats;
+	stats.instantiate();
+	stats->slots_live = stat_slots_live_;
+	stats->slots_culled = stat_slots_culled_;
+	stats->rings_leased = stat_rings_leased_;
+	stats->batches = stat_batches_;
+	stats->world_surfaces = stat_world_surfaces_;
+	stats->entity_meshes = stat_entity_meshes_;
+	stats->textures_missing = stat_textures_missing_;
+	stats->strips_unsupported = stat_strips_unsupported_;
+	stats->owners_unresolved = stat_owners_unresolved_;
+	return stats;
+}
+
+void ScarPresenter::resolve_owner_nodes_(const Ref<ScarDrawList> &p_draw_list,
+		EntityIndex *p_index, EntityPresenter *p_wire, Dictionary &r_owner_nodes) {
+	const PackedInt32Array &owners = p_draw_list->get_batch_owner();
+	const PackedInt32Array &flags = p_draw_list->get_batch_flags();
+	const PackedInt32Array &bms_ids = p_draw_list->get_batch_bms_id();
+	const PackedInt64Array &origins = p_draw_list->get_batch_spawn_origin();
+	stat_owners_unresolved_ = 0;
+	for (int64_t i = 0; i < owners.size(); ++i) {
+		if (i >= flags.size() || (flags[i] & ScarDrawList::FLAG_ENTITY_LOCAL) == 0) {
+			continue;
+		}
+		const int owner = owners[i];
+		if (r_owner_nodes.has(owner)) {
+			continue;
+		}
+		const int bms_id = i < bms_ids.size() ? bms_ids[i] : 0;
+		const int64_t origin = i < origins.size()
+				? origins[i]
+				: static_cast<int64_t>(Simulation::SPAWN_ORIGIN_NONE);
+		Node3D *node = resolve_owner_(bms_id, origin, owner, p_index, p_wire);
+		if (node != nullptr) {
+			r_owner_nodes[owner] = node;
+		} else {
+			++stat_owners_unresolved_;
+		}
+	}
+}
+
+// The destruction pass's identity rule (runtime/world/present_passes.h
+// husk_identity_is_dynamic): a runtime-only row (no BMS id, no authored
+// origin) resolves through its wire node; an authored entity through the
+// shared index by (bms_id, kind, index). The wire node is the fallback for
+// an authored row the index does not carry (a joiner's wire-header world).
+Node3D *ScarPresenter::resolve_owner_(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle,
+		EntityIndex *p_index, EntityPresenter *p_wire) {
+	const bool dynamic_identity =
+			opennova::world::husk_identity_is_dynamic(p_bms_id, p_spawn_origin, p_wire_handle);
+	if (!dynamic_identity && p_index != nullptr) {
+		ObjectModel *node = p_index->resolve(p_bms_id,
+				Simulation::spawn_origin_kind(p_spawn_origin),
+				Simulation::spawn_origin_index(p_spawn_origin));
+		if (node != nullptr) {
+			return node;
+		}
+	}
+	if (p_wire != nullptr) {
+		ObjectModel *wire_node = p_wire->resolve_wire_handle(p_wire_handle);
+		if (wire_node != nullptr) {
+			return wire_node;
+		}
+	}
+	return nullptr;
 }
 
 } // namespace godot

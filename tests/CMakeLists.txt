@@ -11,8 +11,8 @@ endfunction()
 # The retail-mission rig the asset-gated world/mission ctests share
 # (common/retail_mission_files.h): one real mission booted through the
 # engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
-# listen frame (inmatch::listen_host) or the kernel's bare no-net path; this
-# pair supplies only the retail terrain documents and the TickTarget adapter.
+# listen frame (inmatch::HostRole) or the local role's bare no-net tick; this
+# pair supplies only the retail terrain documents and the tick roles.
 add_library(opennova_test_rig STATIC common/retail_mission_files.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
@@ -60,6 +60,15 @@ add_executable(threedi_userpoint_test threedi/userpoint_test.cpp)
 target_link_libraries(threedi_userpoint_test PRIVATE opennova_formats)
 target_include_directories(threedi_userpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint COMMAND threedi_userpoint_test)
+
+# Asset-gated (OPENNOVA_JO_DIR): the retail MTRL facts (Scrate1's constant
+# AlphaGen on an opaque, non-alpha-tested FF_ST_OP row) the projected-shadow
+# GUT witness keys on, read through the engine's 3DI3 parser.
+add_executable(threedi_retail_material_facts_test threedi/retail_material_facts_test.cpp)
+target_link_libraries(threedi_retail_material_facts_test PRIVATE opennova_base opennova_formats)
+target_include_directories(threedi_retail_material_facts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_retail_material_facts_test PRIVATE cxx_std_17)
+opennova_add_gated_test(threedi_retail_material_facts COMMAND threedi_retail_material_facts_test)
 
 add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
 target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
@@ -215,7 +224,7 @@ target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
-# pools, zero-valued optional fields) authored through MissionDocument and
+# pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
 add_executable(minimal_bms_gen_test fixtures/minimal_bms_gen.cpp)
 target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)
@@ -274,7 +283,7 @@ target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
-target_link_libraries(inmatch_session_test PRIVATE opennova_net)
+target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
 # The menu sound profile (the synthetic fixtures/lwf/menu.lwf): trigger sets
@@ -341,6 +350,25 @@ add_executable(bank_chain_test audio/bank_chain_test.cpp)
 target_link_libraries(bank_chain_test PRIVATE opennova_runtime)
 add_test(NAME audio_bank_chain COMMAND bank_chain_test)
 
+# The loaded-bank set index (case-insensitive, first bank wins) and the 3D
+# one-shot fire decision (set-range cull, occlusion inflate + recheck, the
+# per-layer member pick and fire-time volume), pushed down from the Godot
+# sound bank (godot/src/audio/sound_bank; ADR 0043 slice G7).
+add_executable(oneshot_play_test audio/oneshot_play_test.cpp)
+target_link_libraries(oneshot_play_test PRIVATE opennova_runtime)
+target_include_directories(oneshot_play_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(oneshot_play_test PRIVATE cxx_std_17)
+add_test(NAME audio_oneshot_play COMMAND oneshot_play_test)
+
+# The serialized dialog queue, the PlayWavList dialog-id resolution through
+# the co-named .DBF and the WAC scripted-voice channel reset, pushed down from
+# the Godot mission audio (godot/src/audio/mission_audio; ADR 0043 slice G7).
+add_executable(dialog_queue_test audio/dialog_queue_test.cpp)
+target_link_libraries(dialog_queue_test PRIVATE opennova_runtime)
+target_include_directories(dialog_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(dialog_queue_test PRIVATE cxx_std_17)
+add_test(NAME audio_dialog_queue COMMAND dialog_queue_test)
+
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)
@@ -355,12 +383,12 @@ target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
 # Game profile table tests
-add_executable(gameprofile_test gameprofile/gameprofile_test.c)
+add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
 target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gameprofile COMMAND gameprofile_test)
 
-add_executable(required_resources_test gameprofile/required_resources_test.c)
+add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
@@ -810,7 +838,7 @@ target_include_directories(fnt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(fnt_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
 
-add_executable(fnt_pack_test fnt/fnt_pack_test.c)
+add_executable(fnt_pack_test fnt/fnt_pack_test.cpp)
 target_link_libraries(fnt_pack_test PRIVATE opennova_formats)
 add_test(NAME fnt_pack COMMAND fnt_pack_test)
 
@@ -910,6 +938,22 @@ add_executable(weather_state_test world/weather_state_test.cpp)
 target_link_libraries(weather_state_test PRIVATE opennova_runtime)
 target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weather_state COMMAND weather_state_test)
+
+# The per-item ITEMS.DEF particlefx law (runtime/world/item_effects): the
+# pool / controller attrib gates, the identity aliases, and the matched-
+# userpoint / origin-fallback attach plan over a synthetic model.
+add_executable(item_effects_test world/item_effects_test.cpp)
+target_link_libraries(item_effects_test PRIVATE opennova_runtime)
+target_include_directories(item_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME item_effects COMMAND item_effects_test)
+
+# The present passes' shared law (runtime/world/present_passes): the husk
+# RENDER pick (husk first, apart from the piece pick), the destroyed entity's
+# presentation identity + key, and the settling graft's tilt retention.
+add_executable(present_passes_test world/present_passes_test.cpp)
+target_link_libraries(present_passes_test PRIVATE opennova_runtime)
+target_include_directories(present_passes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME present_passes COMMAND present_passes_test)
 
 # The precipitation pool (runtime/environment/precipitation): seed, fall, wrap,
 # floor, and the drawer compile.
@@ -1061,7 +1105,7 @@ add_test(NAME minimap_markers COMMAND minimap_markers_test)
 # decode, the per-side default walk, and the joiner profile projection
 # (npruntime/join_character_profile.h).
 add_executable(character_registry_test npruntime/character_registry_test.cpp)
-target_link_libraries(character_registry_test PRIVATE opennova_net)
+target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
 
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
@@ -1089,7 +1133,7 @@ add_test(NAME client_minimap_overlay COMMAND client_minimap_overlay_test)
 
 # The Tab board's folded lanes (the 0x16 scoreboard + the 0x46 roster join —
 # empty lists CLEAR and removals WIPE, the witnessed parser shape) plus the
-# draw-time projection (netsim::project_scoreboard).
+# draw-time projection (replication::project_scoreboard).
 add_executable(client_replica_scoreboard_test netsim/client_replica_scoreboard_test.cpp)
 target_link_libraries(client_replica_scoreboard_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(client_replica_scoreboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1125,11 +1169,6 @@ add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
-
-add_executable(menu_table_sort_test menu/menu_table_sort_test.cpp)
-target_link_libraries(menu_table_sort_test PRIVATE opennova_runtime)
-target_include_directories(menu_table_sort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME menu_table_sort COMMAND menu_table_sort_test)
 
 add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
 target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
@@ -1363,7 +1402,7 @@ add_test(NAME guided_missile_flight COMMAND guided_missile_flight_test)
 # The message-feed line policy (0x1E -> canned sentence + color) and the
 # witnessed game-event classification corrections.
 add_executable(feed_format_test hud/feed_format_test.cpp)
-target_link_libraries(feed_format_test PRIVATE opennova_runtime opennova_net)
+target_link_libraries(feed_format_test PRIVATE opennova_runtime)
 target_include_directories(feed_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(feed_format_test PRIVATE cxx_std_17)
 add_test(NAME feed_format COMMAND feed_format_test)
@@ -1461,6 +1500,24 @@ target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
 
+# The collision sweep's death-trait mining (simassets/collision_resolve ->
+# world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
+# and missing-husk gates, and the retail GLASS userpoint table, over
+# byte-patched synthetic fixtures in a loose temp root (ADR 0043 d10).
+add_executable(item_death_traits_resolve_test world/item_death_traits_resolve_test.cpp)
+target_link_libraries(item_death_traits_resolve_test PRIVATE opennova_runtime opennova_base)
+target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
+add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
+
+# Asset-gated (OPENNOVA_JO_ASSETS fixtures): the RoundSim debug trail over the
+# shipped ammo.def — a grenadehe dies by its fuse, never by an impact.
+add_executable(round_debug_trail_test world/round_debug_trail_test.cpp)
+target_link_libraries(round_debug_trail_test PRIVATE opennova_runtime)
+target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
+opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
+
 # Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
 # grenade bounce/fuse, satchel place/detonator, claymore cone + fan, AV-mine
 # data-dead proximity, owner-death cleanup.
@@ -1490,8 +1547,10 @@ target_compile_features(infantry_test PRIVATE cxx_std_17)
 # Like player_spawn_test below, MSVC coalesces this file's many scoped World
 # fixtures into one Release stack frame. The blend-transition grills add nested
 # motor calls on top of that frame, so leave the test runner deliberate headroom.
+# World owns its AiSystem by value (ADR 0043 slice E4), which lifted this file's
+# largest frame past 8 MB; 16 MB keeps the same headroom.
 if(MSVC)
-    target_link_options(infantry_test PRIVATE "/STACK:8388608")
+    target_link_options(infantry_test PRIVATE "/STACK:16777216")
 endif()
 add_test(NAME infantry COMMAND infantry_test)
 
@@ -1518,6 +1577,13 @@ add_executable(collision_test world/collision_test.cpp)
 target_link_libraries(collision_test PRIVATE opennova_runtime)
 target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
+# Like infantry_test above, MSVC coalesces this file's many scoped World
+# fixtures into one Release stack frame (999 KB at ADR 0043 slice E6, when
+# World gained its vehicle and zone systems); give it the same headroom as
+# player_spawn_test and promote_test.
+if(MSVC)
+    target_link_options(collision_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME collision COMMAND collision_test)
 
 # Asset-gated (OPENNOVA_JO_DIR): the 00TRg transport-unload repro over the
@@ -1646,6 +1712,17 @@ add_test(NAME presentation_frame COMMAND presentation_frame_test)
 add_executable(occlusion_camera_test world/occlusion_camera_test.cpp)
 target_link_libraries(occlusion_camera_test PRIVATE opennova_runtime)
 add_test(NAME occlusion_camera COMMAND occlusion_camera_test)
+
+# The local player's presentation law (runtime/world/player_present): the
+# camera-mode split, the FP submit AND-composition, the lighting split, the
+# local fire-effect gate + gfx pick, the fixed-tick batch order, the per-submit
+# CTRL writers, the raw-key latch, the def precedence/memo, the spawn-loadout
+# projection.
+add_executable(player_present_test world/player_present_test.cpp)
+target_link_libraries(player_present_test PRIVATE opennova_runtime)
+target_include_directories(player_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_present_test PRIVATE cxx_std_17)
+add_test(NAME player_present COMMAND player_present_test)
 
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
@@ -1800,6 +1877,15 @@ add_test(NAME wac_behavior COMMAND wac_behavior_test)
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
 
+# The WAC program surface the retired WacProgram / WacState bindings served
+# (ADR 0043 d10): the compile surface, the layered load, and an installed
+# program's 62-tick execution, pause gate, eager start and restart rewind.
+add_executable(wac_program_surface_test wac/wac_program_surface_test.cpp)
+target_link_libraries(wac_program_surface_test PRIVATE opennova_runtime)
+target_include_directories(wac_program_surface_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_program_surface_test PRIVATE cxx_std_17)
+add_test(NAME wac_program_surface COMMAND wac_program_surface_test)
+
 # The layered game.wac/server.wac/<mission>.wac load every mission boot walks
 # (runtime/wac/wac_layered_load): retail layer order as one program, the
 # absent BMS-only case, and the lenient-vs-strict diagnostic policies (strict
@@ -1842,9 +1928,9 @@ if(MSVC)
 endif()
 add_test(NAME mission_promote COMMAND promote_test)
 
-# S9 (ADR 0028): the mission boot policy — the first ctest lock on the boot ORDER:
-# run_mission_boot's exact step sequence + gates (role, missing inputs, the load abort,
-# the ammo-gated AI-weapon seed), the mission-text fallback, and the .aip speed resolve.
+# S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
+# fallback and the .aip resolve (the boot ORDER itself is pinned through
+# MissionKernel::boot_trace in mission_kernel_test, ADR 0043 slice E9).
 add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
 target_link_libraries(mission_runtime_boot_test PRIVATE opennova_runtime)
 add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)
@@ -1859,6 +1945,14 @@ target_include_directories(mission_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(mission_kernel_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel COMMAND mission_kernel_test)
 
+# Per-model infantry animation loading with an absent default, using synthetic
+# ADM/BAD fixtures: movement, fallback, late spawn, restore and replica rearm.
+add_executable(mission_infantry_anim_test mission/mission_infantry_anim_test.cpp)
+target_link_libraries(mission_infantry_anim_test PRIVATE opennova_runtime)
+target_include_directories(mission_infantry_anim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_infantry_anim_test PRIVATE cxx_std_17)
+add_test(NAME mission_infantry_anim COMMAND mission_infantry_anim_test)
+
 # The kernel's lifecycle contract over the same synthetic mission, ungated: the
 # ordering guards, the sealed play-start baseline (capture/restore rewinds the
 # registry, the player, the clock and the event latches), the strict-vs-lenient
@@ -1869,14 +1963,24 @@ target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 
-# inmatch::listen_host over the kernel (ADR 0042 d3), ungated: the SP listen
+# inmatch::HostRole over the kernel (ADR 0043 d3), ungated: the SP listen
 # bring-up and its per-tick frame over a null socket, the local C2S gameplay
 # drain, and the dedicated (HostOnly) bring-up.
-add_executable(listen_host_test mission/listen_host_test.cpp)
-target_link_libraries(listen_host_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(listen_host_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(listen_host_test PRIVATE cxx_std_17)
-add_test(NAME listen_host COMMAND listen_host_test)
+add_executable(host_role_test mission/host_role_test.cpp)
+target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(host_role_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(host_role_test PRIVATE cxx_std_17)
+add_test(NAME host_role COMMAND host_role_test)
+
+# The tick digest (ADR 0043): the per-tick state hash a structural slice must
+# leave unchanged. The ctest leg is the synthetic mission (committed chain,
+# determinism); `tick_digest_test --mission <name>` is the local retail tool
+# behind scripts/parity/tick_digest.py and is never a ctest leg.
+add_executable(tick_digest_test mission/tick_digest_test.cpp)
+target_link_libraries(tick_digest_test PRIVATE opennova_test_rig)
+target_include_directories(tick_digest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tick_digest_test PRIVATE cxx_std_17)
+add_test(NAME tick_digest COMMAND tick_digest_test)
 
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
@@ -1975,12 +2079,26 @@ target_link_libraries(gsb_parse_roundtrip_test PRIVATE opennova_net)
 target_include_directories(gsb_parse_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_parse_roundtrip COMMAND gsb_parse_roundtrip_test)
 
+# The browser's per-row ping display fold (-4 -> -3, negative -> -2, 0 -> ms)
+# and the witnessed sweep constants.
+add_executable(ping_sweep_fold_test novaworld/ping_sweep_fold_test.cpp)
+target_link_libraries(ping_sweep_fold_test PRIVATE opennova_net)
+target_include_directories(ping_sweep_fold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ping_sweep_fold COMMAND ping_sweep_fold_test)
+
 # Retail dispatcher semantics (D-NET-190..193): SVRS accumulation, the gated
 # "GSB " reset, undersized-record skips, and the XXXX-terminator hardening.
 add_executable(gsb_retail_semantics_test novaworld/gsb_retail_semantics_test.cpp)
 target_link_libraries(gsb_retail_semantics_test PRIVATE opennova_net)
 target_include_directories(gsb_retail_semantics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_retail_semantics COMMAND gsb_retail_semantics_test)
+
+# The server browser's table model: cells, ping states, quick filters and
+# search, the sort orders (unmeasured pings last either way), details and hover text.
+add_executable(server_browser_test novaworld/server_browser_test.cpp)
+target_link_libraries(server_browser_test PRIVATE opennova_net)
+target_include_directories(server_browser_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME server_browser COMMAND server_browser_test)
 
 # Byte-level oracle: decode the genuine .204 server-browser blob
 # (fixtures/novaworld/nw204_jop_2.gsb) through our retail-faithful parser.
@@ -2012,7 +2130,7 @@ target_include_directories(net_ports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME net_ports COMMAND net_ports_test)
 
 add_executable(game_type_policy_test npwire/game_type_policy_test.cpp)
-target_link_libraries(game_type_policy_test PRIVATE opennova_net)
+target_link_libraries(game_type_policy_test PRIVATE opennova_runtime)
 target_include_directories(game_type_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME game_type_policy COMMAND game_type_policy_test)
 
@@ -2079,7 +2197,7 @@ add_executable(nw_host_register_e2e_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
 target_link_libraries(nw_host_register_e2e_test
-    PRIVATE opennova_novaworld_service opennova_net opennova_app_common)
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
 target_include_directories(nw_host_register_e2e_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server
@@ -2280,19 +2398,19 @@ add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
 # netsim tests — the in-match net seam (ADR 0009/0011).
 # The in-process loopback transport.
 add_executable(netsim_loopback_channel_test netsim/loopback_channel_test.cpp)
-target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_net)
+target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_runtime)
 add_test(NAME netsim_loopback_channel COMMAND netsim_loopback_channel_test)
 
 add_executable(netsim_item_replication_catalog_test
     netsim/item_replication_catalog_test.cpp)
-target_link_libraries(netsim_item_replication_catalog_test PRIVATE opennova_net opennova_formats)
+target_link_libraries(netsim_item_replication_catalog_test PRIVATE opennova_runtime opennova_formats)
 add_test(NAME netsim_item_replication_catalog
     COMMAND netsim_item_replication_catalog_test)
 
 # The ADR 0011 §4 loopback identity guard: World entity -> encode -> loopback ->
 # decode -> ClientState, field-identical to what the host's encoder + codec produced.
 add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
-target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_net)
+target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_runtime)
 add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 
 # A header-only retail join has no local BMS body to promote. The decoded
@@ -2300,7 +2418,7 @@ add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 # collision, deploy, and vehicle-seat consumers.
 add_executable(netsim_client_world_materializer_test
     netsim/client_world_materializer_test.cpp)
-target_link_libraries(netsim_client_world_materializer_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_world_materializer_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_world_materializer
     COMMAND netsim_client_world_materializer_test)
 
@@ -2310,18 +2428,18 @@ add_test(NAME netsim_client_world_materializer
 # bucket-ladder pins, and the honest chase-only fast-vehicle sustain limit
 # (the family prediction legs live world-side; watercraft_client_motor_test).
 add_executable(netsim_remote_motion_smoothness_test netsim/remote_motion_smoothness_test.cpp)
-target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_net)
+target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_runtime)
 add_test(NAME netsim_remote_motion_smoothness COMMAND netsim_remote_motion_smoothness_test)
 
 # The co-op-LAN fan-out guard: one World snapshot fanned to a connection table (loopback
 # self + a socket-free UdpSessionTransport joiner), per-connection anchoring, and the
 # host-side C2S 0x0C drain/SNAP — no Godot, no OS sockets (Increment A).
 add_executable(netsim_two_peer_fanout_test netsim/two_peer_fanout_test.cpp)
-target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_net)
+target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_runtime)
 add_test(NAME netsim_two_peer_fanout COMMAND netsim_two_peer_fanout_test)
 
 add_executable(netsim_build_player_uplink_test netsim/build_player_uplink_test.cpp)
-target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_net)
+target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_runtime)
 add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test)
 
 # The §5.10b decode-dispatch guard: the replica pipeline's items.def class resolver sizes
@@ -2330,35 +2448,42 @@ add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test
 # scatters every later record around the recipient anchor.
 add_executable(netsim_client_replica_pipeline_arms_dip_test
     netsim/client_replica_pipeline_arms_dip_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_arms_dip_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_arms_dip_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_arms_dip
     COMMAND netsim_client_replica_pipeline_arms_dip_test)
 
 add_executable(netsim_client_replica_pipeline_world_page_atomicity_test
     netsim/client_replica_pipeline_world_page_atomicity_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_world_page_atomicity
     COMMAND netsim_client_replica_pipeline_world_page_atomicity_test)
 
+# The engine's PF_* present-row collectors (runtime/inmatch/present_rows.h,
+# ADR 0043 G3): the host pool walk and the joiner's decoded-replica walk over a
+# bare kernel.
+add_executable(netsim_present_rows_test netsim/present_rows_test.cpp)
+target_link_libraries(netsim_present_rows_test PRIVATE opennova_runtime)
+add_test(NAME netsim_present_rows COMMAND netsim_present_rows_test)
+
 add_executable(netsim_client_replica_pipeline_recoil_test
     netsim/client_replica_pipeline_recoil_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_recoil
     COMMAND netsim_client_replica_pipeline_recoil_test)
 
 add_executable(netsim_client_replica_pipeline_occupant_backref_test
     netsim/client_replica_pipeline_occupant_backref_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_occupant_backref
     COMMAND netsim_client_replica_pipeline_occupant_backref_test)
 
 add_executable(netsim_client_replica_pipeline_target_carrier_follow_test
     netsim/client_replica_pipeline_target_carrier_follow_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_target_carrier_follow_test
-    PRIVATE opennova_net)
+    PRIVATE opennova_runtime)
 add_executable(netsim_client_replica_pipeline_contact_resolver_test
     netsim/client_replica_pipeline_contact_resolver_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_contact_resolver_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_contact_resolver_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_contact_resolver
     COMMAND netsim_client_replica_pipeline_contact_resolver_test)
 add_test(NAME netsim_client_replica_pipeline_target_carrier_follow
@@ -2366,13 +2491,13 @@ add_test(NAME netsim_client_replica_pipeline_target_carrier_follow
 
 add_executable(netsim_client_replica_pipeline_class_resolver_test
     netsim/client_replica_pipeline_class_resolver_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_class_resolver_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_class_resolver_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_class_resolver
     COMMAND netsim_client_replica_pipeline_class_resolver_test)
 
 add_executable(netsim_client_replica_pipeline_anim_pulse_test
     netsim/client_replica_pipeline_anim_pulse_test.cpp)
-target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE opennova_net)
+target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_anim_pulse
     COMMAND netsim_client_replica_pipeline_anim_pulse_test)
 
@@ -2388,14 +2513,14 @@ add_test(NAME netsim_client_replica_pipeline_body_arbitration
     COMMAND netsim_client_replica_pipeline_body_arbitration_test)
 
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
-target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_net)
+target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_runtime)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
 
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
 # P0/P1: the in-process listen-server bring-up state writes (§5.0).
 add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
-target_link_libraries(npruntime_server_session_test PRIVATE opennova_net)
+target_link_libraries(npruntime_server_session_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
 
 # P3: the World-driven host-side spawn pipeline (Server_InitNewRoundState ->
@@ -2414,21 +2539,21 @@ add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burs
 # S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
 # [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello
 # one-shot, the in-match spawn edge for L + the weapon-pump L-gate, and the per-session resets.
-add_executable(npruntime_joiner_world_bridge_test npruntime/joiner_world_bridge_test.cpp)
-target_link_libraries(npruntime_joiner_world_bridge_test PRIVATE opennova_net opennova_runtime)
-add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridge_test)
+add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
+target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
 
 # The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
 # promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
 # settle > window > edges), and the D-NET-178 expansion reconcile decision.
 add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
-target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_net)
+target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
 
-# ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
+# ADR 0013: the shared byte-budget spawn/world-stream chunker (inmatch::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
-target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_net)
+target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
 # D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
@@ -2485,10 +2610,11 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 # shared rig (common/retail_mission_files.h). Gated: OPENNOVA_JO_DIR (a packed
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
-        world/truck_rest_00tra world/rock_collision_00trg world/ai_corpse world/ai_threat
+        world/truck_rest_00tra world/motorcycle_gravity_06tr
+        world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/lose_flow_04tr)
+        mission/native_assets_00trg mission/lose_flow_04tr mission/buggy_01tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
@@ -2535,7 +2661,7 @@ target_link_libraries(npruntime_lan_probe_client_test
     PRIVATE opennova_lan_probe_client opennova_net opennova_app_common)
 add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test)
 
-# P5 — the headless CLIENT runtime (np::ClientRuntime / Client_ProcessNetworkFrame). Always-on
+# P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
 # plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
@@ -2546,7 +2672,7 @@ add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 # D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and
 # reassembles the paged S2C 0x45 terrain-tile stream for wire-driven loading.
 add_executable(npruntime_join_wire_assets_test npruntime/join_wire_assets_test.cpp)
-target_link_libraries(npruntime_join_wire_assets_test PRIVATE opennova_net)
+target_link_libraries(npruntime_join_wire_assets_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_wire_assets COMMAND npruntime_join_wire_assets_test)
 
 # Retail in-match loss recovery: future 0x43/0x83 packets trigger direction-specific 0x84/0x44
@@ -2604,3 +2730,18 @@ if(OPENNOVA_DEVTOOLS)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)
     add_test(NAME devtools COMMAND devtools_test)
 endif()
+
+# Mission-authored lndm callbacks, independent of thrown AT mines.
+add_executable(minefield_test world/minefield_test.cpp)
+target_link_libraries(minefield_test PRIVATE opennova_runtime)
+add_test(NAME minefield COMMAND minefield_test)
+
+add_executable(minefield_retail_test world/minefield_retail_test.cpp)
+target_link_libraries(minefield_retail_test PRIVATE opennova_test_rig)
+target_include_directories(minefield_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(minefield_retail COMMAND minefield_retail_test)
+
+target_include_directories(minefield_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(minefield_replica_test netsim/minefield_replica_test.cpp)
+target_link_libraries(minefield_replica_test PRIVATE opennova_runtime)
+add_test(NAME minefield_replica COMMAND minefield_replica_test)

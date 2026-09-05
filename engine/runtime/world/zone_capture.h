@@ -19,8 +19,7 @@
 // This preserves the original collision semantics without a second remote-only
 // objective path. [orig: Entity_MovementCollisionResolver @0x4B2BD0,
 // capture callback callsite @0x4B2F90..0x4B2FD0]
-#ifndef OPENNOVA_WORLD_ZONE_CAPTURE_H
-#define OPENNOVA_WORLD_ZONE_CAPTURE_H
+#pragma once
 
 #include <cstdint>
 #include <variant>
@@ -185,15 +184,6 @@ struct ZoneCaptureDeltaInput {
 // and minimum signed delta. Exposed as one input value for exact formula pins.
 int32_t zone_capture_control_delta(const ZoneCaptureDeltaInput &input);
 
-// Per-logic-tick consumer of the collision world's exact type-10 Change Team
-// contacts. It updates active presence and queues one request per zone/team;
-// it performs no ownership transition itself.
-void zone_capture_contact_tick(World &world);
 
-// One 1 Hz capture transaction. Reads its configuration and persistent state
-// from World, emits all semantic wire events, and drains pending requests.
-void zone_capture_second_tick(World &world, ZoneCaptureEvents &out);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ZONE_CAPTURE_H

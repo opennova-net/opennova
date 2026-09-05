@@ -1,7 +1,9 @@
 #include <formats/bfc1/bfc1.h>
 
 #include <string.h>
-#include "miniz.h"
+#include <miniz.h> // third_party/miniz
+
+namespace opennova::bfc1 {
 
 int bfc1_is_bfc1(const uint8_t *data, size_t size)
 {
@@ -65,3 +67,5 @@ int bfc1_decompress(const uint8_t *data, size_t size,
     *out_size = (size_t)stream.total_out;
     return 0;
 }
+
+} // namespace opennova::bfc1

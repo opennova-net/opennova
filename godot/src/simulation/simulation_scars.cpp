@@ -4,6 +4,9 @@
 // inputs (camera, fog distance, the terrain light colour) arrive from the shell
 // per present frame.
 #include "simulation/simulation_internal.h"
+#include "util/color_convert.h"
+#include "util/axes.h"
+#include "world/scar_draw_list.h"
 
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/impact_scar.h>
@@ -23,21 +26,6 @@ namespace {
 bool scar_owner_visible_cb(uint16_t p_owner_packed, void *p_user) {
 	const Simulation *sim = static_cast<const Simulation *>(p_user);
 	return sim->scar_owner_visible(p_owner_packed);
-}
-
-inline uint32_t argb_from_color(const Color &p_color) {
-	auto byte = [](float v) -> uint32_t {
-		const float clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-		return static_cast<uint32_t>(clamped * 255.0f + 0.5f);
-	};
-	return 0xFF000000u | (byte(p_color.r) << 16) | (byte(p_color.g) << 8) | byte(p_color.b);
-}
-
-inline Color color_from_argb(uint32_t p_argb) {
-	return Color(static_cast<float>((p_argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((p_argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(p_argb & 0xFFu) / 255.0f,
-			static_cast<float>((p_argb >> 24) & 0xFFu) / 255.0f);
 }
 
 } // namespace
@@ -80,9 +68,10 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 	return !any_hit;
 }
 
-Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
+Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		float p_fog_distance, const Color &p_terrain_light) const {
-	Dictionary out;
+	Ref<ScarDrawList> out;
+	out.instantiate();
 	if (!kernel_) {
 		return out;
 	}
@@ -91,11 +80,11 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.cam_x = p_camera_godot.x;
 	ctx.cam_y = -p_camera_godot.z;
 	ctx.fog_distance = p_fog_distance > 0.0f ? p_fog_distance : 0.0f;
-	ctx.terrain_light_argb = argb_from_color(p_terrain_light);
+	ctx.terrain_light_argb = opennova::argb_from_color_opaque(p_terrain_light);
 	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
 	opennova::renderer::ScarDrawList list;
-	opennova::renderer::compile_scar_draws(kernel_->world.scars, ctx, list);
+	opennova::renderer::compile_scar_draws(kernel_->world.out.scars, ctx, list);
 
 	PackedVector3Array vertices;
 	PackedVector2Array uvs;
@@ -155,9 +144,9 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		const opennova::renderer::ScarVertex &v = list.vertices[source_index(i)];
 		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
 				? Vector3(-v.x, v.y, v.z)
-				: Vector3(v.x, v.z, -v.y);
+				: mission_to_godot(v);
 		uvs[static_cast<int64_t>(i)] = Vector2(v.u, v.v);
-		colors[static_cast<int64_t>(i)] = color_from_argb(v.argb);
+		colors[static_cast<int64_t>(i)] = opennova::color_from_argb(v.argb);
 	}
 	PackedInt32Array batch_owner;
 	PackedInt32Array batch_texture;
@@ -214,21 +203,21 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		strip_mode_words[strip] =
 				static_cast<int32_t>(opennova::world::scar_texture_strip_mode_word(strip));
 	}
-	out["vertices"] = vertices;
-	out["uvs"] = uvs;
-	out["colors"] = colors;
-	out["batch_owner"] = batch_owner;
-	out["batch_texture"] = batch_texture;
-	out["batch_section"] = batch_section;
-	out["batch_flags"] = batch_flags;
-	out["batch_first"] = batch_first;
-	out["batch_count"] = batch_count;
-	out["batch_bms_id"] = batch_bms_id;
-	out["batch_spawn_origin"] = batch_spawn_origin;
-	out["strip_names"] = strip_names;
-	out["strip_mode_words"] = strip_mode_words;
-	out["slots_live"] = static_cast<int>(list.slots_live);
-	out["slots_culled"] = static_cast<int>(list.slots_culled);
-	out["rings_leased"] = kernel_->world.scars.leased_count();
+	out->set_vertices(vertices);
+	out->set_uvs(uvs);
+	out->set_colors(colors);
+	out->set_batch_owner(batch_owner);
+	out->set_batch_texture(batch_texture);
+	out->set_batch_section(batch_section);
+	out->set_batch_flags(batch_flags);
+	out->set_batch_first(batch_first);
+	out->set_batch_count(batch_count);
+	out->set_batch_bms_id(batch_bms_id);
+	out->set_batch_spawn_origin(batch_spawn_origin);
+	out->set_strip_names(strip_names);
+	out->set_strip_mode_words(strip_mode_words);
+	out->set_slots_live(static_cast<int>(list.slots_live));
+	out->set_slots_culled(static_cast<int>(list.slots_culled));
+	out->set_rings_leased(kernel_->world.out.scars.leased_count());
 	return out;
 }

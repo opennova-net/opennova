@@ -22,20 +22,19 @@
 // light @0x479600 for cbik/Bike — client subsets: pad probes at wheel height,
 // per-corner lifts, the 4-normal/axle attitude fits, the positive-corner or
 // mean-wheel rest Z; vehicle-client-movers-re.md §7-§9; boxless/terrain-less
-// rows keep the bilinear terrain-clamp stand-in). Tracked deferrals (D-NET-161):
-// the air/helicopter AUTHORITY mover (`move_function chel` — Super Pumas stay
-// parked), the skid/tire-slip model (`tireSlip`/`slip_speed`; the ASH buggy
-// authors slip_speed 0), the pool-1 vehicle-vs-vehicle collision loop +
-// collision-avoid damping, the authority drown-drain countdown, the solve's
-// contact-direction store feeding a slope-following velocity re-derive
-// (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the tank keeps
-// its full-basis drive with the same store deferred), the AI
-// autopilot/waypoint drive (states 16/18), specialized vehicle sound families
-// beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, and the
-// vehicle AI state machine's non-drive states
+// rows keep the bilinear terrain-clamp stand-in). The air family's authority
+// half (the CHel/cpln AI flight block, health machine, rotor gate and drains)
+// lives in vehicle_motor_air.cpp + AiSystem::chel_ai_drive (2026-09-01).
+// Tracked deferrals (D-NET-161): the skid/tire-slip model (`tireSlip`/
+// `slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
+// vehicle-vs-vehicle collision loop, the authority drown-drain countdown, the
+// solve's contact-direction store feeding a slope-following velocity
+// re-derive (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the
+// tank keeps its full-basis drive with the same store deferred), specialized
+// vehicle sound families beyond the ground idle/drive/reverse pass in
+// vehicle_sound.cpp, and the vehicle AI state machine's non-drive states
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
-#ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
-#define OPENNOVA_WORLD_VEHICLE_MOTOR_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -88,6 +87,14 @@ constexpr bool vehicle_family_uses_direct_air_mover(VehicleFamily family) {
            family == VehicleFamily::Plane;
 }
 
+// One of the two cbot-only, afloat wake slots retained from items.def. Unlike
+// the general item particle slot, these are speed-controlled persistent groups
+// and deliberately stay in the portable vehicle traits.
+struct VehicleWakeEffect {
+    std::string effect;
+    std::string userpoint;
+};
+
 struct VehicleTraits {
     int32_t physics = 0;       // itemDef+0x8DC ground-dispatch selector; direct air ignores it
     int32_t player_speed = 0;  // itemDef+0x8E8
@@ -122,6 +129,19 @@ struct VehicleTraits {
     int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
+    int32_t hand_brake = 0;    // itemDef+0x944 raw — arms the byte-973 stop latch
+                               // [orig: @0x48c03a `occupant && Flags & 8 && handBrake`]
+    // The AI crew clamp pair [orig: minAI +0x8D8 @0x48bc51, criticalHp +0x180
+    // @0x48bc7d]: an undercrewed AI hull that has left its spawn anchor bleeds
+    // to criticalHp (AiSystem::apply_min_ai_crew_clamp).
+    int32_t min_ai = 0;        // itemDef+0x8D8 raw — the crew count threshold
+    int32_t critical_hp = 0;   // itemDef+0x180 i16 raw — the clamp ceiling
+    // The aircraft mover's authority health machine [orig: the every-64th-tick
+    // block of Entity_UpdateAircraftPhysics @0x4903F4..0x4904A7]: above
+    // criticalHp the hull regens nonCriticalRegen up to healthMax - regen; at or
+    // below it the hull burns criticalDrain per 64 ticks.
+    int32_t critical_drain = 0;     // itemDef+0x182 i16 raw
+    int32_t non_critical_regen = 0; // itemDef+0x184 i16 raw
     // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
     // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904 —
     //  ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10]. The def's
@@ -133,6 +153,8 @@ struct VehicleTraits {
     int32_t shock = 0;         // the landing damp (11 - shock)/11; the oscillator
                                // clamps THIS field to [0,10] in place, as retail
                                // clamps the def's (@0x45D18F..0x45D1A2)
+    VehicleWakeEffect wake_w3; // particlefxw3: commanded-speed wake
+    VehicleWakeEffect wake_w4; // particlefxw4: current-motion wake
     // Platform probe geometry from the model bound boxes (16.16 model space;
     // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
     // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
@@ -173,11 +195,6 @@ private:
     std::unordered_map<int32_t, VehicleTraits> by_item_;
 };
 
-// The controlling occupant of a PlayerControl vehicle: the first live, internally
-// consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
-// +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in
-// Entity_UpdateVehiclePhysics @0x48af00]
-Entity *resolve_vehicle_controller(World &world, Entity &veh);
 
 // The AI-driver command block, computed by the AI system from the vehicle's brain (the
 // witnessed leg lives inside the vehicle physics; our brain state is AiSystem-owned, so
@@ -211,33 +228,12 @@ struct VehicleCtrlRegisters {
 VehicleCtrlRegisters vehicle_ctrl_registers(
         const Entity::VehicleMotorState &state);
 
-// One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
-// traits carry a non-zero `physics` selector). Consumes the controlling occupant's
-// replicated input (or the AI-driver command when the controller is an NPC), advances
-// Entity::position / Entity::yaw and the persistent Entity::veh motor state.
-// [orig: Entity_UpdateVehiclePhysics @0x48af00 — the authority drive core;
-// block-level cites inline]
-void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                        const VehicleDriveCmd *ai_cmd = nullptr);
+// abs((0xFFFF * signed_speed) >> 15), kept as Q16 control magnitude. The
+// arithmetic shift occurs before absolute value, including its one-unit
+// forward/reverse asymmetry.
+uint32_t watercraft_wake_magnitude_q16(int32_t signed_speed) noexcept;
 
-// The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
-// subset of the cbot family function — per-record chase plus local-driver input
-// or remote register mirroring, steer/thrust/drag/keel prediction, contact drags,
-// and X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480].
-// The local driver reconciles longitudinal command with the received register
-// while retaining local steer. Z, pitch/roll, and the
-// afloat/airborne latches come from the platform solve below. Consumes the staged
-// VehicleMotorState net_* cluster; the sim runs it once per world tick on a
-// non-authority world for staged pool-1 Watercraft entities.
-// The boat platform solve — buoyancy, hull attitude, and the airborne/afloat
-// flags, run every tick after integration exactly where the retail caller sits
-// [orig: Entity_ProcessPlatformPhysics @0x481870, called @0x48ECE7; client
-// subset — the authority damage/latch legs, entity-entity collision, the
-// planing lean machine @0x45AEA0, and the wreck-tumble path are cited
-// deferrals]. Writes veh.veh.air_pitch_bam/air_roll_bam (the shared attitude
-// fields the sim mirrors to the presented row) and position Z.
-void watercraft_platform_solve(World &world, Entity &veh,
-                               const VehicleTraits &traits);
+
 
 // The carrier pose in the deck-ride's units (16.16 position / BAM32
 // attitude): predicted vehicles serve the exact motor registers, everything
@@ -251,29 +247,8 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 // per-mover prologue stamps of +0x80..+0x94].
 void stamp_saved_live_pose(Entity &e);
 
-void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
-// One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
-// occupant/AI/parked input staging behind the witnessed gate, capsize damage,
-// then the same steer/thrust/drag/contact/integration core the client subset
-// runs. The AI command block comes from AiSystem::watercraft_ai_drive.
-// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path behind
-// the @0x48DF8C..0x48DFA2 input gate; witnessed 2026-08-06]
-void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &traits,
-                           const VehicleDriveCmd *ai_cmd = nullptr);
 
-// The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
-// remote registers driving tick_vehicle_motor's core with the input block bypassed;
-// the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
-void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
-// The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is
-// a thunk): the client subset of Entity_UpdateAircraftPhysics @0x490310 —
-// three-register mirror, tilt-command attitude model, altitude-hold servo on the
-// record-seeded target Z (no gravity constant), airborne aero / grounded sheds,
-// and the terrain-clamp stand-in for the unported 0x47EF10 contact solve.
-void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_VEHICLE_MOTOR_H

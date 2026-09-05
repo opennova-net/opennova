@@ -111,22 +111,19 @@ func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners
 
 
 func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:
-	var empty_stats := {
-		"runtime_detail_intents": 0,
-		"detail_high_instances": 0,
-		"detail_low_instances": 0,
-	}
+	var empty_stats := FoliageFrameStats.new()
 	assert_false(ProbeScript.runtime_foliage_validation_error(
 		"00TRe.bms", empty_stats, 0).is_empty(),
 		"The foliage oracle must not PASS 00TRe when dispatch produced nothing.")
+	var intent_only := FoliageFrameStats.new()
+	intent_only.runtime_detail_intents = 1
 	assert_false(ProbeScript.runtime_foliage_validation_error(
-		"00TRe.bms", {"runtime_detail_intents": 1}, 1).is_empty(),
+		"00TRe.bms", intent_only, 1).is_empty(),
 		"Intent-only 00TRe output is not enough when the reimpl has no detail instances.")
-	assert_eq(ProbeScript.runtime_foliage_validation_error("00TRe.bms", {
-		"runtime_detail_intents": 1,
-		"detail_high_instances": 1,
-		"detail_low_instances": 0,
-	}, 1), "")
+	var one_instance := FoliageFrameStats.new()
+	one_instance.runtime_detail_intents = 1
+	one_instance.detail_high_instances = 1
+	assert_eq(ProbeScript.runtime_foliage_validation_error("00TRe.bms", one_instance, 1), "")
 	assert_eq(ProbeScript.runtime_foliage_validation_error(
 		"00TRa.bms", empty_stats, 0), "",
 		"00TRa's exact spawn is an intentional zero-visible-foliage control.")

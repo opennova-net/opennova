@@ -40,29 +40,29 @@ int main() {
 		return 1;
 	}
 
-	CHECK(kernel.has_local_player(), "minimal mission spawns the local player");
-	CHECK(kernel.loadout.spawn_kit_set, "the offline BMS kit is promoted");
-	CHECK(!kernel.loadout.spawn_kit.empty(), "the promoted offline kit is not empty");
-	if (!kernel.loadout.spawn_kit.empty())
-		CHECK(kernel.loadout.spawn_kit.front().name == kExpectedWeapon,
+	CHECK(kernel.local.has_local_player(), "minimal mission spawns the local player");
+	CHECK(kernel.local.loadout.spawn_kit_set, "the offline BMS kit is promoted");
+	CHECK(!kernel.local.loadout.spawn_kit.empty(), "the promoted offline kit is not empty");
+	if (!kernel.local.loadout.spawn_kit.empty())
+		CHECK(kernel.local.loadout.spawn_kit.front().name == kExpectedWeapon,
 		      "the promoted first weapon is WPN_AK47AUTO");
 
-	CHECK(kernel.inventory_valid, "the promoted kit builds a weapon inventory");
+	CHECK(kernel.local.inventory_valid, "the promoted kit builds a weapon inventory");
 	const opennova::world::WeaponInventorySlot *equipped =
-			kernel.inventory.slot(kernel.inventory.equipped_combo);
+			kernel.local.inventory.slot(kernel.local.inventory.equipped_combo);
 	CHECK(equipped != nullptr && equipped->adm_index >= 0,
 	      "the spawn-default inventory slot is equipped");
 
 	const opennova::world::WeaponTableEntry *equipped_def = nullptr;
 	if (equipped != nullptr && equipped->adm_index >= 0 && equipped->adm_index < 256)
-		equipped_def = kernel.world.weapons.by_index(
+		equipped_def = kernel.world.tables.weapons.by_index(
 				static_cast<uint8_t>(equipped->adm_index));
 	CHECK(equipped_def != nullptr, "the equipped slot resolves through weapon.def");
 	if (equipped_def != nullptr)
 		CHECK(equipped_def->name == kExpectedWeapon,
 		      "the equipped weapon identity is WPN_AK47AUTO");
 
-	const opennova::world::Entity *player = kernel.player();
+	const opennova::world::Entity *player = kernel.local.player();
 	CHECK(player != nullptr, "the spawned player entity exists");
 	if (player != nullptr && equipped != nullptr && equipped->adm_index >= 0)
 		CHECK(player->equipped_adm_index == static_cast<uint8_t>(equipped->adm_index),

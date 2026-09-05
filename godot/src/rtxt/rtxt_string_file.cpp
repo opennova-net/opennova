@@ -54,6 +54,8 @@ bool is_valid_utf8(const std::string &s) {
 	return true;
 }
 
+// NOT util/string_convert.h's to_gd/to_std: these two are cp1252-aware (the
+// retail text falls back to the single-byte codepage), a different contract.
 String std_to_gd(const std::string &s) {
 	if (is_valid_utf8(s)) {
 		return String::utf8(s.c_str(), static_cast<int>(s.length()));
@@ -197,7 +199,6 @@ void RtxtStringFile::remove_entry(int p_index) {
 void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
 	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
 	file_.entries[p_index].text = gd_to_std(p_text);
-	emit_signal("entry_text_changed", p_index);
 }
 
 int RtxtStringFile::_section_insert_index(uint32_t p_section_index) const {
@@ -234,7 +235,6 @@ int RtxtStringFile::add_section(const String &p_name) {
 	section.string_count = 0;
 	file_.sections.push_back(std::move(section));
 	_refresh();
-	emit_signal("sections_changed");
 	return static_cast<int>(file_.sections.size()) - 1;
 }
 
@@ -269,11 +269,7 @@ PackedByteArray RtxtStringFile::to_byte_array() const {
 		UtilityFunctions::push_warning("RtxtStringFile: serialize failed: ", error.c_str());
 		return out;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error RtxtStringFile::load_from_byte_array(const PackedByteArray &p_bytes) {
@@ -335,9 +331,7 @@ Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &
 	opennova::mission::resolve_mission_text(files,
 			std::string(mission_file_basename.utf8().get_data()), bytes);
 	if (bytes.empty()) return Ref<RtxtStringFile>();
-	PackedByteArray packed;
-	packed.resize(static_cast<int64_t>(bytes.size()));
-	std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
+	const PackedByteArray packed = to_packed_bytes(bytes);
 	Ref<RtxtStringFile> table;
 	table.instantiate();
 	if (table->load_from_byte_array(packed) != OK) return Ref<RtxtStringFile>();
@@ -350,7 +344,6 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_string", "key"), &RtxtStringFile::has_string);
 	ClassDB::bind_method(D_METHOD("get_string_in_section", "section", "key"), &RtxtStringFile::get_string_in_section);
 	ClassDB::bind_method(D_METHOD("has_string_in_section", "section", "key"), &RtxtStringFile::has_string_in_section);
-	ClassDB::bind_method(D_METHOD("normalize_grouping"), &RtxtStringFile::normalize_grouping);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &RtxtStringFile::get_entry_count);
 
 	ClassDB::bind_method(D_METHOD("get_section_count"), &RtxtStringFile::get_section_count);
@@ -377,6 +370,4 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 
 	ADD_SIGNAL(MethodInfo("entries_structure_changed"));
-	ADD_SIGNAL(MethodInfo("entry_text_changed", PropertyInfo(Variant::INT, "index")));
-	ADD_SIGNAL(MethodInfo("sections_changed"));
 }

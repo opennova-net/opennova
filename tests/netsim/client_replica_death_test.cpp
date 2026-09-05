@@ -10,13 +10,13 @@
 #include <memory>
 #include <vector>
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
 using namespace opennova;
-using namespace opennova::netsim;
+using namespace opennova::replication;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \
@@ -107,9 +107,100 @@ void test_self_wave_zone() {
 
 } // namespace
 
+// A minimal complete S2C 0x0F body: the 23-byte fixed header (game_flags at
+// byte 22), the 128-entry zero score table, then zero waypoint/team-name
+// counts — the exact end the strict decoder requires.
+std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
+	std::vector<uint8_t> b(23 + kWorldStateScoreCount * 4 + 4, 0);
+	b[22] = game_flags;
+	return b;
+}
+
+// The deploy-map OVERLAY global (retail g_deploy_screen_active): armed by the
+// 0x0F game_flags bit0 UNLESS the death screen is already up, then host-
+// ASSIGNED every per-frame 0x0A from flags1 bit1 — set and cleared, no edge
+// latch. [orig: NapiNPClientMsg_0x00F zero @0x42e2d8 + arm @0x42e2f8;
+//  NapiNPClientMsg_0x00A @0x42ff82 g_deploy_screen_active = (flags1 >> 1) & 1]
+void test_deploy_overlay_follows_the_host() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	CHECK(!view.state().deploy_overlay_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(view.state().deploy_overlay_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
+	CHECK(!view.state().deploy_overlay_active);
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 150;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x02;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().deploy_overlay_active);
+	fu.flags1 = 0x00;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().deploy_overlay_active);
+	// With the death screen up (flags1 bit0), the 0x0F bit0 arm is suppressed.
+	fu.flags1 = 0x01;
+	fu.health = 0;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().death_screen_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(!view.state().deploy_overlay_active);
+}
+
+// The death.mnu open latch: one open per arming, stamped result-blind, and
+// cleared only by the host dropping the bit — never by a dismiss.
+// [orig: Render_ProcessMainSceneFrame latch @0x5cab70/@0x5cab8b;
+//  Game_CloseInGameScreens @0x54b954 on the close-on-clear leg]
+void test_deploy_overlay_open_latch() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(view.state().take_deploy_overlay_open());  // the one open
+	CHECK(!view.state().take_deploy_overlay_open()); // latched (a dismiss
+	                                                 // does not re-arm)
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 150;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x02; // the host keeps the bit set: still latched
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().take_deploy_overlay_open());
+	fu.flags1 = 0x00; // the trigger falls: the latch clears
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().deploy_overlay_open_latch);
+	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed again
+	fu.flags1 = 0x02; // re-armed: the screen opens again
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().take_deploy_overlay_open());
+	CHECK(!view.state().take_deploy_overlay_open());
+	// The 0x0F zero clears it the same way [orig: @0x42e2d8].
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
+	CHECK(!view.state().deploy_overlay_open_latch);
+}
+
+// A KNOWN tag whose body fails its decoder counts as a malformed body, not
+// an unknown tag — the arm that once bumped the wrong counter.
+void test_truncated_known_body_counts_as_malformed() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	const std::size_t malformed_before = view.malformed_bodies();
+	const std::size_t unknown_before = view.unknown_tags();
+	std::vector<uint8_t> truncated = world_state_load_body(0x01);
+	truncated.resize(10);
+	view.apply(s2c::WORLD_STATE_LOAD, truncated);
+	CHECK(view.malformed_bodies() == malformed_before + 1);
+	CHECK(view.unknown_tags() == unknown_before);
+	CHECK(!view.state().deploy_overlay_active); // nothing folded
+}
+
 int main() {
 	test_sub_block_0_timers_fold_and_retain();
 	test_self_wave_zone();
+	test_deploy_overlay_follows_the_host();
+	test_deploy_overlay_open_latch();
+	test_truncated_known_body_counts_as_malformed();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

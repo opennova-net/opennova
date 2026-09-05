@@ -13,11 +13,18 @@ var _game_container: SubViewportContainer = null
 var _game_viewport: SubViewport = null
 var _embedded_game_view := false
 var _tools_open := false
+var _runtime_window: Window = null
 
 
 static func should_embed_game_view(
 		debug_build: bool, display_name: String, imgui_available: bool) -> bool:
 	return debug_build and display_name != "headless" and imgui_available
+
+
+## The headless display server (--headless): no window, no capture, no
+## splash; the one place the display-server name is compared.
+static func is_headless() -> bool:
+	return DisplayServer.get_name() == "headless"
 
 
 func _ready() -> void:
@@ -28,6 +35,10 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if _runtime_window != null and _runtime_window.size_changed.is_connected(
+			_on_runtime_window_size_changed):
+		_runtime_window.size_changed.disconnect(_on_runtime_window_size_changed)
+	_runtime_window = null
 	if _embedded_game_view and is_instance_valid(_main_game):
 		_main_game.get_dev_tools().set_game_viewport(null)
 
@@ -66,6 +77,16 @@ func is_game_view_embedded() -> bool:
 	return _embedded_game_view
 
 
+## Synchronize the optional debug SubViewport with its Window immediately.
+## LoadingScreen calls this after pumping DisplayServer events because the
+## ordinary _process resize pass cannot run inside a blocking mission load.
+func sync_game_viewport_to_window() -> void:
+	if _embedded_game_view and not _tools_open and _runtime_window != null:
+		var target_size := _runtime_window.size
+		_resize_game_viewport(target_size)
+		_submit_game_viewport_rect(target_size)
+
+
 func _can_embed_game_view() -> bool:
 	return should_embed_game_view(
 			OS.is_debug_build(), DisplayServer.get_name(), Engine.has_singleton("ImGuiGD"))
@@ -73,6 +94,10 @@ func _can_embed_game_view() -> bool:
 
 func _start_embedded_game() -> void:
 	_embedded_game_view = true
+	_runtime_window = get_window()
+	if _runtime_window != null and not _runtime_window.size_changed.is_connected(
+			_on_runtime_window_size_changed):
+		_runtime_window.size_changed.connect(_on_runtime_window_size_changed)
 	_game_container = SubViewportContainer.new()
 	_game_container.name = "GameViewportContainer"
 	_game_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -96,6 +121,13 @@ func _start_embedded_game() -> void:
 	tools.open_changed.connect(_on_tools_open_changed)
 	_game_viewport.add_child(_main_game)
 	_on_tools_open_changed(tools.is_open())
+
+
+func _on_runtime_window_size_changed() -> void:
+	# Keep ordinary resize edges in lockstep. LoadingScreen also calls the
+	# public sync explicitly after process_events() while mission loading blocks
+	# the normal _process pass.
+	sync_game_viewport_to_window()
 
 
 func _start_direct_game() -> void:
@@ -126,3 +158,20 @@ func _resize_game_viewport(requested_size: Vector2i) -> void:
 	var size := Vector2i(maxi(1, requested_size.x), maxi(1, requested_size.y))
 	if _game_viewport.size != size:
 		_game_viewport.size = size
+
+
+## Replace the container's already-submitted texture rectangle immediately.
+## During a blocking mission load, Control's queued redraw cannot run, so a
+## fullscreen resize otherwise leaves the last windowed rectangle on the root
+## canvas even though both Control.size and SubViewport.size already changed.
+func _submit_game_viewport_rect(requested_size: Vector2i) -> void:
+	if not is_instance_valid(_game_container) or not is_instance_valid(_game_viewport):
+		return
+	var texture := _game_viewport.get_texture()
+	if texture == null:
+		return
+	var size := Vector2i(maxi(1, requested_size.x), maxi(1, requested_size.y))
+	var canvas_item := _game_container.get_canvas_item()
+	RenderingServer.canvas_item_clear(canvas_item)
+	RenderingServer.canvas_item_add_texture_rect(
+			canvas_item, Rect2(Vector2.ZERO, Vector2(size)), texture.get_rid())

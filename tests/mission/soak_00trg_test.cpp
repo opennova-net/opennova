@@ -1,5 +1,5 @@
 // S3/S4 native soak (ADR 0028) on the retail data: 00TRg boots with the sim's
-// own asset root (the native SimCollisionPoseProvider + the native mounted
+// own asset root (the native SimPoseProvider + the native mounted
 // resolver are AUTHORITATIVE) plus the seat-spec table, then runs an extended
 // live-shaped load: thousands of 62.5 Hz ticks with the mission's AI thinking,
 // walking, and command-mounted on the 50cals (bms 37 -> SSN 65, 51 -> 64), a
@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	std::printf("soak: 00TRg up: attached=%d seat specs=%zu rounds=%d (%d ticks)\n", rig.collision_attached,
 			rig.seat_specs.size(), rounds, rounds * 62);
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
 	bool seen = false;
 	for (int r = 0; r < rounds; ++r) {
 		rig.tick(62);
-		const int count = static_cast<int>(rig.hitboxes(rig.player_position(), 80.0f, 96, 24000).size());
+		const int count = static_cast<int>(rig.hitboxes(rig.local.player_position(), 80.0f, 96, 24000).size());
 		max_hitboxes = std::max(max_hitboxes, count);
 		if (seen) {
 			// Zero rounds COUNT once live hitboxes exist — a mid-soak regression

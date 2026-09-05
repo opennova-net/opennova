@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <base/io/hash.h>
 
 // [orig: Terrain_CollectAndRenderTileModels temp-blue result
 // @0x60D5BF..0x60DA4F; PSDepthAlpha zero-RGB ONE/ONE page composite
@@ -11,7 +12,6 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
 constexpr uint8_t kShadowStampDomain[] = {
 		't', 'e', 'r', 'r', 'a', 'i', 'n', '-',
 		's', 't', 'a', 't', 'i', 'c', '-', 's',
@@ -35,10 +35,6 @@ bool pixel_count(uint32_t width, uint32_t height,
 	}
 	result = static_cast<std::size_t>(width) * height;
 	return true;
-}
-
-uint64_t mix(uint64_t hash, uint8_t value) noexcept {
-	return (hash ^ value) * kFnvPrime;
 }
 
 } // namespace
@@ -128,9 +124,9 @@ TerrainTileContentStamp mix_terrain_static_shadow_content_stamp(
 		TerrainTileContentStamp base,
 		TerrainTileContentStamp shadow) noexcept {
 	uint64_t hash = base.value;
-	for (uint8_t byte : kShadowStampDomain) hash = mix(hash, byte);
+	for (uint8_t byte : kShadowStampDomain) hash = io::fnv1a64_byte(hash, byte);
 	for (int shift = 0; shift < 64; shift += 8) {
-		hash = mix(hash, static_cast<uint8_t>(shadow.value >> shift));
+		hash = io::fnv1a64_byte(hash, static_cast<uint8_t>(shadow.value >> shift));
 	}
 	return TerrainTileContentStamp{hash};
 }

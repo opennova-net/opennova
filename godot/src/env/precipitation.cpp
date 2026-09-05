@@ -1,4 +1,5 @@
 #include "env/precipitation.h"
+#include "util/color_convert.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -58,10 +59,6 @@ void Precipitation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame", "sim", "camera"),
 			&Precipitation::render_frame);
 	ClassDB::bind_method(D_METHOD("hide_frame"), &Precipitation::hide_frame);
-	ClassDB::bind_method(D_METHOD("get_last_drop_count"),
-			&Precipitation::get_last_drop_count);
-	ClassDB::bind_method(D_METHOD("is_last_frame_snow"),
-			&Precipitation::is_last_frame_snow);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -197,11 +194,11 @@ void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera) {
 	}
 	const Transform3D xform = p_camera->get_global_transform();
 	const Basis basis = xform.basis;
-	const Dictionary frame = sim->compile_precipitation_frame(xform.origin,
-			basis.get_column(0).normalized(), basis.get_column(1).normalized(),
+	const opennova::renderer::PrecipitationDrawFrame &frame = sim->compile_precipitation_frame(
+			xform.origin, basis.get_column(0).normalized(), basis.get_column(1).normalized(),
 			weather->get_terrain_light_combined_rgb());
-	int drops = static_cast<int>(frame.get("drops", 0));
-	last_snow_ = static_cast<bool>(frame.get("snow", false));
+	int drops = frame.drops;
+	last_snow_ = frame.snow;
 	if (drops <= 0) {
 		hide_frame();
 		return;
@@ -210,22 +207,26 @@ void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera) {
 		drops = kMaxVertices / 3;
 	}
 	last_drops_ = drops;
-	const PackedVector3Array positions = frame.get("positions", PackedVector3Array());
-	const int live_vertices = static_cast<int>(
-			positions.size() < static_cast<int64_t>(drops) * 3 ? positions.size() : static_cast<int64_t>(drops) * 3);
+	// The positions only: the per-drop uv triple {(0.5, 0), (0, 1), (1, 1)} is
+	// a constant of the streak build kept in the static attribute stream; the
+	// frame packs five floats per vertex.
+	const int live_vertices = drops * 3;
+	PackedVector3Array positions;
+	positions.resize(live_vertices);
+	Vector3 *pw = positions.ptrw();
+	for (int i = 0; i < live_vertices; ++i) {
+		const float *v = frame.vertices.data() + static_cast<size_t>(i) * 5;
+		pw[i] = Vector3(v[0], v[1], v[2]);
+	}
 	if (surface_streams_) {
 		_upload_positions(positions, live_vertices);
 	} else {
 		_rebuild_surface(positions, live_vertices);
 	}
-	const int64_t argb = static_cast<int64_t>(frame.get("color", 0xFF000000));
+	const int64_t argb = static_cast<int64_t>(frame.color_argb);
 	// Env_TerrainLightCombined | 0xFF000000: the diffuse the fixed-function
 	// combine modulates (x2) the texture with.
-	const Color diffuse(
-			static_cast<float>((argb >> 16) & 0xFF) / 255.0f,
-			static_cast<float>((argb >> 8) & 0xFF) / 255.0f,
-			static_cast<float>(argb & 0xFF) / 255.0f,
-			static_cast<float>((argb >> 24) & 0xFF) / 255.0f);
+	const Color diffuse = opennova::color_from_argb(static_cast<uint32_t>(argb));
 	material_->set_shader_parameter(param_diffuse_, diffuse);
 	if (!texture_bound_ || bound_texture_snow_ != last_snow_) {
 		Ref<Texture2D> texture = _texture_for(last_snow_);

@@ -113,7 +113,6 @@ public:
 	// Env_TrnSnapshotTable @ 0x26c7414]. Null = no table (a clear-weather
 	// mission renders the .env table alone).
 	void set_overcast_config(const Config *overcast);
-	const Config *overcast_config() const { return overcast_config_; }
 	// The weather view this state reads its scalars, fog type, precipitation
 	// kind, overcast blend and clock through: the World's WeatherState on a
 	// mission, else this state's own standalone home (null binds it back).
@@ -172,7 +171,6 @@ public:
 	// Environment_SetTodAdvanceRate @ 0x57d170, the 60-minute floor]. A
 	// bound World home keeps its own (the embedder seeded it).
 	void configure_mission_clock(int start_time_q8_8, int minutes_per_day);
-	int mission_advance_per_tick() const;
 	// Advance the STANDALONE home by complete weather ticks (sim legs; the
 	// TOD recompute follows); a bound World home advances in its kernel.
 	void advance_mission_clock(int ticks);
@@ -465,9 +463,12 @@ private:
 
 	TodState tod_{};
 	bool tod_valid_ = false;
-	Vec3 sun_dir_{0.0f, 0.70710678f, 0.70710678f};
+	// The unseeded default light direction: 45 degrees up, in the render-float
+	// basis (a unit vector, not a weight; sqrt(2)/2 by construction).
+	static constexpr Vec3 kDefaultSunDirRender{0.0f, 0.70710678f, 0.70710678f};
+	Vec3 sun_dir_ = kDefaultSunDirRender;
 	Vec3 moon_dir_{};
-	Vec3 light_dir_{0.0f, 0.70710678f, 0.70710678f};
+	Vec3 light_dir_ = kDefaultSunDirRender;
 	bool is_night_ = false;
 	float day_phase_blend_ = 1.0f;
 	Rgb fill_light_{0.4f, 0.45f, 0.55f};

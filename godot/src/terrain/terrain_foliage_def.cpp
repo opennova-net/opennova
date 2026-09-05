@@ -22,7 +22,6 @@ void TerrainFoliageDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_attrib_flags"), &TerrainFoliageDef::get_attrib_flags);
 	ClassDB::bind_method(D_METHOD("set_shadow", "enabled"), &TerrainFoliageDef::set_shadow);
 	ClassDB::bind_method(D_METHOD("get_shadow"), &TerrainFoliageDef::get_shadow);
-	ClassDB::bind_method(D_METHOD("to_dictionary"), &TerrainFoliageDef::to_dictionary);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic"), "set_graphic", "get_graphic");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "match", PROPERTY_HINT_RANGE, "-1,255,1"), "set_match", "get_match");
@@ -70,18 +69,6 @@ bool TerrainFoliageDef::get_shadow() const {
 
 bool TerrainFoliageDef::get_force_on() const {
 	return (attrib_flags & ATTRIB_FORCE_ON) != 0;
-}
-
-Dictionary TerrainFoliageDef::to_dictionary() const {
-	Dictionary out;
-	out["graphic"] = graphic;
-	out["color_lower"] = color_lower;
-	out["color_upper"] = color_upper;
-	out["match"] = match;
-	out["attrib_flags"] = attrib_flags;
-	out["shadow"] = get_shadow();
-	out["force_on"] = get_force_on();
-	return out;
 }
 
 void TerrainFoliageDef::copy_from_native(const opennova::FoliageDef &def) {

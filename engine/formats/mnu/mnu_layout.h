@@ -1,5 +1,4 @@
-#ifndef MNU_LAYOUT_H
-#define MNU_LAYOUT_H
+#pragma once
 
 // Witnessed .mnu widget-geometry math (the layout half of the menu system —
 // ADR 0028: math native, Control-tree writes stay shell-side). Everything is
@@ -113,4 +112,3 @@ RectEdges spin_button_rect(bool has_left, int left, bool has_top, int top,
 std::uint32_t item_color_argb(const std::string &hex_text);
 
 }  // namespace opennova::mnu
-#endif  // MNU_LAYOUT_H

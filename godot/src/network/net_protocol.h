@@ -4,8 +4,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <net/npruntime/game_config.h>
-#include <net/npwire/game_type.h>
+#include <runtime/inmatch/game_config.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/wire_handle.h>
 
@@ -17,14 +17,14 @@ namespace godot {
 // promoted-literal lint keeps the values in their canonical homes), and the
 // .cpp static_asserts pin each bound name besides. The witnesses live at the
 // engine homes, never here:
-//   engine/net/npwire/game_type.h      — g_GameType code words, the objective
+//   engine/base/gameprofile/game_type.h      — g_GameType code words, the objective
 //                                        bit, the mission-attrib map, the
 //                                        Config_SetDefaults rule baseline,
 //                                        custom-text default, callsign cap
 //   engine/net/npwire/net_ports.h      — the retail LAN port range + gate port
 //   engine/net/npwire/wire_handle.h    — the pool<<12|slot handle layout
 //   engine/net/npwire/session_hello.h  — the ClientAuth character_id bit-pack
-//   engine/net/npruntime/game_config.h — the 1..65 lobby player cap
+//   engine/runtime/inmatch/game_config.h — the 1..65 lobby player cap
 class NetProtocol : public RefCounted {
 	GDCLASS(NetProtocol, RefCounted)
 
@@ -62,7 +62,7 @@ public:
 
 		// The lobby player-cap ceiling (npruntime game_config.h) and the wire
 		// callsign cap (Name[16] cstring; npwire game_type.h).
-		MAX_PLAYERS_CAP = opennova::np::kMaxPlayersCap,
+		MAX_PLAYERS_CAP = opennova::inmatch::kMaxPlayersCap,
 		MAX_CALLSIGN_LENGTH = opennova::game_rules::kMaxCallsignLength,
 
 		// The Config_SetDefaults session-rule baseline (npwire game_type.h).

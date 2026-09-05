@@ -74,7 +74,6 @@ void CreditsPlayer::_bind_methods() {
 	// Signals.
 	ADD_SIGNAL(MethodInfo("finished"));
 	ADD_SIGNAL(MethodInfo("started"));
-	ADD_SIGNAL(MethodInfo("scroll_offset_changed", PropertyInfo(Variant::FLOAT, "offset")));
 }
 
 CreditsPlayer::CreditsPlayer() {
@@ -161,7 +160,6 @@ void CreditsPlayer::play() {
 	}
 
 	scroll_offset_ = 0.0f;
-	emit_signal("scroll_offset_changed", scroll_offset_);
 	playing_ = true;
 	paused_ = false;
 	set_process(true);
@@ -177,7 +175,6 @@ void CreditsPlayer::stop() {
 	playing_ = false;
 	paused_ = false;
 	scroll_offset_ = 0.0f;
-	emit_signal("scroll_offset_changed", scroll_offset_);
 	set_process(false);
 
 	if (content_) {
@@ -211,7 +208,6 @@ void CreditsPlayer::_process_scroll(double p_delta) {
 	// tick elsewhere is 62 Hz). Do not cite or change without a grill.
 	float scroll_rate = credits_resource_->get_scroll_rate() * speed_scale_ * 60.0f;
 	scroll_offset_ += scroll_rate * p_delta;
-	emit_signal("scroll_offset_changed", scroll_offset_);
 
 	float y_pos = get_size().y - scroll_offset_;
 	content_->set_position(Vector2(0, y_pos));

@@ -2,6 +2,7 @@
 #include "render/q3_frame_adapter.h"
 #include "render/q3_source_registry.h"
 #include "render/rd_fullscreen.h"
+#include "render/rd_timestamp_span.h"
 
 #include <algorithm>
 #include <array>
@@ -48,13 +49,15 @@ namespace {
 // A normal gameplay camera keeps precisely the beauty layers left after the
 // player/fly camera removes the FP body, shadow-only, and the twelve
 // slot-capture bits: world, water, the terrain-shadow receiver plumbing bit,
-// the no-mirror world layer, and the first-person viewmodel (bit 11 — the gun
-// draws inside the beauty pass through its shader-side renderfov projection
-// and depth band, retail's "viewmodel first" step). Q3 omits the plumbing bit
-// and the viewmodel (retail's Q3 copies of gun strips against the depth band
-// are unwitnessed, D-RORD-10). That gives shaders a collision-free exact-mask
-// signature without admitting caster or slot-capture geometry anywhere.
-constexpr std::uint32_t kBeautyCameraMask = 0x00018C01u;
+// the no-mirror world layer, the foliage blanket bit (mirror-excluded — the
+// witnessed reflection context collects no foliage, env-tod-re.md #30), and
+// the first-person viewmodel (bit 11 — the gun draws inside the beauty pass
+// through its shader-side renderfov projection and depth band, retail's
+// "viewmodel first" step). Q3 omits the plumbing bit and the viewmodel
+// (retail's Q3 copies of gun strips against the depth band are unwitnessed,
+// D-RORD-10). That gives shaders a collision-free exact-mask signature
+// without admitting caster or slot-capture geometry anywhere.
+constexpr std::uint32_t kBeautyCameraMask = 0x00038C01u;
 // FrameFX's 256-square blur target size. Focused Q3 is rendered at beauty
 // resolution into the compositor's color attachment with resolved beauty
 // depth attached; this constant applies only after the capture stretch.
@@ -276,7 +279,15 @@ public:
 	Vector2i last_size;
 	Vector2i last_capture_size;
 	bool q3_sampled = false;
+	std::uint64_t gpu_span_us = 0;
+	bool gpu_span_valid = false;
+	std::uint64_t gpu_composite_us = 0;
+	bool gpu_composite_valid = false;
+	std::uint64_t gpu_decode_us = 0;
+	bool gpu_decode_valid = false;
 	std::atomic<bool> shutdown_requested{false};
+	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
+	std::atomic<bool> gpu_timing_enabled{false};
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
@@ -839,6 +850,33 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	const Vector2i size = buffers->get_internal_size();
 	if (!ensure_targets(buffers, count, size))
 		return false;
+	const bool gpu_timing =
+			gpu_timing_enabled.load(std::memory_order_relaxed);
+	if (gpu_timing) {
+		std::uint64_t span_us = 0;
+		const bool span_valid = rd_timestamp_span_us(rd,
+				"opennova_framefx_begin", "opennova_framefx_end", span_us);
+		// The two sub-spans attribute the pass: the Q3 composite (source
+		// draw + capture + blur + additive composite) versus the terminal
+		// display decode's two full-screen draws.
+		std::uint64_t composite_us = 0;
+		const bool composite_valid = rd_timestamp_span_us(rd,
+				"opennova_q3_composite_begin", "opennova_q3_composite_end",
+				composite_us);
+		std::uint64_t decode_us = 0;
+		const bool decode_valid = rd_timestamp_span_us(rd,
+				"opennova_decode_begin", "opennova_decode_end", decode_us);
+		{
+			std::lock_guard<std::mutex> lock(diagnostics_mutex);
+			gpu_span_valid = span_valid;
+			gpu_span_us = span_us;
+			gpu_composite_valid = composite_valid;
+			gpu_composite_us = composite_us;
+			gpu_decode_valid = decode_valid;
+			gpu_decode_us = decode_us;
+		}
+		rd->capture_timestamp("opennova_framefx_begin");
+	}
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
@@ -850,6 +888,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
 		if (q3_adapter.has_commands() && !q3_failed) {
+			if (gpu_timing && view == 0)
+				rd->capture_timestamp("opennova_q3_composite_begin");
 			// A focused-Q3 device failure keeps its diagnostic and skips the
 			// capture/blur/composite for this frame, but must never skip the
 			// terminal display decode below: a frame presented without it is
@@ -858,11 +898,15 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 				sampled_q3 = true;
 			else
 				q3_failed = true;
+			if (gpu_timing && view == 0)
+				rd->capture_timestamp("opennova_q3_composite_end");
 		}
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
 		// once, then apply the display-backend transfer immediately before Godot's
 		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward.
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_decode_begin");
 		if (!draw_one(target.scene_scratch_framebuffer, target.color_uniform,
 				BlendMode::Replace, FramePass::Snapshot, target.size,
 				target.size, 0, 0, 0, 0, false, true))
@@ -873,7 +917,11 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 				target.size, 0, 0, 0, 0, false, true))
 			return false;
 		++draws;
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_decode_end");
 	}
+	if (gpu_timing)
+		rd->capture_timestamp("opennova_framefx_end");
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
 		if (q3_failed)
@@ -926,6 +974,14 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["frame_size"] = last_size;
 	result["capture_size"] = last_capture_size;
 	result["q3_sampled"] = q3_sampled;
+	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
+	result["q3_gpu_valid"] = gpu_span_valid;
+	// The composite/decode halves of q3_gpu_us are raw-report diagnostics
+	// (probe dumps, MCP reads); q3_gpu_us alone feeds a FrameStats slot.
+	result["q3_gpu_composite_us"] = static_cast<int64_t>(gpu_composite_us);
+	result["q3_gpu_composite_valid"] = gpu_composite_valid;
+	result["q3_gpu_decode_us"] = static_cast<int64_t>(gpu_decode_us);
+	result["q3_gpu_decode_valid"] = gpu_decode_valid;
 	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
 	const Dictionary q3_report = q3_adapter.get_report();
 	const Array q3_keys = q3_report.keys();
@@ -971,6 +1027,11 @@ void FrameFxCompositorEffect::release_device_resources() {
 	impl_->rd_available = false;
 	impl_->status = "shutdown";
 	impl_->failure.clear();
+}
+
+void FrameFxCompositorEffect::set_gpu_timing_enabled(bool p_enabled) {
+	if (impl_)
+		impl_->gpu_timing_enabled.store(p_enabled, std::memory_order_relaxed);
 }
 
 Dictionary FrameFxCompositorEffect::get_backend_report() const {
@@ -1054,6 +1115,8 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
+	ClassDB::bind_method(D_METHOD("set_gpu_timing_enabled", "enabled"),
+			&FrameFx::set_gpu_timing_enabled);
 	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
 			&FrameFx::get_q3_target_image);
 	ClassDB::bind_static_method("FrameFx",
@@ -1078,6 +1141,13 @@ void FrameFx::build_compositor() {
 		return;
 	if (terminal_effect_.is_null())
 		terminal_effect_.instantiate();
+	terminal_effect_->set_gpu_timing_enabled(gpu_timing_enabled_);
+}
+
+void FrameFx::set_gpu_timing_enabled(bool p_enabled) {
+	gpu_timing_enabled_ = p_enabled;
+	if (terminal_effect_.is_valid())
+		terminal_effect_->set_gpu_timing_enabled(p_enabled);
 }
 
 void FrameFx::install_compositor() {
@@ -1181,7 +1251,7 @@ void FrameFx::_notification(int p_what) {
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
 		// still boots with coherent views; the live per-frame sync is the
-		// ordered GameFramePipeline leg, never a process callback.
+		// ordered GameWorld leg, never a process callback.
 		advance_frame();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		shutdown();

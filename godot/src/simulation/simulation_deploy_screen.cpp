@@ -5,8 +5,10 @@
 // roster names) and the authority's own facts into them, and routes the
 // C2S 0x2E medic request the way the reload request already travels.
 #include "simulation/simulation_internal.h"
+#include "simulation/hud_view_records.h"
+#include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
-#include <net/npruntime/napi_np_server_ctx.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include "rtxt/rtxt_string_file.h"
@@ -20,64 +22,47 @@ using namespace godot;
 
 bool Simulation::local_player_dead() const {
 	// The one role-agnostic read of the local player's dead bit: the joiner's
-	// replica (np::ClientRuntime), the authority's entity flags (the kernel).
-	if (joiner_) return runtime_ != nullptr && runtime_->local_player_dead();
-	return kernel_ != nullptr && kernel_->local_player_dead();
+	// replica (inmatch::ClientRuntime), the authority's entity flags (the kernel).
+	if (is_joiner()) return runtime_ != nullptr && runtime_->local_player_dead();
+	return kernel_ != nullptr && kernel_->local.local_player_dead();
 }
 
 bool Simulation::request_local_player_medic() {
-	// The session/entity gates are the binding's (a live runtime, a local
-	// entity); the dead-bit and cooldown gates are the kernel's.
-	if (!runtime_ || !kernel_->world.cached.local_player.valid()) return false;
-	if (!kernel_->medic_request_allowed(local_player_dead())) return false;
-	bool sent = false;
-	if (joiner_) {
-		sent = runtime_->queue_medic_request();
-	} else if (host_owner_.serve_and_play) {
-		// The listen host's own call rides its loopback client like the reload
-		// request (simulation_player_weapon.cpp): the server handler
-		// broadcasts the 0x1E line to everyone including this client.
-		opennova::MedicRequest request;
-		request.entity_index = kernel_->world.cached.local_player.packed;
-		host_loop_.client_send(opennova::c2s::MEDIC_REQUEST,
-				opennova::encode_medic_request(request));
-		sent = true;
-	}
-	if (sent) kernel_->stamp_medic_request();
-	return sent;
+	if (!kernel_) return false;
+	return active_role().request_medic();
 }
 
 int Simulation::local_medic_request_cooldown_ticks() const {
-	return kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
+	return kernel_ ? kernel_->local.medic_request_cooldown_ticks : 0;
 }
 
 int Simulation::local_medic_request_serial() const {
-	return kernel_ ? kernel_->medic_request_serial : 0;
+	return kernel_ ? kernel_->local.medic_request_serial : 0;
 }
 
 void Simulation::set_server_text(const String &p_medic_request_format) {
 	// The rtxt "Server" table's STRSRV_MEDREQ format the host's medic
 	// broadcast prints the caller's name into (Server_BroadcastMedicRequest
 	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
-	opennova::np::ServerTextTable text;
+	opennova::inmatch::ServerTextTable text;
 	text.medic_request_format = p_medic_request_format.utf8().get_data();
-	opennova::np::set_server_text(ctx_, std::move(text));
+	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx())
+		opennova::inmatch::set_server_text(*ctx, std::move(text));
 }
 
-Dictionary Simulation::get_deploy_status() {
+Ref<DeployStatus> Simulation::get_deploy_status() {
 	// The DEATH screen's STATIC facts for THIS client [orig: the client
 	// globals UI_UpdateDeathScreenContent @0x5536a0 reads — dword_A85B5C /
 	// A85B60 / A85B68 from the 0x0A sub-block 0, word_A85BC0 + entity+538/548
 	// from the 0x6E fold].
-	Dictionary out;
 	int penalty = 0;
 	int revive = 0;
 	int hold = 0;
 	int self_zone_index = -1;
 	bool self_zone_numbered = false;
 	int self_zone_countdown = 0;
-	if (joiner_ && runtime_) {
-		const opennova::netsim::ClientState &cs = runtime_->state();
+	if (is_joiner() && runtime_) {
+		const opennova::replication::ClientState &cs = runtime_->state();
 		penalty = cs.respawn_penalty_seconds;
 		revive = cs.local_revive_seconds;
 		hold = cs.spawn_hold_seconds;
@@ -105,20 +90,20 @@ Dictionary Simulation::get_deploy_status() {
 	opennova::world::DeployStaticsInput statics_in;
 	statics_in.hold_seconds = hold;
 	statics_in.revive_seconds = revive;
-	statics_in.local_mounted = kernel_->view.mount.control_seat;
+	statics_in.local_mounted = kernel_->local.view.mount.control_seat;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
-	out["penalty_seconds"] = penalty;
-	out["revive_seconds"] = revive;
-	out["hold_seconds"] = hold;
-	out["queued_kind"] = static_cast<int>(line.kind);
-	out["queued_zone_index"] = line.zone_index;
-	out["queued_seconds"] = line.seconds;
-	out["queued_numbered"] = line.numbered;
-	out["show_psp_respawn"] = statics.psp_respawn;
-	out["show_medic"] = statics.medic;
-	out["medic_cooldown_ticks"] = kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
-	out["medic_request_serial"] = kernel_ ? kernel_->medic_request_serial : 0;
+	opennova::world::DeployScreenStatus v;
+	v.penalty_seconds = penalty;
+	v.revive_seconds = revive;
+	v.hold_seconds = hold;
+	v.line = line;
+	v.statics = statics;
+	v.medic_cooldown_ticks = kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0;
+	v.medic_request_serial = kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0;
+	Ref<DeployStatus> out;
+	out.instantiate();
+	out->assign(v);
 	return out;
 }
 
@@ -127,13 +112,8 @@ String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext)
 	// status line get_deploy_status computes, with the gametext strings
 	// resolved here (GameText_GetString("Overlays", "STROVER_PENALTYTIMER") /
 	// ("WPNames", "STRWPNAME%03d") @0x5536a0, their shipped fallbacks).
-	const Dictionary status = get_deploy_status();
-	opennova::world::DeployStatusLine line;
-	line.kind = static_cast<opennova::world::DeployStatusLine::Kind>(
-			static_cast<int>(status.get("queued_kind", 0)));
-	line.seconds = static_cast<int>(status.get("queued_seconds", 0));
-	line.numbered = static_cast<bool>(status.get("queued_numbered", false));
-	line.zone_index = static_cast<int>(status.get("queued_zone_index", -1));
+	const Ref<DeployStatus> status = get_deploy_status();
+	const opennova::world::DeployStatusLine &line = status->value().line;
 	auto game_text = [&p_gametext](const char *section, const String &key, const char *fallback) {
 		if (!p_gametext.is_null() && p_gametext->has_string_in_section(section, StringName(key)))
 			return p_gametext->get_string_in_section(section, StringName(key));
@@ -151,48 +131,29 @@ String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext)
 			penalty_label.utf8().get_data(), zone_name.utf8().get_data()).c_str());
 }
 
-TypedArray<Dictionary> Simulation::get_deploy_list_rows(const String &p_default_key,
+TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_default_key,
 		const String &p_default_home, const Dictionary &p_zone_names) {
 	// The compiled SPAWNPOINTS_LIST: the engine builder runs both witnessed
-	// loops over the zone rows this sim exposes (get_deploy_spawn_zones), the
-	// team colour tag, and the embedder-resolved WPNames strings.
-	TypedArray<Dictionary> out;
-	if (!kernel_ || !joiner_ || !runtime_) return out;
+	// loops over the zone rows this sim exposes (deploy_zone_rows), the team
+	// colour tag, and the embedder-resolved WPNames strings.
+	TypedArray<DeployListRow> out;
+	if (!kernel_ || !is_joiner() || !runtime_) return out;
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
 	in.default_key = p_default_key.utf8().get_data();
 	in.default_home = p_default_home.utf8().get_data();
-	const TypedArray<Dictionary> zones = get_deploy_spawn_zones();
-	for (int i = 0; i < zones.size(); ++i) {
-		const Dictionary z = zones[i];
-		opennova::world::DeployZoneRow row;
-		row.index = static_cast<int>(int64_t(z.get("param", 0))) - 1;
-		row.letter = static_cast<char>('A' + row.index);
-		row.name_key = String(z.get("name_key", "")).utf8().get_data();
-		row.secured = bool(z.get("secured", false));
-		row.wave_countdown = static_cast<uint16_t>(int64_t(z.get("wave_countdown", 0)));
-		const Array occupants = z.get("occupants", Array());
-		for (int k = 0; k < occupants.size(); ++k) {
-			const Dictionary o = occupants[k];
-			opennova::world::DeployOccupant occ;
-			occ.handle = static_cast<uint16_t>(int64_t(o.get("handle", 0xFFFF)));
-			occ.name = String(o.get("name", "")).utf8().get_data();
-			occ.self = bool(o.get("self", false));
-			row.occupants.push_back(occ);
-		}
-		in.zones.push_back(row);
-	}
+	in.zones = deploy_zone_rows();
 	in.zone_name = [&p_zone_names](const std::string &key) {
 		const String k = String::utf8(key.c_str());
 		if (p_zone_names.has(k)) return std::string(String(p_zone_names[k]).utf8().get_data());
 		return key;
 	};
 	for (const opennova::world::DeployListRow &row : opennova::world::build_deploy_rows(in)) {
-		Dictionary d;
-		d["text"] = String::utf8(row.text.c_str());
-		d["value"] = row.value;
-		out.push_back(d);
+		Ref<DeployListRow> record;
+		record.instantiate();
+		record->assign(row);
+		out.push_back(record);
 	}
 	return out;
 }

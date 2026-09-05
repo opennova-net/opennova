@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+namespace opennova::threedi {
+
 // Table of known control functions from the witnessed 3DI catalog.
 typedef struct ControlEntry {
     uint8_t code;
@@ -303,3 +305,5 @@ void threedi_format_panm(const ThreediPartAnimation *p,
         (void)snprintf(buf + cursor, buf_sz - cursor, "\n  %s: %s", label, tmp);
     }
 }
+
+} // namespace opennova::threedi

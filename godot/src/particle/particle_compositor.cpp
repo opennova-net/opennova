@@ -1,4 +1,5 @@
 #include "particle/particle_compositor.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 using namespace godot;
+using opennova::to_std;
 
 namespace {
 
@@ -209,12 +211,6 @@ void main() {
 	frag_color = texelFetch(source_color, ivec2(gl_FragCoord.xy), 0);
 }
 )GLSL";
-
-std::string utf8_string(const String &value) {
-	const CharString utf8 = value.utf8();
-	return utf8.get_data() != nullptr ? std::string(utf8.get_data()) :
-			std::string();
-}
 
 std::uint32_t grow_capacity(std::uint32_t required) {
 	std::uint32_t capacity = kMinimumVertexCapacity;
@@ -522,8 +518,8 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
 			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
 		set_failure("Particle shader compilation failed: vertex=" +
-				utf8_string(vertex_error) + "; fragment=" +
-				utf8_string(fragment_error), "shader_compile_failed");
+				to_std(vertex_error) + "; fragment=" +
+				to_std(fragment_error), "shader_compile_failed");
 		return false;
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova particle compositor");
@@ -667,8 +663,8 @@ bool ParticleCompositorEffect::Impl::ensure_scene_snapshot_shader() {
 					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
 		scene_snapshot_shader_initialization_failed = true;
 		set_failure("Scene-color snapshot shader compilation failed: vertex=" +
-				utf8_string(vertex_error) + "; fragment=" +
-				utf8_string(fragment_error),
+				to_std(vertex_error) + "; fragment=" +
+				to_std(fragment_error),
 				"scene_snapshot_shader_compile_failed");
 		return false;
 	}
@@ -1466,8 +1462,6 @@ ParticleCompositorEffect::ParticleCompositorEffect() :
 ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 
 void ParticleCompositorEffect::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("release_device_resources"),
-			&ParticleCompositorEffect::release_device_resources);
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&ParticleCompositorEffect::get_backend_report);
 }

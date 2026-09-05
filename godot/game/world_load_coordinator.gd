@@ -22,7 +22,7 @@ var _layer: CanvasLayer = null
 var _screen: LoadingScreen = null
 var _operation: WorldLoadOperation = null
 var _presentation_active := false
-var _load_info: Dictionary = {}
+var _load_info: LoadingScreenInfo = null
 
 
 func can_start() -> bool:
@@ -30,7 +30,7 @@ func can_start() -> bool:
 
 
 func start(owner: Node, root: ResourceRoot, world: GameWorld,
-		load_info: Dictionary, loader: Callable) -> WorldLoadOperation:
+		load_info: LoadingScreenInfo, loader: Callable) -> WorldLoadOperation:
 	if not can_start() or owner == null or world == null or not loader.is_valid():
 		return null
 	_owner = owner
@@ -57,8 +57,34 @@ func current_operation() -> WorldLoadOperation:
 
 
 func finish_presentation() -> void:
+	complete_progress()
 	_presentation_active = false
 	dismiss()
+
+
+## Present the final checkpoint only at the shell's reveal/transition edge.
+## GameWorld stops at WORLD_READY so a joiner waiting for authoritative
+## admission never claims to be complete.
+func complete_progress() -> bool:
+	if _screen == null or not _presentation_active:
+		return false
+	_screen.set_progress(MissionData.LOAD_PROGRESS_COMPLETE)
+	_screen.present(true)
+	return true
+
+
+## Exact visible checkpoint, or -1 when there is no loading presentation.
+func progress_percent() -> int:
+	return _screen.displayed_progress() if _screen != null else -1
+
+
+## Exact pixel size occupied by the active loading surface, or (-1, -1) once
+## the presentation is gone. Render probes use this instead of reaching into
+## the transient CanvasLayer/LoadingScreen ownership tree (ADR 0018).
+func surface_size() -> Vector2i:
+	if _screen == null:
+		return Vector2i(-1, -1)
+	return _screen.presented_size()
 
 
 func dismiss() -> void:
@@ -81,7 +107,7 @@ func has_background() -> bool:
 ## half; SP `load_info` never sets `in_session`
 ## [orig: the !is_in_session leg of the splash gate @ 0x525d38].
 func is_session_load() -> bool:
-	return bool(_load_info.get("in_session", false))
+	return _load_info != null and _load_info.in_session
 
 
 ## The screen's custom-background flag (the retail g_loadscreen_has_custom_bg
@@ -129,7 +155,7 @@ func begin_start_mission_splash() -> bool:
 ## resolve a sidecar image and would otherwise hold the presentation forever
 ## with no input to dismiss it.
 func maybe_begin_start_mission_splash(audio: MissionAudio,
-		headless_skip: bool = DisplayServer.get_name() == "headless") -> bool:
+		headless_skip: bool = GameRuntimeRoot.is_headless()) -> bool:
 	if is_session_load() or not has_custom_background() or headless_skip:
 		return false
 	if not begin_start_mission_splash():
@@ -164,7 +190,7 @@ func _run(operation: WorldLoadOperation, loader: Callable) -> void:
 		if _is_cancelled_or_stale(operation):
 			_settle(operation)
 			return
-	var result = loader.call()
+	var result: Variant = loader.call()
 	var err := int(result) if result != null else OK
 	# GameWorld normally emits load_failed inside the loader call. If that path
 	# already dismissed this presentation, suppress the duplicate fallback.
@@ -185,7 +211,7 @@ func _settle(operation: WorldLoadOperation) -> void:
 		_operation = null
 
 
-func _show_screen(load_info: Dictionary) -> void:
+func _show_screen(load_info: LoadingScreenInfo) -> void:
 	dismiss()
 	_presentation_active = true
 	if _root == null:
@@ -201,18 +227,13 @@ func _show_screen(load_info: Dictionary) -> void:
 	_screen.name = "LoadingScreen"
 	_layer.add_child(_screen)
 	_screen.setup(_root, load_info)
-	# CanvasLayer is not a Control parent, so full-rect anchors have no layout
-	# rectangle to resolve against.
-	_screen.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_screen.position = Vector2.ZERO
-	_screen.size = _screen.get_viewport_rect().size
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
 	if not _world.join_session_identified.is_connected(_on_join_session_identified):
 		_world.join_session_identified.connect(_on_join_session_identified)
 
 
-func _on_join_session_identified(info: Dictionary) -> void:
+func _on_join_session_identified(info: LoadingScreenInfo) -> void:
 	# The joiner's 0x7B record fills the same session strings retail resolves
 	# before its wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0 -> loading title/mission buffers @ 0x51f533/0x51f53a].

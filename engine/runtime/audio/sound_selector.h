@@ -3,7 +3,7 @@
 // A NovaLogic sound set (.lwf Multi) has one or more layers, each holding a list of member
 // sounds and selection flags that decide which member plays when the set is triggered. This is
 // the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
-// (godot/game/world/sound_bank.gd) so the engine core stays C++ and a headless server can
+// (now godot/src/audio/sound_bank) so the engine core stays C++ and a headless server can
 // resolve the same member without Godot. The embedder keeps the lwf data access and the
 // AudioStreamPlayer spawning; this only decides WHICH member index plays.
 //
@@ -15,8 +15,7 @@
 // [orig: PRNG_ScaledRandom @ 0x75be50] one global ROL-LCG stream drives every pick:
 //   state = ROL32(state + ROL32(state, 11), 3); index = (count * (state & 0xFF)) >> 8;
 // seeded statically with 0x2B0749C1 [orig: .data @ 0x85A3DC] and never reseeded.
-#ifndef OPENNOVA_AUDIO_SOUND_SELECTOR_H
-#define OPENNOVA_AUDIO_SOUND_SELECTOR_H
+#pragma once
 
 #include <cstdint>
 #include <unordered_map>
@@ -80,5 +79,3 @@ private:
 };
 
 } // namespace opennova::audio
-
-#endif // OPENNOVA_AUDIO_SOUND_SELECTOR_H

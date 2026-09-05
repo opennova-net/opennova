@@ -14,6 +14,8 @@
 #include <vector>
 #include <formats/mus/mus.h>
 
+using namespace opennova::mus;
+
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
     int before = failed; fn(); \

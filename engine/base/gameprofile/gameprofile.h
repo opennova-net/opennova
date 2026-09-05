@@ -1,12 +1,9 @@
-#ifndef GAMEPROFILE_H
-#define GAMEPROFILE_H
+#pragma once
 
 #include <stdint.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::gameprofile {
 
 /* Per-game profiles. A single "game" choice drives how an existing archive's contents are decoded
    (container key + SCR payload-codec policy) and how a new/edited archive is written. It is the one
@@ -19,7 +16,7 @@ extern "C" {
    [orig: PFF_LoadFileToMemory @ 0x768920]. Per-game rows carry it so a future
    title only needs a new table entry; consumers with no resolved profile fall
    back to this named default (never to a raw literal). */
-#define GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT 0x0312A4CEu
+inline constexpr uint32_t GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT = 0x0312A4CEu;
 
 typedef enum GameId {
     GAME_JO = 0,    /* Joint Operations: Typhoon Rising            */
@@ -68,8 +65,4 @@ const GameProfile *gameprofile_by_code(const char *code);
    This is the engine's single game-to-policy seam. */
 int gameprofile_scr_policy_for_code(const char *code);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* GAMEPROFILE_H */
+} // namespace opennova::gameprofile

@@ -33,6 +33,10 @@ struct WeatherOscillator;
 
 namespace godot {
 
+struct MaterialInfo;
+class ModelLight;
+class ModelUserPoint;
+
 class ObjectData : public Resource {
 	GDCLASS(ObjectData, Resource)
 
@@ -40,7 +44,7 @@ private:
 	// Immutable parsed runtime content. Loading another .3di replaces the whole
 	// model and invalidates every derived cache; there is no Godot authoring
 	// session or editable intermediate representation.
-	Threedi3di3 source_model = {};
+	opennova::threedi::Threedi3di3 source_model = {};
 	bool has_source_model = false;
 	uint64_t change_revision_ = 0;
 	// Process-wide content counter bumped alongside every per-document revision.
@@ -83,10 +87,10 @@ private:
 		bool valid = false;
 		bool has_noise = false;
 		uint64_t revision = 0;
-		std::vector<ThreediPartAnimation> anims;         // effective set for `lod`
-		std::vector<ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
-		std::vector<ThreediVec3> pivots;
-		std::vector<ThreediMatrix4x4> node_matrices;     // scratch, per anim node
+		std::vector<opennova::threedi::ThreediPartAnimation> anims;         // effective set for `lod`
+		std::vector<opennova::threedi::ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
+		std::vector<opennova::threedi::ThreediVec3> pivots;
+		std::vector<opennova::threedi::ThreediMatrix4x4> node_matrices;     // scratch, per anim node
 		std::vector<int> part_to_node;
 		std::vector<Transform3D> part_transforms;        // per part, godot frame
 		std::vector<uint64_t> part_revision;             // revision at last change
@@ -115,7 +119,7 @@ private:
 	Error _open_3di(const String &p_path);
 	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	bool _effective_panm_for_lod(int p_lod_index,
-			std::vector<ThreediPartAnimation> &r_nodes) const;
+			std::vector<opennova::threedi::ThreediPartAnimation> &r_nodes) const;
 
 protected:
 	static void _bind_methods();
@@ -125,30 +129,30 @@ public:
 	// authority; defined FROM it so they can never drift). Bound as class
 	// constants so runtime consumers do not re-declare the bytes.
 	enum {
-		MATERIAL_FLAG_ALPHA_TEST = THREEDI_MATERIAL_FLAG_ALPHA_TEST,
-		MATERIAL_FLAG_ALPHA_INVERT = THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
-		MATERIAL_FLAG_TWO_SIDED = THREEDI_MATERIAL_FLAG_TWO_SIDED,
-		TEX_FLAG_ANIMATED = THREEDI_TEX_FLAG_ANIMATED,
-		TEX_FLAG_CLAMPED = THREEDI_TEX_FLAG_CLAMPED,
-		TEX_SLOT_DIFFUSE = THREEDI_TEX_SLOT_DIFFUSE,
-		TEX_SLOT_DETAIL = THREEDI_TEX_SLOT_DETAIL,
-		TEX_SLOT_NORMAL = THREEDI_TEX_SLOT_NORMAL,
-		TEX_SLOT_NORMAL_B = THREEDI_TEX_SLOT_NORMAL_B,
-		LIGHT_FLAG_DISABLE_CORONA = THREEDI_LIGHT_FLAG_DISABLE_CORONA,
-		LIGHT_FLAG_DISABLE_TERRAIN = THREEDI_LIGHT_FLAG_DISABLE_TERRAIN,
-		LIGHT_FLAG_DISABLE_OBJECTS = THREEDI_LIGHT_FLAG_DISABLE_OBJECTS,
-		LIGHT_FLAG_TYPE_TARGET = THREEDI_LIGHT_FLAG_TYPE_TARGET,
+		MATERIAL_FLAG_ALPHA_TEST = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+		MATERIAL_FLAG_ALPHA_INVERT = opennova::threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
+		MATERIAL_FLAG_TWO_SIDED = opennova::threedi::THREEDI_MATERIAL_FLAG_TWO_SIDED,
+		TEX_FLAG_ANIMATED = opennova::threedi::THREEDI_TEX_FLAG_ANIMATED,
+		TEX_FLAG_CLAMPED = opennova::threedi::THREEDI_TEX_FLAG_CLAMPED,
+		TEX_SLOT_DIFFUSE = opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE,
+		TEX_SLOT_DETAIL = opennova::threedi::THREEDI_TEX_SLOT_DETAIL,
+		TEX_SLOT_NORMAL = opennova::threedi::THREEDI_TEX_SLOT_NORMAL,
+		TEX_SLOT_NORMAL_B = opennova::threedi::THREEDI_TEX_SLOT_NORMAL_B,
+		LIGHT_FLAG_DISABLE_CORONA = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_CORONA,
+		LIGHT_FLAG_DISABLE_TERRAIN = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_TERRAIN,
+		LIGHT_FLAG_DISABLE_OBJECTS = opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_OBJECTS,
+		LIGHT_FLAG_TYPE_TARGET = opennova::threedi::THREEDI_LIGHT_FLAG_TYPE_TARGET,
 	};
 
 	// Generator-style consumers (threedi/threedi_panm.h
 	// ThreediGeneratorConsumer): the 0x71..0x75 control-register range
 	// dispatches differently per retail consumer.
 	enum {
-		GENERATOR_CONSUMER_UV = THREEDI_GENERATOR_CONSUMER_UV,
-		GENERATOR_CONSUMER_RGB = THREEDI_GENERATOR_CONSUMER_RGB,
-		GENERATOR_CONSUMER_ALPHA = THREEDI_GENERATOR_CONSUMER_ALPHA,
-		GENERATOR_CONSUMER_LIGHT = THREEDI_GENERATOR_CONSUMER_LIGHT,
-		GENERATOR_CONSUMER_PANM = THREEDI_GENERATOR_CONSUMER_PANM,
+		GENERATOR_CONSUMER_UV = opennova::threedi::THREEDI_GENERATOR_CONSUMER_UV,
+		GENERATOR_CONSUMER_RGB = opennova::threedi::THREEDI_GENERATOR_CONSUMER_RGB,
+		GENERATOR_CONSUMER_ALPHA = opennova::threedi::THREEDI_GENERATOR_CONSUMER_ALPHA,
+		GENERATOR_CONSUMER_LIGHT = opennova::threedi::THREEDI_GENERATOR_CONSUMER_LIGHT,
+		GENERATOR_CONSUMER_PANM = opennova::threedi::THREEDI_GENERATOR_CONSUMER_PANM,
 	};
 
 	// --- Witnessed threedi catalog/unit re-exports (statics; the engine
@@ -162,7 +166,7 @@ public:
 	// Native-side read access to the parsed model. The collision sweep
 	// (Simulation::resolve_collision_instances) builds the runtime collision
 	// model from the CDTA block; GDScript keeps the curated getters only.
-	const Threedi3di3 &native_model() const { return source_model; }
+	const opennova::threedi::Threedi3di3 &native_model() const { return source_model; }
 
 	Error open_file(const String &p_path);
 	// Mounted .3DI loads also feed the retail-compatible network challenge registry.
@@ -184,37 +188,48 @@ public:
 	static uint64_t get_global_change_counter() {
 		return global_change_counter_.load(std::memory_order_relaxed);
 	}
-	Dictionary get_summary() const;
+	// The loaded document's LOD count (0 when empty).
+	int get_lod_count() const;
 
 	int get_material_count() const;
 	Array get_lod_surfaces(int p_lod_index) const;
 	bool is_skinned(int p_lod_index) const;
-	Array get_materials() const;
-	Dictionary get_material_info(int p_index) const;
+	// One MTRL row (object/material_info.h, C++-only); false out of range.
+	bool get_material_info(int p_index, MaterialInfo &r_info) const;
+	// The MTRL array index a surface's material index addresses: the row whose
+	// authored index matches wins, else the array position itself when in
+	// range, else -1 (the alias fold the material cache keys on).
+	int find_material_array_index(int p_material_index) const;
+	// The first texture of `slot` (1 diffuse, 2 detail, 3/4 normal) on the
+	// MTRL row at `array_index` that resolves through the resource root or the
+	// loose source dir; null when none does.
+	Ref<Texture2D> load_material_slot_texture(int p_array_index, int p_slot) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	static String canonical_control_register_name(const String &p_name);
+	// Drops the register-name memo; the module terminator calls it so no
+	// godot::String outlives the extension.
+	static void clear_static_caches();
 	Array get_control_registers() const;
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
-	Dictionary get_light_info(int p_index) const;
+	// One LGHT record (object/model_light.h); null out of range.
+	Ref<ModelLight> get_light_info(int p_index) const;
 	int get_user_point_count() const;
-	Dictionary get_user_point_info(int p_index) const;
+	// One USRP row (object/model_user_point.h); null out of range.
+	Ref<ModelUserPoint> get_user_point_info(int p_index) const;
 	// The item-effect attach scan: name -> 16-bit mask over the FIRST 16
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 	int get_user_point_bone_mask(const String &p_name) const;
 	// PLAYPARTANIM's engine math (one impl in engine/runtime/world ai.h): the
 	// witnessed rate from ANIMTIME seconds
-	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9] and one 16 ms sweep step
-	// (returns {"phase": int, "finished": bool})
-	// [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]. The
-	// authoritative AI path integrates in AiSystem and presents through
-	// set_part_phase; local runtime controllers use the same helpers.
+	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. The sweep step is
+	// world::part_anim_step, which the model's part-anim channels call
+	// directly; the authoritative AI path integrates in AiSystem and presents
+	// through set_part_phase.
 	static int part_anim_rate_for_seconds(double p_seconds);
-	static Dictionary part_anim_step(int p_phase, int p_dir, int p_rate);
-	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked
@@ -229,8 +244,6 @@ public:
 	int get_live_panm_lod() const;
 	PackedInt32Array get_effective_panm_targets(int p_lod_index) const;
 	int get_part_anim_count(int p_lod_index) const;
-	Dictionary get_part_anim_info(int p_lod_index, int p_anim_index) const;
-	Dictionary get_render_lod_info(int p_lod_index) const;
 	// Per-part parent-relative bone pivot (native model space, raw ThreediRenderObject.rel),
 	// indexed by part index, for the given LOD -- the model's authoritative bone rest positions.
 	// The skeletal runtime feeds these to SkeletalAnim in place of the .bad's lossy
@@ -289,6 +302,22 @@ public:
 	int64_t apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 			const Dictionary &p_ctrl_values, const Array &p_nodes,
 			int64_t p_applied_revision) const;
+	// The hot variant (distinct name — an overload would ambiguate the
+	// Dictionary form's ClassDB bind): a retained caller passes its cached
+	// converted table so the per-call dict iteration disappears.
+	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
+			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
+			const Array &p_nodes, int64_t p_applied_revision) const;
+	// The dict conversion split for retained callers: the dict-only half
+	// caches per change; FLICKER/SWING ride the live weather globals at use
+	// time unless the dict pins them (the same override order the one-shot
+	// runtime_control_values applies).
+	static opennova::renderer::ControlRegisterValues
+	runtime_control_values_dict_only(const Dictionary &p_ctrl_values,
+			bool &r_has_flicker, bool &r_has_swing);
+	static void stamp_weather_ctrl_registers(
+			opennova::renderer::ControlRegisterValues &r_values,
+			bool p_dict_has_flicker, bool p_dict_has_swing);
 	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 };

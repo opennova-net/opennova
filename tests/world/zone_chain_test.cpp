@@ -6,7 +6,7 @@
 //  find_spawn_entity_for_team @0x4fc810]
 #include <runtime/world/entity.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 #include <runtime/world/zone_capture.h>
@@ -117,21 +117,21 @@ struct AshFixture {
         MatchRules rules;
         rules.game_type = opennova::game_type::kAdvanceAndSecure;
         w.match.configure(rules);
-        zone_chain_build_from_mission(w, w.zone_chain);
-        zone_chain_latch_control(w, w.zone_chain);
+        w.zones.build_chain_from_mission();
+        w.zones.latch_control();
     }
 };
 
 void test_build_and_masks() {
     AshFixture f;
-    CHECK(f.w.zone_chain.zones.size() == 4);
+    CHECK(f.w.zones.chain.zones.size() == 4);
     // ownedMask = OR(1 << zone_no) per team [orig: ZoneSlotChain_RebuildOwnershipMasks @0x4A26C0].
-    CHECK(f.w.zone_chain.owned_mask[1] == (1u << 1));
-    CHECK(f.w.zone_chain.owned_mask[2] == (1u << 3));
-    CHECK(f.w.zone_chain.owned_mask[0] == (1u << 2));
+    CHECK(f.w.zones.chain.owned_mask[1] == (1u << 1));
+    CHECK(f.w.zones.chain.owned_mask[2] == (1u << 3));
+    CHECK(f.w.zones.chain.owned_mask[0] == (1u << 2));
     // The ASH markers carry zone_number 0, so no assigned slot is seeded (as authored).
-    CHECK(f.w.zone_chain.assigned_slot[1] == 0);
-    CHECK(f.w.zone_chain.assigned_slot[2] == 0);
+    CHECK(f.w.zones.chain.assigned_slot[1] == 0);
+    CHECK(f.w.zones.chain.assigned_slot[2] == 0);
 }
 
 void test_frontier_rule() {
@@ -141,24 +141,24 @@ void test_frontier_rule() {
     const Entity *z3 = f.w.registry.get(f.z3);
     // Team 1 owns zone 1: zone 2 is adjacent (1+1) -> capturable; zone 3 is two hops -> not.
     // [orig: ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450 adjacency walk]
-    CHECK(zone_chain_is_capturable(f.w, f.w.zone_chain, 1, *z2a));
-    CHECK(!zone_chain_is_capturable(f.w, f.w.zone_chain, 1, *z3));
+    CHECK(f.w.zones.is_capturable(1, *z2a));
+    CHECK(!f.w.zones.is_capturable(1, *z3));
     // A team's own zone is never "capturable" by it.
-    CHECK(!zone_chain_is_capturable(f.w, f.w.zone_chain, 1, *z1));
+    CHECK(!f.w.zones.is_capturable(1, *z1));
     // Team 2 owns zone 3: zone 2 adjacent -> capturable; zone 1 not.
-    CHECK(zone_chain_is_capturable(f.w, f.w.zone_chain, 2, *z2a));
-    CHECK(!zone_chain_is_capturable(f.w, f.w.zone_chain, 2, *z1));
+    CHECK(f.w.zones.is_capturable(2, *z2a));
+    CHECK(!f.w.zones.is_capturable(2, *z1));
     // Both teams' frontier number is 2 [orig: ZoneSlotChain_FindFrontierZone @0x4A2AC0].
-    CHECK(zone_chain_frontier_zone(f.w, f.w.zone_chain, 1) == 2);
-    CHECK(zone_chain_frontier_zone(f.w, f.w.zone_chain, 2) == 2);
+    CHECK(f.w.zones.frontier_zone(1) == 2);
+    CHECK(f.w.zones.frontier_zone(2) == 2);
 }
 
 void test_owned_zone_mask_and_latch() {
     AshFixture f;
     // The 0x0F mask: team 2 wholly owns zone 3 -> 0x8, the golden ASH_I5A steady value.
     // [orig: ZoneSlotChain_GetOwnedZoneMask @0x4A2620; golden uniformMask=0x8]
-    CHECK(zone_chain_owned_zone_mask(f.w, f.w.zone_chain, 2) == 0x8u);
-    CHECK(zone_chain_owned_zone_mask(f.w, f.w.zone_chain, 1) == 0x2u);
+    CHECK(f.w.zones.owned_zone_mask(2) == 0x8u);
+    CHECK(f.w.zones.owned_zone_mask(1) == 0x2u);
     // Neither mid-zone entity is team 1's or 2's -> zone 2 in neither mask.
     // The latch: base zones sit on the enemy frontier? zone 1/3 are NOT reachable by the
     // enemy (two hops) -> control snaps to 1.0; the neutral mid zones ARE on both
@@ -179,18 +179,18 @@ void test_capture_progression() {
     z2a->zone_control = 0;
     z2b->team = 1;
     z2b->zone_control = 0;
-    zone_chain_rebuild_masks(f.w, f.w.zone_chain);
+    f.w.zones.rebuild_masks();
     // Now zone 3 is adjacent to team 1's zone 2 -> capturable; team 2 can push back on 2.
     const Entity *z3 = f.w.registry.get(f.z3);
-    CHECK(zone_chain_is_capturable(f.w, f.w.zone_chain, 1, *z3));
-    CHECK(zone_chain_frontier_zone(f.w, f.w.zone_chain, 1) == 2 ||
-          zone_chain_frontier_zone(f.w, f.w.zone_chain, 1) == 3);
+    CHECK(f.w.zones.is_capturable(1, *z3));
+    CHECK(f.w.zones.frontier_zone(1) == 2 ||
+          f.w.zones.frontier_zone(1) == 3);
     // Owned mask now spans zones 1+2 for team 1 (both number-2 entities held).
-    CHECK(zone_chain_owned_zone_mask(f.w, f.w.zone_chain, 1) == 0x6u);
+    CHECK(f.w.zones.owned_zone_mask(1) == 0x6u);
     // One mid entity lost back to neutral -> the number-2 bit drops (not wholly owned).
     z2b->team = 0;
-    zone_chain_rebuild_masks(f.w, f.w.zone_chain);
-    CHECK(zone_chain_owned_zone_mask(f.w, f.w.zone_chain, 1) == 0x2u);
+    f.w.zones.rebuild_masks();
+    CHECK(f.w.zones.owned_zone_mask(1) == 0x2u);
 }
 
 void test_auto_deploy_pick() {
@@ -198,7 +198,7 @@ void test_auto_deploy_pick() {
     // 0xFFFE auto-deploy (AS 0x10010): team 1's zone 1 is NOT on team 2's frontier and
     // carries number 1 != frontier 2 -> no zone auto-pick (falls back to base markers).
     // [orig: find_spawn_entity_for_team @0x4fc810 -> requestedHandle -1 on miss]
-    CHECK(find_spawn_zone_for_team(f.w, f.w.zone_chain, 1, 0x10010u) == nullptr);
+    CHECK(f.w.zones.find_spawn_zone_for_team(1, 0x10010u) == nullptr);
     // Take zone 2 for team 1 (secured): now zone 2 IS on team 2's frontier -> the front line.
     Entity *z2a = f.w.registry.get(f.z2a);
     Entity *z2b = f.w.registry.get(f.z2b);
@@ -206,27 +206,27 @@ void test_auto_deploy_pick() {
     z2a->zone_control = 0x10000;
     z2b->team = 1;
     z2b->zone_control = 0x10000;
-    zone_chain_rebuild_masks(f.w, f.w.zone_chain);
-    const Entity *pick = find_spawn_zone_for_team(f.w, f.w.zone_chain, 1, 0x10010u);
+    f.w.zones.rebuild_masks();
+    const Entity *pick = f.w.zones.find_spawn_zone_for_team(1, 0x10010u);
     CHECK(pick != nullptr && pick->zone_number == 2);
     // Contested (control < 1.0) removes it again [orig: @0x4fc92c entity+540 >= 0x10000].
     z2a->zone_control = 0x8000;
     z2b->zone_control = 0x8000;
-    CHECK(find_spawn_zone_for_team(f.w, f.w.zone_chain, 1, 0x10010u) == nullptr);
+    CHECK(f.w.zones.find_spawn_zone_for_team(1, 0x10010u) == nullptr);
 }
 
 void test_resolve_spawn_target() {
     AshFixture f;
     // A valid pick: team 1 picks its own zone-1 object [orig: Server_ResolveSpawnTargetHandle
     // @0x4fe110 — pool 0/1/2, SpawnPoint attrib, team match].
-    const Entity *t = resolve_spawn_target(f.w, 1, f.z1.packed);
+    const Entity *t = f.w.zones.resolve_spawn_target(1, f.z1.packed);
     CHECK(t != nullptr && t->zone_number == 1);
     // Cross-team pick refused; a teamless requester passes.
-    CHECK(resolve_spawn_target(f.w, 2, f.z1.packed) == nullptr);
-    CHECK(resolve_spawn_target(f.w, 0, f.z1.packed) != nullptr);
+    CHECK(f.w.zones.resolve_spawn_target(2, f.z1.packed) == nullptr);
+    CHECK(f.w.zones.resolve_spawn_target(0, f.z1.packed) != nullptr);
     // 0xFFFF and pool-3 handles refused.
-    CHECK(resolve_spawn_target(f.w, 1, 0xFFFF) == nullptr);
-    CHECK(resolve_spawn_target(f.w, 1, static_cast<uint16_t>(0x3000)) == nullptr);
+    CHECK(f.w.zones.resolve_spawn_target(1, 0xFFFF) == nullptr);
+    CHECK(f.w.zones.resolve_spawn_target(1, static_cast<uint16_t>(0x3000)) == nullptr);
     // The deploy pose: target origin z+1, target yaw [orig: @0x50d01c].
     const SpawnPointResult pose = resolve_player_spawn_pose(
         f.w, EntityHandle{}, t->handle, 0, 1, 0x10010u);
@@ -250,20 +250,20 @@ void test_spawn_zone_presence_and_zone_info() {
     AshFixture f;
     // The join-time respawn-pending gate: ASH offers deploy-selectable zones
     // [orig: SpawnZoneList_GetCount() > 0 @0x51a6f2 -> stateByte |= 0x10; D-NET-156].
-    CHECK(world_has_spawn_zone(f.w));
+    CHECK(f.w.zones.has_spawn_zone());
     // The 0x0D packed zone byte = zoneNumber + 32*rank [orig: ZoneSlotChain_GetZoneInfo
     // @0x503eeb]. The two zone-2 entities share a number: descending rank within it —
     // golden ASH_I5A bunker 0x22 = zone 2 rank 1.
     const Entity *z2a = f.w.registry.get(f.z2a);
     const Entity *z2b = f.w.registry.get(f.z2b);
     const Entity *z1 = f.w.registry.get(f.z1);
-    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z2a) == (2 + 32 * 1));
-    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z2b) == (2 + 32 * 0));
-    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z1) == 1); // sole zone 1 -> rank 0
+    CHECK(zone_chain_zone_info_byte(f.w.zones.chain, *z2a) == (2 + 32 * 1));
+    CHECK(zone_chain_zone_info_byte(f.w.zones.chain, *z2b) == (2 + 32 * 0));
+    CHECK(zone_chain_zone_info_byte(f.w.zones.chain, *z1) == 1); // sole zone 1 -> rank 0
     // A zone-less world offers nothing to hold the deploy screen for.
     World bare;
     bare.registry.configure_pool(1, 4);
-    CHECK(!world_has_spawn_zone(bare));
+    CHECK(!bare.zones.has_spawn_zone());
 }
 
 // ---- Slice 2: the 1 Hz capture loop [orig: the Server_TickUpdate 1 Hz block] ----
@@ -304,8 +304,8 @@ void capture_second(World &w, ZoneCaptureEvents &events) {
                     health);
         }
     }
-    zone_capture_contact_tick(w);
-    zone_capture_second_tick(w, events);
+    w.zones.capture_contact_tick();
+    w.zones.capture_second_tick(events);
 }
 
 template <typename T>
@@ -395,7 +395,7 @@ void test_capture_loop_flip_and_secure() {
     }
     CHECK(z2a->team == 1);
     CHECK(z2a->zone_control == 0);            // the new owner must SECURE it
-    CHECK((f.w.zone_chain.owned_mask[1] & (1u << 2)) != 0); // masks rebuilt
+    CHECK((f.w.zones.chain.owned_mask[1] & (1u << 2)) != 0); // masks rebuilt
 
     // Securing: the soldier stays; control rises by delta each pass until the latch/edge.
     int passes = 0;
@@ -666,7 +666,7 @@ void test_instant_capture_preserves_team_change_order() {
     zone->zone_radius = 70;
     zone->team = 1;
     zone->zone_control = 0;
-    zone_chain_rebuild_masks(f.w, f.w.zone_chain);
+    f.w.zones.rebuild_masks();
     spawn_soldier(f.w, 2, zone->position);
 
     ZoneCaptureEvents ev;
@@ -752,7 +752,7 @@ void test_spawn_zone_registry() {
     vehicle.is_spawn_point = true;
     vehicle.alive = true;
     const EntityHandle vh = f.w.registry.spawn(1, vehicle);
-    const SpawnZoneRegistry reg = build_spawn_zone_list(f.w);
+    const SpawnZoneRegistry reg = f.w.zones.build_spawn_zone_list();
     CHECK(reg.entries.size() == 6); // 4 zones + building + vehicle
     // Ground zones ascend by zone number (building zone 0 first), vehicle trails.
     CHECK(reg.entries[0].packed == bh.packed);
@@ -791,7 +791,7 @@ void test_spawn_zone_zero_key_uses_retail_pool_address_order() {
     pool1.alive = true;
     const EntityHandle pool1_handle = world.registry.spawn(1, pool1);
 
-    const SpawnZoneRegistry reg = build_spawn_zone_list(world);
+    const SpawnZoneRegistry reg = world.zones.build_spawn_zone_list();
     CHECK(reg.entries.size() == 2);
     CHECK(reg.entries[0] == pool1_handle);
     CHECK(reg.entries[1] == pool2_handle);

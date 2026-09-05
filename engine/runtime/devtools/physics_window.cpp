@@ -8,9 +8,8 @@ namespace opennova::devtools {
 
 namespace {
 
-// The overlay's kind palette (godot/game/debug/collision_debug_view.gd
-// HIT_KIND_COLORS, enum order) — the window doubles as the legend for the
-// flashes drawn in-world; keep the two tables in sync.
+// The contact-kind palette (the engine's, in ContactDebugKind enum order):
+// the swatch beside each kind row.
 constexpr float kKindColors[kContactKindCount][3] = {
 	{1.0f, 0.35f, 0.15f}, // Projectile hit
 	{1.0f, 0.4f, 0.7f},   // Knife hit
@@ -36,7 +35,6 @@ void PhysicsWindow::set_snapshot(const PhysicsSnapshot &snapshot) {
 	snapshot_ = snapshot;
 	// Mirror the authoritative state into the edit controls: a click flips
 	// locally and queues its request, the next push confirms it here.
-	view_edit_ = snapshot_.view_shown;
 	capture_edit_ = snapshot_.capturing;
 	mask_edit_ = snapshot_.kind_mask;
 	format_rows();
@@ -85,11 +83,7 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		return;
 	}
 
-	if (ImGui::Checkbox("Show collision", &view_edit_)) {
-		enqueue_request({PhysicsRequest::Kind::SetViewShown, view_edit_ ? 1 : 0});
-	}
-	ImGui::SameLine();
-	if (ImGui::Checkbox("Flash hits", &capture_edit_)) {
+	if (ImGui::Checkbox("Capture hits", &capture_edit_)) {
 		enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, capture_edit_ ? 1 : 0});
 	}
 	ImGui::SameLine();
@@ -100,11 +94,10 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	}
 	ImGui::Text("logic tick %llu (%.2f s readings)",
 			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds);
-	ImGui::Text("boxes drawn %d", snapshot_.boxes_drawn);
-	ImGui::Text("recent hits %d (inside the flash window)", snapshot_.recent);
+	ImGui::Text("recent hits %d (inside the TTL window)", snapshot_.recent);
 
 	if (ImGui::SmallButton("All")) {
-		mask_edit_ = 0x3F;
+		mask_edit_ = kContactKindMaskAll;
 		enqueue_request({PhysicsRequest::Kind::SetKindMask,
 				static_cast<int32_t>(mask_edit_)});
 	}

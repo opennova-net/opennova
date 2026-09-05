@@ -12,8 +12,8 @@ The replay/spectate consumer named throughout — `NovaWorldClient`,
 dev scaffolding (it never shipped and no live path consumed it; the capture
 DECODE chain that feeds parity tests is untouched). The decision itself is
 unchanged and now reads simpler: `ClientReplicaPipeline` is the sole S2C entity
-reducer and `WirePresentPass` its sole presenter (then `wire_present_pass.gd`;
-native `godot/src/simulation/present_applier_wire.cpp` since the #460
+reducer and `EntityPresenter` its sole presenter (then `wire_present_pass.gd`;
+native `godot/src/simulation/entity_presenter_wire.cpp` since the #460
 rework), with the live joiner
 (`ClientRuntime`) as the one consumer. Mentions of the replay consumer below
 are the original decision text, left as written.
@@ -22,7 +22,7 @@ are the original decision text, left as written.
 
 Live play and replay/spectate used the same `npwire` decoders but built two
 different client worlds. `Simulation` folded S2C messages into
-`NetClientView` and presented its flat snapshot through `WirePresentPass`.
+`NetClientView` and presented its flat snapshot through `EntityPresenter`.
 `NovaWorldClient` retained every decoded message, periodically rebuilt a
 `ReplayTimeline`, and rendered that model through `NetWorldView`. The two paths
 could disagree about spawn identity, compact record widths, Person animation,
@@ -49,7 +49,7 @@ physical kind of either entity.
    tools. Live play does not pay for history. The batch `build_replay_timeline`
    function remains an offline capture-analysis utility; it is not a runtime
    spectator renderer.
-3. **`WirePresentPass` is the sole decoded-entity presenter.** Live joiners and
+3. **`EntityPresenter` is the sole decoded-entity presenter.** Live joiners and
    spectators expose the same `PF_*` snapshot contract and use the same spawn,
    model-resolution, transform, animation, visibility, and liveness path.
    `NetWorldView` is removed. Role-specific data may enrich a snapshot:

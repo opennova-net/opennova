@@ -42,11 +42,11 @@ struct Nearest {
 // [orig: aiSlot byte+4 & 1 -> no scan] — both are out of the slice-1 loop.
 Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 	Nearest best;
-	const w::Vec3 player = rig.player_position();
-	const w::AiEntity *self = rig.player_ai();
+	const w::Vec3 player = rig.local.player_position();
+	const w::AiEntity *self = rig.local.player_ai();
 	const uint8_t own_team = self != nullptr ? self->team : 1;
-	for (int i = 0; i < rig.ai.count(); ++i) {
-		w::AiEntity *e = rig.ai.at(i);
+	for (int i = 0; i < rig.world.ai.count(); ++i) {
+		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active) continue;
 		if ((e->slot.f[1] & 1) != 0 || e->team == 0 || e->team == own_team) continue;
 		const w::Entity *ent = rig.world.registry.get(e->handle);
@@ -75,7 +75,7 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.ammo_ok, "ammo.def loaded (AI rounds need the ballistics table)")) return 1;
 	rig.install_weapon("WPN_M4AUTO");
 
@@ -86,7 +86,7 @@ int main() {
 
 	// --- Approach: walk at the nearest NPC until it is inside the stop distance
 	// or fire already lands.
-	const int32_t hp0 = rig.player_health();
+	const int32_t hp0 = rig.local.player_health();
 	int seconds = 0;
 	int fires = 0;
 	const auto count_fire_events = [&]() {
@@ -100,31 +100,31 @@ int main() {
 		}
 		++seconds;
 	};
-	rig.input.forward = true;
+	rig.local.input.forward = true;
 	while (seconds < kMaxMissionSeconds) {
 		const Nearest npc = nearest_npc(rig);
 		if (npc.ai != nullptr) {
-			const w::Vec3 me = rig.player_position();
+			const w::Vec3 me = rig.local.player_position();
 			w::Vec3 target = testrig::ai_position(*npc.ai);
 			target.z = me.z;
-			rig.aim_at(me, target);
+			rig.local.aim_at(me, target);
 		}
 		mission_second();
-		if (rig.player_health() < hp0) break; // already under fire
+		if (rig.local.player_health() < hp0) break; // already under fire
 		const Nearest npc_now = nearest_npc(rig);
 		if (npc_now.ai == nullptr) continue;
 		if (npc_now.distance <= kStopDistance) break;
 		if (seconds % 10 == 0)
 			std::printf("threat: approach t=%ds dist=%.1fu hp=%d npc_state=%d\n", seconds,
-					npc_now.distance, rig.player_health(), npc_now.ai->brain.cur_state());
+					npc_now.distance, rig.local.player_health(), npc_now.ai->brain.cur_state());
 	}
-	rig.input.forward = false;
+	rig.local.input.forward = false;
 	{
 		const Nearest here = nearest_npc(rig);
 		std::printf("threat: holding at %.1fu (t=%ds) — waiting for hostile fire\n",
 				here.distance, seconds);
-		const w::Entity *pe = rig.player();
-		const w::AiEntity *pa = rig.player_ai();
+		const w::Entity *pe = rig.local.player();
+		const w::AiEntity *pa = rig.local.player_ai();
 		if (pe != nullptr && pa != nullptr)
 			std::printf("threat: player item=%d def=%d radar_sig=%d heat_sig=%d engine_flags=0x%x flags=0x%x refcount=%d team=%d/%d alive=%d hp=%d pool=%d\n",
 					pe->item_id, int(pe->has_item_def), pe->radar_sig, pe->heat_sig, unsigned(pe->engine_flags),
@@ -134,7 +134,7 @@ int main() {
 			const w::AiProfile &pr = here.ai->profile;
 			std::printf("threat: npc see_all=%d profile_type=%d prio=%d authority=%d in_session=%d team=%d slot_class=[%d %d %d %d] class_priority=[%d %d %d %d] fov=%d/%d flags100=0x%x\n",
 					int(here.ai->see_all), pr.type, here.ai->brain.f[w::AiBrain::kPriorityTarget],
-					int(rig.ai.is_authority), int(rig.ai.is_in_session), int(here.ai->team),
+					int(rig.world.ai.is_authority), int(rig.world.ai.is_in_session), int(here.ai->team),
 					pr.slot_class[0], pr.slot_class[1], pr.slot_class[2], pr.slot_class[3],
 					pr.class_priority[0], pr.class_priority[1], pr.class_priority[2], pr.class_priority[3],
 					pr.fov_primary, pr.fov_secondary, unsigned(pr.flags100));
@@ -143,9 +143,9 @@ int main() {
 			std::printf("\n");
 			if (pe != nullptr) {
 				int32_t sa[3], sb[3];
-				rig.ai.weapon_aim_origin(rig.world, *here.ai, sa);
-				rig.ai.weapon_aim_origin(rig.world, *pe, sb);
-				const bool los = rig.ai.line_of_sight_clear(rig.world, sa, sb, here.ai->handle, pe->handle);
+				rig.world.ai.weapon_aim_origin(rig.world, *here.ai, sa);
+				rig.world.ai.weapon_aim_origin(rig.world, *pe, sb);
+				const bool los = rig.world.ai.line_of_sight_clear(rig.world, sa, sb, here.ai->handle, pe->handle);
 				std::printf("threat: npc slot1=0x%x aim npc=(%.2f, %.2f, %.2f) player=(%.2f, %.2f, %.2f) player eye_offset=(%.2f, %.2f, %.2f) los_clear=%d ground under player=%.2f\n",
 						unsigned(here.ai->slot.f[1]), sa[0] / 65536.0f, sa[1] / 65536.0f, sa[2] / 65536.0f,
 						sb[0] / 65536.0f, sb[1] / 65536.0f, sb[2] / 65536.0f, pe->eye_offset_x / 65536.0f,
@@ -158,7 +158,7 @@ int main() {
 	// --- Watch: stand still until NPC fire kills the player.
 	int damaged_at = -1;
 	while (seconds < kMaxMissionSeconds) {
-		const int32_t hp = rig.player_health();
+		const int32_t hp = rig.local.player_health();
 		if (hp < hp0 && damaged_at < 0) {
 			damaged_at = seconds;
 			std::printf("threat: DAMAGED t=%ds hp %d -> %d (hostile fire landed)\n", seconds, hp0, hp);
@@ -174,7 +174,7 @@ int main() {
 		mission_second();
 		if (seconds % 10 == 0) {
 			const Nearest npc = nearest_npc(rig);
-			const w::AiEntity *self = rig.player_ai();
+			const w::AiEntity *self = rig.local.player_ai();
 			std::printf("threat: t=%ds hp=%d nearest=%.1fu state=%d npc_hp=%d sight=%d attack=%d alert=%d tgt=%d team=%d/%d find_calls=%d fires=%d\n",
 					seconds, hp, npc.distance, npc.ai != nullptr ? npc.ai->brain.cur_state() : -1,
 					npc.ai != nullptr ? int(npc.ai->health) : 0,
@@ -183,10 +183,10 @@ int main() {
 					npc.ai != nullptr ? int(npc.ai->slot.bytes()[w::AiSlot::kAlertByte]) : -1,
 					npc.ai != nullptr ? int(npc.ai->inf.combat_target.valid()) : -1,
 					npc.ai != nullptr ? int(npc.ai->team) : -1, self != nullptr ? int(self->team) : -1,
-					rig.ai.find_target_calls, fires);
+					rig.world.ai.find_target_calls, fires);
 		}
 	}
 	std::fprintf(stderr, "FAIL: player hp=%d after %ds (damaged_at=%d) — no kill observed\n",
-			rig.player_health(), kMaxMissionSeconds, damaged_at);
+			rig.local.player_health(), kMaxMissionSeconds, damaged_at);
 	return 1;
 }

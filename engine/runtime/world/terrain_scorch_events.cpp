@@ -2,6 +2,8 @@
 
 #include <base/crt/crt_rng.h>
 
+using namespace opennova::crt;
+
 namespace opennova::world {
 namespace {
 
@@ -25,16 +27,6 @@ bool TerrainScorchEvents::emit_standard(int32_t center_x_q16,
 			terrain::resolve_standard_terrain_scorch(
 					center_x_q16, center_y_q16, scorch_id,
 					producer_roll(scorch_id));
-	return append_resolved(resolved, tick);
-}
-
-bool TerrainScorchEvents::emit_sized(int32_t center_x_q16,
-		int32_t center_y_q16, int scorch_id, int32_t half_extent_q16,
-		uint32_t tick) {
-	const terrain::TerrainScorchResolved resolved =
-			terrain::resolve_sized_terrain_scorch(
-					center_x_q16, center_y_q16, scorch_id,
-					half_extent_q16, producer_roll(scorch_id));
 	return append_resolved(resolved, tick);
 }
 

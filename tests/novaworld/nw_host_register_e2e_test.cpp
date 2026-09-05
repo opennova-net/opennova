@@ -18,8 +18,8 @@
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/joiner_connection.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_connection.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
@@ -650,7 +650,7 @@ int main() {
 		auto jo_client = opennova::net::udp_bind(0, &jo_client_port);
 		first_jo_client_port = jo_client_port;
 		expect(jo_client.is_valid(), "JO loss-probe UDP socket bound");
-		opennova::np::JoinerConnection joiner("E2ELossProbe");
+		opennova::inmatch::JoinerConnection joiner("E2ELossProbe");
 
 		auto send_jo = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -780,7 +780,7 @@ int main() {
 		uint16_t live_client_port = 0;
 		auto live_client = opennova::net::udp_bind(0, &live_client_port);
 		expect(live_client.is_valid(), "standalone-spawn UDP socket bound");
-		opennova::np::ClientRuntime live_joiner("E2EStandaloneSpawn");
+		opennova::inmatch::ClientRuntime live_joiner("E2EStandaloneSpawn");
 
 		auto send_live = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -985,7 +985,7 @@ int main() {
 		       "listener restart preserves the shared manager's unrelated peer");
 	}
 	if (restarted && restart_client.is_valid()) {
-		opennova::np::JoinerConnection restart_joiner("E2ERestartProbe");
+		opennova::inmatch::JoinerConnection restart_joiner("E2ERestartProbe");
 		const auto restart_hello = restart_joiner.start();
 		opennova::net::udp_send_to(
 				restart_client, server_ep,

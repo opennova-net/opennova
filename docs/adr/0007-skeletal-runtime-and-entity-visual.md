@@ -100,7 +100,7 @@ dismount clears the occupant's mode-driving copy and validity.
 builds the authoritative `AimOverlayInputs`, and calls
 `opennova::anim::compute_aim_overlay_angles`. Local pose export/rendering and organic collision consume
 that same selector result. Entity presentation snapshots carry the final body frame plus all nine selected
-overlay angles; `MissionPresentPass` and `WirePresentPass` only adapt that result to
+overlay angles; `MissionPresentPass` and `EntityPresenter` only adapt that result to
 `ObjectModel.set_aim_overlay`, so placed and remote actors do not carry a second config switch or a
 collision-only heuristic. CXLT remains independent metadata: organic COBJ section `i` consumes final bone
 matrix `i`, with no CXLT selection or post-transform.
@@ -171,10 +171,10 @@ rotated mounted enemy's posed section and confirms authoritative damage. Native 
 additionally pins a moved posed head (section 14),
 strict reverse-scan/mask and radius rules, propagation of the primary/reaction bone into the directional
 death animation, and the independent secondary normal-infantry damage-zone multiplier. It also pins the
-native F3 object prefilter's organic and out-of-range rejection before matrix-provider work. GUT
-`hitbox_debug_view_test` pins the person-section roles, retained shared-sphere packed
-batch at the full 96×19 budget, six-Hz cadence, unchanged-snapshot cache, and real-input/label-only
-invalidation. F3 omits the local avatar and bounds posed/fallback remote targets to 80 units under its
+native F3 object prefilter's organic and out-of-range rejection before matrix-provider work. (The GUT
+`hitbox_debug_view_test` that pinned the GDScript hitbox view's person-section roles, packed sphere
+batch, six-Hz cadence and snapshot cache went with that view on 2026-09-02, ADR 0039 §6; the native
+`Simulation.get_hitbox_debug()` report survives.) F3 omits the local avatar and bounds posed/fallback remote targets to 80 units under its
 96-actor diagnostic cap. Headless dump confirms US01 and C4Ground (40+ clips, compressed) pose as humanoids
 with no collapse. User-validated US01 walk/idle in the object preview.
 

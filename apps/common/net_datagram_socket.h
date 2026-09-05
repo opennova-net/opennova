@@ -3,21 +3,21 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <net/netsim/idatagram_socket.h> // netsim::IDatagramSocket
+#include <net/npwire/idatagram_socket.h> // opennova::IDatagramSocket
 #include <net/npwire/peer_addr.h>     // opennova::PeerAddr
 
 #include "net_sockets.h" // opennova::net (apps/common)
 
 namespace opennova::net {
 
-// net::Socket-backed netsim::IDatagramSocket — the real-UDP adapter the headless host
-// (apps/nw_server) and the two-endpoint socket test plug into the engine/net/npruntime owner loop.
+// net::Socket-backed opennova::IDatagramSocket — the real-UDP adapter the headless host
+// (apps/nw_server) and the two-endpoint socket test plug into the engine/runtime/inmatch owner loop.
 //
 // net::Endpoint.ip is MSO-first (ip[0] = a in a.b.c.d); PeerAddr.ip is LE octet packing (a in the
 // low byte). The conversion is a straight pack/unpack, NOT a byte swap — verified: 127.0.0.1 ->
 // PeerAddr.ip 0x0100007F (the value client_runtime_test hard-codes). The session loop that owns
-// the socket is engine/net/npruntime/host_session.h.
-class NetDatagramSocket : public netsim::IDatagramSocket {
+// the socket is engine/runtime/inmatch/host_session.h.
+class NetDatagramSocket : public opennova::IDatagramSocket {
 public:
 	// `sock` is NON-OWNING (the caller owns the socket lifetime). `recv_timeout_ms` is the per-recv
 	// wait: 0 (default) is non-blocking — right for main.cpp's busy 62 Hz loop, which paces with

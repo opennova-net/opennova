@@ -18,7 +18,7 @@
 //
 // Asset-free and wire-free: it drives ClientReplicaPipeline::tick_arms_dip() directly.
 
-#include <net/netsim/client_replica_pipeline.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -26,7 +26,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 bool expect(bool ok, const char *what) {
 	if (!ok) std::printf("FAIL: %s\n", what);

@@ -55,15 +55,17 @@ var _temp_dir := ""
 var _shell: Node = null
 
 
-class DeployWorldHarness:
-	extends GameWorld
+# The screen's narrow world view, faked over the loopback joiner sim and the
+# staged menu root (rule 11: a fake of the WorldView interface through its virtual hooks).
+class FakeWorldView:
+	extends WorldView
 	var root: ResourceRoot
-	var sim: Simulation
+	var sim_value: Simulation
 
-	func get_sim() -> Simulation:
-		return sim
+	func _sim() -> Simulation:
+		return sim_value
 
-	func get_resource_root() -> ResourceRoot:
+	func _resource_root() -> ResourceRoot:
 		return root
 
 
@@ -187,24 +189,29 @@ end
 	return result
 
 
-# A REAL loopback join held at the deploy pick (the deploy_screen_presenter_test
-# recipe). Returns {host, joiner}; both autofreed Nodes.
+# A REAL loopback join held at the DEATH deploy pick (the
+# deploy_screen_presenter_test recipe): the initial join deploys with no pick —
+# retail's initial join sends no C2S 0x0E — then the authority kills the joiner
+# and the death edge re-arms the pick. Returns {host, joiner}; both autofreed
+# Nodes.
 func _join_pair_with_pending_pick() -> Dictionary:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	mission.add_entity(3, AI_TYPE, Vector3(0, 0, 0), Vector3.ZERO)
 	var zone := mission.add_entity(
 			MissionData.KIND_ITEM, SPAWN_ZONE_TYPE, Vector3(40, 0, 0), Vector3.ZERO)
-	assert_false(zone.is_empty())
-	if not zone.is_empty():
+	assert_not_null(zone)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
-				MissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
+				MissionData.KIND_ITEM, zone.index, "team", 1))
 	var item_db := _spawn_zone_item_db()
 	assert_not_null(item_db)
 
 	var host := Simulation.new()
 	autofree(host)
-	host.configure_host_session({"gametype": 0x30020})
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1))
@@ -232,8 +239,32 @@ func _join_pair_with_pending_pick() -> Dictionary:
 			break
 		OS.delay_msec(2)
 	assert_true(reached, "the joiner reached in-match over real loopback UDP")
-	assert_true(joiner.is_join_deploy_pick_pending(),
-			"the spawn-zone join holds the player-paced deploy pick")
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join deploys with no forced C2S 0x0E")
+	# The kill targets the joiner's wire handle: wait for the 0x0C name-match to
+	# bind it, then the authority's real death transaction re-arms the pick (the
+	# DEATH screen).
+	var self_bound := false
+	for _i in range(400):
+		host.step()
+		joiner.step()
+		if joiner.get_joiner_self_handle() > 0:
+			self_bound = true
+			break
+		OS.delay_msec(2)
+	assert_true(self_bound, "the joiner bound its wire handle before the kill")
+	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
+			"the host queued the joiner's death")
+	var pick_pending := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(pick_pending,
+			"the death edge holds the deploy pick (begin_redeployment)")
 	return {"host": host, "joiner": joiner}
 
 
@@ -253,14 +284,10 @@ func test_shell_returns_a_punted_deploy_screen_to_the_menu() -> void:
 	var deploy_host: DeployScreenPresenter = deploy_hosts[0]
 	var shell_world = _shell.get_node("World")
 	var pair := _join_pair_with_pending_pick()
-	var world := DeployWorldHarness.new()
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	world.root = _make_root()
-	world.sim = pair.joiner
-	add_child_autofree(world)
-	deploy_host.setup(world, _shell.get_node("HUD"))
+	var view := FakeWorldView.new()
+	view.root = _make_root()
+	view.sim_value = pair.joiner
+	deploy_host.setup(view, _shell.get_node("HUD"))
 	assert_true(deploy_host.open(), "the shell's deploy screen opens over the join")
 	await get_tree().process_frame
 	assert_false(_shell.is_gameplay_input_active(),

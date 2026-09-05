@@ -21,6 +21,10 @@
 #include <godot_cpp/classes/translation_server.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
+// After the Windows block on purpose: godot-cpp's headers must not first meet
+// winnetwk.h's CONNECT_DEFERRED macro through this include.
+#include "util/string_convert.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -30,11 +34,9 @@
 
 namespace godot {
 
-namespace {
+using opennova::to_std;
 
-std::string to_std(const String &value) {
-	return std::string(value.utf8().get_data());
-}
+namespace {
 
 uint32_t fnv1a_32(std::string_view value) {
 	uint32_t hash = 2166136261u;

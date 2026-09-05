@@ -41,7 +41,7 @@ constexpr uint16_t kTruckSsn = 11;
 constexpr uint16_t kAtvSsn = 1766;
 
 bool camera_check(testrig::RetailMissionRig &rig, const char *label, bool expect_third_person) {
-	const w::LocalPlayerViewFrame f = rig.view_frame();
+	const w::LocalPlayerViewFrame f = rig.local.view_frame();
 	std::printf("ride: camera %s third_person=%d camera_mounted=%d selected=%d\n", label,
 			int(f.third_person), int(f.camera_mounted), int(f.third_person_selected));
 	char msg[128];
@@ -64,12 +64,12 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	rig.install_weapon("WPN_M4AUTO");
 	rig.tick(62);
 	if (!camera_check(rig, "on_foot", false)) return 1;
 
-	w::Entity *truck = rig.by_net_id(kTruckSsn);
+	w::Entity *truck = rig.world.registry.by_net_id(kTruckSsn);
 	if (!expect(truck != nullptr, "truck SSN 11 is in the world")) return 1;
 	std::printf("ride: truck pos=(%.1f, %.1f, %.1f) seats=%zu\n", truck->position.x, truck->position.y,
 			truck->position.z, truck->seats.size());
@@ -80,13 +80,13 @@ int main() {
 	// Bring the player to the truck (the spawn point sits inside the barracks;
 	// the motor pool is open ground and the truck's list-2 route starts there).
 	const w::Vec3 tpos = truck->position;
-	rig.set_entity_position(player_handle, w::Vec3{tpos.x + 1.6f, tpos.y, tpos.z});
+	rig.world.commands.set_entity_position(player_handle, w::Vec3{tpos.x + 1.6f, tpos.y, tpos.z});
 	rig.tick(31);
 
 	// --- Toggle mount: the player must end up seated on SSN 11.
-	if (!expect(rig.toggle_mount(), "the mount toggle accepts (a seat within the 4 u scan gate)")) return 1;
+	if (!expect(rig.local.toggle_mount(), "the mount toggle accepts (a seat within the 4 u scan gate)")) return 1;
 	rig.tick(31);
-	const w::Entity *pl = rig.player();
+	const w::Entity *pl = rig.local.player();
 	if (!expect(pl != nullptr && pl->mounted, "the player is mounted after the toggle")) return 1;
 	if (!expect(pl->mount_target == truck_handle, "the player mounted SSN 11")) return 1;
 	const w::SeatType truck_seat = pl->mount_type;
@@ -104,15 +104,15 @@ int main() {
 
 	// --- THE RIDE: the instructor drives the redirected truck; the seated
 	// player must be carried along.
-	const w::Vec3 t0 = rig.by_net_id(kTruckSsn)->position;
+	const w::Vec3 t0 = rig.world.registry.by_net_id(kTruckSsn)->position;
 	float ride_dist = 0.0f;
 	for (int i = 0; i < 30; ++i) {
 		rig.tick(62);
-		ride_dist = testrig::distance(rig.by_net_id(kTruckSsn)->position, t0);
+		ride_dist = testrig::distance(rig.world.registry.by_net_id(kTruckSsn)->position, t0);
 		if (ride_dist > 8.0f) break;
 	}
-	const w::Vec3 rider = rig.player_position();
-	const w::Vec3 truck_now = rig.by_net_id(kTruckSsn)->position;
+	const w::Vec3 rider = rig.local.player_position();
+	const w::Vec3 truck_now = rig.world.registry.by_net_id(kTruckSsn)->position;
 	const float carry_gap = testrig::distance(rider, truck_now);
 	std::printf("ride: truck drove %.1fu; rider gap %.1fu\n", ride_dist, carry_gap);
 	if (!expect(ride_dist >= 8.0f, "the ride moved (the AI driver leg)")) return 1;
@@ -123,31 +123,31 @@ int main() {
 	// teleported away (the seat carry snaps it back) — park the TRUCK far away so
 	// the toggle's scan runs dry and DETACHES [orig: @0x4369c7], then bring the
 	// ATV to the dismounted player.
-	w::Entity *atv = rig.by_net_id(kAtvSsn);
+	w::Entity *atv = rig.world.registry.by_net_id(kAtvSsn);
 	if (atv == nullptr) {
 		std::printf("ride: ATV SSN %u missing; drive leg skipped\n", unsigned(kAtvSsn));
 		std::printf("vehicle_ride_00tra: mount + event 2 + AI ride + carry\n");
 		return failures == 0 ? 0 : 1;
 	}
 	const w::EntityHandle atv_handle = atv->handle;
-	const w::Vec3 here = rig.player_position();
-	rig.set_entity_position(truck_handle, w::Vec3{here.x + 200.0f, here.y, here.z});
+	const w::Vec3 here = rig.local.player_position();
+	rig.world.commands.set_entity_position(truck_handle, w::Vec3{here.x + 200.0f, here.y, here.z});
 	rig.tick(19);
-	rig.toggle_mount(); // seat scan dry (the truck left) -> detach
+	rig.local.toggle_mount(); // seat scan dry (the truck left) -> detach
 	rig.tick(19);
-	if (rig.player()->mounted) {
+	if (rig.local.player()->mounted) {
 		std::printf("ride: dismount failed after the truck left; drive leg skipped\n");
 		std::printf("vehicle_ride_00tra: mount + event 2 + AI ride + carry\n");
 		return failures == 0 ? 0 : 1;
 	}
 	std::printf("ride: dismounted (scan-dry toggle)\n");
 	if (!camera_check(rig, "dismounted", false)) return 1;
-	const w::Vec3 here2 = rig.player_position();
-	rig.set_entity_position(atv_handle, w::Vec3{here2.x + 1.5f, here2.y, here2.z});
+	const w::Vec3 here2 = rig.local.player_position();
+	rig.world.commands.set_entity_position(atv_handle, w::Vec3{here2.x + 1.5f, here2.y, here2.z});
 	rig.tick(19);
-	rig.toggle_mount(); // mount the ATV
+	rig.local.toggle_mount(); // mount the ATV
 	rig.tick(31);
-	pl = rig.player();
+	pl = rig.local.player();
 	if (!pl->mounted || pl->mount_target != atv_handle) {
 		std::printf("ride: ATV mount not reached (mounted=%d); drive leg skipped\n", int(pl->mounted));
 		std::printf("vehicle_ride_00tra: mount + event 2 + AI ride + carry\n");
@@ -158,11 +158,11 @@ int main() {
 	if (!camera_check(rig, "atv_seat", control_seat(atv_seat))) return 1;
 	if (control_seat(atv_seat)) {
 		const w::Vec3 a0 = rig.world.registry.get(atv_handle)->position;
-		rig.input.forward = true;
+		rig.local.input.forward = true;
 		rig.tick(62 * 4);
-		rig.input.forward = false;
+		rig.local.input.forward = false;
 		const w::Vec3 a1 = rig.world.registry.get(atv_handle)->position;
-		const float gap = testrig::distance(rig.player_position(), a1);
+		const float gap = testrig::distance(rig.local.player_position(), a1);
 		std::printf("ride: drive: ATV moved %.1fu; rider gap %.1fu\n", testrig::distance(a1, a0), gap);
 		if (!expect(testrig::distance(a1, a0) >= 2.0f, "forward input drives the ATV (the occupant leg)")) return 1;
 		if (!expect(gap <= 8.0f, "the driver stays on the ATV")) return 1;

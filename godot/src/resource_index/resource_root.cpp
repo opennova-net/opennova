@@ -1,4 +1,5 @@
 #include "resource_index/resource_root.h"
+#include "util/data_format.h"
 
 #include "cbin/cbin_asset_lookup.h"
 #include "fnt/fnt_resource.h"
@@ -18,6 +19,7 @@
 #include <vector>
 
 using namespace godot;
+using namespace opennova::gameprofile;
 
 namespace {
 
@@ -122,7 +124,11 @@ bool ResourceRoot::is_runtime_mount() const {
 	return mount_kind_ == MountKind::Runtime;
 }
 
-Dictionary ResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
+namespace {
+
+// One list_file_entries row (the resource-index enumeration edge the effect
+// and foliage loaders walk by key).
+Dictionary file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
 	Dictionary out;
 	out["kind"] = String(entry.kind.c_str());
 	out["path"] = String(entry.path.c_str());
@@ -133,6 +139,8 @@ Dictionary ResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEn
 	out["archive_path"] = String(entry.archive_path.c_str());
 	return out;
 }
+
+} // namespace
 
 opennova::VfsLookupPolicy ResourceRoot::to_vfs_lookup_policy(LookupPolicy policy) {
 	switch (policy) {
@@ -444,11 +452,7 @@ PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy)
 	if (!found) {
 		return out;
 	}
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy policy) const {

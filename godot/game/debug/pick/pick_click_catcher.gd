@@ -11,15 +11,15 @@ extends Node
 ## viewport mouse position is the root window's cursor and would land the ray
 ## off by the Game window's offset on screen.
 
-var _world: GameWorld = null  # re-resolved for its sim every click
+var _view: WorldView = null  # re-resolved for its sim every click
 var _pick_list: DebugPickList = null
 ## The viewport-local position the last pick ray was built from (the test
 ## seam; INF until a click ran).
 var last_pick_position := Vector2.INF
 
 
-func setup(world: GameWorld, pick_list: DebugPickList) -> void:
-	_world = world
+func setup(view: WorldView, pick_list: DebugPickList) -> void:
+	_view = view
 	_pick_list = pick_list
 
 
@@ -35,7 +35,7 @@ func handle_click(event: InputEvent) -> void:
 	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT \
 			or button.double_click:
 		return
-	if _pick_list == null or _world == null or not is_instance_valid(_world):
+	if _pick_list == null or _view == null:
 		return
 	var viewport := get_viewport()
 	if viewport == null:
@@ -45,8 +45,8 @@ func handle_click(event: InputEvent) -> void:
 		return
 	last_pick_position = button.position
 	var pick := DebugEntityPicker.pick_with_camera(
-			_world.get_sim(), camera, button.position, "mouse_click")
-	if pick.is_empty():
+			_view.sim(), camera, button.position, "mouse_click")
+	if pick == null:
 		return
 	_pick_list.add(pick)
 	viewport.set_input_as_handled()

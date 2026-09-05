@@ -11,6 +11,7 @@
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
+using namespace opennova::crt;
 
 namespace {
 
@@ -52,8 +53,8 @@ struct Rig : HeapWorldFixture {
         t.health = 100;
         target = world.registry.spawn(0, t);
 
-        world.ammo.entries.resize(2);
-        AmmoTableEntry &armed = world.ammo.entries[0];
+        world.tables.ammo.entries.resize(2);
+        AmmoTableEntry &armed = world.tables.ammo.entries[0];
         armed.name = "ARMED";
         armed.valid = true;
         armed.velocity = 620; // 10 units/tick
@@ -63,7 +64,7 @@ struct Rig : HeapWorldFixture {
         armed.max_damage = 25;
         armed.notarmmed_ammo = "DUD";
 
-        AmmoTableEntry &dud = world.ammo.entries[1];
+        AmmoTableEntry &dud = world.tables.ammo.entries[1];
         dud.name = "DUD";
         dud.valid = true;
         dud.velocity = 1;
@@ -123,7 +124,7 @@ struct PosedDamageRig : HeapWorldFixture {
         ammo.velocity = 620;
         ammo.max_age_ticks = 20;
         ammo.weight_in_grains = 875;
-        world.ammo.entries.push_back(ammo);
+        world.tables.ammo.entries.push_back(ammo);
 
         const int section_count = active_section + 1;
         CollisionModel model;
@@ -156,7 +157,7 @@ struct PosedDamageRig : HeapWorldFixture {
 
     Entity *shooter_entity() { return world.registry.get(shooter); }
     Entity *target_entity() { return world.registry.get(target); }
-    AmmoTableEntry &ammo() { return world.ammo.entries[0]; }
+    AmmoTableEntry &ammo() { return world.tables.ammo.entries[0]; }
 
     void fire_and_tick() {
         RoundSpawnParams params;
@@ -190,7 +191,7 @@ FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
     ammo.drag_fp16 = drag_fp16;
     ammo.drag = static_cast<float>(from_fixed(drag_fp16));
     ammo.min_stable_velocity = min_stable_velocity;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     RoundSpawnParams params;
     params.origin = {0.0f, 0.0f, static_cast<float>(from_fixed(origin_z))};
@@ -213,9 +214,9 @@ FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
 
 void test_arming_dud_and_armed_damage() {
     Rig r;
-    r.world.ammo.entries[0].tracer_rate = 1;
-    r.world.ammo.entries[0].tracer_type_friendly = 7;
-    r.world.ammo.entries[0].tracer_type_enemy = 7;
+    r.world.tables.ammo.entries[0].tracer_rate = 1;
+    r.world.tables.ammo.entries[0].tracer_type_friendly = 7;
+    r.world.tables.ammo.entries[0].tracer_type_enemy = 7;
     const int source_slot = r.fire();
     CHECK(source_slot >= 0);
     CHECK(r.world.round_sim.rounds[static_cast<size_t>(source_slot)].trail_slot >= 0);
@@ -266,7 +267,7 @@ void test_arming_dud_and_armed_damage() {
     r.world.round_sim.reset();
     r.world.registry.get(r.target)->position.y = 0.0f;
     r.clear_events();
-    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     CHECK(r.fire() >= 0);
     r.world.round_sim.tick(r.world, nullptr);
     CHECK(r.world.registry.get(r.target)->health == 75);
@@ -278,7 +279,7 @@ void test_arming_dud_and_armed_damage() {
 
 void test_missing_item_def_consumes_round_without_damage() {
     Rig r;
-    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity *target = r.world.registry.get(r.target);
     target->has_item_def = false;
 
@@ -293,7 +294,7 @@ void test_missing_item_def_consumes_round_without_damage() {
 
 void test_damage_uses_retail_signed_wrap_and_ftol_cap() {
     Rig r;
-    AmmoTableEntry &ammo = r.world.ammo.entries[0];
+    AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
     ammo.arm_age_ticks = 0;
     ammo.flags = 0x100u;
     ammo.weight_in_grains = 875;
@@ -317,7 +318,7 @@ void test_damage_uses_retail_signed_wrap_and_ftol_cap() {
 
 void test_nodie_and_nontransparent_damage_gates() {
     Rig r;
-    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity *target = r.world.registry.get(r.target);
     target->health = 10;
     target->item_attrib = 0x40000000u; // ItemDefAttrib NoDie
@@ -387,7 +388,7 @@ void test_posed_head_zone_multiplier() {
     ammo.velocity = 620;
     ammo.max_age_ticks = 20;
     ammo.weight_in_grains = 875;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     CollisionModel model;
     CollisionSection bone;
@@ -524,10 +525,10 @@ void test_shooter_damage_class_runs_after_zone_truncation() {
 void test_network_oneshot_authority_and_session_gate() {
     {
         Rig r;
-        r.world.ammo.entries[0].arm_age_ticks = 0;
-        r.world.mp_session = true;
-        r.world.projectile_authority = true;
-        r.world.one_shot_kill = true;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        r.world.rules.mp_session = true;
+        r.world.rules.projectile_authority = true;
+        r.world.rules.one_shot_kill = true;
         r.world.registry.get(r.target)->health = 3000;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
@@ -535,13 +536,13 @@ void test_network_oneshot_authority_and_session_gate() {
         CHECK(r.world.round_sim.hits[0].damage == 2000);
         CHECK(r.world.registry.get(r.target)->health == 1000);
         // The early MP option return bypasses the authored max_damage=25.
-        CHECK(r.world.ammo.entries[0].max_damage == 25);
+        CHECK(r.world.tables.ammo.entries[0].max_damage == 25);
     }
     {
         Rig r;
-        r.world.ammo.entries[0].arm_age_ticks = 0;
-        r.world.mp_session = false;
-        r.world.one_shot_kill = true;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        r.world.rules.mp_session = false;
+        r.world.rules.one_shot_kill = true;
         r.world.registry.get(r.target)->health = 3000;
         CHECK(r.fire() >= 0);
         r.world.round_sim.tick(r.world, nullptr);
@@ -551,10 +552,10 @@ void test_network_oneshot_authority_and_session_gate() {
     }
     {
         Rig r;
-        r.world.ammo.entries[0].arm_age_ticks = 0;
-        r.world.mp_session = true;
-        r.world.projectile_authority = false;
-        r.world.one_shot_kill = true;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        r.world.rules.mp_session = true;
+        r.world.rules.projectile_authority = false;
+        r.world.rules.one_shot_kill = true;
         // A visual client's only native live pool-0 person is its own player L;
         // any synthetic non-local native rows are excluded from projectile walks
         // because remote pool-0 poses arrive as wire proxies.
@@ -567,7 +568,7 @@ void test_network_oneshot_authority_and_session_gate() {
         // cannot normalize entity words or queue the impact kill zone.
         target->health = 0x1FFFF;
         target->health_max = 0x1FFFE;
-        AmmoTableEntry &ammo = r.world.ammo.entries[0];
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
         ammo.kztype = ammo_kz::kStandard;
         ammo.kz_maxradius = 5.0f;
         ammo.kz_damage = 50;
@@ -588,8 +589,8 @@ void test_network_oneshot_authority_and_session_gate() {
         instant.kztype = ammo_kz::kStandard;
         instant.kz_maxradius = 4.0f;
         instant.kz_damage = 40;
-        const int instant_index = static_cast<int>(r.world.ammo.entries.size());
-        r.world.ammo.entries.push_back(instant);
+        const int instant_index = static_cast<int>(r.world.tables.ammo.entries.size());
+        r.world.tables.ammo.entries.push_back(instant);
         RoundSpawnParams instant_params;
         instant_params.owner = r.shooter;
         instant_params.shooter_handle = r.shooter.packed;
@@ -602,9 +603,9 @@ void test_network_oneshot_authority_and_session_gate() {
 
 void test_visual_only_rounds_have_no_gameplay_consequences() {
     Rig r;
-    r.world.mp_session = true;
-    r.world.projectile_authority = false;
-    r.world.one_shot_kill = true;
+    r.world.rules.mp_session = true;
+    r.world.rules.projectile_authority = false;
+    r.world.rules.one_shot_kill = true;
     // The consequence gates are proven against the one local person a visual
     // client still collides with: its own player L (ghost slots are excluded).
     r.world.cached.local_player = r.target;
@@ -628,7 +629,7 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     target->death_anim_state = 77;
     const Entity before = *target;
 
-    AmmoTableEntry &bullet = r.world.ammo.entries[0];
+    AmmoTableEntry &bullet = r.world.tables.ammo.entries[0];
     bullet.arm_age_ticks = 0;
     bullet.kztype = ammo_kz::kStandard;
     bullet.kz_maxradius = 5.0f;
@@ -647,15 +648,15 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     CHECK(target->flags == before.flags);
     CHECK(target->last_attacker == before.last_attacker);
     CHECK(target->death_anim_state == before.death_anim_state);
-    CHECK(!r.world.relations.group_group(
+    CHECK(!r.world.script.relations.group_group(
         TriggerRelations::kShot, shooter->group_id, target->group_id));
-    CHECK(!r.world.relations.single_group(
+    CHECK(!r.world.script.relations.single_group(
         TriggerRelations::kShot, shooter->net_id, target->group_id));
-    CHECK(!r.world.relations.group_single(
+    CHECK(!r.world.script.relations.group_single(
         TriggerRelations::kShot, shooter->group_id, target->net_id));
-    CHECK(!r.world.relations.single_single(
+    CHECK(!r.world.script.relations.single_single(
         TriggerRelations::kShot, shooter->net_id, target->net_id));
-    CHECK(r.world.relations.group(target->group_id).alert ==
+    CHECK(r.world.script.relations.group(target->group_id).alert ==
           TriggerRelations::kAlertGreen);
 
     auto entity_count = [&]() {
@@ -675,8 +676,8 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     instant.kztype = ammo_kz::kStandard;
     instant.kz_maxradius = 4.0f;
     instant.kz_damage = 40;
-    const int instant_index = static_cast<int>(r.world.ammo.entries.size());
-    r.world.ammo.entries.push_back(instant);
+    const int instant_index = static_cast<int>(r.world.tables.ammo.entries.size());
+    r.world.tables.ammo.entries.push_back(instant);
     RoundSpawnParams instant_params;
     instant_params.owner = r.shooter;
     instant_params.shooter_handle = r.shooter.packed;
@@ -697,8 +698,8 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     charge.velocity = 62;
     charge.max_age_ticks = 20;
     charge.drag_fp16 = 65536;
-    const int charge_index = static_cast<int>(r.world.ammo.entries.size());
-    r.world.ammo.entries.push_back(charge);
+    const int charge_index = static_cast<int>(r.world.tables.ammo.entries.size());
+    r.world.tables.ammo.entries.push_back(charge);
     RoundSpawnParams charge_params;
     charge_params.owner = r.shooter;
     charge_params.shooter_handle = r.shooter.packed;
@@ -782,9 +783,9 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     ammo.max_age_ticks = 20;
     ammo.weight_in_grains = 875;
     ammo.max_damage = 25;
-    world.ammo.entries.push_back(ammo);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.tables.ammo.entries.push_back(ammo);
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     RoundSpawnParams params;
     params.owner = local_l;
@@ -913,7 +914,7 @@ void test_knife_instant_kill_zone_raycast() {
     knife.flags = kAmmoFlagInstantKillZone;
     knife.kztype = ammo_kz::kKnife;
     knife.kz_maxradius = 3.0f;
-    world.ammo.entries.push_back(knife);
+    world.tables.ammo.entries.push_back(knife);
 
     RoundSpawnParams params;
     params.owner = sh;
@@ -1022,8 +1023,8 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     World world;
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -1082,10 +1083,10 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     CHECK(!trace_down_at(12 * 65536, false).hit());
 
     // The same world WITH authority keeps the ordinary local-table behavior.
-    world.projectile_authority = true;
+    world.rules.projectile_authority = true;
     CHECK(trace_down_at(5 * 65536, false).hit_class ==
           ProjectileHitClass::DynamicEntity);
-    world.projectile_authority = false;
+    world.rules.projectile_authority = false;
 
     // The wire projection consumes the SAME effective items.def scale as its
     // visual and local collision twin. A ray 1.5u off-center misses the
@@ -1132,8 +1133,8 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
 void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
     World world;
     world.registry.configure_pool(0, 4);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -1197,8 +1198,8 @@ void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
 void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
     World world;
     world.registry.configure_pool(0, 4);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -1244,8 +1245,8 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
     World world;
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -1277,8 +1278,8 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
     nade.velocity = 124;          // 2 units/tick
     nade.max_age_ticks = 60;
     nade.drag_fp16 = 65536;       // dragless: keep the 2 u/tick lane speed
-    const int nade_index = static_cast<int>(world.ammo.entries.size());
-    world.ammo.entries.push_back(nade);
+    const int nade_index = static_cast<int>(world.tables.ammo.entries.size());
+    world.tables.ammo.entries.push_back(nade);
 
     RoundSpawnParams params;
     params.owner = sh;
@@ -1329,8 +1330,8 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
 void test_visual_infantry_proxy_joins_person_walk() {
     World world;
     world.registry.configure_pool(0, 8);
-    world.mp_session = true;
-    world.projectile_authority = false;
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
 
     Entity local;
     local.kind = EntityKind::Organic;
@@ -1380,8 +1381,8 @@ void test_person_walk_orders_local_player_by_its_server_handle() {
     const auto run_case = [](uint16_t local_wire_h) {
         World world;
         world.registry.configure_pool(0, 8);
-        world.mp_session = true;
-        world.projectile_authority = false;
+        world.rules.mp_session = true;
+        world.rules.projectile_authority = false;
 
         // Synthetic non-local native organics at slots 0..3. A visual client
         // never collides them (decoded pool-0 proxies serve instead), but they
@@ -1449,8 +1450,8 @@ void test_signed_armor_equality_and_damage_state_gates() {
     const auto run_case = [](int32_t armor, int32_t damage_state,
                              int32_t expected_damage, int32_t expected_armor) {
         Rig r;
-        r.world.ammo.entries[0].arm_age_ticks = 0;
-        r.world.ammo.entries[0].penetration_impact = 10;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        r.world.tables.ammo.entries[0].penetration_impact = 10;
         Entity *target = r.world.registry.get(r.target);
         target->armor_impact = armor;
         target->damage_state = damage_state;
@@ -1485,7 +1486,7 @@ void test_signed_health_subtraction_wraps_at_entity_word() {
     target->health_max = 65535; // normalized at the same target consequence boundary
     target->armor_kz = 65535;
 
-    AmmoTableEntry &ammo = r.world.ammo.entries[0];
+    AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
     ammo.arm_age_ticks = 0;
     ammo.weight_in_grains = -875;
     ammo.min_damage = -1000;
@@ -1614,7 +1615,7 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
     const auto run_direct_case = [](uint8_t child_type, uint32_t child_attrib,
                                     uint8_t parent_type, bool expect_parent) {
         Rig r;
-        r.world.ammo.entries[0].arm_age_ticks = 0;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
         Entity *child = r.world.registry.get(r.target);
         child->item_type = child_type;
         child->item_attrib = child_attrib;
@@ -1656,7 +1657,7 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
     // The resolver does not search ancestors: child -> nonvehicle -> vehicle
     // still damages the child.
     Rig r;
-    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
     vehicle.has_item_def = true;
@@ -1687,9 +1688,9 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
 void test_vehicle_occupant_reduction_count_cap_and_depth() {
     Rig r;
     r.world.registry.configure_pool(1, 2);
-    r.world.ammo.entries[0].arm_age_ticks = 0;
-    r.world.ammo.entries[0].max_damage = 0;
-    r.world.ammo.entries[0].weight_in_grains = 143; // floor(620*143/875) = 101
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].max_damage = 0;
+    r.world.tables.ammo.entries[0].weight_in_grains = 143; // floor(620*143/875) = 101
 
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
@@ -1850,7 +1851,7 @@ void test_retail_aerodynamic_drag_vectors() {
 
 void test_consumed_hit_skips_post_sweep_forces() {
     Rig r;
-    r.world.ammo.entries[0].arm_age_ticks = 0;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
     const int slot = r.fire();
     CHECK(slot >= 0);
     if (slot < 0) return;
@@ -1897,7 +1898,7 @@ void test_terrain_impact_samples_charmap_surface() {
         ammo.velocity = 620;
         ammo.max_age_ticks = 20;
         ammo.weight_in_grains = 875;
-        world.ammo.entries.push_back(ammo);
+        world.tables.ammo.entries.push_back(ammo);
 
         std::vector<uint16_t> heights(512u * 512u, 0);
         std::vector<int> sectors(256u, 1);
@@ -1910,10 +1911,10 @@ void test_terrain_impact_samples_charmap_surface() {
         cw.build_tick_tables(world);
         world.collision = &cw;
 
-        world.surface_map.data = v.data;
-        world.surface_map.width = v.data != nullptr ? 2 : 0;
-        world.surface_map.height = v.data != nullptr ? 2 : 0;
-        world.surface_map.sector_grid = v.grid;
+        world.tables.surface_map.data = v.data;
+        world.tables.surface_map.width = v.data != nullptr ? 2 : 0;
+        world.tables.surface_map.height = v.data != nullptr ? 2 : 0;
+        world.tables.surface_map.sector_grid = v.grid;
 
         RoundSpawnParams p;
         p.owner = shooter;
@@ -1953,7 +1954,7 @@ void test_terrain_impact_emits_permanent_scorch() {
     ammo.velocity = 620;
     ammo.max_age_ticks = 20;
     ammo.scorch_id = 2;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     std::vector<uint16_t> heights(512u * 512u, 0);
     std::vector<int> sectors(256u, 1);
@@ -1978,9 +1979,9 @@ void test_terrain_impact_emits_permanent_scorch() {
         Vec3{0.0f, 0.0f, -10.0f};
     world.round_sim.tick(world, &flat, &collision);
 
-    CHECK(world.terrain_scorches.pending().size() == 1);
-    if (world.terrain_scorches.pending().empty()) return;
-    const TerrainScorchEvent &event = world.terrain_scorches.pending()[0];
+    CHECK(world.out.terrain_scorches.pending().size() == 1);
+    if (world.out.terrain_scorches.pending().empty()) return;
+    const TerrainScorchEvent &event = world.out.terrain_scorches.pending()[0];
     CHECK(event.mission_bounds.texture_index == 2); // first CRT rand = 41
     CHECK(event.mission_bounds.minimum_x_q16 == 6 * 65536);
     CHECK(event.mission_bounds.maximum_x_q16 == 14 * 65536);
@@ -1988,12 +1989,12 @@ void test_terrain_impact_emits_permanent_scorch() {
     CHECK(event.mission_bounds.maximum_z_q16 == -16 * 65536);
     CHECK(event.tick == world.logic_tick);
 
-    world.terrain_scorches.reset();
+    world.out.terrain_scorches.reset();
     ammo.scorch_id = 0;
     // No second active round remains, so an inert route can be pinned directly
     // without manufacturing a renderer record.
-    CHECK(!world.terrain_scorches.emit_standard(0, 0, ammo.scorch_id, 1));
-    CHECK(world.terrain_scorches.pending().empty());
+    CHECK(!world.out.terrain_scorches.emit_standard(0, 0, ammo.scorch_id, 1));
+    CHECK(world.out.terrain_scorches.pending().empty());
 }
 
 // The ordinary BULLET path never remaps a building's CFAC material 1 to the
@@ -2039,7 +2040,7 @@ void test_bullet_building_material_is_plain_plus_four() {
     ammo.max_age_ticks = 20;
     ammo.weight_in_grains = 875;
     ammo.max_damage = 25;
-    world.ammo.entries.push_back(ammo);
+    world.tables.ammo.entries.push_back(ammo);
 
     RoundSpawnParams params;
     params.owner = owner;
@@ -2067,7 +2068,7 @@ void test_bullet_building_material_is_plain_plus_four() {
 static void test_move_effect_water_release_reads_pre_move_z() {
     Rig rig;
     rig.world.env.water_z = 0x8000; // water at 0.5
-    AmmoTableEntry &ammo = rig.world.ammo.entries[0];
+    AmmoTableEntry &ammo = rig.world.tables.ammo.entries[0];
     ammo.impact_effects[1].effect = "Effect_Smoke";
     ammo.flags |= kAmmoFlagClipWaterFx | kAmmoFlagUseOwnMove;
     ammo.max_age_ticks = 200;
@@ -2112,7 +2113,7 @@ static void test_move_effect_water_release_reads_pre_move_z() {
 static void test_move_effect_ballistic_leg_ignores_the_water_plane() {
     Rig rig;
     rig.world.env.water_z = 0x8000; // water at 0.5
-    AmmoTableEntry &ammo = rig.world.ammo.entries[0];
+    AmmoTableEntry &ammo = rig.world.tables.ammo.entries[0];
     ammo.impact_effects[1].effect = "Effect_Smoke";
     ammo.flags |= kAmmoFlagClipWaterFx | kAmmoFlagNoGravity;
     ammo.max_age_ticks = 200;

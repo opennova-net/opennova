@@ -60,7 +60,7 @@ struct Ladder {
 std::vector<Ladder> cl_volumes(testrig::RetailMissionRig &rig) {
 	std::vector<Ladder> found;
 	for (const w::CollisionWorld::DebugInstance &inst :
-			rig.collision_instances(rig.player_position(), 150.0f, 128)) {
+			rig.collision_instances(rig.local.player_position(), 150.0f, 128)) {
 		for (const w::CollisionWorld::DebugVolume &vd : inst.volumes) {
 			if (vd.type != w::bvol_type::kLadderCL) continue;
 			Ladder l;
@@ -100,12 +100,12 @@ std::vector<Ladder> cl_volumes(testrig::RetailMissionRig &rig) {
 }
 
 bool climbing(testrig::RetailMissionRig &rig) {
-	return rig.player_anim_key().find("climb") != std::string::npos;
+	return rig.local.player_anim_key().find("climb") != std::string::npos;
 }
 
 void look_up(testrig::RetailMissionRig &rig) {
 	for (int i = 0; i < 8; ++i) {
-		rig.look(0.0f, -600.0f);
+		rig.local.look(0.0f, -600.0f);
 		rig.tick();
 	}
 }
@@ -123,13 +123,13 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.collision_attached > 0, "the collision instances attached")) return 1;
 	rig.tick(62);
 
 	// --- Sweep for CL volumes: the debug view is player-anchored (150 u), so
 	// hop a teleport grid around the spawn and accumulate every CL in range.
-	const w::Vec3 spawn = rig.player_position();
+	const w::Vec3 spawn = rig.local.player_position();
 	std::map<std::string, Ladder> by_key;
 	std::vector<w::Vec3> points{w::Vec3{spawn.x, spawn.y, 0.0f}};
 	for (float r = kSweepStep; r <= kSweepRadius; r += kSweepStep) {
@@ -140,7 +140,7 @@ int main() {
 		}
 	}
 	for (const w::Vec3 &p : points) {
-		rig.teleport_local_player(w::Vec3{p.x, p.y, 60.0f}, 0.0, 0.0);
+		rig.local.teleport_local_player(w::Vec3{p.x, p.y, 60.0f}, 0.0, 0.0);
 		rig.tick(testrig::ticks_for_seconds(0.12));
 		for (const Ladder &l : cl_volumes(rig)) {
 			char key[64];
@@ -179,20 +179,20 @@ int main() {
 	// death anim. That is a rig artifact, not the entry gate: raise the
 	// WAC-writable tolerance past any drop the probe makes. (0 is not "off":
 	// retail's landing check has no zero test, so 0 damages every landing.)
-	rig.world.wac_values.fallmps = 1000;
+	rig.world.script.wac_values.fallmps = 1000;
 	bool latched = false;
 	float hold_z = 0.0f;
 	for (const w::Vec3 &h : hovers) {
-		rig.teleport_local_player(w::Vec3{h.x, h.y, top - 0.3f}, 0.0, -30.0);
+		rig.local.teleport_local_player(w::Vec3{h.x, h.y, top - 0.3f}, 0.0, -30.0);
 		rig.tick(testrig::ticks_for_seconds(0.8));
-		const float z0 = rig.player_position().z;
+		const float z0 = rig.local.player_position().z;
 		rig.tick(testrig::ticks_for_seconds(0.5));
-		const float z1 = rig.player_position().z;
-		const std::string key = rig.player_anim_key();
+		const float z1 = rig.local.player_position().z;
+		const std::string key = rig.local.player_anim_key();
 		if (std::fabs(z1 - z0) < 0.05f && z1 > base && key.find("climb") != std::string::npos) {
 			latched = true;
 			hold_z = z1;
-			const w::Vec3 lp = rig.player_position();
+			const w::Vec3 lp = rig.local.player_position();
 			std::printf("ladder: LATCHED hover (%.2f, %.2f) holds z %.2f as %s (volume %.1f..%.1f); body %.2fu off the column\n",
 					h.x, h.y, z1, key.c_str(), base, top, testrig::planar_distance(lp, face));
 			break;
@@ -204,21 +204,21 @@ int main() {
 	// --- Climb: look up (the forward fan picks climb_up by the look-pitch sign),
 	// hold forward, and the climb clip's vertical lane must rise the body.
 	look_up(rig);
-	rig.input.forward = true;
+	rig.local.input.forward = true;
 	float max_z = hold_z;
 	for (int i = 0; i < 30; ++i) {
 		rig.tick(testrig::ticks_for_seconds(0.1));
-		max_z = std::max(max_z, rig.player_position().z);
+		max_z = std::max(max_z, rig.local.player_position().z);
 	}
-	rig.input.forward = false;
+	rig.local.input.forward = false;
 	if (!expect(max_z > hold_z + 0.4f, "forward + look-up climbs the body (climb_up root motion)")) {
-		rig.input.forward = true;
+		rig.local.input.forward = true;
 		for (int i = 0; i < 6; ++i) {
 			rig.tick(testrig::ticks_for_seconds(0.2));
-			const w::Vec3 lp = rig.player_position();
-			std::printf("ladder: STALL anim=%s pos (%.2f, %.2f, %.2f)\n", rig.player_anim_key().c_str(), lp.x, lp.y, lp.z);
+			const w::Vec3 lp = rig.local.player_position();
+			std::printf("ladder: STALL anim=%s pos (%.2f, %.2f, %.2f)\n", rig.local.player_anim_key().c_str(), lp.x, lp.y, lp.z);
 		}
-		rig.input.forward = false;
+		rig.local.input.forward = false;
 	} else {
 		std::printf("ladder: CLIMB OK %.2f -> %.2f\n", hold_z, max_z);
 	}
@@ -226,10 +226,10 @@ int main() {
 	// --- Hold: release the stick — climb_idle keeps the height while still
 	// inside the span (a natural top-out above the volume falls instead).
 	rig.tick(testrig::ticks_for_seconds(0.5));
-	const float settle = rig.player_position().z;
+	const float settle = rig.local.player_position().z;
 	if (settle < top - 0.5f) {
 		rig.tick(testrig::ticks_for_seconds(0.6));
-		const float settle2 = rig.player_position().z;
+		const float settle2 = rig.local.player_position().z;
 		expect(std::fabs(settle2 - settle) <= 0.3f, "height is held after the climb (climb_idle, no gravity)");
 		std::printf("ladder: HOLD z %.2f -> %.2f\n", settle, settle2);
 	} else {
@@ -243,25 +243,25 @@ int main() {
 		const float a = 2.0f * kPi * float(k) / 8.0f;
 		const float hx = face.x + 0.45f * std::cos(a), hy = face.y + 0.45f * std::sin(a);
 		for (int yaw = 0; yaw < 360 && !below_latched; yaw += 45) {
-			rig.teleport_local_player(w::Vec3{hx, hy, base + 0.6f}, double(yaw), 30.0);
+			rig.local.teleport_local_player(w::Vec3{hx, hy, base + 0.6f}, double(yaw), 30.0);
 			rig.tick(testrig::ticks_for_seconds(0.6));
 			if (climbing(rig)) {
 				below_latched = true;
-				const w::Vec3 lp = rig.player_position();
+				const w::Vec3 lp = rig.local.player_position();
 				std::printf("ladder: BOTTOM LATCH offset k=%d yaw %d -> %s at (%.2f, %.2f, %.2f)\n", k, yaw,
-						rig.player_anim_key().c_str(), lp.x, lp.y, lp.z);
+						rig.local.player_anim_key().c_str(), lp.x, lp.y, lp.z);
 			}
 		}
 	}
 	if (expect(below_latched, "the from-below entry latches (facing within 60 deg + pitch up)")) {
 		look_up(rig);
-		rig.input.forward = true;
-		float z_max = rig.player_position().z;
+		rig.local.input.forward = true;
+		float z_max = rig.local.player_position().z;
 		bool dropped = false;
 		for (int i = 0; i < 60; ++i) {
 			rig.tick(testrig::ticks_for_seconds(0.12));
-			const w::Vec3 lp = rig.player_position();
-			const std::string key = rig.player_anim_key();
+			const w::Vec3 lp = rig.local.player_position();
+			const std::string key = rig.local.player_anim_key();
 			z_max = std::max(z_max, lp.z);
 			// Cresting hands over to the exit leg (the clip family leaves
 			// climb); that is the top-out, not a drop.
@@ -273,7 +273,7 @@ int main() {
 				break;
 			}
 		}
-		rig.input.forward = false;
+		rig.local.input.forward = false;
 		expect(!dropped, "the full span climbs from the base without a drop");
 		if (!dropped) std::printf("ladder: BOTTOM full span climbed %.2f -> %.2f\n", base + 0.6f, z_max);
 	}

@@ -114,7 +114,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	await ctx.wait_frames(4)
 
 	var images: Array[Image] = []
-	var stats_series: Array[Dictionary] = []
+	var stats_series: Array[FoliageFrameStats] = []
 	for frame_index in range(CAPTURE_COUNT):
 		dispatcher.render_preview(camera.global_transform)
 		_pin_wind(dispatcher)
@@ -136,18 +136,18 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		worst_changed = maxi(worst_changed, int(diff.changed_pixels))
 		worst_delta = maxi(worst_delta, int(diff.max_delta))
 
-	var first_stats: Dictionary = stats_series[0]
+	var first_stats := stats_series[0]
 	var renderer_ok := int(foreground.pixels) >= MIN_FOREGROUND_PIXELS
 	var nonblack_ok := renderer_ok and float(foreground.mean_luma) >= MIN_MEAN_LUMA
 	var stable_ok := worst_changed == 0
-	var batches_ok := int(first_stats.get("detail_high_instances", 0)) > 0 \
-		and int(first_stats.get("silhouette_instances", 0)) == 0
+	var batches_ok := first_stats.detail_high_instances > 0 \
+		and first_stats.silhouette_instances == 0
 
 	ctx.log("FOLIAGE_REGRESSION detail foreground_pixels=%d mean_luma=%.3f max_luma=%.3f" % [
 		int(foreground.pixels), float(foreground.mean_luma), float(foreground.max_luma)])
 	ctx.log("FOLIAGE_REGRESSION detail frame_diffs=%s worst_changed=%d worst_delta=%d" % [
 		str(frame_diffs), worst_changed, worst_delta])
-	ctx.log("FOLIAGE_REGRESSION detail first_stats=%s" % str(first_stats))
+	ctx.log("FOLIAGE_REGRESSION detail first_stats=%s" % str(first_stats.to_json_value()))
 	ctx.log("FOLIAGE_REGRESSION detail verdict renderer=%s nonblack=%s stable=%s detail_only=%s" % [
 		str(renderer_ok), str(nonblack_ok), str(stable_ok), str(batches_ok)])
 	_report["detail"] = {
@@ -182,7 +182,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	await ctx.wait_frames(4)
 
 	var silhouette_images: Array[Image] = []
-	var silhouette_stats_series: Array[Dictionary] = []
+	var silhouette_stats_series: Array[FoliageFrameStats] = []
 	for frame_index in range(CAPTURE_COUNT):
 		dispatcher.render_frame(camera.global_transform)
 		_pin_wind(dispatcher)
@@ -206,17 +206,17 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		silhouette_worst_delta = maxi(
 			silhouette_worst_delta, int(diff.max_delta))
 
-	var silhouette_stats: Dictionary = silhouette_stats_series[0]
-	var silhouette_only_ok := int(silhouette_stats.get("silhouette_instances", 0)) > 0 \
-		and int(silhouette_stats.get("detail_high_instances", 0)) == 0 \
-		and int(silhouette_stats.get("detail_low_instances", 0)) == 0
+	var silhouette_stats := silhouette_stats_series[0]
+	var silhouette_only_ok := silhouette_stats.silhouette_instances > 0 \
+		and silhouette_stats.detail_high_instances == 0 \
+		and silhouette_stats.detail_low_instances == 0
 	var no_black_blob_ok := largest_black <= MAX_EXACT_BLACK_COMPONENT
 	var silhouette_stable_ok := silhouette_worst_changed == 0
 	ctx.log("FOLIAGE_REGRESSION silhouette largest_exact_black_component=%d allowed=%d" % [
 		largest_black, MAX_EXACT_BLACK_COMPONENT])
 	ctx.log("FOLIAGE_REGRESSION silhouette frame_diffs=%s worst_changed=%d worst_delta=%d" % [
 		str(silhouette_diffs), silhouette_worst_changed, silhouette_worst_delta])
-	ctx.log("FOLIAGE_REGRESSION silhouette first_stats=%s" % str(silhouette_stats))
+	ctx.log("FOLIAGE_REGRESSION silhouette first_stats=%s" % str(silhouette_stats.to_json_value()))
 	ctx.log("FOLIAGE_REGRESSION silhouette verdict no_black_blob=%s stable=%s silhouette_only=%s" % [
 		str(no_black_blob_ok), str(silhouette_stable_ok), str(silhouette_only_ok)])
 	_report["silhouette"] = {

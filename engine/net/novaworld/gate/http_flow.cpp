@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdlib> // std::atoi
 
+#include <base/io/log.h>
 #include <base/io/strutil.h>
 
 namespace opennova {
@@ -24,6 +25,72 @@ std::string replace_all(std::string s, const std::string &from, const std::strin
 std::string strip_edges(const std::string &s) { return opennova::strutil::trim(s); }
 std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
+}
+
+// Extract the message rendered in NovaWorld's message template. @MESSAGE@ is
+// optionally excluded because the login relay uses it for non-terminal progress.
+std::string extract_message(const std::vector<uint8_t> &body,
+                            bool include_progress_message = true) {
+	const std::string html = to_string_body(body);
+	if (html.empty()) return std::string();
+	const std::string lower = to_lower(html);
+	std::size_t begin = std::string::npos;
+	std::size_t end = std::string::npos;
+	std::size_t at = 0;
+	while ((at = lower.find("<ib3_subst", at)) != std::string::npos) {
+		const std::size_t tag_end = lower.find('>', at);
+		if (tag_end == std::string::npos) break;
+		const std::string tag = lower.substr(at, tag_end - at + 1);
+		if (tag.find("@generic@") != std::string::npos ||
+		    (include_progress_message && tag.find("@message@") != std::string::npos)) {
+			begin = tag_end + 1;
+			end = lower.find("</ib3_subst", begin);
+			break;
+		}
+		at = tag_end + 1;
+	}
+	if (begin == std::string::npos || end == std::string::npos) return std::string();
+
+	const std::string fragment = html.substr(begin, end - begin);
+	const std::string fragment_lower = to_lower(fragment);
+	std::string plain;
+	for (std::size_t i = 0; i < fragment.size();) {
+		if (fragment[i] != '<') {
+			plain.push_back(fragment[i++]);
+			continue;
+		}
+		const std::size_t close = fragment.find('>', i + 1);
+		if (close == std::string::npos) break;
+		const std::string tag = fragment_lower.substr(i, close - i + 1);
+		if (begins_with(tag, "<br") || begins_with(tag, "</p") || begins_with(tag, "</div")) plain.push_back('\n');
+		i = close + 1;
+	}
+	plain = replace_all(plain, "&amp;", "&");
+	plain = replace_all(plain, "&lt;", "<");
+	plain = replace_all(plain, "&gt;", ">");
+	plain = replace_all(plain, "&quot;", "\"");
+	plain = replace_all(plain, "&#39;", "'");
+	plain = replace_all(plain, "&#x27;", "'");
+	plain = replace_all(plain, "&nbsp;", " ");
+
+	std::string normalized;
+	bool space = false;
+	bool newline = false;
+	for (const unsigned char ch : plain) {
+		if (ch == '\r' || ch == '\n') {
+			newline = !normalized.empty();
+			space = false;
+		} else if (std::isspace(ch)) {
+			space = !normalized.empty();
+		} else {
+			if (newline && normalized.back() != '\n') normalized.push_back('\n');
+			else if (space && normalized.back() != '\n' && normalized.back() != ' ') normalized.push_back(' ');
+			newline = false;
+			space = false;
+			normalized.push_back(static_cast<char>(ch));
+		}
+	}
+	return strip_edges(normalized);
 }
 
 LoginResult login_need(HttpRequestSpec req) {
@@ -192,10 +259,11 @@ std::string LobbyHttpFlow::nwlogin_poll_url() const {
 LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
                                              const std::vector<std::string> &response_headers,
                                              const std::vector<uint8_t> &body) {
-	(void)body;
 	const LoginStep step = login_step_;
 	if (!transport_ok || code != 200) {
 		login_step_ = LoginStep::Idle;
+		const std::string message = extract_message(body);
+		if (!message.empty()) return login_fail(message);
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers); // store Set-Cookie BEFORE branching
@@ -205,6 +273,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			const std::string *epask = jar_.find("EPASK");
 			if (epask == nullptr || epask->empty()) {
 				login_step_ = LoginStep::Idle;
+				const std::string message = extract_message(body);
+				if (!message.empty()) return login_fail(message);
 				return login_fail("server issued no EPASK cookie");
 			}
 			try {
@@ -230,12 +300,20 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			}
 			return login_need(login_post_request());
 		}
-		case LoginStep::NwStart:
+		case LoginStep::NwStart: {
+			const std::string message = extract_message(body, false);
+			if (!message.empty()) {
+				login_step_ = LoginStep::Idle;
+				return login_fail(message);
+			}
 			return login_need(login_post_request());
+		}
 		case LoginStep::Post: {
 			const std::string *tag = jar_.find("LOGINSESSIONTAG");
 			if (tag == nullptr || tag->empty()) {
 				login_step_ = LoginStep::Idle;
+				const std::string message = extract_message(body);
+				if (!message.empty()) return login_fail(message);
 				return login_fail("login rejected (no session tag)");
 			}
 			login_step_ = LoginStep::Poll;
@@ -257,6 +335,13 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				r.nwhandle = *nh;
 				r.pcid = (pc && !pc->empty()) ? *pc : std::string();
 				return r;
+			}
+			// The relay page's @MESSAGE@ text is progress, not rejection.
+			// Live .204 returns it while login is pending and needs another poll.
+			const std::string message = extract_message(body, false);
+			if (!message.empty()) {
+				login_step_ = LoginStep::Idle;
+				return login_fail(message);
 			}
 			constexpr int kMaxLoginPolls = 10;
 			if (++login_poll_count_ >= kMaxLoginPolls) {
@@ -330,6 +415,8 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 	const JoinStep step = join_step_;
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
+		const std::string message = extract_message(body);
+		if (!message.empty()) return join_fail(message);
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers);
@@ -349,13 +436,30 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 		case JoinStep::Second: {
 			join_step_ = JoinStep::Idle;
 			const JoiConnection conn = parse_joi_connection_string(to_string_body(body));
-			if (!conn.ok) return join_fail("join: no connection string in .joi");
+			if (!conn.ok) {
+				const std::string message = extract_message(body);
+				if (!message.empty()) return join_fail(message);
+				return join_fail("join: no connection string in .joi");
+			}
 			const int port = std::atoi(conn.host_port.c_str());
 			if (port <= 0 || port > 65535) return join_fail("join: bad host port");
 			JoinResult r;
 			r.kind = JoinResult::Kind::Resolved;
 			r.host_ip = conn.host_ip;
 			r.host_port = static_cast<uint16_t>(port);
+			r.app_id = conn.app_id;  // the game-session APPID join token (decoded CK)
+			// The PUB* identity cookies the authenticated login/NWJoin set, packed
+			// as the CD blob the 0x00 JOIN relays (host code 23).
+			r.cd_cookie = jar_.build_prefixed_blob("PUB");
+			opennova::io::logf(opennova::io::LogLevel::kInfo,
+					"joi: CD identity cookie = %zu bytes from %zu PUB* cookie(s)",
+					r.cd_cookie.size(),
+					[&] {
+						size_t n = 0;
+						for (const std::string &nm : jar_.names())
+							if (nm.rfind("PUB", 0) == 0) ++n;
+						return n;
+					}());
 			return r;
 		}
 		case JoinStep::Idle:

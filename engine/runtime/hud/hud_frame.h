@@ -282,6 +282,18 @@ struct HudLayout {
 	uint32_t stance_good = 0xFF05FA0Du;
 	uint32_t stance_middle = 0xFFFAA608u;
 	uint32_t stance_bad = 0xFFB00A0Au;
+	// The user crosshair config pair — player options, not hudpos.def. The
+	// colour is the persisted RGB forced opaque (the colour-item parse forces
+	// the top byte [orig: item colour wcstoul + forced opaque @ 0x64bd10 /
+	// 0x64b220]); the spread flag gates only the offset, never the draw.
+	// Defaults are the retail config defaults, one home for the options model
+	// and the overlay [orig: Config_SetDefaults — colour 0xFFFFFF @ 0x54d461,
+	// spread on @ 0x54d472]; the persisted value is the 24-bit RGB.
+	static constexpr uint32_t kCrosshairColorMask = 0xFFFFFFu;
+	static constexpr uint32_t kCrosshairColorDefault = 0xFFFFFFu;
+	static constexpr bool kCrosshairSpreadDefault = true;
+	uint32_t crosshair_color = 0xFF000000u | kCrosshairColorDefault;
+	bool crosshair_spread_enabled = kCrosshairSpreadDefault;
 	// ALPHAFADE (percent, percent, seconds) [orig: parse @ 0x5a086c].
 	float alpha_fade_base = 0.0f;
 	float alpha_fade_max = 0.0f;
@@ -651,7 +663,7 @@ static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
 // live here; compile() emits everything for one frame in retail's order.
 class HudFrameCompiler {
 public:
-	void configure(const HudLayout &layout, const fnt_font_t *font);
+	void configure(const HudLayout &layout, const opennova::fnt::fnt_font_t *font);
 
 	// The overlay label fonts + their resolution scales — the Arial pair and
 	// the large slot retail loads beside the hudpos HUD font
@@ -664,9 +676,9 @@ public:
 	// face [orig: @ 0x5a3680/@ 0x5a38a1], the big-map grid labels with the
 	// large face. Null fonts fall back to the hudpos font at scale 1
 	// (layout-only embedders keep drawing).
-	void configure_label_fonts(const fnt_font_t *normal, const fnt_font_t *bold,
-			const fnt_font_t *large, float scale, float large_scale,
-			const fnt_font_t *impact38 = nullptr);
+	void configure_label_fonts(const opennova::fnt::fnt_font_t *normal, const opennova::fnt::fnt_font_t *bold,
+			const opennova::fnt::fnt_font_t *large, float scale, float large_scale,
+			const opennova::fnt::fnt_font_t *impact38 = nullptr);
 
 	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
 	// flash, the message ring) — the texture-table refresh path, e.g. the

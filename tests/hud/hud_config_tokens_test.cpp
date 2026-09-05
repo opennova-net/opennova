@@ -3,6 +3,7 @@
 // action cycles (hudcolor 0..5, huddetail 0..3, showhud (flags + 1) & 3).
 
 #include <runtime/hud/hud_config_tokens.h>
+#include <runtime/hud/hud_math.h> // FriendlyTagMode + its default
 
 #include <cstdio>
 #include <cstdlib>
@@ -49,7 +50,10 @@ int main() {
 	check(next_showhud_flags(2) == 3, "showhud next 2 -> 3");
 
 	// The friendly-tag session default and the anchor lift (0x4000 in 16.16).
-	check(kFriendlyTagModeDefault == 2, "friendly tag mode default FULL");
+	check(kFriendlyTagModeDefault == FriendlyTagMode::kFull, "friendly tag mode default FULL");
+	check(static_cast<int>(kFriendlyTagModeDefault) == 2, "FULL is mode 2");
+	check(next_friendly_tag_mode(FriendlyTagMode::kBrief) == FriendlyTagMode::kOff,
+			"friendly tag cycle wraps 3 -> 0");
 	check(kFriendlyTagLiftUnits == 0x4000 / 65536.0f, "friendly tag lift 0x4000");
 
 	if (g_failures != 0) {

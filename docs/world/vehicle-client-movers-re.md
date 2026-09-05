@@ -4,7 +4,7 @@ The client-executed subsets of the per-family vehicle movers (the D-NET-196
 prediction legs), the boat platform solve, the shared suspension solvers, the
 cbik (bike) mover, and the aircraft contact solve. Implementing code:
 `engine/runtime/world/vehicle_motor.cpp` (the family `*_client_tick` movers +
-`watercraft_platform_solve`), `engine/net/netsim/client_replica_pipeline.cpp` (the
+`watercraft_platform_solve`), `engine/runtime/replication/client_replica_pipeline.cpp` (the
 per-class row chases), with the joiner wiring in
 `godot/src/simulation/simulation_net.cpp`. Binary: retail
 `Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every
@@ -21,13 +21,14 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
 | Watercraft mover AUTHORITY half (`@ 0x48D480`, gate `@ 0x48DF8C`) | MATCHING — ported (`tick_watercraft_motor` + `AiSystem::watercraft_ai_drive`; shared `watercraft_motor_core`) | §1.12 spec (witnessed 2026-08-06); `watercraft_client_motor` ctest authority legs; `00trg_defense_probe.gd` (host boats drive their event routes) |
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
+| Aircraft mover AUTHORITY half (`@ 0x490310`: the AI flight block, the health machine, the rotor gate, the drains) | MATCHING — ported 2026-09-01 (`AiSystem::chel_ai_drive` + the authority legs of `aircraft_client_tick`) | §1.13 spec; `vehicle_mount` (`test_helo_ai_flight`, `test_helo_authority_health`) |
 | Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
-| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the wreck-tumble machinery unported | §4 |
+| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the bike's `+0x2FC` / `+0x460` fall arm is ported, while the force-based wreck-tumble machinery remains unported | §4 / §9 |
 | cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
 | Aircraft contact solve (`@ 0x47EF10`, defined 2026-07-31) | MATCHING — ported, client subset (`aircraft_contact_solve`, 2026-08-01) | §6 spec; landing/ramp-conform/water-hysteresis/sleep bench legs in `watercraft_client_motor` |
 | Ground/tracked contact solve (`@ 0x47C1C0`) | MATCHING — ported, client subset (`ground_contact_solve`, 2026-08-05) | §7 spec; the wheel-clearance rest + drop-landing bench legs in `watercraft_client_motor` |
 | Wheeled (ctan) contact solve (`@ 0x475DE0`) | MATCHING — ported, client subset (`wheeled_contact_solve`, 2026-08-06) | §8 spec; the tank rest/drop bench legs |
-| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06); the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop bench legs |
+| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06), including the contacted-wreck fall arm; the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop/wreck-fall bench legs |
 | Tank (ctan) mover deltas (`@ 0x488AB0`) | MATCHING — the witnessed family deltas ported into the shared ground core (2026-08-06) | §10 spec; the tank family-delta bench leg |
 | Aircraft local-driver input map (`@ 0x490310` occupant block) | MATCHING — ported (`stage_air_vehicle_input` + the both-command blend, 2026-08-06); analog collective = named deferral | §10.4; the air local-pilot gate bench leg |
 
@@ -389,9 +390,14 @@ entity->Yaw += entity->modelPtr0;                 // [0x48ECF2] EVERY tick, no g
 After this: the wake-anim lerp on brain[115..126] (current vec at +0x1CC..0x1E0 chases
 target at +0x1E4..0x1F8; [118] steps by +/-0x2108421 toward [124], snap-copies when
 close) [orig: 0x48ECF5..0x48ED76] — animation only, note-only. Then bone-trail FX
-(masks 3/4 when afloat every 2nd tick, 1/2 otherwise every 4th tick, intensity =
-brain[136] / currentSpeed) and the movement-sound machine — cosmetic. Tail rebuilds
-orientationMatrix from `&entity->Position` and sets Flags bit 0x20000 [0x48EF50..0x48EF63].
+(masks 3/4 when afloat every 2nd tick, 1/2 otherwise every 4th tick) and the
+movement-sound machine — cosmetic. **W3/W4 ported 2026-09-04:** the shared
+authority/client core captures the post-solve pose and water plane on that
+even-tick cadence, with W3 driven by brain[136] command speed and W4 by signed
+current speed; the fixed-tick presenter updates persistent first-16 userpoint
+groups and their two live particle controls. The dry W1/W2 leg remains open.
+Tail rebuilds orientationMatrix from `&entity->Position` and sets Flags bit
+0x20000 [0x48EF50..0x48EF63].
 
 ---
 
@@ -415,15 +421,15 @@ orientationMatrix from `&entity->Position` and sets Flags bit 0x20000 [0x48EF50.
 
 Question: does the client-executed subset of `Entity_UpdateVehiclePhysics` (ground)
 structurally match `world::tick_vehicle_motor` (engine/runtime/world/vehicle_motor.cpp) minus
-the input block — can ground prediction reuse tick_vehicle_motor driven by the mirrored
+the input block — can ground prediction reuse VehicleSystem::tick_motor driven by the mirrored
 cmd registers?
 
 **Yes.** The ground client path after the mirror (`v51[136]=v51[177]; v51[132]=v51[179]`,
 occupant != local, decomp l.616-622 — identical to the boat's) falls through the same
 code the authority runs below the input gate, and that code is exactly what
-tick_vehicle_motor ports:
+VehicleSystem::tick_motor ports:
 
-| ground client block (decomp) | tick_vehicle_motor |
+| ground client block (decomp) | VehicleSystem::tick_motor |
 |---|---|
 | turn blend `minRate + ((turnRate-minRate)*f + 0x8000)>>16`, f = clamp0(0x10000 - speed<<16/playerSpeed) (l.994-1016) | steering-chase block, identical constants |
 | steer step `(reg132 - Yaw + 32)>>6` clamp +/-eff (l.1017-1022) | identical |
@@ -440,7 +446,7 @@ tick_vehicle_motor ports:
 Client-only deltas to account for when reusing it as the prediction leg:
 
 1. **Command source**: brain[136]/[132] come from the mirror every tick (not from
-   resolve_vehicle_controller / ai_cmd) — run tick_vehicle_motor with the input block
+   VehicleSystem::resolve_controller / ai_cmd) — run VehicleSystem::tick_motor with the input block
    bypassed and `m.cmd_speed / m.steer_target_bam` loaded from the mirrored registers;
    include the [177] stale decay (§8) or the boat/vehicle never coasts to rest.
 2. LABEL_208 byte-gates run on the client too (decomp l.972-993): the handbrake latch
@@ -451,7 +457,7 @@ Client-only deltas to account for when reusing it as the prediction leg:
    prediction, flag it in the record.
 3. The tire-slip / surface-normal steering legs (huskModel fields, l.1064-1121,
    1244-1557) DO run on the retail client and feed the velocity direction; the
-   tick_vehicle_motor simplification is an existing ledgered divergence that prediction
+   VehicleSystem::tick_motor simplification is an existing ledgered divergence that prediction
    inherits.
 4. speedAccel/currentSpeed/aiState/modelPtr0 evolve purely locally on the client — no
    net override besides the chase; drift is the chase's job (already ported).
@@ -465,7 +471,7 @@ Client-only deltas to account for when reusing it as the prediction leg:
    presumed `&entity->Position` by the boat's verified codegen pattern (0x48E972);
    confirm at disasm before citing in code.
 
-Boat-vs-ground family deltas (why the boat needs its own motor, not tick_vehicle_motor):
+Boat-vs-ground family deltas (why the boat needs its own motor, not VehicleSystem::tick_motor):
 the boat has no speedAccel/target_speed pipeline (thrust adds directly to velocity, and
 "speed" is re-derived from velocity each tick); drag is 1/64 exponential + keel lateral
 bleed instead of direction-projection; gravity is 167 (vs 324); yaw applies ungated
@@ -591,9 +597,78 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
   Both legs fall into the steer integrator @ 0x48E82C (§3, the ported core).
 
 Deferrals staying with D-NET-161: the every-8th-tick groundEntity refresh
-[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the MoveOrder
-merge, the submerged-driver cut, the minAI clamp, the [135] mirror, the
-boarding-wait hold, the stuck check, and the wake-anim lerp.
+[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the [135]
+mirror, and the wake-anim lerp. Ported 2026-09-01: the MoveOrder merge (the
+occupant's own word, wire-visible in the echo), the submerged-driver cut
+(`watercraft_driver_submerged` — a body with no derived eye height keeps the
+wheel), the minAI clamp (`AiSystem::apply_min_ai_crew_clamp`), the boarding-wait
+hold, and the stuck check (`AiSystem::check_vehicle_stuck`); ctest
+`watercraft_client_motor` (`run_submerged_driver_hands_to_ai_leg`) and
+`vehicle_mount`.
+
+### 1.13 The AIR authority half (witnessed + ported 2026-09-01)
+
+The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
+`@ 0x490310`, decompiled this session and ported as `AiSystem::chel_ai_drive`
+(ai_waypoints.cpp) + the authority legs of `aircraft_client_tick`
+(vehicle_motor_air.cpp). Block map, in retail order:
+
+1. **Health machine** [@ 0x4903F0..0x490480, on the `(tick + 9*DcbId) & 0x3F`
+   cadence]: above `criticalHp` (+0x180) the hull regens `nonCriticalRegen`
+   (+0x184) while `Health < healthMax − regen` [@ 0x4903f9..0x49042d]; at or
+   below it the hull BURNS `criticalDrain` (+0x182) per cadence
+   [@ 0x490434..0x490480] and, airborne (Flags 0x2000) with `[524] − ground >
+   1 u`, `Yaw −= 2886390` every tick — the tail-rotor spiral [@ 0x49048e..
+   0x4904be; the pilot's own Yaw follows unless free-looking — a look write the
+   client owns, deferred]. Smoke (`Health < healthMax/4`) and fire emitters +
+   the every-64th-tick fire sound are presentation seams.
+2. **Rotor gate** [@ 0x490592..0x4905a6]: `updated = Health > 0 && !(Flags & 1)
+   ? Entity_UpdateHeloRotorSpin(...) : 0`, whose return is `!is_authority ||
+   speed >= 0x0CCCCCC0`; at LABEL_328 [@ 0x491ca7..0x491cc2] a false `updated`
+   parks every command (`[548] = 0, [524] = ground − 0x2000, [544] = [540] = 0,
+   [528] = Yaw`) — a cold helicopter commands nothing through the ~18 s
+   spool-up. Port: `m.part_spin.speed >= kRotorSpeedMax` read one tick late
+   (our part-anim machine runs at the mover tail).
+3. **The AI leg** (an occupant WITHOUT Flags 0x100, or a submerged pilot):
+   state 14 → 7 [@ 0x491590]; `[540] = brain[127]; [544] = brain[128]`
+   [@ 0x4915a3..0x4915a9 — brain[127] has no live SM writer, brain[128] is the
+   SM mover's out-speed]; the minAI clamp [@ 0x4915b2..0x4915f2]; the AIR turn
+   budget on the budget refresh `[32] = 8 * (|Yaw − brain[21]| /
+   ((brain[35] >> 15) + 32))` — divide THEN ×8 [@ 0x49160d..0x491663]; then,
+   only with a node (`brain[16]`, nulled when both `brain[14]`/`brain[15]` are
+   zero [@ 0x491576..0x49159a]) and state 7 [@ 0x491671], the **flight block**
+   [@ 0x491672..0x491998]: node Z floored at `ground − 0x4000`; planar
+   distance/bearing (fpatan) and planar speed, zero lengths → 1
+   [@ 0x491694..0x4916dd]; `v104 = speed * dz / dist` (64-bit), `[524] = Z +
+   4*v104`, `slideDecay = (v104 + slideDecay) >> 1` [@ 0x49175c..0x491796];
+   `[548] = [524] − ground − 0x4000`, negative → `[548] = 0, [524] = ground −
+   0x2000` [@ 0x4917a5..0x4917c9]; beyond 6 u planar a ZERO `[540]`/`[544]`
+   takes `132 * sin/cos(err) >> 22` [@ 0x4917f3..0x491834]; two ground samples
+   (self @ 0x491845, the node @ 0x491855): en route (node > 6 u above its
+   ground, or planar > 6 u) a target under `ground + bound/4` lifts to `+16 u`
+   with `[544] ×= 1/8` [@ 0x491862..0x4918aa]; else, landing under that floor,
+   `[544] ×= 1/8`, `X/Y += (node − pos) >> 6`, `[524] = ground − 0x2000`
+   [@ 0x4918b0..0x4918fc]; `[528] = Yaw + clamp(err, ±[32])` [@ 0x491928..
+   0x49195c]; `[544] ×= |cos err|` twice [@ 0x491970..0x49198a]. Then the
+   pool-1 separation damp on `[544]` [@ 0x4919fc..0x491b67 — the ground brake's
+   ellipse/cone/id-frame factor; the air walk gates on `entity+0x1C == 1`] and
+   the boarders hold [@ 0x491b7a..0x491c01]. The parked block (no pilot / dead)
+   [@ 0x491be6..0x491c6d] zeroes the registers, calls the stuck check
+   [@ 0x491c5e] and clears Flags 0x80.
+4. **Engine flag** [@ 0x491dfd..0x491e11]: `Flags 0x80 = [548] != 0` — port:
+   `VehicleMotorState::net_climb` carries [548] on the authority (the client
+   path keeps folding it into `net_alt_target`).
+5. **Drains**: submerged (Flags 0x8000) `Health −= 100`/tick [@ 0x4924e2..
+   0x492503]; `|Roll| or |Pitch| > 0x471C7180` → `Health −= 200`/tick
+   [@ 0x492637..0x49266f]; both floor at 0 and zero `+0x178` at the kill edge
+   (unmodeled slot).
+
+Residuals: the flare scan over the weapon-slot list [@ 0x4911xx], the pilot's
+analog collective, the pilot's Yaw follow of the burn spiral, the FX/sound
+seams, and `brain[127]`'s savegame-only producer. ctest `vehicle_mount`
+(`test_helo_ai_flight`: climbs and closes on the node, routeless hold,
+cold-rotor park; `test_helo_authority_health`: regen, burn + spin, crash
+drain).
 
 ---
 
@@ -1102,7 +1177,8 @@ Z IS part of the mover, and the client runs all of it:
   if the carrier is itself simulated that tick (same ordering dependency as the boat).
 - The AI leg, pool-1 separation, wait-to-board, stuck check, flare release, collective
   jump: all inside the (authority || local-driver) gate — NOT residuals, simply absent
-  from the client subset.
+  from the client subset (the authority half is witnessed + ported in §1.13,
+  2026-09-01; the flare release and the collective jump stay deferred there).
 
 ---
 
@@ -1161,7 +1237,7 @@ near-twin (dead code; do not port).
 prediction stand-in for cbik?** Yes, with ledgered residuals. The command/steering core
 is literally the same skeleton with the same constants (mirror registers, [177] decay,
 turn blend, steer chase, aiState filter, modelPtr0 formula, speedAccel pipeline,
-<48 snap), so a mirrored-register-driven tick_vehicle_motor will track a remote bike's
+<48 snap), so a mirrored-register-driven VehicleSystem::tick_motor will track a remote bike's
 speed and heading correctly between records — and the per-record chase corrects the
 rest. What it will get wrong (bias, not divergence): the bike's velocity rides a
 3D slope-aligned direction vector (so predicted hills behave like flat ground), the
@@ -2313,7 +2389,7 @@ Witness session 2026-07-31. Target: `Entity_UpdatePlayerInfantryMovement @ 0x483
 (name is a known misnomer; this is the cbike-family mover — class row `cbik` in the
 update-callback table `@ 0x82ABC0`, reached via dispatch stub `@ 0x48EFF0`; net-re
 §5.38e row). Comparison base: the ground core `Entity_UpdateVehiclePhysics @ 0x48AF00`
-(our `world::ground_client_tick` interim carrier for bikes,
+(our `VehicleSystem::ground_client_tick` interim carrier for bikes,
 `engine/runtime/world/vehicle_motor.cpp:725`).
 
 Decompiler field-path glossary (IDB names, misnomer-tolerant — same struct both movers):
@@ -2489,8 +2565,8 @@ Runs below the input gate on every machine, driven by the mirrored `[136]/[132]`
 9. Contact/attitude solve: `Entity_ProcessLightVehiclePhysics(entity, frame, 1)
    @ 0x479600` `[orig: call @ 0x486672]` — GROUND DIFF: ground calls
    `Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0` `[orig: call @ 0x48d0b1]`. The
-   bike's terrain pose + lean/roll attitude live in the light solve (B-facet,
-   unported for every family).
+   bike's terrain pose + lean/roll attitude live in the light solve (the B-facet
+   is ported in §9; only the grounded lean smoother remains deferred).
 10. Yaw application: ALWAYS applied — `Yaw += modelPtr0`, quartered (`>> 2`) when
     `Flags & 0x2000` `[orig: @ 0x486681..0x486697]`. GROUND DIFF: ground gates on
     `!(Flags & 0x2000) && BYTE2(aiRef0) && !crashed && !settled` and never quarters
@@ -2585,10 +2661,10 @@ Divergent (bike vs what the interim runs):
    states are simulated client-side (they derive from the input block + light
    solve).
 6. **Contact/attitude solve** — light (`@ 0x479600`) vs tracked (`@ 0x47C1C0`):
-   owns bike lean/roll. The tracked solve is PORTED (§7, 2026-08-05) and the
-   interim runs it for bikes too, so a parked bike rests at wheel clearance and
-   conforms pitch/roll; the light solve's own deltas (bike lean machine, its
-   probe shape) remain the open witness.
+   owns bike lean/roll. The dedicated light solve is PORTED (§9, 2026-08-06):
+   a parked bike rests at wheel clearance and conforms pitch/roll, while a
+   contacted crashed bike now enters the witnessed `+0x2FC` fall-over arm. The
+   grounded lean smoother remains the open attitude witness.
 7. Crash/brake-lock/slip legs differ in detail (24576 clamp, `+0x8E4` brake, 1/8
    reverse) — all input-side or crash-state-side, unreachable for a remote bike
    until occupant/crash replication lands.
@@ -3300,7 +3376,7 @@ push, the in-water flag with the r/2 hysteresis, corner-quad conform, and the
 ### 2. The client subset (the port contract)
 
 `ground_contact_solve` in `engine/runtime/world/vehicle_motor.cpp`, dispatched inside
-`tick_vehicle_motor` at the witnessed call position (after integration, before
+`VehicleSystem::tick_motor` at the witnessed call position (after integration, before
 the yaw apply) for the Ground and Bike families with resolved boxes on a
 terrain-backed world; Watercraft (the authority stand-in path) and
 boxless/terrain-less rows keep the 5-tap terrain clamp. Ported legs: the sleep
@@ -3418,7 +3494,7 @@ sinks × pick dumped into the −Z tilt impulses), `vehicle_suspension_dt`,
 release arm = the oscillator, the per-family sink growth), `vehicle_suspension_clear`;
 the four `pad_z` sites of `vehicle_contact_solve.cpp` add `wheel_comp[k]` and
 the corner-lift feedback consumes the stepped compression; the role is
-`World::logic_authority` stamped in `run_logic_tick`; the def keys reach
+`World::rules.logic_authority` stamped in `run_logic_tick`; the def keys reach
 `VehicleTraits` (and both Python FFI mirrors + the native-stride pins, since
 `DefItemDef` crosses the C ABI). Pinned by ctest `ground_conform`,
 `vehicle_suspension` (a driven buggy settles ×0.99/tick with the
@@ -3493,7 +3569,7 @@ mover tail and, for the host's helicopters whose mover is the unported HELO
 movement physics, from the authority pass at the missing tail site;
 `vehicle_ctrl_registers` publishes rotor/tail_rotor/wheels beside
 steering/speed; `present_rows.h` `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
-`present_applier` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
+`entity_presenter` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
 VEHICLE_WHEELS, the ctrl leg 18 → 21 fields, append-only) →
 `ObjectModel::set_ctrl_override`; the seed in `entity_spawn.cpp`. Pinned by
 ctest `vehicle_part_anim` (the pure pins; a player-control buggy spins only
@@ -3628,15 +3704,21 @@ Deltas from the §7/§8 skeleton:
    through the standard substitute pair. **Z = (c0.z + c1.z) × 0.5**
    (flt_7C3B94 = 0.5) — the mean wheel penetration, adopted with the
    slideDecay non-positive clamp. Airborne: the fit of the unlifted corners =
-   attitude identity. The crash tumble (BuildYXZ with the 298261 BAM/tick
-   fall-over decay — a parked bike TIPS OVER), the wheelie force queues
-   (`Entity_QueueSuspensionForce`), and the flip 0..100 def clamp ride the
-   deferred wreck machine.
+   attitude identity. The contacted-crash fall arm is LIVE: front, rear, and
+   center-spine contact below `0x2000` speed latches `+0x2FC`; speed above
+   `0x1000` seeds the shared `+0x460` accumulator to `0x016C16C1`, then
+   `Math_BuildFixedPointRotationMatrixYXZ(frame, 0, +0x460, 0)` compounds the
+   local-Y fall and subtracts 298261 BAM/tick [orig: @0x468B62..0x468D83].
+   The later part-spin tick intentionally consumes the same `+0x460` word.
+   Wheelie force queues (`Entity_QueueSuspensionForce`) and the flip 0..100
+   def clamp remain in the deferred wreck machine.
 7. **The contact byte needs a REAR-WHEEL RUN**: `up.z(Q16) > 4096`, the lean
    bound |right.z| < 40960, rear-wheel contact, and MORE THAN ONE consecutive
    rear-contact tick (`entity[1].pad_040[8]`, reset in the both-wheels-off
    branch) [orig: @ 0x47A4CC..0x47A52B] — a one-tick graze never grounds the
-   bike. Both-wheel landings absorb half the fall
+   bike. Both wheels off clears the contact byte as it sets Flags 0x2000; the
+   mover therefore preserves its ballistic velocity instead of rebuilding it
+   from the grounded forward row. Both-wheel landings absorb half the fall
    [orig: `slideDecay −= slideDecay >> 1` @ 0x47B0F1..0x47B103].
 8. **The grounded heading/lean smoother** `Entity_SmoothHeadingToTarget`
    @ 0x45B2C0 (roll-rate producer into modelPtr2, the speed>4096 lean-latch
@@ -3649,7 +3731,8 @@ Deltas from the §7/§8 skeleton:
 
 Port: `light_contact_solve` (vehicle_contact_solve.cpp), routed by
 `VehicleFamily::Bike` (the tracked-solve interim retired). Bench: the bike
-rest/drop legs.
+rest/drop legs and `run_bike_wreck_falls_under_gravity` (the crashed sleep
+gate, `+0x2EF` contact transition, `+0x2FC` latch, and rotational fall).
 
 ## §10 The tank (ctan) mover deltas + the air local-driver input map (ported 2026-08-06)
 

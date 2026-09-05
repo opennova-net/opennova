@@ -2,8 +2,7 @@
 // surface over the RaysSnapshot the embedder pushes — recording state,
 // per-category counts (held in ring / lifetime total) with draw-filter
 // checkboxes, the fade TTL, and Clear — leaving typed RaysRequests the
-// embedder drains (filter/TTL/clear into the Simulation's ray-debug seam,
-// the view toggle out to the shell, which owns building the 3D view).
+// embedder drains into the Simulation's ray-debug seam.
 //
 // The window holds only the pushed value record — it never reaches into a
 // live World. Visibility-armed: while hidden it drops its snapshot and the
@@ -61,7 +60,6 @@ private:
 	std::deque<RaysRequest> requests_;
 	// Edit state mirrored from every push (these controls display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
-	bool view_edit_ = false;
 	uint32_t mask_edit_ = 0x7FFF;
 	int32_t ttl_edit_ = 93;
 };

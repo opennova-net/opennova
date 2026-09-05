@@ -9,13 +9,13 @@
 #include <cstddef>
 #include <vector>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <net/netsim/entity_wire_bridge.h> // snapshot_world
+#include <runtime/replication/connection.h>
+#include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
+#include <runtime/replication/entity_wire_bridge.h> // snapshot_world
 #include <runtime/world/player_spawn.h>        // spawn_remote_player
 #include <runtime/world/world.h>
 
-namespace opennova::netsim::test {
+namespace opennova::replication::test {
 
 // The authority host's top-of-tick C2S drain over a connection table (a joiner, is_authority == 0,
 // never drains — the original gates on g_napi_np_ctx.is_authority).
@@ -48,4 +48,4 @@ inline world::EntityHandle admit_peer(world::World &w, std::vector<Connection> &
 	return h;
 }
 
-} // namespace opennova::netsim::test
+} // namespace opennova::replication::test

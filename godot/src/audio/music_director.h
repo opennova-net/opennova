@@ -22,6 +22,8 @@
 
 namespace godot {
 
+class MusicPairNames;
+
 class MusicScript;
 class SbfBank;
 
@@ -46,13 +48,12 @@ public:
 		GAME_HEALTH_SEED = opennova::audio::kGameMusicHealthSeed,
 	};
 
-	// Pure name resolution for the witnessed music pairs (no filesystem):
-	// { "stem": String, "bank_file": String, "script_file": String,
-	//   "subdir": String ("" for base pairs, "expansion/<n>" when active) }.
-	// The service keeps the on-disk case probing / VFS resolution; these only
-	// name the pair (engine music_policy.h owns the scheme + witnesses).
-	static Dictionary resolve_menu_music_pair(const String &p_expansion_name);
-	static Dictionary resolve_game_music_pair(const String &p_expansion_name);
+	// Pure name resolution for the witnessed music pairs (no filesystem), as
+	// a MusicPairNames record (audio/music_pair_names.h). The service keeps
+	// the on-disk case probing / VFS resolution; these only name the pair
+	// (engine music_policy.h owns the scheme + witnesses).
+	static Ref<MusicPairNames> resolve_menu_music_pair(const String &p_expansion_name);
+	static Ref<MusicPairNames> resolve_game_music_pair(const String &p_expansion_name);
 
 	MusicDirector();
 	~MusicDirector();
@@ -95,8 +96,6 @@ private:
 	// signal emissions. Always called with `user` == MusicDirector*.
 	static void _on_play_sound(void *user, uint32_t sbf_entry_index, int wait);
 	static void _on_section_entered(void *user, const char *name);
-	static void _on_var_changed(void *user, uint8_t idx, int32_t v);
-	static void _on_volume_changed(void *user, int32_t left_16_16, int32_t right_16_16);
 	static void _on_echo(void *user, int32_t arg);
 
 	Ref<MusicScript> _script;
@@ -106,7 +105,7 @@ private:
 	int _player_pool_size = 2;
 	StringName _audio_bus = StringName("Music");
 
-	MusVM *_vm = nullptr;
+	opennova::mus::MusVM *_vm = nullptr;
 	Vector<AudioStreamPlayer *> _players;
 	int _next_player = 0;
 	bool _vm_running = false;

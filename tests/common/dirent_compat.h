@@ -1,8 +1,7 @@
 // Minimal dirent compatibility for MSVC.
 // On non-Windows platforms this just includes <dirent.h>.
 
-#ifndef DIRENT_COMPAT_H
-#define DIRENT_COMPAT_H
+#pragma once
 
 #ifdef _WIN32
 
@@ -63,5 +62,3 @@ static void closedir(DIR *d) {
 #else
 #include <dirent.h>
 #endif
-
-#endif // DIRENT_COMPAT_H

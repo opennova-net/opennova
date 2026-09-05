@@ -1,4 +1,5 @@
 #include <runtime/world/ai.h>
+#include <base/io/fixed.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -87,7 +88,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
                     // candidate == g_local_player_entity && dword_24C1930 & 0x800
                     // @0x467155].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
-                    if (h == world.cached.local_player && world.ai_rules_skip_local_player)
+                    if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
                         continue;
                 } else {
                     // The class-0 pool-1 leg (and an inherited case-3 walk): unbrained
@@ -102,9 +103,9 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             }
             AiCandidate cand;
             cand.handle = h;
-            cand.pos[0] = static_cast<int32_t>(c->position.x * 65536.0f);
-            cand.pos[1] = static_cast<int32_t>(c->position.y * 65536.0f);
-            cand.pos[2] = static_cast<int32_t>(c->position.z * 65536.0f);
+            cand.pos[0] = static_cast<int32_t>(c->position.x * io::kFp16One);
+            cand.pos[1] = static_cast<int32_t>(c->position.y * io::kFp16One);
+            cand.pos[2] = static_cast<int32_t>(c->position.z * io::kFp16One);
             cand.team = c->team;
             cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
             cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
@@ -258,7 +259,7 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
 // g_SeesMatrix*/g_TargetedMatrix* bases. [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2;
 // world-wac-ai-re §16.4/§17.2; matrix map docs/mission/bms-event-runtime-re.md §3a]
 void AiSystem::apply_engage_relations(World &world, const Entity &self, const Entity &target) {
-    TriggerRelations &rel = world.relations;
+    TriggerRelations &rel = world.script.relations;
     const int sg = self.group_id, ss = self.net_id;
     const int tg = target.group_id, ts = target.net_id;
     rel.set_group_group(TriggerRelations::kSees, sg, tg);       // [orig: @0x452a40 GG]
@@ -313,16 +314,16 @@ void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(e.position.x * 65536.0f);
-    out[1] = static_cast<int32_t>(e.position.y * 65536.0f);
-    out[2] = static_cast<int32_t>(e.position.z * 65536.0f);
+    out[0] = static_cast<int32_t>(e.position.x * io::kFp16One);
+    out[1] = static_cast<int32_t>(e.position.y * io::kFp16One);
+    out[2] = static_cast<int32_t>(e.position.z * io::kFp16One);
 }
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
 // provider resolves against the current simulation pose first.
 static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3]) {
-    return world.muzzle_pose_provider != nullptr &&
-           world.muzzle_pose_provider->resolve_muzzle_pose(world, h, out);
+    return world.pose_provider != nullptr &&
+           world.pose_provider->resolve_muzzle_pose(world, h, out);
 }
 
 void AiSystem::weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3]) const {
@@ -348,16 +349,16 @@ void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) 
     }
     // def+1350: the TARGET userpoint through the placement matrix
     // [orig: @0x43b5d4..0x43b5f6].
-    if (e.target_userpoint_byte != 0 && world.muzzle_pose_provider != nullptr &&
-        world.muzzle_pose_provider->resolve_userpoint_rigid(
+    if (e.target_userpoint_byte != 0 && world.pose_provider != nullptr &&
+        world.pose_provider->resolve_userpoint_rigid(
                 world, e.handle, e.target_userpoint_byte, out))
         return;
     // Else the model collision-bbox center entity+0x1FC through the same
     // matrix [orig: @0x43b619].
     const int32_t center[3] = {
-        static_cast<int32_t>(e.bbox_center.x * 65536.0f),
-        static_cast<int32_t>(e.bbox_center.y * 65536.0f),
-        static_cast<int32_t>(e.bbox_center.z * 65536.0f)};
+        static_cast<int32_t>(e.bbox_center.x * io::kFp16One),
+        static_cast<int32_t>(e.bbox_center.y * io::kFp16One),
+        static_cast<int32_t>(e.bbox_center.z * io::kFp16One)};
     entity_placement_matrix(e).transform_point(center, out);
 }
 
@@ -403,7 +404,7 @@ static EntityHandle los_exclude_handle(const World &world, EntityHandle h) {
 
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
-    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/false, nullptr);
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/false);
 }
 
 // The stable-phase replication form of line_of_sight_clear: identical
@@ -412,17 +413,15 @@ bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32
 // hull [orig: the same raycast_find_collision_entity endpoint resolve].
 bool AiSystem::line_of_sight_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle from,
-                                          EntityHandle to,
-                                          CollisionWorld::RaycastPerf *perf) const {
-    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/true, perf);
+                                          EntityHandle to) const {
+    return line_of_sight_clear_impl(world, a, b, from, to, /*cached=*/true);
 }
 
 // One body for both LOS forms; `cached` picks the raycast_clear /
 // raycast_clear_cached sector leg.
 bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle from,
-                                        EntityHandle to, bool cached,
-                                        CollisionWorld::RaycastPerf *perf) const {
+                                        EntityHandle to, bool cached) const {
     if (terrain == nullptr || !terrain->valid()) return true;
     if (collision != nullptr) {
         // Each endpoint folds through los_exclude_handle (the +0x268 link,
@@ -433,7 +432,7 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
                 collision, cached
                         ? CollisionWorld::RayDebugCategory::kReplicationLos
                         : CollisionWorld::RayDebugCategory::kAiLos);
-        return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h, perf)
+        return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h)
                       : collision->raycast_clear(world, a, b, from_h, to_h);
     }
     return !los_terrain_blocked(*terrain, a, b);
@@ -465,7 +464,7 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t radius) {
 // effect (g_ammoDefTable +64/+68) are host-presentation, deferred.]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
-    if (world.ammo.by_index(ammo_index) == nullptr) return false;
+    if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
     ++fire_shot_seq; // [orig: word_B7C670 round-trips into the ring +28 word]
 
     RoundEvent ev;
@@ -478,19 +477,19 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     ev.shot_seq = fire_shot_seq;
     const Entity *shooter = world.registry.get(e.handle);
     const uint8_t adm_index = shooter != nullptr &&
-                                      world.weapons.by_index(
+                                      world.tables.weapons.by_index(
                                               shooter->equipped_adm_index) != nullptr
             ? shooter->equipped_adm_index
             : static_cast<uint8_t>(ammo_index & 0xFF);
     ev.adm_index = adm_index;
-    world.rounds.add(ev);
+    world.out.rounds.add(ev);
 
     RoundSpawnParams rp;
     rp.owner = e.handle;
     rp.shooter_handle = e.handle.packed;
-    rp.origin.x = static_cast<float>(origin[0]) / 65536.0f;
-    rp.origin.y = static_cast<float>(origin[1]) / 65536.0f;
-    rp.origin.z = static_cast<float>(origin[2]) / 65536.0f;
+    rp.origin.x = static_cast<float>(origin[0]) / io::kFp16One;
+    rp.origin.y = static_cast<float>(origin[1]) / io::kFp16One;
+    rp.origin.z = static_cast<float>(origin[2]) / io::kFp16One;
     rp.dir_yaw_bam = yaw_bam;
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
@@ -563,9 +562,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // R_yaw(entity+0x10) * (distance, 0, 0) added to the target position and
     // restored after the solve].
     if (target == nullptr) return false;
-    int32_t aim[3] = {static_cast<int32_t>(target->position.x * 65536.0f),
-                      static_cast<int32_t>(target->position.y * 65536.0f),
-                      static_cast<int32_t>(target->position.z * 65536.0f)};
+    int32_t aim[3] = {static_cast<int32_t>(target->position.x * io::kFp16One),
+                      static_cast<int32_t>(target->position.y * io::kFp16One),
+                      static_cast<int32_t>(target->position.z * io::kFp16One)};
     if (aim_offset != 0) {
         const double theta = static_cast<double>(e.heading) / kBamPerRadian;
         aim[0] += static_cast<int32_t>(std::cos(theta) * static_cast<double>(aim_offset));
@@ -776,15 +775,23 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         e.brain.f[AiBrain::kAccuracy] = std::clamp(ev.f[3], 0, 4);
         return true;
     case 9: // DRIVESKILL [orig: AI_HandleCommand @0x465770 case 9]
+        // Declared residual: brain+176 has no reader here yet (the vehicle
+        // driver skill consumer is unported).
         e.brain.f[AiBrain::kDriveSkill] = std::clamp(ev.f[3], 0, 4);
         return true;
     case 10:
-    case 11: { // COMBATSPEED / PATROLSPEED [orig: AI_HandleCommand @0x465770 cases 10/11]
+    case 11: { // COMBATSPEED / PATROLSPEED [orig: AI_HandleCommand @0x465770
+               //  cases 0xA @0x46589a / 0xB @0x4658d3]
         // Retail treats a negative signed dword as its unsigned value before
-        // converting authored km/h to 16.16 world-units/tick.
+        // converting authored km/h to 16.16 world-units/tick: fild, then
+        // fadd 2^32 when negative [orig: flt_7C3288 @0x4658a4/@0x4658da],
+        // fmul 1000.0 [orig: flt_7C6EC0], fmul the stored float32 of
+        // 1/225000 [orig: flt_7C6EBC = 4.444444584805751e-06], fmul 65536
+        // [orig: flt_7C32BC], ftol2_sse @0x76bc00 (out-of-range converts to
+        // the x87 indefinite 0x80000000 — the branch below).
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;
-        const double scaled = value * 1000.0 * 4.444444584805751e-06 * 65536.0;
+        const double scaled = value * 1000.0 * 4.444444584805751e-06 * io::kFp16OneD;
         const int32_t fixed =
                 (scaled >= 2147483648.0 || scaled < -2147483648.0)
                         ? static_cast<int32_t>(0x80000000u)

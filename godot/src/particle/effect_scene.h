@@ -6,9 +6,13 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+
+#include <vector>
 
 #include <runtime/particle/effect_scene.h>
 
@@ -16,10 +20,33 @@
 
 namespace godot {
 
+class EffectLoadReport;
+class EffectSpawnReceipt;
+class EffectSpawnRequest;
+
+// A reusable batch of owner pose updates for EffectScene::apply_owner_poses:
+// EffectWorld clears and refills one per frame, so the per-frame path
+// allocates nothing once warm. add_absent retires the owner (every group
+// following it detaches). A plain C++ scratch, not a ClassDB class.
+class EffectOwnerPoseBatch {
+public:
+	void clear() { updates_.clear(); }
+	void add(int64_t p_owner_token, const Transform3D &p_transform);
+	void add_absent(int64_t p_owner_token);
+	int get_count() const { return static_cast<int>(updates_.size()); }
+	const std::vector<opennova::particle::EffectOwnerPoseUpdate> &updates() const {
+		return updates_;
+	}
+
+private:
+	std::vector<opennova::particle::EffectOwnerPoseUpdate> updates_;
+};
+
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
-// Godot values to the portable interface and converts snapshots back to
-// value-only Dictionaries for runtime/debug consumers.
+// Godot values to the portable interface; the value-only debug read model
+// (EffectWorld.get_debug_group_report) and the renderer read the portable
+// snapshots through the native seams below.
 class EffectScene : public RefCounted {
 	GDCLASS(EffectScene, RefCounted)
 
@@ -73,36 +100,41 @@ public:
 
 	// options keys: simulation_tick_seconds, max_live_groups,
 	// max_live_emitters, random_seed.
-	Dictionary open(const TypedArray<ParticleFile> &p_files,
+	// Loads the catalog documents; the report (particle/effect_load_report.h)
+	// carries the engine's load counters plus the input / ignored document counts.
+	Ref<EffectLoadReport> open(const TypedArray<ParticleFile> &p_files,
 			const Dictionary &p_options = Dictionary());
 	int64_t intern(const String &p_effect_name);
 	String effect_name(int64_t p_effect_handle) const;
 
-	// request keys: effect_handle, transform, admission, binding,
-	// render_domain, slot_token, owner_token, owner_relative_transform,
-	// initial_age_ticks, source_tick, source_order, color_tint,
-	// spring_const, lod_divisor, kill_plane, kill_plane_y.
-	Dictionary spawn(const Dictionary &p_request);
+	// One spawn (particle/effect_spawn_records.h): a null or invalid request
+	// answers an invalid-request receipt naming the failing field.
+	Ref<EffectSpawnReceipt> spawn(const Ref<EffectSpawnRequest> &p_request);
 
-	// Each update is a Dictionary with owner_token, transform, and present.
-	// Removing an owner (present=false) detaches all of its following groups.
-	void apply_owner_poses_in_place(const Array &p_updates);
-	void apply_owner_poses(const Array &p_updates);
+	// Applies every update in the batch; an absent owner detaches all of its
+	// following groups. The non-in-place form also refreshes the snapshot.
+	void apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch);
+	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	PackedInt64Array get_active_owner_tokens() const;
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
+	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
+			float p_offset_control);
 	void reset_runtime_state();
 
 	// Runtime clock: advances simulation without materializing a render snapshot
 	// or serializing one into a throwaway Dictionary. The renderer lazily builds
 	// one retained snapshot after a fixed-tick catch-up batch.
 	void advance_in_place(double p_delta_seconds);
-	Dictionary get_live_counts() const;
-	Dictionary inspect(bool p_include_bounds = true) const;
 
 	// Native renderer adapters use the same immutable frame without a
 	// Dictionary round trip. This is intentionally not bound to Godot.
 	const opennova::particle::ParticleFrameSnapshot &native_frame_snapshot() const;
+	// The portable scene itself for the C++ EffectWorld: live counts, the
+	// active owner tokens and the debug snapshot (particle::EffectScene::
+	// live_counts / active_owner_tokens / inspect) without a Variant round
+	// trip. Not bound to Godot.
+	const opennova::particle::EffectScene &native_scene() const { return scene_; }
 };
 
 } // namespace godot

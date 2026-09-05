@@ -226,9 +226,21 @@ bool LwfData::decode_into_tree(const PackedByteArray &bytes) {
 
 	sets_ = sets;
 	original_bytes_ = bytes;
+	file_ = std::move(f);
+	file_stale_ = false;
 	loaded_ = true;
 	modified_ = false;
 	return true;
+}
+
+const opennova::lwf::File &LwfData::engine_file() {
+	if (file_stale_) {
+		opennova::lwf::File rebuilt;
+		build_file_from_tree(rebuilt);
+		file_ = std::move(rebuilt);
+		file_stale_ = false;
+	}
+	return file_;
 }
 
 PackedByteArray LwfData::encode_current(String &r_error) const {
@@ -236,9 +248,26 @@ PackedByteArray LwfData::encode_current(String &r_error) const {
 		return original_bytes_;
 	}
 
-	// Re-normalize the editable tree into a canonical opennova::lwf::File:
-	// dedup the shared singles table, then rebuild multis/playlists/sndparms.
 	opennova::lwf::File f;
+	build_file_from_tree(f);
+
+	std::vector<uint8_t> out;
+	std::string err;
+	if (!opennova::lwf::encode_lwf(f, out, err)) {
+		r_error = String(err.c_str());
+		return PackedByteArray();
+	}
+	PackedByteArray result;
+	result.resize(static_cast<int64_t>(out.size()));
+	if (!out.empty()) {
+		std::memcpy(result.ptrw(), out.data(), out.size());
+	}
+	return result;
+}
+
+void LwfData::build_file_from_tree(opennova::lwf::File &r_file) const {
+	opennova::lwf::File &f = r_file;
+	f = opennova::lwf::File();
 
 	struct SingleKey {
 		std::string name;
@@ -324,19 +353,6 @@ PackedByteArray LwfData::encode_current(String &r_error) const {
 		}
 		f.multis.push_back(std::move(multi));
 	}
-
-	std::vector<uint8_t> out;
-	std::string err;
-	if (!opennova::lwf::encode_lwf(f, out, err)) {
-		r_error = String(err.c_str());
-		return PackedByteArray();
-	}
-	PackedByteArray result;
-	result.resize(static_cast<int64_t>(out.size()));
-	if (!out.empty()) {
-		std::memcpy(result.ptrw(), out.data(), out.size());
-	}
-	return result;
 }
 
 // ----------------------------------------------------------------------- open/save
@@ -388,6 +404,8 @@ bool LwfData::load_bytes(const PackedByteArray &p_bytes) {
 void LwfData::create_empty() {
 	sets_ = Array();
 	original_bytes_ = PackedByteArray();
+	file_ = opennova::lwf::File();
+	file_stale_ = true;
 	source_path_ = String();
 	last_error_ = String();
 	loaded_ = true;
@@ -425,15 +443,20 @@ PackedByteArray LwfData::to_bytes() const {
 
 // ----------------------------------------------------------------------- live refs
 
-Dictionary LwfData::set_ref(int p_si) const {
-	if (p_si < 0 || p_si >= sets_.size()) {
+namespace {
+
+// The live Dictionary refs into the edit tree (a set / layer / member row, or
+// an empty Dictionary out of range) — file-local: only the mutators below walk
+// them. The Dictionary tree itself is the document's own (lossless) form.
+Dictionary set_ref(const Array &p_sets, int p_si) {
+	if (p_si < 0 || p_si >= p_sets.size()) {
 		return Dictionary();
 	}
-	return sets_[p_si];
+	return p_sets[p_si];
 }
 
-Dictionary LwfData::layer_ref(int p_si, int p_li) const {
-	Dictionary set = set_ref(p_si);
+Dictionary layer_ref(const Array &p_sets, int p_si, int p_li) {
+	Dictionary set = set_ref(p_sets, p_si);
 	Array layers = set.get("layers", Array());
 	if (p_li < 0 || p_li >= layers.size()) {
 		return Dictionary();
@@ -441,14 +464,16 @@ Dictionary LwfData::layer_ref(int p_si, int p_li) const {
 	return layers[p_li];
 }
 
-Dictionary LwfData::member_ref(int p_si, int p_li, int p_mi) const {
-	Dictionary layer = layer_ref(p_si, p_li);
+Dictionary member_ref(const Array &p_sets, int p_si, int p_li, int p_mi) {
+	Dictionary layer = layer_ref(p_sets, p_si, p_li);
 	Array members = layer.get("members", Array());
 	if (p_mi < 0 || p_mi >= members.size()) {
 		return Dictionary();
 	}
 	return members[p_mi];
 }
+
+} // namespace
 
 // --------------------------------------------------------------------------- read
 
@@ -457,36 +482,39 @@ int LwfData::get_set_count() const {
 }
 
 Dictionary LwfData::get_set(int p_si) const {
-	return set_ref(p_si).duplicate(true);
+	return set_ref(sets_, p_si).duplicate(true);
 }
 
 // ------------------------------------------------------------------- scalar edits
 
 void LwfData::set_set_field(int p_si, const String &p_key, const Variant &p_value) {
-	Dictionary set = set_ref(p_si);
+	Dictionary set = set_ref(sets_, p_si);
 	if (set.is_empty() || p_key == "layers") {
 		return;
 	}
 	set[p_key] = p_value;
 	modified_ = true;
+	file_stale_ = true;
 }
 
 void LwfData::set_layer_field(int p_si, int p_li, const String &p_key, const Variant &p_value) {
-	Dictionary layer = layer_ref(p_si, p_li);
+	Dictionary layer = layer_ref(sets_, p_si, p_li);
 	if (layer.is_empty() || p_key == "members") {
 		return;
 	}
 	layer[p_key] = p_value;
 	modified_ = true;
+	file_stale_ = true;
 }
 
 void LwfData::set_member_field(int p_si, int p_li, int p_mi, const String &p_key, const Variant &p_value) {
-	Dictionary member = member_ref(p_si, p_li, p_mi);
+	Dictionary member = member_ref(sets_, p_si, p_li, p_mi);
 	if (member.is_empty()) {
 		return;
 	}
 	member[p_key] = p_value;
 	modified_ = true;
+	file_stale_ = true;
 }
 
 // --------------------------------------------------------------- structural edits
@@ -494,28 +522,31 @@ void LwfData::set_member_field(int p_si, int p_li, int p_mi, const String &p_key
 int LwfData::add_set() {
 	sets_.push_back(make_set());
 	modified_ = true;
+	file_stale_ = true;
 	return sets_.size() - 1;
 }
 
 int LwfData::add_layer(int p_si) {
-	Dictionary set = set_ref(p_si);
+	Dictionary set = set_ref(sets_, p_si);
 	if (set.is_empty()) {
 		return -1;
 	}
 	Array layers = set.get("layers", Array());
 	layers.push_back(make_layer());
 	modified_ = true;
+	file_stale_ = true;
 	return layers.size() - 1;
 }
 
 int LwfData::add_member(int p_si, int p_li) {
-	Dictionary layer = layer_ref(p_si, p_li);
+	Dictionary layer = layer_ref(sets_, p_si, p_li);
 	if (layer.is_empty()) {
 		return -1;
 	}
 	Array members = layer.get("members", Array());
 	members.push_back(make_member());
 	modified_ = true;
+	file_stale_ = true;
 	return members.size() - 1;
 }
 

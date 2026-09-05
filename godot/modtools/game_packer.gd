@@ -369,16 +369,16 @@ static func retail_install_error(retail_dir: String) -> String:
 ## Stage `root` LOOSE (plus the boot token) into `out_dir` with the retail runtime beside
 ## it, ready to launch `/w /d /FRISK`.
 ##
-## Returns { ok, exe, packed_dir, staged, skipped, error }. This is the seam
-## GameRunSession's retail mode calls this directly.
+## Returns the typed RetailStageResult (ok, exe, packed_dir, error). This is the
+## seam GameRunSession's retail mode calls through its platform.
 ## Every runtime file is required: a stage that silently came up short would launch a stale
 ## exe, or reproduce the no-game.cfg hang, while reporting success.
-static func stage_retail(root_dir: String, retail_dir: String) -> Dictionary:
+static func stage_retail(root_dir: String, retail_dir: String) -> RetailStageResult:
 	var out_dir := ProjectSettings.globalize_path("user://packed")
 	var clean_retail := retail_dir.strip_edges()
 	var install_error := retail_install_error(clean_retail)
 	if not install_error.is_empty():
-		return { "ok": false, "exe": "", "error": install_error }
+		return RetailStageResult.failure(install_error)
 
 	# Resolve every runtime source BEFORE packing: a missing file fails fast instead of after
 	# a full archive write.
@@ -389,22 +389,18 @@ static func stage_retail(root_dir: String, retail_dir: String) -> Dictionary:
 			src = clean_retail.path_join(String(entry["fallback"]))
 		if not FileAccess.file_exists(src):
 			var why := String(entry.get("why", ""))
-			return { "ok": false, "exe": "",
-				"error": "No %s in %s — cannot stage retail.%s" % [
-						String(entry["from"]), clean_retail, (" " + why + ".") if not why.is_empty() else ""] }
+			return RetailStageResult.failure("No %s in %s — cannot stage retail.%s" % [
+					String(entry["from"]), clean_retail, (" " + why + ".") if not why.is_empty() else ""])
 		sources.append({ "src": src, "dst": out_dir.path_join(String(entry["to"])) })
 
 	var packed := stage_loose(root_dir, out_dir)
 	if not bool(packed.get("ok", false)):
-		return { "ok": false, "exe": "", "error": String(packed.get("error", "Staging failed.")) }
+		return RetailStageResult.failure(String(packed.get("error", "Staging failed.")))
 
 	for item in sources:
 		var copy_err := _copy_file(String(item["src"]), String(item["dst"]))
 		if copy_err != OK:
-			return { "ok": false, "exe": "",
-				"error": "Staging %s into %s failed: %s" % [
-						String(item["src"]), out_dir, error_string(copy_err)] }
+			return RetailStageResult.failure("Staging %s into %s failed: %s" % [
+					String(item["src"]), out_dir, error_string(copy_err)])
 
-	packed["exe"] = out_dir.path_join("Jointops.exe")
-	packed["packed_dir"] = out_dir
-	return packed
+	return RetailStageResult.success(out_dir.path_join("Jointops.exe"), out_dir)

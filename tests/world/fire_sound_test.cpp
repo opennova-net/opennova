@@ -38,8 +38,8 @@ struct Rig {
         s.health = 100;
         shooter = world.registry.spawn(0, s);
 
-        world.ammo.entries.resize(1);
-        AmmoTableEntry &ammo = world.ammo.entries[0];
+        world.tables.ammo.entries.resize(1);
+        AmmoTableEntry &ammo = world.tables.ammo.entries[0];
         ammo.name = "BALL";
         ammo.valid = true;
         ammo.velocity = 620;
@@ -49,8 +49,8 @@ struct Rig {
 
         // adm 1: fire row authors begin+end sets, recoil row an end set — the
         // JOX shape (gunshots ride soundsetend).
-        world.weapons.entries.resize(2);
-        WeaponTableEntry &def = world.weapons.entries[1];
+        world.tables.weapons.entries.resize(2);
+        WeaponTableEntry &def = world.tables.weapons.entries[1];
         def.valid = true;
         def.name = "WPN_TEST";
         std::strcpy(def.action_fsm.actions[weapon_action::kFire].soundset,
@@ -76,7 +76,7 @@ struct Rig {
         return world.round_sim.spawn(world, p, mode);
     }
 
-    std::vector<ReadyFireSound> drain() { return world.fire_sounds.drain(); }
+    std::vector<ReadyFireSound> drain() { return world.out.fire_sounds.drain(); }
 };
 
 // Without a stamped listener (a dedicated host) no sound leg runs at all
@@ -85,14 +85,14 @@ void test_no_listener_no_sounds() {
     Rig r;
     CHECK(r.fire({10.0f, 0.0f, 0.9f}) >= 0);
     CHECK(r.drain().empty());
-    CHECK(r.world.fire_sounds.pending_count() == 0);
+    CHECK(r.world.out.fire_sounds.pending_count() == 0);
 }
 
 // Under 30 integer units the ammo-arm sound plays this present, carrying the
 // shooter's occlusion identity [orig: the else leg @ 0x528f07].
 void test_near_fire_plays_immediately() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     CHECK(r.fire({10.0f, 0.0f, 0.0f}) >= 0);
     const std::vector<ReadyFireSound> out = r.drain();
     CHECK(out.size() == 1);
@@ -108,15 +108,15 @@ void test_near_fire_plays_immediately() {
 // @ 0x52937b].
 void test_far_fire_counts_down_on_the_logic_clock() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     CHECK(r.fire({330.0f, 0.0f, 0.0f}) >= 0);
     CHECK(r.drain().empty());
-    CHECK(r.world.fire_sounds.pending_count() == 1);
+    CHECK(r.world.out.fire_sounds.pending_count() == 1);
     for (int i = 0; i < 14; ++i) {
-        r.world.fire_sounds.tick();
+        r.world.out.fire_sounds.tick();
         CHECK(r.drain().empty());
     }
-    r.world.fire_sounds.tick();
+    r.world.out.fire_sounds.tick();
     const std::vector<ReadyFireSound> out = r.drain();
     CHECK(out.size() == 1);
     if (out.size() == 1) {
@@ -124,31 +124,31 @@ void test_far_fire_counts_down_on_the_logic_clock() {
         CHECK(out[0].pos.x == 330.0f);
         CHECK(out[0].source_bms_id == 41);
     }
-    CHECK(r.world.fire_sounds.pending_count() == 0);
+    CHECK(r.world.out.fire_sounds.pending_count() == 0);
 }
 
 // The >= 30 gate is on the TRUNCATED integer distance: 29.9 plays now, 30
 // queues one tick ((62 * 30 / 330) >> 2 = 1) [orig: @ 0x528ed4].
 void test_distance_gate_truncates_to_units() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     CHECK(r.fire({29.9f, 0.0f, 0.0f}) >= 0);
     CHECK(r.drain().size() == 1);
     CHECK(r.fire({30.0f, 0.0f, 0.0f}) >= 0);
     CHECK(r.drain().empty());
-    CHECK(r.world.fire_sounds.pending_count() == 1);
-    r.world.fire_sounds.tick();
+    CHECK(r.world.out.fire_sounds.pending_count() == 1);
+    r.world.out.fire_sounds.tick();
     CHECK(r.drain().size() == 1);
 }
 
 // The local player's own fire keeps its action-slot presentation — no seed.
 void test_local_player_fire_is_filtered() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     r.world.cached.local_player = r.shooter;
     CHECK(r.fire({10.0f, 0.0f, 0.0f}) >= 0);
     CHECK(r.drain().empty());
-    CHECK(r.world.fire_sounds.pending_count() == 0);
+    CHECK(r.world.out.fire_sounds.pending_count() == 0);
 }
 
 // The adm-indexed arm plays every authored action-row set (fire + recoil,
@@ -158,11 +158,11 @@ void test_local_player_fire_is_filtered() {
 void test_adm_arm_plays_action_rows_at_the_shooter() {
     Rig r;
     // Listener 500 u away: an ammo-arm sound would queue; the action rows may not.
-    r.world.fire_sounds.set_listener({500.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({500.0f, 0.0f, 0.0f});
     CHECK(r.fire({0.0f, 0.0f, 0.9f}, round_event_flag::kAdmIndexed) >= 0);
     const std::vector<ReadyFireSound> out = r.drain();
     CHECK(out.size() == 3);
-    CHECK(r.world.fire_sounds.pending_count() == 0);
+    CHECK(r.world.out.fire_sounds.pending_count() == 0);
     if (out.size() == 3) {
         CHECK(out[0].set_name == "GS_BEGIN");
         CHECK(out[1].set_name == "GS_END");
@@ -179,7 +179,7 @@ void test_adm_arm_plays_action_rows_at_the_shooter() {
 // along [orig: @ 0x42f521 before @ 0x42f6ce].
 void test_alt_fire_bit_selects_the_ammo_arm() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     CHECK(r.fire({10.0f, 0.0f, 0.0f},
                   round_event_flag::kAltFire | round_event_flag::kAdmIndexed) >= 0);
     const std::vector<ReadyFireSound> out = r.drain();
@@ -191,7 +191,7 @@ void test_alt_fire_bit_selects_the_ammo_arm() {
 // fire) plays at the wire row's position when supplied, else at the origin.
 void test_entityless_adm_arm_uses_the_supplied_shooter_pos() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     RoundSpawnParams p;
     p.origin = {5.0f, 0.0f, 1.7f};
     p.ammo_index = 0;
@@ -217,19 +217,19 @@ void test_entityless_adm_arm_uses_the_supplied_shooter_pos() {
 // allocator's failed scan [orig: @ 0x527c47].
 void test_full_pending_pool_drops() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     for (int i = 0; i < FireSoundQueue::kSlotCount + 5; ++i)
-        r.world.fire_sounds.play_with_distance_delay(
+        r.world.out.fire_sounds.play_with_distance_delay(
                 "GS_FAR", {330.0f, 0.0f, 0.0f}, 0);
-    CHECK(r.world.fire_sounds.pending_count() == FireSoundQueue::kSlotCount);
-    for (int i = 0; i < 15; ++i) r.world.fire_sounds.tick();
+    CHECK(r.world.out.fire_sounds.pending_count() == FireSoundQueue::kSlotCount);
+    for (int i = 0; i < 15; ++i) r.world.out.fire_sounds.tick();
     CHECK(r.drain().size() == FireSoundQueue::kSlotCount);
 }
 
 // run_logic_tick advances the countdown once per tick from the World seam.
 void test_world_tick_advances_the_countdown() {
     Rig r;
-    r.world.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
     CHECK(r.fire({330.0f, 0.0f, 0.0f}) >= 0);
     for (int i = 0; i < 15; ++i) r.world.run_logic_tick();
     CHECK(r.drain().size() == 1);

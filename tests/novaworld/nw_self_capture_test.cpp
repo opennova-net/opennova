@@ -3,7 +3,7 @@
 //
 // Runs a deterministic in-process opennova host + opennova joiner session — the
 // SAME host owner loop apps/nw_server runs (npruntime/host_session.h) driving the
-// SAME headless joiner npruntime_two_endpoint_socket drives (np::ClientRuntime),
+// SAME headless joiner npruntime_two_endpoint_socket drives (inmatch::ClientRuntime),
 // composed over the public IDatagramSocket seam with an in-memory adapter instead
 // of a bound socket (no timing, no ephemeral ports) — tees every datagram BOTH
 // directions into npwire's CaptureDatagram form, decodes through the SAME shared
@@ -32,11 +32,11 @@
 // the same commit (the newly implemented tag, or its D-NET entry) — never
 // regenerate to make an unexplained diff pass.
 
-#include <net/npruntime/client_runtime.h>
-#include <net/npruntime/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
 
-#include <net/netsim/idatagram_socket.h>
-#include <net/netsim/loopback_channel.h>
+#include <net/npwire/idatagram_socket.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
 #include <net/npwire/ingame_message_catalog.h> // ingame_message_name
@@ -68,8 +68,8 @@
 #endif
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 namespace {
@@ -82,12 +82,12 @@ constexpr uint16_t kHostPort = 32768;
 constexpr uint16_t kJoinerPort = 30000;
 const PeerAddr kJoinerPeer{0x0100007Fu, kJoinerPort}; // 127.0.0.1:30000
 
-// In-memory netsim::IDatagramSocket — the same adapter seam apps/common's
+// In-memory opennova::IDatagramSocket — the same adapter seam apps/common's
 // NetDatagramSocket (real socket) and the Godot UdpPump wrapper fill, backed
 // by a deque: the joiner "sends" by pushing onto `inbound`; the host's send_to
 // lands in `outbound` for the test loop to record + deliver. Keeps the tier-1
 // gate free of real sockets (deterministic, port-fixed, no recv timeouts).
-struct MemoryDatagramSocket : ns::IDatagramSocket {
+struct MemoryDatagramSocket : opennova::IDatagramSocket {
 	std::deque<std::vector<uint8_t>> inbound;                 // joiner -> host (all from kJoinerPeer)
 	std::vector<std::vector<uint8_t>> outbound;               // host -> joiner, drained per pump
 
@@ -121,8 +121,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// (spawn-select + a 0x20 pool-3 record) and a pool-2 building so the 0x10
 	// static page carries a real record; a minimal in-memory 0x0B BMS mission.
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
@@ -154,24 +153,24 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// Host bring-up — fixed identity end to end (GameConfig defaults are fixed
 	// strings/values; the host key is pinned) so the coverage never depends on
 	// anything minted at run time. Headless Listen host, same as apps/nw_server.
-	np::HostOwner owner;
+	inmatch::HostOwner owner;
 	ns::LoopbackChannel host_loop;
 	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
-	np::HostConfig host_cfg;
+	inmatch::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
 	// The committed fixture pins message coverage, not retail's LAN subrate.
 	// Hold this deterministic script at one send boundary per driven frame.
 	host_cfg.config.send_holdoff_ticks = 1;
-	host_cfg.socket_mode = np::SocketMode::Lan;
+	host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	host_cfg.host_key = 0x0FE0E112u; // deterministic (HostConfig: "deterministic for tests")
 	host_cfg.serve_and_play = false;
-	np::start_host_session(owner, host_cfg);
+	inmatch::start_host_session(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
-	np::ClientRuntime client("SelfCapture");
+	inmatch::ClientRuntime client("SelfCapture");
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {
@@ -188,7 +187,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		sock.inbound.push_back(d);
 	};
 	auto pump_and_deliver = [&]() {
-		np::host_session_pump(owner, sock);
+		inmatch::host_session_pump(owner, sock);
 		for (const std::vector<uint8_t> &d : sock.outbound) {
 			record(kHostPort, kJoinerPort, d); // S2C
 			client.receive(d.data(), d.size());

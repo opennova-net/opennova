@@ -9,7 +9,10 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr float TERRAIN_AMBIENT_SCALE = 0.70700002f;
+// The float32 literal retail multiplies the ambient term with. NOT the
+// 0xB5/256 byte weight of the env blend (env_render's kTerrainLightWeightByte)
+// and NOT a sun-direction component: three different 0.707s, one per home.
+constexpr float kTerrainAmbientWeightF = 0.70700002f;
 constexpr float FOG_LN_64 = 4.1588830833596715f;
 
 inline uint8_t byte_from_channel(uint32_t argb, int shift) noexcept {
@@ -19,7 +22,7 @@ inline uint8_t byte_from_channel(uint32_t argb, int shift) noexcept {
 inline uint8_t light_ratio_byte(uint8_t ambient, uint8_t diffuse) noexcept {
 	const float ambient_f = static_cast<float>(ambient) * (1.0f / 255.0f);
 	const float diffuse_f = static_cast<float>(diffuse) * (1.0f / 255.0f);
-	const float combined = ambient_f * TERRAIN_AMBIENT_SCALE + diffuse_f;
+	const float combined = ambient_f * kTerrainAmbientWeightF + diffuse_f;
 	float ratio = 1.0f;
 	if (combined != 0.0f) {
 		ratio = diffuse_f / combined;

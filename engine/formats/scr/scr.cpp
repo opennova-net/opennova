@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+namespace opennova::scr {
+
 /* Original codec: Scr_DecryptBuffer @ 0x53D090 in Jointops.exe (byte-reverse,
    then per-byte XOR with the rotating keystream below). Both retail call sites
    strip the 4-byte header before calling it; see scr_decrypt_buf. Divergence
@@ -96,3 +98,5 @@ int scr_decrypt_buf(const uint8_t *data, size_t size,
     *out_size = payload;
     return 0;
 }
+
+} // namespace opennova::scr

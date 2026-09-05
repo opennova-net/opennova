@@ -74,9 +74,18 @@ std::vector<std::pair<std::string, std::string>>
 parse_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 
 // The connection tokens NWJoin.dll hands back in the `.joi` response, used to
-// reach the hosted game. NK/CK are url_cipher-encoded (NK = host "ip:port",
-// CK = the host app id); NI/NP are plaintext proxy/display slots; BK is the
-// literal "986119".
+// reach the hosted game. NK is url_cipher-encoded (host "ip:port"); CK is
+// url_cipher-encoded and, decoded, is a DECIMAL the retail client atol()s into
+// an int field of its net config and serializes on the wire as the ClientAuth
+// **APPID** conn-tag (NOT the BT tag: the host reads the APPID tag into that
+// same int field and the BT tag into a different one); NI/NP are the plaintext
+// game-node ip/port; BK is the plaintext relay tunnel cookie.
+// [orig: parse_connection_query_string @0x54dfb0 (CK key "cfhdcegjigecjehcgjdhe")
+//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.bt = atol(&nk_extra_buf[64])`
+//  = atol(decoded CK)); the host side NapiNetConfig_LoadFromConnTags @0x4c7260
+//  ("APPID" -> the same field IDA labels net_cfg.bt, "BT" -> char_name) and the
+//  compare in Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5 (reject
+//  code 9)].
 struct JoiConnection {
 	std::string nk;
 	std::string ck;
@@ -85,6 +94,11 @@ struct JoiConnection {
 	std::string bk;
 	std::string host_ip;   // decoded NK head, fallback NI
 	std::string host_port; // decoded NK tail, fallback NP
+	// The game-session APPID join token: atol(decoded CK), re-serialized as retail
+	// does (an int field). Sent as the ClientAuth APPID conn-tag, which the
+	// NovaWorld host validates (code 9). "0" when no CK is present (the LAN
+	// default; LAN sends no APPID). Witnessed live: stock `CU APPID="3225"`.
+	std::string app_id = "0";
 	bool ok = false; // true when a dial endpoint was recovered
 };
 
@@ -124,6 +138,14 @@ public:
 	std::vector<std::string> cookie_header_lines() const;
 	bool empty() const { return order_.empty(); }
 	const std::vector<std::string> &names() const { return order_; }
+	// Concatenate every cookie whose name starts with `prefix` as [name\0][value\0]
+	// pairs, in insertion order — the retail CD-cookie blob the game-session join
+	// relays (the NovaWorld-issued PUB* identity: PUBPCID/PUBNAMEINFO/PUBSQUADINFO/
+	// PUBJOINTICKET). Empty when nothing matches.
+	// [orig: config_query_matching_entries @0x64eb70 gather-by-prefix ("PUB*") ->
+	//  NetPacket_BuildAnnouncePayload @0x4c4bf0 -> the C2S 0x00 JOIN "CD" TLV
+	//  (NapiNP_WriteClientAuthPayload @0x42a180)]
+	std::vector<uint8_t> build_prefixed_blob(const std::string &prefix) const;
 
 private:
 	std::map<std::string, std::string> values_;

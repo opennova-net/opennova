@@ -1,6 +1,10 @@
 #include "env/env_file.h"
+#include "util/color_convert.h"
+
+#include "env/mission_environment_overrides.h"
 
 #include <godot_cpp/classes/file_access.hpp>
+#include <base/io/fixed.h>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -19,28 +23,12 @@ using namespace godot;
 
 namespace {
 
-Color to_color(const opennova::env::Rgb &rgb) {
-	return Color(rgb.r, rgb.g, rgb.b);
-}
-
-opennova::env::Rgb to_rgb(const Color &color) {
-	return {
-		static_cast<float>(color.r),
-		static_cast<float>(color.g),
-		static_cast<float>(color.b),
-	};
-}
-
 Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 	return Vector3(rgb.r, rgb.g, rgb.b);
 }
 
 Vector3 to_vector3(const opennova::env::Vec3 &value) {
 	return Vector3(value.x, value.y, value.z);
-}
-
-int clamp_time(int time) {
-	return std::max(0, std::min(2359, time));
 }
 
 } // namespace
@@ -78,10 +66,8 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("horizon_blend_skyfog", "fog", "skyfog", "fog_distance", "fog_distance_reference"), &EnvFile::horizon_blend_skyfog);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("tod_advance_per_tick", "minutes_per_day"), &EnvFile::tod_advance_per_tick);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("tile_overlay_tint_factor", "terrain_tint"), &EnvFile::tile_overlay_tint_factor);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
@@ -167,7 +153,7 @@ String EnvFile::get_source_path() const { return source_path; }
 IMPL_SET_GET(env_name, set_env_name, get_env_name, const String &, String)
 IMPL_SET_GET(timeofday, set_timeofday, get_timeofday, const String &, String)
 IMPL_SET_GET(envscale, set_envscale, get_envscale, float, float)
-void EnvFile::set_curtime(int p_value) { curtime = clamp_time(p_value); _notify_environment_changed(); }
+void EnvFile::set_curtime(int p_value) { curtime = opennova::env::clamp_tod_time(p_value); _notify_environment_changed(); }
 int EnvFile::get_curtime() const { return curtime; }
 IMPL_SET_GET(fog_level, set_fog_level, get_fog_level, float, float)
 IMPL_SET_GET(fog_type, set_fog_type, get_fog_type, int, int)
@@ -213,18 +199,11 @@ IMPL_SET_GET(sun_3di, set_sun_3di, get_sun_3di, const String &, String)
 IMPL_SET_GET(moon_3di, set_moon_3di, get_moon_3di, const String &, String)
 IMPL_SET_GET(glare_3di, set_glare_3di, get_glare_3di, const String &, String)
 IMPL_SET_GET(star_3di, set_star_3di, get_star_3di, const String &, String)
-IMPL_SET_GET(sky_map1_tex, set_sky_map1_tex, get_sky_map1_tex, const Ref<Texture2D> &, Ref<Texture2D>)
-IMPL_SET_GET(sky_map2_tex, set_sky_map2_tex, get_sky_map2_tex, const Ref<Texture2D> &, Ref<Texture2D>)
+Ref<Texture2D> EnvFile::get_sky_map1_tex() const { return sky_map1_tex; }
+Ref<Texture2D> EnvFile::get_sky_map2_tex() const { return sky_map2_tex; }
 IMPL_SET_GET(advanced_clouds, set_advanced_clouds, get_advanced_clouds, int, int)
 
 #undef IMPL_SET_GET
-
-void EnvFile::set_tod_keyframes(const TypedArray<EnvKeyframe> &p_keyframes) {
-	_disconnect_keyframes();
-	tod_keyframes = p_keyframes;
-	_connect_keyframes();
-	_notify_environment_changed();
-}
 
 TypedArray<EnvKeyframe> EnvFile::get_tod_keyframes() const { return tod_keyframes; }
 
@@ -253,15 +232,15 @@ void EnvFile::_sync_env_from_properties() {
 	env.curtime = curtime;
 	env.fog_level = fog_level;
 	env.fog_type = fog_type;
-	env.terrain_rgb = to_rgb(terrain_tint);
-	env.water_rgb = to_rgb(water_color);
+	env.terrain_rgb = opennova::env_rgb_from_color(terrain_tint);
+	env.water_rgb = opennova::env_rgb_from_color(water_color);
 	env.water_height = water_height;
 	env.water_height_set = water_height_set;
-	env.cloud_rgb = to_rgb(cloud_tint);
-	env.vertex_rgb = to_rgb(vertex_tint);
-	env.lightning_rgb = to_rgb(lightning_color);
-	env.ceiling_rgb = to_rgb(ceiling_color);
-	env.floor_rgb = to_rgb(floor_color);
+	env.cloud_rgb = opennova::env_rgb_from_color(cloud_tint);
+	env.vertex_rgb = opennova::env_rgb_from_color(vertex_tint);
+	env.lightning_rgb = opennova::env_rgb_from_color(lightning_color);
+	env.ceiling_rgb = opennova::env_rgb_from_color(ceiling_color);
+	env.floor_rgb = opennova::env_rgb_from_color(floor_color);
 	env.water_murk = water_murk;
 	env.iris_percent = iris_percent;
 	env.iris_center = iris_center;
@@ -293,15 +272,15 @@ void EnvFile::_sync_properties_from_env() {
 	curtime = env.curtime;
 	fog_level = env.fog_level;
 	fog_type = env.fog_type;
-	terrain_tint = to_color(env.terrain_rgb);
-	water_color = to_color(env.water_rgb);
+	terrain_tint = opennova::color_from_env_rgb(env.terrain_rgb);
+	water_color = opennova::color_from_env_rgb(env.water_rgb);
 	water_height = env.water_height;
 	water_height_set = env.water_height_set;
-	cloud_tint = to_color(env.cloud_rgb);
-	vertex_tint = to_color(env.vertex_rgb);
-	lightning_color = to_color(env.lightning_rgb);
-	ceiling_color = to_color(env.ceiling_rgb);
-	floor_color = to_color(env.floor_rgb);
+	cloud_tint = opennova::color_from_env_rgb(env.cloud_rgb);
+	vertex_tint = opennova::color_from_env_rgb(env.vertex_rgb);
+	lightning_color = opennova::color_from_env_rgb(env.lightning_rgb);
+	ceiling_color = opennova::color_from_env_rgb(env.ceiling_rgb);
+	floor_color = opennova::color_from_env_rgb(env.floor_rgb);
 	water_murk = env.water_murk;
 	iris_percent = env.iris_percent;
 	iris_center = env.iris_center;
@@ -538,43 +517,40 @@ float EnvFile::get_fog_end_underwater() const {
 	return opennova::env::fog_end_underwater(water_murk);
 }
 
-Dictionary EnvFile::get_day_phase(float p_time) const {
+Ref<EnvDayPhase> EnvFile::get_day_phase(float p_time) const {
 	const opennova::env::DayPhase phase = opennova::env::compute_day_phase(p_time);
-	Dictionary result;
-	result["is_night"] = phase.is_night;
-	result["blend"] = phase.blend;
+	Ref<EnvDayPhase> result;
+	result.instantiate();
+	result->assign(phase);
 	return result;
 }
 
 Color EnvFile::double_saturate_color(const Color &p_color) {
-	return to_color(opennova::env::double_saturate(to_rgb(p_color)));
+	return opennova::color_from_env_rgb(opennova::env::double_saturate(opennova::env_rgb_from_color(p_color)));
 }
 
 Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
-	return to_color(opennova::env::combine_terrain_light(to_rgb(p_light), to_rgb(p_sky)));
+	return opennova::color_from_env_rgb(opennova::env::combine_terrain_light(opennova::env_rgb_from_color(p_light), opennova::env_rgb_from_color(p_sky)));
 }
 
 Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
-	return to_color(opennova::env::lit_water_color(to_rgb(p_water), to_rgb(p_light)));
+	return opennova::color_from_env_rgb(opennova::env::lit_water_color(opennova::env_rgb_from_color(p_water), opennova::env_rgb_from_color(p_light)));
 }
 
 Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 		float p_fog_distance, float p_fog_distance_reference) {
-	const auto to_fixed = [](float units) {
-		if (units <= 0.0f) return 0u;
-		return static_cast<uint32_t>(units * 65536.0f);
-	};
-	return to_color(opennova::env::horizon_blend_skyfog(
-			to_rgb(p_fog), to_rgb(p_skyfog),
-			to_fixed(p_fog_distance), to_fixed(p_fog_distance_reference)));
+	return opennova::color_from_env_rgb(opennova::env::horizon_blend_skyfog(
+			opennova::env_rgb_from_color(p_fog), opennova::env_rgb_from_color(p_skyfog),
+			opennova::io::float_to_fp16_16_nonneg(p_fog_distance),
+			opennova::io::float_to_fp16_16_nonneg(p_fog_distance_reference)));
 }
 
 Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 	// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md] — DIFFUSE(HALF) x TEXTURE under
 	// MODULATE2X, folded to one multiply for the shader.
 	const opennova::env::TerrainTint tint =
-			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
-	return to_color(opennova::env::tile_overlay_tint_factor(tint));
+			opennova::env::terrain_tint_from_rgb(opennova::env_rgb_from_color(p_terrain_tint));
+	return opennova::color_from_env_rgb(opennova::env::tile_overlay_tint_factor(tint));
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
@@ -623,20 +599,17 @@ float EnvFile::celestial_body_distance() {
 
 namespace {
 
-int to_fixed_16_16(float value) {
-	return static_cast<int>(value * 65536.0f);
-}
 
 } // namespace
 
 float EnvFile::celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct) {
 	return static_cast<float>(opennova::env::celestial_sun_alpha_fixed(
-			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct))) / 65536.0f;
 }
 
 float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend) {
 	return static_cast<float>(opennova::env::celestial_moon_alpha_fixed(
-			p_fog_distance, to_fixed_16_16(p_overcast_blend), false)) / 65536.0f;
+			p_fog_distance, opennova::io::float_to_fp16_16(p_overcast_blend), false)) / 65536.0f;
 }
 
 float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
@@ -645,8 +618,8 @@ float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 	// unscaled fold; the runtime frame builder owns the locked-profile
 	// quarter (celestial_frame.h).
 	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
-			to_fixed_16_16(p_view_dot_sun), p_brightness,
-			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct),
+			opennova::io::float_to_fp16_16(p_view_dot_sun), p_brightness,
+			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct),
 			false)) / 65536.0f;
 }
 
@@ -658,11 +631,11 @@ float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
 	return opennova::env::cloud_uv_rate_per_second(steady);
 }
 
-Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
+Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
 	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
-	Dictionary result;
-	result["glare"] = glare.glare;
-	result["fog_whiten"] = glare.fog_whiten;
+	Ref<EnvSunGlare> result;
+	result.instantiate();
+	result->assign(glare);
 	return result;
 }
 
@@ -732,38 +705,17 @@ Dictionary EnvFile::get_field_consumption() {
 	return table;
 }
 
-void EnvFile::apply_mission_overrides(const Dictionary &p_overrides) {
+void EnvFile::apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides) {
+	if (p_overrides.is_null()) {
+		clear_mission_overrides();
+		return;
+	}
 	if (!mission_overrides_active) {
 		_sync_env_from_properties();
 		env_base = env;
 	}
-	opennova::env::BmsEnvOverrides overrides;
-	if (p_overrides.has("water_height")) {
-		overrides.has_water_height = true;
-		overrides.water_height = static_cast<float>(p_overrides["water_height"]);
-	}
-	if (p_overrides.has("fog_level")) {
-		overrides.has_fog_level = true;
-		overrides.fog_level = static_cast<float>(p_overrides["fog_level"]);
-	}
-	if (p_overrides.has("fog_color")) {
-		overrides.has_fog_color = true;
-		overrides.fog_color = to_rgb(p_overrides["fog_color"]);
-	}
-	if (p_overrides.has("water_color")) {
-		overrides.has_water_color = true;
-		overrides.water_color = to_rgb(p_overrides["water_color"]);
-	}
-	if (p_overrides.has("water_murk")) {
-		overrides.has_water_murk = true;
-		overrides.water_murk = static_cast<float>(p_overrides["water_murk"]);
-	}
-	if (p_overrides.has("start_time")) {
-		overrides.has_start_time = true;
-		overrides.start_time = static_cast<int>(p_overrides["start_time"]);
-	}
 	env = env_base;
-	opennova::env::apply_bms_overrides(env, overrides);
+	opennova::env::apply_bms_overrides(env, p_overrides->value());
 	mission_overrides_active = true;
 	_sync_properties_from_env();
 	emit_signal("environment_changed");

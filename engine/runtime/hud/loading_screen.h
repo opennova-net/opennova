@@ -6,11 +6,11 @@
 // The mission loading screen's witnessed spec: the GAMETYPE -> LoadingText
 // key policy and the layout/appearance block the shell's LoadingScreen draws
 // from (the ENG-4/FNT pattern: policy + constants native, the CanvasItem
-// draws stay shell-side). The smoothing/fill arithmetic already lives in
-// hud_math.h (loading_bar_step / loading_bar_fill_span).
+// draws stay shell-side). The fill arithmetic already lives in hud_math.h
+// (loading_bar_fill_span).
 // [orig: background + text compositing render_loading_screen @ 0x521d10;
 //  session text provider HUD_GetLoadingScreenTextByGameType @ 0x51f300;
-//  throttle + creep + bar draw LoadingScreen_UpdateAndPresent @ 0x586be0;
+//  throttle + retail creep + bar draw LoadingScreen_UpdateAndPresent @ 0x586be0;
 //  bar primitive draw_progress_bar_0 @ 0x5d4c40]
 // Witness record: docs/interface/loading-screen-re.md.
 
@@ -89,15 +89,13 @@ inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 // Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
 inline constexpr int kLoadingPresentIntervalMs = 100;
 
-// Redraw + present when due: the interval elapsed, the reported value
-// changed, or the displayed value still trails it (the trailing case
-// redraws unthrottled so the bar catches a jump quickly, then creeps ahead
-// at the interval cadence) [orig: elapsed >= 100 || this[8] != progress ||
-// this[9] < progress @ 0x586c24, LoadingScreen_UpdateAndPresent @ 0x586be0].
-inline bool loading_present_due(int elapsed_ms, bool reported_changed,
-		int displayed, int reported) {
-	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed ||
-			displayed < reported;
+// Redraw + present when the window-pump interval elapses or a real checkpoint
+// changes. Retail stores the caller's checkpoint in this[8] @ 0x586c32 and a
+// separate liveness value in this[9] @ 0x586c2f, advanced at @ 0x586c3f.
+// OpenNova intentionally omits that autonomous displayed-value creep so the
+// bar never claims work the pipeline has not reached.
+inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
+	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed;
 }
 
 // The composited resources: the stock background when the mission has no

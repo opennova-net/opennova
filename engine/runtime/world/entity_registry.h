@@ -1,8 +1,7 @@
 // Entity registry: fixed-capacity pools + the addressing surface both scripting
 // systems use (by net id / group / team / area / name), plus named non-entity
 // addressables (areas, routes/wplists, groups).
-#ifndef OPENNOVA_WORLD_ENTITY_REGISTRY_H
-#define OPENNOVA_WORLD_ENTITY_REGISTRY_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -26,11 +25,6 @@ struct Area {
     // THIS id in the file and are rewritten to the array index at load
     // [orig: the load-time resolvers @0x453000/@0x453100 match record[0]].
     int32_t zone_id = -1;
-};
-
-struct Route {
-    std::string name;
-    std::vector<Vec3> markers;
 };
 
 // Stable identity for one allocation lifetime of a packed pool/slot handle.
@@ -74,10 +68,12 @@ public:
     // Faithful to EntityPool_FindByNetId @0x4f0a20: scans pool 0 first, then pools
     // 1..3 (mask &0xF), first match wins; returns (pool<<12)|slot, else invalid.
     EntityHandle find_by_net_id(uint16_t net_id) const;
+    // The row itself, or null: the net_id scan above, and the file id
+    // (bms::Entity::id) the mission drives key placed entities by.
+    Entity *by_net_id(uint16_t net_id);
+    Entity *by_bms_id(int32_t bms_id);
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
-    void by_team(uint8_t team, std::vector<EntityHandle> &out) const;
-    EntityHandle find_by_name(std::string_view name) const;
     void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
@@ -88,12 +84,7 @@ public:
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;
-    int find_area(std::string_view name) const;              // -1 if absent
     const Area *area(int id) const;
-
-    int register_route(std::string name, std::vector<Vec3> markers); // returns route id
-    int find_route(std::string_view name) const;
-    const Route *route(int id) const;
 
     int intern_group(std::string_view name); // stable id for a named group
 
@@ -141,10 +132,7 @@ private:
     std::array<Pool, kPoolCount> pools_{};
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
-    std::vector<Route> routes_;
     std::vector<std::string> group_names_;
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ENTITY_REGISTRY_H

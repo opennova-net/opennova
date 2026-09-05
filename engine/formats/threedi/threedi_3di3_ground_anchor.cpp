@@ -14,12 +14,14 @@
 //      by its center height.
 //
 // Returned in model space (threedi_user_point_position's axis order) so callers
-// apply their own coordinate convention exactly once (see
-// ObjectData::get_ground_anchor, which feeds the result through godot_vec3).
+// apply their own coordinate convention exactly once (the placement consumers
+// feed the result through their single negate-x model-space map).
 
 #include <formats/threedi/threedi_3di3.h>
 
 #include <stddef.h>
+
+namespace opennova::threedi {
 
 // ASCII case fold. Avoids strcasecmp (POSIX) / _stricmp (MSVC), neither of which
 // is portable across the toolchains this library builds on.
@@ -44,7 +46,7 @@ static int name_matches_ignore_case(const char *name, size_t name_cap, const cha
     return 0; // name ran its full capacity without terminating: not a match
 }
 
-extern "C" int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
+int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
     if (!model || !out) {
         return 0;
     }
@@ -65,3 +67,5 @@ extern "C" int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]
     out[2] = 0.0f;
     return 1;
 }
+
+} // namespace opennova::threedi

@@ -8,6 +8,7 @@
 
 #include "mission_detail.h"
 #include "mission_records.h"
+#include "bms_edit.h"
 
 #include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
@@ -578,7 +579,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 						resolve_item_type(bms_type_id_to_item_id(entity.type_id)));
 			}
 			entity.type = to_bms_type(kind);
-			entities_for(file, kind)->push_back(entity);
+			entities(file, kind)->push_back(entity);
 			++pos;
 			return true;
 		}

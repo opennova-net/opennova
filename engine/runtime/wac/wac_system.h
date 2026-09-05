@@ -1,8 +1,7 @@
 // WAC scripting system: an ISystem that ticks the WAC VM against the shared
 // world. One of the two scripting evaluators (alongside the BMS event runtime);
 // both register with the World tick service and drive the same entities/vars.
-#ifndef OPENNOVA_WAC_WAC_SYSTEM_H
-#define OPENNOVA_WAC_WAC_SYSTEM_H
+#pragma once
 
 #include <utility>
 
@@ -28,7 +27,8 @@ public:
 
     // The VM executes the whole program once every 62nd tick — the 0x3E divider.
     // [orig: WacScript_AdvanceTick @0x4f81a0: ++dword_C6EAD4, cmp 0x3E @0x4f81b1, reset, execute]
-    static constexpr int kTicksPerExecution = 0x3E; // 62
+    static constexpr int kTicksPerExecution = 0x3E; // 62: WAC's own divider, the same
+                                                    // number as io::kTicksPerSecondInt by design, not by reference
 
     const char *name() const override { return "wac"; }
 
@@ -112,5 +112,3 @@ private:
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_WAC_SYSTEM_H

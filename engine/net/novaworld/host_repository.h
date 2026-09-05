@@ -21,7 +21,7 @@ namespace opennova {
 // Lifecycle (mirrors onnw/onnw/hosts.py + the lobby-session dispatch):
 //   ClientHostRequest  -> upsert_host() (INSERT OR REPLACE)
 //   ClientHostUpdate   -> update_host() (refresh ClientHostUpdate fields)
-//   GOODBYE / timeout  -> remove_host_by_peer()
+//   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)
 //   ClientHostPlayerAdded   -> add_player()
 //   ClientHostPlayerRemoved -> remove_player_by_peer() (a peer can leave
 //     at most one host at a time so the unique-by-peer index is enough)
@@ -70,7 +70,6 @@ void clear_all(db::Database &db);
 void upsert_host(db::Database &db, const HostRow &row);
 void update_host(db::Database &db, const HostRow &row);
 void remove_host_by_rid(db::Database &db, uint32_t rid);
-void remove_host_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
 
 // Backstop sweep: delete active_hosts whose updated_at is older than
 // `window_seconds` (crash orphans the normal teardown missed). Returns the

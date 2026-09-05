@@ -39,7 +39,6 @@ struct Row {
 	std::vector<Value> values;
 
 	std::optional<int64_t> as_int(std::size_t i) const;
-	std::optional<double> as_real(std::size_t i) const;
 	std::optional<std::string> as_text(std::size_t i) const;
 	bool is_null(std::size_t i) const;
 };

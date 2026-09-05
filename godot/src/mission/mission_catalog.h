@@ -15,7 +15,7 @@ class ResourceRoot;
 
 // One front-end mission-catalog row: the engine catalog entry plus the
 // derived session game-type code word. The witnesses live engine-side
-// (engine/runtime/mission/mission_catalog.h; engine/net/npwire/game_type.h).
+// (engine/runtime/mission/mission_catalog.h; engine/base/gameprofile/game_type.h).
 class MissionCatalogRow : public RefCounted {
 	GDCLASS(MissionCatalogRow, RefCounted)
 

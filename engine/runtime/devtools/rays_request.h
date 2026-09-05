@@ -1,8 +1,8 @@
 // A typed ray-capture mutation the F3 Rays window queues for its embedder to
-// drain (ADR 0042 d6; the EnvironmentRequest pattern). The window never
-// mutates engine state itself — the embedder routes the filter/clear requests
-// into the Simulation's ray-debug seam, and the view toggle out to the shell
-// (the GDScript debug-view set owns building the 3D view).
+// drain (ADR 0042 d6). The window never mutates engine state itself — the
+// embedder routes the filter/clear requests into the Simulation's ray-debug
+// seam. A window-local seam: the ray-debug filter has no debug-control row,
+// so it stays beside the ControlRequest channel rather than in it.
 #pragma once
 
 #include <cstdint>
@@ -14,7 +14,6 @@ struct RaysRequest {
 		SetCategoryMask, // a = the new draw mask (bit i = category i)
 		SetTtlTicks,     // a = the new fade window in 62 Hz ticks
 		Clear,           // zero every ring and lifetime counter
-		SetViewShown,    // a != 0: build the 3D ray view (show_rays), 0: free it
 	};
 
 	Kind kind = Kind::SetCategoryMask;

@@ -2,9 +2,12 @@
 // verbatim from the shell binding's simulation_internal.h; the [orig]
 // witnesses ride with them.
 #include <runtime/simassets/model_builders.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
+
+using namespace opennova::threedi;
 
 namespace opennova::simassets {
 
@@ -35,7 +38,7 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	}
 	if (col->volume_count == 0 && !has_face_mesh && !has_person_spheres)
 		return false;
-	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
+	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * io::kFp16OneD)); };
 
 	out.vertices.reserve(col->vertex_count);
 	for (size_t i = 0; i < col->vertex_count; ++i) {
@@ -49,7 +52,7 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	for (size_t i = 0; i < col->normal_count; ++i) {
 		opennova::world::CollisionNormal n;
 		for (int k = 0; k < 3; ++k)
-			n.n[k] = static_cast<int16_t>(std::lround(col->normals[i].normal[k] * 16384.0f));
+			n.n[k] = static_cast<int16_t>(std::lround(col->normals[i].normal[k] * io::kFp14One));
 		n.dominant_axis = col->normals[i].dominate_axis;
 		out.normals.push_back(n);
 	}
@@ -122,9 +125,9 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 		const ThreediBoundingPlane &sp = col->planes[i];
 		opennova::world::CollisionPlane p;
 		p.flags = sp.flags;
-		p.nx = static_cast<int16_t>(std::lround(sp.normal[0] * 16384.0f));
-		p.ny = static_cast<int16_t>(std::lround(sp.normal[1] * 16384.0f));
-		p.nz = static_cast<int16_t>(std::lround(sp.normal[2] * 16384.0f));
+		p.nx = static_cast<int16_t>(std::lround(sp.normal[0] * io::kFp14One));
+		p.ny = static_cast<int16_t>(std::lround(sp.normal[1] * io::kFp14One));
+		p.nz = static_cast<int16_t>(std::lround(sp.normal[2] * io::kFp14One));
 		p.dist = fx(sp.radius);
 		out.planes.push_back(p);
 	}
@@ -227,11 +230,11 @@ int32_t model_bound_radius_q16_from_3di(const Threedi3di3 &model) {
 			}
 		}
 	}
-	return static_cast<int32_t>(std::lround(static_cast<double>(r) * 65536.0));
+	return static_cast<int32_t>(std::lround(static_cast<double>(r) * io::kFp16OneD));
 }
 
 float model_bound_radius_from_3di(const Threedi3di3 &model) {
-	return static_cast<float>(model_bound_radius_q16_from_3di(model)) / 65536.0f;
+	return static_cast<float>(model_bound_radius_q16_from_3di(model)) / io::kFp16One;
 }
 
 // Build the runtime occlusion model from the parsed OCCL tables — the 60 B

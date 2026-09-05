@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <net/npruntime/client_replica_card.h>
+#include <runtime/inmatch/client_replica_card.h>
 #include <runtime/world/inspect.h>
 
 namespace godot {
@@ -24,8 +24,13 @@ protected:
 
 public:
 	void assign(const opennova::world::inspect::SeatRow &p_value) { value_ = p_value; }
+	// The seat's index in its entity's seat table (-1 for a def-level spec row).
+	int get_index() const { return value_.index; }
+	// world::SeatType.
 	int get_type() const { return value_.type; }
+	// Fixed retail mountHandles slot (passengers 0..7, control 8, UseGun 9).
 	int get_retail_slot() const { return value_.retail_slot; }
+	// The 1-based USRP table row the wire byte names.
 	int get_bone_index() const { return value_.bone_index; }
 	int get_pose_index() const { return value_.pose_index; }
 	String get_source_name() const;
@@ -36,27 +41,27 @@ public:
 
 // The full per-entity debug card (world::inspect::EntityCard, ADR 0042 d5):
 // the registry/world half, the AI half, and — on a joiner — the decoded
-// replica section (np::ClientReplicaCard). Typed getters prefer the AI half
+// replica section (inmatch::ClientReplicaCard). Typed getters prefer the AI half
 // when present, matching the old per-shape Dictionary getters; to_json_value()
-// exists for the MCP boundary and reproduces the legacy card key sets.
+// exists for the MCP boundary and carries the card key sets docs/mcp.md names.
 class EntityCard : public RefCounted {
 	GDCLASS(EntityCard, RefCounted)
 
 	opennova::world::inspect::EntityCard value_;
-	opennova::np::ClientReplicaCard replica_;
+	opennova::inmatch::ClientReplicaCard replica_;
 
 protected:
 	static void _bind_methods();
 
 public:
 	void assign(const opennova::world::inspect::EntityCard &p_value) { value_ = p_value; }
-	void assign_replica(const opennova::np::ClientReplicaCard &p_value) { replica_ = p_value; }
+	void assign_replica(const opennova::inmatch::ClientReplicaCard &p_value) { replica_ = p_value; }
 	bool native_valid() const { return value_.valid || replica_.valid; }
 
 	bool has_ai() const { return value_.has_ai; }
 	bool has_world() const { return value_.has_world; }
 
-	// --- identity (AI half preferred, the legacy detail-card precedence) ----
+	// --- identity (AI half preferred, the detail-card precedence) ----
 	int get_wire_handle() const { return static_cast<int>(value_.handle); }
 	int get_ai_index() const { return value_.ai_index; }
 	int get_kind() const;
@@ -102,7 +107,6 @@ public:
 	int get_mount_seat_yaw_offset() const { return value_.ai.mount_seat_yaw_offset; }
 	bool is_mount_target_config_valid() const { return value_.ai.mount_target_config_valid; }
 	int get_mount_target_config() const { return value_.ai.mount_target_config; }
-	int get_mount_target_seat_count() const { return value_.ai.mount_target_seat_count; }
 	TypedArray<EntityCardSeat> get_mount_target_seats() const;
 
 	// --- the world half -----------------------------------------------------
@@ -117,7 +121,7 @@ public:
 	String get_item_name() const;
 	int get_health_max() const { return value_.world.health_max; }
 
-	// The MCP boundary conversion only: the legacy get_entity_debug /
+	// The MCP boundary conversion only: the get_entity_debug /
 	// get_world_entity_debug key set for this card's shape, with the joiner's
 	// decoded replica attached as "client_entity_debug".
 	Dictionary to_json_value() const;

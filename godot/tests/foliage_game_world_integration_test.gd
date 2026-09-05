@@ -4,7 +4,6 @@ extends GutTest
 # Tmap terrain plus real 3DI geometry under both authored vegetation names,
 # then drives GameWorld exactly through its public load/tick surface.
 
-const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const MODEL_FIXTURE := "res://../fixtures/threedi/synth/crate.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
@@ -20,11 +19,9 @@ const FOLIAGE_MATCH := 254
 
 func before_each() -> void:
 	_cleanup_dir(_fixture_root())
-	VegAssets.clear_cache()
 
 
 func after_each() -> void:
-	VegAssets.clear_cache()
 	_cleanup_dir(_fixture_root())
 
 
@@ -100,7 +97,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 
 	var defs: Array = data.get_foliage_defs()
 	assert_eq(defs.size(), 2, "Tmap should retain both authored foliage definitions.")
-	var meshes := VegAssets.resolve_slot_meshes(resource_root, defs)
+	var meshes := dispatcher.resolve_slot_meshes(resource_root, defs)
 	assert_eq(meshes.size(), defs.size())
 	for slot in range(defs.size()):
 		var mesh := meshes[slot] as Mesh
@@ -116,7 +113,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	camera.global_position = position + Vector3(0.0, 2.2, 0.0)
 	camera.look_at(position + Vector3(0.0, 0.5, -12.0), Vector3.UP)
 
-	var stats := {}
+	var stats: FoliageFrameStats = null
 	for _frame in range(60):
 		await get_tree().process_frame
 		world.tick(camera.global_position, camera.global_transform, 1.0 / 60.0)
@@ -124,15 +121,15 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 		if _has_complete_detail_output(dispatcher, stats):
 			break
 
-	assert_true(bool(stats.get("native_detail_source", false)),
+	assert_true(stats.native_detail_source,
 		"GameWorld foliage must consume Terrain native detail cells.")
-	assert_gt(int(stats.get("detail_cells", 0)), 0,
-		"The detail camera witness should collect native 16-unit detail cells: %s" % stats)
-	assert_gt(int(stats.get("runtime_detail_intents", 0)), 0,
-		"Foliage match %d should emit detail intents: %s" % [FOLIAGE_MATCH, stats])
-	assert_gt(int(stats.get("detail_vertices", 0)), 0,
-		"Foliage match %d should expand real 3DI vertices: %s" % [FOLIAGE_MATCH, stats])
-	assert_gt(int(stats.get("render_batches", 0)), 0,
+	assert_gt(stats.detail_cells, 0,
+		"The detail camera witness should collect native 16-unit detail cells: %s" % stats.to_json_value())
+	assert_gt(stats.runtime_detail_intents, 0,
+		"Foliage match %d should emit detail intents: %s" % [FOLIAGE_MATCH, stats.to_json_value()])
+	assert_gt(stats.detail_vertices, 0,
+		"Foliage match %d should expand real 3DI vertices: %s" % [FOLIAGE_MATCH, stats.to_json_value()])
+	assert_gt(stats.render_batches, 0,
 		"Foliage match %d should submit render batches: %s" % [FOLIAGE_MATCH, stats])
 	assert_gt(dispatcher.get_total_instances(), 0,
 		"Foliage match %d should retain visible instances: %s" % [FOLIAGE_MATCH, stats])
@@ -142,11 +139,11 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	await get_tree().process_frame
 
 
-func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: Dictionary) -> bool:
+func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: FoliageFrameStats) -> bool:
 	return (
-		int(stats.get("runtime_detail_intents", 0)) > 0
-		and int(stats.get("detail_vertices", 0)) > 0
-		and int(stats.get("render_batches", 0)) > 0
+		stats.runtime_detail_intents > 0
+		and stats.detail_vertices > 0
+		and stats.render_batches > 0
 		and dispatcher.get_total_instances() > 0
 	)
 

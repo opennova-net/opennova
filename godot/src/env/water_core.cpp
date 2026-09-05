@@ -1,14 +1,10 @@
 #include "env/water_core.h"
+#include "util/color_convert.h"
 
 #include <cmath>
+#include <base/io/fixed.h>
 
 using namespace godot;
-
-void WaterCore::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("update", "frame_counter"), &WaterCore::update);
-	ClassDB::bind_method(D_METHOD("get_color_rgba8"), &WaterCore::get_color_rgba8);
-	ClassDB::bind_method(D_METHOD("get_normal_rgba8"), &WaterCore::get_normal_rgba8);
-}
 
 void WaterCore::update(int p_frame_counter) {
 	opennova::env::water_noise_color_pixels(color_pixels, tables,
@@ -56,121 +52,29 @@ int WaterCore::get_texture_size() const {
 void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 		const Projection &p_cam_projection, const Vector2i &p_viewport_px,
 		float p_fog_end_world) {
-	// Godot world axes coincide COMPONENTWISE with the render (d3d) basis:
-	// both are (-engY, engZ, engX) of the engine axes [orig:
-	// Math_FixedPointToFloat3_YNegated @ 0x611210] — the same identity
-	// star_field.cpp serves its godot-space buffers under, and the one
-	// water.gd already relies on when it feeds get_water_uv_state with
-	// godot cam x/z. Positions and directions therefore carry over UNCHANGED;
-	// only the matrix conventions differ (D3D row-vector v' = v * M vs
-	// Godot's column-vector transforms).
-	//
-	// D3D view matrix [orig: viewMatrix @ 0xA7845C, consumed row-vector by
-	// Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80, see docs/env/env-tod-re.md]: the camera's
-	// world-basis vectors sit in the COLUMNS (0 right / 1 up / 2 forward) and
-	// row 3 carries -dot(axis, eye). A Godot camera looks along -basis.z, so
-	// the D3D forward column is -basis.z; right/up carry over unchanged
-	// (matching the witnessed screen mapping s = center +/- clip/(2w) *
-	// extent [orig: @ 0x5c0cf1..0x5c0d25, see docs/env/env-tod-re.md]: +view-x lands right of center,
-	// +view-y above it).
+	// Godot world axes coincide COMPONENTWISE with the render (d3d) basis, so
+	// positions and directions carry over unchanged; the matrix conventions
+	// (and the -basis.z forward of a Godot camera) are the engine builder's
+	// business (env_water_render.h water_strip_view_from_camera).
 	const Basis &basis = p_cam_transform.basis;
-	const Vector3 right = basis.get_column(0);
-	const Vector3 up = basis.get_column(1);
-	const Vector3 forward = -basis.get_column(2);
-	const Vector3 eye = p_cam_transform.origin;
-
-	float *view = strip_view.view;
-	view[0] = static_cast<float>(right.x);
-	view[1] = static_cast<float>(up.x);
-	view[2] = static_cast<float>(forward.x);
-	view[3] = 0.0f;
-	view[4] = static_cast<float>(right.y);
-	view[5] = static_cast<float>(up.y);
-	view[6] = static_cast<float>(forward.y);
-	view[7] = 0.0f;
-	view[8] = static_cast<float>(right.z);
-	view[9] = static_cast<float>(up.z);
-	view[10] = static_cast<float>(forward.z);
-	view[11] = 0.0f;
-	view[12] = static_cast<float>(-right.dot(eye));
-	view[13] = static_cast<float>(-up.dot(eye));
-	view[14] = static_cast<float>(-forward.dot(eye));
-	view[15] = 1.0f;
-
-	// The inverse the march unprojects through. Retail inverts the cached
-	// view matrix numerically per pass [orig: Math_InvertMatrix4x4_Float_
-	// ToStatic @ 0x611960]; for the rigid camera transform that inverse IS
-	// the transposed rotation with the eye in row 3 — built analytically
-	// here from the same source data.
-	float *inv = strip_view.view_inv;
-	inv[0] = static_cast<float>(right.x);
-	inv[1] = static_cast<float>(right.y);
-	inv[2] = static_cast<float>(right.z);
-	inv[3] = 0.0f;
-	inv[4] = static_cast<float>(up.x);
-	inv[5] = static_cast<float>(up.y);
-	inv[6] = static_cast<float>(up.z);
-	inv[7] = 0.0f;
-	inv[8] = static_cast<float>(forward.x);
-	inv[9] = static_cast<float>(forward.y);
-	inv[10] = static_cast<float>(forward.z);
-	inv[11] = 0.0f;
-	inv[12] = static_cast<float>(eye.x);
-	inv[13] = static_cast<float>(eye.y);
-	inv[14] = static_cast<float>(eye.z);
-	inv[15] = 1.0f;
-
-	// Projection [orig: mat @ 0x2721980; m11 read @ 0x2721994, see docs/env/env-tod-re.md].
-	// Preserve the complete shell matrix so the screen march also serves
-	// orthographic and off-center frustum cameras. Godot is column-vector
-	// while the strip core is row-vector, but both layouts index a coefficient
-	// as [input][output], so flattening columns is direct. Only the view-Z
-	// input changes sign: Godot looks down -Z, while the D3D/render view above
-	// measures +forward.
+	const Vector3 right_v = basis.get_column(0);
+	const Vector3 up_v = basis.get_column(1);
+	const Vector3 forward_v = -basis.get_column(2);
+	const Vector3 eye_v = p_cam_transform.origin;
+	const float right[3] = {static_cast<float>(right_v.x), static_cast<float>(right_v.y), static_cast<float>(right_v.z)};
+	const float up[3] = {static_cast<float>(up_v.x), static_cast<float>(up_v.y), static_cast<float>(up_v.z)};
+	const float forward[3] = {static_cast<float>(forward_v.x), static_cast<float>(forward_v.y), static_cast<float>(forward_v.z)};
+	const float eye[3] = {static_cast<float>(eye_v.x), static_cast<float>(eye_v.y), static_cast<float>(eye_v.z)};
+	float proj_columns[16];
 	for (int input = 0; input < 4; ++input) {
-		const float input_sign = input == 2 ? -1.0f : 1.0f;
 		const Vector4 &column = p_cam_projection.columns[input];
-		strip_view.proj[input * 4 + 0] = static_cast<float>(column.x) * input_sign;
-		strip_view.proj[input * 4 + 1] = static_cast<float>(column.y) * input_sign;
-		strip_view.proj[input * 4 + 2] = static_cast<float>(column.z) * input_sign;
-		strip_view.proj[input * 4 + 3] = static_cast<float>(column.w) * input_sign;
+		proj_columns[input * 4 + 0] = static_cast<float>(column.x);
+		proj_columns[input * 4 + 1] = static_cast<float>(column.y);
+		proj_columns[input * 4 + 2] = static_cast<float>(column.z);
+		proj_columns[input * 4 + 3] = static_cast<float>(column.w);
 	}
-
-	// Camera world-basis rows for the texm3x2 bump rows [orig: flt_27219C0
-	// row 0 (right) / row 2 (forward), Math_CopyVec3Row0/2 @ 0x611fb0 /
-	// @ 0x611f70] — godot == render componentwise again.
-	strip_view.cam_right[0] = static_cast<float>(right.x);
-	strip_view.cam_right[1] = static_cast<float>(right.y);
-	strip_view.cam_right[2] = static_cast<float>(right.z);
-	strip_view.cam_forward[0] = static_cast<float>(forward.x);
-	strip_view.cam_forward[1] = static_cast<float>(forward.y);
-	strip_view.cam_forward[2] = static_cast<float>(forward.z);
-
-	// Camera position as 16.16, like the camera block the originals fild
-	// [orig: 0xA78364 (eng X = render z) / 0xA78368 (eng Y, negated =
-	// render x) / 0xA7836C (eng Z = render y)].
-	strip_view.cam_x_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.x) * 65536.0));
-	strip_view.cam_y_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.y) * 65536.0));
-	strip_view.cam_z_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.z) * 65536.0));
-
-	// Viewport rect + center, pixels [orig: 0xA78384..0xA783A8, see docs/env/env-tod-re.md]: min 0,
-	// max = px - 1 (the clip rect's right/bottom edges are max + 1 = px),
-	// center = px / 2.
-	strip_view.vp_min_x = 0;
-	strip_view.vp_min_y = 0;
-	strip_view.vp_max_x = p_viewport_px.x - 1;
-	strip_view.vp_max_y = p_viewport_px.y - 1;
-	strip_view.vp_center_x = p_viewport_px.x / 2;
-	strip_view.vp_center_y = p_viewport_px.y / 2;
-
-	// The pass fog end, 16.16 [orig: Environment_GetFogEndDistance @ 0x57e3e0,
-	// fetched with the underwater flag @ 0x5c28a2, see docs/env/env-tod-re.md]; clamped to one fp unit —
-	// the row colors integer-divide by it.
-	int32_t fog_end_fp = static_cast<int32_t>(std::lround(static_cast<double>(p_fog_end_world) * 65536.0));
-	if (fog_end_fp < 1) {
-		fog_end_fp = 1;
-	}
-	strip_view.fog_end_fp = fog_end_fp;
+	opennova::env::water_strip_view_from_camera(right, up, forward, eye, proj_columns,
+			p_viewport_px.x, p_viewport_px.y, p_fog_end_world, strip_view);
 	strip_view_set = true;
 }
 
@@ -184,7 +88,7 @@ int WaterCore::strip_build(float p_plane_height_world, float p_murk,
 	opennova::env::WaterStripParams params;
 	// Env_WaterHeightFixed is 16.16 render y (== godot y).
 	params.plane_height_fp =
-			static_cast<int32_t>(std::lround(static_cast<double>(p_plane_height_world) * 65536.0));
+			opennova::io::float_to_fp16_16_round_sat(p_plane_height_world);
 	params.underwater_view = p_underwater;
 	params.nightvision = p_nightvision;
 	params.water_murk = p_murk;
@@ -210,11 +114,7 @@ PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {
 	Color *write = out.ptrw();
 	for (size_t i = 0; i < packed.size(); ++i) {
 		const uint32_t argb = packed[i];
-		write[i] = Color(
-				static_cast<float>((argb >> 16) & 0xFFu) / 255.0f,
-				static_cast<float>((argb >> 8) & 0xFFu) / 255.0f,
-				static_cast<float>(argb & 0xFFu) / 255.0f,
-				static_cast<float>((argb >> 24) & 0xFFu) / 255.0f);
+		write[i] = opennova::color_from_argb(argb);
 	}
 	return out;
 }
@@ -254,10 +154,11 @@ PackedFloat32Array WaterCore::strip_custom1() const {
 	float *write = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		const uint32_t argb = strip_rows.specular[i];
-		write[i * 4 + 0] = static_cast<float>((argb >> 16) & 0xFFu) / 255.0f;
-		write[i * 4 + 1] = static_cast<float>((argb >> 8) & 0xFFu) / 255.0f;
-		write[i * 4 + 2] = static_cast<float>(argb & 0xFFu) / 255.0f;
-		write[i * 4 + 3] = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
+		const Color c = opennova::color_from_argb(argb);
+		write[i * 4 + 0] = c.r;
+		write[i * 4 + 1] = c.g;
+		write[i * 4 + 2] = c.b;
+		write[i * 4 + 3] = c.a;
 	}
 	return out;
 }

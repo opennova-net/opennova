@@ -10,14 +10,14 @@
 // are the broadcast path); a pre-spawn connection receives nothing; a malformed short 0x25 is
 // dropped without any send.
 
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
 
-#include <net/netsim/connection.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -36,8 +36,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -98,8 +98,7 @@ bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,
 int main() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));
 	const w::EntityHandle hb = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	const w::EntityHandle hc = w::spawn_remote_player(world, player_spawn(0xFFF2));
@@ -111,7 +110,7 @@ int main() {
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_d(ns::UdpSessionTransport::Role::Host);
 
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -127,7 +126,7 @@ int main() {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x25, req_body));
 	std::vector<ProtocolMessage> replies =
-			np::dispatch_session_replies(np::GameConfig{}, roster[1], msgs, 100, roster, &world);
+			inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], msgs, 100, roster, &world);
 
 	// The broadcast rides the transports, never the requester's direct reply list.
 	for (const ProtocolMessage &m : replies)
@@ -144,7 +143,7 @@ int main() {
 	// Malformed (short) 0x25 -> dropped, no sends.
 	std::vector<ProtocolMessage> bad;
 	bad.push_back(make_protocol_message(0x25, {0x05, 0x10}));
-	replies = np::dispatch_session_replies(np::GameConfig{}, roster[1], bad, 101, roster, &world);
+	replies = inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], bad, 101, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;
@@ -157,8 +156,8 @@ int main() {
 	std::vector<ProtocolMessage> stale;
 	stale.push_back(make_protocol_message(
 			0x25, encode_weapon_reload(WeaponReload{0x1005, 0x00C3})));
-	replies = np::dispatch_session_replies(
-			np::GameConfig{}, roster[1], stale, 102, roster, &world);
+	replies = inmatch::dispatch_session_replies(
+			inmatch::GameConfig{}, roster[1], stale, 102, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;
@@ -171,8 +170,8 @@ int main() {
 	w::Entity *requester_entity = world.registry.get(hb);
 	if (!expect(requester_entity != nullptr, "requester remains live in the registry")) return 1;
 	requester_entity->health = 0;
-	replies = np::dispatch_session_replies(
-			np::GameConfig{}, roster[1], msgs, 103, roster, &world);
+	replies = inmatch::dispatch_session_replies(
+			inmatch::GameConfig{}, roster[1], msgs, 103, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;

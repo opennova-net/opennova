@@ -6,8 +6,7 @@
 // systems (WAC VM, BMS event evaluator, future GDScript) at the authoritative
 // logic-tick cadence. Editor and runtime drive the SAME World; the editor just
 // owns the clock (and can pause/step/snapshot).
-#ifndef OPENNOVA_WORLD_WORLD_H
-#define OPENNOVA_WORLD_WORLD_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -17,14 +16,16 @@
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/match.h>
-#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
-#include <runtime/world/net_command_sink.h>
 #include <runtime/world/system.h>
+#include <runtime/world/vehicle_system.h>
+#include <runtime/world/zone_system.h>
 #include <runtime/world/trigger_relations.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/water_cross.h>
@@ -33,12 +34,14 @@
 #include <runtime/world/weather_state.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/terrain_scorch_events.h>
+#include <runtime/devtools/tick_profile.h>
 #include <runtime/world/var_store.h>
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
+#include <runtime/world/minefield.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/waypoint_track.h>
 #include <runtime/world/weapon_table.h>
@@ -50,44 +53,6 @@ struct TerrainHeightField;
 }
 
 namespace opennova::world {
-
-// Optional attribution for one World::run_logic_tick call. The caller owns the
-// value and passes nullptr during ordinary play, so the production hot path has
-// no clock reads or counter writes. Mission registration is WAC -> BMS -> AI;
-// the World can identify its explicit AiSystem pointer and groups every other
-// registered system under authored scripts.
-struct LogicTickPerf {
-    uint64_t setup_us = 0;
-    uint64_t scripts_us = 0;
-    uint64_t ai_us = 0;
-    uint64_t ai_reactions_us = 0;
-    uint64_t ai_collision_tables_us = 0;
-    uint64_t ai_entities_us = 0;
-    uint64_t ai_infantry_entities_us = 0;
-    uint64_t ai_infantry_remote_us = 0;
-    uint64_t ai_infantry_combat_us = 0;
-    uint64_t ai_infantry_animation_us = 0;
-    uint64_t ai_infantry_collision_us = 0;
-    uint64_t ai_infantry_collision_contacts_us = 0;
-    uint64_t ai_infantry_collision_repulsion_us = 0;
-    uint64_t ai_infantry_collision_ground_us = 0;
-    uint64_t ai_other_entities_us = 0;
-    uint64_t ai_authority_vehicles_us = 0;
-    uint64_t ai_vehicle_scan_us = 0;
-    uint64_t ai_vehicle_motors_us = 0;
-    uint64_t ai_vehicle_riders_us = 0;
-    uint64_t ai_client_vehicles_us = 0;
-    uint64_t ai_events_us = 0;
-    uint64_t attachments_us = 0;
-    uint64_t attachment_orphans_us = 0;
-    uint64_t attachment_child_pose_us = 0;
-    uint64_t attachment_riders_us = 0;
-    uint64_t throwables_us = 0;
-    uint64_t weapons_us = 0;
-    uint64_t projectiles_us = 0;
-    uint64_t destruction_us = 0;
-    uint64_t housekeeping_us = 0;
-};
 
 class CollisionWorld;
 
@@ -322,9 +287,6 @@ struct MissionKillStats {
 };
 
 
-class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
-                 // shared command layer can reach an entity's AI component in-engine)
-
 // items.def display names keyed by Entity::item_id (the wire type id), the
 // ItemDeathTraitsTable shape: filled once per distinct id by the item-traits
 // sweep, read by the inspection records (world/inspect.h). Small missions:
@@ -348,189 +310,135 @@ struct ItemNameTable {
 // ----------------------------------------------------------------------------
 // World.
 // ----------------------------------------------------------------------------
-class World {
-public:
-    World() : commands(*this) {}
-    // World has stable identity: commands binds this object, net defaults to
-    // its local_sink member, and registered systems retain mission-lifetime
-    // relationships. Memberwise copy/move would preserve pointers/references
-    // into the source World and create a split simulation.
-    World(const World &) = delete;
-    World &operator=(const World &) = delete;
-    World(World &&) = delete;
-    World &operator=(World &&) = delete;
+// ---------------------------------------------------------------------------
+// World's public members group by lifetime (ADR 0043 d2): the script's own
+// state, the per-mission tables the embedder feeds once, the session rules
+// the host stamps at bring-up, and the outbox the presentation/wire drain.
+// The sim members (registry, ai, match, the sims, the clocks) stay flat on
+// World. Every member keeps the witness comment it carried on World.
+// ---------------------------------------------------------------------------
 
-    EntityRegistry registry;
+// The mission-objectives (subgoal) state the SP objectives panel reads:
+// per-slot bit masks written by the SubGoal/ShowSubgoal actions — the bit is
+// the RAW 1-based slot (bits 1..8) — plus the mission header's per-slot
+// WinConditions/LoseConditions text-id tables (index 1..8; 0/255 terminate
+// the panel's row walk). [orig: won @0xAC86F4 / lost @0xAC86F0 (readers
+// EventSystem_GetEntityCounts @0x452e10), show-win @0xAC86EC / show-lose
+// @0xAC86E8 (EventSystem_GetTeamCounts @0x452e30); the id tables
+// byte_A7628B/byte_A76293 = the BMS header win_conditions/lose_conditions;
+// panel HUD_DrawWinConditions @0x5ba940]
+struct SubgoalState {
+    uint32_t won = 0;
+    uint32_t lost = 0;
+    uint32_t show_win = 0;
+    uint32_t show_lose = 0;
+    uint8_t win_text_ids[9] = {};
+    uint8_t lose_text_ids[9] = {};
+};
+
+// What the mission script (WAC + BMS) reads and writes beyond the entity rows.
+// vars and wac_values ride the World snapshot; the rest is re-initialised by
+// the systems' on_load.
+struct ScriptState {
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
-    EnvState env;
-    // The retail weather globals, ONE home (weather_state.h): the WAC weather
-    // handlers write it through EntityCommands, the weather tick advances it
-    // after the logic tick, the wire projection serializes it, a joiner's
-    // decoder writes its targets back.
-    WeatherState weather;
-    EffectLog effects;
-    CachedFrameState cached;
-    LocalSink local_sink;
-    INetCommandSink *net = &local_sink;
-    EntityCommands commands;
-    AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
-                               // this world, so the AI-change command family can reach brains.
-    // Game_StartMission seeds the one process-global PRNG_Next16 stream after
-    // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
-    // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
-    // Game_StartMission @ 0x524360]. AI recoil/engagement, throwable bounce
-    // spin, and server control challenges all consume this owner in their
-    // actual call order.
-    static constexpr uint32_t kMissionPrng16Seed = 0x1A10101Au;
-    uint32_t prng16_state = kMissionPrng16Seed;
-    uint16_t next_prng16() noexcept;
-    // The simulation's owner of the CRT rand() recurrence retail draws from
-    // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
-    // @0x51718A, ...). Retail seeds the process stream from the clock once at
-    // host start and never at mission start; the host seeds this owner from
-    // its session seed in create_session, so a session's draw sequence is
-    // reproducible where retail's is not (D-NET-115). Snapshotted with
-    // prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
-    io::CrtRand crt_rand;
-    CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
-                                         // the host owns the mission CollisionWorld.
-    IMountedPoseProvider *mounted_pose_provider = nullptr; // non-owning live seat-bone seam;
-                                                           // null/false keeps static geometry.
-    IMuzzlePoseProvider *muzzle_pose_provider = nullptr; // non-owning authored muzzle seam;
-                                                         // null/false keeps stamp fallback.
-
-    // Session + game-option state the BMS Teammate trigger family reads. Hosts
-    // stamp these at bring-up; the SP defaults hold otherwise.
-    // [orig: g_napi_np_ctx.is_in_session gate @0x453b53; option dword_24D1E34
-    // bit 0x20 = teammates disabled @0x453b67 — the same gate that suppresses
-    // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
-    bool mp_session = false;
-    bool teammates_disabled = false;
-    // The per-tick authority role consulted by World&-only callbacks. The
-    // suspension role pick and both post-death blast writers read the same
-    // g_napi_np_ctx.is_authority bit in retail
-    // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
-    // run_logic_tick stamps it once so every callback sees the tick's role.
-    bool logic_authority = true;
-    // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
-    // authoritative multiplayer FatBullets trace owned by a remote player.
-    // These explicit host-fed gates keep that option out of ordinary/SP rays.
-    bool projectile_authority = true;
-    bool fat_bullets = false;
-    bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
-    // Multiplayer blast damage to Building ItemDefs is disabled unless the
-    // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
-    // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
-    // @0x4E682E..0x4E6860]
-    bool destroy_buildings = false;
-    // An embedder may own the local player's borrowed UseGun slot so
-    // it can supply trigger/reload/scope input and drain presentation events.
-    // Standalone World users keep the default global mounted-slot pump.
-    bool external_local_mounted_weapon_pump = false;
     // Sticky trigger-relation state (BMS cats 1/2): matrices + group alert/
     // count records + waypoint has-visited. Cleared per mission load by the
     // BMS system's on_load [orig: EventSystem_FreeAll @ 0x453210].
     TriggerRelations relations;
-    // 62-tick live-recount divider [orig: the Server_TickUpdate timer word,
-    // reload 0x3E @ 0x51db93]. Public like the other tick state; hosts never
-    // touch it.
-    int group_recount_timer_ = 0;
+    SubgoalState subgoals;
+    // The player waypoint track (built by mission promotion from the blue-route
+    // nav channel; empty when the mission authors none). Advanced per logic tick
+    // from the local player's position; the BMS event system completes linked
+    // entries and ShowWaypoints toggles `show`. See waypoint_track.h for the
+    // original anchors. (docs/interface/hud-re.md §Waypoint HUD)
+    WaypointTrack waypoints;
     // Active teammate heli-lift operations [orig: dword_AC4F40, slots @0xAC4F48,
     // incremented by HeliLift_SpawnPickup @0x45263a]. The heli-lift subsystem is
     // not ported yet; this counter is its seam so TeammateMedicAssisting /
     // TeammateEvacuating evaluate faithfully once it lands (0 = none active).
     int32_t heli_lift_active_count = 0;
+};
 
+// The Player items.def template, cached for host/late-join entities allocated
+// after the mission-wide trait sweep.
+struct PlayerTemplate {
     // Cached Player ItemDef presence and traits. The default true covers native harnesses that
     // seed the built-in Player directly; resolve_item_traits overwrites it with the database's
     // actual presence so a malformed/missing Player definition is not invented for late spawns.
     // [orig: Entity_InitFromItemDef @0x49e550; D-NET-144]
-    bool player_has_item_def = true;
-    int32_t player_item_hp = 0;
+    bool has_item_def = true;
+    int32_t item_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join
     // entities allocated after the mission-wide trait sweep.
-    uint8_t player_item_type = 3;
-    uint32_t player_item_attrib = 0;
-    int32_t player_armor_impact = 0;
-    int32_t player_armor_kz = 0;
-    float player_damage_reduc_pp = 0.0f;
-    float player_damage_reduc_max = 0.0f;
+    uint8_t item_type = 3;
+    uint32_t item_attrib = 0;
+    int32_t armor_impact = 0;
+    int32_t armor_kz = 0;
+    float damage_reduc_pp = 0.0f;
+    float damage_reduc_max = 0.0f;
     // The Player template's radarsig/heatsig — the AI acquisition engage caps a
     // late-joiner spawn seeds (same cache family as the hp above; the sweep
     // stamps live entities directly) [orig: Entity_InitFromModel @0x40e136].
-    int32_t player_radar_sig = 0;
-    int32_t player_heat_sig = 0;
+    int32_t radar_sig = 0;
+    int32_t heat_sig = 0;
+};
 
+// The per-mission tables the embedder feeds once (the def files, the terrain
+// samplers, the Player template) and the mission header facts.
+struct MissionTables {
     // The weapon.def armory table (empty until the host feeds it — Simulation::
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
-
-    // Scoring awards for this session's game type (score.ini row). Populated by the
-    // host from the parsed config; zero/!valid until then, which makes every award
-    // a no-op rather than a guess.
-    ScoreRules score_rules;
-
-    // Rows the sim destroyed this tick that the net layer must announce with
-    // S2C 0x12 [orig: Server_RemoveEntityAndNotify @0x50A270 writes the handle,
-    // send_mask 0x90 (alive + not-host), msgClass 1, then destroys the row]. The
-    // world cannot send, so it records the packed handle here and the server tick
-    // drains it. Cleared by the drain; a client-side World never fills it.
-    std::vector<uint16_t> entity_removals;
-
-    // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
-    // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
-    // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
-    RoundRing rounds;
-    // Water-surface crossings recorded this tick; the host fan drains them
-    // into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
-    WaterCrossQueue water_crossings;
-
     // The ammo.def ballistics/damage table (empty until the host feeds it —
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
     AmmoTable ammo;
-
-    // The live authoritative rounds — spawned synchronously by the accepted C2S 0x06
-    // (the same fire that appends `rounds`), stepped inside run_logic_tick, deaths
-    // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
-    // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
-    RoundSim round_sim;
-
-    // The explosion queue + AoE damage, the death-piece pool, the per-item death
-    // traits, and the destruction presentation events (world/destruction.h;
-    // world-wac-ai-re §24). Explosions queued this tick drain inside
-    // run_logic_tick right after the round sim [orig: Projectile_ProcessExplosionQueue
-    // @0x4ead80 runs once per frame after the projectile update]; the host drains
-    // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
-    ExplosionSim explosions;
-
-    // Placed throwable devices + class bindings (world-wac-ai-re §27).
-    ThrowableSim throwables;
-    DeathPieceSim death_pieces;
-    DestructionRng destruction_rng;
+    // Scoring awards for this session's game type (score.ini row). Populated by the
+    // host from the parsed config; zero/!valid until then, which makes every award
+    // a no-op rather than a guess.
+    ScoreRules score_rules;
+    // items.def display names per item type (the def row's `name`), filled by
+    // the item-traits sweep once per distinct id so the inspection records can
+    // name an entity by its item, not only by its BMS label. Tooling only.
+    ItemNameTable item_names;
+    // items.def sound profiles per ORGANIC item type — the wire body channel's
+    // equivalent of AiProfile.sound_profile (audio/sound_profile.h).
+    audio::OrganicSoundProfileTable organic_sound_profiles;
+    // The mission's SndProf.def profile table (parsed once at load; empty on a
+    // headless test world unless a test seeds it) and the per-tick slot-sound
+    // emissions the host present layer drains into positional one-shots.
+    // [orig: SoundProfile_LoadAll @ 0x527490; the infantry consumers
+    // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
+    audio::SoundProfileTable sound_profiles;
+    CharacterTraitsTable character_traits;
+    // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
+    // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
+    // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
+    // dword at row offset 40. The embedder stamps it from its parsed table
+    // (inmatch::charattr_class_attribute_rows over the boot-soft charattr table,
+    // re-stamped after every S2C 0x41 clear); zero rows carry no attribute,
+    // which is retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
+    //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
+    //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
+    std::array<uint32_t, 16> class_attribute_flags{};
+    static constexpr uint32_t kCharAttrMedic = 0x8u;
+    bool class_has_attribute(uint8_t player_class, uint32_t bit) const {
+        const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
+        return (class_attribute_flags[row] & bit) != 0;
+    }
+    // The per-item death traits the item-traits sweep feeds (world/destruction.h).
     ItemDeathTraitsTable item_death_traits;
-    DestructionEvents destruction;
-    // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
-    // terrain ring, written by the round stop and cleared on death. Presentation
-    // state — the shell compiles it into quads each frame; it is NOT part of the
-    // snapshot (retail's caches live beside the renderer, not the entity pools).
-    ScarCache scars;
-    // Permanent ground scorch insertions share retail's CRT rand stream with
-    // animated material noise and keep their 4096-row lifetime across drains.
-    TerrainScorchEvents terrain_scorches;
-
-    // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
-    // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
-    Match match;
-    MissionKillStats kill_stats;
-
-    // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
-    // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
-    // tracked D-AI-1 residual; defaults clear (SP).
-    bool ai_rules_skip_local_player = false;
-
+    // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
+    // shares the same field through AiSystem). Null = no terrain impacts.
+    const terrain::TerrainHeightField *terrain = nullptr;
+    // Host-wired charmap (surface-type) sampler data for the infantry footstep
+    // surface pick (surface 3 = the snow slots) and the ammo impact table
+    // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
+    // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
+    terrain::SurfaceTypeMap surface_map;
+    PlayerTemplate player;
     // The mission header's attribute flags, stamped by the host at mission load
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
     // SP auto-lose win-condition leg and by the infantry death scream's night
@@ -548,111 +456,207 @@ public:
     bool map_grid_origin_present = false;
     int32_t map_grid_origin_x = 0;
     int32_t map_grid_origin_y = 0;
+};
 
-    // The Advance & Secure zone-slot chain (empty until the host builds it after the
-    // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds
-    // the 0x0F owned-zone mask, the 0x0E deploy gates, and the 0x1E frontier hint.
-    // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
-    // from Game_StartMission; net-re §5.61]
-    ZoneChain zone_chain;
-    // The capture request/active transaction is mission state, not host-wire
-    // scratch. Keeping it beside the chain prevents a second lifecycle or a
-    // static server singleton. [orig: CaptureCtx_Reset @0x53BD00]
-    ZoneCaptureState zone_capture_state;
-    // Mission-built deploy wave groups. Keeping them beside spawn selection
-    // gives immediate picks and timed releases one lifecycle and no host-only
-    // shadow table. [orig: SpawnWaveList_BuildFromMission @0x52A920]
-    SpawnWaveList spawn_waves;
-    // One mission-global round-robin shared by default spawn selection and a
-    // picked numbered zone's type-6007 scatter choices.
-    // [orig: g_spawn_cycle_counter @0x24C10D0;
-    // Server_PositionPlayerForSpawn @0x50CF60]
-    uint32_t spawn_cycle_counter = 0;
+// The session/game-option bits the host stamps at bring-up; the SP defaults
+// hold otherwise.
+struct SessionRules {
+    // Session + game-option state the BMS Teammate trigger family reads. Hosts
+    // stamp these at bring-up; the SP defaults hold otherwise.
+    // [orig: g_napi_np_ctx.is_in_session gate @0x453b53; option dword_24D1E34
+    // bit 0x20 = teammates disabled @0x453b67 — the same gate that suppresses
+    // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
+    bool mp_session = false;
+    bool teammates_disabled = false;
+    // The per-tick authority role consulted by World&-only callbacks. The
+    // suspension role pick and both post-death blast writers read the same
+    // g_napi_np_ctx.is_authority bit in retail
+    // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
+    // run_logic_tick stamps it once so every callback sees the tick's role.
+    bool logic_authority = true;
+    bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+    // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
+    // authoritative multiplayer FatBullets trace owned by a remote player.
+    // These explicit host-fed gates keep that option out of ordinary/SP rays.
+    bool projectile_authority = true;
+    bool fat_bullets = false;
+    bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
+    // Multiplayer blast damage to Building ItemDefs is disabled unless the
+    // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
+    // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
+    // @0x4E682E..0x4E6860]
+    bool destroy_buildings = false;
+    // An embedder may own the local player's borrowed UseGun slot so
+    // it can supply trigger/reload/scope input and drain presentation events.
+    // Standalone World users keep the default global mounted-slot pump.
+    bool external_local_mounted_weapon_pump = false;
+    // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
+    // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
+    // tracked D-AI-1 residual; defaults clear (SP).
+    bool ai_rules_skip_local_player = false;
+    // The retail is_in_session fact: a net session (listen or dedicated) has
+    // been brought up over this world's kernel. The net bring-ups set it; the
+    // bare no-net kernel keeps false. Gates the UseGun null-slot rejection
+    // [orig: Entity_AttachToUseGunSlot @0x546c07].
+    bool session_open = false;
+};
 
-    // The player waypoint track (built by mission promotion from the blue-route
-    // nav channel; empty when the mission authors none). Advanced per logic tick
-    // from the local player's position; the BMS event system completes linked
-    // entries and ShowWaypoints toggles `show`. See waypoint_track.h for the
-    // original anchors. (docs/interface/hud-re.md §Waypoint HUD)
-    WaypointTrack waypoints;
-
-    // The mission-objectives (subgoal) state the SP objectives panel reads:
-    // per-slot bit masks written by the SubGoal/ShowSubgoal actions — the bit is
-    // the RAW 1-based slot (bits 1..8) — plus the mission header's per-slot
-    // WinConditions/LoseConditions text-id tables (index 1..8; 0/255 terminate
-    // the panel's row walk). [orig: won @0xAC86F4 / lost @0xAC86F0 (readers
-    // EventSystem_GetEntityCounts @0x452e10), show-win @0xAC86EC / show-lose
-    // @0xAC86E8 (EventSystem_GetTeamCounts @0x452e30); the id tables
-    // byte_A7628B/byte_A76293 = the BMS header win_conditions/lose_conditions;
-    // panel HUD_DrawWinConditions @0x5ba940]
-    struct SubgoalState {
-        uint32_t won = 0;
-        uint32_t lost = 0;
-        uint32_t show_win = 0;
-        uint32_t show_lose = 0;
-        uint8_t win_text_ids[9] = {};
-        uint8_t lose_text_ids[9] = {};
-    };
-    SubgoalState subgoals;
-
-    // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
-    // it — Simulation::resolve_item_traits). The AI tick's vehicle pass runs the
-    // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
-    // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
-    // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
-    VehicleTraitsTable vehicle_traits;
-    // items.def display names per item type (the def row's `name`), filled by
-    // the item-traits sweep once per distinct id so the inspection records can
-    // name an entity by its item, not only by its BMS label. Tooling only.
-    ItemNameTable item_names;
-    // items.def sound profiles per ORGANIC item type — the wire body channel's
-    // equivalent of AiProfile.sound_profile (audio/sound_profile.h).
-    audio::OrganicSoundProfileTable organic_sound_profiles;
-
-    // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
-    // shares the same field through AiSystem). Null = no terrain impacts.
-    const terrain::TerrainHeightField *terrain = nullptr;
-
-    // Host-wired charmap (surface-type) sampler data for the infantry footstep
-    // surface pick (surface 3 = the snow slots) and the ammo impact table
-    // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
-    // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
-    terrain::SurfaceTypeMap surface_map;
-
-    // The mission's SndProf.def profile table (parsed once at load; empty on a
-    // headless test world unless a test seeds it) and the per-tick slot-sound
-    // emissions the host present layer drains into positional one-shots.
-    // [orig: SoundProfile_LoadAll @ 0x527490; the infantry consumers
-    // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
-    audio::SoundProfileTable sound_profiles;
-    CharacterTraitsTable character_traits;
-    // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
-    // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
-    // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
-    // dword at row offset 40. The embedder stamps it from its parsed table
-    // (np::charattr_class_attribute_rows over the boot-soft charattr table,
-    // re-stamped after every S2C 0x41 clear); zero rows carry no attribute,
-    // which is retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
-    //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
-    //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
-    std::array<uint32_t, 16> class_attribute_flags{};
-    static constexpr uint32_t kCharAttrMedic = 0x8u;
-    bool class_has_attribute(uint8_t player_class, uint32_t bit) const {
-        const size_t row = static_cast<size_t>((player_class - 1) & 0xF);
-        return (class_attribute_flags[row] & bit) != 0;
-    }
+// What the sim produced this tick for someone else to drain: the wire (entity
+// removals, the round ring, water crossings) and the presentation (effects,
+// destruction, scars, scorches, the sound queues). Nothing in the sim reads
+// an outbox back; the drains clear them.
+struct WorldOutbox {
+    // Rows the sim destroyed this tick that the net layer must announce with
+    // S2C 0x12 [orig: Server_RemoveEntityAndNotify @0x50A270 writes the handle,
+    // send_mask 0x90 (alive + not-host), msgClass 1, then destroys the row]. The
+    // world cannot send, so it records the packed handle here and the server tick
+    // drains it. Cleared by the drain; a client-side World never fills it.
+    std::vector<uint16_t> entity_removals;
+    // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
+    // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
+    // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
+    RoundRing rounds;
+    // Water-surface crossings recorded this tick; the host fan drains them
+    // into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
+    WaterCrossQueue water_crossings;
+    // The destruction presentation events (world/destruction.h) the host drains.
+    DestructionEvents destruction;
+    // The WAC/BMS/sim effect log the presentation drains ("text", "dialog", the
+    // WAC fx command names, ...).
+    EffectLog effects;
+    // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
+    // terrain ring, written by the round stop and cleared on death. Presentation
+    // state — the shell compiles it into quads each frame; it is NOT part of the
+    // snapshot (retail's caches live beside the renderer, not the entity pools).
+    ScarCache scars;
+    // Permanent ground scorch insertions share retail's CRT rand stream with
+    // animated material noise and keep their 4096-row lifetime across drains.
+    TerrainScorchEvents terrain_scorches;
+    // The per-tick slot-sound emissions and the sound-emitter mailbox the host
+    // present layer drains into positional one-shots.
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
     // The weather tick's thunder one-shots (weather_state.h carries the
     // cites); the presentation owner drains them per frame.
     std::vector<WeatherSoundEvent> weather_sounds;
-
     // The fire-sound propagation-delay queue on the logic clock, seeded inline
     // at round spawn and counted down at the head of run_logic_tick; the
     // presenting host stamps the listener and drains the ready one-shots
     // (world/fire_sound.h witness map). [orig: the pending-sound slots
     // @0x24DF678, Sound_TickPendingSlots @0x529310]
     FireSoundQueue fire_sounds;
+};
+
+class World {
+public:
+    World();
+    // World has stable identity: commands binds this object and registered
+    // systems retain mission-lifetime relationships. Memberwise copy/move
+    // would preserve pointers/references into the source World and create a
+    // split simulation.
+    World(const World &) = delete;
+    World &operator=(const World &) = delete;
+    World(World &&) = delete;
+    World &operator=(World &&) = delete;
+
+    EntityRegistry registry;
+    EnvState env;
+    // The retail weather globals, ONE home (weather_state.h): the WAC weather
+    // handlers write it through EntityCommands, the weather tick advances it
+    // after the logic tick, the wire projection serializes it, a joiner's
+    // decoder writes its targets back.
+    WeatherState weather;
+    CachedFrameState cached;
+    EntityCommands commands;
+    // The AI/motor system: every brain plus the infantry and vehicle motors.
+    // Owned here so the command layer, the sims, the wire and the tools reach
+    // brains without a seam; the kernel registers it as the third ISystem
+    // (WAC -> BMS -> AI) and wires its collision/terrain/root-motion links.
+    AiSystem ai;
+    // The lifetime groups (declared above): what the script owns, what the
+    // embedder feeds once, what the host stamps, what the drains consume.
+    ScriptState script;
+    MissionTables tables;
+    SessionRules rules;
+    WorldOutbox out;
+    // The two systems that own their state and their verbs (vehicle_system.h,
+    // zone_system.h); the AI tick runs the vehicle motors, the host tick the
+    // zone capture transaction.
+    VehicleSystem vehicles;
+    ZoneSystem zones;
+    // Game_StartMission seeds the one process-global PRNG_Next16 stream after
+    // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
+    // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
+    // Game_StartMission @ 0x524360]. AI recoil/engagement, throwable bounce
+    // spin, and server control challenges all consume this owner in their
+    // actual call order.
+    static constexpr uint32_t kMissionPrng16Seed = 0x1A10101Au;
+    uint32_t prng16_state = kMissionPrng16Seed;
+    uint16_t next_prng16() noexcept;
+    static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
+    uint32_t prng16_b_state = kMissionPrng16BSeed;
+    uint16_t next_prng16_b() noexcept;
+    // The simulation's owner of the CRT rand() recurrence retail draws from
+    // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
+    // @0x51718A, ...). Retail seeds the process stream from the clock once at
+    // host start and never at mission start; the host seeds this owner from
+    // its session seed in create_session, so a session's draw sequence is
+    // reproducible where retail's is not (D-NET-115). Snapshotted with
+    // prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
+    io::CrtRand crt_rand;
+    CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
+                                         // the host owns the mission CollisionWorld.
+    // The one tick-profile collector (ADR 0043 d5): non-owning, the kernel's.
+    // Null or inactive costs every span one branch; the embedder drains it.
+    devtools::TickProfile *profile = nullptr;
+    IPoseProvider *pose_provider = nullptr; // non-owning: the embedder's live seat-bone, muzzle
+                                            // and userpoint seam; null/false keeps static geometry.
+
+    // 62-tick live-recount divider [orig: the Server_TickUpdate timer word,
+    // reload 0x3E @ 0x51db93]. Public like the other tick state; hosts never
+    // touch it.
+    int group_recount_timer_ = 0;
+
+
+
+
+
+
+
+    // The live authoritative rounds — spawned synchronously by the accepted C2S 0x06
+    // (the same fire that appends `rounds`), stepped inside run_logic_tick, deaths
+    // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
+    // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
+    RoundSim round_sim;
+
+    // The explosion queue + AoE damage, the death-piece pool, the per-item death
+    // traits, and the destruction presentation events (world/destruction.h;
+    // world-wac-ai-re §24). Explosions queued this tick drain inside
+    // run_logic_tick right after the round sim [orig: Projectile_ProcessExplosionQueue
+    // @0x4ead80 runs once per frame after the projectile update]; the host drains
+    // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
+    ExplosionSim explosions;
+
+    // Placed throwable devices + class bindings (world-wac-ai-re §27).
+    ThrowableSim throwables;
+    MinefieldSystem minefields;
+    DeathPieceSim death_pieces;
+    DestructionRng destruction_rng;
+
+    // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
+    // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
+    Match match;
+    MissionKillStats kill_stats;
+
+
+
+
+
+
+
+
+
+
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
@@ -700,8 +704,7 @@ public:
     // pre-mission seam so no caller can mistake a pre-round freeze for a script
     // initialization pass.
     void run_logic_tick(bool is_authority = true,
-                        TickPhase phase = TickPhase::Gameplay,
-                        LogicTickPerf *perf = nullptr);
+                        TickPhase phase = TickPhase::Gameplay);
 
     // End the round: the double-run latch, the winning team, and the SP presentation
     // tail surfaced as the "round_end" host effect. Callers are the witnessed
@@ -721,7 +724,7 @@ public:
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the
-    // registry + vars + named WAC values + env + clock + match + stable
+    // registry + script vars + named WAC values + env + clock + match + stable
     // local-player ownership; per-tick health/proximity/human-count caches reset
     // and systems re-init on restore.
     struct Snapshot {
@@ -737,6 +740,8 @@ public:
         uint32_t logic_tick = 0;
         uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
+        uint32_t prng16_b_state = kMissionPrng16BSeed;
+        bool cease_fire = false;
         uint32_t crt_rand_state = 1;
         EntityHandle local_player;
     };
@@ -762,5 +767,3 @@ void count_mission_units(World &world);
 int32_t count_defined_subgoals(const World &world);
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_WORLD_H

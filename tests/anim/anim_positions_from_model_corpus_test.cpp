@@ -37,6 +37,10 @@
 #include <vector>
 #include "common/retail_paths.h"
 
+using namespace opennova::adm;
+using namespace opennova::bad;
+using namespace opennova::threedi;
+
 namespace fs = std::filesystem;
 using opennova::anim::Vec3;
 

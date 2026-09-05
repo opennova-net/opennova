@@ -55,18 +55,18 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var container := Node3D.new()
 	container.name = "DialogVsAmbientProbe"
 	ctx.tree.root.add_child(container)
-	var audio := MissionAudio.new(root, item_db)
+	var audio := MissionAudio.create(root, item_db)
 	ctx.defer_restore(func() -> void:
 		audio.teardown()
 		if is_instance_valid(container):
 			container.queue_free())
 	if not ambient:
-		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still
-		# load, zero ambient candidates resolve: the "ambient disabled" arm.
-		audio.set_resolution_strategy(MissionAudio.STRATEGY_TARGET_ID)
+		# Banks + .DBF still load, zero ambient candidates resolve: the
+		# "ambient disabled" arm.
+		audio.set_ambient_markers_enabled(false)
 	var stats := audio.setup(mission, mission_name, container)
-	ctx.log("setup: %s" % str(stats.to_dict()))
-	data["setup"] = stats.to_dict()
+	ctx.log("setup: %s" % str(stats.to_json_value()))
+	data["setup"] = stats.to_json_value()
 
 	# The listener parks at the player start when the sim arm resolved one
 	# (the play-test position), else at the origin. A current Camera3D is the
@@ -164,12 +164,11 @@ func _sim_arm(mission: MissionData, sim_ticks: int, data: Dictionary) -> Vector3
 		for t in range(sim_ticks):
 			sim.step()
 			for e in sim.drain_effects():
-				var effect: Dictionary = e
-				var k := String(effect.get("kind", ""))
+				var effect: MissionEffect = e
+				var k := effect.kind
 				kinds[k] = int(kinds.get(k, 0)) + 1
 				if k == "dialog" or k == "dialog_wav":
-					dialog_ticks.append("%s@t%d a=%d str=%s" % [k, t, int(effect.get("a", 0)),
-							String(effect.get("str", ""))])
+					dialog_ticks.append("%s@t%d a=%d str=%s" % [k, t, effect.a, effect.text])
 		_ctx.log("sim %d ticks, effect kinds: %s" % [sim_ticks, str(kinds)])
 		for d in dialog_ticks.slice(0, DIALOG_TICK_LOG_CAP):
 			_ctx.log("  %s" % d)
@@ -178,7 +177,6 @@ func _sim_arm(mission: MissionData, sim_ticks: int, data: Dictionary) -> Vector3
 	else:
 		_ctx.log("sim load FAILED")
 		data["sim_load_failed"] = true
-	sim.free()
 	return player_pos
 
 

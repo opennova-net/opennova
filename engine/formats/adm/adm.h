@@ -1,14 +1,11 @@
 // ADM animation-definition parser. Runtime reads only.
-#ifndef ADM_H
-#define ADM_H
+#pragma once
 
 #include <stddef.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::adm {
 
-#define ADM_MAX_VARIANTS 8
+inline constexpr int ADM_MAX_VARIANTS = 8;
 
 typedef struct AdmEntry {
     char key[64];
@@ -26,8 +23,4 @@ int adm_parse(const char *path, AdmFile *out);
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out);
 void adm_free(AdmFile *af);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // ADM_H
+} // namespace opennova::adm

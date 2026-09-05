@@ -1171,7 +1171,7 @@ public:
 				quad.roll = particle.rotation;
 				quad.yaw = particle.yaw;
 				quad.pitch = particle.pitch;
-				quad.camera_pull = definition.z_offset;
+				quad.camera_pull = source_emitter.camera_pull;
 				quad.primary_color = pack_argb(red, green, blue, alpha);
 				quad.alignment = (definition.flags &
 						opennova::particle::particle_flag::YawAndPitch) != 0 ?
@@ -1891,6 +1891,20 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 		}
 	}
 	return result;
+}
+
+void ParticleRenderer::collect_debug_emitter_bounds(
+		std::vector<opennova::renderer::ParticleEmitterDrawBounds> &r_out) const {
+	r_out.clear();
+	if (!impl_)
+		return;
+	for (const ParticleDrawSlot slot : {
+			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+		if (!impl_->slot_present[slot])
+			continue;
+		const auto &bounds = impl_->compilers[slot].draw_list().emitter_bounds;
+		r_out.insert(r_out.end(), bounds.begin(), bounds.end());
+	}
 }
 
 PackedStringArray ParticleRenderer::get_unresolved_texture_names() const {

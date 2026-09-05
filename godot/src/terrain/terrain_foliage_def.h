@@ -46,7 +46,6 @@ public:
 
 	bool get_force_on() const;
 
-	Dictionary to_dictionary() const;
 
 	void copy_from_native(const opennova::FoliageDef &def);
 	opennova::FoliageDef to_native() const;

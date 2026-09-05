@@ -221,26 +221,6 @@ void add_trigger_area_reference(const MissionTriggerRecord &trigger,
 	}
 }
 
-std::vector<bms::Entity> *entities_for(bms::File &file, EntityKind kind) {
-	switch (kind) {
-		case EntityKind::Marker: return &file.markers;
-		case EntityKind::Item: return &file.items;
-		case EntityKind::Building: return &file.buildings;
-		case EntityKind::Organic: return &file.organics;
-	}
-	return nullptr;
-}
-
-const std::vector<bms::Entity> *entities_for(const bms::File &file, EntityKind kind) {
-	switch (kind) {
-		case EntityKind::Marker: return &file.markers;
-		case EntityKind::Item: return &file.items;
-		case EntityKind::Building: return &file.buildings;
-		case EntityKind::Organic: return &file.organics;
-	}
-	return nullptr;
-}
-
 int next_entity_id(const bms::File &file) {
 	int max_id = 0;
 	auto scan = [&max_id](const std::vector<bms::Entity> &entities) {
@@ -255,39 +235,6 @@ int next_entity_id(const bms::File &file) {
 	return max_id + 1;
 }
 
-EntityRecord to_record(const bms::Entity &entity, EntityKind kind, size_t index) {
-	EntityRecord out;
-	out.kind = kind;
-	out.index = index;
-	out.item_id = bms_type_id_to_item_id(entity.type_id);
-	out.bms_type_id = entity.type_id;
-	out.bms_id = entity.id;
-	out.transform.x = entity.get_x();
-	out.transform.y = entity.get_y();
-	out.transform.z = entity.get_z();
-	out.transform.pitch = entity.pitch;
-	out.transform.yaw = entity.yaw;
-	out.transform.roll = entity.roll;
-	out.group_id = entity.group_id;
-	out.waypoint_id = entity.waypoint_id;
-	out.wp_number = entity.wp_number;
-	out.team = entity.team;
-	out.ai_flags = static_cast<int>(entity.bmsi_attributes);
-	out.perception = entity.perception2;
-	out.accuracy = entity.w_accuracy1;
-	out.alert_state = entity.alert_state;
-	out.min_engagement_distance = entity.min_engagement_distance;
-	out.max_engagement_distance = entity.max_engagement_distance;
-	out.max_attack_distance = entity.max_attack_distance;
-	out.spawn_count = entity.spawns;
-	out.max_simultaneous = entity.no_more_than;
-	out.no_less_than = entity.no_less_than;
-	out.map_symbol = entity.map_symbol;
-	out.name1 = fixed_string(entity.name1, sizeof(entity.name1));
-	out.name2 = fixed_string(entity.name2, sizeof(entity.name2));
-	return out;
-}
-
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 	entity.set_x(transform.x);
 	entity.set_y(transform.y);
@@ -296,58 +243,6 @@ void apply_transform(bms::Entity &entity, const EntityTransform &transform) {
 	entity.yaw = static_cast<int16_t>(transform.yaw);
 	entity.roll = static_cast<int16_t>(transform.roll);
 }
-
-void apply_properties(bms::Entity &entity, const EntityProperties &properties) {
-	// The uint8-backed fields clamp (rather than a bare static_cast) so an out-of-range value from a
-	// programmatic caller saturates instead of silently wrapping (e.g. map_symbol 300 -> 44). The
-	// inspector SpinBoxes already cap these, but set_entity_properties is a public API boundary.
-	entity.group_id = static_cast<uint8_t>(std::clamp(properties.group_id, 0, 255));
-	entity.waypoint_id = static_cast<uint8_t>(std::clamp(properties.waypoint_id, 0, 255));
-	entity.wp_number = properties.wp_number;
-	entity.team = static_cast<uint8_t>(std::clamp(properties.team, 0, 255));
-	entity.bmsi_attributes = static_cast<uint32_t>(properties.ai_flags);
-	entity.perception2 = properties.perception;
-	entity.w_accuracy1 = static_cast<int16_t>(properties.accuracy);
-	entity.alert_state = static_cast<uint8_t>(std::clamp(properties.alert_state, 0, 255));
-	entity.min_engagement_distance = properties.min_engagement_distance;
-	entity.max_engagement_distance = properties.max_engagement_distance;
-	entity.max_attack_distance = properties.max_attack_distance;
-	entity.spawns = static_cast<int16_t>(properties.spawn_count);
-	entity.no_more_than = static_cast<uint8_t>(std::clamp(properties.max_simultaneous, 0, 255));
-	entity.no_less_than = static_cast<uint8_t>(std::clamp(properties.no_less_than, 0, 255));
-	entity.map_symbol = static_cast<uint8_t>(std::clamp(properties.map_symbol, 0, 255));
-	// name1/name2 are fixed 8-byte slots a mission can fill completely; copy_fixed_field keeps all
-	// 8 bytes (copy_cstr would force a NUL into byte 7 and truncate an 8-char name on every edit).
-	copy_fixed_field(entity.name1, sizeof(entity.name1), properties.name1);
-	copy_fixed_field(entity.name2, sizeof(entity.name2), properties.name2);
-}
-
-// Build the editable property set from a record. set_entity_properties overwrites every field, so a
-// single-property edit must seed the full set from the current record first. One copy helper shared
-// by set_entity_property_int / _string keeps the field list in one place.
-EntityProperties properties_from_record(const EntityRecord &record) {
-	EntityProperties properties;
-	properties.group_id = record.group_id;
-	properties.waypoint_id = record.waypoint_id;
-	properties.wp_number = record.wp_number;
-	properties.team = record.team;
-	properties.ai_flags = record.ai_flags;
-	properties.perception = record.perception;
-	properties.accuracy = record.accuracy;
-	properties.alert_state = record.alert_state;
-	properties.min_engagement_distance = record.min_engagement_distance;
-	properties.max_engagement_distance = record.max_engagement_distance;
-	properties.max_attack_distance = record.max_attack_distance;
-	properties.spawn_count = record.spawn_count;
-	properties.max_simultaneous = record.max_simultaneous;
-	properties.no_less_than = record.no_less_than;
-	properties.map_symbol = record.map_symbol;
-	properties.name1 = record.name1;
-	properties.name2 = record.name2;
-	return properties;
-}
-
-
 
 bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,

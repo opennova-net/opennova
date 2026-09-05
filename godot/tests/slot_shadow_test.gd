@@ -480,6 +480,34 @@ func test_bound_slot_publishes_its_patch_and_depth_clip() -> void:
 	shadow.advance_frame()
 
 
+## The maintained caster registry caches per-caster facts (radii, the person
+## flag, the decal); every mutation site bumps the registry revision, so a
+## fact changed AFTER a planned frame must land on the very next frame — the
+## stale-cache guard for the registry rework.
+func test_cached_caster_facts_refresh_on_their_setters() -> void:
+	var environment := _environment()
+	_camera()
+	var shadow := _fresh_shadow(environment)
+	var caster := _caster_at(4.0)
+	caster.set_shadow_bound_radii(2.0, 2.0625)
+	shadow.advance_frame()
+	var drape := SlotShadow.get_drape_material()
+	var patch_before: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	var clip_v_before: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
+	# A radius stamped after the plan (the husk-swap shape) resizes the patch
+	# and re-derives the clip rows on the very next frame.
+	caster.set_shadow_bound_radii(4.0, 9.0)
+	shadow.advance_frame()
+	var patch_after: Vector4 = drape.get_shader_parameter("u_slot_patch")[0]
+	assert_gt(patch_after.z - patch_after.x, patch_before.z - patch_before.x,
+			"a bigger entity bound stamped after a plan grows the next patch")
+	var clip_v_after: Vector4 = drape.get_shader_parameter("u_slot_clip_v")[0]
+	assert_ne(clip_v_after, clip_v_before,
+			"the bigger capture sphere re-derives the clip rows next frame")
+	caster.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_terrain_material_chains_the_shared_drape_passes() -> void:
 	var drape: ShaderMaterial = SlotShadow.get_drape_material()
 	assert_not_null(drape, "the shared drape material exists")

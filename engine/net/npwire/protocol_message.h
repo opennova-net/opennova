@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <base/io/tick_rate.h>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -250,8 +251,6 @@ struct QueuedSessionPacket {
 // per tick (~16.13 ms), 1e9/62 ns pump periods, the send-holdoff dividers
 // (net-re §5.47a). Docs sometimes quote the nominal 62.5 Hz; the integer the
 // original arithmetic uses at every witnessed site is 62.
-constexpr int64_t JO_ENGINE_TICK_RATE = 62;
-
 constexpr size_t SESSION_PACKET_QUEUE_MAX = 100;
 
 struct SessionSequencing {

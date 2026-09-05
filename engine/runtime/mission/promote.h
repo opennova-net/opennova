@@ -12,8 +12,7 @@
 // spawn-transform copy). The nav table mirrors the waypoint populator XML_ParseGroupAction
 // @0x4cc450 (34-dword channel records over pool-3 marker nodes). See
 // notes/world/ai_movement.md §4 / §10 for the RE map + the tracked deviations below.
-#ifndef OPENNOVA_MISSION_PROMOTE_H
-#define OPENNOVA_MISSION_PROMOTE_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +30,6 @@
 #include <utility>
 
 namespace opennova::world {
-class AiSystem;
 class World;
 } // namespace opennova::world
 
@@ -176,10 +174,11 @@ struct PromoteResult {
 };
 
 // Promote a parsed mission into a live world. Populates `world.registry` (entity pools),
-// `ai.nav` (the waypoint channel/node table), and `ai` entities (one AI brain per organic).
-// Does NOT register `ai` as a World system or tick it — the caller wires + drives the sim.
+// `world.ai.nav` (the waypoint channel/node table), and the `world.ai` brains (one per
+// organic). Does NOT register the AI as a World system or tick it — the caller wires +
+// drives the sim.
 PromoteResult promote_mission(const bms::File &mission, world::World &world,
-                              world::AiSystem &ai, const PromoteOptions &opts = {});
+                              const PromoteOptions &opts = {});
 
 // The mission's loadout/availability chunks -> plain world rows, with retail's
 // own atol truncation semantics on the string tuples (a non-numeric prefix
@@ -193,5 +192,3 @@ void stash_mission_loadout_rules(
         std::vector<world::WeaponKitEntry> &r_kit_rows);
 
 } // namespace opennova::mission
-
-#endif // OPENNOVA_MISSION_PROMOTE_H

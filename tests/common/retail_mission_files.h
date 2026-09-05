@@ -1,20 +1,19 @@
 // Retail path glue for the asset-gated world/mission ctests (ADR 0042 d3):
-// the engine's own mission::MissionKernel is the boot + state + no-net tick
-// (the rig body was promoted there), inmatch::listen_host is the SP listen
-// half, and this pair keeps only what a ctest needs on top — the mission's
-// .cpt/.trn terrain documents (the format-typed leg on the far side of the
-// ADR 0020 seam), the listen/no-net tick dispatch, and the inmatch::TickTarget
-// adapter the Session-driven tests bank on.
+// the engine's own mission::MissionKernel is the boot + state, the inmatch
+// roles (LocalRole / HostRole, ADR 0043 d3) are the ticks, and this pair keeps
+// only what a ctest needs on top — the mission's .cpt/.trn terrain documents
+// (the format-typed leg on the far side of the ADR 0020 seam) and the
+// listen/no-net role pick the Session-driven tests bank on.
 //
 // Gating is the caller's: open() (inherited from the kernel) takes the root
 // from retail::install() / retail::assets() and reports a missing file so the
 // test can retail::skip.
-#ifndef OPENNOVA_TEST_RETAIL_MISSION_FILES_H
-#define OPENNOVA_TEST_RETAIL_MISSION_FILES_H
+#pragma once
 
 #include <base/io/bam.h>
-#include <net/inmatch/listen_host.h>
-#include <net/inmatch/session.h>
+#include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/local_role.h>
+#include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <cmath>
@@ -50,37 +49,33 @@ inline int32_t bam_from_radians(double radians) {
 	return static_cast<int32_t>(static_cast<int64_t>(std::llround(radians * kBamPerRad)));
 }
 
-// The kernel plus the ctest-side halves: retail terrain documents, the SP
-// listen state, and the TickTarget adapter. Everything a test reads or
+// The kernel plus the ctest-side halves: retail terrain documents and the
+// two tick roles. Everything a test reads or
 // mutates — world, ai, input, weapon, loadout, the player/entity/terrain/
 // observation seams — is the kernel's own public surface.
-class RetailMissionRig : public mission::MissionKernel, public inmatch::TickTarget {
+class RetailMissionRig : public mission::MissionKernel {
 public:
 	RetailMissionRig();
 
-	// The S9 boot over the opened mission: the terrain load first (the
-	// engine's one cpt/trn(+charmap) loader into the kernel's store), then the
-	// kernel boot with the listen bring-up hook when listen_server is on.
+	// The S9 boot over the opened mission (the kernel loads the terrain field
+	// through the mounted root itself), with the listen bring-up hook when
+	// listen_server is on.
 	bool boot(const BootOptions &options, std::string &error);
 
-	// One authoritative logic tick: the listen frame
-	// (inmatch::listen_host::frame — Server_TickUpdate's owner pump between
-	// the local pumps) or, with listen_server off, the kernel's bare no-net
-	// tick.
+	// One authoritative logic tick through the active role: the host role's
+	// listen frame (Server_TickUpdate's owner pump between the local pumps)
+	// or, with listen_server off, the local role's bare no-net tick.
 	void tick();
 	void tick(int count);
 
 	// --- the SP listen server (npruntime) ------------------------------------
 	bool listen_server = false;
-	inmatch::ListenHostState host;
-
-	// inmatch::TickTarget
-	inmatch::TickOutcome advance_mission_tick(const inmatch::TickInput &input) override;
-	bool reset_mission_to_baseline(inmatch::SessionError &error) override;
-	void close_mission() override;
-
-private:
-	bool load_terrain(std::string &error);
+	// The two roles a rig can run its ticks through (ADR 0043 d3); `host`
+	// aliases the host role's session state for the tests that read it.
+	inmatch::LocalRole local_role;
+	inmatch::HostRole host_role;
+	inmatch::ListenHostState &host = host_role.state;
+	inmatch::Role &role() { return listen_server ? static_cast<inmatch::Role &>(host_role) : local_role; }
 };
 
 // Mission-space helpers.
@@ -97,5 +92,3 @@ inline world::Vec3 ai_position(const world::AiEntity &e) {
 }
 
 } // namespace opennova::testrig
-
-#endif // OPENNOVA_TEST_RETAIL_MISSION_FILES_H

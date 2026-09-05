@@ -1,5 +1,4 @@
-#ifndef MUS_DECOMPILE_SHARED_H
-#define MUS_DECOMPILE_SHARED_H
+#pragma once
 
 /* Shared MUS decompile helpers: name resolution, control-flow analysis, and
    stack-based expression reconstruction used by mus_decompile.cpp. */
@@ -12,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+namespace opennova::mus {
 
 /* ---- Operand helpers (match Python resolve_* lambdas) ---- */
 
@@ -375,4 +376,5 @@ static void format_play_token(const char *name, char *out, size_t cap) {
     else                     snprintf(out, cap, "\"%s\"", name);
 }
 
-#endif /* MUS_DECOMPILE_SHARED_H */
+
+} // namespace opennova::mus

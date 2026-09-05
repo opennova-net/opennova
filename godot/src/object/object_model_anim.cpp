@@ -6,6 +6,7 @@
 // script-double eval fallbacks are gone.
 
 #include "object/object_model.h"
+#include "object/model_user_point.h"
 
 #include <godot_cpp/core/math.hpp>
 
@@ -78,8 +79,8 @@ void ObjectModel::resolve_muzzle_userpoint() {
 	const int count = object_data_->get_user_point_count();
 	int best = -1;
 	for (int i = 0; i < count; ++i) {
-		const Dictionary info = object_data_->get_user_point_info(i);
-		if (String(info.get("name", "")).to_lower() == wanted) {
+		const Ref<ModelUserPoint> info = object_data_->get_user_point_info(i);
+		if (info.is_valid() && info->get_name().to_lower() == wanted) {
 			best = i;
 			break;
 		}
@@ -87,13 +88,13 @@ void ObjectModel::resolve_muzzle_userpoint() {
 	if (best < 0) {
 		return;
 	}
-	const Dictionary info2 = object_data_->get_user_point_info(best);
-	const int bone = int(info2.get("subobject", -1));
+	const Ref<ModelUserPoint> info2 = object_data_->get_user_point_info(best);
+	const int bone = info2->get_subobject();
 	if (bone < 0 || bone >= skeleton_->get_bone_count()) {
 		return;
 	}
 	muzzle_bone_ = bone;
-	muzzle_model_pos_ = info2.get("position", Vector3());
+	muzzle_model_pos_ = info2->get_position();
 }
 
 // Play a main-body clip by ADM key. Missing semantic keys use this ADM's
@@ -749,15 +750,10 @@ void ObjectModel::clear_part_anims() {
 	part_anim_tick_accum_s_ = 0.0;
 }
 
-Dictionary ObjectModel::get_active_part_anims() const {
-	Dictionary result;
+PackedStringArray ObjectModel::get_active_part_anim_registers() const {
+	PackedStringArray result;
 	for (const KeyValue<String, PartAnimChannel> &kv : part_anims_) {
-		Dictionary entry;
-		entry["register"] = kv.key;
-		entry["dir"] = kv.value.dir;
-		entry["rate"] = kv.value.rate;
-		entry["value"] = kv.value.value;
-		result[kv.key] = entry;
+		result.push_back(kv.key);
 	}
 	return result;
 }
@@ -788,20 +784,27 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 		Vector<String> finished;
 		for (KeyValue<String, PartAnimChannel> &kv : part_anims_) {
 			const int64_t previous = kv.value.value;
-			const Dictionary step = ObjectData::part_anim_step(
-					static_cast<int>(previous), kv.value.dir, kv.value.rate);
-			const int64_t next_value = int64_t(step["phase"]);
+			int32_t phase = static_cast<int32_t>(previous);
+			const bool step_finished = opennova::world::part_anim_step(phase,
+					static_cast<int32_t>(kv.value.dir), static_cast<int32_t>(kv.value.rate));
+			const int64_t next_value = phase;
 			kv.value.value = next_value;
+			// A register entering the table is a change even when its first
+			// step lands on the phase it started from.
+			const bool inserted = !ctrl_values_.has(kv.key);
 			ctrl_values_[kv.key] = next_value;
 			ctrl_value_owners_.erase(kv.key);
-			changed = changed || next_value != previous;
-			if (bool(step["finished"])) {
+			changed = changed || inserted || next_value != previous;
+			if (step_finished) {
 				finished.push_back(kv.key);
 			}
 		}
 		for (const String &reg : finished) {
 			part_anims_.erase(reg);
 		}
+	}
+	if (changed) {
+		ctrl_native_cache_valid_ = false;
 	}
 	bounds_dirty_ = bounds_dirty_ || changed;
 	return changed;
@@ -831,19 +834,8 @@ void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks,
 	body_pose_dirty_ = true;
 }
 
-Dictionary ObjectModel::get_weapon_channel() const {
-	Dictionary out;
-	if (wpn_key_.is_empty() && wpn_phase_ticks_ < 0) {
-		return out;
-	}
-	out["key"] = wpn_key_;
-	out["phase_ticks"] = wpn_phase_ticks_;
-	out["prev_key"] = wpn_prev_key_;
-	out["prev_phase_ticks"] = wpn_prev_phase_ticks_;
-	out["blend_weight"] = wpn_blend_weight_;
-	out["variant"] = wpn_variant_;
-	out["prev_variant"] = wpn_prev_variant_;
-	return out;
+bool ObjectModel::has_weapon_channel() const {
+	return !(wpn_key_.is_empty() && wpn_phase_ticks_ < 0);
 }
 
 static_assert(ObjectModel::kAimOverlayClasses ==
@@ -914,15 +906,8 @@ Array ObjectModel::get_aim_overlay() const {
 	return out;
 }
 
-Dictionary ObjectModel::get_body_blend() const {
-	Dictionary out;
-	if (body_blend_source_key_.is_empty() && body_blend_weight_ >= 1.0f) {
-		return out;
-	}
-	out["source_key"] = body_blend_source_key_;
-	out["source_time"] = body_blend_source_time_;
-	out["weight"] = body_blend_weight_;
-	return out;
+bool ObjectModel::has_body_blend() const {
+	return !(body_blend_source_key_.is_empty() && body_blend_weight_ >= 1.0f);
 }
 
 void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {

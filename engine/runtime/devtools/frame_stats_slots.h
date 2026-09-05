@@ -76,7 +76,7 @@
     X(OCCL_LIGHT_QUERY, "native per-drawn-entity sun-visibility queries") \
     X(OCCL_LIGHT_APPLY, "placed/wire lighting-context writes") \
     X(OCCL_WATER_APPLY, "final blink-water visibility write") \
-    /* MissionPresentation legs */ \
+    /* MissionRoot legs */ \
     X(SIM_STEP, "sim.step() total, summed over the frame's logic ticks") \
     X(SIM_NET, "native wire leg of step: joiner recv/uplink pump, or the") \
     /* host's local ClientState decode/fold */ \
@@ -147,6 +147,13 @@
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
     X(SIM_CLIENT_MAINTENANCE, "decoded-state timers and movers") \
     X(SIM_CLIENT_SEND, "joiner-only C2S build/frame") \
+    /* The joiner frame after its wire leg (JoinerRole::pump phases). */ \
+    X(SIM_CLIENT_MATERIALIZE, "joiner: stream materialize + decoded-state folds (spawn/health/mount/ammo/events/weather)") \
+    X(SIM_CLIENT_MIRROR, "joiner: wire pose mirror into the registry (both passes + predicted vehicles)") \
+    X(SIM_CLIENT_PROXIES, "joiner: wire collision proxy rebuild") \
+    X(SIM_CLIENT_WORLD, "joiner: local World::run_logic_tick (its phases land on the World update rows)") \
+    X(SIM_CLIENT_ATTACH, "joiner: remote attachment recompose + local seat re-pose") \
+    X(SIM_CLIENT_PLAYER, "joiner: input/weather/heading/view/weapon device pumps") \
     X(SIM_ADM_RESOLVE, "late animation-registry resolution after the tick") \
     X(SIM_SINK, "typed per-tick Godot presentation/effects callback") \
     X(SIM_TICKS, "VALUE: logic ticks run this frame") \
@@ -176,6 +183,8 @@
     X(PRESENT_MISSION_SUBMITTED_ROWS, "VALUE: camera-submitted rows") \
     X(PRESENT_MISSION_BODY_ROWS, "VALUE: rows eligible for a body pose") \
     X(PRESENT_WIRE, "WirePresentPass.present_snapshot") \
+    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (WirePresentPass)") \
+    X(PRESENT_WIRE_PENDING, "VALUE: wire rows still owed a cold spawn") \
     X(PRESENT_FIRE, "") \
     X(PRESENT_DESTRUCTION, "") \
     X(PRESENT_THROWABLE, "") \
@@ -197,7 +206,12 @@
     X(RENDER_WATER_GPU, "") \
     /* The focused Q3 pass (the FrameFX compositor) and the slot captures (the */ \
     /* PRE_OPAQUE compositor pass) render inside the root viewport, so their */ \
-    /* time is inside RENDER_ROOT_*; only their submission counts below remain. */ \
+    /* time also rides RENDER_ROOT_*. The two slots below carve their own GPU */ \
+    /* spans back out via RenderingDevice timestamps captured inside each */ \
+    /* pass; results surface with Godot's frame delay, so they describe the */ \
+    /* previous completed frame. */ \
+    X(RENDER_Q3_GPU, "focused Q3 pass GPU span (RD timestamps, previous completed frame)") \
+    X(RENDER_SLOT_GPU, "slot-capture pass GPU span (RD timestamps, previous completed frame)") \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
     /* previous frame). VALUE slots: what each pass actually submitted, so pass */ \
     /* cost attribution (main view vs shadow maps vs the water mirror) is read */ \

@@ -1272,6 +1272,15 @@ Accepted/divergent (each a documented decision, not a defect):
 - **D-CTRL-1 (mouse/joystick defaults):** the keyboard defaults are byte-exact from the catalog;
   the per-device mouse/joystick binding arrays are profile-built at runtime, not static, and are
   not ported — mouse/joystick rows show the action list with a blank Control column.
+  2026-09-05: the keyboard slot-1 MODIFIER column is byte-exact too — the catalog row's +24
+  word is VK_CONTROL (17) on seat1..seat10, ScopeZeroInc, nvggainup/nvggaindown, gtalk,
+  sqtalk, respawn, command2 and hudcolor (the +26 slot-2 word is zero on every row), and
+  `BindingSet::restore_defaults` seeds `primary_mod` from it, so the seat chords no longer
+  collide with the digit weapon rows [orig: seat1 @ 0x8160D8 +24; the dispatcher's
+  modifier-first pass `Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7`, fallback
+  `@ 0x49d3ba..0x49d488`]. Witnessed but still unported here: the same row's +20 word is a
+  static MOUSE default mask (Prone 0x10 middle button; ScopeZeroDec/Inc 0x800/0x400 wheel
+  with a Ctrl mouse modifier at +28; attack_1 0x1 left) — the D-CTRL-1 mouse hunt's data.
 - **D-CTRL-2 (visibility filter) — FIXED 2026-07-05:** the witnessed per-entry gate
   (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList @ 0x55c0c0`)
   is ported: every catalog row carries its witnessed flag word (the static catalog's flags
@@ -1438,7 +1447,7 @@ Accepted/divergent (each a documented decision, not a defect):
   `Server_QueueEntityAction`), the FIRST row stamps `g_map_file_name` /
   `missionData` / its rotation flag / `g_GameType`(+4392), then the
   SERVERTYPE arm (1 = NovaWorld HTTP hosting, 2 = LAN session).
-  **Port:** the witnessed rules live engine-side in `npwire/game_type.h`
+  **Port:** the witnessed rules live engine-side in `base/gameprofile/game_type.h`
   (`host_list_visible` / `host_filter_category` / `host_abbreviation_key` /
   `host_rotation_default`, pinned by `game_type_policy` ctest) through the
   `NetProtocol` binding; `mp_menu_companion.gd` seeds the host pool from
@@ -1576,10 +1585,11 @@ button->mask translation, and `is_token_pressed` — the one gameplay sampling
 call: keyboard slots gated on their modifier plus the held-sampleable
 L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
 without sampling), `controls_bindings.gd` (the shared live model +
-persistence), `menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY;
-a screen change cancels an armed capture like retail's screen-owned pump
-state), and `player_input_router.gd` samples gameplay input through the live
-records. Divergences: persistence rides `user://controls.cfg` until the
+persistence), `options_menu_controller.gd` (arm/capture/cancel +
+DEFAULTS/CLEAR_KEY, presence-gated on a CONTROL_MAPPING document since the
+2026-09-01 tidy; moved out of `menu_shell.gd` by PR #611; a screen change
+cancels an armed capture like retail's screen-owned pump state), and
+`godot/src/player/player_input_router.cpp` samples gameplay input through the live records. Divergences: persistence rides `user://controls.cfg` until the
 player.sav profile format slice exists, and the joystick capture page is not
 wired (both under D-CTRL rows). The retail arm also fires on a single click
 of the already-selected row; the reimpl arms on the driver's double-click
@@ -1599,6 +1609,156 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
   separate render/data-supply work (D-MNU-6 covers the latter).
 
 ---
+
+## The in-game options dialog (grilled 2026-09-01) `[orig: ingame_options_dialog_event_handler @ 0x554e40; UI_RegisterIngameCallbacks @ 0x555510]`
+
+The INGAME scene registers `OPT_ACCEPT` (param 1) and `OPT_CANCEL` (param 0)
+onto ONE handler (`@ 0x555597/@ 0x5555b5`). Retail's options edits are staged
+in the widgets with live device previews; the dialog decides their fate:
+
+- **Accept (param 1)** reads EVERY control by name and commits: RESOLUTION
+  (display-mode enumerate + `Format_ResolutionString`), OBJECTDETAIL
+  (`@ 0x554efb` — the older alias game.mnu authors), PARTICLES, the three
+  volumes, the WDM channel/rate radios (`Audio_ShutdownAll` →
+  `Audio_InitSubsystems` re-init), SLOT_MACHINE, INVERT_MOUSE/`profile+1428`,
+  MOUSE_SENSITIVITY/`profile+1424`, joystick fields, XHAIR_APPEARANCE
+  (`sprintf("cross%02d.tga", sel+1)`), XHAIR_COLOR/SPREAD,
+  OPTIONS_AUTORELOAD/`profile+1524`, OPTIONS_AUTOMEDIC/`profile+1660`
+  (INVERTED store), the Mr-Clippy pair — then `apply_video_mode_change`,
+  `PlayerProfile_SaveToFiles @ 0x54be00`, `Game_SaveConfig @ 0x54c490`,
+  `Game_CloseInGameScreens`, the OPTIONS_WRAPPER→MAIN_WRAPPER swap, and
+  `Input_InitBindingSystem`.
+- **Cancel (param 0)** commits NOTHING: `options_screen_init @ 0x554800`
+  re-seeds the whole screen from the saved settings, the live gamma preview
+  rolls back (`flt_25A39C0` saved → `flt_B4C298` live → `GLib_SetGammaRamp
+  @ 0x677be0`), and the GAMMA slider resets.
+
+The front-end OPTIONS scene's shared BACK/ACCEPT handler (`sub_55A710
+@ 0x55a710`, registered `@ 0x55d629/@ 0x55d647`) has the same shape: the
+ACCEPT arm applies video settings; the BACK arm (`@ 0x55adcf`) restores the
+saved gamma, the saved music volume (`AudioVM_SetGlobalVolume`), and a menu
+byte.
+
+Reimpl: `player_options.gd` applies edits live (retail's preview) and
+`options_menu_controller.gd` snapshots the state at surface entry —
+OPT_ACCEPT re-baselines the snapshot, OPT_CANCEL restores it and re-seeds
+(`menu_shell_test.gd` pins commit-vs-revert). PR #611's "Cancel only
+navigates" was a divergence, fixed 2026-09-01. Residuals, each a ledger row:
+our persist runs per edit (retail persists on Accept — invisible except
+crash timing; D-MNU-19); the front-end BACK's narrower gamma/volume-only
+revert is not modeled (our front surface re-seeds per document open;
+D-MNU-20); the engine's `kOptionsUnsupportedControls`
+(`engine/runtime/menu/options_policy.h`, re-exported by `MenuFrame` for the
+shell to lock, the checked states from `kOptionsForcedChecks`)
+force-disables the authored controls retail services (UPDATE →
+`UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK, the WDM family,
+Mr-Clippy, PunkBuster) — a deliberate stand-in until each device leg lands
+(D-MNU-21); the JOYSTICK device page itself is served (its column blank per
+D-CTRL-1). The select-by-value seed and the slider ranges are the engine's
+too (`spinlist_row_for_value`, `kOptionsScrollRanges`; the options model
+clamps by control name through `MenuFrame.options_scroll_ranges`). The
+XHAIR_COLOR /
+XHAIR_SPREAD pair left the locked set 2026-09-01: both are live user options
+now (persisted RGB selected BY VALUE like retail `[orig: options_screen_init
+@ 0x554cec/@ 0x554d15]`; defaults `[orig: Config_SetDefaults @ 0x54d461/
+@ 0x54d472]`; the draw side is hud-re.md's crosshair section and D-HUD-8).
+
+## The in-game exit confirmation (witnessed 2026-09-01, shipped game.mnu + `[orig: UI_RegisterIngameCallbacks @ 0x555510]`)
+
+Retail's INGAME screen (game.mnu, MUSICVAR 4) never exits a mission from the
+ABORT button itself. The shipped document authors:
+
+- `MAIN_WRAPPER` — buttons OPTIONS / RESTART / ABORT / HIDDEN_BACK (ESC).
+- `ABORT` (label id EXIT_MISSION) — authored actions:
+  `SHOW CONFIRM_EXIT` + `HIDE MAIN_WRAPPER`.
+- `CONFIRM_EXIT` — a HIDDEN framed panel at (206,225)-(562,345):
+  `STATIC_CONFIRM` (string id ARE_YOU_SURE, "Are you sure?"),
+  `CONFIRM_YES` (VK_RETURN) and `CONFIRM_NO` (VK_ESCAPE). BOTH confirm
+  buttons carry identical authored actions (`SHOW MAIN_WRAPPER` +
+  `HIDE CONFIRM_EXIT`); the exits are the engine's per-(screen,control)
+  Commands (the ADR-0001 seam, `CUIScene_RegisterControlCallback @ 0x63c060`).
+  With `MAIN_WRAPPER` hidden, the hidden-subtree hotkey rule keeps
+  `HIDDEN_BACK` from eating ESC, which therefore lands on `CONFIRM_NO`.
+
+The INGAME command registrations `[orig: UI_RegisterIngameCallbacks
+@ 0x555510]`:
+
+| Control | Handler | Behavior |
+|---|---|---|
+| ABORT | `UI_IngameAbortArmConfirm @ 0x555450` | arms the confirm-pending latch only (`dword_25A39C8 = 2`); the panel itself is the authored actions' |
+| CONFIRM_YES | `UI_IngameConfirmExitCommand @ 0x555460` | `if (latch == 2) { Game_CloseInGameScreens(); Input_HandleActionBinding(3); }` — the mission exit |
+| HIDDEN_BACK | `UI_IngameBackResumeCommand @ 0x555490` | close screens (resume); out-of-session also clears the pause flag |
+| RESTART | `UI_IngameRestartCommand @ 0x555410` | SP-only immediate restart (`g_mission_exit_reason = 4`); MP disables the button `[orig: options_screen_init @ 0x5548a6]`; its authored confirm actions ship commented out |
+| OPT_ACCEPT / OPT_CANCEL | `ingame_options_dialog_event_handler @ 0x554e40` | the options dialog section above |
+
+The same CONFIRM_EXIT idiom ships on stat.mnu STAT and death.mnu DEATH, both
+raised by their screens' HIDDEN_BACK authored actions:
+
+- STAT `[orig: HUD_CacheStatPanelValues @ 0x5627a8..0x562809]`: the
+  RADIO_TAB_OVERALL/REDTEAM/BLUETEAM trio registers
+  `stat_filter_tab_handler @ 0x562140` with params 0/1/2, and CONFIRM_YES
+  registers `UI_StatConfirmExitCommand @ 0x562210` — byte-identical to the
+  INGAME exit pair (close screens + action 3): the stat board's Yes LEAVES
+  THE MISSION, it does not merely hide the board.
+- DEATH: CONFIRM_YES registers inside `UI_RegisterDeathScreenCallbacks
+  @ 0x554610` (`@ 0x55463d`); its panel is authored MODAL — the flag is
+  parsed but not yet honored by the reimpl frame (recorded follow-up).
+
+The select-by-value contract the options seeds ride
+(`SpinList_SelectItemByValue @ 0x64ba50`): the match key is the item record's
+authored `value=` attribute (item+4, stride 56), and a miss selects row 0
+`[orig: @ 0x64ba82]`; the write-back reads the same field
+(`CSpinListWnd_GetSelectedValue @ 0x64baf0` = item+4, stored `[orig:
+@ 0x555226]`, the spread checkbox `[orig: @ 0x555248]`). The shipped
+XHAIR_COLOR rows author `value=` as the decimal RGB equal to their hex text
+(8 rows, 16777215 down to 0).
+
+Reimpl: `MenuShell.return_control_names` binds CONFIRM_YES (not ABORT) as the
+return-to-menu Command, so ABORT's authored actions raise the panel and only
+a confirmed Yes tears the world down (the retail latch is modeled by
+reachability: the panel is shown only by ABORT's actions and hidden widgets
+take neither clicks nor hotkeys); `end_round_presenter.gd` exits the mission
+on CONFIRM_YES (`exit_to_menu_requested` → the shell teardown). The earlier
+port bound ABORT directly: the teardown swapped the document under the
+activation emit, the authored `SHOW CONFIRM_EXIT` was skipped by design, and
+no confirmation ever appeared
+(`menu_shell_test.gd::test_ingame_abort_raises_confirm_and_only_yes_returns`
+pins the flow). The DEATH deploy screen's ESC→CONFIRM_EXIT leg (with MODAL)
+remains unported.
+
+## Button label mnemonics — dispatch and draw (grilled 2026-09-01) `[orig: dispatch_keyboard_event_to_children @ 0x63ad10; draw_text_with_cursor @ 0x6533b0]`
+
+The `{hot}` registration (`CButtonWnd_SetLabel @ 0x6572F0`, parse twin
+`CUIButtonWidget_ParseXMLAttributes @ 0x657c30`) is `strstr`-based — CASE
+SENSITIVE, `{HOT}` stays literal — strips the FIRST marker in place, records
+its byte offset at widget+740, and appends `[char, 0]` to the widget's
+accelerator array (+284/count +288). The three halves witnessed 2026-09-01:
+
+- **Dispatch**: the parent's hotkey table rows are 12 bytes
+  `[vk_flag, char/vk, window*]`. WM_KEYDOWN (256) matches rows with a nonzero
+  +0 by virtual key; WM_CHAR (258) matches rows with ZERO at +0 by
+  `tolower(entry) == tolower(key)` (`@ 0x63ad78/@ 0x63ad84`) — the
+  case-insensitive compare is retail's, in one document-order walk, first
+  VISIBLE match wins (`CWnd_IsVisibleInHierarchy @ 0x63ad90`), then the event
+  still broadcasts to every child.
+- **Draw**: the mnemonic underline is NOT markup. `CStaticWnd_DrawLabel
+  @ 0x656fb0` passes widget+740 (`@ 0x657270`) into `draw_text_with_cursor
+  @ 0x6533b0` — the same path the edit caret rides: draw the label, then
+  draw ONE `'_'` glyph at prefix-width (+ the two gated `(spacing-1)+1`
+  terms `@ 0x6534dc/@ 0x653562`), x-scaled by charWidth/underscoreWidth so
+  it spans the marked character (`@ 0x6535d8..0x65360f`). `CStaticWnd`'s
+  ctor inits +740 = −1 (`@ 0x656f0a`).
+
+Reimpl: `rtxt::strip_hotkey` is the one strip (mnu's
+`strip_hotkey_marker` delegates since 2026-09-01 — its case-folded scan was
+a divergence, now retired); `MenuFrameCompiler::hotkey_widget` carries the
+tolower compare with the witness; `emit_widget_text` feeds the recorded
+offset to the shared `emit_caret` leg (no `<U>` insertion). Pinned by
+`mnu_unit`, `menu_frame_compiler`. Open: the precise interleaving of
+explicit `<HOTKEY>` rows vs the label mnemonic within ONE widget is
+insertion-order in retail's single table; our per-widget explicit-then-
+mnemonic order is equivalent for shipped menus (no widget authors a
+conflicting pair) and stays a noted approximation.
 
 ## Appendix: IDA correspondence (reverse citations)
 

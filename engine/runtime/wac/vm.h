@@ -5,8 +5,7 @@
 // dispatch by table index. Re-runs the whole program each logic tick against the
 // shared World. Holds the per-event temporal state (fired-tick / active flag) and
 // the DORND LCG seed across ticks.
-#ifndef OPENNOVA_WAC_VM_H
-#define OPENNOVA_WAC_VM_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
@@ -79,5 +78,3 @@ private:
 };
 
 } // namespace opennova::wac
-
-#endif // OPENNOVA_WAC_VM_H

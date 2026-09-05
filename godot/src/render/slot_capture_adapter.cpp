@@ -1,6 +1,8 @@
 #include "render/slot_capture_adapter.h"
+#include "object/post_multiply_draw.h"
 #include "render/q3_geometry_cache.h"
 #include "render/q3_source_registry.h"
+#include "render/rd_timestamp_span.h"
 
 #include <algorithm>
 #include <array>
@@ -301,7 +303,7 @@ void collect_visible_geometry(Node *p_node,
 		return;
 	if (GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(p_node)) {
 		if (geometry->is_visible_in_tree() &&
-				!bool(geometry->get_meta("_opennova_auxiliary_draw", false)))
+				Object::cast_to<PostMultiplyDraw>(geometry) == nullptr)
 			r_instances.push_back(geometry);
 	}
 	for (int index = 0; index < p_node->get_child_count(); ++index)
@@ -1188,13 +1190,6 @@ SlotCaptureFrameCounters SlotCaptureAdapter::frame_counters() const {
 	return impl_->counters;
 }
 
-int SlotCaptureAdapter::compiled_surface_count(int p_order) const {
-	if (!impl_ || p_order < 0 || p_order >= kSlotCaptureCount)
-		return 0;
-	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
-	return impl_->compiled_surfaces[static_cast<std::size_t>(p_order)];
-}
-
 Dictionary SlotCaptureAdapter::get_report() const {
 	return impl_ ? impl_->report() : Dictionary();
 }
@@ -1225,6 +1220,9 @@ Dictionary SlotCaptureCompositorEffect::get_backend_report() const {
 	Dictionary result = adapter_->get_report();
 	result["slot_callback_type"] = static_cast<int>(EFFECT_CALLBACK_TYPE_PRE_OPAQUE);
 	result["slot_shutdown"] = is_shutdown();
+	result["slot_gpu_us"] = static_cast<int64_t>(
+			gpu_span_us_.load(std::memory_order_relaxed));
+	result["slot_gpu_valid"] = gpu_span_valid_.load(std::memory_order_relaxed);
 	return result;
 }
 
@@ -1236,5 +1234,16 @@ void SlotCaptureCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 	RenderingDevice *rd = server != nullptr ? server->get_rendering_device() : nullptr;
 	if (rd == nullptr)
 		return;
+	const bool gpu_timing = gpu_timing_enabled_.load(std::memory_order_relaxed);
+	if (gpu_timing) {
+		std::uint64_t span_us = 0;
+		gpu_span_valid_.store(rd_timestamp_span_us(rd,
+				"opennova_slot_capture_begin", "opennova_slot_capture_end",
+				span_us), std::memory_order_relaxed);
+		gpu_span_us_.store(span_us, std::memory_order_relaxed);
+		rd->capture_timestamp("opennova_slot_capture_begin");
+	}
 	adapter_->draw(rd);
+	if (gpu_timing)
+		rd->capture_timestamp("opennova_slot_capture_end");
 }

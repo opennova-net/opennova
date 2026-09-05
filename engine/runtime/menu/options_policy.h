@@ -7,8 +7,11 @@
 // driver (widget selection and range writes are device work); the values are
 // the engine's.
 
+#include <formats/mnu/mnu.h>
+
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace opennova::menu {
 
@@ -51,7 +54,10 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
     {"TERRAINTEX", "3"},
     {"OBJECTPOLY", "3"},
-    // game.mnu uses this older alias for the same highest object-detail rung.
+    // game.mnu's older alias for the same highest object-detail rung; the
+    // in-game options Accept reads the control by this name
+    // [orig: ingame_options_dialog_event_handler @0x554e40 — "OBJECTDETAIL"
+    //  read @0x554efb].
     {"OBJECTDETAIL", "3"},
     {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest
@@ -76,5 +82,54 @@ inline constexpr int32_t kVideoGammaReference = 8;
 inline constexpr const char *kVideoPresetButtons[] = {
     "VIDEODEFAULT", "VIDEOPERFORMANCE", "VIDEOQUALITY",
 };
+
+// The authored Options controls the reimpl does not service yet. Retail
+// serves every one of them (UPDATE -> UI_LaunchUpdateProcess @0x55b0b0; the
+// WDM channel/rate radios -> the Audio_ShutdownAll / Audio_InitSubsystems
+// re-init, the joystick fields, the Mr-Clippy pair, PunkBuster and the
+// auto-reload / auto-medic profile bytes all read by the dialog's Accept
+// [orig: ingame_options_dialog_event_handler @0x554e40]). The shell shows
+// them read-only until each device leg lands — a tracked stand-in
+// (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
+// it is served (the table shows the D-CTRL-1 blank column).
+inline constexpr const char *kOptionsUnsupportedControls[] = {
+    "DIFFICULTY", "UPDATE",
+    "WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
+    "WDM_AUDIO_8", "WDM_RATE",
+    "ENABLE_JOYSTICK", "INVERT_JOYSTICK", "ENABLE_FORCE_FEEDBACK",
+    "MR_CLIPPY_KEYBOARD", "MR_CLIPPY_HINTS", "CLIENT_PUNKBUSTER",
+    "OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC",
+};
+
+// The checked state those read-only rows show — what the ported paths do:
+// auto-reload and auto-medic on (the Accept stores profile+1524 and the
+// INVERTED profile+1660 @0x554e40), the primary WDM channel on, the rest
+// off.
+struct OptionsForcedCheck {
+    const char *control;
+    bool checked;
+};
+inline constexpr OptionsForcedCheck kOptionsForcedChecks[] = {
+    {"OPTIONS_AUTORELOAD", true},
+    {"OPTIONS_AUTOMEDIC", true},
+    {"WDM_AUDIO_2", true},
+    {"WDM_AUDIO_4", false},
+    {"WDM_AUDIO_6", false},
+    {"WDM_AUDIO_7", false},
+    {"WDM_AUDIO_8", false},
+};
+
+// Retail seeds a spinlist BY VALUE: the selected row is the one whose
+// authored item `value=` attribute equals the wanted value, and a miss
+// selects row 0. The options screen rides it for XHAIR_COLOR (the shipped
+// rows author the decimal RGB) and the write-back reads the same field.
+// [orig: SpinList_SelectItemByValue @0x64ba50 — the item+4 (stride 56)
+//  compare, the miss -> row 0 @0x64ba82; CSpinListWnd_GetSelectedValue
+//  @0x64baf0]
+inline int spinlist_row_for_value(const mnu::Items &items, std::string_view value) {
+    for (size_t i = 0; i < items.items.size(); ++i)
+        if (items.items[i].value == value) return static_cast<int>(i);
+    return 0;
+}
 
 } // namespace opennova::menu

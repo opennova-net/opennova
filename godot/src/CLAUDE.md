@@ -5,7 +5,7 @@ GDExtension classes binding `engine/` to Godot. Register new classes in
 `register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
 line here earns its place only as a device leg (marshalling, nodes, servers,
 input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
-Godot's `GameFramePipeline`, or a documented seam bridge — format/runtime logic
+the `GameWorld` frame-leg table, or a documented seam bridge — format/runtime logic
 and every witnessed behavior belong in `engine/`. The engine's formats never touch
 Godot's resource system
 (documents self-read/write via `load_from_path`/`save_to_path`).
@@ -19,19 +19,27 @@ directory is the include root); engine includes are `<group/lib/file.h>`; no
 subdirectory here may be named `base`, `formats`, `runtime` or `net`
 (`include_graph_check.py` enforces all three).
 
-Citations (ADR 0042 d7): a witness citation is `[orig: Name @ 0xADDR]`
-everywhere — there is no second marker form. `adapter_cpp_orig_cites` is one
-non-increasing count over all of `godot/src`: it shrinks when witnessed code
+Citations (ADR 0042 d7, ADR 0043): a witness citation is `[orig: Name @ 0xADDR]`
+everywhere — there is no second marker form. `godot_orig_cites` is ONE
+non-increasing count over the whole Godot side (`godot/src` plus the
+`godot/game`, `godot/modtools` and `godot/probes` GDScript): a cite moves freely
+between GDScript and binding C++; the count shrinks only when witnessed code
 moves to its engine home (or dies as verified dead code) and may never grow.
 Genuinely witnessed engine behavior still belongs in `engine/` (ADR 0042's
-boundary rule).
+boundary rule). `scripts/lint/cite_census.py` keeps the SET of cited addresses
+from losing a member silently.
 
-Size ratchets: no `.cpp` here past 2500 lines and no shipping `.gd` past 1200 —
-split first; `scripts/lint/ratchet_counts.py` fails on any increase.
+Size ratchet: no `.cpp`/`.h` here past 2500 lines — split by responsibility
+(one type per TU pair), never by "leg"; `scripts/lint/ratchet_counts.py` fails
+on any increase. Shipping GDScript has no size ratchet; it has
+`gd_foreign_private_accesses` instead: a script that reaches into another
+object's `_privates` is a method annex, not a class, and the count only falls.
 
 The game-level GDScript runtime (world, debug, mission, object, terrain,
-ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
-there that is really engine behavior is the C++ rewrite queue.
+ui, avatar, probe, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
+there that is really engine behavior is the C++ rewrite queue. The debug-control
+table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
+windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
 ONED scripts go to `godot/modtools/`.
@@ -67,9 +75,10 @@ Gotchas:
   (ADR 0019), `engine/net/novaworld` for matchmaking — sockets and signals here, protocol and
   crypto in `engine/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
-- Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
-  `ClientReplicaPipeline` owns `ClientState`, and the native `WirePresentPass`
-  (`simulation/wire_present_pass.cpp`; the hot row walk lives in
-  `present_applier_wire.cpp`) renders it for live joiners.
+- Decoded in-match entities have one runtime fold and one presenter (ADR 0026,
+  ADR 0043 d9): `ClientReplicaPipeline` owns `ClientState`, and the one native
+  `EntityPresenter` node (`simulation/entity_presenter.cpp` — the placed walk
+  and the shared legs; `entity_presenter_wire.cpp` — the wire walk's cold path
+  and hot rows) renders both the placed rows and the wire rows for live joiners.
   Nothing may grow another entity reducer or presenter. `NovaWorldClient` is matchmaking/handoff, not a
   gameplay-replication stack.

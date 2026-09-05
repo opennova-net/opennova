@@ -3,18 +3,25 @@
 #include <net/novaworld/gate_probe.h>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 
+#include "network/novaworld_server_row.h"
+#include "network/novaworld_gate_info.h"
 #include "network/nwu_lobby_session.h"
+#include "network/ping_sweep_worker.h"
 
 #include <cstdint>
 #include <memory>
@@ -36,7 +43,6 @@ namespace godot {
 //   nw.player_name = "Taylor"
 //   nw.connected.connect(_on_connected)
 //   nw.disconnected.connect(_on_disconnected)
-//   nw.server_info_received.connect(_on_server_info)
 //   nw.start()
 //
 // State machine:
@@ -81,18 +87,41 @@ public:
 
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
-	Dictionary get_server_info() const;
-
-	// Structured session diagnostics: the state snapshot plus a bounded wire/
-	// session trace ring (newest last). The trace lines keep the retail
-	// _connectlog "SENDING N BYTES ... [0xNN]" shape so a capture diff still
-	// lines up — this replaces the old always-on stdout traces.
-	Dictionary get_session_debug() const;
+	bool is_authenticated() const { return authenticated_; }
+	// The gate reply the lobby HTTP legs resolve their base URL from; null
+	// until a gate response landed.
+	Ref<NovaWorldGateInfo> get_server_info() const;
 
 	// Server browser (ADR 0010 Phase 2). The list is fetched over HTTP from
 	// the GSB endpoint once the session is verified; rows arrive asynchronously
 	// (watch the `server_list_updated` signal, then read get_server_rows()).
-	Array get_server_rows() const;
+	TypedArray<NovaWorldServerRow> get_server_rows() const;
+
+	// Re-fetch the server list on demand (the browser's Refresh button). A
+	// no-op before the session/base URL exists; the fresh rows arrive through
+	// the usual `server_list_updated` signal.
+	void refresh_servers();
+
+	// The GSB response's list-wide totals (network/novaworld_server_totals.h;
+	// the service-wide population line the retail browser shows). Zeros until
+	// the first list lands.
+	// The GSB response's list-wide totals: the service-wide server and
+	// player counts the retail browser shows as its population line (zeros
+	// until the first list lands).
+	int get_total_servers() const { return total_servers_; }
+	int get_total_players() const { return total_players_; }
+
+	// The ping sweep's per-row results so far: rid (int) -> ping. A
+	// non-negative value is the echo round-trip in ms; -2 = failed/timed out,
+	// -3 = never attempted (engine/net/novaworld/ping_sweep.h carries the
+	// witnessed fold + timeout/retry constants). Rows still in flight are
+	// absent. Repopulated per list refresh; `server_pings_updated` fires when
+	// a pass lands.
+	// The sweep results as two parallel packed arrays: the row ids and their
+	// ping (ms, or -2 / -3 for the engine's unreachable / never-attempted
+	// codes). A row absent from the arrays has no result yet.
+	PackedInt64Array get_server_ping_rids() const;
+	PackedInt32Array get_server_ping_values() const;
 
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
 	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the
@@ -102,9 +131,10 @@ public:
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
 	// the GSB row's `rid`, resolves the in-match host address, and emits
-	// joined_game(host, port). The game layer (NovaWorldPanel -> MainGame) then drives
-	// the in-match join through Simulation's joiner — this client does not send the
-	// in-match ClientHello itself (one joiner seam for LAN / NW / env joins).
+	// joined_game(host, port, app_id, cd_cookie). The game layer (NovaWorldPanel ->
+	// MainGame) then drives the in-match join through Simulation's joiner — this client
+	// does not send the in-match ClientHello itself (one joiner seam for LAN / NW / env
+	// joins).
 	void join(int rid);
 
 	// Engine hooks.
@@ -141,9 +171,11 @@ private:
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
 	// The NWJoin handshake resolved the in-match host:port — hand it off to the game
-	// layer via joined_game(host, port). Does NOT send an in-match hello; Simulation's
-	// joiner owns the single ClientHello (see the .cpp for why).
-	void resolve_join_target(const String &host, uint16_t port);
+	// layer via joined_game(host, port, app_id, cd_cookie). Does NOT send an
+	// in-match hello; Simulation's joiner owns the single ClientHello (see the .cpp).
+	void resolve_join_target(const String &host, uint16_t port,
+	                         const String &app_id,
+	                         const PackedByteArray &cd_cookie);
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,
@@ -155,7 +187,8 @@ private:
 
 	void enter_state(State next, const String &reason = String());
 
-	// Append one line to the bounded diagnostics ring (get_session_debug()).
+	// One wire/session trace line under --verbose; the lines keep the retail
+	// _connectlog "SENDING N BYTES ... [0xNN]" shape so a capture diff lines up.
 	void trace(const String &line);
 
 	// Config.
@@ -165,7 +198,8 @@ private:
 
 	// State.
 	State state_ = STATE_IDLE;
-	Dictionary server_info_;
+	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
+	Ref<NovaWorldGateInfo> server_info_;
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, and the handshake timeout all live in here.
 	NwuLobbySession lobby_;
@@ -177,8 +211,22 @@ private:
 
 	// Server browser.
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
-	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
+	std::vector<opennova::GsbServerEntry> server_entries_; // the cached GSB list
 	bool gsb_request_in_flight_ = false;    // transport bookkeeping (cancel before re-issue)
+	int total_servers_ = 0;                 // GSB TS — list-wide server count
+	int total_players_ = 0;                 // GSB TP — service-wide player count
+	// The browse-time ping sweep (retail pings every row's IPv4 on the list
+	// finalize; the semantics live in engine/net/novaworld/ping_sweep.h and
+	// the device leg in network/ping_sweep_worker.cpp). The generation stamps
+	// each sweep so a late pass from a superseded list is dropped; one worker
+	// runs at a time, and a list refreshed underneath it re-sweeps when its
+	// stale results land.
+	Dictionary server_pings_;               // rid (int) -> ping ms / -2 / -3
+	int64_t ping_generation_ = 0;
+	PingSweepWorker ping_worker_;
+	bool ping_resweep_pending_ = false;
+	void start_ping_sweep();
+	void apply_ping_results(const Dictionary &results, int64_t generation);
 
 	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
 	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/
@@ -196,10 +244,6 @@ private:
 	                                  // host that replaces the startupurl [domainname]
 	double tick_accum_ = 0.0;
 	double heartbeat_interval_s_ = 2.0;
-
-	// The wire/session trace ring behind get_session_debug(), newest last.
-	static constexpr int kTraceRingCap = 64;
-	PackedStringArray trace_ring_;
 };
 
 } // namespace godot

@@ -15,15 +15,15 @@
 // default arrays are still the D-CTRL-1 RE hunt, so their defaults are
 // unbound. Joystick capture is not wired (no joystick runtime yet).
 
-#ifndef OPENNOVA_CONTROLS_BINDING_SET_H
-#define OPENNOVA_CONTROLS_BINDING_SET_H
+#pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include <runtime/controls/controls.h>
-#include <cstddef>
 
 namespace opennova::controls {
 
@@ -121,6 +121,23 @@ class BindingSet {
   // when unbound). The gameplay consumer's lookup seam.
   std::vector<int> keys_for_token(const std::string &token) const;
 
+  // The VK firing the record RIGHT NOW under the keyboard dispatcher's two
+  // passes, or 0. `key_down(vk)` is the device's held state (retail's
+  // g_input_key_down_states[vk], indexed by VK). Pass 1 fires a row whose
+  // modifier word (either slot) is held together with either of its keys;
+  // the fallback fires a row with BOTH modifier words zero, and only for a
+  // key no pass-1 row claims -- retail runs the fallback for a key event only
+  // when the modifier pass matched nothing. So Ctrl+1 fires seat1 and never
+  // Knife, a bare 1 fires Knife, and Ctrl+B still fires binoculars (no row
+  // claims B). A mixed record (Ctrl+1 primary, bare Z secondary) fires on
+  // Ctrl+Z -- pass 1 checks the ROW's modifier, then either key -- and never
+  // on a bare Z, since the fallback wants both modifier words zero.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 -- pass 1 @0x49d327..0x49d3ac
+  //  (modifier held @0x49d36a/@0x49d377, key match @0x49d3a7, fire and skip
+  //  the fallback @0x49d42f..0x49d437); fallback @0x49d3ba..0x49d488 (both
+  //  modifier words zero @0x49d3c1.., key match, fire @0x49d488)]
+  int pressed_key(int index, const std::function<bool(int)> &key_down) const;
+
   std::size_t size() const { return records_.size(); }
   const BindingRecord *record(int index) const;
   bool set_record(int index, const BindingRecord &rec);  // persistence load
@@ -131,5 +148,3 @@ class BindingSet {
 };
 
 }  // namespace opennova::controls
-
-#endif  // OPENNOVA_CONTROLS_BINDING_SET_H

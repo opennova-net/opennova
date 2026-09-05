@@ -38,6 +38,9 @@ struct Rig {
 // so the airborne pick is the local derivation `ground == INT32_MIN ->
 // airborne` [orig: the Flags read @0x491E35 region; boxless stand-in].
 void make_rig(Rig &r) {
+	// A joiner's world: its AiSystem runs non-authoritative, the client motor
+	// path [orig: g_napi_np_ctx.is_authority == 0 on a client].
+	r.world.ai.is_authority = false;
 	r.world.registry.configure_pool(0, 8);
 	r.world.registry.configure_pool(1, 8);
 	w::Entity seed;
@@ -92,8 +95,8 @@ bool run_airborne_rate_damp_is_asymmetric() {
 		// pitch, the sideslip pick on zero commands) contribute nothing.
 		hp->veh.air_roll_rate = r;
 		hn->veh.air_roll_rate = -r;
-		w::aircraft_client_tick(pos.world, *hp, pos.traits);
-		w::aircraft_client_tick(neg.world, *hn, neg.traits);
+		pos.world.vehicles.aircraft_client_tick(*hp, pos.traits);
+		neg.world.vehicles.aircraft_client_tick(*hn, neg.traits);
 		// One tick applies: the airborne 1/16 damp, the engine-on path (no
 		// extra damp), the 15 deg/tick clamp (inactive at 16000) and the
 		// integration `roll += rate`. The rate after the tick is what the damp
@@ -122,8 +125,8 @@ bool run_airborne_rate_damp_is_asymmetric() {
 		hz->veh.air_roll_rate = -1;
 		bool stuck_held = true;
 		for (int t = 0; t < 30; ++t) {
-			w::aircraft_client_tick(stuck.world, *hs, stuck.traits);
-			w::aircraft_client_tick(settles.world, *hz, settles.traits);
+			stuck.world.vehicles.aircraft_client_tick(*hs, stuck.traits);
+			settles.world.vehicles.aircraft_client_tick(*hz, settles.traits);
 			stuck_held &= hs->veh.air_roll_rate == 7;
 		}
 		ok &= expect(stuck_held,
@@ -153,8 +156,8 @@ bool run_grounded_damps_twice_as_hard() {
 	const int32_t r = 16000;
 	ha->veh.air_roll_rate = r;
 	hg->veh.air_roll_rate = r;
-	w::aircraft_client_tick(air.world, *ha, air.traits);
-	w::aircraft_client_tick(ground.world, *hg, ground.traits);
+	air.world.vehicles.aircraft_client_tick(*ha, air.traits);
+	ground.world.vehicles.aircraft_client_tick(*hg, ground.traits);
 	const int32_t air_step = r - ha->veh.air_roll_rate;
 	const int32_t ground_step = r - hg->veh.air_roll_rate;
 	bool ok = expect(ground_step == ((r + 4) >> 3),
@@ -189,8 +192,8 @@ bool run_sideslip_pitch_two_gain_pick() {
 		hc->veh.vel_x = 0;
 		// Motion only on the measured hull.
 		h->veh.vel_x = 4096;
-		w::aircraft_client_tick(r.world, *h, r.traits);
-		w::aircraft_client_tick(c.world, *hc, c.traits);
+		r.world.vehicles.aircraft_client_tick(*h, r.traits);
+		c.world.vehicles.aircraft_client_tick(*hc, c.traits);
 		// The tilt->acceleration block adds the same pitch-driven terms to both
 		// runs; the velocity-dependent weathervane acts on yaw only. The
 		// feedback leg is the difference in the pitch RATE before the damp and
@@ -233,7 +236,7 @@ bool run_global_rate_clamp_binds() {
 	if (!expect(h != nullptr, "clamp rig spawned")) return false;
 	h->veh.air_roll_rate = 999999999;
 	const int32_t roll0 = h->veh.air_roll_bam;
-	w::aircraft_client_tick(r.world, *h, r.traits);
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
 	constexpr int32_t kAttitudeRateClamp = 178956960; // 0xAAAAAA0
 	bool ok = expect(h->veh.air_roll_rate <= kAttitudeRateClamp,
 	                 "the rate is clamped to 15 deg/tick");

@@ -13,6 +13,8 @@
 #include <cstring>
 #include <string>
 
+using namespace opennova::def;
+
 namespace {
 
 using namespace opennova;

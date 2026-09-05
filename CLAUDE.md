@@ -19,9 +19,11 @@ easier to relay than to rediscover.
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, simassets, devtools — the Dear ImGui
   pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
-  surface, ADR 0039),
-  `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
-  netsim/npruntime implementation directories). `engine/` is the one public
+  surface, ADR 0039 — plus `session` (the in-match session, the listen-host
+  frame, the server/client state machines and frame loops, the transports) and
+  `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
+  `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
+  or links `runtime/`). `engine/` is the one public
   include root: `#include <runtime/world/x.h>`, `<formats/pff/pff.h>` (ADR 0040).
   Native consumers link the engine groups directly.
   See `engine/CLAUDE.md`.
@@ -50,7 +52,8 @@ easier to relay than to rediscover.
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
-  place — bump submodules upstream) plus vendored in-tree bcrypt sources and two
+  place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
+  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and two
   hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
   `third_party/sqlite/CMakeLists.txt`) and Dear ImGui (`third_party/imgui/`,
   pinned to the commit the imgui-godot addon bundles — bump it and
@@ -113,11 +116,12 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - The in-match session owns lifecycle, role policy, fixed-tick banking, and
-  input consumption in portable C++ (`engine/net/inmatch/session.*`; ADR 0036,
-  superseding ADR 0035's old name/location). An `inmatch::TickTarget` supplies
-  the concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
+  input consumption in portable C++ (`engine/runtime/inmatch/session.*`; ADR 0036,
+  superseding ADR 0035's old name/location). An `inmatch::Role` (Local / Host / Joiner,
+  ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
-  work once per display frame. A `godot/` line earns its place only as that device
+  work once per display frame through ONE static frame-leg table
+  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
   work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
   NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
@@ -138,10 +142,8 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
   and ADRs 0009–0012.
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
-  attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
-  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
-  (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
-  is exempt, so vocabulary in docs is honor-system).
+  front-ends are Shells, a lib's embedding app is its embedder. Vocabulary is a
+  review concern, not a lint (ADR 0043 retired `host_lint.py`).
 - ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
   state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
@@ -184,9 +186,9 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   before engine work.
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
-  it plus the ADRs before touching `mission_presentation.gd`,
-  `game_frame_pipeline.gd`, the native present appliers
-  (`godot/src/simulation/present_applier*.cpp`), or `Simulation`.
+  it plus the ADRs before touching `godot/src/mission/mission_root.cpp`,
+  `godot/src/world/game_world_frame.cpp` (the frame-leg table), the native present appliers
+  (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — ONED,
   retail staging, and hidden release pack command.
 - [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,

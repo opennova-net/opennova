@@ -55,12 +55,11 @@ public:
 	Ref<ShaderMaterial> get_sky_material() const { return sky_material_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
-	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();

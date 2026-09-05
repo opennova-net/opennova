@@ -3,7 +3,7 @@
 Grill session 2026-06-10, IDB `Jointops.exe.kong.i64` (imagebase 0x400000).
 Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`), mission→world
 promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
-(`engine/runtime/mission/mission_systems.h`, `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
+(`engine/runtime/mission/mission_kernel.cpp` (`finish_load`), `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
 **Verdict: MATCHING**, with the tracked deviations D-EVT-1..4 below. Every behavioral
 claim in this record was read from the decompilation this session; addresses cited inline.
@@ -154,7 +154,7 @@ yet witnessed (D-EVT-4).
 | `wac/vm`: WAC time base = completed executions (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks — decoupled from the engine tick | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
-| `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
+| the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
 | engine: Simulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a render frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,
@@ -177,9 +177,9 @@ at low FPS).
 runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
 the Godot presentation owner presents **once** after the batch — sim at a
 constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
-interpolation (faithful to §1.6). `MissionPresentation.tick()` survives as the
+interpolation (faithful to §1.6). `MissionRoot.tick()` survives as the
 deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
-the same session state machine. `MainGame` → `GameWorld` → `GameFramePipeline` is
+the same session state machine. `MainGame` → `GameWorld` (its frame-leg table) is
 the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
 ONED's Run OpenNova loose action launches the standalone game against the
 selected loose assets. The portable `engine/runtime/world` per-tick
@@ -192,7 +192,7 @@ wrong. Pinned by `mission_presentation_test.gd`
 Cleanup tail of §2a, no behavior change. `Simulation` carried a `TickMode` enum
 (`TICK_DIVIDED` / `TICK_EVERY_PROCESS`) selecting between `step()` and `advance_frame()` —
 but the two methods had **identical bodies** (same `loaded_` guard, same
-`host_pump`/`joiner_pump`/authoritative-tick branches), differing only in return type. The
+`HostRole`/`JoinerRole`/`LocalRole` ticks), differing only in return type. The
 enum therefore chose between two copies of one behavior, and its comment still deferred the
 62 Hz accumulator to "a future" that had already shipped in the presentation driver
 (§2a). Its stated reason for surviving — "API stability" — is the internal back-compat that
@@ -1016,7 +1016,7 @@ actions.
 |---|---|---|
 | 0 `Null` | no-op switch arm [orig: EventAction_Dispatch @ 0x4542E0] | explicit no-op; no diagnostic |
 | 4 `VaporizeGroup` | despite its curated callee name, removes matching nonempty rows while walking pools 2, 0, 1, 3 [orig: Entity_TeleportAllByNetId @ 0x43D5D0] | `EntityCommands::remove_group`; then live-count recount + collision refresh |
-| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_tick` |
+| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` — 16.16 units per SECOND (kph × 1000/3600) [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_sec` |
 | 16 `ChangeGTeamAction` | scans pools 2, 0, 1 and rewrites team on every matching group row [orig: Entity_SetTeamByNetId @ 0x43C680] | `set_group_team`, including the live `AiEntity::team` mirror |
 | 17 `ChangeGroupAction` | scans pools 2, 0, 1; pool 0 skips dead rows, pools 2/1 do not; rebuilds group counts [orig: Entity_UpdateNetIdReferences @ 0x43C5B0] | `change_group`, including the AI relation-matrix id mirror |
 | 18 `GroupTeleportAction` | finds the first pool-3 type-6088 marker whose `WP_NUMBER` equals param2, then teleports group members in pools 0, 1, 2 [orig: Entity_TeleportTeamToSpawn @ 0x43D390] | `teleport_group_to_marker` |
@@ -1035,16 +1035,32 @@ The two teleport forms deliberately differ:
   also inherits marker Flags `0x20` when set and runs the reset path [orig:
   EventAction_TeleportEntityToSpawn @ 0x43DFC0].
 
-Both ports copy the resolved pose into a resident `AiEntity` (including its
-saved-live position) so the next organic/vehicle motor does not snap back to a
-stale fixed-point pose. Registry-shape changes refresh collision/proximity once
-after the complete fan, not once per member.
+Both ports copy the resolved pose into a resident `AiEntity`. This is the
+split-pose translation of witnessed stores, not compensation: retail's single
+teleport writes the ONE entity pose the motor reads plus `savedLivePose` and
+the body pose per target [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0 —
+savedLivePose @ 0x43E05F..0x43E071, bodyHeading/Pitch/Roll @ 0x43E07A..0x43E096];
+our AI row carries the fixed-point mirror of exactly those fields
+(`net_saved_live_pose` = `savedLivePose`). The group form writes only
+position/yaw/pitch/roll (pool 0's body pose comes via the reset), so the group
+arm's AI heading sync is slightly ahead of retail's chase-converging body
+heading — a translation note, not a divergence row. Registry-shape changes
+refresh collision/proximity once after the complete fan, not once per member.
+
+The single-target SSN commands (24/25/26) resolve by walking pools 0, 1, 2 in
+order — retail's own sequential DcbId scans, first match wins, `dcb_id != 0`
+gated, with NO item gate on the team/group writers (the teleport walk keeps
+its item gate @ 0x43E036) [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30 —
+team byte entity+354 @ 0x43DB63; Entity_SetNetIdByParentRef @ 0x43D6C0 —
+commandGroup word entity+284 @ 0x43D6F4]. The 2026-09-01 re-grill replaced the
+earlier resolve-then-reject shape, which could miss when a pool-3 row shadowed
+the SSN.
 
 `event_runtime_bms` pins pool coverage, the pool-0 dead-row exception, both
 teleport flag rules, marker selection, AI mirrors, group speed conversion, the
 Null/SingleVelocity no-op arms, and absence of `unported_action` for this set.
 
-### 10.1 Remaining explicit action boundary
+### 10.1 Remaining explicit action boundary (D-EVT-6)
 
 This slice does not claim every BMS action is complete. The default diagnostic
 still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..49
@@ -1052,7 +1068,9 @@ still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..4
 still crosses the presenter/embedder effect seam rather than invoking a
 `WacSystem` directly. Those actions need their door, teammate-command,
 target-reference, or runtime-composition owners; they are not modeled as
-generic flag writes.
+generic flag writes. Tracked as **D-EVT-6** in the divergence ledger
+(minted 2026-09-01 — a declared residual with no row is exactly what the
+ledger exists to prevent).
 
 **D-EVT-1 is unchanged.** `BmsEventSystem::fire` already publishes the fired
 event index to the waypoint completion hook, but retail's linked deploy/POI

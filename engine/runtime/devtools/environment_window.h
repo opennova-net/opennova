@@ -2,8 +2,10 @@
 // rows [orig: Debug_DrawEnvironmentValues @ 0x4ef000 — "Script & Env Values",
 // two columns at x 10 / 200] over the EnvironmentSnapshot the embedder pushes,
 // plus a control strip whose every action is one of the WAC weather commands,
-// leaving as typed EnvironmentRequests the embedder drains into the ONE
-// command layer (world::EntityCommands).
+// leaving as ControlRequests the embedder drains into the ONE debug-control
+// table (ADR 0043 d12): its environment_* rows are the same rows MCP's
+// game_debug invokes, and they reach the ONE command layer
+// (world::EntityCommands) every WAC handler uses.
 //
 // The window holds only the pushed value record — it never reaches into a
 // live World or into Godot. Visibility-armed: while hidden it drops its
@@ -12,7 +14,7 @@
 // cadence below); a frame between pushes only re-emits cached strings.
 #pragma once
 
-#include <runtime/devtools/environment_request.h>
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -44,10 +46,11 @@ public:
 	// nobody shows.
 	bool wants_snapshot() const { return shown_; }
 
-	// The typed request queue the embedder drains. enqueue_request is the one
-	// path the drawn controls feed — and the headless test seam.
-	void enqueue_request(const EnvironmentRequest &request);
-	bool take_request(EnvironmentRequest &request);
+	// The control-request queue the embedder drains into the debug-control
+	// table. enqueue_request is the one path the drawn controls feed — and
+	// the headless test seam.
+	void enqueue_request(const ControlRequest &request);
+	bool take_request(ControlRequest &request);
 
 	// The formatted page, for tests and probes (the StatsWindow row-text
 	// seam): row i is the i-th retail label, "Label: value".
@@ -57,7 +60,6 @@ public:
 
 	// The control strip's edit seeds (tests read what a click would send).
 	int32_t rain_percent_edit() const { return rain_pct_edit_; }
-	int32_t transition_seconds_edit() const { return seconds_edit_; }
 
 private:
 	void format_rows();
@@ -67,7 +69,7 @@ private:
 	EnvironmentSnapshot snapshot_{};
 	std::array<std::string, kRowCount> rows_{};
 	bool shown_ = false;
-	std::deque<EnvironmentRequest> requests_;
+	std::deque<ControlRequest> requests_;
 	// The picker buffers of the color rows: a row follows its snapshot swatch
 	// until its picker opens, then the picker owns it until it closes.
 	std::array<std::array<float, 3>, kRowCount> color_edit_{};

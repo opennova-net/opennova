@@ -4,6 +4,7 @@
 // channel — the model never touches the environment object.
 
 #include "object/object_model.h"
+#include "object/material_info.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -17,6 +18,8 @@
 #include <runtime/renderer/render_order.h>
 #include <formats/threedi/threedi_3di3.h>
 
+using namespace opennova::threedi;
+
 namespace godot {
 
 namespace {
@@ -24,48 +27,18 @@ namespace {
 // index_hue.gd: golden-ratio conjugate hue spread.
 constexpr double kPhiConjugate = 0.618033988749895;
 
-const StringName &postmultiply_material_meta() {
-	static const StringName name("_opennova_postmultiply_material");
-	return name;
-}
-
-Ref<ShaderMaterial> auxiliary_for(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_meta) {
-	if (p_material.is_null() ||
-			!p_material->has_meta(p_meta)) {
-		return Ref<ShaderMaterial>();
-	}
-	return p_material->get_meta(p_meta, Variant());
-}
-
 } // namespace
 
 void ObjectModel::set_material_and_auxiliary_parameter(
-		const Ref<ShaderMaterial> &p_material, const StringName &p_name,
+		const Ref<ShaderMaterial> &p_material,
+		const Ref<ShaderMaterial> &p_auxiliary, const StringName &p_name,
 		const Variant &p_value) {
 	if (p_material.is_null()) {
 		return;
 	}
 	p_material->set_shader_parameter(p_name, p_value);
-	const Ref<ShaderMaterial> postmultiply = auxiliary_for(
-			p_material, postmultiply_material_meta());
-	if (postmultiply.is_valid()) {
-		postmultiply->set_shader_parameter(p_name, p_value);
-	}
-}
-
-void ObjectModel::build_material_defs() {
-	material_defs_.clear();
-	const Array materials = object_data_->get_materials();
-	for (int64_t i = 0; i < materials.size(); ++i) {
-		const Dictionary material = materials[i];
-		const int64_t material_index =
-				int64_t(material.get("material_index", material.get("index", 0)));
-		material_defs_[material_index] = material;
-		const int64_t array_index = int64_t(material.get("index", material_index));
-		if (!material_defs_.has(array_index)) {
-			material_defs_[array_index] = material;
-		}
+	if (p_auxiliary.is_valid()) {
+		p_auxiliary->set_shader_parameter(p_name, p_value);
 	}
 }
 
@@ -75,57 +48,68 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 	if (cached != nullptr) {
 		return *cached;
 	}
-	const Dictionary *def = material_defs_.getptr(p_material_array_index);
+	// The surface's material index addresses the MTRL row by its authored
+	// index first, else by array position (ObjectData::find_material_array_index).
+	const int array_index = object_data_.is_valid()
+			? object_data_->find_material_array_index(p_material_array_index)
+			: -1;
+	Ref<ShaderMaterial> postmultiply;
 	const Ref<ShaderMaterial> material =
-			create_material(p_material_array_index, def != nullptr ? *def : Dictionary());
+			create_material(array_index, p_material_array_index, postmultiply);
 	material_cache_[cache_key] = material;
+	if (postmultiply.is_valid()) {
+		postmultiply_cache_[cache_key] = postmultiply;
+	}
 	return material;
 }
 
-Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
-		const Dictionary &p_material_def) {
+Ref<ShaderMaterial> ObjectModel::postmultiply_material_for_index(
+		int p_material_array_index) const {
+	const Ref<ShaderMaterial> *cached =
+			postmultiply_cache_.getptr(int64_t(p_material_array_index));
+	return cached != nullptr ? *cached : Ref<ShaderMaterial>();
+}
+
+Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index, int p_material_index,
+		Ref<ShaderMaterial> &r_postmultiply) {
+	r_postmultiply = Ref<ShaderMaterial>();
 	Ref<ShaderMaterial> material;
 	material.instantiate();
-	const int material_index = int(p_material_def.get("index", p_index));
-	Dictionary info;
-	if (object_data_.is_valid() && material_index >= 0 &&
-			material_index < object_data_->get_material_count()) {
-		info = object_data_->get_material_info(material_index);
-	}
-	String shader_tag =
-			String(info.get("shader_tag", p_material_def.get("shader", "FF_ST_OP")));
+	// The authored MTRL row; a surface with no row builds the FF_ST_OP defaults.
+	MaterialInfo info;
+	const bool has_info = object_data_.is_valid() &&
+			object_data_->get_material_info(p_array_index, info);
+	String shader_tag = has_info ? info.shader_tag : String("FF_ST_OP");
 	if (shader_tag.is_empty()) {
 		shader_tag = "FF_ST_OP";
 	}
-	const int def_flags = int(p_material_def.get("flags", 0));
 	int material_flags = 0;
-	if (bool(info.get("alpha_test_enabled",
-				(def_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0))) {
+	if (has_info && info.alpha_test_enabled) {
 		material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 	}
-	if (bool(info.get("alpha_invert",
-				(def_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0))) {
+	if (has_info && info.alpha_invert) {
 		material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT;
 	}
-	if (bool(info.get("two_sided",
-				(def_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) != 0))) {
+	if (has_info && info.two_sided) {
 		material_flags |= THREEDI_MATERIAL_FLAG_TWO_SIDED;
 	}
-	const int emissive_type =
-			bool(info.get("emissive", false)) ? 2 : int(p_material_def.get("emissive_type", 0));
-	const int is_glass_flag =
-			bool(info.get("is_glass", p_material_def.get("is_glass", false))) ? 1 : 0;
-	const int alpha_test_byte = int(info.get("alpha_test",
-			int(Math::round(float(p_material_def.get("alpha_threshold", 0.0)) * 255.0f))));
+	const int emissive_type = (has_info && info.emissive) ? 2 : 0;
+	const int is_glass_flag = (has_info && info.is_glass) ? 1 : 0;
+	const int alpha_test_byte = has_info ? info.alpha_test : 0;
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 
 	// Textures resolve before the shader key: the detail stage only survives
 	// classification when the secondary texture actually resolved.
-	Ref<Texture2D> diffuse = load_texture_for_slot(p_material_def, 1);
-	Ref<Texture2D> detail = load_texture_for_slot(p_material_def, 2);
-	Ref<Texture2D> normal = load_texture_for_slot(p_material_def, 3);
-	if (normal.is_null()) {
-		normal = load_texture_for_slot(p_material_def, 4);
+	Ref<Texture2D> diffuse;
+	Ref<Texture2D> detail;
+	Ref<Texture2D> normal;
+	if (object_data_.is_valid() && p_array_index >= 0) {
+		diffuse = object_data_->load_material_slot_texture(p_array_index, 1);
+		detail = object_data_->load_material_slot_texture(p_array_index, 2);
+		normal = object_data_->load_material_slot_texture(p_array_index, 3);
+		if (normal.is_null()) {
+			normal = object_data_->load_material_slot_texture(p_array_index, 4);
+		}
 	}
 	if (diffuse.is_null() && detail.is_valid()) {
 		diffuse = detail;
@@ -172,13 +156,13 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		proxy_material.instantiate();
 		proxy_material->set_shader(proxy_shader);
 		proxy_material->set_render_priority(opennova::renderer::kRungObjectPostMultiply);
-		material->set_meta(postmultiply_material_meta(), proxy_material);
+		r_postmultiply = proxy_material;
 	}
 	if (diffuse.is_valid()) {
-		set_material_and_auxiliary_parameter(material, "u_diffuse", diffuse);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", diffuse);
 	} else {
-		set_material_and_auxiliary_parameter(material, "u_diffuse",
-				solid_colour_texture(hash_color_for_index(p_index)));
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse",
+				solid_colour_texture(hash_color_for_index(p_material_index)));
 	}
 	if (detail.is_valid()) {
 		material->set_shader_parameter("u_detail", detail);
@@ -192,18 +176,18 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
 		// The ref byte feeds the compare exactly; the shader keeps a > ref
 		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold",
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold",
 				float(alpha_test_byte) / 255.0f);
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert",
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert",
 				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0
 						? 1.0f
 						: 0.0f);
 	} else {
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_threshold", 0.0f);
-		set_material_and_auxiliary_parameter(material, "u_alpha_test_invert", 0.0f);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
+		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
 	}
-	const Color reflect = info.get("reflect_color", Color(0.7f, 0.8f, 0.9f, 0.35f));
-	set_material_and_auxiliary_parameter(material, "u_reflect_color", reflect);
+	const Color reflect = has_info ? info.reflect_color : Color(0.7f, 0.8f, 0.9f, 0.35f);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_reflect_color", reflect);
 	// The PANM evaluator supplies the complete two-row affine transform.
 	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
@@ -223,32 +207,6 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	// render_sector_model @0x5d5ca0; see docs/render/render-lighting-re.md].
 	// The terrain material carries the drape pass (SlotShadow).
 	return material;
-}
-
-Ref<Texture2D> ObjectModel::load_texture_for_slot(const Dictionary &p_material_def,
-		int p_slot) {
-	if (object_data_.is_null() || p_material_def.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	const Array textures = p_material_def.get("textures", Array());
-	if (textures.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	const int material_index = int(p_material_def.get("index", -1));
-	if (material_index < 0) {
-		return Ref<Texture2D>();
-	}
-	for (int64_t i = 0; i < textures.size(); ++i) {
-		const Dictionary texture = textures[i];
-		if (int(texture.get("slot", 0)) == p_slot) {
-			const Ref<Texture2D> loaded = object_data_->load_material_texture(
-					material_index, static_cast<int>(i));
-			if (loaded.is_valid()) {
-				return loaded;
-			}
-		}
-	}
-	return Ref<Texture2D>();
 }
 
 void ObjectModel::collect_anim_frames(int p_material_index) {
@@ -291,13 +249,12 @@ bool ObjectModel::material_runtime_is_dynamic(int p_material_index) const {
 	if (object_data_.is_null()) {
 		return true;
 	}
-	const Dictionary info = object_data_->get_material_info(p_material_index);
-	if (info.is_empty()) {
+	MaterialInfo info;
+	if (!object_data_->get_material_info(p_material_index, info)) {
 		return true;
 	}
-	return int(info.get("uv_u_style", 0)) != 0 || int(info.get("uv_v_style", 0)) != 0 ||
-			int(info.get("rgb_gen_style", 0)) != 0 ||
-			int(info.get("alpha_gen_style", 0)) != 0;
+	return info.uv_u_style != 0 || info.uv_v_style != 0 ||
+			info.rgb_gen_style != 0 || info.alpha_gen_style != 0;
 }
 
 // Partition surface materials into runtime-dynamic slots and the static

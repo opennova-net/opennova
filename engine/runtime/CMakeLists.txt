@@ -15,7 +15,9 @@ add_library(opennova_runtime STATIC
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # devtools — the ImGui pass, ONED's run surface and the frame-stats board
@@ -45,7 +47,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_sort.cpp
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
@@ -104,7 +105,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/model_builders.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/mounted_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/seat_spec_extract.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_collision_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_pose_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_model_cache.cpp
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
@@ -140,6 +141,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands.cpp   # the Entity_* command layer (split from world.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
@@ -167,13 +169,17 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect.cpp   # the entity directory + debug cards (ADR 0042 d5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx attach law: pool gates, identity aliases, attach plan
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/present_passes.cpp # the present passes' shared law: husk render pick, husk identity, settle tilt retention
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_input.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_loadout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_look.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/player_present.cpp  # the local player's presentation law: the FP submit, the fire-effect gate, the batch order, the spawn-loadout projection
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
@@ -190,11 +196,15 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/minefield.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/spawn_select.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tracer_trails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_attach.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_mount.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_system.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor_air.cpp # the CHel/cpln mover: input block, prediction leg, authority legs (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_part_anim.cpp # the rotor spin machine + wheel phase (split of the mover tails)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_suspension.cpp # the spring leg: latch pick + per-wheel step (split of the contact solves)
@@ -206,6 +216,56 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_chain.cpp
+    # replication — the world<->wire seam (ex net/netsim, ADR 0043 d4):
+    # connection-fan primitives, client replica state and its folds, the
+    # client world materializer, the roster/scoreboard views
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_body_arbitration.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_body_ticks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_death.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_endround.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_roster_tags.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_scoreboard_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_world_materializer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/connection_fan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
+    # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
+    # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
+    # server/client state machines and frame loops, the transports
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.
@@ -216,8 +276,10 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
-# The Shape A chain: runtime -> base -> formats -> io (all PUBLIC).
-target_link_libraries(opennova_runtime PUBLIC opennova_base opennova_crt)
+# The chain (ADR 0043 d4): runtime -> net -> base -> formats -> io (all
+# PUBLIC). runtime carries the in-match session and replication, so it sits
+# above the wire-only net group.
+target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennova_crt)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 

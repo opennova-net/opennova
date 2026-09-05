@@ -95,24 +95,29 @@ func _make_avatar_driver(include_preview := false) -> MenuDriver:
 	return MenuDriverFixture.driver_over(self, _doc_from_xml(_avatar_screen_xml(include_preview)), "player.mnu")
 
 
+func _character_ids(profile: CharacterJoinProfile) -> Array[int]:
+	return [profile.get_character_id(0), profile.get_character_id(1)]
+
+
+func _player_classes(profile: CharacterJoinProfile) -> Array[int]:
+	return [profile.get_player_class(0), profile.get_player_class(1)]
+
+
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var db := _load_db()
-	var profile := NetSessionDrive.character_join_profile_from_database(db)
-	var ids: Array = profile.get("character_ids", [])
-	var classes: Array = profile.get("player_classes", [])
-	var avatars: Array = profile.get("avatars", [])
+	var profile := db.character_join_profile()
 
 	# The first combo of each alignment in table order (N00 D00 combo 1; N04 D00
 	# combo 1). The shipped table yields 0x8207 there (its first evil entry is N07).
-	assert_eq(ids, [0x0200, 0x8204],
+	assert_eq(_character_ids(profile), [0x0200, 0x8204],
 			"fresh profile selects the first good/evil avatar-table entries")
-	assert_eq(classes, [8, 8],
+	assert_eq(_player_classes(profile), [8, 8],
 			"fresh retail profile is rifleman on both sides")
 	# SYN_HEAD_BOONIE (N00 D00 combo 1) carries voice 1; N04 D00 combo 1 wears
 	# SYN_HEAD_11, voice 3 (tests/fixtures/minimal_avatars_gen.cpp).
-	assert_eq(avatars, [1, 3],
+	assert_eq([profile.get_avatar(0), profile.get_avatar(1)], [1, 3],
 			"zero voice overrides resolve through each selected combo's head voice")
-	assert_eq(int(profile.get("team_request", 0)), -1,
+	assert_eq(profile.team_request, -1,
 			"fresh profile asks the companion to assign a side")
 
 
@@ -130,51 +135,48 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 			{"player_class": 6},
 		],
 	}
-	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
-	var ids: Array = profile.get("character_ids", [])
-	var avatars: Array = profile.get("avatars", [])
-	var combo: Dictionary = db.get_combo(0, 0, 1)
-	var head: Dictionary = combo.get("head", {})
+	var profile := db.character_join_profile(selected)
+	var combo := db.get_combo(0, 0, 1)
 
-	assert_eq(int(ids[0]), 0x0400,
+	assert_eq(profile.get_character_id(0), 0x0400,
 			"nat 0 / div 0 / combo id 2 packs into bits 0..14")
-	assert_eq(int(ids[1]), 0x8204,
+	assert_eq(profile.get_character_id(1), 0x8204,
 			"choosing side A does not erase side B's profile selection")
-	assert_eq(int(avatars[0]), int(head.get("voice", -1)),
+	assert_eq(profile.get_avatar(0), combo.get_head().voice,
 			"the selected combo supplies its retail avatar byte")
-	assert_eq(profile.get("player_classes", []), [6, 6],
+	assert_eq(_player_classes(profile), [6, 6],
 			"retail commits the chosen class to both side blocks")
 
 
 func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
 	var db := _load_db()
-	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
-	var red: Dictionary = db.resolve_character_id(0x8407, 1)
-	assert_false(blue.is_empty())
-	assert_false(red.is_empty())
+	var blue := db.resolve_character_id(0x0400, 0)
+	var red := db.resolve_character_id(0x8407, 1)
+	assert_not_null(blue)
+	assert_not_null(red)
 	var selected := {
 		"team": 0,
 		"side_profiles": [
 			{
 				"team": 0,
-				"nationality": int(blue.get("nationality_index", -1)),
-				"division": int(blue.get("division_index", -1)),
-				"combo": int(blue.get("combo_index", -1)),
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
 				"player_class": 5,
 			},
 			{
 				"team": 1,
-				"nationality": int(red.get("nationality_index", -1)),
-				"division": int(red.get("division_index", -1)),
-				"combo": int(red.get("combo_index", -1)),
+				"nationality": red.nationality_index,
+				"division": red.division_index,
+				"combo": red.combo_index,
 				"player_class": 9,
 			},
 		],
 	}
-	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
-	assert_eq(profile.get("character_ids", []), [0x0400, 0x8407],
+	var profile := db.character_join_profile(selected)
+	assert_eq(_character_ids(profile), [0x0400, 0x8407],
 			"assignment to either team receives that side's persisted character")
-	assert_eq(profile.get("player_classes", []), [5, 9],
+	assert_eq(_player_classes(profile), [5, 9],
 			"an untouched loaded profile retains its two retail class bytes")
 
 
@@ -204,10 +206,8 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 
 	# Each combo row is "<head display> - <body display>". With no gametext table registered
 	# (before_each cleared Strings) the names fall back to their raw keys.
-	var c0: Dictionary = db.get_combo(0, 0, 0)
-	var head: Dictionary = c0.get("head", {})
-	var body: Dictionary = c0.get("body", {})
-	var expected := "%s - %s" % [String(head.get("display_name", "")), String(body.get("display_name", ""))]
+	var c0 := db.get_combo(0, 0, 0)
+	var expected := "%s - %s" % [c0.get_head().display_name, c0.get_body().display_name]
 	assert_eq(driver.item_text(combos, 0), expected, "combo row is the last - first character label")
 
 
@@ -222,11 +222,11 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 	# Map the exact keys this test asserts on to friendly text in a synthetic Avatars table.
 	var t := RtxtStringFile.new()
 	t.add_section("Avatars")
-	var nat0 := String(db.get_nationality(0).get("name_key", ""))
+	var nat0 := db.get_nationality(0).name_key
 	t.add_entry(nat0, "United States", 0, Vector2i())
-	var c0: Dictionary = db.get_combo(0, 0, 0)
-	var head_key := String(c0.get("head", {}).get("display_name", ""))
-	var body_key := String(c0.get("body", {}).get("display_name", ""))
+	var c0 := db.get_combo(0, 0, 0)
+	var head_key := c0.get_head().display_name
+	var body_key := c0.get_body().display_name
 	t.add_entry(head_key, "Boonie Hat", 0, Vector2i())
 	if body_key != head_key:
 		t.add_entry(body_key, "Camo BDU", 0, Vector2i())
@@ -268,7 +268,7 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	var good_rows: Array[int] = companion.nationality_rows()
 	assert_gt(good_rows.size(), 0, "at least one good nationality")
 	for i in good_rows:
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_GOOD,
+		assert_eq(db.get_nationality(i).alignment, AvatarDatabase.ALIGN_GOOD,
 			"team 0 shows only good-aligned nationalities")
 
 	# Switching to SIDE_RED (team 1) re-filters to evil-aligned nationalities.
@@ -279,7 +279,7 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
 	driver.widget_activated.emit(side_red, "SIDE_RED")
 	for i in companion.nationality_rows():
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_EVIL,
+		assert_eq(db.get_nationality(i).alignment, AvatarDatabase.ALIGN_EVIL,
 			"team 1 shows only evil-aligned nationalities")
 
 	# The two teams partition every nationality (good->blue, evil->red; D-PLAYERINFO-5).
@@ -337,6 +337,63 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 				"%s under the portrait is mouse-transparent too" % child.name)
 
 
+func test_preview_render_activity_follows_visibility() -> void:
+	# A hidden portrait must not keep paying for a 3D pass or its animation
+	# (the reflection-viewport rule): UPDATE_ALWAYS and _process follow
+	# is_visible_in_tree(), covering both a hidden widget rect and the whole
+	# shell hiding for a mission.
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+			null, null, null, "player.mnu"), "the preview document opens on the driver")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview
+	assert_not_null(preview, "the preview is mounted")
+	if preview == null:
+		return
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_ALWAYS, "a visible portrait renders every frame")
+	assert_true(preview.is_processing())
+	frame.hide()
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED,
+			"hiding the frame stops the portrait's render and animation")
+	assert_false(preview.is_processing())
+	frame.show()
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_ALWAYS, "showing the frame restores rendering")
+	assert_true(preview.is_processing())
+
+
+func test_release_frees_the_preview_mount() -> void:
+	# The mount survives document swaps by construction (it is a child of the
+	# persistent MenuFrame); the shell's release call is its ONLY teardown when
+	# another document takes the driver. Without it the portrait keeps
+	# rendering, and a stale reposition can park it over the next document's
+	# widgets (the options-menu leak).
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+			null, null, null, "player.mnu"), "the preview document opens on the driver")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	assert_not_null(frame.find_child("PlayerInfoAvatarPreview", true, false),
+			"the preview is mounted while the companion owns the document")
+	companion.on_menu_released()
+	await get_tree().process_frame  # queue_free drains
+	assert_null(frame.find_child("PlayerInfoAvatarPreview", true, false),
+			"releasing the companion frees the frame-child preview mount")
+
+
 func test_snapshot_reports_current_selection() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
@@ -357,8 +414,8 @@ func test_snapshot_reports_current_selection() -> void:
 
 func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	var db := _load_db()
-	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
-	var red: Dictionary = db.resolve_character_id(0x8407, 1)
+	var blue := db.resolve_character_id(0x0400, 0)
+	var red := db.resolve_character_id(0x8407, 1)
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_persisted_profile({
 		"name": "Persistent",
@@ -366,17 +423,17 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 		"side_profiles": [
 			{
 				"team": 0,
-				"nationality": int(blue.get("nationality_index", -1)),
-				"division": int(blue.get("division_index", -1)),
-				"combo": int(blue.get("combo_index", -1)),
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
 				"player_class": 8,
 				"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400,
 			},
 			{
 				"team": 1,
-				"nationality": int(red.get("nationality_index", -1)),
-				"division": int(red.get("division_index", -1)),
-				"combo": int(red.get("combo_index", -1)),
+				"nationality": red.nationality_index,
+				"division": red.division_index,
+				"combo": red.combo_index,
 				"player_class": 8,
 				"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407,
 			},
@@ -389,7 +446,7 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 		return
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
-			int(blue.get("combo_index", -1)))
+			blue.combo_index)
 	assert_eq(driver.get_widget_text(driver.widget_id("PLAYERNAME")), "Persistent")
 	var red_radio := driver.widget_id("SIDE_RED")
 	driver.set_widget_checked(red_radio, true)
@@ -397,11 +454,11 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	driver.widget_activated.emit(red_radio, "SIDE_RED")
 	var red_snapshot := companion.snapshot()
 	assert_eq(int(red_snapshot.get("nationality", -1)),
-			int(red.get("nationality_index", -1)))
+			red.nationality_index)
 	assert_eq(int(red_snapshot.get("division", -1)),
-			int(red.get("division_index", -1)))
+			red.division_index)
 	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
-			int(red.get("combo_index", -1)),
+			red.combo_index,
 			"switching side restores that side's persisted combo")
 	var saved_sides: Array = companion.snapshot().get("side_profiles", [])
 	assert_eq(int((saved_sides[0] as Dictionary).get("avatar_packed", -1)), 0x0400)
@@ -534,29 +591,29 @@ func _weight_text() -> String:
 # is public: row = position in the filtered slot list + 1 (row 0 is NONE)
 # [orig: populate_weapon_slot_lists @ 0x560430].
 func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
-		class_mask: int, weapon_name: String) -> Dictionary:
+		class_mask: int, weapon_name: String) -> WeaponDef:
 	var combo := _ammo_id(control)
-	var defs: Array = wdb.get_slot_weapons(slot, class_mask, 2)  # blue
+	var defs := wdb.get_slot_weapons(slot, class_mask, 2)  # blue
 	for i in defs.size():
-		var w := defs[i] as Dictionary
-		if String(w.get("name", "")).nocasecmp_to(weapon_name) == 0:
+		var w := defs[i] as WeaponDef
+		if w.name.nocasecmp_to(weapon_name) == 0:
 			_ammo_driver.select_row(combo, i + 1)  # emits -> the witnessed refill
 			return w
 	assert_true(false, "%s offers %s" % [control, weapon_name])
-	return {}
+	return null
 
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
 # mirrors [orig: the stricmp walk in populate_ammo_combo_boxes @ 0x55def0].
-func _expected_sub(wdb: WeaponDatabase, parent: Dictionary) -> Dictionary:
-	var parent_round := String(parent.get("round_type", ""))
-	for k in range(1, int(parent.get("loadout_subclasses", 0)) + 1):
-		var cand := wdb.get_weapon(int(parent.get("index", -1)) + k)
-		if cand.is_empty():
-			return {}
-		if String(cand.get("round_type", "")).nocasecmp_to(parent_round) != 0:
+func _expected_sub(wdb: WeaponDatabase, parent: WeaponDef) -> WeaponDef:
+	var parent_round := parent.round_type
+	for k in range(1, parent.loadout_subclasses + 1):
+		var cand := wdb.get_weapon(parent.index + k)
+		if cand == null:
+			return null
+		if cand.round_type.nocasecmp_to(parent_round) != 0:
 			return cand
-	return {}
+	return null
 
 
 func _items(name: String) -> Array:
@@ -605,12 +662,12 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 	var selected_primary := ""
 	var selected_row := -1
 	for i in primary_defs.size():
-		var weapon: Dictionary = primary_defs[i]
-		if String(weapon.get("name", "")).nocasecmp_to("WPN_M4AUTO") == 0:
-			selected_primary = String(weapon.get("name", ""))
+		var weapon: WeaponDef = primary_defs[i]
+		if weapon.name.nocasecmp_to("WPN_M4AUTO") == 0:
+			selected_primary = weapon.name
 			selected_row = i + 1 # row 0 is NONE
 			break
-	assert_false(selected_primary.is_empty(), "the fixture offers M4AUTO for medic/blue")
+	assert_false(selected_primary == null, "the fixture offers M4AUTO for medic/blue")
 	_ammo_driver.select_row(_ammo_id("PRIMARY"), selected_row, false)  # silent reselect
 
 	var profile := companion.snapshot()
@@ -686,12 +743,12 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var _presenter := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var ammo := _ammo_id("PRIMARY_AMMO1")
-	var maxclips := int(w.get("maxclips", 0))
+	var maxclips := w.maxclips
 	assert_true(_ammo_driver.is_widget_shown(ammo), "a clip-carrying weapon shows its ammo combo")
 	assert_eq(_ammo_driver.item_count(ammo), maxclips,
 		"rows 1..maxclips [orig: populate_ammo_combo_boxes @ 0x55def0]")
 	assert_eq(_ammo_driver.item_text(ammo, 0),
-		"%d - %s" % [int(w.get("clipsize", 0)), String(w.get("round_type", ""))],
+		"%d - %s" % [w.clipsize, w.round_type],
 		"row labels are the witnessed \"%d - %s\" rounds + round type")
 	assert_eq(_ammo_driver.selected_row(ammo), maxclips - 1,
 		"the untouched default selects the full (maxclips) row")
@@ -726,14 +783,14 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	# The witnessed walk skips same-round WPN_M4M203 and lands on WPN_M4M203HE
 	# (AMMO_M203_40MM_NADE) within loadout_subclasses = 2.
 	var sub := _expected_sub(wdb, w)
-	assert_eq(String(sub.get("name", "")), "WPN_M4M203HE",
+	assert_eq(sub.name, "WPN_M4M203HE",
 		"the sub walk lands on the first DIFFERING round_type entry")
 	var ammo2 := _ammo_id("PRIMARY_AMMO2")
 	assert_true(_ammo_driver.is_widget_shown(ammo2), "a live sub-weapon shows *_AMMO2")
-	assert_eq(_ammo_driver.item_count(ammo2), int(sub.get("maxclips", 0)),
+	assert_eq(_ammo_driver.item_count(ammo2), sub.maxclips,
 		"*_AMMO2 rows come from the SUB-weapon's maxclips")
 	assert_eq(_ammo_driver.item_text(ammo2, 0),
-		"%d - %s" % [int(sub.get("clipsize", 0)), String(sub.get("round_type", ""))],
+		"%d - %s" % [sub.clipsize, sub.round_type],
 		"*_AMMO2 labels use the sub-weapon's clipsize + round type")
 
 
@@ -748,13 +805,13 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
 	for i in mini(expected.size(), 3):
 		var combo := _ammo_id("GRENADE_AMMO%d" % (i + 1))
-		var w := expected[i] as Dictionary
+		var w := expected[i] as WeaponDef
 		assert_true(_ammo_driver.is_widget_shown(combo), "an owned grenade control shows")
-		assert_eq(_ammo_driver.item_count(combo), int(w.get("maxclips", 0)) + 1,
+		assert_eq(_ammo_driver.item_count(combo), w.maxclips + 1,
 			"grenade rows are 0..maxclips INCLUDING the zero row [orig: @ 0x55def0]")
-		assert_eq(_ammo_driver.item_text(combo, 0), "0 - %s" % String(w.get("round_type", "")),
+		assert_eq(_ammo_driver.item_text(combo, 0), "0 - %s" % w.round_type,
 			"row 0 is the zero-rounds row")
-		assert_eq(_ammo_driver.selected_row(combo), int(w.get("maxclips", 0)),
+		assert_eq(_ammo_driver.selected_row(combo), w.maxclips,
 			"the untouched default selects the full row")
 	for i in range(expected.size(), 3):
 		assert_false(_ammo_driver.is_widget_shown(_ammo_id("GRENADE_AMMO%d" % (i + 1))),
@@ -771,13 +828,13 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
 	# full-grenade clip-only terms the fill selects by default.
-	var expected := float(w.get("weight", 0.0)) \
-			+ int(w.get("maxclips", 0)) * float(w.get("clip_weight", 0.0))
+	var expected := w.weight \
+			+ w.maxclips * w.clip_weight
 	var sub := _expected_sub(wdb, w)
-	if not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
-		expected += int(sub.get("maxclips", 0)) * float(sub.get("clip_weight", 0.0))
+	if sub != null and sub.clipsize > 0:
+		expected += sub.maxclips * sub.clip_weight
 	for g in wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
-		expected += int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0))
+		expected += g.maxclips * g.clip_weight
 	var band := "Light"
 	if expected >= 66.6:
 		band = "Heavy"
@@ -813,7 +870,7 @@ func test_ammo_selection_recomputes_weight_and_snapshot() -> void:
 		"the type byte rides the snapshot [orig: the kit tuple flags field]")
 	# Icon side of the same selection: the M4's authored icon texture name is
 	# non-empty, but with no resource root the rect stays cleared (root-less unit).
-	assert_false(String(w.get("icon", "")).is_empty(), "the fixture authors an icon")
+	assert_false(w.icon.is_empty(), "the fixture authors an icon")
 
 
 func test_type_combo_locks_for_noammotypes_weapons() -> void:
@@ -874,8 +931,8 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	var g := wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
-	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
+	var g: WeaponDef = wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2)[0]
+	assert_gt(g.clip_weight * g.maxclips, 0.0,
 		"the first grenade def carries weighable clips")
 	var default_text := _weight_text()  # -1 default = full grenades weighed in
 	_ammo_driver.select_row(_ammo_id("GRENADE_AMMO1"), 0)  # the zero row
@@ -884,7 +941,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	var zero_total := float(_weight_text().get_slice(" ", 2))
 	var default_total := float(default_text.get_slice(" ", 2))
 	assert_almost_eq(default_total - zero_total,
-		int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0)), 0.06,
+		g.maxclips * g.clip_weight, 0.06,
 		"the delta is exactly the grenade's maxclips*clip_weight term")
 
 
@@ -895,5 +952,5 @@ func test_weapon_dict_carries_loadout_subclasses() -> void:
 	var wdb := _load_weapons()
 	var idx := wdb.find_weapon("WPN_M4M203AUTO")
 	assert_gt(idx, 0)
-	assert_eq(int(wdb.get_weapon(idx).get("loadout_subclasses", -1)), 2,
+	assert_eq(wdb.get_weapon(idx).loadout_subclasses, 2,
 		"loadout_subclasses (+36) rides the transport dict")

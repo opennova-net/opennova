@@ -46,6 +46,7 @@ struct EnvironmentSnapshot {
 	int32_t fov_degrees = 0;
 	int32_t sky_height_metres = 0;  // Env_SkyHeightCurrent hi word
 	int32_t sky_speed = 0;          // Env_CloudScrollRate >> 10
+	int32_t sky_speed_target = 0;   // Env_CloudScrollRateTarget >> 10 (the ramp's goal)
 	int32_t rain_pct = 0;           // (100 * Env_RainPctCurrent) >> 16
 	int32_t rain_target_pct = 0;
 	int32_t overcast_pct = 0;       // (100 * Env_OvercastBlend) >> 16

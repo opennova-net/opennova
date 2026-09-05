@@ -14,6 +14,9 @@
 // The target is pre-weakened through the scripted-SETHP store (the WAC SETHP
 // shape) so the FIRST connecting round completes the kill; the kill still
 // travels the full damage/death chain, only the required hit count changes.
+// This is NOT a firefight-balance test: the incidental exchange is pinned by
+// scripted stores (guard hold on the target, per-tick player top-up), so the
+// player cannot lose the race and no assertion rides on it.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms);
 // no synthetic leg exists: the death matrix needs a retail infantry .adm.
 #include "common/retail_mission_files.h"
@@ -49,9 +52,9 @@ struct Nearest {
 
 Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 	Nearest best;
-	const w::Vec3 player = rig.player_position();
-	for (int i = 0; i < rig.ai.count(); ++i) {
-		w::AiEntity *e = rig.ai.at(i);
+	const w::Vec3 player = rig.local.player_position();
+	for (int i = 0; i < rig.world.ai.count(); ++i) {
+		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active) continue;
 		w::Entity *ent = rig.world.registry.get(e->handle);
 		if (ent == nullptr || !ent->alive || ent->mounted) continue;
@@ -79,7 +82,7 @@ int main() {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
 	if (!expect(rig.ammo_ok, "ammo.def loaded")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs from weapon.def")) return 1;
 
@@ -93,14 +96,14 @@ int main() {
 	// fire distance stop and open fire — waiting loses the race against the
 	// NPC's own perception + fire chain.
 	w::EntityHandle target;
-	rig.input.forward = true;
+	rig.local.input.forward = true;
 	while (seconds < kMaxMissionSeconds) {
 		const Nearest npc = nearest_npc(rig);
 		if (npc.ai != nullptr) {
-			const w::Vec3 me = rig.player_position();
+			const w::Vec3 me = rig.local.player_position();
 			w::Vec3 to = testrig::ai_position(*npc.ai);
 			to.z = me.z;
-			rig.aim_at(me, to);
+			rig.local.aim_at(me, to);
 			if (npc.distance <= kFireDistance) {
 				target = npc.ai->handle;
 				std::printf("corpse: target lock net=%d hp=%d at %.1fu deathtime=%d leave_corpse=%d\n",
@@ -112,9 +115,9 @@ int main() {
 		mission_second();
 		if (seconds % 10 == 0)
 			std::printf("corpse: approach t=%ds dist=%.1fu hp=%d\n", seconds,
-					npc.ai != nullptr ? npc.distance : -1.0f, rig.player_health());
+					npc.ai != nullptr ? npc.distance : -1.0f, rig.local.player_health());
 	}
-	rig.input.forward = false;
+	rig.local.input.forward = false;
 	if (!target.valid()) {
 		std::fprintf(stderr, "FAIL: no foot NPC came within %.0fu in %ds\n", kFireDistance, seconds);
 		return 1;
@@ -124,51 +127,88 @@ int main() {
 	// tick while the trigger is held (the FSM sustains the volley and reloads).
 	// Rounds leave the muzzle (the +0.9 u chest stand-in) parallel to the look,
 	// so aim the muzzle at the chest.
-	rig.set_entity_health(target, 10);
+	//
+	// The ambient firefight is incidental to this test (the subject is the
+	// corpse chain), and since the 2026-09-01 guard-bit fix landed the authored
+	// group guard-clear on engine_flags, the formerly frozen guards patrol
+	// faithfully — the target evades and the pack can win the incidental race.
+	// Two scripted (WAC-shaped) stores pin the scenario without touching the
+	// kill chain: ssnguard holds the target on its post (the guard bit routes
+	// it into the stationary mounted-fire tail), and the player is topped up
+	// through the same SETHP store each tick.
+	{
+		const w::Entity *tent0 = rig.world.registry.get(target);
+		if (tent0 != nullptr && tent0->net_id != 0)
+			rig.world.commands.set_ssn_guard(tent0->net_id, true);
+	}
+	rig.world.commands.set_entity_health(target, 10);
 	int hp_prev = 10;
 	int fire_seconds = 0;
 	bool killed = false;
 	bool pressed = true;
 	while (seconds < kMaxMissionSeconds && fire_seconds < kFireSeconds) {
 		for (int t = 0; t < 62; ++t) {
-			const w::AiEntity *tai = rig.ai_for(target);
+			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			if (tai != nullptr) {
-				const w::Vec3 me = rig.player_position();
+				const w::Vec3 me = rig.local.player_position();
 				const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
 				w::Vec3 chest = testrig::ai_position(*tai);
 				chest.z += 0.9f;
-				rig.aim_at(muzzle, chest);
-				rig.input.forward = testrig::planar_distance(me, chest) > 8.0f;
+				rig.local.aim_at(muzzle, chest);
+				rig.local.input.forward = testrig::planar_distance(me, chest) > 8.0f;
 			}
-			rig.set_weapon_input(true, pressed, false);
+			rig.local.set_weapon_input(true, pressed, false);
 			pressed = false;
+			if (rig.world.cached.local_player.valid())
+				rig.world.commands.set_entity_health(rig.world.cached.local_player, 150);
 			rig.tick();
 		}
 		++seconds;
 		++fire_seconds;
 		const w::Entity *tent = rig.world.registry.get(target);
-		const w::AiEntity *tai = rig.ai_for(target);
+		const w::AiEntity *tai = rig.world.ai.for_handle(target);
 		const int hp = tai != nullptr ? tai->health : -1;
 		if (hp < hp_prev && hp >= 0) std::printf("corpse: HIT t=%ds target hp %d -> %d\n", seconds, hp_prev, hp);
 		hp_prev = hp;
 		if (tent == nullptr || !tent->alive || hp <= 0) {
 			killed = true;
-			rig.input.forward = false;
-			rig.set_weapon_input(false, false, false);
+			rig.local.input.forward = false;
+			rig.local.set_weapon_input(false, false, false);
+			// Release the scripted guard hold: the corpse watch is about an
+			// ordinary body, and the mounted-bit tail must not keep owning it.
+			if (tent != nullptr && tent->net_id != 0)
+				rig.world.commands.set_ssn_guard(tent->net_id, false);
 			std::printf("corpse: KILLED t=%ds — player rounds killed the target\n", seconds);
 			break;
-		}
-		if (rig.player_health() <= 0) {
-			std::fprintf(stderr, "FAIL: the NPC killed the PLAYER first (t=%ds) — rerun\n", seconds);
-			return 1;
 		}
 	}
 	if (!expect(killed, "the fire phase killed the target within its budget")) return 1;
 
+	// Walk up to the body before the watch: the guard died on its authored
+	// post, which can keep hard cover between the watcher and the 0.9 u watch
+	// ray. The §19.4 rule is about a SEEN corpse — stand where it is seen.
+	{
+		int walk_seconds = 0;
+		while (walk_seconds < 20) {
+			const w::Entity *c = rig.world.registry.get(target);
+			if (c == nullptr) break;
+			const w::Vec3 me = rig.local.player_position();
+			if (testrig::planar_distance(me, c->position) <= 3.0f) break;
+			w::Vec3 to = c->position;
+			to.z = me.z;
+			rig.local.aim_at(me, to);
+			rig.local.input.forward = true;
+			rig.tick(62);
+			++seconds;
+			++walk_seconds;
+		}
+		rig.local.input.forward = false;
+	}
+
 	// --- Corpse: dead but NOT hidden; a death-family anim; the timer seeded and
 	// draining; still visible after the timer would have expired (the watch rule).
 	const w::Entity *c0 = rig.world.registry.get(target);
-	const w::AiEntity *a0 = rig.ai_for(target);
+	const w::AiEntity *a0 = rig.world.ai.for_handle(target);
 	if (!expect(c0 != nullptr && a0 != nullptr, "the corpse entity persists after the kill")) return 1;
 	const int anim0 = a0->inf.anim_state;
 	const int timer0 = c0->corpse_timer;
@@ -190,7 +230,7 @@ int main() {
 		rig.tick(62 * 5);
 		seconds += 5;
 		const w::Entity *c = rig.world.registry.get(target);
-		const w::AiEntity *a = rig.ai_for(target);
+		const w::AiEntity *a = rig.world.ai.for_handle(target);
 		const bool hidden = c == nullptr || c->hidden;
 		std::printf("corpse: watch t=%ds hidden=%d corpse_timer=%d anim=%d\n", seconds, int(hidden),
 				c != nullptr ? c->corpse_timer : -1, a != nullptr ? a->inf.anim_state : -1);

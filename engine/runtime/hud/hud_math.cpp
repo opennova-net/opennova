@@ -148,13 +148,6 @@ int power_fill_span(int32_t progress_fp16, int extent_px) {
 			(static_cast<int64_t>(progress_fp16) * extent_px + 0x8000) >> 16);
 }
 
-// [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f; the catch-up max is the
-// D-LOADSCR-1 cadence adaptation]
-int loading_bar_step(int displayed, int reported) {
-	const int lead_cap = std::min(reported + 10, 100);
-	return std::clamp(std::max(displayed + 1, reported), 0, lead_cap);
-}
-
 // [orig: the fill arithmetic @ 0x5d4c40 — the original's integer divide]
 LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed) {
 	int fill_right = x + 4 + displayed * (w + 2) / 100;

@@ -1,0 +1,287 @@
+#pragma once
+
+#include <runtime/world/local_player_view.h>
+#include <runtime/world/player_input.h>
+#include <runtime/world/tick_accumulator.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace opennova::mission {
+class MissionKernel;
+}
+
+namespace opennova::inmatch {
+
+class ClientRuntime;
+
+enum class State : uint8_t {
+	Unloaded = 0,
+	Connecting,
+	Loading,
+	Running,
+	Paused,
+	Stopping,
+	Failed,
+};
+
+enum class RoleKind : uint8_t {
+	SinglePlayer = 0,
+	ListenHost,
+	Joiner,
+	DedicatedHost,
+};
+
+enum class SessionErrorCode : uint8_t {
+	None = 0,
+	InvalidTransition,
+	NetworkRoleLocked,
+	LoadFailed,
+	SessionLost,
+	TickFailed,
+};
+
+struct SessionError {
+	SessionErrorCode code = SessionErrorCode::None;
+	std::string message;
+
+	explicit operator bool() const { return code != SessionErrorCode::None; }
+};
+
+enum class TransitionCode : uint8_t {
+	Applied = 0,
+	NoOp,
+	InvalidState,
+	RejectedForNetworkRole,
+	Failed,
+};
+
+struct TransitionResult {
+	TransitionCode code = TransitionCode::NoOp;
+	State from = State::Unloaded;
+	State to = State::Unloaded;
+	SessionError error;
+
+	bool applied() const { return code == TransitionCode::Applied; }
+};
+
+// One outer-frame input sample. Held state is replaced by the newest sample;
+// look deltas and one-shot actions accumulate until a logic tick consumes them.
+struct InputPacket {
+	world::PlayerInput movement;
+	float look_delta_x = 0.0f;
+	float look_delta_y = 0.0f;
+	// Held actions survive every catch-up tick; pressed actions and look deltas
+	// are consumed by the first successful tick only.
+	uint32_t held_action_bits = 0;
+	uint32_t pressed_action_bits = 0;
+	uint64_t sequence = 0;
+};
+
+struct CameraSample {
+	float position[3] = {0.0f, 0.0f, 0.0f};
+	float forward[3] = {0.0f, 0.0f, 1.0f};
+	bool listener_valid = false;
+};
+
+struct FrameInput {
+	double delta_seconds = 0.0;
+	CameraSample camera;
+	InputPacket player;
+	int32_t viewport_height = 0;
+};
+
+struct TickInput {
+	CameraSample camera;
+	InputPacket player;
+	// True only until the first successful tick in an outer frame. Targets use
+	// this to consume edge-triggered actions exactly once across catch-up.
+	bool consume_one_shots = false;
+	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
+	// against (0 = headless / no renderer, the seam left unset).
+	int32_t viewport_height = 0;
+};
+
+enum class TickStatus : uint8_t {
+	Ran = 0,
+	Declined,
+	SessionLost,
+	Fatal,
+};
+
+struct TickOutcome {
+	TickStatus status = TickStatus::Declined;
+	int32_t logic_tick = 0;
+	int64_t tick_us = 0; // the role's tick alone (no input prologue, no observer)
+	int64_t net_us = 0;  // the tick's wire leg, as the role measured it
+	SessionError error;
+
+	bool ran() const { return status == TickStatus::Ran; }
+	bool terminal() const {
+		return status == TickStatus::SessionLost || status == TickStatus::Fatal;
+	}
+};
+
+enum class FrameStatus : uint8_t {
+	Ok = 0,
+	NotRunning,
+	SessionLost,
+	Fatal,
+};
+
+struct FramePerf {
+	int64_t frame_us = 0;
+	int64_t tick_us = 0;
+	int32_t ticks = 0;
+};
+
+struct FrameOutcome {
+	FrameStatus status = FrameStatus::NotRunning;
+	State state = State::Unloaded;
+	std::vector<TickOutcome> ticks;
+	FramePerf perf;
+	SessionError error;
+
+	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
+	bool terminal() const {
+		return status == FrameStatus::SessionLost || status == FrameStatus::Fatal;
+	}
+};
+
+// The session's one real internal seam. Godot and the headless server both
+// provide an adapter; callers never see the former semantic callback lattice.
+// The shell's per-tick observer. after_tick runs after every tick that ran
+// (the shell's per-tick device gates); accept_tick then offers the outcome of
+// a tick that did not lose the session, and a false return ends the frame's
+// batch as SessionLost (the shell's presentation pipeline declined to go on).
+class TickObserver {
+public:
+	virtual ~TickObserver() = default;
+	virtual void after_tick() {}
+	virtual bool accept_tick(const TickOutcome &tick) { (void)tick; return true; }
+};
+
+// One role's tick over the kernel it binds: the SP/no-net frame, the listen
+// or dedicated host frame, or the joiner frame -- each the leg order it was
+// witnessed with, line for line (ADR 0043 d3). Session::run_one_tick applies
+// the frame's input through the role first (the spectator gate and the
+// medic-call send are the role's facts), then runs the role's tick.
+class Role {
+public:
+	virtual ~Role() = default;
+	virtual RoleKind kind() const = 0;
+	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
+	void unbind() { kernel_ = nullptr; }
+	mission::MissionKernel *kernel() const { return kernel_; }
+	// A spectating joiner drives no body: movement, look and fire are dropped.
+	virtual bool spectator() const { return false; }
+	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
+	// and cooldown gates are the shared prologue's. False = nothing sent.
+	virtual bool send_medic_request() { return false; }
+	virtual void run_tick(const TickInput &input) = 0;
+	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
+	virtual bool reset_to_baseline(SessionError &error) = 0;
+	virtual void close() = 0;
+	// The client-side replica runtime this role folds (the HostClient's or the
+	// joiner's); null for the bare local role and a dedicated host.
+	virtual ClientRuntime *client_runtime() { return nullptr; }
+	// The last tick's wire leg, for the shell's stats board.
+	virtual int64_t last_net_us() const { return 0; }
+	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
+	// run between the world wiring and the system registration [orig:
+	// SinglePlayer_StartMission @0x561af0]: the host stands its session up
+	// from its staged bring-up record, the joiner (re)builds its non-authority
+	// ClientRuntime, the bare local role installs nothing. True when a FRESH
+	// joiner ClientRuntime replaced the previous one (the embedder re-installs
+	// its retained join inputs on it); the host's own HostClient view is
+	// rebuilt every bring-up and carries no embedder inputs, so it reports
+	// false.
+	virtual bool bring_up() { return false; }
+
+	// The frame's input onto the local player, shared by every role: movement
+	// keys, mouse look, the fire/reload bits and the medic edge [orig: the
+	// per-frame input dispatch feeding Player_PackInputStateToEntity @0x4df450
+	// and Input_HandleActionBinding case 217 @0x49b4b4].
+	void apply_input(const TickInput &input);
+	// The medic call past the session/entity gates: a dead local player with
+	// the cooldown at zero sends through the role and stamps the cooldown.
+	bool request_medic();
+	// What the view arbiter reads from the session (death screen, end round,
+	// the death camera), as plain values off the role's replica runtime.
+	static world::LocalViewSessionInputs view_session_inputs_for(
+			const ClientRuntime *runtime, bool joiner, bool local_dead);
+
+protected:
+	mission::MissionKernel *kernel_ = nullptr;
+};
+
+// The held / pressed action bits of InputPacket, the retail action rows the
+// frame input carries besides the movement keys.
+enum HeldAction : uint32_t {
+	HELD_FIRE = 1u << 0,
+};
+enum PressedAction : uint32_t {
+	PRESSED_FIRE = 1u << 0,
+	PRESSED_RELOAD = 1u << 1,
+	// The dead player's medic call edge (the MedicReq action row; retail
+	// Input_HandleActionBinding case 217 @0x49b4b4).
+	PRESSED_MEDIC_REQUEST = 1u << 2,
+};
+
+
+class Session {
+public:
+	// A session without a role can only hold state; configure_role binds the
+	// strategy the ticks run through.
+	Session() = default;
+	explicit Session(Role &role);
+	State state() const { return state_; }
+	RoleKind kind() const { return kind_; }
+	Role *role() const { return role_; }
+	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
+	const SessionError &last_error() const { return last_error_; }
+	const FramePerf &last_perf() const { return last_perf_; }
+
+	TransitionResult configure_role(Role &role);
+	TransitionResult begin_connect();
+	TransitionResult begin_load();
+	TransitionResult complete_load();
+	TransitionResult fail(SessionError error);
+
+	FrameOutcome advance(const FrameInput &input);
+	FrameOutcome step_once(const FrameInput &input = {});
+	// Deterministic external-clock drive used by focused native/Godot probes.
+	// Unlike step_once(), a running network role may use it; it still routes
+	// through the same target and terminal-state handling as realtime cadence.
+	FrameOutcome drive_one(const FrameInput &input = {});
+
+	TransitionResult pause();
+	TransitionResult resume();
+	TransitionResult reset_to_baseline();
+	TransitionResult close();
+
+	void reset_bank();
+
+private:
+	TransitionResult transition(State to);
+	TransitionResult rejected(TransitionCode code, SessionError error = {}) const;
+	TickInput merged_tick_input(const FrameInput &input, bool consume_one_shots);
+	void latch_input(const FrameInput &input);
+	void consume_pending_one_shots();
+	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
+	TickOutcome run_one_tick(const TickInput &input);
+	static int64_t now_us();
+
+	Role *role_ = nullptr;
+	RoleKind kind_ = RoleKind::SinglePlayer;
+	TickObserver *observer_ = nullptr;
+	State state_ = State::Unloaded;
+	world::TickAccumulator accumulator_;
+	InputPacket pending_input_;
+	CameraSample latest_camera_;
+	SessionError last_error_;
+	FramePerf last_perf_;
+};
+
+} // namespace opennova::inmatch

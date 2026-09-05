@@ -3,18 +3,27 @@
 // read that went through the item database's getter surface now reads the
 // DefItemDef row directly; the getters were field-for-field projections, so
 // the miss defaults (0 / empty / TYPE unset) are preserved exactly.
-#include <runtime/simassets/item_traits.h>
 
-#include <base/io/strutil.h>
+#include <runtime/simassets/item_traits.h>
+#include <runtime/simassets/sim_model_cache.h>
 #include <formats/mission/mission.h>
+#include <runtime/mission/placement_traits.h>
+#include <base/io/fixed.h>
+#include <base/io/strutil.h>
+#include <runtime/terrain_query/height_field.h>
+
+#include <algorithm>
+#include <cstring>
+#include <unordered_map>
+
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
 
-#include <algorithm>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+using namespace opennova::def;
 
 namespace opennova::simassets {
 
@@ -86,22 +95,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     const int player_def_id =
             static_cast<int>(world::kPlayerInfantryTypeId) + mission::kItemIdOffset;
     const DefItemDef *player_def = find_item(by_id, player_def_id);
-    world.player_has_item_def = player_def != nullptr;
-    world.player_item_hp =
+    world.tables.player.has_item_def = player_def != nullptr;
+    world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
-    world.player_item_type =
+    world.tables.player.item_type =
             static_cast<uint8_t>(player_def != nullptr ? player_def->type : 0);
-    world.player_item_attrib = player_def != nullptr ? player_def->attrib : 0u;
-    world.player_armor_impact = world::retail_signed_i16(
+    world.tables.player.item_attrib = player_def != nullptr ? player_def->attrib : 0u;
+    world.tables.player.armor_impact = world::retail_signed_i16(
             player_def != nullptr ? player_def->armor_impact : 0);
-    world.player_armor_kz = world::retail_signed_i16(
+    world.tables.player.armor_kz = world::retail_signed_i16(
             player_def != nullptr ? player_def->armor_kz : 0);
-    world.player_damage_reduc_pp =
+    world.tables.player.damage_reduc_pp =
             player_def != nullptr ? player_def->damage_reduc_pp : 0.0f;
-    world.player_damage_reduc_max =
+    world.tables.player.damage_reduc_max =
             player_def != nullptr ? player_def->damage_reduc_max : 0.0f;
-    world.player_radar_sig = player_def != nullptr ? (player_def->radar_sig & 0xFFFF) : 0;
-    world.player_heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
+    world.tables.player.radar_sig = player_def != nullptr ? (player_def->radar_sig & 0xFFFF) : 0;
+    world.tables.player.heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
     std::vector<world::EntityHandle> handles;
     world.registry.for_each(
             [&](const world::Entity &e) { handles.push_back(e.handle); });
@@ -163,8 +172,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
         // The item's display name, once per distinct id (tooling: the
         // inspection records name an entity by its item, not only its label).
-        if (def != nullptr && world.item_names.get(e->item_id) == nullptr)
-            world.item_names.set(e->item_id, def->display_name);
+        if (def != nullptr && world.tables.item_names.get(e->item_id) == nullptr)
+            world.tables.item_names.set(e->item_id, def->display_name);
         // Destruction traits (world/destruction.h; world-wac-ai-re §24): the death
         // chain's def fields, keyed by item id. Fills once per distinct id.
         // [orig: the ItemDef fields Entity_ApplyWeaponDamage / the death dispatch /
@@ -172,7 +181,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // +0x198, huskSubPart* +0x100.., debrisScale +0x1BC, soundDeath +0x860,
         // the particledeath family +0x412..]
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
-        if (world.item_death_traits.get(e->item_id) == nullptr &&
+        if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             world::ItemDeathTraits t;
             t.unit_type = def->unit_type;
@@ -198,7 +207,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.particlefinale = def->particlefinale;
             // The collision-instance sweep enriches this row with live
             // husk-model state and the active first-stage husk's KZ user points.
-            world.item_death_traits.set(e->item_id, std::move(t));
+            world.tables.item_death_traits.set(e->item_id, std::move(t));
         }
         // Vehicle mover traits: the pre-scaled items.def block + PlayerControl
         // attrib (0x40), keyed by item id. Ground-family dispatchers test the
@@ -207,7 +216,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // g_EntityClassPhysicsTable @0x82abc8; ground dispatch @0x48ef90..0x48f060;
         // Entity_UpdateAircraftPhysics @0x490310]
         if (e->handle.pool() == 1 &&
-                world.vehicle_traits.get(e->item_id) == nullptr &&
+                world.vehicles.traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             const std::string fam = fourcc_prefix(def->move_function);
             const bool direct_air_mover = fam == "chel" || fam == "cpln";
@@ -238,9 +247,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.pitch_lift_vel = def->pitch_velocity;
                 vt.bob = def->bob;
                 vt.flip = def->flip;
+                vt.hand_brake = def->hand_brake;
+                vt.min_ai = def->min_ai;
+                vt.critical_hp = def->critical_hp;
+                vt.critical_drain = def->critical_drain;
+                vt.non_critical_regen = def->non_critical_regen;
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;
+                // The two afloat boat lanes stay paired with their authored
+                // model anchors. Their live speed controls are sampled by the
+                // shared watercraft mover; W1/W2 and particlefxs remain on
+                // their separate, currently unrouted transient/ground paths.
+                vt.wake_w3.effect = def->particlefxw3.effect;
+                vt.wake_w3.userpoint = def->particlefxw3.userpoint;
+                vt.wake_w4.effect = def->particlefxw4.effect;
+                vt.wake_w4.userpoint = def->particlefxw4.userpoint;
                 // def->top_heavy is parsed for parity but dead in retail —
                 // no consumer, so the traits do not carry it.
                 vt.player_control =
@@ -282,7 +304,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.sound_profile = def->sound_profile;
                 for (size_t i = 0; i < vt.sound_loops.size(); ++i)
                     vt.sound_loops[i] = def->soundloops[i];
-                world.vehicle_traits.set(e->item_id, vt);
+                world.vehicles.traits.set(e->item_id, vt);
             }
         }
     }
@@ -316,9 +338,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     // is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
     // [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
     // the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
-    world.zone_capture_state.clear(); // [orig: CaptureCtx_Reset @0x53BD00]
-    world::zone_chain_build_from_mission(world, world.zone_chain);
-    world::zone_chain_latch_control(world, world.zone_chain);
+    world.zones.capture.clear(); // [orig: CaptureCtx_Reset @0x53BD00]
+    world.zones.build_chain_from_mission();
+    world.zones.latch_control();
 }
 
 // The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
@@ -333,7 +355,6 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 // [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
 // docs/divergence-ledger.md D-AI-5]
 int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
-    if (world.ai == nullptr) return 0;
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     int armed = 0;
     // Bind every body's sound-profile pair first — persons AND vehicles carry
@@ -342,7 +363,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     // -> SP_DuneBuggy). An unauthored key resolves to "default" via the emit-side
     // fallback (index stays -1). [orig: the def+0x268 parse binding
     // @ 0x49fb0f-0x49fb64; alloc seed @ 0x49e3f5]
-    if (!world.sound_profiles.empty()) {
+    if (!world.tables.sound_profiles.empty()) {
         // The same pair, resolved PER DEF and retained by item type so a
         // wire-fed body — which has no AiEntity to carry a bound index — can
         // resolve its footstep/foley sets at presentation time. Per-def, not
@@ -356,15 +377,15 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
             audio::OrganicSoundProfile op;
             if (def.sound_profile[0] != '\0')
                 op.primary = static_cast<int16_t>(
-                        world.sound_profiles.index_of(def.sound_profile));
+                        world.tables.sound_profiles.index_of(def.sound_profile));
             if (def.sound_profile_female[0] != '\0')
                 op.female = static_cast<int16_t>(
-                        world.sound_profiles.index_of(def.sound_profile_female));
-            world.organic_sound_profiles.set(
+                        world.tables.sound_profiles.index_of(def.sound_profile_female));
+            world.tables.organic_sound_profiles.set(
                     def.id - mission::kItemIdOffset, op);
         }
-        for (int i = 0; i < world.ai->count(); ++i) {
-            world::AiEntity *ae = world.ai->at(i);
+        for (int i = 0; i < world.ai.count(); ++i) {
+            world::AiEntity *ae = world.ai.at(i);
             if (ae == nullptr) continue;
             const world::Entity *e = world.registry.get(ae->handle);
             if (e == nullptr) continue;
@@ -374,15 +395,15 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
             if (def == nullptr) continue;
             if (def->sound_profile[0] != '\0')
                 ae->profile.sound_profile = static_cast<int16_t>(
-                        world.sound_profiles.index_of(def->sound_profile));
+                        world.tables.sound_profiles.index_of(def->sound_profile));
             if (def->sound_profile_female[0] != '\0')
                 ae->profile.sound_profile_female = static_cast<int16_t>(
-                        world.sound_profiles.index_of(def->sound_profile_female));
+                        world.tables.sound_profiles.index_of(def->sound_profile_female));
         }
     }
-    if (world.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
-    for (int i = 0; i < world.ai->count(); ++i) {
-        world::AiEntity *ae = world.ai->at(i);
+    if (world.tables.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
+    for (int i = 0; i < world.ai.count(); ++i) {
+        world::AiEntity *ae = world.ai.at(i);
         if (ae == nullptr) continue;
         const world::Entity *e = world.registry.get(ae->handle);
         if (e == nullptr) continue;
@@ -391,7 +412,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
         const DefItemDef *def = find_item(by_id, def_id);
         if (def == nullptr || def->ammo_closeattack[0] == '\0')
             continue; // def authors no anim-fire round (e.g. the player)
-        const int ammo = world.ammo.index_of(def->ammo_closeattack);
+        const int ammo = world.tables.ammo.index_of(def->ammo_closeattack);
         if (ammo < 0) continue; // name not in this mission's ammo.def — stay unarmed
         ae->profile.ammo_primary = ammo;
         ae->profile.clip_size = def->clipsize;
@@ -403,16 +424,85 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     // resolves at parse time through the ammo-def registry [orig:
     // AIProfile_ParseProperty -> AmmoDef_LookupByName -> profile+148/+180];
     // our parse keeps the name because the table loads after promotion.
-    for (int i = 0; i < world.ai->count(); ++i) {
-        world::AiEntity *ae = world.ai->at(i);
+    for (int i = 0; i < world.ai.count(); ++i) {
+        world::AiEntity *ae = world.ai.at(i);
         if (ae == nullptr) continue;
         for (world::AiProfile::WeaponFire *wf : {&ae->profile.fire_a, &ae->profile.fire_b}) {
             if (wf->ammo_name.empty()) continue;
-            wf->ammo_index = world.ammo.index_of(wf->ammo_name.c_str());
+            wf->ammo_index = world.tables.ammo.index_of(wf->ammo_name.c_str());
             if (wf->ammo_index >= 0) ++armed;
         }
     }
     return armed;
 }
 
+} // namespace opennova::simassets
+
+namespace opennova::simassets {
+namespace {
+uint8_t point_type(const char *name) {
+    if (strutil::iequals(name, "smlmarked")) return 1;
+    if (strutil::iequals(name, "small")) return 2;
+    if (strutil::iequals(name, "lrgmarked")) return 3;
+    if (strutil::iequals(name, "large")) return 4;
+    return 0;
+}
+uint32_t ammo_id(const world::World &world, const char *name) {
+    const int index = world.tables.ammo.index_of(name);
+    return index < 0 ? 0u : static_cast<uint32_t>(index);
+}
+}
+
+// [orig: Entity_InitHardpoints @ 0x4417D0]
+// lndm's bone callback is BoneCallback_Identity @ 0x4E20A0. Its model-global
+// userpoints therefore retain the authored rest position through the bone walk.
+void resolve_minefields(world::World &world, const def::DefItemsFile &items,
+                        SimModelCache &models) {
+    const auto definitions = index_items(items);
+    world.registry.for_each([&](const world::Entity &row) {
+        if (row.minefield.initialized) return;
+        const auto it = definitions.find(row.item_id + mission::kItemIdOffset);
+        if (it == definitions.end()) return;
+        const auto &def = *it->second;
+        const bool think = strutil::iequals(std::string_view(def.ai_function).substr(0, 4), "lndm");
+        const bool render = mission::uses_submodel_renderer(def.render_function);
+        if (!think && !render) return;
+        world::Entity *entity = world.registry.get(row.handle);
+        const auto *model = models.model_for(def.graphic);
+        std::vector<world::MinefieldPoint> points;
+        if (think && model != nullptr) {
+            const world::CollisionMatrix placement = world::entity_placement_matrix(*entity);
+            for (size_t i = 0; i < model->user_point_count && points.size() < 14; ++i) {
+                const auto &up = model->user_points[i];
+                const uint8_t type = point_type(up.name);
+                if (!type) continue;
+                const int32_t local[3] = {up.x, up.y, up.z};
+                int32_t transformed[3]{};
+                // The attachment helper converts to float before transforming.
+                // Preserve that float storage boundary and truncate back to Q16.
+                for (int axis = 0; axis < 3; ++axis) {
+                    // Math_TransformPointByMatrix4x4 @ 0x40CF20: translation
+                    // is last; render X (mission -Y) sums X,Z,Y products.
+                    const int order[3] = {0, axis == 1 ? 2 : 1, axis == 1 ? 1 : 2};
+                    double value = 0;
+                    for (int k : order)
+                        value += static_cast<double>(static_cast<float>(
+                                placement.m[4*axis+k] / 4194304.0f)) *
+                                static_cast<float>(local[k] * io::kInvFp16One);
+                    value += static_cast<float>(placement.m[4*axis+3] * io::kInvFp16One);
+                    transformed[axis] = static_cast<int32_t>(
+                            static_cast<float>(value) * io::kFp16One);
+                }
+                transformed[2] = world.tables.terrain ? static_cast<int32_t>(
+                        terrain::height_field_height_world_bilinear(*world.tables.terrain,
+                            transformed[0] * io::kInvFp16One,
+                            -transformed[1] * io::kInvFp16One) * io::kFp16One) : 0;
+                points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
+            }
+        }
+        world.minefields.initialize(world, *entity, think, render, model != nullptr,
+                ammo_id(world, def.ammo_closeattack), ammo_id(world, def.ammo_marker3),
+                def.huskfinal, def.husk, points);
+    });
+}
 } // namespace opennova::simassets

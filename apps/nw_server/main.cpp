@@ -2,7 +2,7 @@
 // mission kernel (ADR 0042 d3). It mounts the resource root, boots the loose
 // mission through mission::MissionKernel (terrain, item/weapon/ammo tables,
 // collision, infantry .adm — the same boot every embedder drives), stands the
-// npruntime runtime up as a HostOnly session through inmatch::listen_host,
+// npruntime runtime up as a HostOnly session through inmatch::HostRole,
 // opens a real UDP socket, and asks inmatch::Session to drive the listen frame
 // at the original fixed cadence so retail-wire-compatible clients (opennova
 // or, as a follow-up, stock retail) can join -> spawn -> play. All protocol,
@@ -23,19 +23,19 @@
 #include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
 #include <formats/trn/trn.h>
 #include <formats/trn/trn_io.h>
-#include <net/inmatch/listen_host.h>
-#include <net/inmatch/session.h>
-#include <net/npruntime/host_session.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/session_status.h>
-#include <net/npwire/game_type.h>
+#include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/session.h>
+#include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/session_status.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/net_ports.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/world/tick_accumulator.h>
 
-#include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
+#include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
 
 #include <atomic>
@@ -212,51 +212,6 @@ void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
 }
 
-// The mission's .cpt/.trn(+charmap) height field, built into the kernel's own
-// terrain field store BEFORE boot — the embedder-side format-typed leg on the
-// far side of the ADR 0020 seam, through the engine's one loader. The raw .til
-// bytes feed the S2C 0x45 terrain-tile load a wire joiner streams (net-re
-// §5.37); absent, the tile stream is skipped.
-bool load_terrain(opennova::mission::MissionKernel &kernel,
-		const opennova::ResourceIndex &index,
-		std::vector<uint8_t> &til_bytes, std::string &error) {
-	return opennova::terrain::terrain_field_store_load(kernel.terrain_store, index,
-			kernel.mission.get_terrain(), error, &til_bytes);
-}
-
-// The dedicated host's one adapter to inmatch::Session: the portable session
-// decides when a fixed tick is due; the tick itself is the ONE listen-host
-// frame over the kernel. viewport_height 0 is the headless seam — npruntime
-// then suppresses S2C 0x68 instead of inventing a screen size (D-NET-206).
-class DedicatedTickTarget final : public opennova::inmatch::TickTarget {
-public:
-	DedicatedTickTarget(opennova::mission::MissionKernel &kernel,
-			opennova::inmatch::ListenHostState &host,
-			opennova::netsim::IDatagramSocket &socket)
-			: kernel_(kernel), host_(host), socket_(socket) {}
-
-	opennova::inmatch::TickOutcome advance_mission_tick(
-			const opennova::inmatch::TickInput &) override {
-		opennova::inmatch::listen_host::frame(kernel_, host_, socket_,
-				/*viewport_height=*/0, /*perf=*/nullptr);
-		return {opennova::inmatch::TickStatus::Ran,
-				static_cast<int32_t>(kernel_.world.logic_tick), {}};
-	}
-
-	bool reset_mission_to_baseline(opennova::inmatch::SessionError &error) override {
-		error = {opennova::inmatch::SessionErrorCode::NetworkRoleLocked,
-				"dedicated hosts cannot reset a live mission"};
-		return false;
-	}
-
-	void close_mission() override {}
-
-private:
-	opennova::mission::MissionKernel &kernel_;
-	opennova::inmatch::ListenHostState &host_;
-	opennova::netsim::IDatagramSocket &socket_;
-};
-
 } // namespace
 
 int main(int argc, char **argv) {
@@ -353,21 +308,17 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	// --- The mission's terrain field, built into the kernel's store before
-	//     the boot (the ground solve, collision heightfield, surface picks). ---
+	// --- The mission's terrain field is the kernel boot's own load through
+	//     the mounted index (the ground solve, collision heightfield, surface
+	//     picks); the raw .til bytes land here beside it for the S2C 0x45
+	//     terrain-tile stream a wire joiner streams (net-re §5.37); absent, the
+	//     tile stream is skipped. ---
 	std::vector<uint8_t> terrain_til_bytes;
-	{
-		std::string terrain_error;
-		if (!load_terrain(kernel, index, terrain_til_bytes, terrain_error))
-			std::fprintf(stderr,
-					"nw-server: terrain not loaded (%s) - the ground solve will not run\n",
-					terrain_error.c_str());
-	}
 
 	// --- The consolidated HostConfig: identity, the mission-derived (or
 	//     overridden) g_GameType, the fresh-host rule defaults, the flag
 	//     overrides, and the optional loose score.ini overlay. ---
-	np::HostConfig host_cfg;
+	inmatch::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
 	host_cfg.config.mission_name = kernel.mission.get_mission_name();
@@ -376,7 +327,7 @@ int main(int argc, char **argv) {
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	// The harness has no host-options UI, so install the same fresh-host rule
 	// defaults the retail config path would have applied before mission start.
-	np::apply_fresh_host_rule_defaults(host_cfg.config);
+	inmatch::apply_fresh_host_rule_defaults(host_cfg.config);
 	// The BMS task vocabulary has no authored Flag Me bit even though retail's
 	// Game_StartMission retains its type-12 -> g_GameType 8 branch. The harness
 	// therefore accepts an explicit numeric code so every witnessed wire mode
@@ -414,7 +365,7 @@ int main(int argc, char **argv) {
 	if (index.has_file("score.ini")) {
 		std::vector<uint8_t> score_bytes;
 		if (!index.read_file("score.ini", score_bytes) ||
-				!np::load_session_score_config(host_cfg.config,
+				!inmatch::load_session_score_config(host_cfg.config,
 						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
 								score_bytes.size()))) {
 			std::fprintf(stderr, "nw-server: invalid score config 'score.ini' under '%s'\n",
@@ -422,7 +373,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
-	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
+	host_cfg.socket_mode = inmatch::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
 	host_cfg.serve_and_play = false;            // headless dedicated host: no local-player registration
 
 	// The "Server" chat strings: retail reads GameText("Server", key) from the
@@ -454,13 +405,19 @@ int main(int argc, char **argv) {
 	//     fatal here — running a partial script is a known wire-parity
 	//     failure), and the HostOnly session bring-up at the witnessed spot
 	//     inside the load. A refused boot aborts before the UDP socket opens. ---
-	inmatch::ListenHostState host;
+	// The host role (ADR 0043 d3): the listen state, the bring-up, and the ONE
+	// dedicated frame every fixed tick; `host` aliases its state for the ctx feeds.
+	inmatch::HostRole role;
+	role.bind(kernel);
+	role.set_kind(inmatch::RoleKind::DedicatedHost);
+	inmatch::ListenHostState &host = role.state;
 	mission::KernelBootOptions boot_options;
 	boot_options.playable = false; // no synthetic loopback player; every roster row is a remote peer
 	boot_options.wac_strict_diagnostics = true;
+	boot_options.terrain_til_bytes = &terrain_til_bytes;
 	boot_options.game_type = host_cfg.config.game_type;
 	boot_options.bringup_net_session = [&] {
-		inmatch::listen_host::bringup_dedicated(kernel, host, host_cfg);
+		role.bring_up_dedicated(host_cfg);
 	};
 	std::string boot_error;
 	if (!kernel.boot(boot_options, boot_error)) {
@@ -487,9 +444,9 @@ int main(int argc, char **argv) {
 	// terrain-tile source and the "Server" gametext table.
 	host.host_owner.ctx.terrain_til_data = std::move(terrain_til_bytes);
 	if (medic_request_format) {
-		np::ServerTextTable server_text;
+		inmatch::ServerTextTable server_text;
 		server_text.medic_request_format = std::move(*medic_request_format);
-		np::set_server_text(host.host_owner.ctx, std::move(server_text));
+		inmatch::set_server_text(host.host_owner.ctx, std::move(server_text));
 	}
 
 	// --- Open the UDP socket. ---
@@ -516,8 +473,8 @@ int main(int argc, char **argv) {
 	constexpr int64_t kPeriodNs =
 			static_cast<int64_t>(1000000000.0 * opennova::world::TickAccumulator::kTickDt);
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
-	DedicatedTickTarget target(kernel, host, dgram);
-	inmatch::Session session(target, inmatch::Role::DedicatedHost);
+	role.set_socket(&dgram);
+	inmatch::Session session(role);
 	if (!session.begin_load().applied() || !session.complete_load().applied()) {
 		std::fprintf(stderr, "nw-server: failed to start mission session\n");
 		net::shutdown();

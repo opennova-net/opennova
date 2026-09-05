@@ -1,4 +1,5 @@
 #include "mnu/mns_stylesheet.h"
+#include "util/data_format.h"
 
 #include "util/string_convert.h"
 
@@ -46,12 +47,8 @@ String MnsStyleSheet::substitute(const String &p_text) const {
 	return to_gd(sheet_.substitute(to_std(p_text)));
 }
 
-Dictionary MnsStyleSheet::get_variables() const {
-	Dictionary out;
-	for (const auto &kv : sheet_.variables) {
-		out[to_gd(kv.first)] = to_gd(kv.second);
-	}
-	return out;
+const std::unordered_map<std::string, std::string> &MnsStyleSheet::variables() const {
+	return sheet_.variables;
 }
 
 void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {
@@ -255,12 +252,7 @@ Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
 
 PackedByteArray MnsStyleSheet::to_byte_array() const {
 	const std::vector<uint8_t> bytes = doc_.serialize();
-	PackedByteArray out;
-	out.resize(static_cast<int64_t>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
+	return to_packed_bytes(bytes);
 }
 
 Error MnsStyleSheet::load_from_path(const String &p_path) {
@@ -301,11 +293,6 @@ void MnsStyleSheet::set_native(const opennova::mns::StyleSheet &p_sheet) {
 	_refresh();
 }
 
-void MnsStyleSheet::set_native_document(const opennova::mns::Document &p_doc) {
-	doc_ = p_doc;
-	_refresh();
-}
-
 void MnsStyleSheet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_variable", "name"), &MnsStyleSheet::get_variable);
 	ClassDB::bind_method(D_METHOD("has_variable", "name"), &MnsStyleSheet::has_variable);
@@ -313,7 +300,6 @@ void MnsStyleSheet::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_variable", "name", "value"), &MnsStyleSheet::set_variable);
 	ClassDB::bind_method(D_METHOD("remove_variable", "name"), &MnsStyleSheet::remove_variable);
-	ClassDB::bind_method(D_METHOD("set_variables", "variables"), &MnsStyleSheet::set_variables);
 	ClassDB::bind_method(D_METHOD("clear"), &MnsStyleSheet::clear);
 
 	ClassDB::bind_method(D_METHOD("get_entries"), &MnsStyleSheet::get_entries);

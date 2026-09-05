@@ -75,6 +75,15 @@ var _pending_request: Request = null
 var _pending_retail_dir := ""
 
 
+# The OS/process/staging platform the session drives (RunSessionPlatform: the
+# production body by default; the deterministic tests hand in a fake).
+var _platform: RunSessionPlatform
+
+
+func _init(platform: RunSessionPlatform = null) -> void:
+	_platform = platform if platform != null else RunSessionPlatform.new()
+
+
 func get_state() -> Dictionary:
 	return {
 		"state": _state_name(_state),
@@ -101,7 +110,7 @@ func get_last_error() -> String:
 func opennova_readiness(resource_dir: String, game_code: String = "jo",
 		expansion: String = "") -> String:
 	var root := _absolute_root(resource_dir)
-	if root.is_empty() or not _valid_resource_dir(root):
+	if root.is_empty() or not _platform.valid_resource_dir(root):
 		return "Select a valid resource directory first."
 	var request := Request.opennova(root, game_code, expansion)
 	if _current_plan(request) == null:
@@ -111,11 +120,11 @@ func opennova_readiness(resource_dir: String, game_code: String = "jo",
 
 func retail_readiness(resource_dir: String, retail_dir: String) -> String:
 	var root := _absolute_root(resource_dir)
-	if root.is_empty() or not _valid_resource_dir(root):
+	if root.is_empty() or not _platform.valid_resource_dir(root):
 		return "Select a valid resource directory first."
-	if not _supports_working_directory():
+	if not _platform.supports_working_directory():
 		return "Retail launch requires working-directory process support (Windows only)."
-	return _retail_install_error(retail_dir.strip_edges())
+	return _platform.retail_install_error(retail_dir.strip_edges())
 
 
 func run_opennova(resource_dir: String, game_code: String = "jo",
@@ -143,13 +152,13 @@ func stop() -> bool:
 		return false
 	if _state == State.STOPPING:
 		return true
-	if not _process_is_alive(_pid):
+	if not _platform.process_is_alive(_pid):
 		_finish_stopped(false)
 		return true
-	if not _kill_process(_pid):
+	if not _platform.kill_process(_pid):
 		return _fail("Could not stop the running process.")
 	_state = State.STOPPING
-	_stop_deadline_msec = _now_msec() + STOP_WAIT_MSEC
+	_stop_deadline_msec = _platform.now_msec() + STOP_WAIT_MSEC
 	state_changed.emit(get_state())
 	_status("Stopping the managed process...")
 	return true
@@ -158,14 +167,14 @@ func stop() -> bool:
 func poll() -> void:
 	match _state:
 		State.RUNNING:
-			if not _process_is_alive(_pid):
+			if not _platform.process_is_alive(_pid):
 				_finish_stopped(true)
 		State.STOPPING:
-			if not _process_is_alive(_pid):
+			if not _platform.process_is_alive(_pid):
 				_finish_stopped(false)
 				_status("Stopped the managed process.")
 				_spawn_pending()
-			elif _now_msec() >= _stop_deadline_msec:
+			elif _platform.now_msec() >= _stop_deadline_msec:
 				_pending_request = null
 				_pending_retail_dir = ""
 				_state = State.RUNNING
@@ -177,11 +186,11 @@ func poll() -> void:
 func shutdown() -> bool:
 	if _state == State.STOPPED:
 		return true
-	if _state == State.RUNNING and _process_is_alive(_pid) and not _kill_process(_pid):
+	if _state == State.RUNNING and _platform.process_is_alive(_pid) and not _platform.kill_process(_pid):
 		_last_error = "Could not stop the running process during ONED shutdown."
 		_status(_last_error, &"error")
 		return false
-	if _process_is_alive(_pid) and not _wait_for_exit(_pid, STOP_WAIT_MSEC):
+	if _platform.process_is_alive(_pid) and not _platform.wait_for_exit(_pid, STOP_WAIT_MSEC):
 		_last_error = "Could not stop the running process during ONED shutdown."
 		_status(_last_error, &"error")
 		return false
@@ -260,11 +269,11 @@ func _spawn_pending() -> void:
 func _spawn_request(request: Request, retail_dir: String) -> bool:
 	if request.mode == Mode.RETAIL:
 		_status("Staging game data for retail...")
-		var staged: Dictionary = _stage_retail(request.resource_dir, retail_dir)
-		if not bool(staged.get("ok", false)):
-			return _fail(String(staged.get("error", "Retail staging failed.")))
-		request.exe_path = String(staged.get("exe", ""))
-		request.staged_dir = String(staged.get("packed_dir", ""))
+		var staged: RetailStageResult = _platform.stage_retail(request.resource_dir, retail_dir)
+		if not staged.ok:
+			return _fail(staged.error if not staged.error.is_empty() else "Retail staging failed.")
+		request.exe_path = staged.exe
+		request.staged_dir = staged.packed_dir
 
 	var plan := _current_plan(request)
 	if plan == null:
@@ -272,7 +281,7 @@ func _spawn_request(request: Request, retail_dir: String) -> bool:
 				"The staged retail executable is unavailable."
 				if request.mode == Mode.RETAIL else
 				"No OpenNova runtime is available beside ONED.")
-	var pid := _spawn_process(plan.path, plan.args, plan.cwd)
+	var pid := _platform.spawn_process(plan.path, plan.args, plan.cwd)
 	if pid <= 0:
 		return _fail("Could not launch %s." % _mode_name(request.mode))
 
@@ -290,11 +299,11 @@ func _spawn_request(request: Request, retail_dir: String) -> bool:
 
 func _current_plan(request: Request) -> LaunchPlan:
 	return launch_plan(
-			_oned_executable_path(),
-			_project_dir(),
-			_is_dev_mode(),
+			_platform.oned_executable_path(),
+			_platform.project_dir(),
+			_platform.is_dev_mode(),
 			request,
-			func(path: String) -> bool: return _file_exists(path))
+			func(path: String) -> bool: return _platform.file_exists(path))
 
 
 func _finish_stopped(report_exit: bool) -> void:
@@ -303,7 +312,7 @@ func _finish_stopped(report_exit: bool) -> void:
 	_pid = -1
 	_active_request = null
 	if old_pid > 0:
-		_release_process(old_pid)
+		_platform.release_process(old_pid)
 	state_changed.emit(get_state())
 	if report_exit:
 		_status("The managed process exited.")
@@ -342,74 +351,3 @@ static func _state_name(state: int) -> String:
 			return "stopping"
 		_:
 			return "stopped"
-
-
-# Internal seams used by the deterministic session tests. Production has one
-# implementation: Godot/Process plus GamePacker.
-func _valid_resource_dir(path: String) -> bool:
-	return ResourceDirSettings.is_valid_root(path)
-
-
-func _file_exists(path: String) -> bool:
-	return FileAccess.file_exists(path)
-
-
-func _supports_working_directory() -> bool:
-	return Process.supports_working_directory()
-
-
-func _now_msec() -> int:
-	return Time.get_ticks_msec()
-
-
-func _retail_install_error(retail_dir: String) -> String:
-	return GamePacker.retail_install_error(retail_dir)
-
-
-func _stage_retail(resource_dir: String, retail_dir: String) -> Dictionary:
-	return GamePacker.stage_retail(resource_dir, retail_dir)
-
-
-func _spawn_process(path: String, args: PackedStringArray, cwd: String) -> int:
-	if Process.supports_working_directory():
-		return Process.spawn_in_dir(path, args, cwd)
-	return OS.create_process(path, args)
-
-
-func _process_is_alive(pid: int) -> bool:
-	return Process.is_running(pid) if Process.supports_working_directory() \
-			else OS.is_process_running(pid)
-
-
-func _kill_process(pid: int) -> bool:
-	return Process.kill_pid(pid) if Process.supports_working_directory() \
-			else OS.kill(pid) == OK
-
-
-func _wait_for_exit(pid: int, timeout_msec: int) -> bool:
-	if Process.supports_working_directory():
-		return Process.wait_for_exit(pid, timeout_msec)
-	# The portable fallback polls to the same deadline.
-	var deadline := Time.get_ticks_msec() + timeout_msec
-	while OS.is_process_running(pid):
-		if Time.get_ticks_msec() >= deadline:
-			return false
-		OS.delay_msec(EXIT_POLL_MSEC)
-	return true
-
-
-func _release_process(pid: int) -> void:
-	if Process.supports_working_directory():
-		Process.release(pid)
-
-
-func _oned_executable_path() -> String:
-	return OS.get_executable_path()
-
-
-func _project_dir() -> String:
-	return ProjectSettings.globalize_path("res://")
-
-
-func _is_dev_mode() -> bool:
-	return OS.has_feature("editor")

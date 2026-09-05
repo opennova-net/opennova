@@ -1,10 +1,16 @@
 // Simulation's first-class Godot adapter to the portable inmatch::Session.
 // Lifecycle, input deposit, fixed cadence, catch-up, and cancellation stay in
-// engine/net/inmatch. Godot supplies one synchronous typed tick sink so its
+// engine/runtime/inmatch. Godot supplies one synchronous typed tick sink so its
 // presentation devices consume a tick before the next catch-up tick runs.
 #include "simulation/simulation_internal.h"
+#include "simulation/tick_sink.h"
 
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 
 using namespace sim_internal;
 
@@ -20,14 +26,97 @@ Ref<MissionFrameOutcome> godot_outcome(
 
 } // namespace
 
-opennova::inmatch::Role Simulation::configured_session_role() const {
-	if (joiner_) return opennova::inmatch::Role::Joiner;
-	if (host_listen_) {
-		return host_serve_and_play_
-				? opennova::inmatch::Role::ListenHost
-				: opennova::inmatch::Role::DedicatedHost;
+// The ONE engine role this session runs its ticks through (ADR 0043 d3):
+// installed per session by kind, never null after construction.
+opennova::inmatch::Role &Simulation::active_role() {
+	return *role_;
+}
+
+opennova::inmatch::ListenHostState *Simulation::host_state() {
+	return host_role_ != nullptr ? &host_role_->state : nullptr;
+}
+
+const opennova::inmatch::ListenHostState *Simulation::host_state() const {
+	return host_role_ != nullptr ? &host_role_->state : nullptr;
+}
+
+opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() {
+	return host_role_ != nullptr ? &host_role_->state.host_owner.ctx : nullptr;
+}
+
+const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
+	return host_role_ != nullptr ? &host_role_->state.host_owner.ctx : nullptr;
+}
+
+// The ONE writer of the kind-derived world rules: a joiner is never the
+// projectile authority; a LAN host or a joiner is an mp session (the SP
+// listen server keeps the SinglePlayer kind and stays offline). Runs on the
+// fresh kernel at reset_world and whenever a role installs.
+void Simulation::apply_session_rules() {
+	if (kernel_ == nullptr) return;
+	kernel_->world.rules.projectile_authority = !is_joiner();
+	kernel_->world.rules.mp_session = is_host_listening() || is_joiner();
+}
+
+bool Simulation::adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
+		opennova::inmatch::HostRole *p_host, opennova::inmatch::JoinerRole *p_joiner) {
+	const opennova::inmatch::TransitionResult out = session_.configure_role(*p_role);
+	if (out.code != opennova::inmatch::TransitionCode::Applied &&
+			out.code != opennova::inmatch::TransitionCode::NoOp) {
+		return false;
 	}
-	return opennova::inmatch::Role::SinglePlayer;
+	role_ = std::move(p_role);
+	host_role_ = p_host;
+	joiner_role_ = p_joiner;
+	if (kernel_ != nullptr) role_->bind(*kernel_);
+	// A fresh host/joiner has no runtime until its bring-up / dial builds one.
+	runtime_ = role_->client_runtime();
+	apply_session_rules();
+	return true;
+}
+
+// The SP listen server keeps the SinglePlayer kind so the session's
+// pause/step/reset stay available; a LAN host is ListenHost or DedicatedHost
+// by serve_and_play (enable_host_listen / ensure_session_role).
+bool Simulation::install_offline_role() {
+	if (listen_server_) {
+		return install_role(std::make_unique<opennova::inmatch::HostRole>(
+				opennova::inmatch::RoleKind::SinglePlayer, item_class_resolver()));
+	}
+	return install_role(std::make_unique<opennova::inmatch::LocalRole>());
+}
+
+// A joiner (enable_join) stays; a LAN host (enable_host_listen) stays and
+// re-kinds to the UI server type; otherwise the SP listen server or the bare
+// local role by listen_server_. Only while the session can switch roles.
+void Simulation::ensure_session_role() {
+	using State = opennova::inmatch::State;
+	using RoleKind = opennova::inmatch::RoleKind;
+	const State state = session_.state();
+	if (state != State::Unloaded && state != State::Failed) return;
+	if (net_.lan_host_pending) {
+		// The LAN host enable_host_listen could not install mid-mission: the
+		// role lands now, over the pump that was bound then.
+		net_.lan_host_pending = false;
+		if (install_role(std::make_unique<opennova::inmatch::HostRole>(
+					net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost,
+					item_class_resolver())) &&
+				net_.pump_socket != nullptr) {
+			host_role_->set_socket(net_.pump_socket.get());
+		}
+		return;
+	}
+	if (joiner_role_ != nullptr) return;
+	if (host_role_ != nullptr && host_role_->kind() != RoleKind::SinglePlayer) {
+		const RoleKind kind = net_.host_serve_and_play ? RoleKind::ListenHost : RoleKind::DedicatedHost;
+		if (host_role_->kind() != kind) {
+			host_role_->set_kind(kind);
+			(void)session_.configure_role(*role_);
+			apply_session_rules();
+		}
+		return;
+	}
+	if ((host_role_ != nullptr) != listen_server_) (void)install_offline_role();
 }
 
 bool Simulation::begin_session_load() {
@@ -40,8 +129,9 @@ bool Simulation::begin_session_load() {
 		(void)session_.close();
 	}
 	if (session_.state() != State::Connecting) {
+		ensure_session_role();
 		const opennova::inmatch::TransitionResult role =
-				session_.configure_role(configured_session_role());
+				session_.configure_role(*role_);
 		if (role.code != opennova::inmatch::TransitionCode::Applied &&
 				role.code != opennova::inmatch::TransitionCode::NoOp) {
 			return false;
@@ -53,9 +143,9 @@ bool Simulation::begin_session_load() {
 void Simulation::complete_session_load() {
 	if (session_.state() != opennova::inmatch::State::Loading) return;
 	if (!session_.complete_load().applied()) return;
-	// Direct/local simulations historically start paused. Live GameFramePipeline
+	// Direct/local simulations historically start paused. The live GameWorld frame
 	// resumes them after presentation setup; network roles must keep pumping.
-	if (session_.role() == opennova::inmatch::Role::SinglePlayer) {
+	if (session_.kind() == opennova::inmatch::RoleKind::SinglePlayer) {
 		(void)session_.pause();
 	}
 }
@@ -85,6 +175,7 @@ bool Simulation::resume_session() {
 
 bool Simulation::reset_session() {
 	const opennova::inmatch::TransitionResult out = session_.reset_to_baseline();
+	if (out.applied()) restore_world_baseline();
 	return out.applied();
 }
 
@@ -92,128 +183,86 @@ void Simulation::close_session() {
 	(void)session_.close();
 }
 
-void Simulation::close_mission() {
-	leave_net_session();
+// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
+// and wraps against the current renderer viewport height [orig:
+// Server_SendRandomSeedSync @ 0x511360 -- CEffectWorld_GetViewportDimensions
+// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render window
+// the way retail's CEffectWorld query does: the live window (the scene
+// tree's root; the simulation is a RefCounted the runtime owns, not a node
+// in that tree). A headless DisplayServer has no
+// renderer (the dedicated-host analogue); a missing/non-drawable viewport
+// hands the host role 0 and npruntime suppresses 0x68 instead of inventing
+// a screen size (D-NET-206).
+int32_t Simulation::renderer_viewport_height() const {
+	Viewport *viewport = nullptr;
+	DisplayServer *display = DisplayServer::get_singleton();
+	if (display != nullptr && display->get_name() != "headless") {
+		SceneTree *tree = Object::cast_to<SceneTree>(
+				Engine::get_singleton()->get_main_loop());
+		if (tree != nullptr)
+			viewport = tree->get_root();
+	}
+	return viewport != nullptr ? static_cast<int32_t>(viewport->get_visible_rect().size.y) : 0;
 }
 
-bool Simulation::reset_mission_to_baseline(
-		opennova::inmatch::SessionError &r_error) {
-	if (!world_installed_ || !kernel_->have_baseline) {
-		r_error = {opennova::inmatch::SessionErrorCode::TickFailed,
-				"mission baseline is unavailable"};
-		return false;
-	}
-	restore_world_baseline();
-	return true;
-}
-
-opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
-		const opennova::inmatch::TickInput &p_input) {
-	const bool spectator = is_local_spectator();
-	const opennova::world::PlayerInput no_movement{};
-	const opennova::world::PlayerInput &movement =
-			spectator ? no_movement : p_input.player.movement;
-	set_player_input(movement.forward, movement.back, movement.left,
-			movement.right, movement.lean_left, movement.lean_right,
-			movement.jump);
-	if (!spectator && (p_input.player.look_delta_x != 0.0f ||
-			p_input.player.look_delta_y != 0.0f)) {
-		add_local_player_look(p_input.player.look_delta_x,
-				p_input.player.look_delta_y);
-	}
-	set_local_player_weapon_input(
-			!spectator &&
-					(p_input.player.held_action_bits & MissionFrameInput::HELD_FIRE) != 0,
-			!spectator &&
-					(p_input.player.pressed_action_bits &
-							MissionFrameInput::PRESSED_FIRE) != 0,
-			!spectator &&
-					(p_input.player.pressed_action_bits &
-							MissionFrameInput::PRESSED_RELOAD) != 0);
-	// The medic-call edge is an action binding, not weapon state: it fires
-	// its request immediately like retail's binding dispatch (the gates and
-	// cooldown live in request_local_player_medic).
-	if (!spectator && (p_input.player.pressed_action_bits &
-				MissionFrameInput::PRESSED_MEDIC_REQUEST) != 0) {
-		request_local_player_medic();
-	}
-
-	const bool profiling = runtime_profiling_enabled_;
-	const int64_t sim_start =
-			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
-	const bool did_tick = advance_world_tick();
-	if (profiling) {
-		frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
-		frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
-	}
-	if (!did_tick) return {};
-	// The dead-player map-mode clear rides every advanced tick — retail's
+void Simulation::after_tick() {
+	// The dead-player map-mode clear rides every advanced tick -- retail's
 	// render-frame gate, observed before the presenters read the mode.
 	tick_hud_map_death_gate();
-	if (is_session_lost()) {
-		return {opennova::inmatch::TickStatus::SessionLost,
-				static_cast<int32_t>(get_logic_tick()),
-				{opennova::inmatch::SessionErrorCode::SessionLost,
-						std::string(get_session_loss_reason().utf8().get_data())}};
-	}
+	// The joiner's ~1 Hz frozen-session tripwire sampled this tick: the
+	// env-gated print is the shell's channel.
+	if (joiner_role_ != nullptr && joiner_role_->take_diagnostic_sample())
+		print_joiner_net_diagnostic_sample();
+}
 
-	opennova::inmatch::TickOutcome tick;
-	tick.status = opennova::inmatch::TickStatus::Ran;
-	tick.logic_tick = static_cast<int32_t>(get_logic_tick());
-	if (session_tick_sink_.is_valid()) {
-		Ref<MissionTickOutcome> value;
-		value.instantiate();
-		value->assign(tick);
-		const int64_t sink_start =
-				profiling ? Time::get_singleton()->get_ticks_usec() : 0;
-		const Variant accepted = session_tick_sink_.call(value);
-		if (profiling)
-			frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
-		if (accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted)) {
-			tick.status = opennova::inmatch::TickStatus::SessionLost;
-			tick.error = {opennova::inmatch::SessionErrorCode::SessionLost,
-					"Godot frame pipeline cancelled the tick batch"};
-		}
+bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
+	const bool profiling = runtime_profiling_enabled_;
+	last_net_tick_us_ = static_cast<uint64_t>(p_tick.net_us);
+	if (profiling) {
+		frame_sim_us_ += p_tick.tick_us;
+		frame_net_us_ += p_tick.net_us;
 	}
-	return tick;
+	if (session_tick_sink_ == nullptr) return true;
+	const int64_t sink_start =
+			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
+	const bool accepted = session_tick_sink_->on_session_tick(p_tick);
+	if (profiling)
+		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+	return accepted;
 }
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
-		const Ref<MissionFrameInput> &p_input,
-		const Callable &p_tick_sink) {
+		const Ref<MissionFrameInput> &p_input) {
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
-	frame_phase_perf_ = {};
+	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) input = p_input->native_value();
 	if (input.camera.listener_valid) {
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
-	session_tick_sink_ = p_tick_sink;
+	input.viewport_height = renderer_viewport_height();
 	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
-	session_tick_sink_ = Callable();
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
 
 Ref<MissionFrameOutcome> Simulation::step_session_frame(
-		const Ref<MissionFrameInput> &p_input,
-		const Callable &p_tick_sink) {
+		const Ref<MissionFrameInput> &p_input) {
 	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
-	frame_phase_perf_ = {};
+	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) input = p_input->native_value();
 	if (input.camera.listener_valid) {
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
-	session_tick_sink_ = p_tick_sink;
+	input.viewport_height = renderer_viewport_height();
 	const opennova::inmatch::FrameOutcome outcome = session_.step_once(input);
-	session_tick_sink_ = Callable();
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
@@ -223,103 +272,16 @@ bool Simulation::step() {
 	// deterministic tick. Preserve that public seam without adding a second tick
 	// path: snapshot the concrete target's held/edge latches into the same typed
 	// frame value inmatch::Session consumes. Direct look input has already updated
-	// kernel_->input's composed heading/pitch, so it must not be replayed as a
+	// kernel_->local.input's composed heading/pitch, so it must not be replayed as a
 	// second pixel delta here.
 	opennova::inmatch::FrameInput input;
-	input.player.movement = kernel_->input;
-	input.player.held_action_bits = kernel_->weapon.fire_held
-			? MissionFrameInput::HELD_FIRE : 0u;
+	input.player.movement = kernel_->local.input;
+	input.player.held_action_bits = kernel_->local.weapon.fire_held
+			? opennova::inmatch::HELD_FIRE : 0u;
 	input.player.pressed_action_bits =
-			(kernel_->weapon.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
-			(kernel_->weapon.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
+			(kernel_->local.weapon.fire_pressed ? opennova::inmatch::PRESSED_FIRE : 0u) |
+			(kernel_->local.weapon.reload_pressed ? opennova::inmatch::PRESSED_RELOAD : 0u);
+	input.viewport_height = renderer_viewport_height();
 	return session_.drive_one(input).ticks_run() == 1;
 }
 
-Dictionary Simulation::get_session_perf() const {
-	const opennova::inmatch::FramePerf &perf = session_.last_perf();
-	Dictionary out;
-	out["frame_us"] = perf.frame_us;
-	out["tick_us"] = perf.tick_us;
-	out["ticks"] = perf.ticks;
-	if (!runtime_profiling_enabled_)
-		return out;
-	// The phase attribution (frame_phase_perf_) exists only while the native
-	// clocks run; the keys are the Stats board's vocabulary (the board itself
-	// receives them through fold_frame_stats; this Dictionary is the probes').
-	const SessionPhasePerf &phase = frame_phase_perf_;
-	const opennova::np::HostSessionPerf &host_session = phase.host_session;
-	const opennova::np::ServerTickPerf &server = host_session.server;
-	out["sim_us"] = frame_sim_us_;
-	out["sink_us"] = frame_sink_us_;
-	out["net_us"] = frame_net_us_;
-	out["host_prep_us"] = phase.host_prep_us;
-	out["host_pump_us"] = static_cast<int64_t>(host_session.total_us);
-	out["host_receive_us"] = static_cast<int64_t>(host_session.receive_us);
-	out["host_connections_us"] = static_cast<int64_t>(host_session.connections_us);
-	out["host_adapter_us"] = static_cast<int64_t>(host_session.adapter_us);
-	out["server_tick_us"] = static_cast<int64_t>(host_session.server_us);
-	out["server_input_us"] = static_cast<int64_t>(server.input_us);
-	out["server_world_us"] = static_cast<int64_t>(server.world_us);
-	out["world_setup_us"] = static_cast<int64_t>(server.world_setup_us);
-	out["world_scripts_us"] = static_cast<int64_t>(server.world_scripts_us);
-	out["world_ai_us"] = static_cast<int64_t>(server.world_ai_us);
-	out["world_ai_reactions_us"] = static_cast<int64_t>(server.world_ai_reactions_us);
-	out["world_ai_collision_tables_us"] = static_cast<int64_t>(server.world_ai_collision_tables_us);
-	out["world_ai_entities_us"] = static_cast<int64_t>(server.world_ai_entities_us);
-	out["world_ai_infantry_entities_us"] = static_cast<int64_t>(server.world_ai_infantry_entities_us);
-	out["world_ai_infantry_remote_us"] = static_cast<int64_t>(server.world_ai_infantry_remote_us);
-	out["world_ai_infantry_combat_us"] = static_cast<int64_t>(server.world_ai_infantry_combat_us);
-	out["world_ai_infantry_animation_us"] = static_cast<int64_t>(server.world_ai_infantry_animation_us);
-	out["world_ai_infantry_collision_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_us);
-	out["world_ai_infantry_collision_contacts_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_contacts_us);
-	out["world_ai_infantry_collision_repulsion_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_repulsion_us);
-	out["world_ai_infantry_collision_ground_us"] = static_cast<int64_t>(server.world_ai_infantry_collision_ground_us);
-	out["world_ai_other_entities_us"] = static_cast<int64_t>(server.world_ai_other_entities_us);
-	out["world_ai_authority_vehicles_us"] = static_cast<int64_t>(server.world_ai_authority_vehicles_us);
-	out["world_ai_vehicle_scan_us"] = static_cast<int64_t>(server.world_ai_vehicle_scan_us);
-	out["world_ai_vehicle_motors_us"] = static_cast<int64_t>(server.world_ai_vehicle_motors_us);
-	out["world_ai_vehicle_riders_us"] = static_cast<int64_t>(server.world_ai_vehicle_riders_us);
-	out["world_ai_client_vehicles_us"] = static_cast<int64_t>(server.world_ai_client_vehicles_us);
-	out["world_ai_events_us"] = static_cast<int64_t>(server.world_ai_events_us);
-	out["world_attachments_us"] = static_cast<int64_t>(server.world_attachments_us);
-	out["world_attachment_orphans_us"] = static_cast<int64_t>(server.world_attachment_orphans_us);
-	out["world_attachment_child_pose_us"] = static_cast<int64_t>(server.world_attachment_child_pose_us);
-	out["world_attachment_riders_us"] = static_cast<int64_t>(server.world_attachment_riders_us);
-	out["world_throwables_us"] = static_cast<int64_t>(server.world_throwables_us);
-	out["world_weapons_us"] = static_cast<int64_t>(server.world_weapons_us);
-	out["world_projectiles_us"] = static_cast<int64_t>(server.world_projectiles_us);
-	out["world_destruction_us"] = static_cast<int64_t>(server.world_destruction_us);
-	out["world_housekeeping_us"] = static_cast<int64_t>(server.world_housekeeping_us);
-	out["match_us"] = static_cast<int64_t>(server.match_us);
-	out["replication_query_prep_us"] = static_cast<int64_t>(server.replication_query_prep_us);
-	out["replication_query_collect_us"] = static_cast<int64_t>(server.replication_query_collect_us);
-	out["replication_query_grid_us"] = static_cast<int64_t>(server.replication_query_grid_us);
-	out["replication_query_grid_span_us"] = static_cast<int64_t>(server.replication_query_grid_span_us);
-	out["replication_query_grid_bucket_us"] = static_cast<int64_t>(server.replication_query_grid_bucket_us);
-	out["replication_query_grid_workspace_us"] = static_cast<int64_t>(server.replication_query_grid_workspace_us);
-	out["replication_snapshot_us"] = static_cast<int64_t>(server.replication_snapshot_us);
-	out["replication_fan_us"] = static_cast<int64_t>(server.replication_fan_us);
-	out["replication_fan_setup_us"] = static_cast<int64_t>(server.replication_fan_setup_us);
-	out["replication_round_selection_us"] = static_cast<int64_t>(server.replication_round_selection_us);
-	out["replication_entity_selection_us"] = static_cast<int64_t>(server.replication_entity_selection_us);
-	out["replication_entity_setup_us"] = static_cast<int64_t>(server.replication_entity_setup_us);
-	out["replication_entity_scoring_us"] = static_cast<int64_t>(server.replication_entity_scoring_us);
-	out["replication_entity_los_us"] = static_cast<int64_t>(server.replication_entity_los_us);
-	out["replication_entity_los_terrain_us"] = static_cast<int64_t>(server.replication_entity_los_terrain_us);
-	out["replication_entity_los_sector_us"] = static_cast<int64_t>(server.replication_entity_los_sector_us);
-	out["replication_entity_sort_us"] = static_cast<int64_t>(server.replication_entity_sort_us);
-	out["replication_entity_budget_us"] = static_cast<int64_t>(server.replication_entity_budget_us);
-	out["replication_encode_us"] = static_cast<int64_t>(server.replication_encode_us);
-	out["replication_enqueue_us"] = static_cast<int64_t>(server.replication_enqueue_us);
-	out["server_rules_us"] = static_cast<int64_t>(server.rules_us);
-	out["server_replication_us"] = static_cast<int64_t>(server.replication_us);
-	out["host_send_us"] = static_cast<int64_t>(host_session.send_us);
-	out["host_player_us"] = phase.host_player_us;
-	out["client_decode_us"] = phase.client_decode_us;
-	out["client_setup_us"] = static_cast<int64_t>(phase.client.setup_us);
-	out["client_receive_us"] = static_cast<int64_t>(phase.client.receive_us);
-	out["client_maintenance_us"] = static_cast<int64_t>(phase.client.maintenance_us);
-	out["client_send_us"] = static_cast<int64_t>(phase.client.send_us);
-	out["adm_resolve_us"] = phase.adm_resolve_us;
-	return out;
-}

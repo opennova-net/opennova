@@ -38,13 +38,18 @@ const TAB_WIDGETS: Array[String] = ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "R
 
 signal opened
 signal closed
+# The witnessed CONFIRM_YES command exits the mission (the same close-screens
+# + action-3 pair as the pause menu's CONFIRM_YES; docs/mnu/menu-re.md "The
+# in-game exit confirmation"); the shell routes it to the return-to-menu
+# teardown.
+signal exit_to_menu_requested
 
-var _world: GameWorld = null
+var _view: WorldView = null
 var _ui_parent: Node = null
 var _layout_control: Control = null
 var _hud_presenter: GameHudPresenter = null
 var _deploy_presenter: DeployScreenPresenter = null
-var _armory_presenter = null
+var _armory_presenter: ArmoryPresenter = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
@@ -55,8 +60,8 @@ var _overlay_shown := false
 var _team_mode := false
 
 
-func setup(world: GameWorld, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
-	_world = world
+func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
+	_view = view
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
 	_hud_presenter = hud_presenter
@@ -75,13 +80,13 @@ func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
 
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam).
-static func install(parent: Node, world: GameWorld, ui_parent: Node,
+static func install(parent: Node, view: WorldView, ui_parent: Node,
 		hud_presenter: GameHudPresenter, deploy_presenter: DeployScreenPresenter,
 		armory_presenter, on_opened: Callable, on_closed: Callable) -> EndRoundPresenter:
 	var presenter := EndRoundPresenter.new()
 	presenter.name = "EndRoundPresenter"
 	parent.add_child(presenter)
-	presenter.setup(world, ui_parent, hud_presenter)
+	presenter.setup(view, ui_parent, hud_presenter)
 	presenter.connect_shell(deploy_presenter, armory_presenter, on_opened, on_closed)
 	return presenter
 
@@ -99,7 +104,7 @@ func _hud() -> HudOverlay:
 
 
 func _gametext() -> RtxtStringFile:
-	return Strings.get_table("gametext")
+	return Strings.get_table(Strings.TABLE_GAMETEXT)
 
 
 func is_open() -> bool:
@@ -127,9 +132,9 @@ func reset() -> void:
 ## the shell can tear the deploy/armory screens down); the 6 s + board gate
 ## opens STAT once.
 func tick() -> void:
-	if _world == null:
+	if _view == null:
 		return
-	var sim: Simulation = _world.get_sim()
+	var sim: Simulation = _view.sim()
 	if sim == null:
 		return
 	var state: EndRoundState = sim.get_end_round_state()
@@ -173,19 +178,18 @@ func _apply_overlay(sim: Simulation) -> void:
 	var hud := _hud()
 	if hud == null:
 		return
-	var overlay: Dictionary = sim.get_end_round_overlay(_gametext())
-	hud.set_end_round_overlay(true, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
-			PackedStringArray(overlay.get("texts", PackedStringArray())),
-			PackedInt32Array(overlay.get("ys", PackedInt32Array())))
+	var overlay := sim.get_end_round_overlay(_gametext())
+	hud.set_end_round_overlay(true, overlay.top, overlay.bottom, overlay.texts, overlay.ys)
 	_overlay_shown = true
 
 
 func _hide_overlay() -> void:
 	var hud := _hud()
 	if hud != null and _overlay_shown:
-		var sim: Simulation = _world.get_sim() if _world != null else null
-		var overlay: Dictionary = sim.get_end_round_overlay(null) if sim != null else {}
-		hud.set_end_round_overlay(false, int(overlay.get("top", 0)), int(overlay.get("bottom", 0)),
+		var sim: Simulation = _view.sim() if _view != null else null
+		var overlay: EndRoundOverlay = (
+				sim.get_end_round_overlay(null) if sim != null else EndRoundOverlay.new())
+		hud.set_end_round_overlay(false, overlay.top, overlay.bottom,
 				PackedStringArray(), PackedInt32Array())
 	_overlay_shown = false
 
@@ -205,7 +209,7 @@ func _open_stat_screen(sim: Simulation) -> void:
 # The STAT show callback [orig: StatScreen_ShowCallback @0x562840 (ex
 # sub_562840)]: fill the RESULTLIST, then hide the three tab radios for
 # non-team modes (team modes select OVERALL). The team-mode arm is the sim
-# state's `team_mode` (world/game_type.h).
+# state's `team_mode` (base/gameprofile/game_type.h).
 func _populate(sim: Simulation) -> void:
 	var list_id := _driver.widget_id(RESULT_LIST)
 	if list_id < 0:
@@ -228,17 +232,16 @@ func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
 	_driver.table_clear_rows(list_id)
 	var headers := PackedStringArray()
-	for value in sim.get_end_round_columns(table_width, _gametext()):
-		headers.append(String((value as Dictionary).get("header", "")))
+	for column: EndRoundColumn in sim.get_end_round_columns(table_width, _gametext()):
+		headers.append(column.header)
 	_driver.table_add_row(list_id, headers)
 	var row_index := 1
 	var selected_row := -1
-	for value in sim.get_end_round_rows(tab):
-		var row := value as Dictionary
-		var cells := PackedStringArray([String(row.get("name", "")), String(row.get("squad", "-"))])
-		cells.append_array(PackedStringArray(row.get("cells", PackedStringArray())))
+	for row: EndRoundRow in sim.get_end_round_rows(tab):
+		var cells := PackedStringArray([row.name, row.squad])
+		cells.append_array(row.cells)
 		_driver.table_add_row(list_id, cells)
-		if bool(row.get("selected", false)):
+		if row.selected:
 			selected_row = row_index
 		row_index += 1
 	if selected_row >= 0:
@@ -267,24 +270,29 @@ func teardown() -> void:
 	_stat_opened = false
 
 
-# The stat.mnu exits: HIDDEN_BACK and the CONFIRM_YES/CONFIRM_NO pair close the
-# screen (the round cycle itself is the host's).
-func _on_widget_value_changed(widget_name: String, kind: String, index: int,
-		_value: String) -> void:
-	if kind == "button" and (widget_name.nocasecmp_to("HIDDEN_BACK") == 0
-			or widget_name.nocasecmp_to("CONFIRM_YES") == 0
-			or widget_name.nocasecmp_to("CONFIRM_NO") == 0
-			or widget_name.nocasecmp_to("CONFIRM_EXIT") == 0):
+# Buttons and radios arrive on the driver's widget_activated (value_changed
+# never fires for them). The stat.mnu exit is confirmed, like the shipped
+# screen: HIDDEN_BACK's authored actions raise the CONFIRM_EXIT "Are you
+# sure?" panel (SHOW CONFIRM_EXIT + HIDE STATS), CONFIRM_NO's restore STATS,
+# and the CONFIRM_YES Command EXITS THE MISSION — the witnessed handler is the
+# same close-screens + action-3 pair as the pause menu's (docs/mnu/menu-re.md
+# "The in-game exit confirmation"), not a board hide. Closing on the other
+# names swallowed the confirmation.
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	if widget_name.nocasecmp_to("CONFIRM_YES") == 0:
 		close()
+		exit_to_menu_requested.emit()
 		return
 	# The tab radios map onto the engine's tab index [orig:
-	# stat_filter_tab_handler @0x562140]; the filter itself is the sim feed's.
-	if kind == "radio" and widget_name.begins_with("RADIO_TAB_"):
+	# stat_filter_tab_handler @0x562140, registered with params 0/1/2 by
+	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]; the filter itself is the
+	# sim feed's.
+	if widget_name.begins_with("RADIO_TAB_"):
 		var tab := 0
 		for i in TAB_WIDGETS.size():
 			if widget_name.nocasecmp_to(TAB_WIDGETS[i]) == 0:
 				tab = i
-		var sim: Simulation = _world.get_sim() if _world != null else null
+		var sim: Simulation = _view.sim() if _view != null else null
 		var list_id := _driver.widget_id(RESULT_LIST) if _driver != null else -1
 		if sim != null and list_id >= 0:
 			_fill_table(sim, list_id, tab)
@@ -293,7 +301,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
-	var root: ResourceRoot = _world.get_resource_root()
+	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -319,8 +327,8 @@ func _ensure_menu() -> bool:
 	_driver.attach(_frame, _audio)
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
-	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	var style := _load_style(root)
+	_driver.widget_activated.connect(_on_widget_activated)
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("EndRoundPresenter: %s has no screens" % MENU_FILE)
@@ -333,10 +341,6 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 	if _driver == null or not is_open():
 		return
 	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
-
-
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 
 
 func _recompute_fit() -> void:

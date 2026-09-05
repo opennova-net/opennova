@@ -30,9 +30,9 @@ between one portable session module and one first-class Godot pipeline:
 MainGame._process
   sample player input once
   GameWorld.tick(camera, delta, MissionFrameInput)
-    GameFramePipeline.advance
+    GameWorld.advance_frame          the static leg table (godot/src/world/game_world_frame.cpp)
       begin device frame
-      MissionPresentation.advance_session_frame
+      MissionRoot.advance_session_frame
         Simulation.advance_session_frame
           inmatch::Session.advance           state + bank + input retention
             0..N Simulation mission ticks   net pump + World.run_logic_tick
@@ -62,14 +62,14 @@ MainGame._process
 ```
 
 A terminal `MissionFrameOutcome` stops catch-up and returns immediately from
-`GameFramePipeline`, so later device phases cannot run against a lost or failed
+the leg loop (`session` and `network` are the two stopping rows of `kFrameLegs`), so later device phases cannot run against a lost or failed
 session. There is no callback lattice and no second legacy frame sequence.
 
 ## Ownership and seams
 
 ### Portable session
 
-`engine/net/inmatch/session.*` owns:
+`engine/runtime/inmatch/session.*` owns:
 
 - `inmatch::State` and the allowed transitions;
 - role policy for single player, listen host, joiner, and dedicated host;
@@ -78,9 +78,9 @@ session. There is no callback lattice and no second legacy frame sequence.
 - reset, close, terminal error propagation, and frame timing;
 - typed `FrameInput`, `TickInput`, `TickOutcome`, and `FrameOutcome` values.
 
-Its one internal seam is `inmatch::TickTarget`. Both targets — the Godot
+Its one internal seam is the `inmatch::Role` the session binds (ADR 0043 d3: `LocalRole`, `HostRole`, `JoinerRole`). Both embedders — the Godot
 `Simulation` binding and `apps/nw_server`'s dedicated host — embed the engine's
-`mission::MissionKernel` and drive `inmatch::listen_host::frame` (ADR 0042 d3,
+`mission::MissionKernel` and run `inmatch::HostRole::run_tick` (ADR 0042 d3,
 PR #587), so boot, state and the no-net tick have one implementation and the
 session interface provably does not depend on Godot. The target adds only
 resource resolution, Godot value conversion and the device pipeline; none of
@@ -90,9 +90,9 @@ session facts the tooling and the shell flow used to re-derive: `session_open`
 null-slot rejection inside `toggle_mount`), the medic-call cooldown
 (`tick_medic_cooldown` / `stamp_medic_request`), the local dead bit
 (`local_player_dead`; a joiner reads its replica through
-`np::ClientRuntime::local_player_dead`), the water plane the occupant clamp
+`inmatch::ClientRuntime::local_player_dead`), the water plane the occupant clamp
 reads (`sync_water_plane` from `World::env.water_z`), and the per-tick
-environment advance, which runs inside `listen_host::frame` and `tick_no_net`
+environment advance, which runs inside `HostRole::run_tick` and `LocalRole::run_tick`
 rather than in each embedder. The headless embedders load their terrain
 through the engine's one `terrain::terrain_field_store_load`.
 
@@ -128,12 +128,12 @@ texture closes the workspace). Release, headless and addon-less runs hand
 `MainGame` to the tree directly instead (ADR 0039; the `runtime_root_window`
 and `window_fullscreen` probes pin both arrangements).
 
-`MissionPresentation` owns the placed and wire present passes, entity index,
+`MissionRoot` owns the placed and wire present passes, entity index,
 effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through
 `inmatch::Session::step_once`; it is not a second loop.
 
-`GameFramePipeline` owns the concrete Godot device order. It deliberately names
+`GameWorld`'s static leg table (`kFrameLegs` in `godot/src/world/game_world_frame.cpp`, its literal order pinned by `frame_leg_names()`) owns the concrete Godot device order. It deliberately names
 the renderer, audio, particle, environment, and presentation operations we
 ship. We do not add a generic renderer interface for a hypothetical backend.
 
@@ -184,7 +184,7 @@ The proven deep render modules remain unchanged:
 These modules own traversal, ordering, and typed draw records. Godot owns asset
 upload and draw application. Particle rendering, per-model material eval, and
 the local-player view placement are all explicitly invoked by
-`GameFramePipeline` (`render_particle_frame`, `render_material_frame`, and the
+the leg table (`render_particle_frame`, `render_material_frame`, and the
 `present_local_view_frame` leg); `ParticleRenderer`, `EffectWorld`,
 `ObjectModel`, and `GameWorld` no longer run independent process loops. The
 per-model advance is one static driver over a shared awake set
@@ -209,16 +209,22 @@ seven-pass render-command stream.
 Single player is still an in-process listen server
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). Authority roles pump
-`np::host_session_pump`; joiners drive `ClientRuntime`. Both are reached
-inside the session target tick. A joiner's decoded entities use the one
-`ClientReplicaPipeline` path and `WirePresentPass`. The listen host presents
+`inmatch::host_session_pump`; joiners drive `ClientRuntime`. Both are reached
+inside the role's tick (`HostRole::run_tick`, `JoinerRole::run_tick` — the
+joiner frame owns its socket seam, the decoded-row asset resolution through
+the kernel and the local-player pumps; the shell keeps only the loadout
+profile seams, ADR 0043 d3). A joiner's decoded entities use the one
+`ClientReplicaPipeline` path and `EntityPresenter`. The listen host presents
 its own pools (its loopback 0x0A is retail's header-only frame, D-NET-140):
 authored rows through the placed present pass, runtime-spawned rows through
-`WirePresentPass`.
+`EntityPresenter`.
 
-`npwire` is the retail compatibility boundary. `npruntime` and `netsim` are
-implementation directories used inside the concrete tick targets, not
-additional public lifecycle layers. The exact end-round exchange pushes
+`npwire` is the retail compatibility boundary and `net/` is wire only (ADR
+0043 d4). The in-match runtime lives above it in `runtime/inmatch` (the
+session, the listen-host frame, the server/client state machines and frame
+loops, the transports) and `runtime/replication` (the world<->wire seam and
+the client replica state); neither is an additional public lifecycle layer.
+The exact end-round exchange pushes
 `0x61` then recipient-specific `0x1D`, followed by requester-only
 `0x2B`/`0x56` pulls in at most 200-byte chunks. The client connection owns the
 pull loop and folds the immutable board into client state.
@@ -288,9 +294,9 @@ Focused local coverage pins:
   `tests/world/match_test.cpp`, `tests/npruntime/round_end_test.cpp`, and
   `tests/npruntime/client_runtime_test.cpp`;
 - typed Godot session/presentation behavior in
-  `godot/tests/mission_presentation_test.gd`;
+  `godot/tests/mission_root_test.gd`;
 - concrete device ordering and cancellation in
-  `godot/tests/game_frame_pipeline_test.gd`, plus the real GameWorld stack's
+  `godot/tests/world_frame_order_test.gd` (the literal leg names, the replay list, the stopping legs), plus the real GameWorld stack's
   tick integration in `godot/tests/game_world_test.gd`;
 - load cancellation and settlement in
   `godot/tests/game/main_game_lifecycle_test.gd`;

@@ -48,19 +48,6 @@ godot::Ref<godot::Image> make_rgb_image(const IndexedImage8 &image) {
 	return godot::Image::create_from_data(image.width, image.height, false, godot::Image::FORMAT_RGB8, pixels);
 }
 
-bool load_pcx_bytes(const godot::String &path, std::vector<uint8_t> &bytes) {
-	godot::PackedByteArray packed;
-	if (!godot::read_nova_payload_file(path, packed)) {
-		return false;
-	}
-
-	bytes.resize(static_cast<size_t>(packed.size()));
-	if (!bytes.empty()) {
-		std::memcpy(bytes.data(), packed.ptr(), static_cast<size_t>(packed.size()));
-	}
-	return true;
-}
-
 } // namespace
 
 godot::Ref<godot::Image> decode_pcx_image(const uint8_t *data, size_t size) {
@@ -126,34 +113,6 @@ bool decode_pcx_with_palette(const uint8_t *data,
 	return true;
 }
 
-godot::PackedByteArray encode_pcx_indices(const uint8_t *indices,
-                                          int width,
-                                          int height,
-                                          const uint8_t palette[256][3]) {
-	godot::PackedByteArray bytes;
-	if (indices == nullptr || width <= 0 || height <= 0) {
-		return bytes;
-	}
-
-	IndexedImage8 image;
-	image.width = width;
-	image.height = height;
-	image.indices.assign(indices, indices + static_cast<size_t>(width * height));
-	std::memcpy(image.palette, palette, sizeof(image.palette));
-
-	std::vector<uint8_t> encoded;
-	std::string error;
-	if (!encode_pcx_indexed(image, encoded, error)) {
-		return bytes;
-	}
-
-	bytes.resize(static_cast<int>(encoded.size()));
-	if (!encoded.empty()) {
-		std::memcpy(bytes.ptrw(), encoded.data(), encoded.size());
-	}
-	return bytes;
-}
-
 godot::Ref<godot::Texture2D> build_indexed_texture(const std::vector<uint8_t> &indices,
                                                    const uint8_t palette[256][3],
                                                    int width,
@@ -173,26 +132,6 @@ godot::Ref<godot::Texture2D> build_indexed_texture(const std::vector<uint8_t> &i
 		return godot::Ref<godot::Texture2D>();
 	}
 	return godot::ImageTexture::create_from_image(rgb);
-}
-
-std::vector<uint8_t> load_pcx_indices(const godot::String &path, int &out_w, int &out_h) {
-	out_w = 0;
-	out_h = 0;
-
-	std::vector<uint8_t> bytes;
-	if (!load_pcx_bytes(path, bytes)) {
-		return {};
-	}
-
-	IndexedImage8 indexed;
-	std::string error;
-	if (!decode_pcx_indexed(bytes.data(), bytes.size(), indexed, error)) {
-		return {};
-	}
-
-	out_w = indexed.width;
-	out_h = indexed.height;
-	return indexed.indices;
 }
 
 } // namespace opennova

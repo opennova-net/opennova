@@ -1,4 +1,5 @@
 #include <formats/rtxt/rtxt.h>
+#include <base/io/strutil.h>
 
 #include <base/io/le.h>
 
@@ -52,15 +53,10 @@ std::string read_string(const uint8_t *data, size_t size, size_t &offset) {
 
 }  // namespace
 
-std::string to_upper(const std::string &s) {
-  std::string result = s;
-  std::transform(result.begin(), result.end(), result.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-  return result;
-}
-
-// The '&' hotkey marker strip a button label goes through when it is set
-// [orig: CButtonWnd_SetLabel @ 0x6572F0].
+// The "{hot}" marker strip a button label goes through when it is set: the
+// FIRST marker only, found case-sensitively (strstr — "{HOT}" stays literal),
+// its byte offset reported so the byte that followed it becomes the button's
+// accelerator [orig: CButtonWnd_SetLabel @ 0x6572F0, strstr @ 0x657451].
 std::string strip_hotkey(const std::string &text, int &hotkey_index) {
   size_t pos = text.find(HOTKEY_MARKER);
   if (pos == std::string::npos) {
@@ -103,15 +99,15 @@ std::string lookup_with_override(const File *override_table, const File *table,
 std::string File::get(const std::string &key) const {
   if (!lookup_built_) {
     // Fallback linear search if lookup not built.
-    std::string upper_key = to_upper(key);
+    std::string upper_key = strutil::to_upper(key);
     for (const auto &entry : entries) {
-      if (to_upper(entry.key) == upper_key) {
+      if (strutil::to_upper(entry.key) == upper_key) {
         return entry.text;
       }
     }
     return "";
   }
-  auto it = lookup_.find(to_upper(key));
+  auto it = lookup_.find(strutil::to_upper(key));
   if (it == lookup_.end()) {
     return "";
   }
@@ -120,15 +116,15 @@ std::string File::get(const std::string &key) const {
 
 bool File::has(const std::string &key) const {
   if (!lookup_built_) {
-    std::string upper_key = to_upper(key);
+    std::string upper_key = strutil::to_upper(key);
     for (const auto &entry : entries) {
-      if (to_upper(entry.key) == upper_key) {
+      if (strutil::to_upper(entry.key) == upper_key) {
         return true;
       }
     }
     return false;
   }
-  return lookup_.find(to_upper(key)) != lookup_.end();
+  return lookup_.find(strutil::to_upper(key)) != lookup_.end();
 }
 
 const Entry *File::find_in_section(const std::string &section_name,
@@ -138,17 +134,17 @@ const Entry *File::find_in_section(const std::string &section_name,
   // the section's first entry index. The engine never consults the entry's own
   // section_index field; neither do we, so behaviour matches even on files
   // that violate the grouping invariant.
-  std::string upper_section = to_upper(section_name);
+  std::string upper_section = strutil::to_upper(section_name);
   size_t start_index = 0;
   for (const auto &section : sections) {
-    if (to_upper(section.name) == upper_section) {
+    if (strutil::to_upper(section.name) == upper_section) {
       // [orig: TextResource_FindKeyInSection @ 0x75D1E0] — bounded key walk,
       // first match wins, index validated against the header entry count.
-      std::string upper_key = to_upper(key);
+      std::string upper_key = strutil::to_upper(key);
       for (uint32_t i = 0; i < section.string_count; ++i) {
         size_t index = start_index + i;
         if (index >= entries.size()) return nullptr;
-        if (to_upper(entries[index].key) == upper_key) {
+        if (strutil::to_upper(entries[index].key) == upper_key) {
           return &entries[index];
         }
       }
@@ -208,7 +204,7 @@ void File::build_lookup() {
   for (size_t i = 0; i < entries.size(); ++i) {
     // First occurrence wins, matching the engine's forward key walk
     // [orig: TextResource_FindEntryByKey @ 0x75D450].
-    lookup_.emplace(to_upper(entries[i].key), i);
+    lookup_.emplace(strutil::to_upper(entries[i].key), i);
   }
   lookup_built_ = true;
 }

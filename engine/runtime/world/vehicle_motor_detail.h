@@ -17,9 +17,37 @@
 
 #include <runtime/world/collision.h>
 #include <runtime/world/vehicle_motor.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
+
+// Analog steer scale: BAM/tick per axis unit [orig: @0x48b783 `(192426 * analogZ) >> 1`;
+// the same 2^32/360/62 deg/s->BAM/tick constant the turn_rate parse uses].
+// Shared by the ground/boat input block (vehicle_motor.cpp) and the air one
+// (vehicle_motor_air.cpp).
+constexpr int32_t kAnalogSteerScale = 192426;
+
+// x86 SHL used by the vehicle angle/rate integrators: keep only the low
+// 32 bits at every step, exactly like the retail register operation.
+inline int32_t bam_shl_wrap(int32_t value, unsigned shift) {
+    while (shift-- != 0) value = io::bam_dbl(value);
+    return value;
+}
+
+// x86 IMUL low-dword result. The shared BAM helpers cover add/sub/shift/abs;
+// this is the remaining multiply primitive needed by the aircraft rate caps.
+inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
+    return static_cast<int32_t>(static_cast<uint32_t>(lhs) *
+                                static_cast<uint32_t>(rhs));
+}
+
+// The occupant whose input this machine should consume (defined in
+// vehicle_motor.cpp beside the controller resolve; the air TU consumes it).
+// Retail's gate is `(occ->Flags & 0x100) && (occ == g_local_player_entity ||
+// is_authority)` [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the
+// ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
+Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
 
 namespace detail {
 

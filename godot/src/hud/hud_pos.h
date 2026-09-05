@@ -20,6 +20,7 @@
 namespace godot {
 
 class ResourceRoot;
+class VehicleHudBlock;
 
 // Thin GDExtension wrapper over engine/formats/def hudpos.def parsing (def_parse_hudpos).
 //
@@ -35,7 +36,7 @@ class HudPos : public RefCounted {
 	GDCLASS(HudPos, RefCounted)
 
 private:
-	DefHudPosFile file_ = {};
+	opennova::def::DefHudPosFile file_ = {};
 	bool loaded_ = false;
 	String source_path_;
 	String last_error_;
@@ -114,9 +115,7 @@ public:
 	static int waypoint_distance_m(const Vector2 &p_ground_delta);
 	static int heat_fill_span(int p_extent_px, int p_heat);
 	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
-	static int power_throw_progress_fp16(int p_held_ticks);
 	static int power_fill_span(int p_progress_fp16, int p_extent_px);
-	static int loading_bar_step(int p_displayed, int p_reported);
 	static Vector2i loading_bar_fill_span(int p_x, int p_w, int p_displayed);
 	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
 			double p_screen_w);
@@ -136,8 +135,7 @@ public:
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
 	static String loading_sidecar_image_name(const String &p_mission_file);
-	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed,
-			int p_displayed, int p_reported);
+	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
 	static double loading_msg_x_frac();
 	static double loading_msg_right_frac();
 	static double loading_msg_label_y_frac();
@@ -202,10 +200,8 @@ public:
 	Array get_stances() const;
 	// [{ texture:String, pos:Vector2i }]
 	Array get_static_frames() const;
-	// One VEHICLE_HUD block by items.def sid; empty when unknown.
-	Dictionary get_vehicle_hud(const String &p_sid) const;
-	Dictionary get_parachute_icon() const;
-	Dictionary get_armor_icon() const;
+	// One VEHICLE_HUD block by items.def sid (hud/vehicle_hud_block.h); null when unknown.
+	Ref<VehicleHudBlock> get_vehicle_hud(const String &p_sid) const;
 	Rect2i get_spinmap_bounds() const;
 	int get_spinmap_wp_dist_off() const;
 	// MAPCOORDS x, y, suppressor. The suppressor is 0 when unauthored (the
@@ -214,6 +210,9 @@ public:
 	Vector3i get_map_coords() const;
 	// Four visibility bytes for one HUDDECLUT_* row. Empty means absent.
 	PackedByteArray get_declutter_flags(const String &p_name) const;
+	// The retained parse, for the engine folds that take the rows directly
+	// (hud_declutter.h declutter_from_hudpos).
+	const opennova::def::DefHudPosFile &native_file() const { return file_; }
 	// Named HUD colors (Godot Color, RGBA normalized): health_border, hud_textcolor,
 	// stancecolor_good/middle/bad, tagcolor_*, etc.
 	Dictionary get_colors() const;

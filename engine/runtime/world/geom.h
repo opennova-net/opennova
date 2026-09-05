@@ -4,8 +4,7 @@
 // parameters as 16.16 signed fixed-point (e.g. bms::Entity::get_x() = x / 65536).
 // The portable world keeps a clean float model; conversion helpers live here so
 // front-ends (WAC operand resolution, BMS param decode) share one definition.
-#ifndef OPENNOVA_WORLD_GEOM_H
-#define OPENNOVA_WORLD_GEOM_H
+#pragma once
 
 #include <cstdint>
 
@@ -42,5 +41,3 @@ struct Aabb {
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_GEOM_H

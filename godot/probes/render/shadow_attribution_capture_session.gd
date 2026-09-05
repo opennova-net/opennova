@@ -126,9 +126,9 @@ func _realized_suppressed_dynamic_bms_ids() -> Array:
 				or not bool(state.get("dynamic_enabled", false)) \
 				or model.is_shadow_caster_enabled():
 			continue
-		var ref_value: Variant = model.get_meta("entity_ref", {})
-		if ref_value is Dictionary and (ref_value as Dictionary).has("bms_id"):
-			by_bms_id[int((ref_value as Dictionary).bms_id)] = true
+		var ref: EntityRef = model.entity_ref
+		if ref != null:
+			by_bms_id[ref.bms_id] = true
 	var ids: Array = by_bms_id.keys()
 	ids.sort()
 	return ids
@@ -144,19 +144,18 @@ func get_dynamic_caster_inventory() -> Array:
 	for model: ObjectModel in models:
 		if not model.is_shadow_caster_enabled():
 			continue
-		var ref_value: Variant = model.get_meta("entity_ref", {})
-		var ref: Dictionary = ref_value if ref_value is Dictionary else {}
-		var item_id := int(ref.get("item_id", 0))
-		var graphic := String(ref.get("graphic", ""))
-		var attrib2 := int(ref.get("attrib2", 0))
+		var ref: EntityRef = model.entity_ref
+		var item_id := ref.item_id if ref != null else 0
+		var graphic := ref.graphic if ref != null else ""
+		var attrib2 := int(ref.attrib2) if ref != null else 0
 		if item_db != null:
 			if graphic.is_empty():
 				graphic = item_db.get_graphic(item_id)
-			if not ref.has("attrib2"):
+			if attrib2 == 0:
 				attrib2 = item_db.get_attrib2(item_id)
 		var bounds: AABB = model.global_transform * model.get_model_bounds()
 		rows.append(CasterDiagnostic.new(
-				int(ref.get("bms_id", -1)), item_id, graphic, attrib2,
+				ref.bms_id if ref != null else -1, item_id, graphic, attrib2,
 				Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, bounds,
 				String(model.get_path())))
 	rows.sort_custom(_caster_row_less)
@@ -177,10 +176,10 @@ func get_static_caster_inventory() -> Array:
 	for model: ObjectModel in models:
 		if not model.is_static_shadow_caster_enabled():
 			continue
-		var ref := _model_ref(model)
+		var ref: EntityRef = model.entity_ref
 		_append_static_inventory_row(by_identity, item_db,
-				int(ref.get("bms_id", -1)), int(ref.get("item_id", 0)),
-				String(ref.get("graphic", "")), int(ref.get("attrib2", 0)),
+				ref.bms_id if ref != null else -1, ref.item_id if ref != null else 0,
+				ref.graphic if ref != null else "", int(ref.attrib2) if ref != null else 0,
 				model.global_transform * model.get_model_bounds(),
 				String(model.get_path()))
 
@@ -266,9 +265,8 @@ func _models_with_bms_id(bms_id: int) -> Array[ObjectModel]:
 	_collect_object_models(_world, models)
 	var matches: Array[ObjectModel] = []
 	for model: ObjectModel in models:
-		var ref_value: Variant = model.get_meta("entity_ref", {})
-		if ref_value is Dictionary \
-				and int((ref_value as Dictionary).get("bms_id", -1)) == bms_id:
+		var ref: EntityRef = model.entity_ref
+		if ref != null and ref.bms_id == bms_id:
 			matches.append(model)
 	return matches
 
@@ -290,20 +288,16 @@ static func _collect_static_multimeshes(
 		_collect_static_multimeshes(child, out)
 
 
-static func _model_ref(model: ObjectModel) -> Dictionary:
-	var ref_value: Variant = model.get_meta("entity_ref", {})
-	return ref_value if ref_value is Dictionary else {}
-
-
 ## The population-local slot each live MultiMesh row draws. The placer packs a
 ## population's rows dense [0, visible_instance_count) in swap-remove order and
-## publishes the row -> slot map as `static_shadow_rows`; a source without that
-## map is slot-ordered (row == slot) over its instance count.
+## publishes the row -> slot map on its StaticPopulationInstance; any other
+## source is slot-ordered (row == slot) over its instance count.
 static func _static_source_row_slots(source: MultiMeshInstance3D,
 		slot_count: int) -> PackedInt32Array:
 	var rows := PackedInt32Array()
-	if source.has_meta("static_shadow_rows"):
-		for slot in PackedInt32Array(source.get_meta("static_shadow_rows")):
+	var population := source as StaticPopulationInstance
+	if population != null and population.shadow_tagged:
+		for slot in population.row_slots:
 			if slot >= 0 and slot < slot_count:
 				rows.append(slot)
 		return rows
@@ -319,22 +313,29 @@ static func _static_source_row_slots(source: MultiMeshInstance3D,
 static func _static_source_identities(source: MultiMeshInstance3D) -> Array:
 	var count := source.multimesh.instance_count \
 			if source.multimesh != null else 0
-	var bms_ids := Array(source.get_meta("static_shadow_bms_ids", []))
-	var item_ids := Array(source.get_meta("static_shadow_item_ids", []))
-	var attrib2_values := Array(source.get_meta("static_shadow_attrib2", []))
-	var slots := Array(source.get_meta("static_shadow_slots", []))
-	var graphic := String(source.get_meta("static_shadow_graphic", ""))
+	var bms_ids: Array = []
+	var item_ids: Array = []
+	var attrib2_values: Array = []
+	var slots: Array = []
+	var graphic := ""
+	var population := source as StaticPopulationInstance
+	if population != null and population.shadow_tagged:
+		bms_ids = Array(population.slot_bms_ids)
+		item_ids = Array(population.slot_item_ids)
+		attrib2_values = Array(population.slot_attrib2)
+		slots = Array(population.slot_casts_shadow)
+		graphic = population.graphic
 	if bms_ids.is_empty():
 		var parent := source.get_parent()
 		while parent != null and not (parent is ObjectModel):
 			parent = parent.get_parent()
 		if parent is ObjectModel:
-			var ref := _model_ref(parent as ObjectModel)
-			bms_ids = [int(ref.get("bms_id", -1))]
-			item_ids = [int(ref.get("item_id", 0))]
-			attrib2_values = [int(ref.get("attrib2", 0))]
+			var ref: EntityRef = (parent as ObjectModel).entity_ref
+			bms_ids = [ref.bms_id if ref != null else -1]
+			item_ids = [ref.item_id if ref != null else 0]
+			attrib2_values = [int(ref.attrib2) if ref != null else 0]
 			slots = [true]
-			graphic = String(ref.get("graphic", ""))
+			graphic = ref.graphic if ref != null else ""
 	var rows: Array = []
 	for index in range(count):
 		rows.append({

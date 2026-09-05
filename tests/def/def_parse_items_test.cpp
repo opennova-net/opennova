@@ -11,6 +11,8 @@
 #include <ctype.h>
 #include <string>
 
+using namespace opennova::def;
+
 static int expect_str(const char *what, const char *got, const char *want) {
     if (strcmp(got, want) != 0) {
         fprintf(stderr, "FAIL: %s mismatch: expected '%s', got '%s'\n", what, want, got);
@@ -261,6 +263,8 @@ static int test_weathervane_minai_default_aip(void) {
         "  move_function chel\n"
         "    weathervane 30\n"
         "    minai\t\t1\n"
+        "    hand_brake 0\n"
+        "    tire_slip 7\n"
         "  default_aip H_BHawk\n"
         "  sound_profile SP_Blackhawk1\n"
         "end\n"
@@ -282,6 +286,19 @@ static int test_weathervane_minai_default_aip(void) {
     }
     if (items.entries[0].min_ai != 1) {
         fprintf(stderr, "FAIL: min_ai %d != 1\n", items.entries[0].min_ai);
+        ++fails;
+    }
+    /* hand_brake / tire_slip: authored values land raw; an entry that lists
+       neither runs on the allocator's 1 / 5 [orig: ItemDef_AllocateWithDefaults
+       @0x49E3B0; keys @0x7c7d60 / @0x7c7d6c]. */
+    if (items.entries[0].hand_brake != 0 || items.entries[0].tire_slip != 7) {
+        fprintf(stderr, "FAIL: hand_brake %d / tire_slip %d != 0 / 7\n",
+                items.entries[0].hand_brake, items.entries[0].tire_slip);
+        ++fails;
+    }
+    if (items.entries[1].hand_brake != 1 || items.entries[1].tire_slip != 5) {
+        fprintf(stderr, "FAIL: hand_brake/tire_slip defaults %d / %d != 1 / 5\n",
+                items.entries[1].hand_brake, items.entries[1].tire_slip);
         ++fails;
     }
     fails += expect_str("default_aip", items.entries[0].default_aip, "H_BHawk");
@@ -825,7 +842,8 @@ int main(void) {
         def_free_items(&rifle_items);
         return 1;
     }
-    if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0) {
+    if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0 ||
+        strcmp(rifle_items.entries[0].ammo_marker3, "AMMO_AK47_556MM") != 0) {
         fprintf(stderr, "FAIL: rifleman ammo_closeattack mismatch: '%s'\n",
                 rifle_items.entries[0].ammo_closeattack);
         def_free_items(&rifle_items);

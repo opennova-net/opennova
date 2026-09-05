@@ -164,9 +164,9 @@ struct Rig {
 	}
 	Entity &veh() { return *w.registry.get(veh_h); }
 	Entity &drv() { return *w.registry.get(drv_h); }
-	void mount() { CHECK(entity_process_vehicle_attach(w, drv_h, veh_h, 1), "mount"); }
+	void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1), "mount"); }
 	void tick(int n, const VehicleTraits &t) {
-		for (int i = 0; i < n; ++i) tick_vehicle_motor(w, veh(), t);
+		for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
 	}
 };
 
@@ -202,7 +202,7 @@ void test_player_control_rotor_follows_the_claimant() {
 			"four ticks of linear spin-up");
 	CHECK(r.w.prng16_state == prng0, "still no PRNG draw");
 	// Dismount: the claimant clears, the spin-down takes the full rate.
-	CHECK(entity_detach_from_vehicle(r.w, r.drv_h), "dismount");
+	CHECK(r.w.vehicles.detach(r.drv_h), "dismount");
 	r.tick(1, t);
 	CHECK(!r.veh().primary_occupant.valid(), "the claimant cleared");
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull,
@@ -311,15 +311,15 @@ void test_helo_family_decays_at_the_helo_rate() {
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
 	r.mount();
-	for (int i = 0; i < 3; ++i) vehicle_part_anim_tick(r.w, r.veh(), t);
+	for (int i = 0; i < 3; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull,
 			"occupied: the full spin-up rate, both machines");
-	CHECK(entity_detach_from_vehicle(r.w, r.drv_h), "dismount");
-	vehicle_part_anim_tick(r.w, r.veh(), t);
+	CHECK(r.w.vehicles.detach(r.drv_h), "dismount");
+	r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo,
 			"unoccupied: the helo decay");
 	VehicleTraits g = buggy_traits(true);
-	vehicle_part_anim_tick(r.w, r.veh(), g);
+	r.w.vehicles.part_anim_tick(r.veh(), g);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo - kRotorDecayGround,
 			"a ground-family row decays at the ground rate");
 }
@@ -337,7 +337,7 @@ void test_watercraft_runs_no_rotor_machine() {
 	Entity &veh = r.veh();
 	veh.veh.cmd_speed = 3;
 	const uint32_t prng0 = r.w.prng16_state;
-	for (int i = 0; i < 5; ++i) vehicle_part_anim_tick(r.w, veh, t);
+	for (int i = 0; i < 5; ++i) r.w.vehicles.part_anim_tick(veh, t);
 	CHECK(r.w.prng16_state == prng0, "a boat never draws the rotor roll");
 	CHECK(veh.veh.part_spin.rate == 0 && veh.veh.part_spin.speed == 0 &&
 					veh.veh.part_spin.angle == 0,
@@ -347,7 +347,7 @@ void test_watercraft_runs_no_rotor_machine() {
 	// The authority boat tick runs the part-anim exactly once.
 	t.physics = 1;
 	veh.veh.wheel_phase = 0;
-	tick_watercraft_motor(r.w, veh, t, nullptr);
+	r.w.vehicles.tick_watercraft_motor(veh, t, nullptr);
 	CHECK(veh.veh.wheel_phase == (veh.veh.cmd_speed << 13),
 			"one authority tick advances the phase by one step");
 }

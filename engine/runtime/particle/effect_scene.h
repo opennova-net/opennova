@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <base/io/tick_rate.h>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -103,7 +104,7 @@ struct EffectSceneConfig {
 	std::vector<EffectCatalogDocument> documents;
 	// Initial-age replay uses this fixed step so a catch-up spawn follows the
 	// same emission and physics cadence as ordinary world simulation.
-	float simulation_tick_seconds = 1.0f / 62.5f;
+	float simulation_tick_seconds = 1.0f / static_cast<float>(io::kTickHz);
 	// Zero means unbounded. Non-zero limits reject explicitly rather than
 	// silently dropping an effect or a subset of its emitters.
 	std::size_t max_live_groups = 1024;
@@ -233,6 +234,7 @@ struct EffectEmitterFrameSnapshot {
 	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 	float age = 0.0f;
 	float spring_const = 0.0f;
+	float camera_pull = 0.0f;
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
@@ -260,6 +262,9 @@ struct EffectEmitterDebugSnapshot {
 	Vec3 position{};
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
 	float age = 0.0f;
+	float emit_rate = 0.0f;
+	float spawn_y_offset = 0.0f;
+	float camera_pull = 0.0f;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
 	EffectBounds bounds;
@@ -322,6 +327,11 @@ public:
 	// Unique live FollowOwner tokens in deterministic group order. This narrow
 	// query avoids constructing the particle-bounds debug snapshot on hot paths.
 	std::vector<EffectOwnerToken> active_owner_tokens() const;
+	// Applies the two live descriptor parameters used by persistent movement
+	// effects. Inputs are deliberately not clamped: retail permits extrapolation.
+	// Returns false for a missing/detached group or non-finite input.
+	bool set_group_parameters(EffectGroupId group, float rate_control,
+			float offset_control);
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
 

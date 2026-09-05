@@ -9,6 +9,8 @@
 #include <cstring>
 #include <vector>
 
+using namespace opennova::fnt;
+
 namespace godot {
 
 void FntResource::_bind_methods() {

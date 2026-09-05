@@ -12,13 +12,11 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
-#include <runtime/devtools/ai_view_request.h>
 #include <runtime/devtools/ai_window.h>
-#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/control_request.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
-#include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/physics_request.h>
@@ -37,6 +35,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+using namespace opennova::def;
 #endif
 
 namespace godot {
@@ -48,6 +48,9 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"), &DevTools::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"), &DevTools::get_frame_stats);
 	ClassDB::bind_method(D_METHOD("set_simulation", "simulation"), &DevTools::set_simulation);
+	ClassDB::bind_method(D_METHOD("set_debug_control_table", "table"),
+			&DevTools::set_debug_control_table);
+	ClassDB::bind_method(D_METHOD("get_debug_control_table"), &DevTools::get_debug_control_table);
 	ClassDB::bind_method(D_METHOD("select_entity", "handle"), &DevTools::select_entity);
 	ClassDB::bind_method(D_METHOD("selected_entity_handle"), &DevTools::selected_entity_handle);
 	ClassDB::bind_method(D_METHOD("set_game_viewport", "viewport"), &DevTools::set_game_viewport);
@@ -57,11 +60,6 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_game_playing"), &DevTools::is_game_playing);
 	ClassDB::bind_method(D_METHOD("handle_tools_toggle"), &DevTools::handle_tools_toggle);
 	ClassDB::bind_method(D_METHOD("handle_game_escape"), &DevTools::handle_game_escape);
-	ClassDB::bind_method(D_METHOD("take_ray_view_toggle"), &DevTools::take_ray_view_toggle);
-	ClassDB::bind_method(D_METHOD("set_ray_view_shown", "shown"), &DevTools::set_ray_view_shown);
-	ClassDB::bind_method(D_METHOD("take_physics_view_toggle"), &DevTools::take_physics_view_toggle);
-	ClassDB::bind_method(D_METHOD("set_physics_view_state", "shown", "boxes_drawn"),
-			&DevTools::set_physics_view_state);
 	ClassDB::bind_method(D_METHOD("get_rendered_game_viewport_size"), &DevTools::get_rendered_game_viewport_size);
 	ClassDB::bind_method(D_METHOD("feed_stats_window", "frames", "sums", "peaks", "sample_frames"),
 			&DevTools::feed_stats_window);
@@ -71,18 +69,10 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stats_row_peak", "row_id"), &DevTools::stats_row_peak);
 	ClassDB::bind_method(D_METHOD("stats_row_info", "row_id"), &DevTools::stats_row_info);
 	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
-	ClassDB::bind_method(D_METHOD("set_ai_view_state_provider", "provider"),
-			&DevTools::set_ai_view_state_provider);
 	ClassDB::bind_static_method("DevTools", D_METHOD("engine_log_after", "cursor"),
 			&DevTools::engine_log_after);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
-	// The F3 AI window's overlay toggles, drained per frame: id is one of
-	// "overlay" (the master), "labels", "routes", "targets", "rings". The shell
-	// session applies it to the world's debug-view set; the flipped state comes
-	// back through the ai-view-state provider on the immediate re-push.
-	ADD_SIGNAL(MethodInfo("ai_view_request", PropertyInfo(Variant::STRING_NAME, "id"),
-			PropertyInfo(Variant::BOOL, "enabled")));
 }
 
 // Both flavours: the engine log ring records regardless of OPENNOVA_DEVTOOLS
@@ -104,6 +94,12 @@ Dictionary DevTools::engine_log_after(int64_t p_cursor) {
 	out["levels"] = levels;
 	out["texts"] = texts;
 	return out;
+}
+
+// Both flavours: the table serves MCP in the release DLL too; only the
+// windows that would drain into it are compiled out there.
+void DevTools::set_debug_control_table(const Ref<DebugControlTable> &p_table) {
+	control_table_ = p_table;
 }
 
 #if OPENNOVA_DEVTOOLS
@@ -131,6 +127,7 @@ void DevTools::_exit_tree() {
 	tools_->pass().set_open(false);
 	apply_weapon_requests();
 	set_simulation(nullptr);
+	control_table_.unref();
 	tools_->set_frame_stats(nullptr);
 	if (frame_stats_.is_valid()) {
 		frame_stats_->sync_capture_signal();
@@ -145,10 +142,8 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	}
 	apply_game_requests();
 	sync_game_spectator_state();
-	apply_debug_requests();
+	apply_control_requests();
 	apply_weapon_requests();
-	apply_environment_requests();
-	apply_ai_view_requests();
 	apply_rays_requests();
 	apply_physics_requests();
 	push_entity_detail(push_entity_directory());
@@ -274,15 +269,6 @@ void DevTools::apply_game_requests() {
 			case opennova::devtools::GameWindowRequest::CloseTools:
 				set_open(false);
 				return;
-			case opennova::devtools::GameWindowRequest::EnableSpectator:
-			case opennova::devtools::GameWindowRequest::DisableSpectator: {
-				Simulation *sim = simulation();
-				if (sim != nullptr && !sim->is_joiner()) {
-					(void)sim->set_local_spectator(
-							request == opennova::devtools::GameWindowRequest::EnableSpectator);
-				}
-				break;
-			}
 		}
 	}
 }
@@ -323,15 +309,15 @@ Simulation *DevTools::simulation() const {
 			: nullptr;
 }
 
-void DevTools::set_simulation(Simulation *p_simulation) {
-	const ObjectID id = p_simulation != nullptr ? ObjectID(p_simulation->get_instance_id()) : ObjectID();
+void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
+	const ObjectID id = p_simulation.is_valid() ? ObjectID(p_simulation->get_instance_id()) : ObjectID();
 	if (simulation_id_ == id) {
 		return;
 	}
 	// The outgoing world takes nothing of the Weapon window's with it: the
 	// hold latch and the trace ring are released on the Simulation being
 	// dropped, whatever the window's own state.
-	if (Simulation *outgoing = simulation(); outgoing != nullptr && outgoing != p_simulation) {
+	if (Simulation *outgoing = simulation(); outgoing != nullptr && outgoing != p_simulation.ptr()) {
 		outgoing->debug_weapon_set_fire_held(false);
 		outgoing->debug_weapon_arm_trace(false);
 	}
@@ -349,7 +335,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
-	if (p_simulation == nullptr) {
+	if (p_simulation.is_null()) {
 		// The unload edge: invalid records clear the pushed state so a window
 		// left open never shows a dead world's rows or card.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
@@ -360,13 +346,6 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 		tools_->set_physics_snapshot(opennova::devtools::PhysicsSnapshot{});
 	}
 	sync_game_spectator_state();
-}
-
-void DevTools::set_ai_view_state_provider(const Callable &p_provider) {
-	ai_view_state_provider_ = p_provider;
-	// The next needy frame re-reads the overlay state at once (a fresh world's
-	// session installs its provider between cadence beats).
-	last_ai_push_ms_ = -1;
 }
 
 void DevTools::select_entity(int p_handle) {
@@ -385,51 +364,49 @@ int DevTools::selected_entity_handle() const {
 	return handle == opennova::world::EntityHandle::kInvalid ? -1 : static_cast<int>(handle);
 }
 
-// Drain the F3 windows' typed mutation requests into the SAME engine-backed
-// debug delegates the MCP control plane uses (ADR 0042 d6). Requests queued
-// with no world behind them drain and drop.
-void DevTools::apply_debug_requests() {
-	opennova::devtools::DebugRequest request;
-	Simulation *simulation_ = simulation();
+namespace {
+
+// One window argument as the Variant the table marshals against the row's
+// schema (the same kinds an MCP caller sends).
+Variant control_arg_to_variant(const opennova::devtools::ControlArg &p_arg) {
+	using Kind = opennova::devtools::ControlArg::Kind;
+	switch (p_arg.kind) {
+		case Kind::Int:
+			return Variant(p_arg.i);
+		case Kind::Float:
+			return Variant(p_arg.f);
+		case Kind::Bool:
+			return Variant(p_arg.b);
+		case Kind::Text:
+			return Variant(String::utf8(p_arg.text.c_str()));
+		case Kind::Vec3:
+			return Variant(Vector3(p_arg.v[0], p_arg.v[1], p_arg.v[2]));
+	}
+	return Variant();
+}
+
+} // namespace
+
+// Drain the F3 windows' control requests into the ONE debug-control table
+// MCP's game_debug drives too (ADR 0043 d12): the row's schema validates the
+// arguments and its session-role gate refuses a joiner, once for both
+// surfaces. F3 is the local operator, so it carries the per-call
+// confirmation; requests queued with no table (or no owner behind the row)
+// drain and drop.
+void DevTools::apply_control_requests() {
+	opennova::devtools::ControlRequest request;
 	bool drained = false;
-	while (tools_->take_debug_request(request)) {
-		if (simulation_ == nullptr) {
+	while (tools_->take_control_request(request)) {
+		if (control_table_.is_null()) {
 			continue;
 		}
-		// A joiner never mutates: its rows are replicas the wire re-writes and
-		// its local player's pose rides the uplink. The windows disable the
-		// controls; this is the same refusal the debug-control table makes.
-		if (simulation_->session_role() == Simulation::ROLE_JOINER) {
-			continue;
+		Array args;
+		for (const opennova::devtools::ControlArg &arg : request.args) {
+			args.push_back(control_arg_to_variant(arg));
 		}
-		drained = true;
-		// The window's requests carry the engine handle; they reach the engine
-		// mutators (EntityCommands, ADR 0042 d5) by that handle, no index detour.
-		opennova::world::EntityCommands *commands = simulation_->entity_commands();
-		switch (request.kind) {
-			case opennova::devtools::DebugRequest::Kind::SetEntityHealth:
-				if (commands != nullptr) {
-					(void)commands->set_entity_health(request.target, request.health);
-				}
-				break;
-			case opennova::devtools::DebugRequest::Kind::SetEntityPosition:
-				if (commands != nullptr) {
-					(void)commands->set_entity_position(request.target,
-							opennova::world::Vec3{request.pos[0], request.pos[1], request.pos[2]});
-				}
-				break;
-			case opennova::devtools::DebugRequest::Kind::TeleportLocalPlayer:
-				simulation_->debug_teleport_local_player(
-						Vector3(request.pos[0], request.pos[1], request.pos[2]),
-						request.yaw, request.pitch);
-				break;
-			case opennova::devtools::DebugRequest::Kind::SetEntityItemAttrib:
-				if (commands != nullptr) {
-					(void)commands->set_entity_item_attrib(request.target, request.attrib,
-							request.attrib2);
-				}
-				break;
-		}
+		const Ref<DebugInvokeResult> outcome =
+				control_table_->invoke(StringName(request.id), args, true);
+		drained = drained || outcome->get_error() == OK;
 	}
 	if (drained) {
 		// The records pushed this same frame show the mutation, not the
@@ -701,49 +678,6 @@ void DevTools::push_weapon_records() {
 	tools_->set_weapon_live(std::move(live));
 }
 
-// Drain the Environment window's typed weather commands into the ONE
-// command layer (world::EntityCommands, ADR 0042 d5) — the same handlers the
-// WAC VM and the MCP rows reach.
-void DevTools::apply_environment_requests() {
-	opennova::devtools::EnvironmentRequest request;
-	Simulation *simulation_ = simulation();
-	while (tools_->take_environment_request(request)) {
-		if (simulation_ == nullptr || simulation_->is_joiner()) {
-			continue;
-		}
-		opennova::world::EntityCommands *commands = simulation_->entity_commands();
-		if (commands == nullptr) {
-			continue;
-		}
-		using Kind = opennova::devtools::EnvironmentRequest::Kind;
-		switch (request.kind) {
-			case Kind::Rain: commands->set_rain(request.a, request.b); break;
-			case Kind::Snow: commands->set_snow(request.a, request.b); break;
-			case Kind::Overcast: commands->set_overcast(request.a, request.b); break;
-			case Kind::FogDistance: commands->set_fog_distance(request.a); break;
-			case Kind::MoveFog: commands->move_fog(request.a, request.b); break;
-			case Kind::SkySpeed: commands->set_sky_speed(request.a); break;
-			case Kind::SkyHeight: commands->set_sky_height(request.a); break;
-			case Kind::Quake: commands->quake(request.a); break;
-			case Kind::TimeOfDayMinutes: commands->set_time_of_day_minutes(request.a); break;
-			case Kind::FogType: commands->set_fog_type(request.a); break;
-			case Kind::SunFade: commands->sun_fade(request.a, request.b); break;
-			case Kind::ColorFade: commands->set_color_fade(request.a); break;
-			case Kind::Flash: commands->lightning_flash(); break;
-			case Kind::FarFlash: commands->lightning_far_flash(); break;
-			case Kind::WindScale: commands->set_wind_scale(request.a); break;
-			case Kind::BlockColor:
-				commands->set_weather_color(
-						static_cast<opennova::world::WeatherColorTarget>(request.a),
-						static_cast<uint32_t>(request.b));
-				break;
-			case Kind::LightningColor:
-				commands->set_lightning_color(static_cast<uint32_t>(request.b));
-				break;
-		}
-	}
-}
-
 // Push the environment record while the Environment window shows, on its
 // 0.25 s cadence: the ENGINE join (Simulation::native_environment_snapshot)
 // over the weather home — no Variant round-trip (ADR 0042 d6).
@@ -765,47 +699,9 @@ void DevTools::push_environment_snapshot() {
 	tools_->set_environment_snapshot(snapshot);
 }
 
-// Drain the AI window's overlay toggles into the shell as one bound signal
-// per request. The target is a device (the world-parented AI debug view), so
-// unlike DebugRequest these never reach EntityCommands; the shell session
-// connected to "ai_view_request" applies them and the immediate re-push below
-// brings the flipped state back as pushed truth.
-void DevTools::apply_ai_view_requests() {
-	opennova::devtools::AiViewRequest request;
-	bool drained = false;
-	while (tools_->take_ai_view_request(request)) {
-		drained = true;
-		StringName id;
-		switch (request.element) {
-			case opennova::devtools::AiViewRequest::Element::Master:
-				id = StringName("overlay");
-				break;
-			case opennova::devtools::AiViewRequest::Element::Labels:
-				id = StringName("labels");
-				break;
-			case opennova::devtools::AiViewRequest::Element::Routes:
-				id = StringName("routes");
-				break;
-			case opennova::devtools::AiViewRequest::Element::Targets:
-				id = StringName("targets");
-				break;
-			case opennova::devtools::AiViewRequest::Element::Rings:
-				id = StringName("rings");
-				break;
-		}
-		emit_signal("ai_view_request", id, request.enabled);
-	}
-	if (drained) {
-		// The snapshot pushed this same frame shows the flipped toggle, not
-		// the reading from up to half a second ago.
-		last_ai_push_ms_ = -1;
-	}
-}
-
 // Push the AI debug record while the AI window shows, on its 0.5 s cadence:
 // the ENGINE join (world::inspect::ai_debug_report) through the Simulation's
-// native accessor, plus the shell's overlay-view state read back through the
-// provider Callable (ADR 0042 d6).
+// native accessor (ADR 0042 d6).
 void DevTools::push_ai_debug() {
 	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr || !tools_->needs_ai_debug()) {
@@ -822,34 +718,16 @@ void DevTools::push_ai_debug() {
 	opennova::devtools::AiDebugSnapshot snapshot;
 	snapshot.valid = simulation_->native_ai_debug(snapshot.report);
 	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
-	if (snapshot.valid && ai_view_state_provider_.is_valid()) {
-		const Variant state = ai_view_state_provider_.call();
-		if (state.get_type() == Variant::DICTIONARY) {
-			const Dictionary d = state;
-			snapshot.overlay.available = d.get("available", false);
-			snapshot.overlay.master = d.get("overlay", false);
-			snapshot.overlay.labels = d.get("labels", true);
-			snapshot.overlay.routes = d.get("routes", true);
-			snapshot.overlay.targets = d.get("targets", true);
-			snapshot.overlay.rings = d.get("rings", true);
-		}
-	}
 	tools_->set_ai_debug(std::move(snapshot));
 }
 
 // Drain the Rays window's typed requests: the filter/TTL/clear land on the
-// Simulation's ray-debug seam (the same state the GDScript view reads); the
-// view toggle is a SHELL concern (the debug-view set owns building the view)
-// and parks in pending_ray_view_toggle_ for the shell's per-frame poll.
+// Simulation's ray-debug seam.
 void DevTools::apply_rays_requests() {
 	opennova::devtools::RaysRequest request;
 	Simulation *simulation_ = simulation();
 	while (tools_->take_rays_request(request)) {
 		using Kind = opennova::devtools::RaysRequest::Kind;
-		if (request.kind == Kind::SetViewShown) {
-			pending_ray_view_toggle_ = request.a != 0 ? 1 : 0;
-			continue;
-		}
 		if (simulation_ == nullptr) {
 			continue;
 		}
@@ -863,16 +741,13 @@ void DevTools::apply_rays_requests() {
 			case Kind::Clear:
 				simulation_->clear_ray_debug();
 				break;
-			case Kind::SetViewShown:
-				break;
 		}
 	}
 }
 
 // Push the ray-capture record while the Rays window shows, on its 0.25 s
 // cadence: counts + filter state through Simulation::native_rays_snapshot —
-// no Variant round-trip (ADR 0042 d6). The shell-mirrored view state rides
-// along so the window's checkbox reflects the live toggle.
+// no Variant round-trip (ADR 0042 d6).
 void DevTools::push_rays_snapshot() {
 	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr || !tools_->needs_rays_snapshot()) {
@@ -888,32 +763,16 @@ void DevTools::push_rays_snapshot() {
 	last_rays_push_ms_ = now_ms;
 	opennova::devtools::RaysSnapshot snapshot;
 	simulation_->native_rays_snapshot(snapshot);
-	snapshot.view_shown = ray_view_shown_;
 	tools_->set_rays_snapshot(snapshot);
 }
 
-int DevTools::take_ray_view_toggle() {
-	const int pending = pending_ray_view_toggle_;
-	pending_ray_view_toggle_ = -1;
-	return pending;
-}
-
-void DevTools::set_ray_view_shown(bool p_shown) {
-	ray_view_shown_ = p_shown;
-}
-
-// Drain the Physics window's typed requests: the view toggle parks for the
-// shell (the GDScript debug-view set owns building the collision view), the
-// mask/clear/capture legs land in the Simulation contact-debug seam.
+// Drain the Physics window's typed requests: the mask/clear/capture legs
+// land in the Simulation contact-debug seam.
 void DevTools::apply_physics_requests() {
 	opennova::devtools::PhysicsRequest request;
 	Simulation *simulation_ = simulation();
 	while (tools_->take_physics_request(request)) {
 		using Kind = opennova::devtools::PhysicsRequest::Kind;
-		if (request.kind == Kind::SetViewShown) {
-			pending_physics_view_toggle_ = request.a != 0 ? 1 : 0;
-			continue;
-		}
 		if (simulation_ == nullptr) {
 			continue;
 		}
@@ -927,8 +786,6 @@ void DevTools::apply_physics_requests() {
 			case Kind::SetCaptureEnabled:
 				simulation_->set_contact_debug_capture(request.a != 0);
 				break;
-			case Kind::SetViewShown:
-				break;
 		}
 	}
 }
@@ -936,8 +793,6 @@ void DevTools::apply_physics_requests() {
 // Push the contact-capture record while the Physics window shows, on its
 // 0.25 s cadence: counts + capture state through
 // Simulation::native_physics_snapshot — no Variant round-trip (ADR 0042 d6).
-// The shell-mirrored view state and drawable count ride along so the
-// window's checkbox and "boxes drawn" line reflect the live overlay.
 void DevTools::push_physics_snapshot() {
 	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr || !tools_->needs_physics_snapshot()) {
@@ -953,20 +808,7 @@ void DevTools::push_physics_snapshot() {
 	last_physics_push_ms_ = now_ms;
 	opennova::devtools::PhysicsSnapshot snapshot;
 	simulation_->native_physics_snapshot(snapshot);
-	snapshot.view_shown = physics_view_shown_;
-	snapshot.boxes_drawn = physics_boxes_drawn_;
 	tools_->set_physics_snapshot(snapshot);
-}
-
-int DevTools::take_physics_view_toggle() {
-	const int pending = pending_physics_view_toggle_;
-	pending_physics_view_toggle_ = -1;
-	return pending;
-}
-
-void DevTools::set_physics_view_state(bool p_shown, int p_boxes_drawn) {
-	physics_view_shown_ = p_shown;
-	physics_boxes_drawn_ = p_boxes_drawn;
 }
 
 void DevTools::reset_layout() {
@@ -1053,6 +895,7 @@ opennova::devtools::ImGuiPass *DevTools::engine_pass() {
 }
 
 void DevTools::_exit_tree() {
+	control_table_.unref();
 	ImGuiPassNode::_exit_tree();
 }
 
@@ -1098,23 +941,6 @@ bool DevTools::handle_game_escape() {
 	return false;
 }
 
-int DevTools::take_ray_view_toggle() {
-	return -1;
-}
-
-int DevTools::take_physics_view_toggle() {
-	return -1;
-}
-
-void DevTools::set_physics_view_state(bool p_shown, int p_boxes_drawn) {
-	(void)p_shown;
-	(void)p_boxes_drawn;
-}
-
-void DevTools::set_ray_view_shown(bool p_shown) {
-	(void)p_shown;
-}
-
 Vector2i DevTools::get_rendered_game_viewport_size() const {
 	return Vector2i();
 }
@@ -1123,7 +949,7 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	frame_stats_ = p_stats;
 }
 
-void DevTools::set_simulation(Simulation *p_simulation) {
+void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	(void)p_simulation;
 }
 
@@ -1136,10 +962,6 @@ int DevTools::selected_entity_handle() const {
 }
 
 void DevTools::reset_layout() {}
-
-void DevTools::set_ai_view_state_provider(const Callable &p_provider) {
-	(void)p_provider;
-}
 
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {

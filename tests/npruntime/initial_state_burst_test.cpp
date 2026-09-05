@@ -7,15 +7,16 @@
 // (5) the full world-stream pages every pool (0x10/0x0D/0x0C/0x20) and conditionally emits the
 // mission-text-backed 0x7E briefing pair; only the conditional 0x45 terrain stays absent here.
 
-#include <net/npruntime/server_initial_state.h>
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/server_spawn.h>
+#include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_spawn.h>
 
 #include "host_test_setup.h"
 
-#include <net/netsim/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
@@ -32,9 +33,9 @@
 #include <vector>
 
 namespace {
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -63,8 +64,7 @@ int main_impl() {
 	// A World with the host player spawned + one 6002 marker (both the spawn-select start AND a
 	// pool-3 spawn-marker the 0x20 batch streams).
 	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
@@ -89,7 +89,7 @@ int main_impl() {
 		w::WaypointEntry waypoint;
 		waypoint.node = 12;
 		waypoint.name_id = 0;
-		world.waypoints.entries.push_back(waypoint);
+		world.script.waypoints.entries.push_back(waypoint);
 	}
 	{
 		// A pool-2 building carrying the D-NET-147 wire fields (the golden ASH_I5A values):
@@ -108,15 +108,17 @@ int main_impl() {
 	// A valid loaded mission whose source loadout chunk has two ignored bytes after
 	// its terminator. The parser sanitizes that chunk to a shorter canonical model,
 	// while retail's 0x0B sender memcpy's the original loaded 0x268-byte header.
-	opennova::mission::MissionDocument authored_mission;
-	authored_mission.create_default();
-	auto &loadout = authored_mission.bms_file().loadout.entries.emplace_back();
+	opennova::bms::File authored_mission;
+	opennova::mission::make_default(authored_mission);
+	auto &loadout = authored_mission.loadout.entries.emplace_back();
 	loadout.name = "WPN_PARITY_TEST";
 	loadout.ammo_primary = "1";
 	loadout.ammo_secondary = "2";
 	loadout.flags = "-1";
+	opennova::mission::sync_counts(authored_mission);
 	std::vector<uint8_t> source_mission;
-	if (!expect(authored_mission.write_bms_bytes(source_mission),
+	std::string authored_error;
+	if (!expect(opennova::bms::write(authored_mission, source_mission, authored_error),
 	            "authored BMS fixture serializes")) return 1;
 	constexpr std::size_t kLoadoutLenOffset =
 			offsetof(opennova::bms::Header, weapon_loadout_chunk_len);
@@ -147,14 +149,14 @@ int main_impl() {
 	            "fixture distinguishes canonical and loaded header lengths")) return 1;
 
 	ns::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig config;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
 	if (!expect(config.class_allow_mask == 0x03FFu,
 	            "GameConfig defaults to retail's all-ten-classes mask")) return 1;
 	config.class_allow_mask = 0x0155u; // non-default pins config sourcing, not a hard-coded golden
 	config.game_type = 0x00010020u;
 	config.default_spawn_requires_no_team_zone = 1;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
 	ctx.mission = &mission;
@@ -164,22 +166,22 @@ int main_impl() {
 	ctx.mission_location_names = {"Weapons Cache", "Rebel Outpost"};
 	const uint32_t advertised_build_flags = ctx.np_protocol.build_flags;
 	ctx.config.server_password = "mutated-after-create";
-	if (!expect(np::build_server_config_flags(ctx) != advertised_build_flags,
+	if (!expect(inmatch::build_server_config_flags(ctx) != advertised_build_flags,
 	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
 	// Spawn the host's own pool-0 player (so the burst's 0x0C has it with dcb 2).
-	np::Server_InitNewRoundState(ctx);
-	if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player spawned")) return 1;
+	inmatch::Server_InitNewRoundState(ctx);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player spawned")) return 1;
 
-	np::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 
 	// Drive the burst to completion, collecting the emitted (tag, body) in order.
 	// The HOST LOOPBACK (type-2) skips the loadout gate and drains in one shot — it has no remote
 	// client sending C2S 0x2F. The loadout gate only applies to REMOTE JOINERS (type-1).
-	std::vector<np::InitialStateMessage> emitted;
+	std::vector<inmatch::InitialStateMessage> emitted;
 	bool reached = false;
 	for (int i = 0; i < 64 && !reached; ++i) {
-		np::InitialStateStep step = np::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
+		inmatch::InitialStateStep step = inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
 		if (!step.advanced) break;
 		for (auto &m : step.messages) emitted.push_back(m);
 		reached = step.reached_in_game;
@@ -187,7 +189,7 @@ int main_impl() {
 
 	if (!expect(reached, "burst reached game-state 9 (the world-stream terminator)")) return 1;
 	if (!expect(conn.burst.spawned && conn.burst.game_state == 9, "burst marks spawned + game_state 9")) return 1;
-	if (!expect(conn.phase == np::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
+	if (!expect(conn.phase == inmatch::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
 	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream streams EVERY pool in
@@ -277,7 +279,7 @@ int main_impl() {
 		            "0x0C body decodes")) return 1;
 		bool host_dcb = false;
 		for (const auto &r : batch.records)
-			if (r.item_type_id == 0x14B9 && r.entity_flags == np::kHostPlayerDcb) host_dcb = true;
+			if (r.item_type_id == 0x14B9 && r.entity_flags == inmatch::kHostPlayerDcb) host_dcb = true;
 		if (!expect(host_dcb, "0x0C carries the host player (0x14B9) with entity+0x78 == dcb 2")) return 1;
 	}
 
@@ -386,8 +388,7 @@ int main_impl() {
 	// signal). This drives a fresh host loopback (unspawned) so tick_connections runs the full burst. ---
 	{
 		w::World w2;
-		w::AiSystem ai2;
-		w2.ai = &ai2;
+		w::AiSystem &ai2 = w2.ai;
 		w2.registry.configure_pool(0, 16);
 		w2.registry.configure_pool(3, 16);
 		{
@@ -398,31 +399,31 @@ int main_impl() {
 			w2.registry.spawn(3, m);
 		}
 		ns::LoopbackChannel lb2;
-		np::NapiNPServerCtx ctx2;
-		np::test::bring_up_host(ctx2, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		inmatch::NapiNPServerCtx ctx2;
+		inmatch::test::bring_up_host(ctx2, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb2);
 		ctx2.world = &w2;
 		ctx2.mission = &mission;
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
 		            "world-path pose player spawned")) return 1;
-		np::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
+		inmatch::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
 		w::AiEntity *pose_ai = ai2.for_handle(pose_conn.link.owned_entity);
 		if (!expect(pose_ai != nullptr, "world-path pose resolves the owned AiEntity")) return 1;
 		constexpr int32_t kLookPitchBam = 0x23456789;
 		constexpr int16_t kLookPitchHigh = 0x2345;
 		pose_ai->pitch = kLookPitchBam;
 
-		const std::vector<np::TickOut> outs = np::tick_connections(ctx2, /*elapsed_ms=*/16, /*now_tick=*/1);
+		const std::vector<inmatch::TickOut> outs = inmatch::tick_connections(ctx2, /*elapsed_ms=*/16, /*now_tick=*/1);
 		int f3_at = -1, spawned_at = -1, seq = 0;
-		for (const np::TickOut &to : outs) {
-			for (const np::HostAcceptEvent &ev : to.events) {
-				if (ev.kind == np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
-					if (!expect(ev.self_id == np::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
+		for (const inmatch::TickOut &to : outs) {
+			for (const inmatch::HostAcceptEvent &ev : to.events) {
+				if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
+					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "F3 world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					if (f3_at < 0) f3_at = seq;
-				} else if (ev.kind == np::HostAcceptEvent::Kind::PeerSpawned) {
-					if (!expect(ev.self_id == np::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
+				} else if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned) {
+					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "PeerSpawned world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					if (spawned_at < 0) spawned_at = seq;
@@ -448,20 +449,20 @@ int main_impl() {
 		if (!expect(entity_handle.valid(), "missing-AI pose fixture entity spawned")) return 1;
 
 		ns::LoopbackChannel no_ai_loopback;
-		np::NapiNPServerCtx no_ai_ctx;
-		np::test::bring_up_host(no_ai_ctx, np::ConnectionMode::HostClient,
-		                        np::SocketMode::Socketless, /*host_key=*/0, &no_ai_loopback);
+		inmatch::NapiNPServerCtx no_ai_ctx;
+		inmatch::test::bring_up_host(no_ai_ctx, inmatch::ConnectionMode::HostClient,
+		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &no_ai_loopback);
 		no_ai_ctx.world = &no_ai_world;
-		np::NapiNPConnection &no_ai_conn = no_ai_ctx.np_protocol.connection_list[0];
-		no_ai_conn.phase = np::ConnectionPhase::New;
+		inmatch::NapiNPConnection &no_ai_conn = no_ai_ctx.np_protocol.connection_list[0];
+		no_ai_conn.phase = inmatch::ConnectionPhase::New;
 		no_ai_conn.link.owned_entity = entity_handle;
 		no_ai_conn.burst.entity_batch_count = 1;
 
 		bool saw_world_pose = false;
-		for (const np::TickOut &to : np::tick_connections(
+		for (const inmatch::TickOut &to : inmatch::tick_connections(
 		             no_ai_ctx, /*elapsed_ms=*/16, /*now_tick=*/1)) {
-			for (const np::HostAcceptEvent &ev : to.events) {
-				if (ev.kind != np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) continue;
+			for (const inmatch::HostAcceptEvent &ev : to.events) {
+				if (ev.kind != inmatch::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) continue;
 				saw_world_pose = true;
 				if (!expect(ev.pose.entity_handle == entity_handle.packed,
 				            "missing-AI fallback still uses the bound World entity")) return 1;
@@ -478,8 +479,7 @@ int main_impl() {
 	// game-start would land together and the client couldn't send 0x2F between them. ---
 	{
 		w::World w3;
-		w::AiSystem ai3;
-		w3.ai = &ai3;
+		w::AiSystem &ai3 = w3.ai;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
 		{
@@ -489,23 +489,23 @@ int main_impl() {
 			m.position = {10.0f, 20.0f, 1.0f};
 			w3.registry.spawn(3, m);
 		}
-		np::NapiNPServerCtx ctx3;
+		inmatch::NapiNPServerCtx ctx3;
 		ns::LoopbackChannel lb3;
-		np::test::bring_up_host(ctx3, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		inmatch::test::bring_up_host(ctx3, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb3);
 		ctx3.world = &w3;
 		ctx3.mission = &mission;
-		np::Server_InitNewRoundState(ctx3);
-		np::Server_ProcessPendingPlayerSpawns(ctx3, w3);
+		inmatch::Server_InitNewRoundState(ctx3);
+		inmatch::Server_ProcessPendingPlayerSpawns(ctx3, w3);
 
 		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
-		np::NapiNPConnection joiner{};
+		inmatch::NapiNPConnection joiner{};
 		joiner.type = 1;
-		joiner.connection_id = np::kFirstJoinerDcb;
-		joiner.phase = np::ConnectionPhase::PlayerAdded;
+		joiner.connection_id = inmatch::kFirstJoinerDcb;
+		joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
 		joiner.burst.sync_state = 0;
 		ctx3.np_protocol.connection_list.push_back(joiner);
-		np::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.back();
+		inmatch::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.back();
 
 		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
 		// so the burst takes many calls to stream the player-sync tail — and then PARKS at sync-state
@@ -517,7 +517,7 @@ int main_impl() {
 		bool saw_atomic_player_sync_tail = false;
 		int paced_calls = 0;
 		for (int i = 0; i < 64 && !parked_for_spawn_menu; ++i) {
-			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
 			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
 			if (!s.messages.empty() && s.messages.front().tag == 0x1C) {
@@ -539,7 +539,7 @@ int main_impl() {
 		            "paced remote emitted the witnessed atomic player-sync tail")) return 1;
 		{
 			// Park is stable: further ticks emit nothing until the 0x0A arrives.
-			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			if (!expect(s.messages.empty(), "parked burst emits nothing without the C2S 0x0A")) return 1;
 		}
 		// Simulate the client's C2S 0x0A spawn-menu request (what the dispatch case 0x0A applies)
@@ -549,7 +549,7 @@ int main_impl() {
 		jconn.burst.world_stream_phase = 0;
 		bool reached_loadout_gate = false;
 		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
-			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
 			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
 			// The per-tick budget means each call emits a bounded number of datagrams (the game-start
@@ -569,7 +569,7 @@ int main_impl() {
 		bool saw_transient_42 = false;
 		bool reached = false;
 		for (int i = 0; i < 16 && !reached; ++i) {
-			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
 			for (const auto &m : s.messages) {
 				if (m.tag == 0x42) {
 					saw_42 = true;

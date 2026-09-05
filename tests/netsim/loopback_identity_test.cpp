@@ -12,11 +12,10 @@
 // the pre-compression value — the codec is intentionally lossy). This guard must
 // stay green through every phase.
 
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/serializing_sink.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/replication/client_replica_pipeline.h>
 
 #include "conn_fan_test_util.h"
 
@@ -39,7 +38,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -246,11 +245,8 @@ bool run() {
 	const w::EntityHandle h = world.registry.spawn(0, seed);
 	if (!expect(h.valid(), "entity spawned")) return false;
 
-	// --- the SP serializing sink replaces LocalSink (the seam is wired) ---
+	// --- the socketless channel the SP host's own client rides ---
 	ns::LoopbackChannel channel;
-	ns::SerializingSink sink(channel);
-	world.net = &sink;
-	if (!expect(world.net->is_authority(h), "SP host is authority")) return false;
 
 	// --- one loopback connection owned by the live subject ---
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 takes its reference from
@@ -403,7 +399,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
 	                    p->seat_type == 2 && p->pitch_byte == 0x21 &&
 	                    p->aim_yaw_byte == 0 && p->anim_state_id == 62 &&
-	                    p->anim_channel_ratio == 19,
+	                    p->anim_channel_ratio == 19 && p->health_class_byte == 0x28,
 	            "player compact mount/pose bytes survive the client fold")) return false;
 	const ns::ClientEntityState *i = view.state().find(0x0002);
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
@@ -992,8 +988,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	w::Entity soldier;
 	soldier.kind = w::EntityKind::Organic;
@@ -1028,7 +1023,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	vehicle.seats.push_back(seat); // zero local pose: occupant lands at carrier origin.
 	const w::EntityHandle vh = world.registry.spawn_from(1, 0, vehicle);
 	if (!expect(vh.valid(), "carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(world, ih, vh, 3),
+	if (!expect(world.vehicles.process_attach(ih, vh, 3),
 	            "infantry attaches to witnessed wire bone")) return false;
 	if (!expect(ai.pose_if_mounted(*ae, world),
 	            "mounted infantry synchronizes to the seat frame")) return false;
@@ -1089,7 +1084,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	            "client lifts carrier-local infantry pose through current decoded carrier"))
 		return false;
 
-	if (!expect(w::entity_detach_from_vehicle(world, ih), "infantry detaches")) return false;
+	if (!expect(world.vehicles.detach(ih), "infantry detaches")) return false;
 	ns::test::emit_all(world, conns);
 	if (!expect(channel.client_recv(dg), "dismounted infantry frame dequeued")) return false;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
@@ -1185,8 +1180,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 
 	// The engine-frame mirror. AiSystem is wired (so apply mirrors it) but NOT ticked —
 	// this isolates the host read-apply from the motor.
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 
 	// A DIFFERENT handle is the local player, so the read-apply guard does not reject the peer.
@@ -1247,9 +1241,8 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	FlatTerrain terrain;
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.terrain = &terrain.field;
-	w::AiSystem ai;
-	world.ai = &ai;
+	world.tables.terrain = &terrain.field;
+	w::AiSystem &ai = world.ai;
 	ai.terrain = &terrain.field;
 	world.add_system(&ai);
 
@@ -1338,8 +1331,7 @@ bool run_apply_rejects_own_player() {
 	peer.item_id = 0x14B9;
 	peer.position = {1.0f, 2.0f, 3.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 
 	// Make the peer the local player -> the read-apply must reject it.
@@ -1369,8 +1361,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	world.add_system(&ai);
 
 	w::Entity peer;
@@ -1404,7 +1395,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.seats.push_back(driver);
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	if (!expect(vh.valid(), "death-test carrier spawned")) return false;
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 3),
+	if (!expect(world.vehicles.process_attach(ph, vh, 3),
 	            "remote player occupies the actual driver seat")) return false;
 
 	w::Entity *host_peer = world.registry.get(ph);
@@ -1454,8 +1445,7 @@ bool run_motor_skips_net_peer() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9;
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	ai.attach(ph);
 	w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "peer AiEntity")) return false;

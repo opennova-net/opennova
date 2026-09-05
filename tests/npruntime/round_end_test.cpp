@@ -6,15 +6,15 @@
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
 // post-round respawn hold [orig: the g_spawn_success_gate check @0x519af6].
-#include <net/npruntime/napi_np_connection.h>
-#include <net/npruntime/napi_np_server_ctx.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/server_tick.h>
-#include <net/npruntime/end_round_protocol.h>
+#include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/end_round_protocol.h>
 
 #include <runtime/mission/event_runtime.h>
 
-#include <net/netsim/loopback_channel.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include <net/npwire/replication_model.h>
 #include <net/npwire/ingame_decode.h>
@@ -23,7 +23,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/world/zone_chain.h>
@@ -42,8 +42,8 @@
 namespace {
 
 using namespace opennova;
-namespace np = opennova::np;
-namespace ns = opennova::netsim;
+namespace inmatch = opennova::inmatch;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 int failures = 0;
@@ -116,12 +116,10 @@ w::CollisionModel contact_box(int32_t type) {
 	return model;
 }
 
-void install_collision_system(w::World &world, w::CollisionWorld &collision,
-		w::AiSystem &ai) {
+void install_collision_system(w::World &world, w::CollisionWorld &collision) {
 	world.collision = &collision;
-	world.ai = &ai;
-	ai.collision = &collision;
-	world.add_system(&ai);
+	world.ai.collision = &collision;
+	world.add_system(&world.ai);
 }
 
 w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
@@ -160,9 +158,9 @@ void prime_collision_tables(w::World &world, w::CollisionWorld &collision) {
 		collision.build_tick_tables(world);
 }
 
-void ready_mp_connection(np::NapiNPConnection &conn, uint8_t slot) {
+void ready_mp_connection(inmatch::NapiNPConnection &conn, uint8_t slot) {
 	conn.reply.player_slot = slot;
-	conn.admission_stage = np::GameAdmissionStage::Complete;
+	conn.admission_stage = inmatch::GameAdmissionStage::Complete;
 }
 
 bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header,
@@ -187,16 +185,16 @@ bool drain_round_header(ns::LoopbackChannel &channel, EndRoundHeader &header,
 
 // The 0x2B service reads the host's frozen board stream through the dispatch
 // inputs, exactly as the owner pump threads it.
-np::ServerDispatchInputs board_inputs(const np::NapiNPServerCtx &ctx) {
-	np::ServerDispatchInputs inputs;
+inmatch::ServerDispatchInputs board_inputs(const inmatch::NapiNPServerCtx &ctx) {
+	inmatch::ServerDispatchInputs inputs;
 	inputs.round_end_board_stream = &ctx.round_end_board_stream;
 	return inputs;
 }
 
 std::vector<ProtocolMessage> request_board_chunk(
-		np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
+		inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &connection,
 		w::World &world, uint16_t offset) {
-	return np::dispatch_session_replies(
+	return inmatch::dispatch_session_replies(
 			ctx.config, connection,
 			{make_protocol_message(c2s::END_ROUND_STATS_REQUEST,
 					encode_end_round_stats_request(offset))},
@@ -204,7 +202,7 @@ std::vector<ProtocolMessage> request_board_chunk(
 			board_inputs(ctx));
 }
 
-bool pull_round_board(np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection,
+bool pull_round_board(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &connection,
 		w::World &world, EndRoundStats &board, size_t &chunk_count) {
 	std::vector<uint8_t> bytes;
 	uint16_t offset = 0;
@@ -236,7 +234,7 @@ bool pull_round_board(np::NapiNPServerCtx &ctx, np::NapiNPConnection &connection
 void test_tdm_round_wire_and_linger() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = 0x10000u;
 	rules.score_limit = 1;
@@ -255,7 +253,7 @@ void test_tdm_round_wire_and_linger() {
 
 	ns::LoopbackChannel blue_wire;
 	ns::LoopbackChannel red_wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -269,9 +267,9 @@ void test_tdm_round_wire_and_linger() {
 
 	// The zero-armed one-second service fires on the first frame, then every
 	// 62 ticks; a death routed between boundaries waits for the next pass.
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	push_death(world, red, blue);
-	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 61; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(!world.match.outcome().ended,
 			"TDM kill-limit win waits for the 1 Hz win-condition pass");
 	blue_wire.clear();
@@ -282,7 +280,7 @@ void test_tdm_round_wire_and_linger() {
 			request_board_chunk(ctx, ctx.np_protocol.connection_list[0],
 					world, 0).empty(),
 			"C2S 0x2B before the round-end announce receives no 0x56");
-	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+	inmatch::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 	expect(world.match.outcome().ended &&
 			world.match.outcome().winner_team == 1,
 			"TDM kill limit ends for the killer's team");
@@ -292,7 +290,7 @@ void test_tdm_round_wire_and_linger() {
 	// push; every 0x2B pull cuts from that same byte sequence.
 	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
 	const std::vector<uint8_t> frozen_board = encode_end_round_stats(
-			np::build_end_round_stats(world.match.result()));
+			inmatch::build_end_round_stats(world.match.result()));
 	expect(!ctx.round_end_board_stream.empty() &&
 			ctx.round_end_board_stream == frozen_board,
 			"the announce freezes the encoded board stream once");
@@ -362,10 +360,10 @@ void test_tdm_round_wire_and_linger() {
 	expect(invalid_offset_reply.empty(),
 			"C2S 0x2B offset beyond the frozen board receives no 0x56 reply");
 
-	for (int i = 0; i < 2789; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 2789; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(ctx.is_in_session == 1 && ctx.round_end_linger_ticks == 1,
 			"MP session remains live through linger tick 2789");
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	expect(ctx.is_in_session == 0 && ctx.round_end_linger_ticks == 0,
 			"MP session closes at exactly 2790 post-announcement ticks");
 }
@@ -377,7 +375,7 @@ void test_tdm_round_wire_and_linger() {
 void test_dm_round_wire_named_header() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kDeathmatch;
 	rules.score_limit = 1;
@@ -390,7 +388,7 @@ void test_dm_round_wire_named_header() {
 
 	ns::LoopbackChannel ace_wire;
 	ns::LoopbackChannel cid_wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -402,16 +400,16 @@ void test_dm_round_wire_named_header() {
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 9);
 
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	push_death(world, cid, ace);
 	push_death(world, bee, ace);
 	push_death(world, cid, bee);
-	for (int i = 0; i < 61; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 61; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(!world.match.outcome().ended,
 			"DM kill-limit win waits for the 1 Hz win-condition pass");
 	ace_wire.clear();
 	cid_wire.clear();
-	np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+	inmatch::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 	expect(world.match.outcome().ended, "DM score limit ends the round");
 	const w::MatchResult &result = world.match.result();
 	expect(result.players.size() == 3, "three frozen DM board rows");
@@ -449,7 +447,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 		w::World world;
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(2, 4);
-		world.mp_session = true;
+		world.rules.mp_session = true;
 		w::MatchRules rules;
 		rules.game_type = game_type;
 		rules.game_time_minutes = 1;
@@ -467,7 +465,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 		expect(target.valid(), "demolition objective fixture spawns");
 
 		ns::LoopbackChannel wire;
-		np::NapiNPServerCtx ctx;
+		inmatch::NapiNPServerCtx ctx;
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
@@ -482,9 +480,9 @@ void test_demolition_death_routes_score_and_round_wire() {
 		// objective census for the frame. [orig: Entity_ApplyWeaponDamage
 		// @0x4E6FB4; GameEvent_ProcessScoring case 11 @0x52F550;
 		// Server_CheckWinConditions demolition arm @0x51B18B]
-		np::Server_TickUpdate(ctx); // first-frame one-second service
+		inmatch::Server_TickUpdate(ctx); // first-frame one-second service
 		push_death(world, target, attacker);
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		const w::MatchPlayer *scorer = world.match.player(attacker);
 		expect(scorer != nullptr &&
 				scorer->stats[w::MatchStats::kTargetsDestroyed] == 1 &&
@@ -511,11 +509,11 @@ void test_demolition_death_routes_score_and_round_wire() {
 		expect(saw_death,
 			"demolition target death fans the exact 0x13 target/killer handles");
 
-		for (int i = 0; i < 60; ++i) np::Server_TickUpdate(ctx);
+		for (int i = 0; i < 60; ++i) inmatch::Server_TickUpdate(ctx);
 		expect(!world.match.outcome().ended,
 				"demolition win waits for the 1 Hz win-condition pass");
 		wire.clear();
-		np::Server_TickUpdate(ctx); // the next one-second win-condition boundary
+		inmatch::Server_TickUpdate(ctx); // the next one-second win-condition boundary
 		expect(world.match.outcome().ended &&
 				world.match.outcome().winner_team == 1,
 			"S&D/A&D complete authored target census ends for the attacker team");
@@ -532,7 +530,7 @@ void test_aas_round_wire() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
@@ -543,11 +541,11 @@ void test_aas_round_wire() {
 	z1.zone_number = 1;
 	w::Entity z2 = z1;
 	z2.zone_number = 2;
-	world.zone_chain.zones.push_back(world.registry.spawn(1, z1));
-	world.zone_chain.zones.push_back(world.registry.spawn(1, z2));
+	world.zones.chain.zones.push_back(world.registry.spawn(1, z1));
+	world.zones.chain.zones.push_back(world.registry.spawn(1, z2));
 
 	ns::LoopbackChannel wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -556,7 +554,7 @@ void test_aas_round_wire() {
 			make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
 	// Every zone is already owned, so the first-frame service ends the round.
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 
 	EndRoundHeader header;
 	expect(drain_round_header(wire, header),
@@ -572,7 +570,7 @@ void test_coop_script_producers_share_round_wire() {
 	auto run_case = [](uint32_t game_type_code, bool use_wac) {
 		w::World world;
 		world.registry.configure_pool(0, 4);
-		world.mp_session = true;
+		world.rules.mp_session = true;
 		w::MatchRules rules;
 		rules.game_type = game_type_code;
 		world.match.configure(rules);
@@ -601,7 +599,7 @@ void test_coop_script_producers_share_round_wire() {
 		world.load_systems();
 
 		ns::LoopbackChannel wire;
-		np::NapiNPServerCtx ctx;
+		inmatch::NapiNPServerCtx ctx;
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
@@ -611,11 +609,11 @@ void test_coop_script_producers_share_round_wire() {
 		ready_mp_connection(ctx.np_protocol.connection_list[0], 4);
 
 		for (int tick = 1; tick < producer_tick; ++tick)
-			np::Server_TickUpdate(ctx);
+			inmatch::Server_TickUpdate(ctx);
 		expect(!world.match.outcome().ended,
 				"Co-op does not end before its authored script action");
 		wire.clear();
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 		expect(world.match.outcome().ended &&
 				world.match.outcome().winner_team == 2,
 				"WAC/BMS action owns the Co-op result edge");
@@ -638,12 +636,12 @@ void test_coop_script_producers_share_round_wire() {
 void test_aas_events_use_spawn_registry_index() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = 0x10010u;
 	world.match.configure(rules);
@@ -676,8 +674,8 @@ void test_aas_events_use_spawn_registry_index() {
 	spawn_zone(1, 1, -100.0f);
 	const w::EntityHandle target = spawn_zone(2, 0, 100.0f);
 	spawn_zone(3, 2, 300.0f);
-	w::zone_chain_build_from_mission(world, world.zone_chain);
-	w::zone_chain_latch_control(world, world.zone_chain);
+	world.zones.build_chain_from_mission();
+	world.zones.latch_control();
 	const int32_t capture_model = collision.add_model(
 		contact_box(w::bvol_type::kChangeTeamCT));
 	collision.assign_entity(target, capture_model);
@@ -686,7 +684,7 @@ void test_aas_events_use_spawn_registry_index() {
 	prime_collision_tables(world, collision);
 
 	ns::LoopbackChannel wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -696,7 +694,7 @@ void test_aas_events_use_spawn_registry_index() {
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
 	// The body already stands in the box, so the first-frame one-second
 	// service drains that contact and flips the numbered zone at once.
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 
 	bool saw_capture_event = false;
 	ns::Datagram datagram;
@@ -715,11 +713,11 @@ void test_aas_events_use_spawn_registry_index() {
 void test_ctf_pickup_and_capture_wire_transaction() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
@@ -759,7 +757,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 
 	ns::LoopbackChannel wire;
 	ns::LoopbackChannel host_wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -771,7 +769,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
-	np::Server_TickUpdate(ctx); // contact -> pickup
+	inmatch::Server_TickUpdate(ctx); // contact -> pickup
 	bool saw_pickup_event = false;
 	bool saw_pickup = false;
 	int pickup_event_order = -1;
@@ -834,7 +832,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 			"CTF pickup mask 0x80 includes the host with event-before-state ordering");
 
 	move_remote_body(world, ai, blue, bay_position);
-	np::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
+	inmatch::Server_TickUpdate(ctx); // carried flag contacts bay -> capture
 	bool saw_capture_event = false;
 	bool saw_remove = false;
 	bool saw_reset = false;
@@ -892,11 +890,11 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 void test_flag_timeout_wire_transaction() {
 	w::World world;
 	w::CollisionWorld collision;
-	w::AiSystem ai;
-	install_collision_system(world, collision, ai);
+	w::AiSystem &ai = world.ai;
+	install_collision_system(world, collision);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	world.mp_session = true;
+	world.rules.mp_session = true;
 	w::MatchRules rules;
 	rules.game_type = game_type::kFlagBall;
 	rules.max_score = 99;
@@ -929,7 +927,7 @@ void test_flag_timeout_wire_transaction() {
 
 	ns::LoopbackChannel remote_wire;
 	ns::LoopbackChannel host_wire;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -941,7 +939,7 @@ void test_flag_timeout_wire_transaction() {
 	ready_mp_connection(ctx.np_protocol.connection_list[0], 3);
 	ready_mp_connection(ctx.np_protocol.connection_list[1], 1);
 
-	np::Server_TickUpdate(ctx); // pickup arms the return state
+	inmatch::Server_TickUpdate(ctx); // pickup arms the return state
 	remote_wire.clear();
 	host_wire.clear();
 	world.match.record_death(world, blue); // drop without waiting for combat routing
@@ -949,12 +947,12 @@ void test_flag_timeout_wire_transaction() {
 	blue_entity->alive = false;
 	blue_entity->flags |= w::kEntityFlagDead;
 	blue_entity->net_move_input = 0;
-	np::Server_TickUpdate(ctx); // route the drop
+	inmatch::Server_TickUpdate(ctx); // route the drop
 	remote_wire.clear();
 	host_wire.clear();
 
 	for (int tick = 0; tick < 330; ++tick)
-		np::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 
 	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
 		bool saw_event = false;
@@ -1012,7 +1010,7 @@ void test_end_round_row_flags_word_is_field_11() {
 	p.stats[w::MatchStats::kFlagSaves] = 7;
 	p.stats[w::MatchStats::kDeaths] = 2;
 	result.players.push_back(p);
-	const EndRoundStats board = np::build_end_round_stats(result);
+	const EndRoundStats board = inmatch::build_end_round_stats(result);
 	expect(board.players.size() == 1 && board.players[0].slot == 3 &&
 			board.players[0].flags == 7 && board.players[0].captures == 2,
 			"0x56 row: the sixth word carries field 11 (FLAGSAVE), the fifth field 7 (deaths)");
@@ -1022,8 +1020,7 @@ int main() {
 	test_end_round_row_flags_word_is_field_11();
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	// The host player + NPC victims across the witnessed classification axes.
 	w::PlayerSpawn ps;
@@ -1050,7 +1047,7 @@ int main() {
 	const w::EntityHandle green_person2 = spawn_npc(104, 0, w::EntityKind::Organic);
 
 	ns::LoopbackChannel loop;
-	np::NapiNPServerCtx ctx;
+	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0; // SP: the tallies + the auto-lose leg are SP-only
@@ -1058,20 +1055,20 @@ int main() {
 			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
 
 	// --- 1. humans = the active human slot count (the SP host counts itself). ---
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	expect(world.cached.humans == 1, "humans == 1 for the SP host");
 
 	// --- 2. Kill tallies by the local player: green person -> greenkills, blue person
 	// -> bluekills, red person -> enemy; a green NON-person tallies nothing. ---
 	push_death(world, green_person, player);
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.greenkills_by_player == 1, "green person kill -> greenkills");
 	expect(!world.match.outcome().ended, "kill tallies alone never end the round");
 
 	push_death(world, blue_person, player);
 	push_death(world, red_person, player);
 	push_death(world, green_item, player);
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1, "blue person kill -> bluekills");
 	expect(world.kill_stats.enemy_kills_by_player == 1, "team>=2 kill -> enemy bucket");
 	expect(world.kill_stats.greenkills_by_player == 1,
@@ -1093,43 +1090,43 @@ int main() {
 		w::count_mission_units(world);
 		expect(world.kill_stats.enemy_unit_total == 2,
 		       "census counts team>=2 units with a unit-class byte only");
-		world.subgoals.win_text_ids[1] = 3;
-		world.subgoals.win_text_ids[2] = 7;
-		world.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
-		world.subgoals.win_text_ids[4] = 5;
+		world.script.subgoals.win_text_ids[1] = 3;
+		world.script.subgoals.win_text_ids[2] = 7;
+		world.script.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
+		world.script.subgoals.win_text_ids[4] = 5;
 		expect(w::count_defined_subgoals(world) == 2,
 		       "defined subgoals = the leading non-zero, non-0xFF run");
 	}
 
 	// --- 3. A kill by someone else lands in the by-others family. ---
 	push_death(world, green_person2, red_person);
-	np::Server_TickUpdate(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.friendly_kills_by_others == 1,
 	       "green person killed by an NPC -> friendly_kills_by_others");
 	expect(world.kill_stats.greenkills_by_player == 1, "the by-player bucket is untouched");
 
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
-	world.mission_attrib_flags = 0x40;
+	world.tables.mission_attrib_flags = 0x40;
 	push_death(world, player, red_person);
-	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx); // past a 1 Hz check
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
-	for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.registry.get(player)->alive, "the player respawned after the timer");
 
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---
-	world.mission_attrib_flags = 0;
+	world.tables.mission_attrib_flags = 0;
 	push_death(world, player, red_person);
-	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx);
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(world.match.outcome().ended, "dead player without SP-respawn -> round over");
 	expect(world.match.outcome().winner_team == 2, "auto-lose winner is team 2 (red)");
-	expect(world.effects.count("round_end") == 1, "one round_end host effect");
-	for (int i = 0; i < 700; ++i) np::Server_TickUpdate(ctx);
+	expect(world.out.effects.count("round_end") == 1, "one round_end host effect");
+	for (int i = 0; i < 700; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(!world.registry.get(player)->alive,
 	       "respawns hold once the round is over [orig: the gate check @0x519af6]");
 	world.process_round_end(1);
 	expect(world.match.outcome().winner_team == 2, "the latch ignores a second round end");
-	expect(world.effects.count("round_end") == 1, "no second round_end effect");
+	expect(world.out.effects.count("round_end") == 1, "no second round_end effect");
 
 	test_tdm_round_wire_and_linger();
 	test_dm_round_wire_named_header();

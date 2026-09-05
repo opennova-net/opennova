@@ -114,6 +114,19 @@ void EntityRegistry::restore_from(const EntityRegistry &snapshot) {
     if (next_spawn_id_ < live_high_water) next_spawn_id_ = live_high_water;
 }
 
+Entity *EntityRegistry::by_net_id(uint16_t net_id) {
+    const EntityHandle h = find_by_net_id(net_id);
+    return h.valid() ? get(h) : nullptr;
+}
+
+Entity *EntityRegistry::by_bms_id(int32_t bms_id) {
+    EntityHandle found;
+    for_each([&](const Entity &e) {
+        if (!found.valid() && e.bms_id == bms_id) found = e.handle;
+    });
+    return found.valid() ? get(found) : nullptr;
+}
+
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {
     // [orig: EntityPool_FindByNetId @0x4f0a20] pool 0 first, then pools where
     // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins.
@@ -148,30 +161,6 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
     }
 }
 
-void EntityRegistry::by_team(uint8_t team, std::vector<EntityHandle> &out) const {
-    out.clear();
-    for (int pool = 0; pool < kPoolCount; ++pool) {
-        const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
-            if (p.used[s] && p.slots[s].team == team) {
-                out.push_back(EntityHandle::make(pool, static_cast<int>(s)));
-            }
-        }
-    }
-}
-
-EntityHandle EntityRegistry::find_by_name(std::string_view name) const {
-    for (int pool = 0; pool < kPoolCount; ++pool) {
-        const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
-            if (p.used[s] && iequals(p.slots[s].name, name)) {
-                return EntityHandle::make(pool, static_cast<int>(s));
-            }
-        }
-    }
-    return EntityHandle{};
-}
-
 void EntityRegistry::in_area(const Aabb &zone, std::vector<EntityHandle> &out) const {
     out.clear();
     for (int pool = 0; pool < kPoolCount; ++pool) {
@@ -199,33 +188,9 @@ int EntityRegistry::area_index_by_zone_id(int32_t zone_id) const {
     return -1;
 }
 
-int EntityRegistry::find_area(std::string_view name) const {
-    for (size_t i = 0; i < areas_.size(); ++i) {
-        if (iequals(areas_[i].name, name)) return static_cast<int>(i);
-    }
-    return -1;
-}
-
 const Area *EntityRegistry::area(int id) const {
     if (id < 0 || static_cast<size_t>(id) >= areas_.size()) return nullptr;
     return &areas_[id];
-}
-
-int EntityRegistry::register_route(std::string name, std::vector<Vec3> markers) {
-    routes_.push_back(Route{std::move(name), std::move(markers)});
-    return static_cast<int>(routes_.size() - 1);
-}
-
-int EntityRegistry::find_route(std::string_view name) const {
-    for (size_t i = 0; i < routes_.size(); ++i) {
-        if (iequals(routes_[i].name, name)) return static_cast<int>(i);
-    }
-    return -1;
-}
-
-const Route *EntityRegistry::route(int id) const {
-    if (id < 0 || static_cast<size_t>(id) >= routes_.size()) return nullptr;
-    return &routes_[id];
 }
 
 int EntityRegistry::intern_group(std::string_view name) {

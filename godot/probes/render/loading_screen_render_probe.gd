@@ -1,12 +1,15 @@
 extends GameProbe
 
-## loading_screen_render: the windowed regression probe for the real
+## loading_screen_render: the regression probe for the real
 ## menu -> mission loading handoff. From the main menu it drives the shell's
 ## public start seam, then accepts only a frame captured while
 ## MainGame.is_world_loading() is true that contains both the loading art and
-## the witnessed red progress bar. This catches the failure where a forced
-## draw happens before the newly-mounted Control has reached a SceneTree
-## frame, leaving the OS cursor responsive over a black client area. The
+## the witnessed red progress bar. With fullscreen_during_load, the initial
+## real-stage checkpoint switches the actual Window to fullscreen
+## while the ordinary SceneTree loop is blocked; the accepted frame must also
+## prove that the game viewport, loading surface, embedded container, and final
+## root-window image all match the fullscreen window. This catches both a
+## premature forced draw and a stale windowed-resolution root composite. The
 ## mission (mnml.bms by default) must be in the launch's mounted root: the
 ## committed minimal fixture wants `--resource-dir <repo>/assets /d`.
 
@@ -21,6 +24,8 @@ const LOAD_TIMEOUT_MS := 15_000
 const ART_HEIGHT_FRACTION := 0.85
 const ART_MEAN_LUMA_MIN := 0.20
 const ART_SAMPLE_GRID := 192
+const EXTENDED_ART_SAMPLE_MIN := 32
+const EXTENDED_ART_LUMA_MIN := 0.10
 
 # BAR_FILL is Color8(0xEB, 0, 0). Restrict the scan to its witnessed bottom-center
 # neighborhood so incidental red pixels in the briefing art cannot satisfy it.
@@ -36,10 +41,40 @@ var _qualified := false
 var _qualified_metrics := {}
 var _max_art_mean_luma := 0.0
 var _max_red_pixels := 0
+var _progress_callbacks := 0
+var _progress_sequence := PackedInt32Array()
+var _screen_progress_sequence := PackedInt32Array()
+var _fullscreen_during_load := false
+var _fullscreen_requested := false
+var _fullscreen_observed := false
+var _fullscreen_surface_matched := false
+var _fullscreen_art_extended := false
+var _max_extended_art_samples := 0
+var _fullscreen_mismatch_frames := 0
+var _first_fullscreen_mismatch := {}
+var _window: Window = null
+var _windowed_size := Vector2i.ZERO
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
 	_ctx = ctx
+	_loading_frames = 0
+	_qualified = false
+	_qualified_metrics = {}
+	_max_art_mean_luma = 0.0
+	_max_red_pixels = 0
+	_progress_callbacks = 0
+	_progress_sequence = PackedInt32Array()
+	_screen_progress_sequence = PackedInt32Array()
+	_fullscreen_during_load = bool(ctx.args.get("fullscreen_during_load", false))
+	_fullscreen_requested = false
+	_fullscreen_observed = false
+	_fullscreen_surface_matched = false
+	_fullscreen_art_extended = false
+	_max_extended_art_samples = 0
+	_fullscreen_mismatch_frames = 0
+	_first_fullscreen_mismatch = {}
+	_windowed_size = Vector2i.ZERO
 	var mission := String(ctx.args.get("mission", MISSION_DEFAULT)).strip_edges()
 	var shell := ctx.game()
 	var menu_shell := ctx.menu_shell()
@@ -47,7 +82,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("the game shell and its menu are unavailable")
 	var resource_root := ctx.resource_root()
 	if resource_root == null or not resource_root.has_file(mission):
-		return ProbeVerdict.failed("%s is not in the mounted root (launch with the fixture's --resource-dir)" % mission)
+		return ProbeVerdict.failed("%s is not in the mounted --resource-dir" % mission)
 	var world := ctx.world()
 	if world != null and world.is_loaded():
 		var leave := ctx.return_to_menu()
@@ -55,6 +90,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			return ProbeVerdict.failed("could not return to the menu: %s" % error_string(leave))
 	if not ctx.set_window_size(WINDOW_SIZE):
 		return ProbeVerdict.failed("the shell has no window to size")
+	var live_viewport := ctx.viewport()
+	_window = live_viewport.get_window() if live_viewport != null else null
+	if _window == null:
+		return ProbeVerdict.failed("the shell has no live window")
+	_windowed_size = _window.size
 
 	var menu_ready := false
 	for _frame in range(MENU_WAIT_FRAMES):
@@ -75,11 +115,21 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.defer_restore(func() -> void:
 		if RenderingServer.frame_post_draw.is_connected(_on_frame_post_draw):
 			RenderingServer.frame_post_draw.disconnect(_on_frame_post_draw))
+	if world == null:
+		return ProbeVerdict.failed("the game world is unavailable")
 	var started_ms := Time.get_ticks_msec()
 	var deadline_ms := started_ms + LOAD_TIMEOUT_MS
 	var start := ctx.start_mission(mission)
 	if start != OK:
 		return ProbeVerdict.failed("the shell refused to start %s: %s" % [mission, error_string(start)])
+	# start_mission mounts the coordinator and then yields inside its two-frame
+	# preparation barrier. Connecting here puts this observer after the
+	# coordinator: every checkpoint callback can inspect the frame that
+	# LoadingScreen.present just forced while the main loop is blocked.
+	world.load_progress.connect(_on_load_progress)
+	ctx.defer_restore(func() -> void:
+		if is_instance_valid(world) and world.load_progress.is_connected(_on_load_progress):
+			world.load_progress.disconnect(_on_load_progress))
 
 	while not _qualified and Time.get_ticks_msec() < deadline_ms and not ctx.cancelled:
 		if not is_instance_valid(shell) or not shell.is_world_loading():
@@ -87,44 +137,167 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		await ctx.tree.process_frame
 
 	var elapsed_ms := Time.get_ticks_msec() - started_ms
+	var expected_progress := PackedInt32Array(
+			[0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
 	var data := {
 		"loading_frames": _loading_frames,
 		"max_upper_mean_luma": _max_art_mean_luma,
 		"max_red_pixels": _max_red_pixels,
+		"progress_callbacks": _progress_callbacks,
+		"progress_sequence": _progress_sequence,
+		"screen_progress_sequence": _screen_progress_sequence,
+		"progress_exact": _progress_sequence == expected_progress \
+				and _screen_progress_sequence == expected_progress,
 		"elapsed_ms": elapsed_ms,
+		"fullscreen_during_load": _fullscreen_during_load,
+		"fullscreen_requested": _fullscreen_requested,
+		"fullscreen_observed": _fullscreen_observed,
+		"fullscreen_surface_matched": _fullscreen_surface_matched,
+		"fullscreen_art_extended": _fullscreen_art_extended,
+		"max_extended_art_samples": _max_extended_art_samples,
+		"fullscreen_mismatch_frames": _fullscreen_mismatch_frames,
+		"first_fullscreen_mismatch": _first_fullscreen_mismatch,
 	}
+	if is_instance_valid(shell) and shell.is_world_loading():
+		data["presentation_released"] = await ctx.wait_world_ready(LOAD_TIMEOUT_MS)
+	else:
+		data["presentation_released"] = true
 	if not _qualified:
-		return ProbeVerdict.failed(("no loading frame contained both art and the red bar "
-				+ "(loading_frames=%d, max_upper_mean_luma=%.4f, max_red_pixels=%d, elapsed_ms=%d)"
-				% [_loading_frames, _max_art_mean_luma, _max_red_pixels, elapsed_ms]), data)
+		var detail := ("no qualifying loading frame was presented "
+				+ "(loading_frames=%d, max_upper_mean_luma=%.4f, max_red_pixels=%d, "
+				+ "fullscreen_requested=%s, fullscreen_observed=%s, surface_matched=%s, "
+				+ "art_extended=%s, elapsed_ms=%d)")
+		detail = detail % [_loading_frames, _max_art_mean_luma, _max_red_pixels,
+				_fullscreen_requested, _fullscreen_observed,
+				_fullscreen_surface_matched, _fullscreen_art_extended, elapsed_ms]
+		return ProbeVerdict.failed(detail, data)
+	if not bool(data["progress_exact"]):
+		return ProbeVerdict.failed(
+				"loading progress did not follow the exact retail-mission checkpoints",
+				data)
+	if _fullscreen_mismatch_frames > 0:
+		return ProbeVerdict.failed(
+				"fullscreen presented stale loading pixels before reaching the new resolution",
+				data)
 	data["qualified_upper_mean_luma"] = _qualified_metrics.get("art_mean_luma", 0.0)
 	data["qualified_red_pixels"] = _qualified_metrics.get("red_pixels", 0)
-	ctx.log("OK loading_frames=%d qualified_upper_mean_luma=%.4f qualified_red_pixels=%d elapsed_ms=%d" % [
+	data["qualified_checkpoint"] = _qualified_metrics.get("checkpoint", -1)
+	data["qualified_extended_art_samples"] = _qualified_metrics.get(
+			"extended_art_samples", 0)
+	data["qualified_window_size"] = _qualified_metrics.get("window_size", Vector2i.ZERO)
+	data["qualified_viewport_size"] = _qualified_metrics.get("viewport_size", Vector2i.ZERO)
+	data["qualified_surface_size"] = _qualified_metrics.get("surface_size", Vector2i.ZERO)
+	data["qualified_image_size"] = _qualified_metrics.get("size", Vector2i.ZERO)
+	ctx.log("OK loading_frames=%d qualified_upper_mean_luma=%.4f qualified_red_pixels=%d fullscreen=%s size=%s elapsed_ms=%d" % [
 			_loading_frames, float(data["qualified_upper_mean_luma"]),
-			int(data["qualified_red_pixels"]), elapsed_ms])
-	return ProbeVerdict.passed("a loading frame carried the art and the red bar", data)
+			int(data["qualified_red_pixels"]), _fullscreen_surface_matched,
+			data["qualified_image_size"], elapsed_ms])
+	var summary := "a fullscreen loading frame covered the live window" \
+			if _fullscreen_during_load else "a loading frame carried the art and the red bar"
+	return ProbeVerdict.passed(summary, data)
+
+
+func _on_load_progress(percent: int) -> void:
+	_progress_callbacks += 1
+	if _progress_sequence.is_empty() or _progress_sequence[-1] != percent:
+		_progress_sequence.append(percent)
+	var shell := _ctx.game() if _ctx != null else null
+	var screen_progress := shell.loading_progress_percent() if shell != null else -1
+	if _screen_progress_sequence.is_empty() \
+			or _screen_progress_sequence[-1] != screen_progress:
+		_screen_progress_sequence.append(screen_progress)
+	if _fullscreen_during_load and not _fullscreen_requested and percent >= 0 \
+			and _window != null:
+		_fullscreen_requested = true
+		_press_f11()
+		DisplayServer.process_events()
+	# This callback runs after WorldLoadCoordinator presented the checkpoint.
+	# Complete that queued draw before reading back its pixels; frame_post_draw
+	# alone is delivered only after the synchronous loader yields to the loop.
+	RenderingServer.force_draw(true, 0.0)
+	_sample_loading_frame(percent)
+
+
+static func _press_f11() -> void:
+	for pressed in [true, false]:
+		var key := InputEventKey.new()
+		key.keycode = WindowState.TOGGLE_KEY
+		key.physical_keycode = WindowState.TOGGLE_KEY
+		key.pressed = pressed
+		Input.parse_input_event(key)
 
 
 func _on_frame_post_draw() -> void:
+	_sample_loading_frame()
+
+
+func _sample_loading_frame(checkpoint := -1) -> void:
 	if _qualified or _ctx == null:
 		return
 	var shell := _ctx.game()
 	if shell == null or not shell.is_world_loading():
 		return
 	var viewport := _ctx.viewport()
-	var image: Image = viewport.get_texture().get_image() if viewport != null else null
+	var capture_viewport: Viewport = _window if _window != null else viewport
+	var image: Image = capture_viewport.get_texture().get_image() \
+			if capture_viewport != null else null
 	if image == null or image.is_empty():
 		return
 	_loading_frames += 1
 	var metrics := _measure_frame(image)
+	metrics["checkpoint"] = checkpoint if checkpoint >= 0 \
+			else shell.loading_progress_percent()
 	_max_art_mean_luma = maxf(_max_art_mean_luma, float(metrics["art_mean_luma"]))
 	_max_red_pixels = maxi(_max_red_pixels, int(metrics["red_pixels"]))
+	if _fullscreen_during_load:
+		var viewport_size := Vector2i(viewport.get_visible_rect().size)
+		var surface_size := shell.loading_surface_size()
+		var image_size := image.get_size()
+		var window_size := _window.size if _window != null else Vector2i.ZERO
+		var container_size := window_size
+		var runtime_root := _ctx.tree.current_scene as GameRuntimeRoot \
+				if _ctx.tree != null else null
+		if runtime_root != null and runtime_root.is_game_view_embedded():
+			var container := runtime_root.get_node_or_null(
+					"GameViewportContainer") as SubViewportContainer
+			if container != null:
+				container_size = Vector2i(container.size)
+		var fullscreen := _window != null and WindowState.is_fullscreen(_window)
+		_fullscreen_observed = _fullscreen_observed or fullscreen
+		var extended_art_samples := _count_extended_art_samples(image)
+		_max_extended_art_samples = maxi(
+				_max_extended_art_samples, extended_art_samples)
+		var art_extended := extended_art_samples >= EXTENDED_ART_SAMPLE_MIN
+		_fullscreen_art_extended = _fullscreen_art_extended or art_extended
+		var surface_matched := fullscreen and window_size != _windowed_size \
+				and viewport_size == window_size \
+				and container_size == window_size \
+				and surface_size == viewport_size and image_size == window_size
+		_fullscreen_surface_matched = _fullscreen_surface_matched or surface_matched
+		metrics["fullscreen"] = fullscreen
+		metrics["window_size"] = window_size
+		metrics["viewport_size"] = viewport_size
+		metrics["container_size"] = container_size
+		metrics["surface_size"] = surface_size
+		metrics["extended_art_samples"] = extended_art_samples
+		if fullscreen and window_size != _windowed_size \
+				and (not surface_matched or not art_extended):
+			_fullscreen_mismatch_frames += 1
+			if _first_fullscreen_mismatch.is_empty():
+				_first_fullscreen_mismatch = metrics.duplicate()
+				var mismatch_path := _ctx.artifact_dir.path_join(
+						"fullscreen_first_mismatch.png")
+				if image.save_png(mismatch_path) == OK:
+					_ctx.artifact("fullscreen_first_mismatch", mismatch_path, "png")
+		if not surface_matched or not art_extended:
+			return
 	if float(metrics["art_mean_luma"]) > ART_MEAN_LUMA_MIN and int(metrics["red_pixels"]) > 0:
 		_qualified = true
 		_qualified_metrics = metrics
-		var path := _ctx.artifact_dir.path_join("loading_frame.png")
+		var artifact_name := "loading_frame_fullscreen" if _fullscreen_during_load else "loading_frame"
+		var path := _ctx.artifact_dir.path_join(artifact_name + ".png")
 		if image.save_png(path) == OK:
-			_ctx.artifact("loading_frame", path, "png")
+			_ctx.artifact(artifact_name, path, "png")
 
 
 func _measure_frame(image: Image) -> Dictionary:
@@ -156,3 +329,23 @@ func _measure_frame(image: Image) -> Dictionary:
 		"red_pixels": red_pixels,
 		"size": Vector2i(width, height),
 	}
+
+
+func _count_extended_art_samples(image: Image) -> int:
+	var width := image.get_width()
+	var height := image.get_height()
+	if width <= _windowed_size.x and height <= _windowed_size.y:
+		return EXTENDED_ART_SAMPLE_MIN
+	var art_bottom := clampi(int(height * ART_HEIGHT_FRACTION), 1, height)
+	@warning_ignore("integer_division")
+	var step := maxi(1, maxi(width, art_bottom) / ART_SAMPLE_GRID)
+	var samples := 0
+	for y in range(0, art_bottom, step):
+		for x in range(0, width, step):
+			if x < _windowed_size.x and y < _windowed_size.y:
+				continue
+			var color := image.get_pixel(x, y)
+			var luma := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
+			if luma > EXTENDED_ART_LUMA_MIN:
+				samples += 1
+	return samples

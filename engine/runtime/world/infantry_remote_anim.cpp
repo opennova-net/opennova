@@ -49,7 +49,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // already be in a death-class clip when a late/replayed state restores a
         // mount, and that must not leave the seat claim or compact carrier alive.
         // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-        if (ent->mounted) entity_detach_from_vehicle(world, e.handle);
+        if (ent->mounted) world.vehicles.detach(e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
             const int death = anim_state::kDeathBulletBase + 4;
             const int target =
@@ -92,7 +92,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             // Only latch the synthesized vertical state when the authority has
             // terrain and can therefore observe its landing on a later uplink.
             // Terrain-free harnesses retain the documented cooldown-only residual.
-            if (world.terrain != nullptr && world.terrain->valid()) {
+            if (world.tables.terrain != nullptr && world.tables.terrain->valid()) {
                 inf.airborne = true;
                 ent->flags |= kEntityFlagInAir;
                 ent->engine_flags |= kEntityFlagInAir;

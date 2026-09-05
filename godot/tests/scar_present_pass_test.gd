@@ -1,19 +1,19 @@
 extends GutTest
 
-# ScarPresentPass + ScarPresenter on the typed surfaces (ADR 0034): the draw
-# list is pure data through the public present_draw_list leg (production
-# present() pulls Simulation.get_scar_draw_list), the owner models are real
-# ObjectModels built from the armory fixture (their render-part nodes mount the
-# entity-ring meshes), the wire resolver is a real WirePresentPass with injected
-# nodes, and the textures resolve through a real ResourceRoot over a temp dir.
+# The scar present pass (ScarPresenter's present_frame leg, EntityPresenter's
+# owned "Scars" child, ADR 0043 d9) on the typed surfaces (ADR 0034): the draw
+# list is pure data through the public present_scar_draw_list leg (production
+# present_passes() pulls Simulation.get_scar_draw_list), the owner models are
+# real ObjectModels built from the armory fixture (their render-part nodes
+# mount the entity-ring meshes), the wire resolver is the presenter's own
+# registry with injected nodes, and the textures resolve through a real
+# ResourceRoot over a temp dir.
 #
 # [orig: Scar_RenderAllCaches @0x5CDF70 -> Scar_RenderCache @0x5CD830; the
 #  shared ring draws world-space quads, an entity ring's quads are transformed
 #  through the owner's section matrix at draw time — the section-node parent
 #  here; docs/world/world-wac-ai-re.md §24.9]
 
-const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
-const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 const MODEL_GRAPHIC := "armory"
 const MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
@@ -94,73 +94,76 @@ func _strip_mode_words() -> PackedInt32Array:
 
 
 # One quad = six vertices in the witnessed order around `centre` (half-size 0.25).
-func _quad(draw: Dictionary, centre: Vector3) -> void:
+# The record's packed arrays are values, so the quad is appended to the local
+# arrays and stored back on the record.
+func _quad(draw: ScarDrawList, centre: Vector3) -> void:
 	var corners := [
 		centre + Vector3(-0.25, 0, -0.25), centre + Vector3(0.25, 0, -0.25),
 		centre + Vector3(-0.25, 0, 0.25), centre + Vector3(0.25, 0, 0.25),
 	]
 	var uv := [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]
+	var vertices := draw.vertices
+	var uvs := draw.uvs
+	var colors := draw.colors
 	for k in [0, 1, 2, 1, 3, 2]:
-		draw["vertices"].append(corners[k])
-		draw["uvs"].append(uv[k])
-		draw["colors"].append(Color(0.5, 0.5, 0.5, 1.0))
+		vertices.append(corners[k])
+		uvs.append(uv[k])
+		colors.append(Color(0.5, 0.5, 0.5, 1.0))
+	draw.vertices = vertices
+	draw.uvs = uvs
+	draw.colors = colors
 
 
-func _draw_list() -> Dictionary:
-	return {
-		"vertices": PackedVector3Array(),
-		"uvs": PackedVector2Array(),
-		"colors": PackedColorArray(),
-		"batch_owner": PackedInt32Array(),
-		"batch_texture": PackedInt32Array(),
-		"batch_section": PackedInt32Array(),
-		"batch_flags": PackedInt32Array(),
-		"batch_first": PackedInt32Array(),
-		"batch_count": PackedInt32Array(),
-		"batch_bms_id": PackedInt32Array(),
-		"batch_spawn_origin": PackedInt64Array(),
-		"strip_names": _strip_names(),
-		"strip_mode_words": _strip_mode_words(),
-		"slots_live": 0,
-		"slots_culled": 0,
-		"rings_leased": 0,
-	}
+func _draw_list() -> ScarDrawList:
+	var draw := ScarDrawList.new()
+	draw.strip_names = _strip_names()
+	draw.strip_mode_words = _strip_mode_words()
+	return draw
 
 
-func _batch(draw: Dictionary, owner: int, texture: int, section: int,
+static func _append_i32(values: PackedInt32Array, value: int) -> PackedInt32Array:
+	values.append(value)
+	return values
+
+
+func _batch(draw: ScarDrawList, owner: int, texture: int, section: int,
 		entity_local: bool, quads: int, bms_id: int = 0,
-		spawn_origin: int = SpawnOrigin.NONE) -> void:
-	var first: int = draw["vertices"].size()
+		spawn_origin: int = Simulation.SPAWN_ORIGIN_NONE) -> void:
+	var first := draw.vertices.size()
 	for q in range(quads):
 		_quad(draw, Vector3(q, 0, 0))
-	draw["batch_owner"].append(owner)
-	draw["batch_texture"].append(texture)
-	draw["batch_section"].append(section)
-	draw["batch_flags"].append(1 if entity_local else 0)
-	draw["batch_first"].append(first)
-	draw["batch_count"].append(quads * 6)
-	draw["batch_bms_id"].append(bms_id)
-	draw["batch_spawn_origin"].append(spawn_origin)
-	draw["slots_live"] = int(draw["slots_live"]) + quads
+	draw.batch_owner = _append_i32(draw.batch_owner, owner)
+	draw.batch_texture = _append_i32(draw.batch_texture, texture)
+	draw.batch_section = _append_i32(draw.batch_section, section)
+	draw.batch_flags = _append_i32(draw.batch_flags,
+			ScarDrawList.FLAG_ENTITY_LOCAL if entity_local else 0)
+	draw.batch_first = _append_i32(draw.batch_first, first)
+	draw.batch_count = _append_i32(draw.batch_count, quads * 6)
+	draw.batch_bms_id = _append_i32(draw.batch_bms_id, bms_id)
+	var origins := draw.batch_spawn_origin
+	origins.append(spawn_origin)
+	draw.batch_spawn_origin = origins
+	draw.slots_live += quads
 
 
-func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
-	var presenter := WirePresentPass.new()
-	for handle in nodes:
-		presenter.register_wire_node(int(handle), nodes[handle])
-	return presenter
+# A REAL EntityPresenter with its scar pass wired: `index` resolves authored
+# owners, `wire_nodes` are injected per-handle avatars (its own registry is
+# the runtime-only resolver), `root` resolves the strip TGAs. Its "Scars"
+# child is the device.
+func _make_presenter(index: EntityIndex = null, root: ResourceRoot = null,
+		wire_nodes: Dictionary = {}) -> EntityPresenter:
+	var entities := EntityPresenter.new()
+	add_child_autofree(entities)
+	entities.setup(null, index, null)
+	for handle in wire_nodes:
+		entities.register_wire_node(int(handle), wire_nodes[handle])
+	entities.setup_passes(null, null, root, null, null, null, null, null)
+	return entities
 
 
-func _presenter(root: ResourceRoot = null) -> ScarPresenter:
-	var presenter := ScarPresenter.new()
-	add_child_autofree(presenter)
-	if root != null:
-		presenter.set_resource_root(root)
-	return presenter
-
-
-func _world_mesh(presenter: ScarPresenter) -> MeshInstance3D:
-	return presenter.get_node_or_null("ScarWorld") as MeshInstance3D
+func _world_mesh(entities: EntityPresenter) -> MeshInstance3D:
+	var presenter := entities.scar_presenter()
+	return presenter.get_node_or_null("ScarWorld") as MeshInstance3D if presenter != null else null
 
 
 func _entity_meshes(root: Node) -> Array:
@@ -177,16 +180,14 @@ func _entity_meshes(root: Node) -> Array:
 
 func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -> void:
 	var root := _texture_root(["scorch1.tga", "bhole1.tga"])
-	var presenter := _presenter(root)
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, null, null, null, root, Callable(), Callable(), presenter)
+	var entities := _make_presenter(null, root)
 	var draw := _draw_list()
 	_batch(draw, 0xFFFF, 0, 0, false, 3)            # scorch1 x3
 	_batch(draw, 0xFFFF, BHOLE_STRIP, 0, false, 1)  # bhole1 x1
 
-	scar_pass.present_draw_list(draw)
+	entities.present_scar_draw_list(draw)
 
-	var world := _world_mesh(presenter)
+	var world := _world_mesh(entities)
 	assert_not_null(world, "the shared ring lands on the top-level ScarWorld mesh")
 	if world == null:
 		return
@@ -207,16 +208,16 @@ func test_shared_ring_batches_become_one_world_mesh_with_a_surface_per_batch() -
 	if hole_material != null:
 		assert_eq(hole_material.shader.resource_path, SHADER_HOLE,
 				"the bhole word (0x460651) selects the alpha-tested drawer state")
-	var stats := scar_pass.get_stats()
+	var stats := entities.get_scar_present_stats()
 	assert_eq(stats.world_surfaces, 2)
 	assert_eq(stats.entity_meshes, 0)
 	assert_eq(stats.batches, 2)
 	assert_eq(stats.textures_missing, 0)
 	assert_eq(stats.slots_live, 4)
-	assert_eq(presenter.get_stats_record().strips_unsupported, 0,
+	assert_eq(entities.scar_presenter().get_stats_record().strips_unsupported, 0,
 			"both shipped words decode to a carried drawer state")
 	assert_eq(_entity_meshes(self).size(), 0)
-	scar_pass.teardown()
+	entities.teardown()
 
 
 func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
@@ -259,23 +260,23 @@ func test_a_strip_whose_tga_arrives_later_binds_it_on_the_next_present() -> void
 	# The material is created on the first present even when the TGA is not
 	# resolvable yet (no root); the texture must not stay missing forever once
 	# a root is set.
-	var presenter := _presenter()
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, null, null, null, null, Callable(), Callable(), presenter)
+	var entities := _make_presenter()
 	var draw := _draw_list()
 	_batch(draw, 0xFFFF, 0, 0, false, 1)
-	scar_pass.present_draw_list(draw)
-	assert_eq(scar_pass.get_stats().textures_missing, 1, "no root: the strip reports its missing TGA")
+	entities.present_scar_draw_list(draw)
+	assert_eq(entities.get_scar_present_stats().textures_missing, 1,
+			"no root: the strip reports its missing TGA")
 	var root := _texture_root(["scorch1.tga"])
-	presenter.set_resource_root(root)
-	scar_pass.present_draw_list(draw)
-	assert_eq(scar_pass.get_stats().textures_missing, 0, "the TGA binds once a root resolves it")
-	var world := _world_mesh(presenter)
+	entities.scar_presenter().set_resource_root(root)
+	entities.present_scar_draw_list(draw)
+	assert_eq(entities.get_scar_present_stats().textures_missing, 0,
+			"the TGA binds once a root resolves it")
+	var world := _world_mesh(entities)
 	if world != null and world.mesh != null:
 		var material := world.mesh.surface_get_material(0) as ShaderMaterial
 		if material != null:
 			assert_not_null(material.get_shader_parameter("albedo_tex"))
-	scar_pass.teardown()
+	entities.teardown()
 
 
 func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
@@ -289,15 +290,12 @@ func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
 	if parts.is_empty():
 		return
 	var section := int(parts.keys()[0])
-	var presenter := _presenter()
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, null, null, _wire_resolver({OWNER_A: model}), null,
-			Callable(), Callable(), presenter)
+	var entities := _make_presenter(null, null, {OWNER_A: model})
 	var draw := _draw_list()
 	_batch(draw, OWNER_A, 0, section, true, 2)            # scorch1 on the section
 	_batch(draw, OWNER_A, 2, section, true, 1)            # scorch3 on the same section
 
-	scar_pass.present_draw_list(draw)
+	entities.present_scar_draw_list(draw)
 
 	var meshes := _entity_meshes(self)
 	assert_eq(meshes.size(), 1, "one mesh per (owner, section) carries every strip batch")
@@ -309,7 +307,7 @@ func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
 	assert_eq(mesh_instance.mesh.get_surface_count(), 2, "one surface per strip")
 	assert_eq(mesh_instance.transform, Transform3D.IDENTITY,
 			"section-local vertices are uploaded as-is under the section node")
-	var stats := scar_pass.get_stats()
+	var stats := entities.get_scar_present_stats()
 	assert_eq(stats.entity_meshes, 1)
 	assert_eq(stats.owners_unresolved, 0)
 	assert_eq(stats.textures_missing, 2,
@@ -317,12 +315,12 @@ func test_entity_ring_batches_parent_under_the_owners_section_node() -> void:
 	# An owner the pass cannot resolve draws nothing this frame, and is counted.
 	var unresolved := _draw_list()
 	_batch(unresolved, OWNER_B, 0, section, true, 1)
-	scar_pass.present_draw_list(unresolved)
-	assert_eq(scar_pass.get_stats().owners_unresolved, 1)
+	entities.present_scar_draw_list(unresolved)
+	assert_eq(entities.get_scar_present_stats().owners_unresolved, 1)
 	assert_eq(_entity_meshes(self).filter(
 			func(m: Node) -> bool: return not m.is_queued_for_deletion()).size(), 0,
 			"the previous owner's mesh is retired once it produces no batch")
-	scar_pass.teardown()
+	entities.teardown()
 
 
 func test_authored_owners_resolve_through_the_entity_index() -> void:
@@ -332,22 +330,19 @@ func test_authored_owners_resolve_through_the_entity_index() -> void:
 	if model == null:
 		return
 	var index := EntityIndex.new()
-	index.build([{'model': model, 'ref': {
-		'bms_id': 41, 'kind': -1, 'index': -1,
-		'group': -1, 'team': -1, 'position': Vector3.ZERO}}], [])
-	var presenter := _presenter()
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, null, index, null, null, Callable(), Callable(), presenter)
+	model.entity_ref = EntityRef.make(-1, -1, 41)
+	index.build([model], [])
+	var entities := _make_presenter(index)
 	var section := int(model.get_render_part_nodes().keys()[0])
 	var draw := _draw_list()
-	_batch(draw, OWNER_A, 0, section, true, 1, 41, SpawnOrigin.NONE)
+	_batch(draw, OWNER_A, 0, section, true, 1, 41, Simulation.SPAWN_ORIGIN_NONE)
 
-	scar_pass.present_draw_list(draw)
+	entities.present_scar_draw_list(draw)
 
-	assert_eq(scar_pass.get_stats().entity_meshes, 1,
+	assert_eq(entities.get_scar_present_stats().entity_meshes, 1,
 			"a BMS-identified owner resolves through the shared index")
-	assert_eq(scar_pass.get_stats().owners_unresolved, 0)
-	scar_pass.teardown()
+	assert_eq(entities.get_scar_present_stats().owners_unresolved, 0)
+	entities.teardown()
 
 
 func test_an_empty_list_clears_every_scar_mesh() -> void:
@@ -357,44 +352,61 @@ func test_an_empty_list_clears_every_scar_mesh() -> void:
 	if model == null:
 		return
 	var section := int(model.get_render_part_nodes().keys()[0])
-	var presenter := _presenter()
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, null, null, _wire_resolver({OWNER_A: model}), null,
-			Callable(), Callable(), presenter)
+	var entities := _make_presenter(null, null, {OWNER_A: model})
 	var draw := _draw_list()
 	_batch(draw, 0xFFFF, 1, 0, false, 1)
 	_batch(draw, OWNER_A, 0, section, true, 1)
-	scar_pass.present_draw_list(draw)
-	assert_eq(scar_pass.get_stats().world_surfaces, 1)
-	assert_eq(scar_pass.get_stats().entity_meshes, 1)
+	entities.present_scar_draw_list(draw)
+	assert_eq(entities.get_scar_present_stats().world_surfaces, 1)
+	assert_eq(entities.get_scar_present_stats().entity_meshes, 1)
 
-	scar_pass.present_draw_list(_draw_list())
+	entities.present_scar_draw_list(_draw_list())
 
-	var world := _world_mesh(presenter)
+	var world := _world_mesh(entities)
 	assert_not_null(world)
 	if world != null:
 		assert_false(world.visible, "no shared-ring slot: the world mesh hides")
-	assert_eq(scar_pass.get_stats().world_surfaces, 0)
-	assert_eq(scar_pass.get_stats().entity_meshes, 0)
+	assert_eq(entities.get_scar_present_stats().world_surfaces, 0)
+	assert_eq(entities.get_scar_present_stats().entity_meshes, 0)
 	for m in _entity_meshes(self):
 		assert_true((m as Node).is_queued_for_deletion())
-	scar_pass.reset_runtime_state()
-	scar_pass.teardown()
+	entities.reset_wire_runtime_state()
+	entities.teardown()
 
 
-func test_the_pass_creates_its_presenter_under_the_container_and_tears_it_down() -> void:
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var scar_pass := ScarPresentPass.new()
-	scar_pass.setup(null, container, null, null, null)
-	var presenter := scar_pass.get_presenter()
-	assert_not_null(presenter, "the pass owns a presenter when none is supplied")
+func test_the_presenter_owns_its_scars_child_and_reset_clears_every_mesh() -> void:
+	# The scar device is the presenter's own "Scars" child (no injected
+	# presenter seam); the Stop -> Play boundary reaches it through the
+	# presenter's one reset, which drops every scar mesh and the pass census
+	# while the child and its texture cache stay.
+	var root := _texture_root(["scorch1.tga"])
+	var entities := _make_presenter(null, root)
+	var presenter := entities.scar_presenter()
+	assert_not_null(presenter, "the presenter owns a scar device from birth")
 	if presenter == null:
 		return
-	assert_eq(presenter.get_parent(), container)
-	scar_pass.teardown()
-	assert_true(presenter.is_queued_for_deletion(), "teardown frees the owned presenter")
-	assert_null(scar_pass.get_presenter())
+	assert_eq(presenter.get_parent(), entities)
+	assert_eq(String(presenter.name), "Scars")
+	var draw := _draw_list()
+	_batch(draw, 0xFFFF, 0, 0, false, 2)
+	entities.present_scar_draw_list(draw)
+	assert_eq(entities.get_scar_present_stats().world_surfaces, 1)
+	assert_eq(entities.get_scar_present_stats().slots_live, 2)
+
+	entities.reset_wire_runtime_state()
+
+	var stats := entities.get_scar_present_stats()
+	assert_eq(stats.world_surfaces, 0, "reset drops the shared-ring mesh")
+	assert_eq(stats.batches, 0)
+	assert_eq(stats.slots_live, 0, "reset clears the pass census")
+	var world := _world_mesh(entities)
+	assert_not_null(world)
+	if world != null:
+		assert_false(world.visible, "the world mesh hides until the next present")
+	assert_eq(entities.scar_presenter(), presenter, "the device child survives the reset")
+	entities.teardown()
+	assert_eq(entities.scar_presenter(), presenter,
+			"teardown clears the meshes; the child dies with the presenter node")
 
 
 func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
@@ -405,32 +417,31 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	assert_eq(mission.create_default(), OK)
 	var boot_container := Node3D.new()
 	add_child_autofree(boot_container)
-	var rt := MissionPresentation.new()
+	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(mission, boot_container)
 	var sim := rt.get_sim()
 	assert_not_null(sim, "the runtime boots a real simulation over the mission")
 	if sim == null:
 		return
-	var draw: Dictionary = sim.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
-	assert_true(draw.has("vertices"))
-	assert_eq((draw["vertices"] as PackedVector3Array).size(), 0)
-	assert_eq((draw["batch_owner"] as PackedInt32Array).size(), 0)
-	var names: PackedStringArray = draw["strip_names"]
+	var draw := sim.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
+	assert_not_null(draw)
+	assert_eq(draw.vertices.size(), 0)
+	assert_eq(draw.batch_owner.size(), 0)
+	var names := draw.strip_names
 	assert_eq(names.size(), 32)
 	assert_eq(names[0], "scorch1.tga")
 	assert_eq(names[3], "scorch4.tga")
 	assert_eq(names[BHOLE_STRIP], "bhole1.tga")
-	var words: PackedInt32Array = draw["strip_mode_words"]
+	var words := draw.strip_mode_words
 	assert_eq(words.size(), 32)
 	assert_eq(words[0], MODE_WORD_SCORCH, "scorch1 draws in the scorch state")
 	assert_eq(words[3], MODE_WORD_SCORCH)
 	assert_eq(words[BHOLE_STRIP], MODE_WORD_HOLE, "bhole1 draws in the alpha-tested state")
-	assert_eq(int(draw["rings_leased"]), 0)
-	var stats := rt.get_scar_present_stats()
+	assert_eq(draw.rings_leased, 0)
+	var stats: ScarPresentStats = rt.get_scar_present_stats()
 	assert_not_null(stats, "the runtime owns the scar presentation pass")
 	var fresh := Simulation.new()
-	var fresh_draw: Dictionary = fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
-	assert_eq((fresh_draw.get("batch_owner", PackedInt32Array()) as PackedInt32Array).size(), 0,
+	var fresh_draw := fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
+	assert_eq(fresh_draw.batch_owner.size(), 0,
 			"an unbooted simulation lists no scars, never crashes")
-	fresh.free()

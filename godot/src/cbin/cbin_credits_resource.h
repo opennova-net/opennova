@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_CBIN_CREDITS_RESOURCE_H
-#define OPENNOVA_CBIN_CREDITS_RESOURCE_H
+#pragma once
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -210,5 +209,3 @@ private:
 
 VARIANT_ENUM_CAST(godot::CbinEntryType);
 VARIANT_ENUM_CAST(godot::CbinJustify);
-
-#endif  // OPENNOVA_CBIN_CREDITS_RESOURCE_H

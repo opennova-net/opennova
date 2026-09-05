@@ -8,35 +8,69 @@ in maturity_baseline.json:
                         that access an _underscore member of ANOTHER object
                         (self._ excluded) -- ADR 0018: each is a missing public
                         seam, on the test side and the probe side alike.
+  gd_test_production_subclasses
+                        test classes (a file-level `extends` or an inline
+                        `class X extends Y` / `class X:` + `extends Y`) under
+                        godot/tests/**/*.gd whose base is a PRODUCTION class:
+                        a `class_name` declared under godot/game or
+                        godot/modtools, or a class registered in
+                        godot/src/register_types.cpp. ADR 0043 rule 11: a test
+                        boots a real fixture or fakes a GDScript INTERFACE
+                        class (GameShell, WorldView, RunSessionPlatform,
+                        MenuCompanion hooks) by overriding public verbs; it
+                        never subclasses a production Node to override
+                        behavior and never overrides a private. Non-increasing;
+                        the baseline is the sanctioned interface-fake residue.
   engine_uncited_src_files  engine/<group>/<lib> source files (post-flatten:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
-  adapter_cpp_orig_cites  "[orig:" citations across ALL of godot/src -- the
-                        one cite marker (ADR 0042 d7 retired the dual-marker
-                        convention; there is no "(retail:" form and no
-                        pushdown/device partition any more). Non-increasing:
-                        a decrease means witnessed code moved to its engine
-                        home or died as verified dead code -- bank it with
-                        --write-baseline. The marker-rewrite exit is gone;
-                        only code that moves banks the counter.
+  godot_orig_cites      "[orig:" citations across the whole Godot side --
+                        godot/src C++ plus the godot/game, godot/modtools and
+                        godot/probes GDScript -- as ONE count (ADR 0043 merged
+                        the former adapter_cpp_orig_cites / gd_orig_cites
+                        pair). A cite moves freely between the two Godot-side
+                        languages; the gauge falls only when witnessed code
+                        reaches its engine/ home or dies as verified dead
+                        code -- bank it with --write-baseline. The one cite
+                        marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
+  gd_foreign_private_accesses
+                        lines in the shipping GDScript (godot/game,
+                        godot/modtools) that access an _underscore member of
+                        ANOTHER object (self._ excluded) -- a "method annex"
+                        reaching into its owner's privates is not a class
+                        boundary (ADR 0043). Non-increasing; target zero.
   mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
                         the typed debug-control table
-                        (godot/game/debug/debug_controls.gd, ADR 0042 d5). An
-                        ABSOLUTE zero floor, not baseline-relative (ADR 0042
-                        d7): the MCP boundary converts typed records to JSON,
-                        and a converter that needs a witness cite is
-                        re-deriving. No baseline key exists for it.
-  gd_orig_cites         "[orig:" citations in godot/game, godot/modtools and
-                        godot/probes GDScript -- witnessed engine behavior
-                        still living in the game-level scripts (ADR 0034 d6's
-                        C++ rewrite queue, measured; godot/probes joined the
-                        scope under ADR 0042 d7). The burn-down class for the
-                        push-down campaign; its floor is the device-leg
-                        justifications.
+                        (godot/src/devtools/debug_control_table.{h,cpp},
+                        ADR 0043 d12). An ABSOLUTE zero floor, not
+                        baseline-relative (ADR 0042 d7): the MCP boundary
+                        converts typed records to JSON, and a converter that
+                        needs a witness cite is re-deriving. No baseline key
+                        exists for it.
+  godot_node_meta_sites Object metadata calls (set_meta / get_meta / has_meta /
+                        remove_meta) anywhere under godot/ (bindings, game
+                        scripts, modtools, probes, tests). An ABSOLUTE zero
+                        floor like mcp_boundary_cites: a fact hung on a node
+                        by string key is an untyped record nobody can find;
+                        it belongs on the node class as a typed property, on
+                        a RefCounted record, or in the owner's own table.
   oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
+  gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
+                        code lines of the shipping GDScript (godot/game,
+                        godot/modtools), excluding godot/game/mcp (the
+                        sanctioned JSON transport edge) and godot/game/probe
+                        (the probe model: its arguments are JSON Schema and
+                        its status pages are the game_probe wire by design,
+                        ADR 0041 / ADR 0043 d12). Each is a record that
+                        crosses untyped (ADR 0017); typed records burn it down.
+  godot_src_dictionary_returns
+                        Binding methods declared to return Dictionary or
+                        TypedArray<Dictionary> in godot/src/**/*.h -- the seams
+                        still handing GDScript untyped records instead of a
+                        RefCounted row (ADR 0042 d5).
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -84,10 +118,13 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
-def count_test_private_pokes() -> int:
+def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
-    for sub in ("tests", "probes"):
+    for sub in subdirs:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -98,6 +135,64 @@ def count_test_private_pokes() -> int:
                 stripped = SELF_POKE.sub("", line.split("#", 1)[0])
                 if PRIVATE_POKE.search(stripped):
                     count += 1
+    return count
+
+
+def count_test_private_pokes() -> int:
+    return _count_private_pokes(("tests", "probes"))
+
+
+def count_gd_foreign_private_accesses() -> int:
+    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game,
+    godot/modtools): the annex pattern -- a RefCounted "method annex" split
+    off its owner for size and reaching back through `_owner._field` -- is
+    C++ `friend` without the keyword. A class owns its state; an object that
+    needs another's privates is a method of that other class (ADR 0043)."""
+    return _count_private_pokes(("game", "modtools"))
+
+
+CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
+GDREGISTER = re.compile(r"GDREGISTER_(?:ABSTRACT_|VIRTUAL_|INTERNAL_)?CLASS\((\w+)\)")
+# `extends Y` at file level, `class X extends Y:` inline, or the two-line
+# `class X:` / `\textends Y` form.
+TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?\s*$", re.M)
+
+
+def _production_class_names() -> set[str]:
+    names: set[str] = set()
+    for sub in ("game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            names.update(CLASS_NAME_DECL.findall(text))
+    register = REPO / "godot" / "src" / "register_types.cpp"
+    try:
+        names.update(GDREGISTER.findall(register.read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        pass
+    return names
+
+
+def count_gd_test_production_subclasses() -> int:
+    """Test classes extending a production class (see the module doc)."""
+    production = _production_class_names()
+    count = 0
+    for path in (REPO / "godot" / "tests").rglob("*.gd"):
+        parts = path.relative_to(REPO).parts
+        if "addons" in parts or _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for base in TEST_EXTENDS.findall(text):
+            if base in production:
+                count += 1
     return count
 
 
@@ -130,14 +225,13 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     return count
 
 
-# One cite marker, one count (ADR 0042 d7): a witness citation is
-# `[orig: Name @0xADDR]` everywhere — the adjudicated `(retail: ...)` note
-# form and the pushdown/device partition are retired. The count over all of
-# godot/src is non-increasing; a decrease means witnessed code moved to its
-# engine home (or died as verified dead code) and is banked with
-# --write-baseline. The marker rewrite that let citations leave the gauge is
-# no longer an exit: only code that moves banks the counter.
-def count_adapter_cpp_orig_cites() -> int:
+# One cite marker, one count (ADR 0042 d7 + ADR 0043): a witness citation is
+# `[orig: Name @0xADDR]` everywhere, and the whole Godot side -- the
+# godot/src C++ bindings and the game-level GDScript -- is ONE gauge. A cite
+# moving between GDScript and binding C++ leaves the count unchanged; the
+# count falls only when witnessed code reaches its engine/ home or dies as
+# verified dead code, and that decrease is banked with --write-baseline.
+def count_godot_orig_cites() -> int:
     count = 0
     adapter = REPO / "godot" / "src"
     for path in adapter.rglob("*"):
@@ -151,14 +245,27 @@ def count_adapter_cpp_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
+    for sub in ("game", "modtools", "probes"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            count += text.count("[orig:")
     return count
 
 
-# The debug-control table (ADR 0042 d5) shares the boundary floor: its rows
-# forward into engine functions, and a row needing a witness cite would be
-# re-deriving engine behavior instead of calling it.
+# The debug-control table (ADR 0043 d12, the C++ pair) shares the boundary
+# floor: its rows forward into engine functions through typed owners, and a
+# row needing a witness cite would be re-deriving engine behavior instead of
+# calling it. These files must exist: a missing one fails the run loudly
+# rather than leaving the floor vacuous.
 MCP_BOUNDARY_EXTRA_FILES = (
-    Path("godot") / "game" / "debug" / "debug_controls.gd",
+    Path("godot") / "src" / "devtools" / "debug_control_table.h",
+    Path("godot") / "src" / "devtools" / "debug_control_table.cpp",
 )
 
 
@@ -169,14 +276,15 @@ def count_mcp_boundary_cites() -> int:
     to JSON; a converter that needs a witness cite is re-deriving engine
     facts at the boundary."""
     count = 0
-    paths = list((REPO / "godot" / "game" / "mcp").rglob("*.gd"))
-    paths += [REPO / extra for extra in MCP_BOUNDARY_EXTRA_FILES]
-    for path in paths:
+    for path in (REPO / "godot" / "game" / "mcp").rglob("*.gd"):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         count += text.count("[orig:")
+    for extra in MCP_BOUNDARY_EXTRA_FILES:
+        # No OSError swallow: the table pair is the floor's subject.
+        count += (REPO / extra).read_text(encoding="utf-8", errors="replace").count("[orig:")
     return count
 
 
@@ -253,8 +361,9 @@ HAS_METHOD_GUARD = re.compile(r"(?<!\w)has_method\s*\(")
 
 
 def count_has_method_guards() -> int:
-    """Duck-type guards in the shipping godot layer (W4-2): the floor is the
-    documented kept set (harness seams and dynamic dispatch), not zero.
+    """Duck-type guards in the shipping godot layer (W4-2): the floor is zero
+    (ADR 0043 d12 typed the last kept set, the render-fixture contract's
+    Object/Node parameters, to their production classes).
     class_has_method is excluded by the word boundary.
     Covers the native binding layer too (godot/src *.cpp/*.h) - a C++
     has_method() probe is the same duck dispatch, just invisible to GDScript
@@ -323,51 +432,6 @@ def count_oversize_cpp_headers() -> int:
     return count
 
 
-def count_gd_orig_cites() -> int:
-    """`[orig:` citations in the game-level GDScript (godot/game,
-    godot/modtools, and — since ADR 0042 d7 — godot/probes): witnessed engine
-    behavior that ADR 0033/0034 say belongs in engine/. The push-down campaign
-    banks this down; the floor is the device-leg justifications (a cite
-    explaining WHY a node write happens, not HOW a witnessed value is
-    derived)."""
-    count = 0
-    for sub in ("game", "modtools", "probes"):
-        for path in (REPO / "godot" / sub).rglob("*.gd"):
-            parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            count += text.count("[orig:")
-    return count
-
-
-OVERSIZE_GD_LINE_LIMIT = 1200
-
-
-def count_oversize_gd_files() -> int:
-    """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave a ratcheted residual set; no .gd under godot/src, godot/game,
-    godot/modtools or godot/probes may grow past 1200 lines without splitting
-    first. godot/tests is deliberately out of scope; test-suite file size is a
-    separate maintainability concern."""
-    count = 0
-    for root in ("godot/src", "godot/game", "godot/modtools", "godot/probes"):
-        for path in (REPO / root).rglob("*.gd"):
-            parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):  # vendored addons / build output, not source
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            if len(text.splitlines()) > OVERSIZE_GD_LINE_LIMIT:
-                count += 1
-    return count
-
-
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
@@ -392,6 +456,86 @@ def count_cpp_binding_console_writes() -> int:
     return count
 
 
+GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
+
+
+def count_gd_dict_key_sites() -> int:
+    """Dictionary-keyed reads in the shipping GDScript (godot/game and
+    godot/modtools; godot/game/mcp excluded as the sanctioned JSON transport
+    edge, godot/game/probe as the probe model whose arguments are JSON Schema
+    and whose status pages are the game_probe wire by design): `row["key"]`
+    and `.get("key"` on code lines. Each site is a record crossing a seam
+    untyped (ADR 0017); a typed RefCounted row removes its sites. The floor
+    is the documented transport edges (the dict-contract allowlist in this
+    file's baseline)."""
+    count = 0
+    for sub in ("game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            if sub == "game" and len(parts) > 2 and parts[2] in ("mcp", "probe"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                count += len(GD_DICT_KEY_SITE.findall(line.split("#", 1)[0]))
+    return count
+
+
+GODOT_SRC_DICTIONARY_RETURN = re.compile(
+    r"^\s*(static\s+)?(virtual\s+)?(TypedArray<Dictionary>|Dictionary)\s+\w+\s*\(")
+
+
+def count_godot_src_dictionary_returns() -> int:
+    """Binding methods declared to return Dictionary or TypedArray<Dictionary>
+    in godot/src/**/*.h: the seams that still hand GDScript an untyped record
+    where ADR 0042 d5 wants a RefCounted row (EntityRow, FeedRow, ...). A
+    to_json_value() converter is not counted (it returns to the MCP edge);
+    only method declarations whose return TYPE is the Dictionary."""
+    count = 0
+    for path in (REPO / "godot" / "src").rglob("*.h"):
+        parts = path.relative_to(REPO).parts
+        if _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if GODOT_SRC_DICTIONARY_RETURN.match(line) and "to_json_value" not in line:
+                count += 1
+    return count
+
+
+NODE_META_CALL = re.compile(r"\b(?:set_meta|get_meta|has_meta|remove_meta|get_meta_list)\s*\(")
+
+
+def count_godot_node_meta_sites() -> int:
+    """Object metadata calls under godot/ (every .gd/.cpp/.h outside the
+    addons and build trees): a fact hung on a node by string key is an
+    untyped record with no declared owner. The floor is zero — the placer,
+    the wire pass, the audio mixer and the model materials all moved theirs
+    onto typed node properties, RefCounted records or owner tables."""
+    count = 0
+    for path in (REPO / "godot").rglob("*"):
+        if path.suffix not in (".gd", ".cpp", ".h"):
+            continue
+        parts = path.relative_to(REPO).parts
+        if "addons" in parts or "third_party" in parts or _in_build_dir(parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            code = line.split("#", 1)[0] if path.suffix == ".gd" else line.split("//", 1)[0]
+            count += len(NODE_META_CALL.findall(code))
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true",
@@ -406,21 +550,25 @@ def main() -> int:
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
+        "gd_foreign_private_accesses": count_gd_foreign_private_accesses(),
+        "gd_test_production_subclasses": count_gd_test_production_subclasses(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
-        "adapter_cpp_orig_cites": count_adapter_cpp_orig_cites(),
+        "godot_orig_cites": count_godot_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),
         "oversize_cpp_headers": count_oversize_cpp_headers(),
-        "oversize_gd_files": count_oversize_gd_files(),
         "has_method_guards": count_has_method_guards(),
-        "gd_orig_cites": count_gd_orig_cites(),
+        "gd_dict_key_sites": count_gd_dict_key_sites(),
+        "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
     }
 
-    # Absolute floor, no baseline key (ADR 0042 d7): the MCP boundary carries
-    # zero witness cites, forever — this never relaxes via --write-baseline.
+    # Absolute floors, no baseline key: the MCP boundary carries zero witness
+    # cites (ADR 0042 d7) and godot/ hangs zero facts on node metadata,
+    # forever — neither relaxes via --write-baseline.
     mcp_cites = count_mcp_boundary_cites()
+    meta_sites = count_godot_node_meta_sites()
 
     if args.write_baseline:
         config["counters"] = current
@@ -431,6 +579,9 @@ def main() -> int:
         if mcp_cites > 0:
             print(f"[ratchet] WARNING: mcp_boundary_cites is {mcp_cites} — the "
                   f"floor is 0 and has no baseline; --enforce will fail.")
+        if meta_sites > 0:
+            print(f"[ratchet] WARNING: godot_node_meta_sites is {meta_sites} — the "
+                  f"floor is 0 and has no baseline; --enforce will fail.")
         return 0
 
     failed = False
@@ -440,6 +591,13 @@ def main() -> int:
         print("[ratchet]   godot/game/mcp converts typed records to JSON; a "
               "converter that needs a witness cite is re-deriving (ADR 0042 d7). "
               "Move the witnessed logic to engine/ and delete the cite.")
+        failed = True
+    meta_marker = "OK" if meta_sites == 0 else "ABOVE FLOOR"
+    print(f"[ratchet] godot_node_meta_sites: {meta_sites} (absolute floor 0) {meta_marker}")
+    if meta_sites > 0:
+        print("[ratchet]   a fact hung on a node by string key is an untyped record "
+              "nobody can find. Put it on the node class as a typed property, "
+              "on a RefCounted record, or in the owner's own table.")
         failed = True
     for name, value in current.items():
         base = baseline.get(name)

@@ -23,7 +23,7 @@ namespace godot {
 // pushes (the scene-pass block terrain/foliage/water read, and the object
 // family's lighting block — retail's per-pass RenderBatchCtx constants), the
 // terrain ShaderMaterial uniform pushes, the sky-map texture handles, and the
-// EnvLightState publication + env_generation_changed signal. Ported from environment.gd (2026-08-09 de-scripting); RE record:
+// EnvLightState publication. Ported from environment.gd (2026-08-09 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class MissionEnvironment : public Node {
 	GDCLASS(MissionEnvironment, Node)
@@ -50,6 +50,9 @@ public:
 	// (the TOD WAC / the debug row move it through Simulation.
 	// command_time_of_day_minutes), this state's standalone home otherwise
 	// (previews, fixtures) — configure/advance act on the standalone home.
+	// The mission clock's default day length in minutes (the script-visible
+	// DEFAULT_MINUTES_PER_DAY constant binds from it).
+	static constexpr int DEFAULT_MINUTES_PER_DAY = 1440;
 	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
 	static double mission_start_time_hhmm(int p_start_time_q8_8);
 	void advance_mission_clock(int p_ticks);
@@ -67,7 +70,6 @@ public:
 	int get_quake_ticks() const;
 	float get_rain_current() const;
 	float get_overcast_blend() const;
-	int get_precipitation_kind() const;
 	bool is_raining() const;
 	// The overcast table (.trn + overcast.def keyframes) the overcast blend
 	// cross-fades the .env colors against; null clears it.
@@ -194,9 +196,8 @@ public:
 	// engine-side writeback path cannot perform itself.
 	opennova::env::EnvironmentState &state() { return state_; }
 	const opennova::env::EnvironmentState &state() const { return state_; }
-	// Publish the typed light record, write the object lighting block globals,
-	// and emit env_generation_changed when the engine generation moved since
-	// the last publish.
+	// Publish the typed light record and write the object lighting block
+	// globals when the engine generation moved since the last publish.
 	void flush_publication(bool p_pass_changed = false);
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).

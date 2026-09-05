@@ -23,68 +23,29 @@ var _temp_dir := ""
 var _shell: Node = null
 
 
-class FakeGameHud:
-	extends RefCounted
-	var crosshair_style := -1
-	var visible := true
-
-	func set_crosshair_style(style: int) -> void:
-		crosshair_style = style
-
-
-class HudHiddenPresenterHarness:
-	extends GameHudPresenter
-	var begin_calls := 0
-	var finish_calls := 0
-	var capture_active := false
-
-	func begin_hud_hidden_capture() -> Error:
-		begin_calls += 1
-		capture_active = true
-		return OK
-
-	func finish_hud_hidden_capture() -> void:
-		finish_calls += 1
-		capture_active = false
-
-	func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
-		var witness := HudHiddenCaptureWitness.new()
-		if not capture_active:
-			witness.error = "HUD-hidden capture is not active"
-			return witness
-		witness.hud_detail_level = 3
-		witness.gameplay_hud_visible = false
-		witness.player_view_effects_active = true
-		return witness
+var _hud_fixture_dir := ""
 
 
 func before_each() -> void:
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
+	# A shell booted here sees only the launch flags a case sets through the
+	# override (the GUT process carries none; no sibling leftovers).
+	LaunchFlags.set_args_override(PackedStringArray([]))
 	Strings.clear()
 
 
 func after_each() -> void:
-	if is_instance_valid(_shell):
-		var world = _shell.get_node_or_null("World")
-		if world != null:
-			world.unload()
-			var world_root = world.get_resource_root()
-			if world_root != null:
-				world_root.clear()
-		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
-		if menu_shell != null and menu_shell.get_resource_root() != null:
-			var menu_root = menu_shell.get_resource_root()
-			if menu_root != null:
-				menu_root.clear()
-		_shell.queue_free()
-		_shell = null
-		await get_tree().process_frame
-	MusicService.stop_context()
+	if not _hud_fixture_dir.is_empty():
+		TestFs.remove_dir_recursive(_hud_fixture_dir)
+		_hud_fixture_dir = ""
+	await WorldFixture.release_shell(self, _shell)
+	_shell = null
 	if not _temp_dir.is_empty():
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
+	LaunchFlags.clear_args_override()
 	if _had_config:
 		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
 		if file != null:
@@ -196,25 +157,38 @@ func test_world_only_capture_rejects_an_unconfigured_shell() -> void:
 
 
 func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active() -> void:
-	var game := _make()
-	var hud := CanvasLayer.new()
-	var presenter := HudHiddenPresenterHarness.new()
-	game.add_child(hud)
-	game.add_child(presenter)
-	game.set("_hud", hud)
-	game.set("_hud_presenter", presenter)
+	# The REAL shell in the minimal mission (WorldFixture.boot_shell): MainGame
+	# delegates to its ShellPresentationSession over its own GameHudPresenter,
+	# whose overlay the first in-world frame built. The delegation reads back
+	# through the presenter's public level + witness seams, and the shell's HUD
+	# CanvasLayer stays active throughout (the witness' canvas fact).
+	_shell = await _booted_in_world()
+	if _shell == null:
+		return
+	var presenter: GameHudPresenter = _shell.get_hud_presenter()
+	var level_before := presenter.hud_detail_level()
 
-	assert_eq(game.begin_hud_hidden_capture(), OK)
-	assert_eq(presenter.begin_calls, 1)
-	var witness: HudHiddenCaptureWitness = game.hud_hidden_capture_witness()
+	assert_eq(_shell.begin_hud_hidden_capture(), OK)
+	assert_eq(presenter.get_game_hud().get_hud_detail_level(),
+			HudOverlay.hud_detail_level_blank(),
+			"the shell delegate decluttered the presenter's built overlay")
+	# The overlay redraws at the blank level before the witness compiles its
+	# gameplay draw families.
+	await get_tree().process_frame
+	var witness: HudHiddenCaptureWitness = _shell.hud_hidden_capture_witness()
+	assert_true(witness.is_valid(), witness.error)
 	assert_eq(witness.hud_detail_level, 3)
 	assert_false(witness.gameplay_hud_visible)
 	assert_true(witness.player_view_effects_active)
 	assert_false(witness.ads_active)
 	assert_false(witness.big_map_active)
 	assert_true(witness.hud_canvas_layer_active)
-	game.finish_hud_hidden_capture()
-	assert_eq(presenter.finish_calls, 1)
+	_shell.finish_hud_hidden_capture()
+	assert_eq(presenter.hud_detail_level(), level_before,
+			"finish restores the exact in-memory level through the presenter")
+	assert_eq(presenter.get_game_hud().get_hud_detail_level(), level_before)
+	assert_false(_shell.hud_hidden_capture_witness().is_valid(),
+			"no witness outside the transaction")
 
 	var unconfigured := _make()
 	assert_eq(unconfigured.begin_hud_hidden_capture(), ERR_UNCONFIGURED)
@@ -222,19 +196,22 @@ func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active
 
 
 func test_runtime_shutdown_restores_an_active_hud_hidden_capture() -> void:
-	var game := _make()
-	var hud := CanvasLayer.new()
-	var presenter := HudHiddenPresenterHarness.new()
-	game.add_child(hud)
-	game.add_child(presenter)
-	game.set("_hud", hud)
-	game.set("_hud_presenter", presenter)
+	_shell = await _booted_in_world()
+	if _shell == null:
+		return
+	var presenter: GameHudPresenter = _shell.get_hud_presenter()
+	var level_before := presenter.hud_detail_level()
 
-	assert_eq(game.begin_hud_hidden_capture(), OK)
-	assert_true(presenter.capture_active)
-	game.begin_runtime_shutdown()
-	assert_false(presenter.capture_active,
+	assert_eq(_shell.begin_hud_hidden_capture(), OK)
+	assert_true(_shell.hud_hidden_capture_witness().is_valid())
+	assert_eq(presenter.get_game_hud().get_hud_detail_level(),
+			HudOverlay.hud_detail_level_blank())
+	_shell.begin_runtime_shutdown()
+	assert_false(presenter.hud_hidden_capture_witness().is_valid(),
 			"runtime cancellation also restores the gameplay HUD detail")
+	assert_eq(presenter.hud_detail_level(), level_before,
+			"the in-memory level is the pre-capture one, not the blank capture level")
+	assert_false(_shell.hud_hidden_capture_witness().is_valid())
 
 
 func test_shell_presentation_session_rejects_unconfigured_hud_hidden_capture() -> void:
@@ -245,31 +222,39 @@ func test_shell_presentation_session_rejects_unconfigured_hud_hidden_capture() -
 
 
 func test_shell_presentation_session_owns_hud_hidden_capture_boundary() -> void:
+	# The session over a REAL GameHudPresenter with its overlay built
+	# (HudFixture: a loaded world over the staged HUD root) and a HUD layer:
+	# the boundary reads back through the presenter's level + witness seams.
 	var session := ShellPresentationSessionScript.new()
-	var presenter := HudHiddenPresenterHarness.new()
+	_hud_fixture_dir = HudFixture.stage_root(true)
+	var presenter := HudFixture.booted_presenter(self, _hud_fixture_dir)
 	var hud := CanvasLayer.new()
-	autofree(presenter)
 	autofree(hud)
+	var level_before := presenter.hud_detail_level()
 
 	assert_eq(session.begin_hud_hidden_capture(presenter, hud), OK)
-	assert_true(presenter.capture_active,
+	assert_eq(presenter.get_game_hud().get_hud_detail_level(),
+			HudOverlay.hud_detail_level_blank(),
 			"the gameplay HUD detail is hidden only while screenshot presentation is active")
 	assert_eq(session.begin_hud_hidden_capture(presenter, hud), ERR_BUSY,
 			"a nested screenshot cannot replace the visibility snapshot")
+	await get_tree().process_frame
 	var witness: HudHiddenCaptureWitness = \
 			session.hud_hidden_capture_witness(presenter, hud)
-	assert_true(witness.is_valid())
+	assert_true(witness.is_valid(), witness.error)
 	assert_eq(witness.hud_detail_level, 3)
 	assert_false(witness.gameplay_hud_visible)
 	assert_true(witness.player_view_effects_active)
 	assert_true(witness.hud_canvas_layer_active)
 
 	session.finish_hud_hidden_capture(presenter)
-	assert_false(presenter.capture_active,
+	assert_eq(presenter.hud_detail_level(), level_before,
 			"screenshot cleanup restores the ordinary HUD detail")
-	assert_eq(presenter.finish_calls, 1)
+	assert_eq(presenter.get_game_hud().get_hud_detail_level(), level_before)
+	# Idempotent cleanup: a second finish is a no-op on the restored level (the
+	# observable consequence of the session's one-shot finish).
 	session.finish_hud_hidden_capture(presenter)
-	assert_eq(presenter.finish_calls, 1, "screenshot cleanup is idempotent")
+	assert_eq(presenter.hud_detail_level(), level_before, "screenshot cleanup is idempotent")
 	assert_false(session.hud_hidden_capture_witness(presenter, hud).is_valid())
 
 
@@ -299,68 +284,58 @@ func test_shell_presentation_session_stages_and_reveals_world_atomically() -> vo
 	assert_true(hud_item.visible)
 
 
-func test_main_frame_probe_spans_are_default_off() -> void:
-	var game := _make()
-	var world := GameWorld.new()
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	add_child_autofree(world)
-	# The shell's camera member is typed FlyCamera (the scene's camera
-	# class); a plain Camera3D would be rejected by the typed member set.
-	var camera := FlyCamera.new()
-	add_child_autofree(camera)
-	world.set("_world_ready", true)
-	game.set("_world", world)
-	game.set("_camera", camera)
-	game.set("_state", MainGameScript.State.WORLD)
+# One REAL main frame of the booted in-world shell: `process_frame` fires before
+# the frame's _process callbacks, so a switch flipped now is seen by exactly
+# one _process after the second await.
+func _one_main_frame() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
 
-	game.call("_process", 0.0)
-	assert_true(game.get_perf_probe_switches().spans.is_empty(),
+
+func test_main_frame_probe_spans_are_default_off() -> void:
+	# The real shell in the minimal mission (WorldFixture.boot_shell): its
+	# _process runs the main-frame legs every tree frame.
+	_shell = await _booted_in_world()
+	if _shell == null:
+		return
+	await _one_main_frame()
+	assert_true(_shell.get_perf_probe_switches().spans.is_empty(),
 			"ordinary main frames make no clock reads or span writes")
 
-	game.set_perf_probe_enabled(true)
-	game.call("_process", 0.0)
-	var spans: Dictionary = game.get_perf_probe_switches().spans
+	_shell.set_perf_probe_enabled(true)
+	await _one_main_frame()
+	var spans: Dictionary = _shell.get_perf_probe_switches().spans
 	assert_true(spans.has_all(["before", "world", "after", "hud"]),
 			"an explicitly enabled probe captures each main-frame phase")
 
-	game.set_perf_probe_enabled(false)
-	assert_true(game.get_perf_probe_switches().spans.is_empty(),
+	_shell.set_perf_probe_enabled(false)
+	assert_true(_shell.get_perf_probe_switches().spans.is_empty(),
 			"probe teardown cannot leave stale measurements behind")
 
 
 func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	# The F3 Stats capture rides the same frame-leg measurements as the probe
 	# but lands on the FrameStats, and only while capture is active.
-	var game := _make()
-	var world := GameWorld.new()
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	add_child_autofree(world)
-	# The shell's camera member is typed FlyCamera (the scene's camera
-	# class); a plain Camera3D would be rejected by the typed member set.
-	var camera := FlyCamera.new()
-	add_child_autofree(camera)
-	world.set("_world_ready", true)
-	game.set("_world", world)
-	game.set("_camera", camera)
-	game.set("_state", MainGameScript.State.WORLD)
-
-	var board: FrameStats = game.get_frame_stats()
+	_shell = await _booted_in_world()
+	if _shell == null:
+		return
+	var board: FrameStats = _shell.get_frame_stats()
 	assert_not_null(board, "the shell owns a frame-stats board from construction")
-	game.call("_process", 0.0)
+	await _one_main_frame()
 	assert_eq(board.drain().sample_frames[FrameStats.FRAME_WORLD], 0,
 			"ordinary main frames feed nothing")
 
 	board.set_capture_active(true)
-	game.call("_process", 0.0)
+	await _one_main_frame()
 	var counts := board.drain().sample_frames
+	# How many main frames ran since activation depends on the test's own
+	# frame phase; the contract is that every leg is captured on each of them.
+	var frames: int = counts[FrameStats.FRAME_WORLD]
+	assert_gt(frames, 0, "an active board captures the main frames")
 	for slot in [FrameStats.FRAME_PLAYER_BEFORE, FrameStats.FRAME_WORLD,
 			FrameStats.FRAME_PLAYER_AFTER, FrameStats.FRAME_HUD]:
-		assert_eq(counts[slot], 1, "an active board captures each main-frame leg")
-	assert_true(game.get_perf_probe_switches().spans.is_empty(),
+		assert_eq(counts[slot], frames, "an active board captures each main-frame leg")
+	assert_true(_shell.get_perf_probe_switches().spans.is_empty(),
 			"stats capture never writes the probe span dictionary")
 
 
@@ -418,9 +393,9 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "dialog", "a": 3},
-		{"kind": "text", "str": "Proceed to the beach"},
-		{"kind": "text", "str": ""},
+		MissionEffect.make("dialog", 3),
+		MissionEffect.make("text", 0, 0, 0, "Proceed to the beach"),
+		MissionEffect.make("text"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Proceed to the beach",
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
@@ -433,8 +408,8 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "text", "str": "Hold this position"},
-		{"kind": "debug_text", "str": "trigger 17 entered"},
+		MissionEffect.make("text", 0, 0, 0, "Hold this position"),
+		MissionEffect.make("debug_text", 0, 0, 0, "trigger 17 entered"),
 	])
 	assert_eq(presenter.hud_objective_line(), "Hold this position",
 		"debug_text stays off the player-facing HUD mission-text channel")
@@ -449,7 +424,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
-		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
+		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
 	])
 	assert_string_contains(presenter.endround_banner_line(), "STRMISC_KILLEDGREEN",
 			"the lose banner resolves (or marks) the Misc gametext key")
@@ -467,7 +442,8 @@ func test_mission_end_screen_lose_form_and_exit() -> void:
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)
 	watch_signals(screen)
-	screen.setup({"ended": true, "winner_team": 2}, "You shot a friendly unit!", null)
+	var lost := RoundOutcome.make(true, 2)
+	screen.setup(lost, "You shot a friendly unit!", null)
 	assert_true(_screen_has_label_containing(screen, "You shot a friendly unit!"),
 			"the lose form shows the stored banner line")
 	screen.request_exit()
@@ -483,12 +459,8 @@ func test_mission_end_screen_win_form_counts() -> void:
 	# by-player + by-others, FRIENDLYUNITS likewise].
 	var screen := MissionEndScreen.new()
 	add_child_autofree(screen)
-	screen.setup({
-		"ended": true, "winner_team": 1,
-		"enemy_kills": 3, "enemy_kills_by_others": 2,
-		"bluekills": 1, "team_kills_by_others": 1,
-		"greenkills": 0, "friendly_kills_by_others": 0,
-	}, "", null)
+	var won := RoundOutcome.make(true, 1, 3, 2, 1, 1)
+	screen.setup(won, "", null)
 	assert_true(_screen_has_label_containing(screen, "5"), "enemy units = 3 + 2")
 	assert_true(_screen_has_label_containing(screen, "2"), "team units = 1 + 1")
 
@@ -509,10 +481,12 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 	assert_eq(presenter.crosshair_style(), 13,
 			"a pre-HUD choice is cached for the lazy build")
 
-	var hud := FakeGameHud.new()
-	presenter._game_hud = hud
-	presenter.set_crosshair_style(17)
-	assert_eq(hud.crosshair_style, 17,
+	# A REAL overlay over the staged HUD root (HudFixture): the presenter above
+	# stays HUD-less, this one carries the built HudOverlay.
+	_hud_fixture_dir = HudFixture.stage_root(true)
+	var live := HudFixture.booted_presenter(self, _hud_fixture_dir)
+	live.set_crosshair_style(17)
+	assert_eq(live.get_game_hud().get_crosshair_style(), 17,
 			"a paused game's existing HUD adopts the menu selection immediately")
 	presenter.set_crosshair_style(99)
 	assert_eq(presenter.crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE,
@@ -552,6 +526,26 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 
 	assert_not_null(Strings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")
+
+
+# The packed lifecycle shell (WorldFixture.boot_shell) in the minimal mission,
+# started through the real front end; null when the boot or the load failed.
+func _booted_in_world() -> MainGame:
+	var shell: MainGame = await WorldFixture.boot_shell(self)
+	_temp_dir = WorldFixture.last_shell_dir()
+	if shell == null:
+		return null
+	_shell = shell
+	var loaded: bool = await WorldFixture.start_shell_mission(self, shell)
+	assert_true(loaded, "the minimal mission loads through the real front end")
+	if not loaded:
+		return null
+	# One shell frame ticks the HUD presenter, which builds the lazy overlay
+	# the HUD-hidden capture declutters.
+	await get_tree().process_frame
+	assert_not_null(shell.get_hud_presenter().get_game_hud(),
+			"the first in-world frame built the presenter's overlay")
+	return shell
 
 
 func _make_packed_shell(game_code: String):

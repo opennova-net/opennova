@@ -4,8 +4,7 @@
 // @0x4f0a20, Jointops.exe): entities live in fixed-capacity pools; each carries a
 // 16-bit net id (the "SSN" WAC/BMS scripts reference). A live entity is named by a
 // packed handle (pool<<12 | slot) — 4-bit pool index, 12-bit slot.
-#ifndef OPENNOVA_WORLD_ENTITY_H
-#define OPENNOVA_WORLD_ENTITY_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -229,9 +228,59 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+
+// The BMS-attribute part of a streamed Flags dword, mapped back onto the
+// record attribute bits the placement traits read (Reflective 1<<23,
+// NoShadow 1<<24, Indestructible 1<<21): the exact inverse of the spawn
+// mapping [orig: Entity_SpawnFromBMSRecord @0x40e9f0, the three attrib tests
+// @0x40ed14 / @0x40ed29 / @0x40ed36: 0x200000 -> 0x4000000, 0x800000 ->
+// 0x400, 0x1000000 -> 0x1000000]. A joiner's 0x10
+// static record streams the dword raw, so this is how its placed statics
+// recover the mirror/shadow attributes the host reads off the file.
+constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
+    uint32_t attrib = 0;
+    if (flags & kEntityFlagReflective) attrib |= 0x00800000u;
+    if (flags & kEntityFlagNoShadow) attrib |= 0x01000000u;
+    if (flags & kEntityFlagIndestructible) attrib |= 0x00200000u;
+    return attrib;
+}
                                                                  // [orig: @0x40e9f0; @0x40dc8e]
 
+// Captured inputs for the watercraft's two afloat wake lanes. The cbot mover
+// samples these on its even-tick effect pass; presentation consumes the saved
+// pose rather than a later interpolated entity pose, so particles and their
+// intensity share one simulation instant.
+struct VehicleWakeState {
+    bool valid = false;
+    bool afloat = false;
+    uint32_t source_tick = 0;
+    Vec3 position;
+    float pitch_deg = 0.0f;
+    float yaw_deg = 0.0f;
+    float roll_deg = 0.0f;
+    int32_t water_z = 0;
+    uint32_t command_magnitude_q16 = 0;
+    uint32_t motion_magnitude_q16 = 0;
+};
+
+// The lndm entity overlay. Zero-filled, unauthored slots still participate.
+// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+struct MinefieldState {
+    static constexpr int kSlots = 14;
+    bool initialized = false;
+    bool think = false;
+    bool render = false;
+    int32_t age = 0;
+    uint32_t ammo_small = 0, ammo_large = 0;
+    int32_t placement[16] = {};
+    int16_t offsets[kSlots][3] = {};
+    uint8_t types[kSlots] = {};
+    uint8_t rotations[kSlots] = {};
+    std::string small_marker, large_marker;
+};
+
 struct Entity {
+    MinefieldState minefield;
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
@@ -800,6 +849,10 @@ struct Entity {
         int32_t net_recv_lat = 0;          // [orig: brain[178]] air lateral cmd, stale-decays
         int32_t net_alt_target = 0;        // [orig: brain[131]] absolute target Z, never decays
         bool net_engine_on = false;        // replicated Flags 0x80 (air engine/collective)
+        // The AUTHORITY's climb-above-ground register [orig: brain[137] +0x224],
+        // clamped at zero on every write; the engine flag IS `[548] != 0`
+        // (@0x491dfd). The client path folds it into net_alt_target instead.
+        int32_t net_climb = 0;
         // Authority AI flight: chel_ai_drive staged this tick's commands into
         // cmd_speed/cmd_lateral/steer_target/net_alt_target — the mover keeps
         // them instead of adopting net mirrors, then clears the flag. Retail
@@ -829,6 +882,7 @@ struct Entity {
         bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
         bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
         bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
+        VehicleWakeState wake;             // even-tick W3/W4 presentation sample
         int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
         // Light (cbik) solve: consecutive rear-wheel contact ticks — the
         // contact byte requires > 1, so a one-tick graze never grounds the
@@ -836,13 +890,14 @@ struct Entity {
         // Entity_ProcessLightVehiclePhysics, reset in the both-wheels-off
         // branch].
         int32_t light_rear_contact_ticks = 0;
-        // --- Part-animation accumulators (world/vehicle_part_anim.h). The
-        // rotor spin machine's three dwords and the wheel phase; the PANM
+        // --- Part-animation/fall accumulators (world/vehicle_part_anim.h).
+        // The rotor spin machine's three dwords and the wheel phase; the PANM
         // registers HELO_ROTOR/HELO_TAILROTOR/VEHICLE_WHEELS sample their
         // HIGH words [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 owns
         //  +0x460 speed / +0x464 angle / +0x468 rate; the wheel phase is
         //  +0x2B8; Entity_CacheVehicleHUDStats @0x4929B0 reads +0x466 /
-        //  +0x2BA].
+        //  +0x2BA]. The crashed bike's chassis-orientation helper reuses
+        //  +0x460 as its fall rate [orig: @0x468BFC/@0x468D67..0x468D7D].
         struct PartSpin {
             int32_t speed = 0; // +0x460
             int32_t angle = 0; // +0x464
@@ -880,10 +935,18 @@ struct Entity {
         uint8_t settle_2f0 = 0;      // +0x2F0 — the wreck/settle latch
         uint8_t fresh_2f1 = 0;       // +0x2F1 — 1 after Entity_RespawnVehicle
         uint8_t settled_2f2 = 0;     // +0x2F2 — settled upright (the sleep path)
-        uint8_t wreck_2fc = 0;       // +0x2FC — the crash latch
+        uint8_t wreck_2fc = 0;       // +0x2FC — wreck-settled / bike fall latch
         uint8_t has_been_driven = 0; // +0x3DE — the bike's driven byte
         uint32_t airborne_stamp_2f8 = 0; // +0x2F8 — the client crash window's stamp
         float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
+        // The driverless stuck counter [orig: entity+0x148 moveTimer — ++ per
+        // AI_CheckVehicleStuckState @0x465290 call, zeroed while occupied
+        // (@0x48DFB9 boat / the air AI leg @0x491185)].
+        int32_t stuck_ticks = 0;
+        // The handbrake stop latch [orig: entity byte +0x3CD @0x48c03a..0x48c074]:
+        // 1 while `occupant && Flags & 8 && itemDef->handBrake`, and the
+        // command word is forced to zero for as long as it holds.
+        uint8_t handbrake_latched = 0;
     };
     VehicleMotorState veh;
 };
@@ -892,7 +955,7 @@ struct Entity {
 // facts the engine derives from them at spawn (the items.def trait sweep,
 // simassets/item_traits.cpp) and again when a tool overrides one entity's words
 // (EntityCommands::set_entity_item_attrib). Per-item caches keyed by item id
-// (world.item_death_traits, vehicle_traits) are the sweep's alone.
+// (world.tables.item_death_traits, vehicle_traits) are the sweep's alone.
 // [orig: Entity_InitFromItemDef @0x49e550 — the def+84/+88 copies; the AS zone
 //  gates @0x4a2de0 / @0x4fe110 (ChangeTeam / SpawnPoint); the AIData gate
 //  @0x433327; LeaveCorpse @0x4b9e54]
@@ -919,5 +982,3 @@ inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
 }
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_ENTITY_H

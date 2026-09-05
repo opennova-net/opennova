@@ -35,7 +35,7 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
             static_cast<int32_t>(std::min<int64_t>(ratio, 0x10000));
     // The medic plate keys on the class's charattr ATTRIBUTES & 8
     // [orig: AnimMap_IsSlotActive(playerClass, 8) @0x4125e0].
-    src.medic = world.class_has_attribute(e.player_class, World::kCharAttrMedic);
+    src.medic = world.tables.class_has_attribute(e.player_class, MissionTables::kCharAttrMedic);
     // The dead latch the bad tier's downed legs read [orig: `Flags & 2`
     // @0x5a3c1c..0x5a3c27]; our registry mirrors the kill's `|= 6` in both
     // the flag word and `alive` [orig: @0x43fbf6].

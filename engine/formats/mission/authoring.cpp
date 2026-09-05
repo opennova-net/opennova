@@ -2,6 +2,8 @@
 
 #include <formats/def/def.h>
 
+using namespace opennova::def;
+
 namespace opennova::mission::authoring {
 
 EntityKind entity_kind_for_item_type(int def_item_type) {

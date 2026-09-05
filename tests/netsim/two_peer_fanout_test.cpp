@@ -13,13 +13,13 @@
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
-#include <net/netsim/connection.h>
-#include <net/netsim/connection_fan.h>
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/session_transport.h>
-#include <net/netsim/udp_session_transport.h>
+#include <runtime/replication/connection.h>
+#include <runtime/replication/connection_fan.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/inmatch/session_transport.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
 
@@ -42,7 +42,7 @@
 namespace {
 
 namespace nw = opennova;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -111,8 +111,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
 bool run_fanout_and_per_connection_anchor() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	// The host's own player (publishes cached.local_player). Anchor subject for conn_self.
 	const w::EntityHandle host_h =
@@ -312,8 +311,7 @@ bool run_fanout_and_per_connection_anchor() {
 bool run_joiner_uplink_snaps_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
 
@@ -382,8 +380,7 @@ bool run_joiner_uplink_snaps_peer() {
 bool run_self_uplink_rejected() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({7.0f, 8.0f, 9.0f}, 0, 0xFFF0));
 
@@ -413,8 +410,7 @@ bool run_self_uplink_rejected() {
 bool run_cross_peer_uplink_rejected() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle peer_a =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF1));
 	const w::EntityHandle peer_b =
@@ -465,8 +461,7 @@ bool run_cross_peer_uplink_rejected() {
 bool run_retail_player_slots_start_after_bms_organics() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0, 4));
@@ -509,8 +504,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 bool run_0a_subblock_phase_cycle() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -640,10 +634,10 @@ bool run_0a_subblock_phase_cycle() {
 	// Co-op's shared g_GameType (0x30020) turns phase 3 into a 16-byte
 	// objective block. The gate is not encoded in flags2, so both fan and view
 	// must receive the same session value.
-	world.subgoals.won = 0x00000102u;
-	world.subgoals.lost = 0x00000204u;
-	world.subgoals.show_win = 0x00000408u;
-	world.subgoals.show_lose = 0x00000810u;
+	world.script.subgoals.won = 0x00000102u;
+	world.script.subgoals.lost = 0x00000204u;
+	world.script.subgoals.show_win = 0x00000408u;
+	world.script.subgoals.show_lose = 0x00000810u;
 	conns[0].s2c_phase = 2; // next retail counter value is phase 3
 	ns::test::emit_all(world, conns, 0x30020u);
 	ns::Datagram objective_dg;
@@ -655,10 +649,10 @@ bool run_0a_subblock_phase_cycle() {
 	            "objective 0x0A frame decodes with the session hint")) return false;
 	if (!expect(objective_fu.flags2 == 3 && objective_fu.objective.present,
 	            "co-op phase 3 carries the required 16-byte objective block")) return false;
-	if (!expect(uint32_t(objective_fu.objective.state[0]) == world.subgoals.won &&
-	                    uint32_t(objective_fu.objective.state[1]) == world.subgoals.lost &&
-	                    uint32_t(objective_fu.objective.state[2]) == world.subgoals.show_win &&
-	                    uint32_t(objective_fu.objective.state[3]) == world.subgoals.show_lose,
+	if (!expect(uint32_t(objective_fu.objective.state[0]) == world.script.subgoals.won &&
+	                    uint32_t(objective_fu.objective.state[1]) == world.script.subgoals.lost &&
+	                    uint32_t(objective_fu.objective.state[2]) == world.script.subgoals.show_win &&
+	                    uint32_t(objective_fu.objective.state[3]) == world.script.subgoals.show_lose,
 	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
 	if (!expect(objective_fu.local_tail_present,
 	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
@@ -696,9 +690,8 @@ bool run_0a_health_class_byte_packed() {
 	// Entity_InitFromItemDef @0x49e550] -> tier 2 -> 0x28, the golden joiner byte (D-NET-144).
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
-	world.player_item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
+	w::AiSystem &ai = world.ai;
+	world.tables.player.item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -745,8 +738,7 @@ bool run_0a_vehicle_budget_round_robin() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 64);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -885,8 +877,7 @@ bool run_0a_priority_view_terms() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	// Recipient at (100,100) facing +x (mission yaw 90 -> engine heading BAM 0).
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
@@ -992,8 +983,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	// Recipient at (100,100) facing +x, team 1, ALIVE for frame 1.
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
@@ -1103,8 +1093,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 bool run_0a_owner_hidden_admission() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle a_h =
 			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
 	const w::EntityHandle b_h =
@@ -1157,8 +1146,7 @@ bool run_0a_owner_hidden_admission() {
 bool run_0a_player_record_field_sources() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
@@ -1232,8 +1220,7 @@ bool run_0a_player_record_field_sources() {
 bool run_0a_deploy_hold_and_tail_stance() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(h);
@@ -1352,8 +1339,7 @@ bool run_0x26_attach_mounted_echo() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ph =
 			w::spawn_remote_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *player = world.registry.get(ph);
@@ -1384,7 +1370,7 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect(vh.valid(), "vehicle spawned")) return false;
 
 	// The 0x26 acceptance path (dispatch calls this after the word0 anti-spoof overwrite).
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+	if (!expect(world.vehicles.process_attach(ph, vh, 1), "attach accepted"))
 		return false;
 	if (!expect(player->mounted && player->mount_target == vh, "mount fields written"))
 		return false;
@@ -1393,7 +1379,7 @@ bool run_0x26_attach_mounted_echo() {
 	// A second occupant cannot take the held seat [orig: @0x435ba9].
 	const w::EntityHandle ph2 =
 			w::spawn_remote_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
-	if (!expect(!w::entity_process_vehicle_attach(world, ph2, vh, 1), "occupied seat rejects"))
+	if (!expect(!world.vehicles.process_attach(ph2, vh, 1), "occupied seat rejects"))
 		return false;
 
 	std::vector<ns::Connection> conns;
@@ -1436,7 +1422,7 @@ bool run_0x26_attach_mounted_echo() {
 		return false;
 
 	// Detach: seat freed, mount fields cleared, record back to free-standing.
-	if (!expect(w::entity_detach_from_vehicle(world, ph), "detach applies")) return false;
+	if (!expect(world.vehicles.detach(ph), "detach applies")) return false;
 	if (!expect(!player->mounted && player->mount_bone == 0, "mount fields cleared"))
 		return false;
 	w::Entity *veh = world.registry.get(vh);
@@ -1460,8 +1446,7 @@ bool run_mounted_g_slot_route_echo() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ph =
 			w::spawn_remote_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
 	w::Entity *player = world.registry.get(ph);
@@ -1535,8 +1520,7 @@ bool run_grounded_uplink_apply_and_echo() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 
 	// The carrier: a pool-2 building at (100, 200, 10), mission yaw 90 -> engine BAM 0
 	// (identity rotation — every 22-bit product below is exact).
@@ -1675,8 +1659,7 @@ bool run_pose_transform_roundtrip() {
 bool run_round_event_fanout() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	const w::EntityHandle peer_h =
@@ -1703,7 +1686,7 @@ bool run_round_event_fanout() {
 		w::RoundEvent backlog;
 		backlog.shooter_handle = peer_h.packed;
 		backlog.adm_index = 9;
-		world.rounds.add(backlog);
+		world.out.rounds.add(backlog);
 	}
 	ns::test::emit_all(world, conns);
 	{
@@ -1734,7 +1717,7 @@ bool run_round_event_fanout() {
 		ev.subtype = 12;
 		ev.slot_byte = 0;
 		ev.adm_index = 11;
-		world.rounds.add(ev);
+		world.out.rounds.add(ev);
 	}
 	ns::test::emit_all(world, conns);
 	{
@@ -1793,8 +1776,7 @@ bool run_vehicle_drive_authority() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
-	w::AiSystem ai;
-	world.ai = &ai;
+	w::AiSystem &ai = world.ai;
 	// The driver is a REMOTE joiner (the v33 rider topology): its MoveOrder/heading are
 	// wire-owned — the motor consumes what the 0x0C apply landed, and mirror_wire_anim's
 	// local-input export must NOT overwrite them (a local host player's input comes from
@@ -1831,10 +1813,10 @@ bool run_vehicle_drive_authority() {
 		t.turn_rate = 65 * 192426;
 		t.turn_rate2 = 41 * 192426;
 		t.player_control = true;
-		world.vehicle_traits.set(0x1004, t);
+		world.vehicles.traits.set(0x1004, t);
 	}
 
-	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+	if (!expect(world.vehicles.process_attach(ph, vh, 1), "attach accepted"))
 		return false;
 	// Land the remote driver's grounded 0x0C intent through the production read-apply:
 	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at

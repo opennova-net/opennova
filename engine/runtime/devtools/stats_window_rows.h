@@ -43,7 +43,7 @@ inline constexpr Slot k_replication_unattributed[] = {Slot::SIM_REPLICATION_QUER
 inline constexpr Slot k_server_unattributed[] = {Slot::SIM_SERVER_INPUT, Slot::SIM_SERVER_WORLD, Slot::SIM_MATCH, Slot::SIM_SERVER_RULES, Slot::SIM_SERVER_REPLICATION};
 inline constexpr Slot k_host_unattributed[] = {Slot::SIM_HOST_RECEIVE, Slot::SIM_HOST_CONNECTIONS, Slot::SIM_HOST_ADAPTER, Slot::SIM_SERVER_TICK, Slot::SIM_HOST_SEND};
 inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
-inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_HOST_PLAYER, Slot::SIM_NET, Slot::SIM_ADM_RESOLVE};
+inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_HOST_PLAYER, Slot::SIM_NET, Slot::SIM_CLIENT_MATERIALIZE, Slot::SIM_CLIENT_MIRROR, Slot::SIM_CLIENT_PROXIES, Slot::SIM_CLIENT_WORLD, Slot::SIM_CLIENT_ATTACH, Slot::SIM_CLIENT_PLAYER, Slot::SIM_ADM_RESOLVE};
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_mission_rows_remainder[] = {Slot::PRESENT_MISSION_CORE, Slot::PRESENT_MISSION_AIM, Slot::PRESENT_MISSION_CONTROLS, Slot::PRESENT_MISSION_VISIBILITY, Slot::PRESENT_MISSION_BODY};
@@ -147,8 +147,14 @@ inline constexpr StatsRow kRows[] = {
 	{"client_maintenance", "Replica maintenance/movers", 5, RowKind::SPAN, Slot::SIM_CLIENT_MAINTENANCE, nullptr, 0},
 	{"client_send", "Joiner C2S build/send", 5, RowKind::SPAN, Slot::SIM_CLIENT_SEND, nullptr, 0},
 	{"client_unattributed", "Client-frame unattributed", 5, RowKind::RESIDUAL, Slot::SIM_NET, k_client_unattributed, 4},
+	{"client_materialize", "Joiner stream materialize + folds", 4, RowKind::SPAN, Slot::SIM_CLIENT_MATERIALIZE, nullptr, 0},
+	{"client_mirror", "Joiner wire pose mirror", 4, RowKind::SPAN, Slot::SIM_CLIENT_MIRROR, nullptr, 0},
+	{"client_proxies", "Joiner collision proxies", 4, RowKind::SPAN, Slot::SIM_CLIENT_PROXIES, nullptr, 0},
+	{"client_world", "Joiner local world tick (see World update)", 4, RowKind::SPAN, Slot::SIM_CLIENT_WORLD, nullptr, 0},
+	{"client_attach", "Joiner attachment recompose", 4, RowKind::SPAN, Slot::SIM_CLIENT_ATTACH, nullptr, 0},
+	{"client_player", "Joiner view/weapon devices", 4, RowKind::SPAN, Slot::SIM_CLIENT_PLAYER, nullptr, 0},
 	{"adm_resolve", "Animation registry resolve", 4, RowKind::SPAN, Slot::SIM_ADM_RESOLVE, nullptr, 0},
-	{"sim_unattributed", "Sim-step unattributed", 4, RowKind::RESIDUAL, Slot::SIM_STEP, k_sim_unattributed, 5},
+	{"sim_unattributed", "Sim-step unattributed", 4, RowKind::RESIDUAL, Slot::SIM_STEP, k_sim_unattributed, 11},
 	{"trace", "Projectile trace (attributed)", 4, RowKind::GROUP, Slot::COUNT, k_trace, 4},
 	{"trace_terrain", "Terrain", 5, RowKind::SPAN, Slot::TRACE_TERRAIN, nullptr, 0},
 	{"trace_static", "Static", 5, RowKind::SPAN, Slot::TRACE_STATIC, nullptr, 0},
@@ -241,7 +247,9 @@ inline constexpr StatsRow kRows[] = {
 	{"render_water_cpu", "Water RTT CPU", 2, RowKind::SPAN, Slot::RENDER_WATER_CPU, nullptr, 0},
 	{"render_water_gpu", "Water RTT GPU", 2, RowKind::SPAN, Slot::RENDER_WATER_GPU, nullptr, 0},
 	{"render_q3", "FrameFX focused Q3", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
+	{"render_q3_gpu", "Q3 pass GPU", 2, RowKind::SPAN, Slot::RENDER_Q3_GPU, nullptr, 0},
 	{"render_slot", "Slot-shadow captures", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
+	{"render_slot_gpu", "Slot captures GPU", 2, RowKind::SPAN, Slot::RENDER_SLOT_GPU, nullptr, 0},
 };
 
 inline constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));

@@ -5,8 +5,7 @@
 // banks LOOSE in the game dir and the .bin scripts in localres.pff. Both are
 // pure writer output (engine/formats/sbf encoder + engine/formats/mus compiler), generated at
 // package time, never committed.
-#ifndef OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
-#define OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
+#pragma once
 
 #include <formats/mus/mus.h>
 #include <formats/sbf/sbf.h>
@@ -27,10 +26,10 @@ inline int build_silent_sbf(std::vector<uint8_t> *out) {
 	const size_t counts[] = {pcm.size()};
 	uint8_t *buf = nullptr;
 	size_t size = 0;
-	const int rc = sbf_encode_file(kNames, 1, samples, counts, &buf, &size);
+	const int rc = opennova::sbf::sbf_encode_file(kNames, 1, samples, counts, &buf, &size);
 	if (rc != 0) return rc;
 	out->assign(buf, buf + size);
-	sbf_free(buf);
+	opennova::sbf::sbf_free(buf);
 	return 0;
 }
 
@@ -46,22 +45,20 @@ inline int build_minimal_mus(const char *script_name, std::vector<uint8_t> *out)
 	              "  done\n"
 	              "}\n",
 	              script_name);
-	MusScript script = {};
+	opennova::mus::MusScript script = {};
 	int err_line = 0, err_col = 0;
 	const char *err_msg = nullptr;
-	int rc = mus_compile(src, &script, &err_line, &err_col, &err_msg);
+	int rc = opennova::mus::mus_compile(src, &script, &err_line, &err_col, &err_msg);
 	if (rc != 0) return rc;
-	const MusScript *scripts[1] = {&script};
+	const opennova::mus::MusScript *scripts[1] = {&script};
 	uint8_t *buf = nullptr;
 	size_t size = 0;
-	rc = mus_encode_file(scripts, 1, &buf, &size);
-	mus_script_free(&script);
+	rc = opennova::mus::mus_encode_file(scripts, 1, &buf, &size);
+	opennova::mus::mus_script_free(&script);
 	if (rc != 0) return rc;
 	out->assign(buf, buf + size);
-	mus_free(buf);
+	opennova::mus::mus_free(buf);
 	return 0;
 }
 
 } // namespace minimal_mus
-
-#endif // OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H

@@ -12,6 +12,8 @@
 #include <climits>
 #include <cstring>
 
+using namespace opennova::fnt;
+
 namespace opennova::menu {
 
 namespace {
@@ -485,10 +487,15 @@ MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolved_widget_text(
 		const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	if (ws != nullptr && ws->has_text) {
-		if (node.window->type == mnu::WindowType::Button) {
-			return resolve_text_value("literal", ws->text);
-		}
 		ResolvedText resolved;
+		if (node.window->type == mnu::WindowType::Button) {
+			// A runtime relabel is raw text: retail's SetLabel strips the
+			// mnemonic marker but runs no %VAR% pass (that pass is parse-time,
+			// D-MNU-1) [orig: CButtonWnd_SetLabel @ 0x6572F0].
+			resolved.text = mnu::strip_hotkey_marker(ws->text, &resolved.hotkey,
+					&resolved.hotkey_pos);
+			return resolved;
+		}
 		resolved.text = ws->text;
 		return resolved;
 	}
@@ -874,15 +881,21 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 	}
 	x += edge; // [orig: the edge term added into the draw x]
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
-	// Feed the witnessed button mnemonic to GameFont's existing underline
-	// markup. Insert only when the marked byte survived prefix truncation.
-	if (w.type == mnu::WindowType::Button && resolved.hotkey_pos >= 0 &&
+	// The button mnemonic is drawn by retail's caret leg — the '_' glyph
+	// stretched to the marked character's width at its prefix offset, the
+	// same draw_text_with_cursor path the edit caret rides (emit_caret).
+	// Only when the marked byte survived prefix truncation.
+	// [orig: CStaticWnd_DrawLabel passes the +740 offset @0x657270 ->
+	//  draw_text_with_cursor @0x6533b0 — prefix measure + pad @0x6534b7..
+	//  0x6534eb, '_' @0x6534f7/@0x653550, char-width stretch
+	//  @0x6535d8..0x65360f]
+	int drawn_caret = caret;
+	if (drawn_caret < 0 && w.type == mnu::WindowType::Button &&
+			resolved.hotkey_pos >= 0 &&
 			resolved.hotkey_pos < static_cast<int>(drawn.size())) {
-		const size_t pos = static_cast<size_t>(resolved.hotkey_pos);
-		drawn.insert(pos, "<U>");
-		drawn.insert(pos + 4, "<-U>");
+		drawn_caret = resolved.hotkey_pos;
 	}
-	emit_glyph_run(node, drawn, x, y, s, node.colors[state], caret);
+	emit_glyph_run(node, drawn, x, y, s, node.colors[state], drawn_caret);
 }
 
 // The edit render [orig: CEditWnd_Render @ 0x6619e0]: focus forces visual
@@ -2012,6 +2025,12 @@ int MenuFrameCompiler::hotkey_widget(const std::string &key, bool virtual_key,
 				return idx;
 			}
 		}
+		// The registered label mnemonic joins the same character walk, and the
+		// compare is case-insensitive on both sides — retail's WM_CHAR arm
+		// tolower()s the table char and the typed char before comparing;
+		// visibility gates the match [orig: dispatch_keyboard_event_to_children
+		// @0x63ad10 — char rows @0x63ad63, tolower pair @0x63ad78/@0x63ad84,
+		// CWnd_IsVisibleInHierarchy gate @0x63ad90].
 		if (!virtual_key && w.type == mnu::WindowType::Button) {
 			const ResolvedText label = resolved_widget_text(node, ws);
 			if (!label.hotkey.empty() &&

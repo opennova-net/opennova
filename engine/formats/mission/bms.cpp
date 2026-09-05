@@ -1,5 +1,7 @@
 // BMS mission file parser implementation.
 #include <formats/mission/bms.h>
+#include <base/io/byte_reader.h>
+#include <base/io/byte_writer.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -35,177 +37,28 @@ constexpr uint32_t kKnownBmsiAttributeMask =
     static_cast<uint32_t>(BmsiAttributeFlags::Reflective) |
     static_cast<uint32_t>(BmsiAttributeFlags::NoShadow);
 
-// Helper class for reading binary data
-class Reader {
-public:
-    Reader(const uint8_t* data, size_t size) : data_(data), size_(size), pos_(0) {}
-
-    // Asked against the bytes left, not as `pos_ + count <= size_`: that sum
-    // overflows for a large stream-derived count and wraps to a value that
-    // passes, which would let a malformed .bms read past the buffer. Every
-    // mutator below keeps pos_ <= size_, so remaining() never underflows.
-    bool has_bytes(size_t count) const { return count <= remaining(); }
-    size_t position() const { return pos_; }
-    size_t remaining() const { return size_ - pos_; }
-
-    uint8_t read_u8() {
-        if (!has_bytes(1)) return 0;
-        return data_[pos_++];
-    }
-
-    int8_t read_i8() {
-        return static_cast<int8_t>(read_u8());
-    }
-
-    uint16_t read_u16() {
-        if (!has_bytes(2)) return 0;
-        uint16_t v = data_[pos_] | (data_[pos_ + 1] << 8);
-        pos_ += 2;
-        return v;
-    }
-
-    int16_t read_i16() {
-        return static_cast<int16_t>(read_u16());
-    }
-
-    uint32_t read_u32() {
-        if (!has_bytes(4)) return 0;
-        uint32_t v = data_[pos_] | (data_[pos_ + 1] << 8) |
-                     (data_[pos_ + 2] << 16) | (data_[pos_ + 3] << 24);
-        pos_ += 4;
-        return v;
-    }
-
-    int32_t read_i32() {
-        return static_cast<int32_t>(read_u32());
-    }
-
-    float read_f32() {
-        uint32_t v = read_u32();
-        float f;
-        std::memcpy(&f, &v, sizeof(f));
-        return f;
-    }
-
-    // Read fixed-point 16.16 as float
-    float read_fixed16() {
-        int32_t v = read_i32();
-        return v / 65536.0f;
-    }
-
-    void read_bytes(uint8_t* out, size_t count) {
-        if (!has_bytes(count)) {
-            std::memset(out, 0, count);
-            return;
-        }
-        std::memcpy(out, data_ + pos_, count);
-        pos_ += count;
-    }
-
-    void read_bytes(std::vector<uint8_t>& out, size_t count) {
-        out.resize(count);
-        read_bytes(out.data(), count);
-    }
-
-    // Read fixed-size string field (preserves all bytes for roundtrip)
-    void read_fixed_string(char* out, size_t max_len) {
-        read_bytes(reinterpret_cast<uint8_t*>(out), max_len);
-    }
-
-    void skip(size_t count) {
-        if (!has_bytes(count)) { // was `pos_ + count > size_` — same overflow
-            pos_ = size_;
-        } else {
-            pos_ += count;
-        }
-    }
-
-private:
-    const uint8_t* data_;
-    size_t size_;
-    size_t pos_;
-};
-
-// Helper class for writing binary data
-class Writer {
-public:
-    void write_u8(uint8_t v) {
-        data_.push_back(v);
-    }
-
-    void write_i8(int8_t v) {
-        write_u8(static_cast<uint8_t>(v));
-    }
-
-    void write_u16(uint16_t v) {
-        data_.push_back(v & 0xFF);
-        data_.push_back((v >> 8) & 0xFF);
-    }
-
-    void write_i16(int16_t v) {
-        write_u16(static_cast<uint16_t>(v));
-    }
-
-    void write_u32(uint32_t v) {
-        data_.push_back(v & 0xFF);
-        data_.push_back((v >> 8) & 0xFF);
-        data_.push_back((v >> 16) & 0xFF);
-        data_.push_back((v >> 24) & 0xFF);
-    }
-
-    void write_i32(int32_t v) {
-        write_u32(static_cast<uint32_t>(v));
-    }
-
-    void write_f32(float f) {
-        uint32_t v;
-        std::memcpy(&v, &f, sizeof(v));
-        write_u32(v);
-    }
-
-    // Write float as fixed-point 16.16
-    void write_fixed16(float f) {
-        int32_t v = static_cast<int32_t>(f * 65536.0f);
-        write_i32(v);
-    }
-
-    void write_bytes(const uint8_t* src, size_t count) {
-        data_.insert(data_.end(), src, src + count);
-    }
-
-    void write_bytes(const std::vector<uint8_t>& src) {
-        data_.insert(data_.end(), src.begin(), src.end());
-    }
-
-    // Write fixed-size string field preserving all bytes (for roundtrip fidelity)
-    void write_fixed_string(const char* src, size_t max_len) {
-        data_.insert(data_.end(), src, src + max_len);
-    }
-
-    void write_zeros(size_t count) {
-        data_.insert(data_.end(), count, 0);
-    }
-
-    std::vector<uint8_t>& data() { return data_; }
-    size_t size() const { return data_.size(); }
-
-private:
-    std::vector<uint8_t> data_;
-};
-
-bool parse_header(Reader& r, Header& h, std::string& error) {
+bool parse_header(io::ByteReader& r, Header& h, std::string& error, bool wire_header = false) {
     size_t start = r.position();
 
     r.read_bytes(reinterpret_cast<uint8_t*>(h.magic), 4);
-    if (h.magic[0] != 'B' || h.magic[1] != 'M' || h.magic[2] != 'S') {
-        error = "Invalid BMS magic";
-        return false;
-    }
-    // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
-    if (static_cast<uint8_t>(h.magic[3]) < kMinVersion) {
-        error = "Unsupported BMS version " + std::to_string(static_cast<uint8_t>(h.magic[3])) +
-                " (minimum " + std::to_string(kMinVersion) + ")";
-        return false;
+    // The wire S2C 0x0B header is the retail g_BmsHeaderBlock runtime struct, NOT
+    // a .bms file: its first 4 bytes are zeroed, not "BMS"+version, and retail's
+    // joiner memcpy's it verbatim and reads offsets with NEITHER the magic nor
+    // the version gate [orig: NapiNPClientMsg_HandleBMSHeader @0x422660 vs the
+    // file gate Mission_LoadBMSFile @0x40f5aa]. The field layout after byte 4 is
+    // identical, so the file loader alone enforces both; `wire_header` drops
+    // both together, as retail does.
+    if (!wire_header) {
+        if (h.magic[0] != 'B' || h.magic[1] != 'M' || h.magic[2] != 'S') {
+            error = "Invalid BMS magic";
+            return false;
+        }
+        // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
+        if (static_cast<uint8_t>(h.magic[3]) < kMinVersion) {
+            error = "Unsupported BMS version " + std::to_string(static_cast<uint8_t>(h.magic[3])) +
+                    " (minimum " + std::to_string(kMinVersion) + ")";
+            return false;
+        }
     }
 
     r.read_fixed_string(h.mission_name, 32);
@@ -267,12 +120,12 @@ bool parse_header(Reader& r, Header& h, std::string& error) {
     return true;
 }
 
-void write_header(Writer& w, const Header& h) {
+void write_header(io::ByteWriter& w, const Header& h) {
     w.write_bytes(reinterpret_cast<const uint8_t*>(h.magic), 4);
-    w.write_fixed_string(h.mission_name, 32);
-    w.write_fixed_string(h.designer, 32);
-    w.write_fixed_string(h.terrain, 48);
-    w.write_fixed_string(h.default_str, 16);
+    w.write_raw(h.mission_name, 32);
+    w.write_raw(h.designer, 32);
+    w.write_raw(h.terrain, 48);
+    w.write_raw(h.default_str, 16);
     w.write_u32(static_cast<uint32_t>(h.climate));
     w.write_u32(static_cast<uint32_t>(h.attrib_flags));
     w.write_bytes(h.unknown0, 12);
@@ -290,7 +143,7 @@ void write_header(Writer& w, const Header& h) {
     w.write_bytes(h.win_conditions, 8);
     w.write_bytes(h.lose_conditions, 8);
     w.write_bytes(h.unknown3, 16);
-    w.write_fixed_string(h.environment, 16);
+    w.write_raw(h.environment, 16);
     w.write_bytes(h.unknown4, 10);
     w.write_bytes(h.water_color, 3);
     w.write_u16(h.murk);
@@ -302,8 +155,8 @@ void write_header(Writer& w, const Header& h) {
     w.write_u32(h.mana);
     w.write_u32(h.music);
     w.write_u32(h.reverb);
-    w.write_fixed_string(h.terrain_tile, 16);
-    w.write_fixed_string(h.mission_briefing, 256);
+    w.write_raw(h.terrain_tile, 16);
+    w.write_raw(h.mission_briefing, 256);
     w.write_i16(h.unknown6);
     w.write_u8(static_cast<uint8_t>(h.mission_type));
     w.write_u8(h.max_saves);
@@ -319,7 +172,7 @@ void write_header(Writer& w, const Header& h) {
     w.write_bytes(h.unknown9, 28);
 }
 
-bool parse_entity(Reader& r, Entity& e, std::string& error) {
+bool parse_entity(io::ByteReader& r, Entity& e, std::string& error) {
     size_t start = r.position();
 
     e.type_id = r.read_i32();
@@ -409,7 +262,7 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
     return true;
 }
 
-void write_entity(Writer& w, const Entity& e) {
+void write_entity(io::ByteWriter& w, const Entity& e) {
     w.write_i32(e.type_id);
     w.write_i32(e.name_index);
     w.write_i32(e.id);
@@ -451,9 +304,9 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_i32(e.advancetimer);
     w.write_i32(e.ttool_index);
     w.write_i32(e.wp_goals);
-    w.write_fixed_string(e.name1, 8);
-    w.write_fixed_string(e.name2, 8);
-    w.write_fixed_string(e.gen_string, sizeof(e.gen_string));
+    w.write_raw(e.name1, 8);
+    w.write_raw(e.name2, 8);
+    w.write_raw(e.gen_string, sizeof(e.gen_string));
     w.write_u8(0);
     w.write_u8(e.grenades);
     w.write_u8(e.ref_num);
@@ -467,7 +320,7 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_i32(0);
 }
 
-bool parse_waypoint_record(Reader& r, WaypointRecord& wp, std::string& error) {
+bool parse_waypoint_record(io::ByteReader& r, WaypointRecord& wp, std::string& error) {
     size_t start = r.position();
 
     wp.flags = static_cast<WaypointFlags>(r.read_u32());
@@ -505,7 +358,7 @@ bool parse_waypoint_record(Reader& r, WaypointRecord& wp, std::string& error) {
     return true;
 }
 
-void write_waypoint_record(Writer& w, const WaypointRecord& wp) {
+void write_waypoint_record(io::ByteWriter& w, const WaypointRecord& wp) {
     w.write_u32(static_cast<uint32_t>(wp.flags));
     w.write_u32(wp.marker_count);
 
@@ -517,7 +370,7 @@ void write_waypoint_record(Writer& w, const WaypointRecord& wp) {
     w.write_bytes(wp.padding);
 }
 
-bool parse_group_record(Reader& r, GroupRecord& gr, std::string& error) {
+bool parse_group_record(io::ByteReader& r, GroupRecord& gr, std::string& error) {
     const int32_t flags = r.read_i32();
     const int32_t zero_after_flags = r.read_i32();
     const int32_t value = r.read_i32();
@@ -545,7 +398,7 @@ bool parse_group_record(Reader& r, GroupRecord& gr, std::string& error) {
     return true;
 }
 
-void write_group_record(Writer& w, const GroupRecord& gr) {
+void write_group_record(io::ByteWriter& w, const GroupRecord& gr) {
     w.write_i32(gr.flags & 0x3);
     w.write_i32(0);
     w.write_i32(gr.value);
@@ -553,16 +406,16 @@ void write_group_record(Writer& w, const GroupRecord& gr) {
     w.write_zeros(16);
 }
 
-bool parse_layer_record(Reader& r, LayerRecord& lr, std::string& /*error*/) {
+bool parse_layer_record(io::ByteReader& r, LayerRecord& lr, std::string& /*error*/) {
     r.read_fixed_string(lr.name, kLayerRecordSize);
     return true;
 }
 
-void write_layer_record(Writer& w, const LayerRecord& lr) {
-    w.write_fixed_string(lr.name, kLayerRecordSize);
+void write_layer_record(io::ByteWriter& w, const LayerRecord& lr) {
+    w.write_raw(lr.name, kLayerRecordSize);
 }
 
-bool parse_area_trigger(Reader& r, AreaTrigger& at, std::string& /*error*/) {
+bool parse_area_trigger(io::ByteReader& r, AreaTrigger& at, std::string& /*error*/) {
     // [orig: interleaved per-axis layout, no swap — Entity_IsTeamInTriggerBounds @0x43c75c]
     at.id = r.read_i32();      // off 0
     at.x_min = r.read_i32();   // off 4
@@ -575,7 +428,7 @@ bool parse_area_trigger(Reader& r, AreaTrigger& at, std::string& /*error*/) {
     return true;
 }
 
-void write_area_trigger(Writer& w, const AreaTrigger& at) {
+void write_area_trigger(io::ByteWriter& w, const AreaTrigger& at) {
     w.write_i32(at.id);
     w.write_i32(at.x_min);
     w.write_i32(at.x_max);
@@ -586,7 +439,7 @@ void write_area_trigger(Writer& w, const AreaTrigger& at) {
     w.write_u32(at.flags);
 }
 
-bool parse_event(Reader& r, Event& e, std::string& error) {
+bool parse_event(io::ByteReader& r, Event& e, std::string& error) {
     e.flags = static_cast<EventFlags>(r.read_i32());
     if ((static_cast<uint32_t>(e.flags) & ~kEventKnownFlagMask) != 0) {
         error = "BMS event has unsupported flag bits";
@@ -612,7 +465,7 @@ bool parse_event(Reader& r, Event& e, std::string& error) {
     return true;
 }
 
-void write_event(Writer& w, const Event& e) {
+void write_event(io::ByteWriter& w, const Event& e) {
     w.write_i32(static_cast<int32_t>(static_cast<uint32_t>(e.flags) & kEventKnownFlagMask));
     w.write_i32(e.trigger_index);
     w.write_i32(e.action_index);
@@ -627,7 +480,7 @@ void write_event(Writer& w, const Event& e) {
     w.write_u8(0);
 }
 
-bool parse_trigger(Reader& r, Trigger& t, std::string& error) {
+bool parse_trigger(io::ByteReader& r, Trigger& t, std::string& error) {
     t.condition_flags = r.read_i32();
     t.main_type = static_cast<TriggerMainType>(r.read_i32());
     t.sub_type = r.read_i32();
@@ -643,7 +496,7 @@ bool parse_trigger(Reader& r, Trigger& t, std::string& error) {
     return true;
 }
 
-void write_trigger(Writer& w, const Trigger& t) {
+void write_trigger(io::ByteWriter& w, const Trigger& t) {
     w.write_i32(t.condition_flags);
     w.write_i32(static_cast<int32_t>(t.main_type));
     w.write_i32(t.sub_type);
@@ -654,7 +507,7 @@ void write_trigger(Writer& w, const Trigger& t) {
     w.write_i32(0);
 }
 
-bool parse_action(Reader& r, Action& a, std::string& error) {
+bool parse_action(io::ByteReader& r, Action& a, std::string& error) {
     a.reserved0 = r.read_i32();
     a.action_type = static_cast<ActionType>(r.read_i32());
     a.action_sub_type = r.read_i32();
@@ -670,7 +523,7 @@ bool parse_action(Reader& r, Action& a, std::string& error) {
     return true;
 }
 
-void write_action(Writer& w, const Action& a) {
+void write_action(io::ByteWriter& w, const Action& a) {
     w.write_i32(0);
     w.write_i32(static_cast<int32_t>(a.action_type));
     w.write_i32(a.action_sub_type);
@@ -681,7 +534,7 @@ void write_action(Writer& w, const Action& a) {
     w.write_i32(0);
 }
 
-bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& error) {
+bool parse_bounding_box(io::ByteReader& r, BoundingBox& bb, std::string& error) {
     // 0x24-byte record: min/max XYZ (16.16) + type/ref metadata + reserved zero.
     bb.min_x = r.read_i32();
     bb.min_y = r.read_i32();
@@ -699,7 +552,7 @@ bool parse_bounding_box(Reader& r, BoundingBox& bb, std::string& error) {
     return true;
 }
 
-void write_bounding_box(Writer& w, const BoundingBox& bb) {
+void write_bounding_box(io::ByteWriter& w, const BoundingBox& bb) {
     w.write_i32(bb.min_x);
     w.write_i32(bb.min_y);
     w.write_i32(bb.min_z);
@@ -716,7 +569,7 @@ void write_bounding_box(Writer& w, const BoundingBox& bb) {
 // std::vector::resize() throws std::length_error / std::bad_alloc, and nothing up the load chain
 // catches C++ exceptions, so it would abort the process instead of failing the parse cleanly.
 // record_size must be > 0.
-bool count_fits(const Reader& r, int64_t count, size_t record_size,
+bool count_fits(const io::ByteReader& r, int64_t count, size_t record_size,
                 const char* what, std::string& error) {
     if (count < 0 || static_cast<uint64_t>(count) > r.remaining() / record_size) {
         error = std::string("BMS ") + what + " count " + std::to_string(count) +
@@ -949,7 +802,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         return false;
     }
 
-    Reader r(data, size);
+    io::ByteReader r(data, size);
 
     // Section read order + sizes verified byte-for-byte against the engine loader
     // [orig: Mission_LoadBMSFile @0x40f7b6 (Jointops.exe)]:
@@ -1138,8 +991,10 @@ bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::strin
         return false;
     }
 
-    Reader r(data, size);
-    return parse_header(r, out, error);
+    io::ByteReader r(data, size);
+    // The wire 0x0B blob carries the retail g_BmsHeaderBlock (zeroed magic); do
+    // not enforce the file-only "BMS"+version gate on it.
+    return parse_header(r, out, error, /*wire_header=*/true);
 }
 
 bool parse_file(const std::string& path, File& out, std::string& error) {
@@ -1175,9 +1030,9 @@ bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string
     header_file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(loadout_chunk.size());
     header_file.header.secondary_chunk_len = static_cast<uint16_t>(item_availability_chunk.size());
 
-    Writer w;
+    io::ByteWriter w;
     write_header(w, header_file.header);
-    out = w.data();
+    out = w.take();
     if (out.size() != kHeaderSize) {
         error = "Encoded BMS header size mismatch";
         return false;
@@ -1207,7 +1062,7 @@ bool encode_loaded_header_blob(const File& file, std::vector<uint8_t>& out, std:
 }
 
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
-    Writer w;
+    io::ByteWriter w;
     std::vector<uint8_t> header_blob;
     if (!encode_header_blob(file, header_blob, error)) {
         return false;
@@ -1300,7 +1155,7 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
         write_bounding_box(w, bb);
     }
 
-    out = std::move(w.data());
+    out = w.take();
     return true;
 }
 

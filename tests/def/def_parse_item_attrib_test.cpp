@@ -8,6 +8,8 @@
 
 #include <formats/def/def.h>
 
+using namespace opennova::def;
+
 static const DefItemDef *find_by_id(const DefItemsFile *items, int id) {
     for (size_t i = 0; i < items->count; ++i) {
         if (items->entries[i].id == id) return &items->entries[i];

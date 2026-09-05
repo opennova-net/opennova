@@ -1,3 +1,4 @@
+#include <runtime/world/zone_system.h>
 // Advance & Secure zone-slot chain (net-re §5.61). Structural translation of the
 // retail ZoneSlotChain_* cluster (ex-"CWeaponSlotManager", inline @ 0x24D1EBC).
 #include <runtime/world/zone_chain.h>
@@ -54,7 +55,8 @@ void assign_ranks(const World &world, ZoneChain &chain) {
 
 } // namespace
 
-void zone_chain_rebuild_masks(const World &world, ZoneChain &chain) {
+void ZoneSystem::rebuild_masks() {
+    const World &world = world_;
     // [orig: ZoneSlotChain_RebuildOwnershipMasks @ 0x4A26C0 — clear the five masks,
     //  then mask[team] |= 1 << entity+538 per vector entry (team <= 4)]
     for (int t = 0; t < ZoneChain::kTeamCount; ++t) chain.owned_mask[t] = 0;
@@ -66,7 +68,8 @@ void zone_chain_rebuild_masks(const World &world, ZoneChain &chain) {
     }
 }
 
-void zone_chain_build_from_mission(const World &world, ZoneChain &chain) {
+void ZoneSystem::build_chain_from_mission() {
+    const World &world = world_;
     chain.clear(); // [orig: ZoneSlotChain_Reset @ 0x4A2C30 precedes the sweeps]
 
     // Pool-3 marker sweep: a NUMBERED marker's zone number seeds its family team's
@@ -89,12 +92,12 @@ void zone_chain_build_from_mission(const World &world, ZoneChain &chain) {
         });
     }
 
-    zone_chain_rebuild_masks(world, chain);
+    rebuild_masks();
     assign_ranks(world, chain); // [orig: CNetQuality-misnamed rank pass @ 0x4A2EEC]
 }
 
-bool zone_chain_is_capturable(const World &world, const ZoneChain &chain, uint8_t team,
-                              const Entity &zone) {
+bool ZoneSystem::is_capturable(uint8_t team, const Entity &zone) const {
+    const World &world = world_;
     // [orig: ZoneSlotChain_IsZoneCapturableByTeam @ 0x4A2450]
     // Not in the chain -> always capturable [orig: !ContainsEntity -> return 1].
     if (!chain_contains(chain, zone.handle)) return true;
@@ -131,18 +134,20 @@ bool zone_chain_is_capturable(const World &world, const ZoneChain &chain, uint8_
     return true;
 }
 
-uint8_t zone_chain_frontier_zone(const World &world, const ZoneChain &chain, uint8_t team) {
+uint8_t ZoneSystem::frontier_zone(uint8_t team) const {
+    const World &world = world_;
     // [orig: ZoneSlotChain_FindFrontierZone @ 0x4A2AC0 — first vector entry
     //  IsZoneCapturableByTeam(team) -> its entity+538]
     for (const EntityHandle h : chain.zones) {
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
-        if (zone_chain_is_capturable(world, chain, team, *e)) return e->zone_number;
+        if (world.zones.is_capturable(team, *e)) return e->zone_number;
     }
     return 0;
 }
 
-uint32_t zone_chain_owned_zone_mask(const World &world, const ZoneChain &chain, uint8_t team) {
+uint32_t ZoneSystem::owned_zone_mask(uint8_t team) const {
+    const World &world = world_;
     // [orig: ZoneSlotChain_GetOwnedZoneMask @ 0x4A2620 — all_slots_mask & ~mismatch_mask]
     uint32_t all_mask = 0;
     uint32_t mismatch_mask = 0;
@@ -156,7 +161,8 @@ uint32_t zone_chain_owned_zone_mask(const World &world, const ZoneChain &chain, 
     return all_mask & ~mismatch_mask;
 }
 
-void zone_chain_latch_control(World &world, const ZoneChain &chain) {
+void ZoneSystem::latch_control() {
+    World &world = world_;
     // [orig: Server_UpdateCaptureZoneEntities @ 0x519690: per numbered capture entity,
     //  if !IsZoneCapturableByTeam(enemy_of(zone.team)) -> entity+540 = 0x10000
     //  (@ 0x51975B..0x519764); enemy_of = 2 - (team != 1)]
@@ -164,7 +170,7 @@ void zone_chain_latch_control(World &world, const ZoneChain &chain) {
         Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
         const uint8_t enemy = (e->team == 1) ? 2 : 1;
-        if (!zone_chain_is_capturable(world, chain, enemy, *e)) e->zone_control = 0x10000;
+        if (!world.zones.is_capturable(enemy, *e)) e->zone_control = 0x10000;
     }
 }
 

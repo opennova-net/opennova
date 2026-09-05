@@ -1,180 +1,15 @@
 extends GutTest
 
+# The render-fixture capture contract (RenderFixtureContract) and its probe's
+# transactions. The contract's live legs are typed to their production owners
+# (GameShell, GameWorld, Simulation, Terrain, Weather, LocalPlayerPresenter;
+# ADR 0043 d12), so this file drives them over REAL fixtures (the packaged
+# world, a bare Terrain, the null GameShell) and pins the rule they refuse
+# with; the positive comparison legs (a spawned local player carrying the
+# retail kit) run in the live render_fixture_capture probe over the retail
+# fixture, never against a double.
+
 const Probe := preload("res://probes/render/render_fixture_capture_probe.gd")
-const HudHiddenCaptureWitness := preload(
-		"res://game/world/hud_hidden_capture_witness.gd")
-const FirstPersonArmsWitness := preload(
-		"res://game/world/first_person_arms_witness.gd")
-
-
-class RecordingWeather:
-	extends Node
-	var prepare_calls := 0
-
-	func prepare_world_driven() -> void:
-		prepare_calls += 1
-
-
-class RecordingWorld:
-	extends Node
-	var weather := RecordingWeather.new()
-
-	func get_weather_node() -> Node:
-		return weather
-
-
-class RecordingStaticShadowTerrain:
-	extends RefCounted
-	var static_shadow_enabled := true
-	var static_shadow_writes: Array[bool] = []
-	var live_startup_frames := 132
-
-	func is_static_terrain_shadow_enabled() -> bool:
-		return static_shadow_enabled
-
-	func set_static_terrain_shadow_enabled(enabled: bool) -> void:
-		static_shadow_enabled = enabled
-		static_shadow_writes.append(enabled)
-
-
-class ComparisonSim:
-	extends RefCounted
-	var loadout_calls: Array = []
-	var teleports: Array = []
-	var equipped_name := "WPN_M4AUTO"
-	var weapon_clip := 30
-	var weapon_reserve := 300
-	var player_position := Vector3.ZERO
-	var player_class := 9
-
-	func get_local_player_class() -> int:
-		return player_class
-
-	func apply_local_player_loadout(kit: Array, requested_class: int) -> bool:
-		loadout_calls.append({
-			"kit": kit.duplicate(true),
-			"player_class": requested_class,
-		})
-		if kit.is_empty():
-			return false
-		equipped_name = String((kit[0] as Dictionary).get("name", ""))
-		if int((kit[0] as Dictionary).get("ammo_primary", -1)) == 9:
-			weapon_clip = 30
-			weapon_reserve = 270
-		player_class = requested_class
-		return not equipped_name.is_empty()
-
-	func get_local_player_inventory() -> Dictionary:
-		return {
-			"valid": true,
-			"equipped_name": equipped_name,
-		}
-
-	func get_local_player_weapon_name() -> String:
-		return equipped_name
-
-	func get_local_player_weapon_state() -> Dictionary:
-		return {
-			"active": true,
-			"clip": weapon_clip,
-			"reserve": weapon_reserve,
-		}
-
-	func debug_teleport_local_player(
-			position_bms: Vector3, yaw_deg: float, pitch_deg: float) -> Error:
-		teleports.append({
-			"position_bms": position_bms,
-			"yaw_deg": yaw_deg,
-			"pitch_deg": pitch_deg,
-		})
-		player_position = RenderFixtureContract.mission_to_godot(position_bms)
-		return OK
-
-	func get_local_player_position() -> Vector3:
-		return player_position
-
-
-class ComparisonWorld:
-	extends Node3D
-	var sim := ComparisonSim.new()
-	var presented_weapon := "WPN_M4AUTO"
-	var terrain := Node3D.new()
-	var terrain_data := RefCounted.new()
-	var arms_character_id := 0x0402
-	var arms_graphic := "IndoArms.3di"
-	var arms_camo := PackedInt32Array([1, 0, 0])
-
-	func _init() -> void:
-		terrain.name = "Terrain"
-		add_child(terrain)
-
-	func get_sim():
-		return sim
-
-	func local_player_weapon_name() -> String:
-		return presented_weapon
-
-	func set_local_player_weapon_by_name(weapon_name: String) -> bool:
-		presented_weapon = weapon_name
-		return true
-
-	func get_terrain_node() -> Node3D:
-		return terrain
-
-	func get_terrain_data() -> RefCounted:
-		return terrain_data
-
-	func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
-		var witness := FirstPersonArmsWitness.new()
-		witness.character_id = arms_character_id
-		witness.arms_graphic = arms_graphic
-		witness.arms_camo = arms_camo
-		return witness
-
-
-class ComparisonPresenter:
-	extends Node
-	var refresh_calls := 0
-	var viewmodel_node := Node3D.new()
-
-	func _init() -> void:
-		add_child(viewmodel_node)
-
-	func refresh_viewmodel() -> void:
-		refresh_calls += 1
-
-	func viewmodel() -> Node3D:
-		return viewmodel_node
-
-
-class CaptureTransactionGame:
-	extends Node
-	var begin_calls := 0
-	var finish_calls := 0
-	var begin_result: Error = OK
-	var hud_detail_level := 3
-	var gameplay_hud_visible := false
-	var player_view_effects_active := true
-	var hud_canvas_layer_active := true
-	var ads_active := false
-	var big_map_active := false
-
-	func begin_hud_hidden_capture() -> Error:
-		begin_calls += 1
-		return begin_result
-
-	func finish_hud_hidden_capture() -> void:
-		finish_calls += 1
-
-	func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
-		var witness := HudHiddenCaptureWitness.new()
-		witness.hud_detail_level = hud_detail_level
-		witness.gameplay_hud_visible = gameplay_hud_visible
-		witness.player_view_effects_active = player_view_effects_active
-		witness.hud_canvas_layer_active = hud_canvas_layer_active
-		witness.ads_active = ads_active
-		witness.big_map_active = big_map_active
-		return witness
 
 
 func test_mission_camera_pose_converts_to_godot_basis() -> void:
@@ -358,18 +193,6 @@ func test_comparison_contract_requires_full_frame_m16_and_exact_player_pose() ->
 
 
 func test_comparison_contract_uses_production_spawn_profile_and_presentation_witness() -> void:
-	var game := Node.new()
-	var hud := CanvasLayer.new()
-	hud.name = "HUD"
-	game.add_child(hud)
-	var presenter := ComparisonPresenter.new()
-	presenter.name = "LocalPlayerPresenter"
-	game.add_child(presenter)
-	add_child_autofree(game)
-	var world := ComparisonWorld.new()
-	add_child_autofree(world)
-	var viewport := SubViewport.new()
-	add_child_autofree(viewport)
 	var contract := {
 		"weapon": "WPN_M16BURST",
 		"retail_hud_weapon_label": "M16 - Burst",
@@ -423,11 +246,12 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var avatar_db := AvatarDatabase.new()
 	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/avatars/synth_avatars.def")), OK)
-	var join_profile := NetSessionDrive.character_join_profile_from_database(
-			avatar_db, RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
-	assert_eq(join_profile.get("character_ids", []), [0x0402, 0x8207],
+	var join_profile := avatar_db.character_join_profile(
+			RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
+	assert_eq([join_profile.get_character_id(0), join_profile.get_character_id(1)],
+			[0x0402, 0x8207],
 			"the staged tree selections resolve to retail slot 0's character IDs")
-	assert_eq(join_profile.get("player_classes", []), [9, 9])
+	assert_eq([join_profile.get_player_class(0), join_profile.get_player_class(1)], [9, 9])
 	# The reference leg: in the shipped table blue's 0x0402 wears the arms the retail
 	# capture shows (IndoArms.3di, camo 1).
 	var retail_avatars := RetailData.fixture("avatars/Avatars.def")
@@ -436,175 +260,74 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	else:
 		var retail_db := AvatarDatabase.new()
 		assert_eq(retail_db.load(retail_avatars), OK)
-		var resolved_blue: Dictionary = retail_db.resolve_character_id(0x0402, 0)
-		var combo: Dictionary = retail_db.resolve_combo(
-				int(resolved_blue.get("nationality_index", -1)),
-				int(resolved_blue.get("division_index", -1)),
-				int(resolved_blue.get("combo_index", -1)))
-		var arms: Dictionary = combo.get("arms", {})
-		assert_eq(String(arms.get("graphic", "")), "IndoArms.3di")
-		assert_eq(Array(arms.get("camo", [])), [1, 0, 0])
-	assert_true(RenderFixtureContract.verify_comparison_spawn(
-			world, contract).has("error"),
-			"the mission-overridden M4 spawn must not pass as matched evidence")
-	var fallback: Dictionary = RenderFixtureContract.apply_comparison_weapon_fallback(
-			game, world, contract)
-	assert_false(fallback.has("error"))
-	assert_eq(fallback.weapon_install_source,
-			"production_armory_fallback_after_spawn_override")
-	assert_eq(world.sim.loadout_calls, [{
-		"kit": [{
-			"name": "WPN_M16BURST",
-			"ammo_primary": 9,
-			"ammo_secondary": -1,
-			"flags": -1,
-		}],
-		"player_class": 9,
-	}])
-	assert_eq(presenter.refresh_calls, 1)
-	assert_false(RenderFixtureContract.verify_comparison_spawn(world, contract).has("error"))
-	var pose: Dictionary = RenderFixtureContract.teleport_comparison_player(world, contract)
-	assert_false(pose.has("error"))
-	assert_eq(world.sim.teleports, [{
-		"position_bms": Vector3(283.129364, -357.799469, 27.0),
-		"yaw_deg": -90.0,
-		"pitch_deg": -6.5,
-	}])
+		var combo := retail_db.resolve_character_id(0x0402, 0)
+		assert_not_null(combo)
+		var arms := combo.get_arms()
+		assert_not_null(arms, "blue 0x0402 authors an arms part")
+		assert_eq(arms.graphic, "IndoArms.3di")
+		assert_eq(arms.camo, Vector3i(1, 0, 0))
 
-	var witness: Dictionary = RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract)
-	assert_false(witness.has("error"))
-	assert_eq(witness.equipped_weapon, "WPN_M16BURST")
-	assert_eq(witness.weapon_clip, 30)
-	assert_eq(witness.weapon_reserve, 270)
-	assert_true(witness.hud_canvas_layer_visible)
-	assert_true(witness.viewmodel_canvas_layer_visible)
-	assert_true(witness.terrain_data_available)
-	assert_true(witness.terrain_node_visible)
-	assert_true(witness.player_position_bms.is_equal_approx(
-			contract.player_position_bms))
 
-	var hidden_game: CaptureTransactionGame = add_child_autofree(
-			CaptureTransactionGame.new())
-	var hidden_hud := CanvasLayer.new()
-	hidden_hud.name = "HUD"
-	hidden_game.add_child(hidden_hud)
-	var hidden_presenter := ComparisonPresenter.new()
-	hidden_presenter.name = "LocalPlayerPresenter"
-	hidden_game.add_child(hidden_presenter)
-	var hidden_contract := {
-		"capture_mode": "hud_hidden",
-		"equipped_weapon": "WPN_M16BURST",
-		"weapon_clip": 30,
-		"weapon_reserve": 270,
-		"character_id": 0x0402,
-		"arms_graphic": "IndoArms.3di",
-		"arms_camo": [1, 0, 0],
-		"gameplay_hud_visible": false,
-		"hud_canvas_layer_active": true,
-		"hud_detail_level": 3,
-		"player_view_effects_active": true,
+# The typed comparison legs over real owners that carry no matched spawn: the
+# unloaded packaged world (no Simulation), the null shell (no presenter, no
+# HUD witness) and a loaded minimal world whose spawn is not the retail kit.
+# Every leg names what is missing instead of passing; the positive path (a
+# spawned local player carrying WPN_M16BURST at 30/270, the retail arms) is
+# the live probe's over the retail fixture.
+func test_comparison_legs_refuse_real_owners_without_the_matched_spawn() -> void:
+	var contract := {
+		"weapon": "WPN_M16BURST",
+		"retail_hud_weapon_label": "M16 - Burst",
+		"hud_enabled": true,
 		"viewmodel_enabled": true,
 		"terrain_enabled": true,
-		"ads_active": false,
-		"big_map_active": false,
-		"player_pose_source": "retail_player_bms.applied",
-		"player_position_bms": contract.player_position_bms,
-		"yaw_deg": contract.yaw_deg,
-		"pitch_deg": contract.pitch_deg,
+		"player_position_bms": Vector3(283.129364, -357.799469, 27.0),
+		"yaw_deg": -90.0,
+		"pitch_deg": -6.5,
 	}
-	var hidden_witness: Dictionary = RenderFixtureContract.observe_comparison_contract(
-			hidden_game, world, viewport, hidden_contract)
-	assert_false(hidden_witness.has("error"))
-	for expected: Dictionary in [
-		{"capture_mode": "hud_hidden"},
-		{"equipped_weapon": "WPN_M16BURST"},
-		{"weapon_clip": 30},
-		{"weapon_reserve": 270},
-		{"character_id": 0x0402},
-		{"arms_graphic": "IndoArms.3di"},
-		{"arms_camo": [1, 0, 0]},
-		{"gameplay_hud_visible": false},
-		{"hud_canvas_layer_active": true},
-		{"hud_detail_level": 3},
-		{"player_view_effects_active": true},
-		{"viewmodel_enabled": true},
-		{"terrain_enabled": true},
-		{"ads_active": false},
-		{"big_map_active": false},
-		{"player_pose_source": "retail_player_bms.applied"},
-	]:
-		for key: Variant in expected:
-			assert_eq(hidden_witness.get(key), expected[key],
-					"live comparison witness must prove %s" % key)
-	var expected_witness_keys: Array = [
-		"observed_at",
-		"equipped_weapon",
-		"player_class",
-		"weapon_clip",
-		"weapon_reserve",
-		"player_position_bms",
-		"requested_player_pose_bms",
-		"hud_canvas_layer_visible",
-		"viewmodel_canvas_layer_visible",
-		"terrain_data_available",
-		"terrain_node_visible",
-		"capture_mode",
-		"character_id",
-		"arms_graphic",
-		"arms_camo",
-		"gameplay_hud_visible",
-		"hud_canvas_layer_active",
-		"hud_detail_level",
-		"player_view_effects_active",
-		"viewmodel_enabled",
-		"terrain_enabled",
-		"ads_active",
-		"big_map_active",
-		"player_pose_source",
-	]
-	var observed_witness_keys := hidden_witness.keys()
-	expected_witness_keys.sort()
-	observed_witness_keys.sort()
-	assert_eq(observed_witness_keys, expected_witness_keys,
-			"the runtime witness retains exact timing, pose, and node provenance")
-	world.arms_graphic = "ArmsG.3di"
-	assert_true(RenderFixtureContract.observe_comparison_contract(
-			hidden_game, world, viewport, hidden_contract).has("error"),
-			"a different submitted arms asset must fail the capture")
-	world.arms_graphic = "IndoArms.3di"
-	hidden_game.big_map_active = true
-	hidden_game.gameplay_hud_visible = true
-	assert_true(RenderFixtureContract.observe_comparison_contract(
-			hidden_game, world, viewport, hidden_contract).has("error"),
-			"an active large map must fail the HUD-hidden capture")
-	hidden_game.big_map_active = false
-	hidden_game.gameplay_hud_visible = false
-	world.visible = false
-	assert_true(RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract).has("error"),
-			"terrain hidden by a parent must fail the capture witness")
-	world.visible = true
+	var shell: GameShell = add_child_autofree(GameShell.new())
+	var unloaded := WorldFixture.make_world(self)
+	assert_false(unloaded.is_loaded())
+	var viewport := get_viewport()
 
-	world.sim.equipped_name = "WPN_M4AUTO"
+	assert_true(RenderFixtureContract.verify_comparison_spawn(null, contract).has("error"),
+			"no world: the spawn witness names the missing world")
+	assert_eq(String(RenderFixtureContract.verify_comparison_spawn(
+			unloaded, contract).get("error", "")),
+			"comparison simulation is unavailable",
+			"an unloaded world carries no simulation to witness")
+	assert_eq(String(RenderFixtureContract.teleport_comparison_player(
+			unloaded, contract).get("error", "")),
+			"comparison simulation cannot teleport the local player")
+	assert_eq(String(RenderFixtureContract.apply_comparison_weapon_fallback(
+			shell, unloaded, contract).get("error", "")),
+			"comparison Armory fallback has no live simulation")
+	assert_true(RenderFixtureContract.apply_comparison_weapon_fallback(
+			null, unloaded, contract).has("error"), "no shell: no fallback")
 	assert_true(RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract).has("error"),
-			"a different equipped weapon must fail the capture")
-	world.sim.equipped_name = "WPN_M16BURST"
-	world.presented_weapon = "WPN_M4AUTO"
+			null, unloaded, viewport, contract).has("error"),
+			"no shell: the presentation witness is unavailable")
 	assert_true(RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract).has("error"),
-			"a stale world viewmodel weapon must fail the capture")
-	world.presented_weapon = "WPN_M16BURST"
-	hud.visible = false
+			shell, unloaded, null, contract).has("error"),
+			"no viewport: the presentation witness is unavailable")
+	assert_eq(String(RenderFixtureContract.observe_comparison_contract(
+			shell, unloaded, viewport, contract).get("error", "")),
+			"comparison simulation is unavailable",
+			"the spawn witness gates the presentation witness")
+
+	# A loaded minimal world spawns its own kit, never the retail M16: the
+	# spawn witness refuses on the weapon, and the null shell's Armory
+	# fallback has no presenter to refresh.
+	var world := WorldFixture.boot_minimal(self)
+	var refused := RenderFixtureContract.verify_comparison_spawn(world, contract)
+	assert_true(refused.has("error"),
+			"the mission's own spawn must not pass as matched evidence")
+	assert_eq(String(RenderFixtureContract.apply_comparison_weapon_fallback(
+			shell, world, contract).get("error", "")),
+			"comparison game has no viewmodel refresh seam")
 	assert_true(RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract).has("error"),
-			"a hidden HUD must fail the capture")
-	hud.visible = true
-	world.sim.weapon_reserve = 300
-	assert_true(RenderFixtureContract.observe_comparison_contract(
-			game, world, viewport, contract).has("error"),
-			"different visible reserve ammo must fail the capture")
+			shell, world, viewport, contract).has("error"),
+			"the presentation witness inherits the spawn refusal")
 
 
 func test_capture_provenance_requires_a_frozen_source_and_exact_binaries() -> void:
@@ -1391,28 +1114,32 @@ func test_fixture_lookup_and_capture_variants_are_bounded() -> void:
 
 
 func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> void:
-	var terrain := RecordingStaticShadowTerrain.new()
+	# The transaction is typed to the real Terrain: it reads the static-shadow
+	# provider's own flag and restores exactly what it found.
+	var terrain: Terrain = autofree(Terrain.new())
+	terrain.set_static_terrain_shadow_enabled(true)
 	var suspension = Probe.StaticTerrainShadowWarmupSuspension.new()
 	assert_eq(suspension.begin(terrain), OK)
-	assert_false(terrain.static_shadow_enabled)
-	assert_eq(terrain.static_shadow_writes, [false])
-	assert_eq(terrain.live_startup_frames, 132,
-			"the transaction must not pause or consume unrelated startup work")
+	assert_false(terrain.is_static_terrain_shadow_enabled(),
+			"the live load warmup runs without static page projection")
+	assert_eq(suspension.begin(terrain), ERR_ALREADY_IN_USE,
+			"one transaction at a time")
 	suspension.finish()
-	assert_true(terrain.static_shadow_enabled)
-	assert_eq(terrain.static_shadow_writes, [false, true])
+	assert_true(terrain.is_static_terrain_shadow_enabled(),
+			"finish restores the provider the transaction found enabled")
 	suspension.finish()
-	assert_eq(terrain.static_shadow_writes, [false, true],
+	assert_true(terrain.is_static_terrain_shadow_enabled(),
 			"failure cleanup may finish the transaction more than once")
+	assert_eq(suspension.begin(null), ERR_UNCONFIGURED, "no terrain: nothing to suspend")
 
-	var already_disabled := RecordingStaticShadowTerrain.new()
-	already_disabled.static_shadow_enabled = false
+	var already_disabled: Terrain = autofree(Terrain.new())
+	already_disabled.set_static_terrain_shadow_enabled(false)
 	var disabled_suspension = Probe.StaticTerrainShadowWarmupSuspension.new()
 	assert_eq(disabled_suspension.begin(already_disabled), OK)
+	assert_false(already_disabled.is_static_terrain_shadow_enabled())
 	disabled_suspension.finish()
-	assert_false(already_disabled.static_shadow_enabled)
-	assert_true(already_disabled.static_shadow_writes.is_empty(),
-			"an originally disabled provider must be restored without spurious invalidation")
+	assert_false(already_disabled.is_static_terrain_shadow_enabled(),
+			"an originally disabled provider is restored disabled, never enabled")
 
 	var source := FileAccess.get_file_as_string(
 			"res://probes/render/render_fixture_capture_probe.gd")
@@ -1886,12 +1613,13 @@ func test_catalog_variants_must_exactly_match_the_capture_driver() -> void:
 
 
 func test_exact_fixture_pose_reseeds_the_public_weather_phase_owner() -> void:
-	var world := RecordingWorld.new()
-	world.add_child(world.weather)
-	add_child_autofree(world)
+	# The packaged world owns its Weather node: the pin reaches its
+	# prepare_world_driven (the cloud, sway and lightning phase reset) through
+	# the typed seam; no world is the parameter refusal.
+	var world := WorldFixture.make_world(self)
+	assert_not_null(world.get_weather_node(), "the packaged world carries its weather owner")
 	assert_eq(RenderFixtureContract.pin_weather_phase(world), OK)
-	assert_eq(world.weather.prepare_calls, 1,
-			"capture setup must reset cloud, sway, and lightning phase once")
+	assert_eq(RenderFixtureContract.pin_weather_phase(null), ERR_INVALID_PARAMETER)
 	var contract: Dictionary = RenderFixtureContract.capture_phase_contract()
 	assert_eq(contract.weather, "canonical_reset_at_requested_tod")
 	assert_eq(contract.water_noise,

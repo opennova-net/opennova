@@ -7,9 +7,11 @@
 //  Light_GetPointLightParams @ 0x5a9180; Light_TickGenBlock @ 0x5a8ae0].
 #include <runtime/renderer/light_scene.h>
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -966,6 +968,138 @@ int main() {
                "an interior lamp never leaks onto an outdoor draw");
     }
 
+    // The select_for_draws cell index is a pure broadphase: for every draw the
+    // indexed enumeration must admit the same slots in the same order as the
+    // reference linear scan (the witnessed first-64 slot-order truncation is
+    // semantics, not an implementation detail). Fuzzed scenes: a dense
+    // cluster that overflows the 64-cap, spread lights, hidden slots, owner
+    // groups, oversize radii, moving slots across revisions, and draws far
+    // outside the populated region.
+    {
+        LightScene indexed;
+        LightScene linear;
+        linear.set_select_index_enabled(false);
+        uint32_t rng = 0x4f1bbcdcu;
+        auto next = [&rng]() {
+            rng = rng * 1664525u + 1013904223u;
+            return rng;
+        };
+        std::vector<LightHandle> indexed_handles;
+        std::vector<LightHandle> linear_handles;
+        auto spawn_pair = [&](const LightSpawnParams &params) {
+            indexed_handles.push_back(indexed.spawn(params));
+            linear_handles.push_back(linear.spawn(params));
+        };
+        for (int i = 0; i < 90; ++i) {
+            // The dense cluster: everything within one 16-wu box so a draw
+            // over it collects far more than 64 candidates.
+            spawn_pair(barrel_params(
+                    static_cast<int32_t>(next() % (16u << 16)),
+                    static_cast<int32_t>(next() % (16u << 16)),
+                    static_cast<int32_t>(next() % (8u << 16))));
+        }
+        for (int i = 0; i < 120; ++i) {
+            LightSpawnParams params = barrel_params(
+                    static_cast<int32_t>(next() % (900u << 16)) - (450 << 16),
+                    static_cast<int32_t>(next() % (900u << 16)) - (450 << 16),
+                    static_cast<int32_t>(next() % (60u << 16)));
+            params.radius_fixed = static_cast<int32_t>(
+                    (1u << 16) + next() % (12u << 16));
+            if ((next() & 7u) == 0) {
+                // Oversize spans exercise the shared bucket.
+                params.radius_fixed = 300 << 16;
+            }
+            if ((next() & 3u) == 0) {
+                params.owner_entity = 1 + (next() % 3);
+                params.owner_section = static_cast<int32_t>(next() % 4);
+            }
+            params.has_gen = (next() & 1u) != 0;
+            spawn_pair(params);
+        }
+        LightSelectionOptions options;
+        options.target = LightSelectionTarget::Objects;
+        const std::array<float, 3> ambient = {1.0f, 0.9f, 0.8f};
+        LightFlickerInputs flicker;
+        flicker.time_ms = 123456;
+        auto compare_round = [&](const char *label) {
+            std::vector<LightDrawContext> draws;
+            for (int d = 0; d < 40; ++d) {
+                LightDrawContext draw;
+                const int32_t cx = static_cast<int32_t>(
+                        next() % (1000u << 16)) - (500 << 16);
+                const int32_t cy = static_cast<int32_t>(
+                        next() % (1000u << 16)) - (500 << 16);
+                const int32_t cz = static_cast<int32_t>(next() % (80u << 16));
+                const int32_t half = static_cast<int32_t>(
+                        (1u << 16) + next() % (40u << 16));
+                draw.aabb_min_fixed = {cx - half, cy - half, cz - half};
+                draw.aabb_max_fixed = {cx + half, cy + half, cz + half};
+                if ((next() & 7u) == 0) {
+                    draw.groups.owner_group_entity = 1 + (next() % 3);
+                    draw.groups.owner_group_section =
+                            static_cast<int32_t>(next() % 4);
+                }
+                draws.push_back(draw);
+            }
+            // One draw over the dense cluster (the 64-cap truncation) and one
+            // far outside every populated cell.
+            LightDrawContext cluster;
+            cluster.aabb_min_fixed = {-(4 << 16), -(4 << 16), -(4 << 16)};
+            cluster.aabb_max_fixed = {20 << 16, 20 << 16, 20 << 16};
+            draws.push_back(cluster);
+            LightDrawContext far_out;
+            far_out.aabb_min_fixed = {5000 << 16, 5000 << 16, 0};
+            far_out.aabb_max_fixed = {5010 << 16, 5010 << 16, 1 << 16};
+            draws.push_back(far_out);
+            std::vector<LightDrawSelection> a(draws.size());
+            std::vector<LightDrawSelection> b(draws.size());
+            indexed.select_for_draws(draws.data(), draws.size(), options,
+                    ambient, flicker, /*d3d_light_path=*/true, a.data());
+            linear.select_for_draws(draws.data(), draws.size(), options,
+                    ambient, flicker, /*d3d_light_path=*/true, b.data());
+            for (size_t d = 0; d < draws.size(); ++d) {
+                expect(a[d].count == b[d].count, label);
+                for (size_t l = 0; l < a[d].count; ++l) {
+                    const SelectedLight &sa = a[d].lights[l];
+                    const SelectedLight &sb = b[d].lights[l];
+                    expect(sa.handle.retail_value == sb.handle.retail_value &&
+                                    sa.handle.generation == sb.handle.generation,
+                            label);
+                    expect(sa.position == sb.position &&
+                                    sa.color == sb.color &&
+                                    sa.attenuation == sb.attenuation &&
+                                    sa.range == sb.range,
+                            label);
+                }
+            }
+        };
+        compare_round("indexed select matches the linear reference (fresh)");
+        // Mutations that move the selection topology: moved slots, a hide, a
+        // despawn, fade ticks — then compare again on the rebuilt index.
+        for (int round = 0; round < 3; ++round) {
+            for (int m = 0; m < 25; ++m) {
+                const size_t pick = next() % indexed_handles.size();
+                const std::array<int32_t, 3> pos = {
+                    static_cast<int32_t>(next() % (900u << 16)) - (450 << 16),
+                    static_cast<int32_t>(next() % (900u << 16)) - (450 << 16),
+                    static_cast<int32_t>(next() % (60u << 16)),
+                };
+                indexed.set_position(indexed_handles[pick], pos);
+                linear.set_position(linear_handles[pick], pos);
+            }
+            const size_t hid = next() % indexed_handles.size();
+            indexed.set_blend(indexed_handles[hid], 0.0f);
+            linear.set_blend(linear_handles[hid], 0.0f);
+            const size_t dead = next() % indexed_handles.size();
+            indexed.despawn(indexed_handles[dead]);
+            linear.despawn(linear_handles[dead]);
+            indexed.tick();
+            linear.tick();
+            compare_round("indexed select matches the linear reference "
+                          "(after topology mutations)");
+        }
+    }
+
     // The witnessed transient-spawner constants the presenting director
     // builds its muzzle-glow / death-flash spawns from.
     expect(LightScene::kMuzzleGlowRadiusFixed == 98304, "muzzle glow radius 1.5 wu");
@@ -975,6 +1109,50 @@ int main() {
     expect(LightScene::kDeathFlashColorRgb == 0xFFC080u, "death flash color");
     expect(LightScene::kDeathFlashFadeMode == 2 && LightScene::kDeathFlashFadeTicks == 31,
            "death flash mode 2 / 31 ticks");
+
+    // The static atlas row's group pair: a building row is its own interior
+    // group at section 0 with the owner section re-scoped to its ROBJ; any
+    // other row is owned by its static owner and carries the blink interior
+    // its placement origin resolved (empty outdoors).
+    {
+        using opennova::renderer::StaticLightRowInputs;
+        using opennova::renderer::static_light_row_groups;
+        StaticLightRowInputs building;
+        building.is_building = true;
+        building.static_owner = 0x2000000000000005ull;
+        building.robj_index = 3;
+        building.blink_hit = true;
+        building.blink_owner_entity = 99;
+        building.blink_section = 4;
+        const auto b = static_light_row_groups(building);
+        expect(b.owner_group_entity == 0 && b.owner_group_section == 3,
+               "a building row re-scopes the owner section to its ROBJ");
+        expect(b.interior_group_entity == building.static_owner &&
+                       b.interior_group_section == 0,
+               "a building row is its own interior group at section zero");
+        StaticLightRowInputs indoors;
+        indoors.static_owner = 0x2000000000000007ull;
+        indoors.robj_index = 9;
+        indoors.blink_hit = true;
+        indoors.blink_owner_entity = 99;
+        indoors.blink_section = 4;
+        const auto i = static_light_row_groups(indoors);
+        expect(i.owner_group_entity == indoors.static_owner && i.owner_group_section == 0,
+               "a non-building row is owned by its static owner at section 0");
+        expect(i.interior_group_entity == 99 && i.interior_group_section == 4,
+               "a non-building row carries the blink interior group");
+        StaticLightRowInputs outdoors = indoors;
+        outdoors.blink_hit = false;
+        const auto o = static_light_row_groups(outdoors);
+        expect(o.interior_group_entity == 0 && o.interior_group_section == 0,
+               "outdoors the interior group stays empty");
+    }
+    // The light_move round glow lifts its spawn half a radius and follows at
+    // the raw round position.
+    expect(nearly_equal(opennova::renderer::round_glow_spawn_lift(8.0f), 4.0f),
+           "the round glow spawns radius/2 above the round");
+    expect(opennova::renderer::kRoundGlowFollowLift == 0.0f,
+           "the per-tick follow re-centers at the raw round position");
 
     std::cout << "light_scene_test passed\n";
     return 0;

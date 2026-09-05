@@ -1,4 +1,4 @@
-#include <net/netsim/item_replication_catalog.h>
+#include <runtime/replication/item_replication_catalog.h>
 
 #include <formats/def/def.h>
 
@@ -7,9 +7,11 @@
 #include <optional>
 #include <vector>
 
+using namespace opennova::def;
+
 namespace {
 
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 using opennova::EntityClass;
 
 bool expect(bool condition, const char *message) {

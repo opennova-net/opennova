@@ -1,8 +1,8 @@
 # nw-server — dev/golden-harness in-match host
 
 A thin headless C++ binary that boots a loose mission through the engine's one
-`mission::MissionKernel` (ADR 0042 d3) and stands up the `engine/net/npruntime`
-in-match host through `inmatch::listen_host` (the witnessed dedicated
+`mission::MissionKernel` (ADR 0042 d3) and stands up the `engine/runtime/inmatch`
+in-match host through `inmatch::HostRole` (the witnessed dedicated
 host-only shape, a real UDP socket, the original 62 Hz cadence) so the net
 iteration harness can produce golden-comparable sessions: host a mission, let
 opennova or retail clients join, capture with dumpcap, and diff against the
@@ -22,7 +22,7 @@ clients joining it remains the retail-join follow-up: the per-join legs a
 retail client exercises beyond the opennova client's are not yet golden-proven
 against this host.
 
-- The runtime it drives: [`engine/net/npruntime/ROADMAP.md`](../../engine/net/npruntime/ROADMAP.md)
+- The runtime it drives: [`engine/runtime/inmatch/ROADMAP.md`](../../engine/runtime/inmatch/ROADMAP.md)
   (build plan + live status).
 - The capture/diff loop it exists for: [`scripts/net/README.md`](../../scripts/net/README.md).
 

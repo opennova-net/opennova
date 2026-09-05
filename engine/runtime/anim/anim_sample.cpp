@@ -8,6 +8,8 @@
 
 #include <cmath>
 
+using namespace opennova::bad;
+
 namespace opennova::anim {
 
 namespace {

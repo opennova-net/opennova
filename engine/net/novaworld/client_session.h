@@ -219,7 +219,7 @@ private:
 };
 
 // Shared identity-message builders — the ClientHello / ClientAuth struct-fill that BOTH the lobby
-// ClientSession (above) and the in-match np::JoinerConnection (engine/net/npruntime) use. The two builders
+// ClientSession (above) and the in-match inmatch::JoinerConnection (engine/runtime/inmatch) use. The two builders
 // differ ONLY in the CO source (lobby company vs the joiner's player name) and which envelope frames
 // the bytes (both directions now share npwire's nw_encode_outbound / nw_decode_inbound), so the
 // struct-fill is dedup'd here.

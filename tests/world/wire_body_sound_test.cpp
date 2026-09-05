@@ -41,11 +41,11 @@ constexpr char kProfiles[] =
     "end\n";
 
 void seed_world(World &w) {
-    CHECK(w.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
+    CHECK(w.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
     audio::OrganicSoundProfile op;
     op.primary = 1; // SP_Man
     op.female = 2;  // SP_Woman
-    w.organic_sound_profiles.set(42, op);
+    w.tables.organic_sound_profiles.set(42, op);
 }
 
 // Foley fires before the feet within ONE word, foley sits at the body origin,
@@ -59,18 +59,18 @@ void test_foley_precedes_feet_and_positions() {
     wire_body_slot_sounds(w, words, 1, /*capsule_bottom=*/2 * kUnit,
                           /*item_id=*/42, /*character_id=*/0,
                           /*source_handle=*/7, /*on_entity=*/false, body);
-    CHECK(w.slot_sounds.size() == 3);
-    if (w.slot_sounds.size() == 3) {
-        CHECK(std::strcmp(w.slot_sounds[0].set_name, "RUSTLE_M") == 0);
-        CHECK(std::strcmp(w.slot_sounds[1].set_name, "GEAR_M") == 0);
-        CHECK(std::strcmp(w.slot_sounds[2].set_name, "FSP_MAN_L") == 0);
+    CHECK(w.out.slot_sounds.size() == 3);
+    if (w.out.slot_sounds.size() == 3) {
+        CHECK(std::strcmp(w.out.slot_sounds[0].set_name, "RUSTLE_M") == 0);
+        CHECK(std::strcmp(w.out.slot_sounds[1].set_name, "GEAR_M") == 0);
+        CHECK(std::strcmp(w.out.slot_sounds[2].set_name, "FSP_MAN_L") == 0);
         // Foley at the ORIGIN, no dip.
-        CHECK(w.slot_sounds[0].pos[2] == 5 * kUnit);
+        CHECK(w.out.slot_sounds[0].pos[2] == 5 * kUnit);
         // The footstep dips by the frame's capsule bottom (origin - bottom).
-        CHECK(w.slot_sounds[2].pos[2] == 3 * kUnit);
-        CHECK(w.slot_sounds[2].pos[0] == 10 * kUnit);
-        CHECK(w.slot_sounds[0].source_handle == 7);
-        CHECK(w.slot_sounds[2].slot == audio::kSlotFootLGround);
+        CHECK(w.out.slot_sounds[2].pos[2] == 3 * kUnit);
+        CHECK(w.out.slot_sounds[2].pos[0] == 10 * kUnit);
+        CHECK(w.out.slot_sounds[0].source_handle == 7);
+        CHECK(w.out.slot_sounds[2].slot == audio::kSlotFootLGround);
     }
 }
 
@@ -82,17 +82,17 @@ void test_slot_pick_reads_carrier_and_water() {
     const int32_t body[3] = {0, 0, 5 * kUnit};
     const uint32_t words[1] = {0x1u};
     wire_body_slot_sounds(w, words, 1, 0, 42, 0, 7, /*on_entity=*/true, body);
-    CHECK(w.slot_sounds.size() == 1);
-    if (!w.slot_sounds.empty()) {
-        CHECK(w.slot_sounds[0].slot == audio::kSlotFootLObject);
-        CHECK(std::strcmp(w.slot_sounds[0].set_name, "FSP_MAN_WOOD_L") == 0);
+    CHECK(w.out.slot_sounds.size() == 1);
+    if (!w.out.slot_sounds.empty()) {
+        CHECK(w.out.slot_sounds[0].slot == audio::kSlotFootLObject);
+        CHECK(std::strcmp(w.out.slot_sounds[0].set_name, "FSP_MAN_WOOD_L") == 0);
     }
-    w.slot_sounds.clear();
+    w.out.slot_sounds.clear();
     w.env.water_z = 10 * kUnit; // feet below the plane -> the one water slot
     wire_body_slot_sounds(w, words, 1, 0, 42, 0, 7, true, body);
-    CHECK(w.slot_sounds.size() == 1);
-    if (!w.slot_sounds.empty())
-        CHECK(w.slot_sounds[0].slot == audio::kSlotFootWater);
+    CHECK(w.out.slot_sounds.size() == 1);
+    if (!w.out.slot_sounds.empty())
+        CHECK(w.out.slot_sounds[0].slot == audio::kSlotFootWater);
 }
 
 // A player row's packed avatar id selects the female profile; an NPC row
@@ -100,19 +100,19 @@ void test_slot_pick_reads_carrier_and_water() {
 void test_female_select_is_player_only() {
     World w;
     seed_world(w);
-    w.character_traits.set(9, true);
-    w.character_traits.set(0, true);
+    w.tables.character_traits.set(9, true);
+    w.tables.character_traits.set(0, true);
     const int32_t body[3] = {0, 0, 0};
     const uint32_t words[1] = {0x1u};
     wire_body_slot_sounds(w, words, 1, 0, 42, /*character_id=*/9, 7, false, body);
-    CHECK(w.slot_sounds.size() == 1);
-    if (!w.slot_sounds.empty())
-        CHECK(std::strcmp(w.slot_sounds[0].set_name, "FSP_WOMAN_L") == 0);
-    w.slot_sounds.clear();
+    CHECK(w.out.slot_sounds.size() == 1);
+    if (!w.out.slot_sounds.empty())
+        CHECK(std::strcmp(w.out.slot_sounds[0].set_name, "FSP_WOMAN_L") == 0);
+    w.out.slot_sounds.clear();
     wire_body_slot_sounds(w, words, 1, 0, 42, /*character_id=*/0, 7, false, body);
-    CHECK(w.slot_sounds.size() == 1);
-    if (!w.slot_sounds.empty())
-        CHECK(std::strcmp(w.slot_sounds[0].set_name, "FSP_MAN_L") == 0);
+    CHECK(w.out.slot_sounds.size() == 1);
+    if (!w.out.slot_sounds.empty())
+        CHECK(std::strcmp(w.out.slot_sounds[0].set_name, "FSP_MAN_L") == 0);
 }
 
 // An unauthored slot is the resolved-id-0 no-op: NOTHING plays, no fallback.
@@ -120,11 +120,11 @@ void test_female_select_is_player_only() {
 void test_empty_set_plays_nothing() {
     World w;
     seed_world(w);
-    w.character_traits.set(9, true);
+    w.tables.character_traits.set(9, true);
     const int32_t body[3] = {0, 0, 0};
     const uint32_t words[1] = {0x2u | 0x40u}; // RIGHT foot + SSAudio2
     wire_body_slot_sounds(w, words, 1, 0, 42, 9, 7, false, body);
-    CHECK(w.slot_sounds.empty());
+    CHECK(w.out.slot_sounds.empty());
 }
 
 // Words consume in playhead order — two crossed frames fire both, in order.
@@ -134,10 +134,10 @@ void test_multi_word_order() {
     const int32_t body[3] = {0, 0, 0};
     const uint32_t words[3] = {0x1u, 0u, 0x2u};
     wire_body_slot_sounds(w, words, 3, 0, 42, 0, 7, false, body);
-    CHECK(w.slot_sounds.size() == 2);
-    if (w.slot_sounds.size() == 2) {
-        CHECK(w.slot_sounds[0].slot == audio::kSlotFootLGround);
-        CHECK(w.slot_sounds[1].slot == audio::kSlotFootRGround);
+    CHECK(w.out.slot_sounds.size() == 2);
+    if (w.out.slot_sounds.size() == 2) {
+        CHECK(w.out.slot_sounds[0].slot == audio::kSlotFootLGround);
+        CHECK(w.out.slot_sounds[1].slot == audio::kSlotFootRGround);
     }
 }
 
@@ -148,7 +148,7 @@ void test_degenerate_inputs() {
     wire_body_slot_sounds(w, nullptr, 4, 0, 42, 0, 7, false, body);
     const uint32_t words[1] = {0x1u};
     wire_body_slot_sounds(w, words, 0, 0, 42, 0, 7, false, body);
-    CHECK(w.slot_sounds.empty());
+    CHECK(w.out.slot_sounds.empty());
 }
 
 } // namespace

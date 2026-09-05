@@ -1,6 +1,8 @@
 // ObjectData — geometry views: LOD surfaces and memoized submesh builds,
 // bones/skinning, collision volumes, lights and user points.
 #include "object/object_data_internal.h"
+#include "object/model_light.h"
+#include "object/model_user_point.h"
 
 #include <runtime/simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
@@ -14,6 +16,7 @@
 #include <vector>
 
 using namespace novaobj;
+using namespace opennova::threedi;
 
 namespace {
 
@@ -42,27 +45,28 @@ int ObjectData::get_light_count() const {
 	return has_source_model ? static_cast<int>(source_model.light_count) : 0;
 }
 
-Dictionary ObjectData::get_light_info(int p_index) const {
-	Dictionary info;
+Ref<ModelLight> ObjectData::get_light_info(int p_index) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.light_count) {
-		return info;
+		return Ref<ModelLight>();
 	}
 	const ThreediLight &light = source_model.lights[p_index];
-	info["name"] = vformat("Light %d", p_index);
-	info["position"] = godot_vec3(light.offset);
-	info["atten_start"] = light.atten_start;
-	info["atten_end"] = light.atten_end;
-	info["color_start"] = Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f, 1.0f);
-	info["color_end"] = Color(light.color_end[2] / 255.0f, light.color_end[1] / 255.0f, light.color_end[0] / 255.0f, 1.0f);
-	info["falloff_deg"] = static_cast<int>(light.falloff_byte);
-	info["subobject"] = static_cast<int>(light.subobj_index);
-	info["disable_corona"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_CORONA) != 0;
-	info["disable_lightterrain"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_TERRAIN) != 0;
-	info["disable_lightobjects"] = (light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0;
-	info["colorgen_style"] = static_cast<int>(light.style);
-	info["colorgen_phase"] = static_cast<int>(light.phase);
-	info["colorgen_rate"] = static_cast<int>(light.rate);
-	info["light_type"] = (light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0;
+	Ref<ModelLight> info;
+	info.instantiate();
+	info->set_name(vformat("Light %d", p_index));
+	info->set_position(godot_vec3(light.offset));
+	info->set_atten_start(light.atten_start);
+	info->set_atten_end(light.atten_end);
+	info->set_color_start(Color(light.color_start[2] / 255.0f, light.color_start[1] / 255.0f, light.color_start[0] / 255.0f, 1.0f));
+	info->set_color_end(Color(light.color_end[2] / 255.0f, light.color_end[1] / 255.0f, light.color_end[0] / 255.0f, 1.0f));
+	info->set_falloff_deg(static_cast<int>(light.falloff_byte));
+	info->set_subobject(static_cast<int>(light.subobj_index));
+	info->set_disable_corona((light.flags & THREEDI_LIGHT_FLAG_DISABLE_CORONA) != 0);
+	info->set_disable_lightterrain((light.flags & THREEDI_LIGHT_FLAG_DISABLE_TERRAIN) != 0);
+	info->set_disable_lightobjects((light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0);
+	info->set_colorgen_style(static_cast<int>(light.style));
+	info->set_colorgen_phase(static_cast<int>(light.phase));
+	info->set_colorgen_rate(static_cast<int>(light.rate));
+	info->set_light_type((light.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0 ? 1 : 0);
 	return info;
 }
 
@@ -70,21 +74,19 @@ int ObjectData::get_user_point_count() const {
 	return has_source_model ? static_cast<int>(source_model.user_point_count) : 0;
 }
 
-Dictionary ObjectData::get_user_point_info(int p_index) const {
-	Dictionary info;
+Ref<ModelUserPoint> ObjectData::get_user_point_info(int p_index) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.user_point_count) {
-		return info;
+		return Ref<ModelUserPoint>();
 	}
 	const ThreediUserPoint &point = source_model.user_points[p_index];
 	float position[3];
 	float direction[3];
 	threedi_user_point_position(&point, position);
 	threedi_user_point_direction(&point, direction);
-	info["name"] = from_native(point.name);
-	info["position"] = godot_vec3(position);
-	info["rotation"] = godot_vec3(direction);
-	info["subobject"] = point.subobject_index;
-	info["point_type"] = point.userpoint_type;
+	Ref<ModelUserPoint> info;
+	info.instantiate();
+	info->assign(from_native(point.name), godot_vec3(position), godot_vec3(direction),
+			point.subobject_index, point.userpoint_type);
 	return info;
 }
 
@@ -96,33 +98,6 @@ int ObjectData::get_user_point_bone_mask(const String &p_name) const {
 
 int ObjectData::part_anim_rate_for_seconds(double p_seconds) {
 	return opennova::world::part_anim_rate_from_seconds(p_seconds);
-}
-
-Dictionary ObjectData::part_anim_step(int p_phase, int p_dir, int p_rate) {
-	int32_t phase = static_cast<int32_t>(p_phase);
-	const bool finished = opennova::world::part_anim_step(phase,
-			static_cast<int32_t>(p_dir), static_cast<int32_t>(p_rate));
-	Dictionary out;
-	out["phase"] = phase;
-	out["finished"] = finished;
-	return out;
-}
-
-Vector3 ObjectData::get_ground_anchor(int p_lod_index) const {
-	// The model-space point that should sit at a placed object's stored position:
-	// the "ground" userpoint if present, else the model origin (see
-	// threedi_3di3_ground_anchor). The helper returns model axis order; godot_vec3
-	// applies the single negate-x that maps it into render/model space, exactly as
-	// get_user_point_info / build_lod_submeshes do for userpoints and part origins.
-	(void)p_lod_index; // userpoints are model-global
-	if (!has_source_model) {
-		return Vector3();
-	}
-	float anchor[3];
-	if (!threedi_3di3_ground_anchor(&source_model, anchor)) {
-		return Vector3();
-	}
-	return godot_vec3(anchor);
 }
 
 bool ObjectData::has_collision() const {
@@ -212,20 +187,13 @@ Array ObjectData::get_collision_volumes() const {
 	return out;
 }
 
-Dictionary ObjectData::get_render_lod_info(int p_lod_index) const {
-	Dictionary info;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
-		return info;
+int ObjectData::get_part_anim_count(int p_lod_index) const {
+	if (!has_source_model || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+		return 0;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
-	info["render_function"] = from_native(lod.model_type);
-	info["threshold"] = lod.lod_threshold;
-	info["part_count"] = static_cast<int>(lod.render_object_count);
-	info["render_object_count"] = static_cast<int>(lod.render_object_count);
-	info["strip_count"] = static_cast<int>(lod.strip_count);
-	info["vertex_count"] = static_cast<int>(lod.vertices.count);
-	info["index_count"] = static_cast<int>(lod.indices.count);
-	return info;
+	return static_cast<int>(
+			source_model.lods[p_lod_index].part_animation_count);
 }
 
 PackedVector3Array ObjectData::get_bone_origins(int p_lod_index) const {

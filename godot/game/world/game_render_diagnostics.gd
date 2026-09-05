@@ -23,6 +23,17 @@ static func from_world(
 	return snapshot
 
 
+## The world's one typed render snapshot for MCP, visual probes, and
+## comparison tooling: the world viewport's current camera when none is
+## given. Keeping camera/environment/water/shadow/pass sampling together
+## guarantees every consumer sees the same fields and frame semantics.
+static func sample(world: GameWorld, camera: Camera3D = null) -> GameRenderDiagnostics:
+	var viewport := world.get_viewport() if world.is_inside_tree() else null
+	if camera == null and viewport != null:
+		camera = viewport.get_camera_3d()
+	return from_world(world, camera, viewport)
+
+
 func to_json_value() -> Dictionary:
 	return _value.duplicate(true)
 
@@ -75,7 +86,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 		},
 		"renderer": _renderer_state(viewport),
 		"runtime": {
-			"performance": world.get_runtime_perf_counters(),
+			"performance": world.get_runtime_perf_counters().to_json_value(),
 		},
 	}
 
@@ -345,10 +356,9 @@ static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
 		"projection_mode": shadow.get_projection_mode(),
 		"visible": shadow.visible,
 		"visible_in_tree": shadow.is_visible_in_tree(),
-		# Live = following the sun each frame: through its own _process when it
-		# stands alone, or through the world's render_environment_nodes_frame
-		# (which turns that callback off and calls advance_frame itself).
-		"processing": shadow.is_processing() or world_driven,
+		# Live = following the sun each frame through the world's
+		# render_environment_nodes_frame (the node never self-clocks).
+		"processing": world_driven,
 		"shadow_enabled": shadow.has_shadow(),
 		"global_transform": shadow.global_transform,
 		"emission_direction": -shadow.global_transform.basis.z,
@@ -432,7 +442,7 @@ static func _lights_state(root: Node) -> Dictionary:
 			directional += 1
 	# The EffectWorld point lights are shader-fed pool instances, not Light3D
 	# nodes — the omni node census above must stay 0 while this sibling block
-	# reports the hosted table (effect_light_director.gd).
+	# reports the hosted table (EffectLightDirector, godot/src/lights).
 	var effectworld: Dictionary = {}
 	var world := root as GameWorld
 	if world != null:

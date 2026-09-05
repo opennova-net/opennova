@@ -1,4 +1,5 @@
 #include "network/novaworld_host.h"
+#include "util/string_convert.h"
 
 #include "network/novaworld_identity.h"
 
@@ -13,13 +14,7 @@
 
 namespace godot {
 
-namespace {
-
-std::string to_std(const String &s) {
-	return std::string(s.utf8().get_data());
-}
-
-} // namespace
+using opennova::to_std;
 
 NovaWorldHost::NovaWorldHost() :
 		lobby_(make_lobby_hooks()) {}
@@ -88,7 +83,6 @@ void NovaWorldHost::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "lobby_name"), "set_lobby_name", "get_lobby_name");
 
 	ADD_SIGNAL(MethodInfo("registered"));
-	ADD_SIGNAL(MethodInfo("host_update_sent"));
 	ADD_SIGNAL(MethodInfo("disconnected", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
 	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state")));
@@ -258,7 +252,6 @@ void NovaWorldHost::send_host_update() {
 	// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860, see docs/net/novaworld-net-re.md]
 	auto upd = opennova::make_host_update(host_cfg());
 	lobby_.send(lobby_.session()->build_lobby_message(upd));
-	emit_signal("host_update_sent");
 }
 
 void NovaWorldHost::enter_state(State next, const String &reason) {

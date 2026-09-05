@@ -3,6 +3,7 @@
 // Ported verbatim from object_model.gd (2026-08-09 de-scripting).
 
 #include "object/object_model.h"
+#include "object/model_light.h"
 
 #include <cmath>
 
@@ -27,6 +28,8 @@
 #include "render/object_lod_frame.h"
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
+
+using namespace opennova::threedi;
 
 namespace godot {
 
@@ -246,13 +249,18 @@ void ObjectModel::update_slot_shadow_group() {
 	if (is_shadow_caster_enabled()) {
 		if (!is_in_group(group)) {
 			add_to_group(group);
+			SlotShadow::bump_caster_group_revision();
 		}
 	} else if (is_in_group(group)) {
 		remove_from_group(group);
+		SlotShadow::bump_caster_group_revision();
 	}
 }
 
 void ObjectModel::set_slot_shadow_person(bool p_person) {
+	if (slot_shadow_person_ != p_person) {
+		SlotShadow::bump_caster_group_revision();
+	}
 	slot_shadow_person_ = p_person;
 }
 
@@ -279,8 +287,13 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 }
 
 void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
-	model_sphere_radius_ = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
-	entity_bound_radius_ = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
+	const float sphere = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
+	const float bound = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
+	if (model_sphere_radius_ != sphere || entity_bound_radius_ != bound) {
+		SlotShadow::bump_caster_group_revision();
+	}
+	model_sphere_radius_ = sphere;
+	entity_bound_radius_ = bound;
 }
 
 float ObjectModel::get_model_sphere_radius() const {
@@ -292,9 +305,13 @@ float ObjectModel::get_entity_bound_radius() const {
 }
 
 void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
-	slot_shadow_capture_with_ = p_owner != nullptr
+	const ObjectID next = p_owner != nullptr
 			? ObjectID(p_owner->get_instance_id())
 			: ObjectID();
+	if (slot_shadow_capture_with_ != next) {
+		SlotShadow::bump_caster_group_revision();
+	}
+	slot_shadow_capture_with_ = next;
 }
 
 ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
@@ -304,6 +321,9 @@ ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
 
 void ObjectModel::set_slot_shadow_decal(const String &p_texture,
 		const Vector4 &p_dims) {
+	if (slot_shadow_decal_texture_ != p_texture) {
+		SlotShadow::bump_caster_group_revision();
+	}
 	slot_shadow_decal_texture_ = p_texture;
 	slot_shadow_decal_dims_ = p_dims;
 }
@@ -400,7 +420,7 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(child);
 		if (visual != nullptr) {
 			const bool auxiliary =
-					bool(visual->get_meta("_opennova_auxiliary_draw", false));
+					Object::cast_to<PostMultiplyDraw>(visual) != nullptr;
 			visual->set_layer_mask(presentation_layer_mask(auxiliary));
 			GeometryInstance3D *geometry =
 					Object::cast_to<GeometryInstance3D>(child);
@@ -536,7 +556,7 @@ void ObjectModel::set_panm_clock(const Ref<PanmClock> &p_clock) {
 }
 
 void ObjectModel::set_active_lod(int p_lod_index) {
-	const int next_lod = clamp_lod_index(p_lod_index);
+	const int next_lod = exact_owner_lod_ ? p_lod_index : clamp_lod_index(p_lod_index);
 	if (active_lod_ == next_lod) {
 		return;
 	}
@@ -560,7 +580,9 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 	apply_runtime_state(0.0);
 }
 
-void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner) {
+void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner, bool p_exact) {
+    exact_owner_lod_ = p_exact;
+    if (p_exact && authored_lod_enabled_) authored_lod_models_.insert(this);
 	authored_lod_owner_ = p_owner != nullptr && p_owner != this
 			? p_owner->get_instance_id()
 			: ObjectID();
@@ -607,7 +629,20 @@ int64_t ObjectModel::ctrl_dword(int64_t p_value) {
 	return next_value;
 }
 
+opennova::renderer::ControlRegisterValues ObjectModel::runtime_ctrl_values() {
+	if (!ctrl_native_cache_valid_) {
+		ctrl_native_cache_ = ObjectData::runtime_control_values_dict_only(
+				ctrl_values_, ctrl_native_has_flicker_, ctrl_native_has_swing_);
+		ctrl_native_cache_valid_ = true;
+	}
+	opennova::renderer::ControlRegisterValues values = ctrl_native_cache_;
+	ObjectData::stamp_weather_ctrl_registers(values, ctrl_native_has_flicker_,
+			ctrl_native_has_swing_);
+	return values;
+}
+
 void ObjectModel::finish_ctrl_change(bool p_apply_now) {
+	ctrl_native_cache_valid_ = false;
 	wake_runtime_frame();
 	bounds_dirty_ = true;
 	if (p_apply_now) {
@@ -714,15 +749,6 @@ void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_nam
 	finish_ctrl_change(true);
 }
 
-void ObjectModel::clear_ctrl_values() {
-	if (ctrl_values_.is_empty() && ctrl_value_owners_.is_empty()) {
-		return;
-	}
-	ctrl_values_.clear();
-	ctrl_value_owners_.clear();
-	finish_ctrl_change(true);
-}
-
 Dictionary ObjectModel::get_ctrl_values() const {
 	return ctrl_values_.duplicate(true);
 }
@@ -790,7 +816,7 @@ void ObjectModel::on_object_changed() {
 
 // The shared awake set: every model with live per-frame work. One driver
 // (ObjectModel::advance_awake_frame) walks it per render frame — the game from
-// GameFramePipeline's render_material_frame leg, the menu shell and ONED from
+// GameWorld's render_material_frame leg, the menu shell and ONED from
 // their one process loop. There is no per-node _process, so nothing self-clocks
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
@@ -889,7 +915,8 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			continue;
 		}
 		const ObjectModel *owner = attachment->get_authored_lod_owner();
-		const int level = opennova::renderer::attachment_lod_index(
+		const int level = attachment->exact_owner_lod_ && owner != nullptr ? owner->active_lod_
+                : opennova::renderer::attachment_lod_index(
 				owner != nullptr ? owner->active_lod_ : 0,
 				static_cast<int>(attachment->authored_lod_thresholds_q16_.size()));
 		if (level < 0 || level == attachment->active_lod_) {
@@ -1144,6 +1171,13 @@ void ObjectModel::_notification(int p_what) {
 			rebuild();
 		}
 		update_slot_shadow_group();
+	} else if (p_what == NOTIFICATION_PARENTED || p_what == NOTIFICATION_UNPARENTED) {
+		// Reparenting can change the caster registry's ancestor-derived
+		// seat_parented fact (a caster moved under, or out from under, another
+		// caster) without touching group membership; both edges bump.
+		if (is_in_group(SlotShadow::caster_group())) {
+			SlotShadow::bump_caster_group_revision();
+		}
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible re-derives the render-side state (PANM pose, light
 		// draw parts, order) that stayed stale while hidden.
@@ -1156,7 +1190,7 @@ void ObjectModel::_notification(int p_what) {
 		render_order_dirty_ = true;
 		refresh_render_order();
 	} else if (p_what == NOTIFICATION_PREDELETE) {
-		// Only a model a PresentApplier row plan retains by pointer moves the
+		// Only a model an EntityPresenter row plan retains by pointer moves the
 		// stamp: a throwable, viewmodel, wire-body, or preview model freeing
 		// must not force every mission row back through a cold plan rebuild.
 		if (present_planned_) {
@@ -1238,8 +1272,7 @@ int ObjectModel::clamp_lod_index(int p_lod_index) const {
 	if (object_data_.is_null() || !object_data_->has_document()) {
 		return 0;
 	}
-	const Dictionary summary = object_data_->get_summary();
-	const int lod_count = int(summary.get("lod_count", 1));
+	const int lod_count = object_data_->get_lod_count();
 	return CLAMP(p_lod_index, 0, MAX(lod_count - 1, 0));
 }
 
@@ -1332,6 +1365,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					ObjectData::canonical_control_register_name("SWING");
 			ctrl_values_[flicker_register] = static_cast<int64_t>(flicker);
 			ctrl_values_[swing_register] = static_cast<int64_t>(swing);
+			ctrl_native_cache_valid_ = false;
 		}
 	}
 	// Retail poses PANM during entity submission before the later render-batch
@@ -1358,7 +1392,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	const opennova::renderer::ControlRegisterValues material_ctrl_values =
 			dynamic_material_slots_.is_empty()
 			? opennova::renderer::ControlRegisterValues{}
-			: ObjectData::runtime_control_values(ctrl_values_);
+			: runtime_ctrl_values();
 	for (int64_t s = 0; s < dynamic_material_slots_.size(); ++s) {
 		const int i = dynamic_material_slots_[s];
 		const Ref<ShaderMaterial> material = surface_materials_[i];
@@ -1413,7 +1447,8 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					frame_index < frames->size()) {
 				const Ref<Texture2D> frame = (*frames)[frame_index];
 				if (frame.is_valid()) {
-					set_material_and_auxiliary_parameter(material, "u_diffuse", frame);
+					set_material_and_auxiliary_parameter(material,
+							postmultiply_material_for_index(material_index), "u_diffuse", frame);
 					stamp.anim_frame = frame_index;
 					q3_parameters_changed = true;
 				}
@@ -1445,15 +1480,35 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	}
 }
 
+void ObjectModel::set_geometry_visible(bool p_visible) {
+    if (geometry_visible_ == p_visible) return;
+    geometry_visible_ = p_visible;
+    apply_level_surfaces();
+}
+
+void ObjectModel::set_rigid_parts(bool p_rigid) {
+    if (rigid_parts_ == p_rigid) return;
+    rigid_parts_ = p_rigid;
+    panm_applied_revision_ = 0;
+    apply_robj_transforms();
+    bounds_dirty_ = true;
+    point_light_draw_parts_dirty_ = true;
+    wake_runtime_frame();
+}
+
 bool ObjectModel::apply_robj_transforms() {
+    if (rigid_parts_) {
+        for (const auto &part : robj_nodes_) part.value->set_transform(Transform3D());
+        return true;
+    }
 	if (object_data_.is_null() || robj_nodes_.is_empty()) {
 		return false;
 	}
 	// One native call evaluates PANM at most once per graphic per frame (the
 	// placer shares one ObjectData across every instance of a graphic) and
 	// writes only the parts whose transforms changed since this model applied.
-	const int64_t revision = object_data_->apply_panm_to_nodes(
-			active_lod_, anim_time_ms_, ctrl_values_, robj_dense_,
+	const int64_t revision = object_data_->apply_panm_to_nodes_table(
+			active_lod_, anim_time_ms_, runtime_ctrl_values(), robj_dense_,
 			panm_applied_revision_);
 	const bool changed = revision != panm_applied_revision_;
 	panm_applied_revision_ = revision;
@@ -1472,13 +1527,29 @@ void ObjectModel::set_on_screen(bool p_value) {
 	}
 }
 
+// The two visibility owners: the entity presenter's placed walk writes the
+// sim's intent, the render-occlusion frame writes its claim, and the node's
+// visible flag is their product — a claimed node stays hidden through a sim
+// show, and a release lands on the sim's current intent, so neither writer
+// fights the other and a sim-hidden entity never flashes. Node3D::set_visible
+// no-ops on an unchanged flag, so the visibility-changed notification (light
+// draw parts dirty + the runtime wake) fires exactly on the product's edges.
+void ObjectModel::set_present_visible(bool p_visible) {
+	present_visible_ = p_visible;
+	set_visible(present_visible_ && !occlusion_hidden_);
+}
+
+void ObjectModel::set_occlusion_hidden(bool p_hidden) {
+	occlusion_hidden_ = p_hidden;
+	set_visible(present_visible_ && !occlusion_hidden_);
+}
+
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
 	sync_screen_notifier(p_bounds);
 	if (aabb_equal_approx(model_bounds_, p_bounds)) {
 		return;
 	}
 	model_bounds_ = p_bounds;
-	emit_signal("bounds_changed", model_bounds_);
 }
 
 bool ObjectModel::aabb_equal_approx(const AABB &p_a, const AABB &p_b) {
@@ -1541,10 +1612,10 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 			p_index >= object_data_->get_light_count()) {
 		return get_global_position();
 	}
-	const Dictionary info = object_data_->get_light_info(p_index);
-	const Vector3 model_position = info.get("position", Vector3());
+	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
+	const Vector3 model_position = info->get_position();
 	Vector3 position = get_global_transform().xform(model_position);
-	const int subobject = int(info.get("subobject", 0));
+	const int subobject = info->get_subobject();
 	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
 	// the rest-to-live transform, matching the user-point attachment basis.
 	if (subobject > 0 && skeleton_ != nullptr &&
@@ -1674,6 +1745,28 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
+	ClassDB::bind_method(D_METHOD("set_avatar_part", "part"), &ObjectModel::set_avatar_part);
+	ClassDB::bind_method(D_METHOD("get_avatar_part"), &ObjectModel::get_avatar_part);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "avatar_part", PROPERTY_HINT_ENUM,
+						 "None,Body,Head,Arms"),
+			"set_avatar_part", "get_avatar_part");
+	ClassDB::bind_method(D_METHOD("set_character_id", "id"), &ObjectModel::set_character_id);
+	ClassDB::bind_method(D_METHOD("get_character_id"), &ObjectModel::get_character_id);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "character_id"), "set_character_id",
+			"get_character_id");
+	ClassDB::bind_method(D_METHOD("set_avatar_camo", "camo"), &ObjectModel::set_avatar_camo);
+	ClassDB::bind_method(D_METHOD("get_avatar_camo"), &ObjectModel::get_avatar_camo);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3I, "avatar_camo"), "set_avatar_camo",
+			"get_avatar_camo");
+	ClassDB::bind_method(D_METHOD("set_graphic_name", "name"), &ObjectModel::set_graphic_name);
+	ClassDB::bind_method(D_METHOD("get_graphic_name"), &ObjectModel::get_graphic_name);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic_name"), "set_graphic_name",
+			"get_graphic_name");
+	ClassDB::bind_method(D_METHOD("set_entity_ref", "ref"), &ObjectModel::set_entity_ref);
+	ClassDB::bind_method(D_METHOD("get_entity_ref"), &ObjectModel::get_entity_ref);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "entity_ref", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_DEFAULT, "EntityRef"),
+			"set_entity_ref", "get_entity_ref");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),
@@ -1722,10 +1815,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_active_lod);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_enabled", "enabled"),
 			&ObjectModel::set_authored_lod_enabled);
-	ClassDB::bind_method(D_METHOD("is_authored_lod_enabled"),
-			&ObjectModel::is_authored_lod_enabled);
-	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner"),
-			&ObjectModel::set_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
+            &ObjectModel::set_authored_lod_owner, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
+    ClassDB::bind_method(D_METHOD("set_rigid_parts", "rigid"), &ObjectModel::set_rigid_parts);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
 			&ObjectModel::get_authored_lod_owner);
 	ClassDB::bind_method(D_METHOD("get_surface_slot_count"),
@@ -1738,8 +1831,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::add_level_bound_visual);
 	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
 			&ObjectModel::set_authored_occluders_enabled);
-	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
-			&ObjectModel::are_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("get_authored_occluder_count"),
 			&ObjectModel::get_authored_occluder_count);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
@@ -1747,6 +1838,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::advance_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
 	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
+	ClassDB::bind_method(D_METHOD("set_present_visible", "visible"),
+			&ObjectModel::set_present_visible);
+	ClassDB::bind_method(D_METHOD("is_present_visible"),
+			&ObjectModel::is_present_visible);
+	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
+			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_occlusion_hidden"),
+			&ObjectModel::is_occlusion_hidden);
 
 	ClassDB::bind_method(D_METHOD("begin_ctrl_update"), &ObjectModel::begin_ctrl_update);
 	ClassDB::bind_method(D_METHOD("end_ctrl_update"), &ObjectModel::end_ctrl_update);
@@ -1758,7 +1857,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_ctrl_override);
 	ClassDB::bind_method(D_METHOD("clear_ctrl_override", "owner", "name"),
 			&ObjectModel::clear_ctrl_override);
-	ClassDB::bind_method(D_METHOD("clear_ctrl_values"), &ObjectModel::clear_ctrl_values);
 	ClassDB::bind_method(D_METHOD("get_ctrl_values"), &ObjectModel::get_ctrl_values);
 
 	ClassDB::bind_method(D_METHOD("set_skeletal_anim", "skeletal"),
@@ -1812,15 +1910,19 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_part_phase", "channel"),
 			&ObjectModel::clear_part_phase);
 	ClassDB::bind_method(D_METHOD("clear_part_anims"), &ObjectModel::clear_part_anims);
-	ClassDB::bind_method(D_METHOD("get_active_part_anims"),
-			&ObjectModel::get_active_part_anims);
+	ClassDB::bind_method(D_METHOD("get_active_part_anim_registers"),
+			&ObjectModel::get_active_part_anim_registers);
 	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks",
 								 "prev_key", "prev_phase_ticks", "blend_weight",
 								 "variant", "prev_variant"),
 			&ObjectModel::set_weapon_channel, DEFVAL(String()), DEFVAL(0),
 			DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("get_weapon_channel"),
-			&ObjectModel::get_weapon_channel);
+	ClassDB::bind_method(D_METHOD("has_weapon_channel"),
+			&ObjectModel::has_weapon_channel);
+	ClassDB::bind_method(D_METHOD("get_weapon_channel_key"),
+			&ObjectModel::get_weapon_channel_key);
+	ClassDB::bind_method(D_METHOD("get_weapon_channel_phase_ticks"),
+			&ObjectModel::get_weapon_channel_phase_ticks);
 	ClassDB::bind_method(D_METHOD("set_aim_overlay", "deltas"),
 			&ObjectModel::set_aim_overlay);
 	ClassDB::bind_method(D_METHOD("get_aim_overlay"),
@@ -1829,15 +1931,23 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_right_hand_collapsed);
 	ClassDB::bind_method(D_METHOD("is_right_hand_collapsed"),
 			&ObjectModel::is_right_hand_collapsed);
-	ClassDB::bind_method(D_METHOD("get_body_blend"),
-			&ObjectModel::get_body_blend);
+	ClassDB::bind_method(D_METHOD("has_body_blend"),
+			&ObjectModel::has_body_blend);
+	ClassDB::bind_method(D_METHOD("get_body_blend_source_key"),
+			&ObjectModel::get_body_blend_source_key);
+	ClassDB::bind_method(D_METHOD("get_body_blend_source_time"),
+			&ObjectModel::get_body_blend_source_time);
+	ClassDB::bind_method(D_METHOD("get_body_blend_weight"),
+			&ObjectModel::get_body_blend_weight);
 	ClassDB::bind_method(D_METHOD("advance_body_animation", "delta", "write_pose"),
 			&ObjectModel::advance_body_animation, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),
 			&ObjectModel::is_body_pose_dirty);
 
-	ADD_SIGNAL(MethodInfo("bounds_changed", PropertyInfo(Variant::AABB, "bounds")));
-
+	BIND_ENUM_CONSTANT(AVATAR_PART_NONE);
+	BIND_ENUM_CONSTANT(AVATAR_PART_BODY);
+	BIND_ENUM_CONSTANT(AVATAR_PART_HEAD);
+	BIND_ENUM_CONSTANT(AVATAR_PART_ARMS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_CLOCK_ANIMATION_US);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_PANM_US);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_MATERIAL_US);

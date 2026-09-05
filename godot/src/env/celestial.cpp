@@ -12,7 +12,7 @@
 
 #include <runtime/renderer/render_order.h>
 
-#include "env/env_axes.h"
+#include "util/axes.h"
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
 #include "object/object_data.h"
@@ -64,7 +64,7 @@ void Celestial::_bind_methods() {
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
-	// The externally-callable render-frame drive (the _process body): the
+	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Celestial::advance_frame);
@@ -130,12 +130,11 @@ Ref<EnvFile> Celestial::_env_data() {
 }
 
 void Celestial::_ready() {
-	set_process(true);
-	if (glare_occlusion_.is_null()) {
-		glare_occlusion_.instantiate();
+	if (!glare_occlusion_) {
+		glare_occlusion_ = std::make_unique<GlareOcclusion>();
 	}
-	if (star_core_.is_null()) {
-		star_core_.instantiate();
+	if (!star_core_) {
+		star_core_ = std::make_unique<StarField>();
 	}
 	_rebuild_if_needed();
 }
@@ -225,7 +224,7 @@ void Celestial::_rebuild_if_needed() {
 		// under an identity basis leaves the quad facing Godot +Z (south) -
 		// edge-on at a sunrise/sunset pose, the "squashed oval sun". The
 		// +90 degree yaw about +Y is the exact composition
-		// R * import(v) == render_float_to_godot(v) (env_axes.h), restoring
+		// R * import(v) == render_float_to_godot(v) (util/axes.h), restoring
 		// the retail east-facing placement. Positive axis on purpose:
 		// godot-cpp Basis(axis, angle) diverges from core for negative axes.
 		model->set_basis(Basis(Vector3(0.0f, 1.0f, 0.0f),
@@ -399,10 +398,6 @@ void Celestial::_stamp_environment_capture_layer(Node3D *p_model) {
 	}
 }
 
-void Celestial::_process(double p_delta) {
-	advance_frame(p_delta);
-}
-
 Camera3D *Celestial::_resolve_camera() {
 	Camera3D *cam = Object::cast_to<Camera3D>(
 			ObjectDB::get_instance(cached_cam_id_));
@@ -465,11 +460,11 @@ void Celestial::advance_frame(double p_delta) {
 	// cull (celestial_frame.h carries the cite). Deliberately the RAW
 	// render-float tuple: the star instance directions it dots against live
 	// in the same axes engine-side, and the instance PLACEMENT crosses the
-	// env_axes.h swap where the transforms are stamped, so the culled star
+	// util/axes.h swap where the transforms are stamped, so the culled star
 	// and the placed star agree.
 	_update_star_field(to_vector3(state.light_direction()));
 
-	// The GODOT-world sun direction and view forward (env_axes.h swap — the
+	// The GODOT-world sun direction and view forward (util/axes.h swap — the
 	// 2026-08-20 correction: the earlier identity mapping placed every body
 	// 90 degrees off in yaw and mirrored, the 03tr-sun-sky "sun rises in the
 	// wrong place" half of the fixture's divergence).
@@ -481,7 +476,7 @@ void Celestial::advance_frame(double p_delta) {
 		Body &body = kv.value;
 		opennova::env::CelestialBodyFrame frame;
 		// The frame builders run in the witnessed render-float axes; the
-		// camera enters and the placement leaves through the env_axes.h swap.
+		// camera enters and the placement leaves through the util/axes.h swap.
 		const opennova::env::Vec3 cam_rf = godot_to_render_float(cam_pos);
 		if (kv.key == "moon") {
 			frame = opennova::env::build_moon_frame(state, cam_rf);
@@ -560,11 +555,11 @@ void Celestial::advance_frame(double p_delta) {
 	// by the world's veil leg into Weather.
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
-	if (bodies_.has("sun") && glare_occlusion_.is_valid() && cam != nullptr) {
+	if (bodies_.has("sun") && glare_occlusion_ != nullptr && cam != nullptr) {
 		const int sun_dim_fixed =
-				opennova::env::detail::to_fixed_16_16(state.sun_dim_pct());
+				opennova::io::float_to_fp16_16(state.sun_dim_pct());
 		const int overcast_fixed =
-				opennova::env::detail::to_fixed_16_16(state.overcast_blend());
+				opennova::io::float_to_fp16_16(state.overcast_blend());
 		const int view_dot_fixed = static_cast<int>(
 				forward.dot(sun_dir) * 65536.0f);
 		opennova::env::SunVeil veil = opennova::env::sun_veil_from_dot(
@@ -630,7 +625,7 @@ void Celestial::_set_body_parameter(const Body &p_body,
 // env #33: the star field owner — one MultiMesh of camera-facing quads under
 // the additive celestial shader, textured with the star 3DI's diffuse. The
 // witnessed placement, near-light cull, and twinkle accumulator run in
-// engine/formats/env behind the StarField binding.
+// engine/formats/env behind the StarField device helper.
 void Celestial::_build_star_field(const String &p_star_name) {
 	if (p_star_name.strip_edges().is_empty() || resource_root_.is_null()) {
 		return;
@@ -692,7 +687,7 @@ void Celestial::_update_star_field(const Vector3 &p_light_dir) {
 			continue;
 		}
 		// The instance offsets arrive in the render-float axes
-		// (star_offset_render_float3); place them through the env_axes.h
+		// (star_offset_render_float3); place them through the util/axes.h
 		// swap so the near-light cull's hidden star is the one the viewer
 		// sees beside the bright body.
 		const Vector3 offset(buf[o + 2], buf[o + 1], buf[o]);
@@ -711,8 +706,8 @@ void Celestial::_update_star_field(const Vector3 &p_light_dir) {
 }
 
 int Celestial::settle_glare_occlusion(int p_max_frames) {
-	if (glare_occlusion_.is_null()) {
-		glare_occlusion_.instantiate();
+	if (!glare_occlusion_) {
+		glare_occlusion_ = std::make_unique<GlareOcclusion>();
 	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
@@ -763,7 +758,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 Dictionary Celestial::get_diagnostics() const {
 	Dictionary diag;
 	Dictionary glare;
-	if (glare_occlusion_.is_valid()) {
+	if (glare_occlusion_ != nullptr) {
 		glare["brightness"] = glare_occlusion_->get_brightness();
 		glare["window"] = glare_occlusion_->get_window();
 		glare["ray_length"] = glare_occlusion_->get_ray_length();
@@ -803,15 +798,8 @@ float Celestial::_advance_water_glint(
 		const opennova::env::EnvironmentState &p_state,
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 		const Vector3 &p_forward, Body &p_body) {
-	// [orig: update_sun_glare @ 0x5ad130, once per main scene render from
-	// Terrain_RenderSceneWithReflection @ 0x5c96c0, see docs/env/env-tod-re.md]: one sample per frame —
-	// the reflected-sun point on the water (with the 0.25 * (frame & 3)
-	// reflected-height jitter and the +-2 point x/z jitter), visible when
-	// the point sees BOTH the sun (point -> camera + sun * 2048) and the
-	// camera over terrain (the entity ray keeps the documented sun-occlusion
-	// statics posture, like the sky glow) — then the +-16 chase toward
-	// popcount * 64 and the mirrored glare-model submit at camera +
-	// sun * 128 with the height term negated. No water = no glint.
+	// The glint law is the engine's advance_water_glint (celestial_frame.h);
+	// this leg owns the terrain rays and the model writes. No water = no glint.
 	if (p_body.model == nullptr) {
 		return 0.0f;
 	}
@@ -819,45 +807,19 @@ float Celestial::_advance_water_glint(
 		p_body.model->set_visible(false);
 		return 0.0f;
 	}
-	const opennova::env::Vec3 cam_m = godot_to_mission(p_cam_pos);
-	const opennova::env::Vec3 sun_m = godot_to_mission(p_sun_dir);
-	const float view_z_jitter =
-			0.25f * static_cast<float>(water_glint_.frame_index & 3u);
-	opennova::env::Vec3 point_m;
-	bool visible = opennova::env::water_glint_point(cam_m, sun_m,
-			p_state.water_height(), view_z_jitter, point_m);
-	if (visible) {
-		// The +-2 unit point jitter [orig: @ 0x5ad26a..0x5ad27e, see docs/env/env-tod-re.md] — mission
-		// x (godot x) and mission z = height (godot y).
-		point_m.x += (water_glint_.frame_index & 1u) ? 2.0f : -2.0f;
-		point_m.z += (water_glint_.frame_index & 2u) ? 2.0f : -2.0f;
-		const Vector3 point_g = mission_to_godot(point_m);
-		visible = _segment_clear(point_g,
-						  p_cam_pos + p_sun_dir * 2048.0f) &&
-				_segment_clear(point_g, p_cam_pos);
-	}
-	opennova::env::water_glint_tick(water_glint_, visible);
-
-	// Placement: camera + sun * 128 with the HEIGHT term negated (the
-	// mirrored glint below the eye [orig: @ 0x5ad1ba..0x5ad213 — the float
-	// matrix stores (-(camY + sunY*128), camZ - sunZ*128, camX + sunX*128),
-	// the mission -> render-float map of exactly that mirrored point, see docs/env/env-tod-re.md]).
-	const Vector3 mirrored(p_sun_dir.x, -p_sun_dir.y, p_sun_dir.z);
+	const opennova::env::WaterGlintFrame frame = opennova::env::advance_water_glint(
+			p_state, godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
+			godot_to_mission(p_forward), water_glint_,
+			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
+				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+			});
+	const Vector3 mirrored = mission_to_godot(frame.mirrored_sun);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
 	_set_body_parameter(p_body, "u_anchor_camera_world", p_cam_pos);
 	_set_body_parameter(p_body, "u_tint", to_vector3(p_state.sun_color()));
-	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
-	// negates the height term before the view transform, see docs/env/env-tod-re.md] through the
-	// witnessed (dot^4 - 28672/65536) x brightness chain.
-	const int dot_fixed = static_cast<int>(
-			p_forward.dot(mirrored) * 65536.0f);
-	const float alpha = static_cast<float>(opennova::env::water_glint_alpha_fixed(
-			dot_fixed, water_glint_.brightness,
-			opennova::env::detail::to_fixed_16_16(p_state.sun_dim_pct()))) /
-			65536.0f;
-	_set_body_parameter(p_body, "u_opacity", alpha);
-	p_body.model->set_visible(alpha > 0.0f && water_glint_.brightness > 0);
-	return alpha;
+	_set_body_parameter(p_body, "u_opacity", frame.alpha);
+	p_body.model->set_visible(frame.alpha > 0.0f && water_glint_.brightness > 0);
+	return frame.alpha;
 }
 
 // Terrain line-of-sight for the glare: the ported boolean raycast form over

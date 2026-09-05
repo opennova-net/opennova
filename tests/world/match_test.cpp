@@ -5,7 +5,7 @@
 // Server_CheckWinConditions @0x51AD40; Server_ProcessRoundEnd @0x5164F0]
 #include <runtime/world/match.h>
 #include <runtime/world/collision.h>
-#include <runtime/world/game_type.h>
+#include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -79,7 +79,7 @@ EntityHandle zone(World &world, uint8_t number, uint8_t team) {
     entity.is_capture_trigger = true;
     entity.alive = true;
     const EntityHandle handle = world.registry.spawn(1, entity);
-    world.zone_chain.zones.push_back(handle);
+    world.zones.chain.zones.push_back(handle);
     return handle;
 }
 

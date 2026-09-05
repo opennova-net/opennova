@@ -130,11 +130,11 @@ func test_mission_overrides_apply_as_live_view_only() -> void:
 	env.set_water_murk(0.8)
 	var base_bytes := env.to_bytes()
 
-	env.apply_mission_overrides({
-		"fog_level": 250.0,
-		"water_color": Color(0.1, 0.2, 0.3),
-		"water_murk": 0.4,
-	})
+	var overrides := MissionEnvironmentOverrides.new()
+	overrides.fog_level = 250.0
+	overrides.water_color = Color(0.1, 0.2, 0.3)
+	overrides.water_murk = 0.4
+	env.apply_mission_overrides(overrides)
 	assert_true(env.has_mission_overrides(), "Applying overrides should set the active flag.")
 	assert_almost_eq(env.get_fog_level(), 250.0, 0.5, "Getters should see the overridden fog level.")
 	assert_almost_eq(env.get_water_murk(), 0.4, 0.01, "Getters should see the overridden murk.")
@@ -377,11 +377,11 @@ func test_weather_publishes_the_active_moon_direction_at_night() -> void:
 
 func test_day_phase_selects_night_and_day() -> void:
 	var env := _new_default_env()
-	var noon: Dictionary = env.get_day_phase(1200.0)
-	assert_false(bool(noon["is_night"]), "Noon should be day.")
-	assert_almost_eq(float(noon["blend"]), 1.0, 0.01, "Noon should be fully blended into day.")
-	assert_true(bool(env.get_day_phase(0.0)["is_night"]), "Midnight should be night.")
-	assert_true(bool(env.get_day_phase(1845.0)["is_night"]), "18:45 is the sunset switch into night.")
+	var noon := env.get_day_phase(1200.0)
+	assert_false(noon.night, "Noon should be day.")
+	assert_almost_eq(noon.blend, 1.0, 0.01, "Noon should be fully blended into day.")
+	assert_true(env.get_day_phase(0.0).night, "Midnight should be night.")
+	assert_true(env.get_day_phase(1845.0).night, "18:45 is the sunset switch into night.")
 
 
 func test_double_saturate_and_lit_water_helpers() -> void:
@@ -437,10 +437,9 @@ func test_weather_releases_a_freed_simulation_before_the_environment_reads_it() 
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.weather_state_bound())
 	weather.bind_simulation(sim)
-	# GameWorld.unload frees the runtime and the off-tree sim with it: the
+	# GameWorld.unload frees the runtime and drops its sim with it: the
 	# environment must stop viewing the dead World's WeatherState before its
 	# next reload reads the view (the mission-lifecycle segfault).
-	sim.free()
 	env_node.environment_data = _load_full_00()
 	env_node.set_time_of_day(12.0)
 	# GameWorld re-prepares the standalone home on the world-only load.

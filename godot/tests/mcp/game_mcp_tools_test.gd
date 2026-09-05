@@ -1,89 +1,16 @@
 extends GutTest
 
-
-class DebugControlsStub:
-	extends DebugControls
-
-	var invoked_id: StringName
-	var invoked_args: Variant
-	var invoked_authority := false
-	var set_id: StringName
-	var set_value: Variant
-	var set_authority := false
-	var list_authority := false
-	var read_authority := false
-	var snapshot_authority := false
-
-	func list_controls(
-			_page: StringName = &"",
-			_filter: String = "",
-			allow_authority: bool = false) -> Array[Dictionary]:
-		list_authority = allow_authority
-		return [{"id": "probe"}]
-
-	func get_control_state(
-			id: StringName,
-			allow_authority: bool = false) -> DebugControlState:
-		read_authority = allow_authority
-		var state := DebugControlState.new()
-		state.id = id
-		state.available = true
-		# Writable no matter the caller, so the transport's own per-caller
-		# refusals stay observable against an always-accepting table.
-		state.writable = true
-		return state
-
-	func control(id: StringName) -> DebugControls.Row:
-		var row := DebugControls.Row.new()
-		row.id = id
-		row.page = &"Test"
-		row.label = String(id)
-		row.kind = DebugControls.Kind.ACTION
-		if id in [
-			&"teleport_local_player",
-			&"set_entity_health",
-			&"set_entity_position",
-			&"set_entity_item_attrib",
-			&"runtime_transport",
-			&"set_mission_variable",
-		]:
-			row.requires_confirm = true
-			row.authority = DebugControls.Authority.HOST_ONLY
-		return row
-
-	func set_control_value(
-			id: StringName,
-			value: Variant,
-			authority: bool = false) -> Error:
-		set_id = id
-		set_value = value
-		set_authority = authority
-		return OK
-
-	func invoke_control(
-			id: StringName,
-			args: Variant = null,
-			authority: bool = false) -> Dictionary:
-		invoked_id = id
-		invoked_args = args
-		invoked_authority = authority
-		return {
-			"error": OK,
-			"result": "done",
-			"state": get_control_state(id).to_json_value(),
-		}
-
-	func capture_snapshot(
-			filter: String = "",
-			allow_authority: bool = false) -> Dictionary:
-		snapshot_authority = allow_authority
-		return {"filter": filter, "controls": []}
+# The runtime tool handlers over the abstract adapter seam (GameMcpAdapter,
+# faked through its public verbs) and the REAL debug-control table over a
+# faked DebugShellHost answering one real MissionRoot (ADR 0043 rule 11): the
+# transport's per-caller authority refusals, argument marshalling and JSON
+# shapes are observed on the engine owner, never on a stub table.
 
 
 class AdapterStub:
 	extends GameMcpAdapter
 
-	var debug := DebugControlsStub.new()
+	var debug: DebugControlTable = null
 	var last_action := ""
 	var entity_page := {
 		"total": 2,
@@ -101,8 +28,11 @@ class AdapterStub:
 		"passes": {"root": {"shadow_draw_calls": 17}},
 	}
 
-	func get_debug_controls() -> DebugControls:
+	func get_debug_controls() -> DebugControlTable:
 		return debug
+
+	func runtime_status() -> Dictionary:
+		return {"label": "stub"}
 
 	func get_mcp_game_state() -> Variant:
 		return {"shell": {"state": "world"}}
@@ -143,10 +73,20 @@ var adapter: AdapterStub
 var tools: GameMcpTools
 var registry: McpToolRegistry
 var ctx := McpToolContext.new()
+var _runtime: MissionRoot
+var _sim: Simulation
+var _host: DebugHostFixture
 
 
 func before_each() -> void:
+	# The real table over one real runtime: the engine rows have an owner to
+	# reach, and the host's authority fact is the test's to flip.
+	_runtime = WorldFixture.boot_mission_data(self, WorldFixture.default_mission(0))
+	_sim = _runtime.get_sim()
+	_host = DebugHostFixture.for_runtime(_runtime, self)
 	adapter = add_child_autofree(AdapterStub.new())
+	adapter.debug = DebugControlTable.new()
+	adapter.debug.setup(_host)
 	tools = GameMcpTools.new(null, adapter)
 	registry = McpToolRegistry.new()
 	tools.register_all(registry)
@@ -199,58 +139,88 @@ func test_game_control_routes_through_public_adapter_seam() -> void:
 func test_debug_set_forwards_per_call_authority_confirmation() -> void:
 	var result := await _call("game_debug", {
 		"op": "set",
-		"id": "terrain_lod_quality",
-		"value": 2.0,
+		"id": "runtime_wac_paused",
+		"value": true,
 		"confirm_authority": true,
 	})
-	assert_eq(adapter.debug.set_id, &"terrain_lod_quality")
-	assert_eq(adapter.debug.set_value, 2.0)
-	assert_true(adapter.debug.set_authority)
-	assert_eq(result.structured["id"], "terrain_lod_quality")
+	assert_false(result.is_error, "a confirmed gated write reaches the table")
+	assert_eq(result.structured["id"], "runtime_wac_paused")
+	assert_eq(result.structured["value"], true)
+	assert_true(_sim.is_wac_paused(), "the write reached the engine owner")
+
+	var refused := await _call("game_debug", {
+		"op": "set",
+		"id": "runtime_wac_paused",
+		"value": false,
+	})
+	assert_true(refused.is_error, "an unconfirmed gated write is refused before the table")
+	assert_true(_sim.is_wac_paused(), "the refusal left the owner untouched")
 
 
 func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
 	# A confirm_authority caller's rows must answer for THAT caller: reporting
-	# writable=false / "Unlock edits" after its own write succeeded misleads
-	# MCP consumers into thinking the mutation was rejected.
-	await _call("game_debug", {
+	# writable=false / "confirm_authority" after its own write succeeded
+	# misleads MCP consumers into thinking the mutation was rejected.
+	var locked := await _call("game_debug", {"op": "get", "id": "runtime_wac_paused"})
+	assert_false(bool(locked.structured["writable"]),
+			"an unconfirmed caller sees the locked policy view")
+	assert_true(String(locked.structured["reason"]).contains("confirm_authority"))
+
+	var open := await _call("game_debug", {
 		"op": "get",
-		"id": "terrain_lod_quality",
+		"id": "runtime_wac_paused",
 		"confirm_authority": true,
 	})
-	assert_true(adapter.debug.read_authority,
+	assert_true(bool(open.structured["writable"]),
 			"op=get threads the caller's confirmed authority into the row")
 
-	adapter.debug.read_authority = false
-	await _call("game_debug", {
+	var written := await _call("game_debug", {
 		"op": "set",
-		"id": "terrain_lod_quality",
-		"value": 2.0,
+		"id": "runtime_wac_paused",
+		"value": false,
 		"confirm_authority": true,
 	})
-	assert_true(adapter.debug.read_authority,
+	assert_true(bool(written.structured["writable"]),
 			"the row returned after a confirmed set reflects that authority")
 
-	await _call("game_debug", {"op": "list", "confirm_authority": true})
-	assert_true(adapter.debug.list_authority)
-	await _call("game_debug", {"op": "snapshot", "confirm_authority": true})
-	assert_true(adapter.debug.snapshot_authority)
+	var listed := await _call("game_debug", {
+		"op": "list",
+		"filter": "Pause mission scripts",
+		"confirm_authority": true,
+	})
+	var rows: Array = listed.structured["controls"]
+	assert_eq(rows.size(), 1, "the filter narrows the list to the one row")
+	assert_true(bool(rows[0]["state"]["writable"]))
 
-	adapter.debug.read_authority = true
-	await _call("game_debug", {"op": "get", "id": "terrain_lod_quality"})
-	assert_false(adapter.debug.read_authority,
-			"an unconfirmed caller still sees the locked F3 policy view")
+	var snapshot := await _call("game_debug", {
+		"op": "snapshot",
+		"filter": "Pause mission scripts",
+		"confirm_authority": true,
+	})
+	assert_true(bool((snapshot.structured["controls"] as Array)[0]["state"]["writable"]))
+	assert_eq(snapshot.structured["runtime"]["label"], "stub",
+			"the snapshot carries the shell's runtime block")
+	assert_eq(snapshot.structured["edit_unlocked"], false)
+
+	_host.authority = false
+	var joiner := await _call("game_debug", {
+		"op": "get",
+		"id": "runtime_wac_paused",
+		"confirm_authority": true,
+	})
+	assert_false(bool(joiner.structured["writable"]),
+			"explicit confirmation cannot override joiner authority")
 
 
 func test_authority_confirmation_requires_a_json_boolean() -> void:
-	await _call("game_debug", {
+	var result := await _call("game_debug", {
 		"op": "set",
-		"id": "terrain_lod_quality",
-		"value": 2.0,
+		"id": "runtime_wac_paused",
+		"value": true,
 		"confirm_authority": "true",
 	})
-	assert_false(adapter.debug.set_authority,
-			"a truthy string cannot opt into authoritative mutation")
+	assert_true(result.is_error, "a truthy string cannot opt into authoritative mutation")
+	assert_false(_sim.is_wac_paused())
 
 
 func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> void:
@@ -264,26 +234,9 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		},
 		"confirm_authority": true,
 	})
+	assert_false(result.is_error, "the by-name teleport marshals and reaches the sim")
 	assert_eq(result.structured["error"], OK)
-	assert_eq(adapter.debug.invoked_id, &"teleport_local_player")
-	assert_eq(adapter.debug.invoked_args, [Vector3(12.0, 34.0, 56.0), 90.0, -10.0])
-	assert_true(adapter.debug.invoked_authority)
-
-	await _call("game_debug", {
-		"op": "invoke",
-		"id": "set_entity_health",
-		"args": {"entity": 7, "health": 25},
-		"confirm_authority": true,
-	})
-	assert_eq(adapter.debug.invoked_args, [7, 25])
-
-	await _call("game_debug", {
-		"op": "invoke",
-		"id": "runtime_transport",
-		"args": {"action": "pause"},
-		"confirm_authority": true,
-	})
-	assert_eq(adapter.debug.invoked_args, "pause")
+	assert_eq(result.structured["state"]["id"], "teleport_local_player")
 
 	await _call("game_debug", {
 		"op": "invoke",
@@ -291,37 +244,46 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"args": {"index": 17, "value": -3},
 		"confirm_authority": true,
 	})
-	assert_eq(adapter.debug.invoked_args, [17, -3])
+	assert_eq(_sim.get_mission_variable(17), -3, "the decoded arguments reached the engine")
 
+	var paused := await _call("game_debug", {
+		"op": "invoke",
+		"id": "runtime_transport",
+		"args": {"action": "pause"},
+		"confirm_authority": true,
+	})
+	assert_false(paused.is_error)
+	assert_false(_runtime.is_playing(), "the transport row paused the runtime")
 	await _call("game_debug", {
 		"op": "invoke",
-		"id": "set_audio_bus_volume",
-		"args": {"bus": "SFX", "volume_db": -12.5},
+		"id": "runtime_transport",
+		"args": {"action": "resume"},
+		"confirm_authority": true,
 	})
-	assert_eq(adapter.debug.invoked_args, ["SFX", -12.5])
+	assert_true(_runtime.is_playing())
 
-	await _call("game_debug", {
+	var bus := AudioServer.get_bus_index("Master")
+	var previous := AudioServer.is_bus_mute(bus)
+	var muted := await _call("game_debug", {
 		"op": "invoke",
 		"id": "set_audio_bus_mute",
-		"args": {"bus": "SFX", "muted": true},
+		"args": {"bus": "Master", "muted": previous},
 	})
-	assert_eq(adapter.debug.invoked_args, ["SFX", true])
+	assert_false(muted.is_error, "the ungated audio rows need no confirmation")
+	assert_eq(AudioServer.is_bus_mute(bus), previous)
 
 
 func test_gated_actions_require_per_call_confirmation_before_marshalling() -> void:
-	# The stub table deliberately accepts any write. The transport's precheck
-	# must refuse an unconfirmed gated call before reaching it (and before
-	# marshalling its args).
-	adapter.debug.invoked_id = &""
+	# The transport's precheck refuses an unconfirmed gated call before the
+	# table (and before marshalling its args).
 	var result := await _call("game_debug", {
 		"op": "invoke",
-		"id": "set_entity_health",
-		"args": {"entity": 0, "health": 25},
+		"id": "set_mission_variable",
+		"args": {"index": 17, "value": -3},
 	})
 	assert_true(result.is_error)
-	assert_eq(adapter.debug.invoked_id, &"")
-	assert_true(String(result.content[0]["text"]).contains(
-			"confirm_authority"))
+	assert_true(String(result.content[0]["text"]).contains("confirm_authority"))
+	assert_eq(_sim.get_mission_variable(17), 0, "the refused call never reached the engine")
 
 
 func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
@@ -356,7 +318,6 @@ func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
 		},
 	]
 	for row in cases:
-		adapter.debug.invoked_id = &""
 		var result := await _call("game_debug", {
 			"op": "invoke",
 			"id": row["id"],
@@ -365,8 +326,7 @@ func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
 		})
 		assert_true(result.is_error,
 				"Bad numeric input errors for %s" % row["id"])
-		assert_eq(adapter.debug.invoked_id, &"",
-				"Bad numeric input never reaches %s" % row["id"])
+	assert_eq(_sim.get_mission_variable(17), 0, "bad numeric input never reaches the engine")
 
 
 func test_debug_action_validation_is_actionable() -> void:
@@ -380,12 +340,17 @@ func test_debug_action_validation_is_actionable() -> void:
 	assert_true(String(result.content[0]["text"]).contains("position"))
 
 
-func test_snapshot_filter_reaches_shared_session() -> void:
+func test_snapshot_filter_reaches_the_table() -> void:
 	var result := await _call("game_debug", {
 		"op": "snapshot",
 		"filter": "terrain",
 	})
-	assert_eq(result.structured["filter"], "terrain")
+	var rows: Array = result.structured["controls"]
+	assert_gt(rows.size(), 0, "the filter keeps the terrain rows")
+	for row in rows:
+		var haystack := ("%s %s %s %s" % [
+			row["id"], row["page"], row["label"], row["description"]]).to_lower()
+		assert_true(haystack.contains("terrain"), "%s matches the filter" % row["id"])
 
 
 func test_cancelled_screenshot_reports_the_cancellation() -> void:

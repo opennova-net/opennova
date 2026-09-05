@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+using namespace opennova::threedi;
+
 namespace {
 
 struct ExpectedRegister {

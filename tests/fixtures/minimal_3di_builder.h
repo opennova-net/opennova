@@ -16,8 +16,7 @@
 //     wheels and rockers that way), strip indices are strip-relative.
 // Every float that the writer quantizes (16.16, Q14, Q8, byte colors) is
 // stored pre-quantized so a read -> write round trip reproduces the bytes.
-#ifndef OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H
-#define OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H
+#pragma once
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm.h>
@@ -57,7 +56,7 @@ struct Strip {
 	int material = 0;
 	bool alpha = false;
 	int bone = -1; // skinned strips: the skeleton bone every vertex rides
-	std::vector<ThreediVertex> vertices;
+	std::vector<opennova::threedi::ThreediVertex> vertices;
 	std::vector<uint16_t> indices;
 };
 
@@ -71,38 +70,38 @@ struct Lod {
 	std::string type = "gnrc";
 	int32_t threshold = 0;
 	std::vector<Part> parts;
-	std::vector<ThreediPartAnimation> panm;
+	std::vector<opennova::threedi::ThreediPartAnimation> panm;
 };
 
 struct CollisionObject {
 	int parent_part = 0;
 	Vec3 offset; // mission axes
-	std::vector<ThreediCollisionVertex> vertices;
-	std::vector<ThreediCollisionNormal> normals;
-	std::vector<ThreediCollisionFace> faces;
-	std::vector<ThreediBoundingVolume> volumes;
-	std::vector<ThreediBoundingPlane> planes;
+	std::vector<opennova::threedi::ThreediCollisionVertex> vertices;
+	std::vector<opennova::threedi::ThreediCollisionNormal> normals;
+	std::vector<opennova::threedi::ThreediCollisionFace> faces;
+	std::vector<opennova::threedi::ThreediBoundingVolume> volumes;
+	std::vector<opennova::threedi::ThreediBoundingPlane> planes;
 	bool sphere = false; // sphere-only skeletal section (person bones)
 	Vec3 sphere_center;
 	double sphere_radius = 0.0;
 };
 
 struct OcclusionRecord {
-	ThreediOcclusionObject object{};
-	std::vector<ThreediOcclusionVertex> vertices;
-	std::vector<ThreediOcclusionPlane> planes;
-	std::vector<ThreediOcclusionFace> faces;
+	opennova::threedi::ThreediOcclusionObject object{};
+	std::vector<opennova::threedi::ThreediOcclusionVertex> vertices;
+	std::vector<opennova::threedi::ThreediOcclusionPlane> planes;
+	std::vector<opennova::threedi::ThreediOcclusionFace> faces;
 };
 
-inline ThreediPartAnimation inert_panm(int part, int parent) {
-	ThreediPartAnimation row{};
+inline opennova::threedi::ThreediPartAnimation inert_panm(int part, int parent) {
+	opennova::threedi::ThreediPartAnimation row{};
 	row.parent_subobject = static_cast<uint8_t>(parent);
 	row.subobject_index = static_cast<uint8_t>(part);
 	return row;
 }
 
-inline ThreediTransform track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end) {
-	ThreediTransform t{};
+inline opennova::threedi::ThreediTransform track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end) {
+	opennova::threedi::ThreediTransform t{};
 	t.control = control;
 	t.control_param = param;
 	t.rate = rate;
@@ -115,9 +114,9 @@ struct Model {
 	std::string name;
 	bool skinned = false;
 	std::vector<Lod> lods;
-	std::vector<ThreediMaterial> materials;
-	std::vector<ThreediLight> lights;
-	std::vector<ThreediUserPoint> user_points;
+	std::vector<opennova::threedi::ThreediMaterial> materials;
+	std::vector<opennova::threedi::ThreediLight> lights;
+	std::vector<opennova::threedi::ThreediUserPoint> user_points;
 	std::vector<std::string> control_registers;
 	std::vector<CollisionObject> collision;
 	std::vector<OcclusionRecord> occlusion;
@@ -140,15 +139,15 @@ struct Model {
 		return static_cast<int>(lods[lod].parts.size()) - 1;
 	}
 
-	int add_material(const char *shader, const char *texture, uint8_t slot = THREEDI_TEX_SLOT_DIFFUSE) {
-		ThreediMaterial m{};
+	int add_material(const char *shader, const char *texture, uint8_t slot = opennova::threedi::THREEDI_TEX_SLOT_DIFFUSE) {
+		opennova::threedi::ThreediMaterial m{};
 		m.index = static_cast<int32_t>(materials.size());
 		std::snprintf(m.shader_name, sizeof(m.shader_name), "%s", shader);
 		if (texture != nullptr && texture[0] != '\0') {
 			m.texture_count = 1;
 			std::snprintf(m.textures[0].name, sizeof(m.textures[0].name), "%s", texture);
 			m.textures[0].slot = slot;
-			m.textures[0].type = THREEDI_TEX_TYPE_DIFFUSE;
+			m.textures[0].type = opennova::threedi::THREEDI_TEX_TYPE_DIFFUSE;
 		}
 		m.alpha_gen.reg = -1;
 		m.rgb_gen.reg = -1;
@@ -160,16 +159,16 @@ struct Model {
 	}
 
 	void add_detail_texture(int material, const char *texture) {
-		ThreediMaterial &m = materials[material];
-		ThreediMaterialTexture &t = m.textures[m.texture_count++];
+		opennova::threedi::ThreediMaterial &m = materials[material];
+		opennova::threedi::ThreediMaterialTexture &t = m.textures[m.texture_count++];
 		std::snprintf(t.name, sizeof(t.name), "%s", texture);
-		t.slot = THREEDI_TEX_SLOT_DETAIL;
-		t.type = THREEDI_TEX_TYPE_DIFFUSE;
+		t.slot = opennova::threedi::THREEDI_TEX_SLOT_DETAIL;
+		t.type = opennova::threedi::THREEDI_TEX_TYPE_DIFFUSE;
 	}
 
 	// The RGB generator on a material (styles > 112 read CTRL register `reg`).
 	void set_rgb_gen(int material, uint8_t style, int reg, double rate, const int start_rgb[3], const int end_rgb[3]) {
-		ThreediRgbGen &g = materials[material].rgb_gen;
+		opennova::threedi::ThreediRgbGen &g = materials[material].rgb_gen;
 		g.style = style;
 		g.reg = style > 112 ? reg : -1;
 		g.phase = 0.0f;
@@ -211,7 +210,7 @@ struct Model {
 			const uint16_t base = static_cast<uint16_t>(strip.vertices.size());
 			for (int c = 0; c < 4; ++c) {
 				const Vec3 m = to_model(corners[c]);
-				ThreediVertex v{};
+				opennova::threedi::ThreediVertex v{};
 				v.position[0] = static_cast<float>(m.x);
 				v.position[1] = static_cast<float>(m.y);
 				v.position[2] = static_cast<float>(m.z);
@@ -244,8 +243,8 @@ struct Model {
 		lods[lod].parts[part].strips.push_back(strip);
 	}
 
-	ThreediPartAnimation &add_panm(int lod, int part, int parent, uint32_t flags = 0) {
-		ThreediPartAnimation row = inert_panm(part, parent);
+	opennova::threedi::ThreediPartAnimation &add_panm(int lod, int part, int parent, uint32_t flags = 0) {
+		opennova::threedi::ThreediPartAnimation row = inert_panm(part, parent);
 		row.flags = flags;
 		lods[lod].panm.push_back(row);
 		return lods[lod].panm.back();
@@ -253,7 +252,7 @@ struct Model {
 
 	// --- user points, lights, registers -------------------------------------
 	int add_user_point(const char *point_name, Vec3 pos, Vec3 dir, int subobject, int32_t type) {
-		ThreediUserPoint p{};
+		opennova::threedi::ThreediUserPoint p{};
 		p.x = q16(pos.x);
 		p.y = q16(pos.y);
 		p.z = q16(pos.z);
@@ -270,7 +269,7 @@ struct Model {
 	int add_light(Vec3 pos, double atten_start, double atten_end, uint8_t style, int subobject,
 			const int rgb_start[3], const int rgb_end[3], uint8_t flags = 0, uint8_t phase = 0,
 			uint16_t rate = 0) {
-		ThreediLight l{};
+		opennova::threedi::ThreediLight l{};
 		const Vec3 m = to_model(pos);
 		l.offset[0] = static_cast<float>(m.x);
 		l.offset[1] = static_cast<float>(m.y);
@@ -323,7 +322,7 @@ struct Model {
 	// A bounding volume carved by six axis planes (normal . p + radius == 0).
 	void add_volume(int cobj, int32_t type, int32_t flags, const Box &box) {
 		CollisionObject &o = collision[cobj];
-		ThreediBoundingVolume v{};
+		opennova::threedi::ThreediBoundingVolume v{};
 		v.collidable_type = type;
 		v.flags = flags;
 		v.min_x_fp16 = q16(box.min.x);
@@ -337,7 +336,7 @@ struct Model {
 		const double n[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
 		const double d[6] = {-box.max.x, box.min.x, -box.max.y, box.min.y, -box.max.z, box.min.z};
 		for (int p = 0; p < 6; ++p) {
-			ThreediBoundingPlane plane{};
+			opennova::threedi::ThreediBoundingPlane plane{};
 			plane.normal[0] = q14f(n[p][0]);
 			plane.normal[1] = q14f(n[p][1]);
 			plane.normal[2] = q14f(n[p][2]);
@@ -349,7 +348,7 @@ struct Model {
 	// A regular octagonal prism (eight side planes + two caps) around (cx, cy).
 	void add_prism8(int cobj, int32_t type, int32_t flags, double cx, double cy, double radius, double z0, double z1) {
 		CollisionObject &o = collision[cobj];
-		ThreediBoundingVolume v{};
+		opennova::threedi::ThreediBoundingVolume v{};
 		v.collidable_type = type;
 		v.flags = flags;
 		v.min_x_fp16 = q16(cx - radius);
@@ -363,18 +362,18 @@ struct Model {
 		for (int s = 0; s < 8; ++s) {
 			const double angle = s * 3.14159265358979323846 / 4.0;
 			const double nx = q14f(std::cos(angle)), ny = q14f(std::sin(angle));
-			ThreediBoundingPlane plane{};
+			opennova::threedi::ThreediBoundingPlane plane{};
 			plane.normal[0] = static_cast<float>(nx);
 			plane.normal[1] = static_cast<float>(ny);
 			plane.normal[2] = 0.0f;
 			plane.radius = q16f(-(nx * cx + ny * cy + radius));
 			o.planes.push_back(plane);
 		}
-		ThreediBoundingPlane top{};
+		opennova::threedi::ThreediBoundingPlane top{};
 		top.normal[2] = 1.0f;
 		top.radius = q16f(-z1);
 		o.planes.push_back(top);
-		ThreediBoundingPlane bottom{};
+		opennova::threedi::ThreediBoundingPlane bottom{};
 		bottom.normal[2] = -1.0f;
 		bottom.radius = q16f(z0);
 		o.planes.push_back(bottom);
@@ -383,9 +382,9 @@ struct Model {
 	// One collision face over three of the object's local vertices.
 	void add_face(int cobj, uint16_t a, uint16_t b, uint16_t c, uint8_t poly_type = 1, uint32_t material_flags = 0) {
 		CollisionObject &o = collision[cobj];
-		const ThreediCollisionVertex &va = o.vertices[a];
-		const ThreediCollisionVertex &vb = o.vertices[b];
-		const ThreediCollisionVertex &vc = o.vertices[c];
+		const opennova::threedi::ThreediCollisionVertex &va = o.vertices[a];
+		const opennova::threedi::ThreediCollisionVertex &vb = o.vertices[b];
+		const opennova::threedi::ThreediCollisionVertex &vc = o.vertices[c];
 		const double ex = vb.position[0] - va.position[0], ey = vb.position[1] - va.position[1], ez = vb.position[2] - va.position[2];
 		const double fx = vc.position[0] - va.position[0], fy = vc.position[1] - va.position[1], fz = vc.position[2] - va.position[2];
 		// The retail corpus winds collision faces clockwise about their normal
@@ -395,7 +394,7 @@ struct Model {
 		nx /= len;
 		ny /= len;
 		nz /= len;
-		ThreediCollisionNormal normal{};
+		opennova::threedi::ThreediCollisionNormal normal{};
 		normal.normal[0] = q14f(nx);
 		normal.normal[1] = q14f(ny);
 		normal.normal[2] = q14f(nz);
@@ -412,14 +411,14 @@ struct Model {
 			normal_index = static_cast<int16_t>(o.normals.size());
 			o.normals.push_back(normal);
 		}
-		ThreediCollisionFace face{};
+		opennova::threedi::ThreediCollisionFace face{};
 		face.vert_index[0] = static_cast<int16_t>(a);
 		face.vert_index[1] = static_cast<int16_t>(b);
 		face.vert_index[2] = static_cast<int16_t>(c);
 		face.normal_index = normal_index;
 		face.plane_dist_fp16 = q16(normal.normal[0] * va.position[0] + normal.normal[1] * va.position[1] + normal.normal[2] * va.position[2]);
 		double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
-		for (const ThreediCollisionVertex *v : {&va, &vb, &vc}) {
+		for (const opennova::threedi::ThreediCollisionVertex *v : {&va, &vb, &vc}) {
 			for (int k = 0; k < 3; ++k) {
 				mn[k] = std::min<double>(mn[k], v->position[k]);
 				mx[k] = std::max<double>(mx[k], v->position[k]);
@@ -437,7 +436,7 @@ struct Model {
 	}
 
 	uint16_t add_collision_vertex(int cobj, Vec3 p) {
-		ThreediCollisionVertex v{};
+		opennova::threedi::ThreediCollisionVertex v{};
 		v.position[0] = q8f(p.x);
 		v.position[1] = q8f(p.y);
 		v.position[2] = q8f(p.z);
@@ -476,8 +475,8 @@ struct Model {
 		return static_cast<uint16_t>((lo & 0xFF) | ((hi & 0x7F) << 8) | (a > b ? 0x8000 : 0));
 	}
 
-	static ThreediOcclusionFace occ_face(int v0, int v1, int v2, int plane) {
-		ThreediOcclusionFace f{};
+	static opennova::threedi::ThreediOcclusionFace occ_face(int v0, int v1, int v2, int plane) {
+		opennova::threedi::ThreediOcclusionFace f{};
 		f.raw_indices = static_cast<uint32_t>(v0 & 0xFF) | (static_cast<uint32_t>(v1 & 0xFF) << 8) |
 				(static_cast<uint32_t>(v2 & 0xFF) << 16) | (static_cast<uint32_t>(plane & 0xFF) << 24);
 		f.edge_data = static_cast<uint32_t>(occ_edge(v0, v1)) | (static_cast<uint32_t>(occ_edge(v1, v2)) << 16);
@@ -485,18 +484,18 @@ struct Model {
 		return f;
 	}
 
-	static ThreediOcclusionVertex occ_vertex(Vec3 mission) {
+	static opennova::threedi::ThreediOcclusionVertex occ_vertex(Vec3 mission) {
 		const Vec3 m = to_model(mission);
-		ThreediOcclusionVertex v{};
+		opennova::threedi::ThreediOcclusionVertex v{};
 		v.position[0] = static_cast<float>(m.x);
 		v.position[1] = static_cast<float>(m.y);
 		v.position[2] = static_cast<float>(m.z);
 		return v;
 	}
 
-	static ThreediOcclusionPlane occ_plane(Vec3 mission_normal, const ThreediOcclusionVertex &on_plane) {
+	static opennova::threedi::ThreediOcclusionPlane occ_plane(Vec3 mission_normal, const opennova::threedi::ThreediOcclusionVertex &on_plane) {
 		const Vec3 n = to_model(mission_normal);
-		ThreediOcclusionPlane p{};
+		opennova::threedi::ThreediOcclusionPlane p{};
 		p.normal[0] = static_cast<float>(n.x);
 		p.normal[1] = static_cast<float>(n.y);
 		p.normal[2] = static_cast<float>(n.z);
@@ -509,10 +508,10 @@ struct Model {
 		rec.object.parent_subobject_index = static_cast<uint8_t>(section_a);
 		rec.object.connecting_subobject = static_cast<uint8_t>(section_b);
 		float center[3] = {0, 0, 0};
-		for (const ThreediOcclusionVertex &v : rec.vertices)
+		for (const opennova::threedi::ThreediOcclusionVertex &v : rec.vertices)
 			for (int k = 0; k < 3; ++k) center[k] += v.position[k] / static_cast<float>(rec.vertices.size());
 		float radius = 0.0f;
-		for (const ThreediOcclusionVertex &v : rec.vertices) {
+		for (const opennova::threedi::ThreediOcclusionVertex &v : rec.vertices) {
 			const float dx = v.position[0] - center[0], dy = v.position[1] - center[1], dz = v.position[2] - center[2];
 			radius = std::max(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
 		}
@@ -562,39 +561,39 @@ struct Model {
 // Assembly: the contiguous Threedi3di3 the writer serializes. Owns every
 // array the struct points at.
 struct Assembled {
-	Threedi3di3 model{};
-	std::vector<ThreediLod> lods;
-	std::vector<std::vector<ThreediVertex>> lod_vertices;
+	opennova::threedi::Threedi3di3 model{};
+	std::vector<opennova::threedi::ThreediLod> lods;
+	std::vector<std::vector<opennova::threedi::ThreediVertex>> lod_vertices;
 	std::vector<std::vector<uint16_t>> lod_indices;
-	std::vector<std::vector<ThreediTriangleStrip>> lod_strips;
-	std::vector<std::vector<ThreediRenderObject>> lod_parts;
-	std::vector<std::vector<ThreediPartAnimation>> lod_panm;
-	std::vector<ThreediMaterial> materials;
-	std::vector<ThreediLight> lights;
-	std::vector<ThreediUserPoint> user_points;
-	std::vector<ThreediControlRegister> registers;
-	std::vector<ThreediMatrix4x4> matrices;
-	ThreediCollisionModel collision{};
-	std::vector<ThreediBoundingPlane> planes;
-	std::vector<ThreediBoundingVolume> volumes;
-	std::vector<ThreediCollisionVertex> vertices;
-	std::vector<ThreediCollisionNormal> normals;
-	std::vector<ThreediCollisionFace> faces;
-	std::vector<ThreediCollisionObject> objects;
-	std::vector<ThreediCollisionTranslation> translations;
-	std::vector<ThreediOcclusionVertex> occ_vertices;
-	std::vector<ThreediOcclusionPlane> occ_planes;
-	std::vector<ThreediOcclusionFace> occ_faces;
-	std::vector<ThreediOcclusionObject> occ_objects;
+	std::vector<std::vector<opennova::threedi::ThreediTriangleStrip>> lod_strips;
+	std::vector<std::vector<opennova::threedi::ThreediRenderObject>> lod_parts;
+	std::vector<std::vector<opennova::threedi::ThreediPartAnimation>> lod_panm;
+	std::vector<opennova::threedi::ThreediMaterial> materials;
+	std::vector<opennova::threedi::ThreediLight> lights;
+	std::vector<opennova::threedi::ThreediUserPoint> user_points;
+	std::vector<opennova::threedi::ThreediControlRegister> registers;
+	std::vector<opennova::threedi::ThreediMatrix4x4> matrices;
+	opennova::threedi::ThreediCollisionModel collision{};
+	std::vector<opennova::threedi::ThreediBoundingPlane> planes;
+	std::vector<opennova::threedi::ThreediBoundingVolume> volumes;
+	std::vector<opennova::threedi::ThreediCollisionVertex> vertices;
+	std::vector<opennova::threedi::ThreediCollisionNormal> normals;
+	std::vector<opennova::threedi::ThreediCollisionFace> faces;
+	std::vector<opennova::threedi::ThreediCollisionObject> objects;
+	std::vector<opennova::threedi::ThreediCollisionTranslation> translations;
+	std::vector<opennova::threedi::ThreediOcclusionVertex> occ_vertices;
+	std::vector<opennova::threedi::ThreediOcclusionPlane> occ_planes;
+	std::vector<opennova::threedi::ThreediOcclusionFace> occ_faces;
+	std::vector<opennova::threedi::ThreediOcclusionObject> occ_objects;
 };
 
 inline void assemble(const Model &m, Assembled &out) {
 	out = Assembled{};
-	Threedi3di3 &model = out.model;
+	opennova::threedi::Threedi3di3 &model = out.model;
 	model.version = 0;
 	model.header.has_header = 1;
 	std::snprintf(model.header.name, sizeof(model.header.name), "%s", m.name.c_str());
-	model.header.mesh_type = m.skinned ? THREEDI_MESH_SKINNED : THREEDI_MESH_BASIC;
+	model.header.mesh_type = m.skinned ? opennova::threedi::THREEDI_MESH_SKINNED : opennova::threedi::THREEDI_MESH_BASIC;
 	model.header.lod_count_decl = static_cast<int32_t>(m.lods.size());
 
 	// --- render LODs ---
@@ -608,18 +607,18 @@ inline void assemble(const Model &m, Assembled &out) {
 	double max_radius = 0.0;
 	for (size_t li = 0; li < lod_count; ++li) {
 		const Lod &src = m.lods[li];
-		ThreediLod &lod = out.lods[li];
+		opennova::threedi::ThreediLod &lod = out.lods[li];
 		std::memset(&lod, 0, sizeof(lod));
 		std::snprintf(lod.model_type, sizeof(lod.model_type), "%s", src.type.c_str());
 		lod.lod_threshold = src.threshold;
 		lod.rmdl_render_object_count = static_cast<int32_t>(src.parts.size());
-		std::vector<ThreediVertex> &verts = out.lod_vertices[li];
+		std::vector<opennova::threedi::ThreediVertex> &verts = out.lod_vertices[li];
 		std::vector<uint16_t> &indices = out.lod_indices[li];
-		std::vector<ThreediTriangleStrip> &strips = out.lod_strips[li];
-		std::vector<ThreediRenderObject> &parts = out.lod_parts[li];
+		std::vector<opennova::threedi::ThreediTriangleStrip> &strips = out.lod_strips[li];
+		std::vector<opennova::threedi::ThreediRenderObject> &parts = out.lod_parts[li];
 		for (size_t pi = 0; pi < src.parts.size(); ++pi) {
 			const Part &part = src.parts[pi];
-			ThreediRenderObject ro{};
+			opennova::threedi::ThreediRenderObject ro{};
 			ro.parent_index = static_cast<int32_t>(part.parent);
 			const Vec3 abs = to_model(part.pivot);
 			const Vec3 parent_pivot = part.parent == static_cast<int>(pi) ? Vec3{} : to_model(src.parts[part.parent].pivot);
@@ -635,7 +634,7 @@ inline void assemble(const Model &m, Assembled &out) {
 			for (int pass = 0; pass < 2; ++pass) {
 				for (const Strip &strip : part.strips) {
 					if (strip.alpha != (pass == 1)) continue;
-					ThreediTriangleStrip rec{};
+					opennova::threedi::ThreediTriangleStrip rec{};
 					rec.material_index = strip.material;
 					rec.index_offset = static_cast<int32_t>(indices.size());
 					rec.num_indices = static_cast<uint16_t>(strip.indices.size());
@@ -644,7 +643,7 @@ inline void assemble(const Model &m, Assembled &out) {
 					rec.start_vertex = static_cast<int32_t>(verts.size());
 					rec.num_vertices = static_cast<int32_t>(strip.vertices.size());
 					double smn[3] = {1e9, 1e9, 1e9}, smx[3] = {-1e9, -1e9, -1e9};
-					for (const ThreediVertex &v : strip.vertices) {
+					for (const opennova::threedi::ThreediVertex &v : strip.vertices) {
 						for (int k = 0; k < 3; ++k) {
 							smn[k] = std::min<double>(smn[k], v.position[k]);
 							smx[k] = std::max<double>(smx[k], v.position[k]);
@@ -682,13 +681,13 @@ inline void assemble(const Model &m, Assembled &out) {
 			}
 			parts.push_back(ro);
 		}
-		for (ThreediVertex &v : verts) {
-			v.flags = m.skinned ? (THREEDI_VERTEX_FLAG_SKINNED | 1u) : 1u;
+		for (opennova::threedi::ThreediVertex &v : verts) {
+			v.flags = m.skinned ? (opennova::threedi::THREEDI_VERTEX_FLAG_SKINNED | 1u) : 1u;
 			v.is_skinned = m.skinned ? 1 : 0;
 		}
 		lod.vertices.count = static_cast<uint32_t>(verts.size());
 		lod.vertices.stride = m.skinned ? 56u : 40u;
-		lod.vertices.flags = m.skinned ? (THREEDI_VERTEX_FLAG_SKINNED | 1u) : 1u;
+		lod.vertices.flags = m.skinned ? (opennova::threedi::THREEDI_VERTEX_FLAG_SKINNED | 1u) : 1u;
 		lod.vertices.items = verts.data();
 		lod.indices.count = static_cast<uint32_t>(indices.size());
 		lod.indices.indices = indices.data();
@@ -718,7 +717,7 @@ inline void assemble(const Model &m, Assembled &out) {
 	model.user_points = out.user_points.data();
 	model.user_point_count = out.user_points.size();
 	for (const std::string &reg : m.control_registers) {
-		ThreediControlRegister r{};
+		opennova::threedi::ThreediControlRegister r{};
 		std::snprintf(r.name, sizeof(r.name), "%s", reg.c_str());
 		out.registers.push_back(r);
 	}
@@ -726,8 +725,8 @@ inline void assemble(const Model &m, Assembled &out) {
 	model.ctrl.record_size = 24u;
 	model.ctrl.registers = out.registers.data();
 	for (int i = 0; i < m.matrix_count; ++i) {
-		ThreediMatrix4x4 identity;
-		threedi_mat4_identity(&identity);
+		opennova::threedi::ThreediMatrix4x4 identity;
+		opennova::threedi::threedi_mat4_identity(&identity);
 		out.matrices.push_back(identity);
 	}
 	model.mtrx.count = static_cast<uint32_t>(out.matrices.size());
@@ -749,7 +748,7 @@ inline void assemble(const Model &m, Assembled &out) {
 		};
 		for (size_t oi = 0; oi < m.collision.size(); ++oi) {
 			const CollisionObject &src = m.collision[oi];
-			ThreediCollisionObject o{};
+			opennova::threedi::ThreediCollisionObject o{};
 			o.num_vertices = static_cast<int32_t>(src.vertices.size());
 			o.num_faces = static_cast<int32_t>(src.faces.size());
 			o.num_normals = static_cast<int32_t>(src.normals.size());
@@ -760,7 +759,7 @@ inline void assemble(const Model &m, Assembled &out) {
 			o.offset[2] = q16(src.offset.z);
 			double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 			bool any = false;
-			for (const ThreediCollisionVertex &v : src.vertices) {
+			for (const opennova::threedi::ThreediCollisionVertex &v : src.vertices) {
 				for (int k = 0; k < 3; ++k) {
 					mn[k] = std::min<double>(mn[k], v.position[k]);
 					mx[k] = std::max<double>(mx[k], v.position[k]);
@@ -768,7 +767,7 @@ inline void assemble(const Model &m, Assembled &out) {
 				expand(v.position[0], v.position[1], v.position[2]);
 				any = true;
 			}
-			for (const ThreediBoundingVolume &v : src.volumes) {
+			for (const opennova::threedi::ThreediBoundingVolume &v : src.volumes) {
 				const double vmn[3] = {v.min_x_fp16 / 65536.0, v.min_y_fp16 / 65536.0, v.min_z_fp16 / 65536.0};
 				const double vmx[3] = {v.max_x_fp16 / 65536.0, v.max_y_fp16 / 65536.0, v.max_z_fp16 / 65536.0};
 				for (int k = 0; k < 3; ++k) {
@@ -819,14 +818,14 @@ inline void assemble(const Model &m, Assembled &out) {
 			// CXLT: the retail corpus carries one translation per non-root
 			// section on rigid models and one per section on skinned ones.
 			if (oi > 0 || m.skinned) {
-				ThreediCollisionTranslation t{};
+				opennova::threedi::ThreediCollisionTranslation t{};
 				t.translation[0] = o.offset[0];
 				t.translation[1] = o.offset[1];
 				t.translation[2] = o.offset[2];
 				out.translations.push_back(t);
 			}
 		}
-		ThreediCollisionModel &col = out.collision;
+		opennova::threedi::ThreediCollisionModel &col = out.collision;
 		if (bounded) {
 			for (int k = 0; k < 3; ++k) {
 				col.model_data.bbox[k] = q16f(bmn[k]);
@@ -893,7 +892,7 @@ inline void assemble(const Model &m, Assembled &out) {
 inline bool mint(const Model &m, const std::string &scratch_path, std::vector<uint8_t> &out) {
 	Assembled assembled;
 	assemble(m, assembled);
-	if (threedi_3di3_write(scratch_path.c_str(), &assembled.model) != 0) return false;
+	if (opennova::threedi::threedi_3di3_write(scratch_path.c_str(), &assembled.model) != 0) return false;
 	std::ifstream f(scratch_path, std::ios::binary | std::ios::ate);
 	if (!f) return false;
 	const std::streamoff size = f.tellg();
@@ -906,5 +905,3 @@ inline bool mint(const Model &m, const std::string &scratch_path, std::vector<ui
 }
 
 } // namespace synth3di
-
-#endif // OPENNOVA_TESTS_MINIMAL_3DI_BUILDER_H

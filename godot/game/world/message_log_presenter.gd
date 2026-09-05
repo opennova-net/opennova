@@ -66,15 +66,15 @@ func update(hud: HudOverlay, sim: Simulation, down: bool, chorded: bool,
 func flush_chat_lines(hud: HudOverlay, sim: Simulation) -> void:
 	if hud == null or sim == null:
 		return
-	for row in sim.drain_chat_lines():
-		var text := String(row.get("text", ""))
-		if text.is_empty():
+	for row_v in sim.drain_chat_lines():
+		var row: ChatLineRow = row_v
+		if row.text.is_empty():
 			continue
-		match int(row.get("sink", SINK_SYSTEM)):
+		match row.sink:
 			SINK_CHAT:
-				hud.push_chat_line(text, int(row.get("argb", -1)))
+				hud.push_chat_line(row.text, row.argb)
 			SINK_SYSTEM:
-				hud.push_feed_line(text, int(row.get("argb", -1)))
+				hud.push_feed_line(row.text, row.argb)
 			_:
 				pass  # the message queue / channel 3: no ring
 
@@ -82,7 +82,7 @@ func flush_chat_lines(hud: HudOverlay, sim: Simulation) -> void:
 ## The stdbox title from gametext Overlays/STROVER43; absent, the box draws
 ## untitled (no literal is witnessed for this one).
 func _title() -> String:
-	var table: RtxtStringFile = Strings.get_table("gametext")
-	if table != null and table.has_string_in_section("Overlays", "STROVER43"):
-		return table.get_string_in_section("Overlays", "STROVER43")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if table != null and table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER43"):
+		return table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER43")
 	return ""

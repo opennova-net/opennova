@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 
 namespace opennova::world {
@@ -86,5 +87,53 @@ inline constexpr uint32_t kDamageFlagCollision = 0x400u;
 // The death callback's cause code for a collision [orig: the literal 3 passed
 // at @0x4E6752, `deathCallback(target, 3, 0)`].
 inline constexpr int kDeathCauseCollision = 3;
+
+// THE RUN-OVER KILL — the movement resolver's own leg, run for the body being
+// resolved against the LAST candidate that pushed it in the first force pass
+// [orig: Entity_MovementCollisionResolver @0x4b2bd0, the block
+// @0x4b37c2..0x4b39f7; the pusher is the var_80 store inside the pass-0 force
+// fold @0x4b30a9]. Every gate is a refusal:
+//   * the pusher is a VEHICLE (itemDef type 1 @0x4b37dc) that is not the
+//     victim's ground link (@0x4b37e8 — a rider is never crushed by its ride)
+//     and is not dead (@0x4b37f3);
+//   * the victim has health and is not dead (@0x4b37fd / @0x4b380b);
+//   * BOTH the pusher's own tick displacement and its displacement RELATIVE to
+//     the victim exceed 0x27B0 (the planar lengths @0x4b3815..0x4b3890, the
+//     compares @0x4b38e5..0x4b38f8) — a parked hull nudged into never kills;
+//   * a same-team pusher kills only when either side's AI slot carries the
+//     BERSERK behavior bit 0x200 (@0x4b389d..0x4b38d2);
+//   * the authority alone kills (@0x4b38d8);
+//   * an indestructible victim (Flags 0x4000000) survives (@0x4b3901).
+// The kill: death anim = cause 2 (explosive) at bone 2 by the approach
+// quadrant, +0x178 credits the pusher's OCCUPANT, Health = 0, then
+// Score_ProcessKillEvent (@0x4b39b2..0x4b39e2).
+inline constexpr int32_t kRunOverSpeedThreshold = 0x27B0;
+inline constexpr int kRunOverDeathBone = 2;
+inline constexpr int kRunOverDeathCause = 2; // explosive family (death_grenade_*)
+
+inline bool run_over_kill_applies(bool pusher_is_vehicle, bool pusher_is_victims_ground,
+		bool pusher_dead, int32_t victim_health, bool victim_dead,
+		int32_t pusher_move_planar, int32_t relative_move_planar,
+		bool same_team, bool either_berserk, bool is_authority,
+		bool victim_indestructible) {
+	if (!pusher_is_vehicle || pusher_is_victims_ground || pusher_dead) return false;
+	if (victim_health <= 0 || victim_dead) return false;
+	if (same_team && !either_berserk) return false;
+	if (!is_authority) return false;
+	if (relative_move_planar <= kRunOverSpeedThreshold) return false;
+	if (pusher_move_planar <= kRunOverSpeedThreshold) return false;
+	if (victim_indestructible) return false;
+	return true;
+}
+
+// The approach quadrant [orig: @0x4b395d..0x4b39a7 — fpatan(rel dy, rel dx)
+// x 2^32/2pi, `(Yaw - that + 0x1FFFFFFF) >> 30` as an UNSIGNED shift].
+inline int run_over_quadrant(int32_t victim_yaw_bam, int32_t rel_dx, int32_t rel_dy) {
+	const double a = std::atan2(static_cast<double>(rel_dy), static_cast<double>(rel_dx));
+	const int32_t bam = static_cast<int32_t>(std::llround(a * 683565275.5764316));
+	const uint32_t q = (static_cast<uint32_t>(victim_yaw_bam) - static_cast<uint32_t>(bam) +
+			0x1FFFFFFFu) >> 30;
+	return static_cast<int>(q);
+}
 
 } // namespace opennova::world

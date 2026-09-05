@@ -438,7 +438,7 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 	if (!std::isfinite(next->config.simulation_tick_seconds) ||
 			next->config.simulation_tick_seconds <=
 					std::numeric_limits<float>::epsilon()) {
-		next->config.simulation_tick_seconds = 1.0f / 62.5f;
+		next->config.simulation_tick_seconds = 1.0f / static_cast<float>(io::kTickHz);
 	}
 	next->load_report.document_count = config.documents.size();
 
@@ -780,6 +780,47 @@ std::vector<EffectOwnerToken> EffectScene::active_owner_tokens() const {
 	return result;
 }
 
+bool EffectScene::set_group_parameters(EffectGroupId group_id,
+		float rate_control, float offset_control) {
+	if (!std::isfinite(rate_control) || !std::isfinite(offset_control)) {
+		return false;
+	}
+	Impl::GroupRecord *group = impl_->find_group(group_id);
+	if (group == nullptr || group->detached) {
+		return false;
+	}
+	const float rate_lerp = rate_control * 2.0f - 1.0f;
+	const float offset_lerp = offset_control * 2.0f - 1.0f;
+	for (const std::size_t emitter_slot : group->emitter_slots) {
+		if (emitter_slot >= impl_->emitter_pool.size()) {
+			continue;
+		}
+		Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
+		if (!record.active || record.definition_index >= impl_->definitions->size()) {
+			continue;
+		}
+		const ParticleDef &definition =
+				(*impl_->definitions)[record.definition_index];
+		Emitter &emitter = record.emitter;
+		// The first descriptor value replaces spawn-time randomisation with a
+		// live base/adjust interpolation. Negative rates stop emission.
+		// [orig: CEffectEmitter_CalcEmissionRate @ 0x5e1c30]
+		const float rate =
+				definition.emit_rate + definition.emit_rate_adj * rate_lerp;
+		emitter.emit_rate =
+				std::isfinite(rate) ? std::max(rate, 0.0f) : 0.0f;
+		// The second value turns the authored y/z pair into an interpolated
+		// spawn offset and clears the ordinary billboard camera pull.
+		// [orig: CEffectWorld_UpdateBlendValues @ 0x5e5df0]
+		const float spawn_y =
+				definition.y_offset + definition.z_offset * offset_lerp;
+		emitter.spawn_y_offset =
+				std::isfinite(spawn_y) ? spawn_y : definition.y_offset;
+		emitter.camera_pull = 0.0f;
+	}
+	return true;
+}
+
 void EffectScene::detach(EffectGroupId group_id) {
 	Impl::GroupRecord *group = impl_->find_group(group_id);
 	if (group != nullptr) {
@@ -938,6 +979,7 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 			emitter_snapshot.color_tint = emitter.color_tint;
 			emitter_snapshot.age = emitter.age;
 			emitter_snapshot.spring_const = emitter.spring_const;
+			emitter_snapshot.camera_pull = emitter.camera_pull;
 			emitter_snapshot.lod_divisor = emitter.lod_divisor;
 			emitter_snapshot.kill_plane =
 					static_cast<EffectKillPlane>(emitter.kill_plane_mode);
@@ -1021,6 +1063,9 @@ EffectDebugSnapshot EffectScene::inspect(bool p_include_bounds) const {
 			emitter_snapshot.position = emitter.position;
 			emitter_snapshot.forward = emitter.forward;
 			emitter_snapshot.age = emitter.age;
+			emitter_snapshot.emit_rate = emitter.emit_rate;
+			emitter_snapshot.spawn_y_offset = emitter.spawn_y_offset;
+			emitter_snapshot.camera_pull = emitter.camera_pull;
 			emitter_snapshot.kill_plane =
 					static_cast<EffectKillPlane>(emitter.kill_plane_mode);
 			emitter_snapshot.kill_plane_y = emitter.kill_plane_y;

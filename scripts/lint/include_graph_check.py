@@ -6,21 +6,27 @@ seam re-homed here by ADR 0029).
 as `<group/lib/file.h>` with group in {base, formats, runtime, net}. The group
 in the path is what makes the layering visible, so this check reads it:
 
-  1. GROUP ORDER — the PUBLIC link chain of ADR 0029 d3
-     (io -> crt -> formats -> base -> runtime -> net):
+  1. GROUP ORDER — the PUBLIC link chain of ADR 0029 d3 as flipped by
+     ADR 0043 d4 (io -> crt -> formats -> base -> net -> runtime; net is
+     wire only, the in-match session and replication live in runtime/):
        engine/base/io, engine/base/crt   include only base/io, base/crt
        engine/formats/**                 include base/io, base/crt, formats
        engine/base/**                    include base, formats
-       engine/runtime/**                 include base, formats, runtime
-       engine/net/**                     include base, formats, runtime, net
+       engine/net/**                     include base, formats, net
+       engine/runtime/**                 include base, formats, net, runtime
+  1b. NET-AGNOSTIC (ADR 0043 d4) — every engine/runtime lib except
+     runtime/inmatch and runtime/replication stays free of net/,
+     runtime/inmatch/ and runtime/replication/ includes: the world, the
+     scripts, the mission kernel and every presentation compiler are
+     headless facts the wire consumes, never the other way round.
   2. QUALIFIED — no include under engine/, apps/, tests/ or godot/src names an
      engine lib by its bare prefix (`<world/x.h>`); the group is mandatory. A
      quoted include that resolves locally (the includer's own directory, the
      godot/src binding root, tests/, apps/<app>/) is not an engine include.
-  3. TERRAIN SEAM (ADR 0020) — engine/net, runtime/wac, runtime/mission and
-     runtime/world reach terrain only through runtime/terrain_query's seam
-     headers; runtime/terrain and the terrain formats (cpt, til, trn, tpj,
-     foliage) are forbidden there.
+  3. TERRAIN SEAM (ADR 0020) — runtime/inmatch, runtime/replication,
+     runtime/wac, runtime/mission and runtime/world reach terrain only
+     through runtime/terrain_query's seam headers; runtime/terrain and the
+     terrain formats (cpt, til, trn, tpj, foliage) are forbidden there.
   4. GODOT-FREE — no include under engine/, apps/ or tests/ names godot; the
      engine's portability is a ratcheted property, not a re-verified one.
   5. BINDING ROOT — godot/src has no subdirectory named like an engine group,
@@ -63,14 +69,20 @@ ALLOWED = {
     "base/crt": {("base", "io"), ("base", "crt")},
     "formats": {("base", "io"), ("base", "crt"), ("formats", None)},
     "base": {("base", None), ("formats", None)},
-    "runtime": {("base", None), ("formats", None), ("runtime", None)},
-    "net": {("base", None), ("formats", None), ("runtime", None), ("net", None)},
+    "net": {("base", None), ("formats", None), ("net", None)},
+    "runtime": {("base", None), ("formats", None), ("net", None), ("runtime", None)},
 }
+
+# Rule 1b: the runtime libs that carry the wire (ADR 0043 d4). Every other
+# runtime lib is net-agnostic.
+NET_AWARE_RUNTIME_LIBS = ("inmatch", "replication")
+NET_AGNOSTIC_FORBIDDEN_PREFIXES = ("net/", "runtime/inmatch/", "runtime/replication/")
 
 # Rule 3: the consumer trees on the far side of the seam. engine/runtime/world
 # is ADR 0020's protagonist — the lib the query capability exists FOR — so it
 # is scanned too.
-SEAM_TREES = ("engine/net", "engine/runtime/wac", "engine/runtime/mission",
+SEAM_TREES = ("engine/runtime/inmatch", "engine/runtime/replication",
+              "engine/runtime/wac", "engine/runtime/mission",
               "engine/runtime/world")
 SEAM_FORBIDDEN_PREFIXES = ("runtime/terrain/", "runtime/terrain_query/",
                            "formats/cpt/", "formats/til/", "formats/trn/",
@@ -87,6 +99,11 @@ TERRAIN_QUERY_HEADERS = {
     # The permanent scorch record + its two retail producers (ADR 0020 #5:
     # world-owned interfaces grow here; the registry/textures stay behind).
     "runtime/terrain_query/terrain_scorch_record.h",
+}
+# ADR 0043 (amending ADR 0020 d3): the mission kernel owns the terrain field's
+# file entry, so runtime/mission alone may include the format-typed builder.
+SEAM_TREE_EXTRA_HEADERS = {
+    "engine/runtime/mission": {"runtime/terrain_query/terrain_field_build.h"},
 }
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
@@ -164,7 +181,11 @@ def scan() -> tuple[list[str], int]:
         except OSError:
             continue
         in_seam = any(posix == t or posix.startswith(t + "/") for t in SEAM_TREES)
+        seam_extra = set().union(*(h for t, h in SEAM_TREE_EXTRA_HEADERS.items()
+                                   if posix == t or posix.startswith(t + "/")))
         tree = includer_tree(rel)
+        net_agnostic = tree == "runtime" and len(rel.parts) > 3 and \
+                rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
         for lineno, line in enumerate(text.splitlines(), 1):
             m = INCLUDE_LINE.match(line)
             if not m:
@@ -199,7 +220,13 @@ def scan() -> tuple[list[str], int]:
                 group, lib = parts[0], parts[1]
                 if tree is not None and not allowed(tree, group, lib):
                     violations.append(f"[group-order] {where} (engine/{tree} may not include {group}/{lib})")
-                if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and inc not in TERRAIN_QUERY_HEADERS:
+                if net_agnostic and inc.startswith(NET_AGNOSTIC_FORBIDDEN_PREFIXES):
+                    violations.append(
+                            f"[net-agnostic] {where} (engine/{'/'.join(rel.parts[1:3])} is a "
+                            f"headless runtime lib; only runtime/inmatch and "
+                            f"runtime/replication carry the wire; ADR 0043 d4)")
+                if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and \
+                        inc not in TERRAIN_QUERY_HEADERS and inc not in seam_extra:
                     violations.append(f"[terrain-seam] {where}")
                 continue
             if first in all_libs:
@@ -227,11 +254,12 @@ def main() -> int:
         print(f"[include-graph]{v}")
     if violations and args.enforce:
         print("[include-graph] FAIL: engine headers are included as <group/lib/file.h>; "
-              "a tree includes only the groups below it (ADR 0029 d3); net/wac/mission/"
-              "world reach terrain only through runtime/terrain_query's seam headers "
-              "(ADR 0020); nothing under engine/, apps/ or tests/ includes godot; "
-              "imgui headers stay under engine/runtime/devtools/ and tests/devtools/ "
-              "(ADR 0042 d6).")
+              "a tree includes only the groups below it (ADR 0029 d3, net below runtime "
+              "since ADR 0043 d4); every runtime lib but inmatch/replication is "
+              "net-agnostic; inmatch/replication/wac/mission/world reach terrain only "
+              "through runtime/terrain_query's seam headers (ADR 0020); nothing under "
+              "engine/, apps/ or tests/ includes godot; imgui headers stay under "
+              "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6).")
         return 1
     return 0
 

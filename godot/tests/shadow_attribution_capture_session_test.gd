@@ -4,14 +4,15 @@ const CaptureSession := preload(
 		"res://probes/render/shadow_attribution_capture_session.gd")
 const CaptureVariant := preload(
 		"res://probes/render/render_capture_variant.gd")
+const ITEMS_DEF_FIXTURE := "res://../fixtures/def/items.def"
+
+var _root_dir := ""
 
 
-class ItemDatabaseWorld:
-	extends GameWorld
-	var item_db: ItemDatabase
-
-	func get_item_db() -> ItemDatabase:
-		return item_db
+func after_each() -> void:
+	if not _root_dir.is_empty():
+		TestFs.remove_dir_recursive(_root_dir)
+		_root_dir = ""
 
 
 func _add_caster(
@@ -27,12 +28,10 @@ func _add_caster(
 	var model := ObjectModel.new()
 	model.name = "Caster%d" % bms_id
 	model.position = position
-	model.set_meta("entity_ref", {
-		"bms_id": bms_id,
-		"item_id": item_id,
-		"graphic": graphic,
-		"attrib2": attrib2,
-	})
+	var ref := EntityRef.make(-1, -1, bms_id, item_id)
+	ref.graphic = graphic
+	ref.attrib2 = attrib2
+	model.entity_ref = ref
 	world.add_child(model)
 	model.set_shadow_caster_enabled(dynamic_enabled)
 	model.set_static_shadow_caster_enabled(static_enabled)
@@ -130,19 +129,19 @@ func test_static_batch_inventory_and_suppression_leave_visible_geometry_intact()
 	multimesh.instance_count = 2
 	multimesh.set_instance_transform(0, Transform3D(Basis(), Vector3(5, 2, 7)))
 	multimesh.set_instance_transform(1, Transform3D(Basis(), Vector3(-3, 2, 9)))
-	var batch := MultiMeshInstance3D.new()
+	var batch := StaticPopulationInstance.new()
 	batch.name = "Batch_DTruck1_0"
 	batch.multimesh = multimesh
 	batch.layers = Water.VISUAL_LAYER_WORLD_NO_MIRROR \
 			| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	batch.set_meta("static_shadow_bms_ids", PackedInt32Array([58, 77]))
-	batch.set_meta("static_shadow_item_ids", PackedInt32Array([101294, 101111]))
-	batch.set_meta("static_shadow_attrib2", PackedInt32Array([0x20, 0x20]))
-	# The native mission placer stores eligibility as bool Variants in an Array.
-	# Keep this fixture faithful so inventory exercises the runtime value shape.
-	batch.set_meta("static_shadow_slots", [true, true])
-	batch.set_meta("static_shadow_graphic", "DTruck1")
+	batch.shadow_tagged = true
+	batch.slot_bms_ids = PackedInt32Array([58, 77])
+	batch.slot_item_ids = PackedInt32Array([101294, 101111])
+	batch.slot_attrib2 = PackedInt64Array([0x20, 0x20])
+	batch.slot_casts_shadow = PackedByteArray([1, 1])
+	batch.graphic = "DTruck1"
+	batch.row_slots = PackedInt32Array([0, 1])
 	world.add_child(batch)
 
 	var original_layers := batch.layers
@@ -217,18 +216,19 @@ func test_dynamic_caster_inventory_is_typed_complete_and_deterministic() -> void
 
 
 func test_inventory_resolves_graphic_and_attrib2_through_the_public_item_db() -> void:
-	var world := ItemDatabaseWorld.new()
-	world.item_db = ItemDatabase.new()
-	assert_eq(world.item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	var terrain := Terrain.new()
-	terrain.name = "Terrain"
-	world.add_child(terrain)
-	add_child_autofree(world)
+	# A REAL loaded world whose staged root carries the committed def fixture
+	# as its items.def, so world.get_item_db() is the placer's own database.
+	_root_dir = WorldFixture.stage_minimal_root("shadow_item_db", false, {
+		"items.def": FileAccess.get_file_as_string(
+				ProjectSettings.globalize_path(ITEMS_DEF_FIXTURE)),
+	})
+	var world := WorldFixture.boot_minimal(self, _root_dir)
+	assert_not_null(world.get_item_db(),
+			"the loaded mission mounted the placer's item database")
 	var viewport := SubViewport.new()
 	world.add_child(viewport)
 	var model := ObjectModel.new()
-	model.set_meta("entity_ref", {"bms_id": 291, "item_id": 101291})
+	model.entity_ref = EntityRef.make(-1, -1, 291, 101291)
 	world.add_child(model)
 	model.set_shadow_caster_enabled(true)
 

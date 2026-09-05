@@ -1,5 +1,4 @@
-#ifndef OPENNOVA_CBIN_ASSET_LOOKUP_H
-#define OPENNOVA_CBIN_ASSET_LOOKUP_H
+#pragma once
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -60,5 +59,3 @@ inline Ref<Resource> find_texture_by_name(const String &p_name, const String &p_
 
 }  // namespace cbin_internal
 }  // namespace godot
-
-#endif  // OPENNOVA_CBIN_ASSET_LOOKUP_H

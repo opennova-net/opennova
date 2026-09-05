@@ -6,6 +6,8 @@
 #include <formats/adm/adm.h>
 #include "common/test_paths.h"
 
+using namespace opennova::adm;
+
 int main(void) {
     const char *test_content =
         "anim_idle\t\t\"IdleAnim.bad\"\n"

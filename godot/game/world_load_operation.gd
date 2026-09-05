@@ -5,7 +5,6 @@ extends RefCounted
 ## is the authoritative edge proving that the awaiting preparation coroutine
 ## and the bound load Callable have both released their references.
 
-signal cancelled()
 signal settled()
 
 enum State { ACTIVE, CANCELLED, SETTLING, SETTLED }
@@ -19,7 +18,6 @@ func cancel() -> bool:
 		return false
 	_state = State.CANCELLED
 	_was_cancelled = true
-	cancelled.emit()
 	return true
 
 
@@ -45,7 +43,3 @@ func is_cancelled() -> bool:
 
 func is_settled() -> bool:
 	return _state == State.SETTLED
-
-
-func is_active() -> bool:
-	return _state == State.ACTIVE

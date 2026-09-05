@@ -55,7 +55,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			continue
 		var container := Node3D.new()
 		parent.add_child(container)
-		var audio := MissionAudio.new(root, item_db)
+		var audio := MissionAudio.create(root, item_db)
 		var stats := audio.setup(mission, m, container)
 		ctx.log("%-28s resolved %3d/%3d markers, %d banks, %d candidates, %d dialogs" % [
 				m, int(stats.markers_resolved), int(stats.markers_total),
@@ -81,7 +81,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		container.queue_free()
 		reports.append({
 			"mission": m,
-			"stats": stats.to_dict(),
+			"stats": stats.to_json_value(),
 			"loop_voices": loop_voices,
 			"loop_empty": loop_empty,
 		})

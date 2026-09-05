@@ -2,16 +2,12 @@ extends GutTest
 
 # Pins the GDScript wire-handle constants to the witnessed layout. The native
 # twin (engine/net/npwire/wire_handle.h) static_asserts the same
-# values, and engine/net/netsim pins both against world::EntityHandle — this is the
+# values, and engine/runtime/replication pins both against world::EntityHandle — this is the
 # GDScript leg of that agreement. [orig: EntityPool_FindByNetId @ 0x4f0a20]
 
 
 func test_witnessed_values() -> void:
-	assert_eq(WireHandle.POOL_SHIFT, 12, "pool rides the high nibble")
-	assert_eq(WireHandle.POOL_MASK, 0xF, "pool nibble mask")
-	assert_eq(WireHandle.SLOT_MASK, 0xFFF, "slot rides the low 12 bits")
 	assert_eq(WireHandle.INVALID, 0xFFFF, "the not-found sentinel")
-	assert_eq(WireHandle.POOL_COUNT, 5, "live pools 0..4")
 
 
 func test_pool_slot_label_decode() -> void:

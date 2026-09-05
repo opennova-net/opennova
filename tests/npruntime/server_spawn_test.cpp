@@ -5,21 +5,21 @@
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::entity_flags (the §1 wiring), the F3 self-match field.
 
-#include <net/npruntime/server_session.h>
-#include <net/npruntime/server_spawn.h>
-#include <net/npruntime/napi_np_protocol.h>
+#include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
-#include <net/netsim/entity_wire_bridge.h>
-#include <net/netsim/loopback_channel.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/inmatch/loopback_channel.h>
 
 #include <net/npwire/ingame_decode.h> // OrganicSpawnRecord / OrganicSpawnBatch
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
-#include <runtime/world/game_type.h>
-#include <net/npwire/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
+#include <base/gameprofile/game_type.h>
+#include <base/gameprofile/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
@@ -29,9 +29,9 @@
 #include <set>
 
 namespace {
-namespace np = opennova::np;
+namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
-namespace ns = opennova::netsim;
+namespace ns = opennova::replication;
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -41,8 +41,7 @@ bool expect(bool cond, const char *msg) {
 
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
 // and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
-void make_world(w::World &world, w::AiSystem &ai) {
-	world.ai = &ai;
+void make_world(w::World &world) {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	w::Entity start;
@@ -64,54 +63,54 @@ const w::Entity *pool0_player(const w::World &world, uint16_t want_dcb) {
 
 int main() {
 	w::World world;
-	w::AiSystem ai;
-	make_world(world, ai);
+	w::AiSystem &ai = world.ai;
+	make_world(world);
 
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.
 	ns::LoopbackChannel loopback;
-	np::NapiNPServerCtx ctx;
-	np::GameConfig listen_settings;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig listen_settings;
 	listen_settings.max_players = 8;
-	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, listen_settings);
 	ctx.world = &world;
 
 	// --- §5.2a step 1-2: spawn the host's OWN player (the type-2 loopback). ---
-	np::Server_InitNewRoundState(ctx);
-	const int n1 = np::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::Server_InitNewRoundState(ctx);
+	const int n1 = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	if (!expect(n1 == 1, "host's own player spawned exactly once")) return 1;
 
 	if (!expect(world.cached.local_player.valid(), "cached.local_player published for the host")) return 1;
 	const w::Entity *host = world.registry.get(world.cached.local_player);
 	if (!expect(host != nullptr, "host player entity resolvable")) return 1;
 	if (!expect(host->item_id == w::kPlayerInfantryTypeId, "host player is 0x14B9 infantry")) return 1;
-	if (!expect(host->owner_connection_id == np::kHostPlayerDcb,
+	if (!expect(host->owner_connection_id == inmatch::kHostPlayerDcb,
 	            "host player entity+0x78 == kHostPlayerDcb (2), NOT 0")) return 1;
-	if (!expect(host->handle.slot() >= np::kRetailPlayerMinEntitySlot,
+	if (!expect(host->handle.slot() >= inmatch::kRetailPlayerMinEntitySlot,
 	            "host player lands at/after the retail player slot")) return 1;
 	if (!expect(host->position.x == 123.0f && host->position.y == 456.0f,
 	            "host player took the authored start-marker pose, not the origin/an NPC")) return 1;
 	// Idempotent: a second pass spawns nothing (phase advanced to PlayerAdded).
-	if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx, world) == 0,
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 0,
 	            "re-running ProcessPendingPlayerSpawns is idempotent")) return 1;
 
 	// --- A remote joiner reaches the accepted phase: it spawns as a REMOTE peer, host untouched. ---
 	{
-		np::NapiNPConnection joiner;
+		inmatch::NapiNPConnection joiner;
 		joiner.type = 1;                       // server-side view of a remote client
-		joiner.connection_id = np::kFirstJoinerDcb; // 3, the host-assigned dcb
+		joiner.connection_id = inmatch::kFirstJoinerDcb; // 3, the host-assigned dcb
 		joiner.self_id_seen = true;            // accepted (post-0x42 / 0x48)
-		joiner.phase = np::ConnectionPhase::Joined;
+		joiner.phase = inmatch::ConnectionPhase::Joined;
 		ctx.np_protocol.connection_list.push_back(joiner);
 	}
 	const w::EntityHandle host_handle_before = world.cached.local_player;
-	const int n2 = np::Server_ProcessPendingPlayerSpawns(ctx, world);
+	const int n2 = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	if (!expect(n2 == 1, "the remote joiner spawned exactly once")) return 1;
 	if (!expect(world.cached.local_player == host_handle_before,
 	            "the joiner did NOT republish cached.local_player (host keeps its own)")) return 1;
 
-	const w::Entity *joiner_ent = pool0_player(world, np::kFirstJoinerDcb);
-	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == np::kFirstJoinerDcb,
+	const w::Entity *joiner_ent = pool0_player(world, inmatch::kFirstJoinerDcb);
+	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == inmatch::kFirstJoinerDcb,
 	            "joiner player entity+0x78 == its dcb (3)")) return 1;
 	if (!expect(joiner_ent->handle != world.cached.local_player,
 	            "joiner is a distinct pool-0 entity from the host")) return 1;
@@ -119,14 +118,14 @@ int main() {
 	// The same authority transition backs the F3 checkbox and host-side tooling:
 	// it mutates the real connection/entity/AI state, then respawns through the
 	// ordinary marker chain when play resumes.
-	np::NapiNPConnection &joiner_conn =
+	inmatch::NapiNPConnection &joiner_conn =
 			ctx.np_protocol.connection_list.back();
 	const w::EntityHandle joiner_handle = joiner_ent->handle;
 	if (!expect(
-			np::Server_SetPlayerSpectator(ctx, joiner_conn, world, true),
+			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, true),
 			"authority enters spectator mode for a live player")) return 1;
 	w::Entity *spectator = world.registry.get(joiner_handle);
-	w::AiEntity *spectator_ai = world.ai->for_handle(joiner_handle);
+	w::AiEntity *spectator_ai = world.ai.for_handle(joiner_handle);
 	if (!expect(
 			joiner_conn.link.spectator && spectator != nullptr &&
 			spectator->team == 0 && (spectator->flags & 1u) != 0 &&
@@ -137,7 +136,7 @@ int main() {
 	}
 	spectator->position = {900.0f, 901.0f, 902.0f};
 	if (!expect(
-			np::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
+			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
 			"authority returns a spectator to play")) return 1;
 	w::Entity *restored = world.registry.get(joiner_handle);
 	if (!expect(
@@ -151,19 +150,19 @@ int main() {
 		return 1;
 	}
 	{
-		np::NapiNPConnection joining_spectator;
+		inmatch::NapiNPConnection joining_spectator;
 		joining_spectator.type = 1;
-		joining_spectator.connection_id = np::kFirstJoinerDcb + 1;
+		joining_spectator.connection_id = inmatch::kFirstJoinerDcb + 1;
 		joining_spectator.self_id_seen = true;
-		joining_spectator.phase = np::ConnectionPhase::Joined;
+		joining_spectator.phase = inmatch::ConnectionPhase::Joined;
 		joining_spectator.link.spectator = true;
 		ctx.np_protocol.connection_list.push_back(joining_spectator);
 	}
 	if (!expect(
-			np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+			inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 			"a newly admitted spectator receives its hidden player record")) return 1;
 	const w::Entity *joining_spectator =
-			pool0_player(world, np::kFirstJoinerDcb + 1);
+			pool0_player(world, inmatch::kFirstJoinerDcb + 1);
 	if (!expect(
 			joining_spectator != nullptr && joining_spectator->team == 0 &&
 			(joining_spectator->flags & 1u) != 0 &&
@@ -176,8 +175,8 @@ int main() {
 	const opennova::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	bool saw_host = false, saw_joiner = false;
 	for (const opennova::OrganicSpawnRecord &r : batch.records) {
-		if (r.entity_flags == np::kHostPlayerDcb) saw_host = true;
-		if (r.entity_flags == np::kFirstJoinerDcb) saw_joiner = true;
+		if (r.entity_flags == inmatch::kHostPlayerDcb) saw_host = true;
+		if (r.entity_flags == inmatch::kFirstJoinerDcb) saw_joiner = true;
 	}
 	if (!expect(saw_host && saw_joiner,
 	            "build_pool0_organic_batch stamps entity_flags from owner_connection_id (host 2 + joiner 3)")) return 1;
@@ -186,25 +185,25 @@ int main() {
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
 	{
 		w::World many_world;
-		w::AiSystem many_ai;
-		make_world(many_world, many_ai);
+		w::AiSystem &many_ai = many_world.ai;
+		make_world(many_world);
 		many_world.registry.configure_pool(0, 32);
 
-		np::NapiNPServerCtx many_ctx;
-		np::GameConfig settings;
+		inmatch::NapiNPServerCtx many_ctx;
+		inmatch::GameConfig settings;
 		settings.max_players = 32;
-		np::test::bring_up_host(many_ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+		inmatch::test::bring_up_host(many_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 		                        /*host_key=*/0, nullptr, settings);
 		many_ctx.world = &many_world;
 		for (int i = 0; i < 20; ++i) {
-			np::NapiNPConnection joiner;
+			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
-			joiner.connection_id = static_cast<uint32_t>(np::kFirstJoinerDcb + i);
+			joiner.connection_id = static_cast<uint32_t>(inmatch::kFirstJoinerDcb + i);
 			joiner.self_id_seen = true;
-			joiner.phase = np::ConnectionPhase::Joined;
+			joiner.phase = inmatch::ConnectionPhase::Joined;
 			many_ctx.np_protocol.connection_list.push_back(joiner);
 		}
-		const int spawned = np::Server_ProcessPendingPlayerSpawns(many_ctx, many_world);
+		const int spawned = inmatch::Server_ProcessPendingPlayerSpawns(many_ctx, many_world);
 		if (!expect(spawned == 20, "twenty remote players spawned")) return 1;
 
 		// [D-NET-112] A player carries NO SSN (net_id 0) — faithful: the original identifies a player by
@@ -230,13 +229,13 @@ int main() {
 	// [orig: Server_PlayerAdd @0x51cbc0 writes the first free dword_A87048 player slot]
 	{
 		w::World slot_world;
-		w::AiSystem slot_ai;
-		make_world(slot_world, slot_ai);
+		w::AiSystem &slot_ai = slot_world.ai;
+		make_world(slot_world);
 
-		np::NapiNPServerCtx slot_ctx;
-		np::GameConfig settings;
+		inmatch::NapiNPServerCtx slot_ctx;
+		inmatch::GameConfig settings;
 		settings.max_players = 8;
-		np::test::bring_up_host(slot_ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+		inmatch::test::bring_up_host(slot_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 		                        /*host_key=*/0, nullptr, settings);
 		slot_ctx.world = &slot_world;
 
@@ -244,31 +243,31 @@ int main() {
 				{0x0100007Fu, 33001}, {0x0100007Fu, 33002},
 				{0x0100007Fu, 33003}, {0x0100007Fu, 33004}};
 		for (int i = 0; i < 3; ++i) {
-			np::NapiNPConnection player;
+			inmatch::NapiNPConnection player;
 			player.peer = peers[i];
 			player.type = 1;
-			player.connection_id = np::kFirstJoinerDcb + static_cast<uint32_t>(i);
+			player.connection_id = inmatch::kFirstJoinerDcb + static_cast<uint32_t>(i);
 			player.self_id_seen = true;
-			player.phase = np::ConnectionPhase::Joined;
+			player.phase = inmatch::ConnectionPhase::Joined;
 			slot_ctx.np_protocol.connection_list.push_back(std::move(player));
 		}
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 3,
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 3,
 		            "slot reuse fixture spawns three players")) return 1;
 		if (!expect(slot_ctx.np_protocol.connection_list[0].reply.player_slot == 0 &&
 		                    slot_ctx.np_protocol.connection_list[1].reply.player_slot == 1 &&
 		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 2,
 		            "first three players occupy roster slots 0, 1, 2")) return 1;
 
-		if (!expect(np::drop_connection(slot_ctx, peers[1]),
+		if (!expect(inmatch::drop_connection(slot_ctx, peers[1]),
 		            "non-tail player disconnects")) return 1;
-		np::NapiNPConnection replacement;
+		inmatch::NapiNPConnection replacement;
 		replacement.peer = peers[3];
 		replacement.type = 1;
-		replacement.connection_id = np::kFirstJoinerDcb + 3;
+		replacement.connection_id = inmatch::kFirstJoinerDcb + 3;
 		replacement.self_id_seen = true;
-		replacement.phase = np::ConnectionPhase::Joined;
+		replacement.phase = inmatch::ConnectionPhase::Joined;
 		slot_ctx.np_protocol.connection_list.push_back(std::move(replacement));
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 1,
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 1,
 		            "replacement player spawns")) return 1;
 		if (!expect(slot_ctx.np_protocol.connection_list.back().reply.player_slot == 1,
 		            "replacement reuses the first free roster slot instead of colliding with slot 2"))
@@ -279,15 +278,15 @@ int main() {
 	// phase. It still owns its supplied roster row, and the advertised capacity is
 	// a hard upper bound on reservations.
 	{
-		std::vector<np::NapiNPConnection> roster(3);
-		roster[0].phase = np::ConnectionPhase::Joined;
+		std::vector<inmatch::NapiNPConnection> roster(3);
+		roster[0].phase = inmatch::ConnectionPhase::Joined;
 		roster[0].reply.player_slot = 0;
 		roster[0].link.owned_entity.packed = 1;
 		roster[1].reply.player_slot = 1;
 		roster[1].reply.player_slot_reserved = true;
 
 		const std::optional<uint8_t> within_capacity =
-				np::Server_ReservePlayerSlot(roster, roster[2], 3);
+				inmatch::Server_ReservePlayerSlot(roster, roster[2], 3);
 		if (!expect(
 					within_capacity.has_value() && *within_capacity == 2,
 					"bound entities and pending reservations both occupy roster rows")) {
@@ -295,7 +294,7 @@ int main() {
 		}
 		roster[2].reply.player_slot_reserved = false;
 		if (!expect(
-					!np::Server_ReservePlayerSlot(roster, roster[2], 2).has_value(),
+					!inmatch::Server_ReservePlayerSlot(roster, roster[2], 2).has_value(),
 					"slot reservation never escapes the advertised capacity")) {
 			return 1;
 		}
@@ -308,24 +307,24 @@ int main() {
 	// @0x4FE51A..0x4FE587]
 	{
 		auto team_world = std::make_unique<w::World>();
-		auto team_ai = std::make_unique<w::AiSystem>();
-		make_world(*team_world, *team_ai);
+		w::AiSystem &team_ai = team_world->ai;
+		make_world(*team_world);
 
-		auto reserve_sequence = [&](np::GameConfig config,
+		auto reserve_sequence = [&](inmatch::GameConfig config,
 				std::initializer_list<uint8_t> requests) {
-			std::vector<np::NapiNPConnection> roster;
+			std::vector<inmatch::NapiNPConnection> roster;
 			std::vector<uint8_t> teams;
 			roster.reserve(requests.size());
 			for (uint8_t request : requests) {
 				roster.emplace_back();
 				roster.back().char_vars.team_request = request;
-				teams.push_back(np::Server_ReservePlayerTeam(
+				teams.push_back(inmatch::Server_ReservePlayerTeam(
 						config, true, roster, roster.back(), *team_world));
 			}
 			return teams;
 		};
 
-		np::GameConfig solo;
+		inmatch::GameConfig solo;
 		solo.game_type = opennova::game_type::kDeathmatch;
 		if (!expect(reserve_sequence(solo, {0xFF, 0xFF, 0xFF}) ==
 					std::vector<uint8_t>({1, 1, 1}),
@@ -335,9 +334,9 @@ int main() {
 					std::vector<uint8_t>({1, 1, 1}),
 				"Flag Me is solo CTF and keeps every player on team 1")) return 1;
 
-		np::GameConfig chosen;
+		inmatch::GameConfig chosen;
 		chosen.game_type = opennova::game_type::kAttackDefend;
-		chosen.mp_attributes = np::GameConfig::kMpAttribTeamChoose;
+		chosen.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
 		if (!expect(reserve_sequence(chosen, {1, 0, 0xFF}) ==
 					std::vector<uint8_t>({2, 1, 1}),
 				"TeamChoose honors side B/A requests before deterministic balance")) return 1;
@@ -359,7 +358,7 @@ int main() {
 		// repeatedly chooses teams 1/2; it does not spread an empty lobby across
 		// all four advertised columns. Preserve that defect for compatibility.
 		// [orig: @0x4FE62C..0x4FE723]
-		np::GameConfig four;
+		inmatch::GameConfig four;
 		four.game_type = opennova::game_type::kTeamDeathmatch;
 		four.num_teams = 4;
 		four.mp_attributes = 0;
@@ -367,13 +366,13 @@ int main() {
 					std::vector<uint8_t>({1, 2, 1, 2}),
 				"retail four-team auto assignment retains its 1/2-only empty-lobby sequence")) return 1;
 
-		std::vector<np::NapiNPConnection> mixed(4);
+		std::vector<inmatch::NapiNPConnection> mixed(4);
 		for (std::size_t i = 0; i < 3; ++i) {
 			mixed[i].assigned_team_valid = true;
 			mixed[i].assigned_team = static_cast<uint8_t>(i == 2 ? 4 : i + 1);
 		}
 		mixed.back().char_vars.team_request = 0xFF;
-		if (!expect(np::Server_ReservePlayerTeam(
+		if (!expect(inmatch::Server_ReservePlayerTeam(
 					four, true, mixed, mixed.back(), *team_world) == 2,
 				"four-team mixed-index lookup is reproduced exactly")) return 1;
 
@@ -393,22 +392,22 @@ int main() {
 	// entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
 	{
 		w::World cw;
-		w::AiSystem cai;
-		make_world(cw, cai);
+		w::AiSystem &cai = cw.ai;
+		make_world(cw);
 
 		ns::LoopbackChannel cloop;
-		np::NapiNPServerCtx cctx;
-		np::GameConfig settings;
+		inmatch::NapiNPServerCtx cctx;
+		inmatch::GameConfig settings;
 		settings.max_players = 8;
 		settings.game_type = 0x10010; // golden ASH_I5A session gameType (bit 0x10000 = team-based)
-		np::test::bring_up_host(cctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		inmatch::test::bring_up_host(cctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &cloop, settings);
 		cctx.world = &cw;
 		// A non-default local profile is installed on the type-2 loopback before the
 		// spawn (start_host_session does it from HostConfig.local_character_vars); the
 		// host's own player is stamped from it by ASSIGNED side like a joiner's upload —
 		// otherwise the listen host would always be the stock 0x0200 character.
-		np::NapiNPConnection &host_conn = cctx.np_protocol.connection_list.front();
+		inmatch::NapiNPConnection &host_conn = cctx.np_protocol.connection_list.front();
 		host_conn.char_vars.char_id[0] = 0x0400;
 		host_conn.char_vars.char_id[1] = 0x8407;
 		host_conn.char_vars.char_class[0] = 6;
@@ -417,16 +416,16 @@ int main() {
 		host_conn.char_vars.avatar[1] = 9;
 
 		// Host own player first (team 1 by autobalance).
-		np::Server_InitNewRoundState(cctx);
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
+		inmatch::Server_InitNewRoundState(cctx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
 
 		// The joiner: golden CU var set (side A 1/0x0200 class 8, side B 4/0x8207 class 5, TR auto).
 		{
-			np::NapiNPConnection joiner;
+			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
-			joiner.connection_id = np::kFirstJoinerDcb;
+			joiner.connection_id = inmatch::kFirstJoinerDcb;
 			joiner.self_id_seen = true;
-			joiner.phase = np::ConnectionPhase::Joined;
+			joiner.phase = inmatch::ConnectionPhase::Joined;
 			joiner.char_vars.char_id[0] = 0x0200;
 			joiner.char_vars.char_id[1] = 0x8207;
 			joiner.char_vars.team_request = 0xFF; // auto -> the class pick takes side B (CTB)
@@ -436,10 +435,10 @@ int main() {
 			joiner.char_vars.avatar[1] = 4;
 			cctx.np_protocol.connection_list.push_back(joiner);
 		}
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: joiner spawned")) return 1;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: joiner spawned")) return 1;
 
-		const w::Entity *chost = pool0_player(cw, np::kHostPlayerDcb);
-		const w::Entity *cjoin = pool0_player(cw, np::kFirstJoinerDcb);
+		const w::Entity *chost = pool0_player(cw, inmatch::kHostPlayerDcb);
+		const w::Entity *cjoin = pool0_player(cw, inmatch::kFirstJoinerDcb);
 		if (!expect(chost != nullptr && cjoin != nullptr, "char-stamp: both players resolvable")) return 1;
 		if (!expect(chost->team == 1 && cjoin->team == 2, "char-stamp: host team 1, joiner team 2")) return 1;
 		if (!expect(chost->anim_slot == 3, "host animSlot = selected side-A avatar")) return 1;
@@ -455,9 +454,9 @@ int main() {
 		const opennova::OrganicSpawnBatch cbatch = ns::build_pool0_organic_batch(cw);
 		bool host_rec_ok = false, join_rec_ok = false;
 		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
-			if (r.entity_flags == np::kHostPlayerDcb)
+			if (r.entity_flags == inmatch::kHostPlayerDcb)
 				host_rec_ok = (r.anim_slot == 3 && r.net_id == 0x0400);
-			if (r.entity_flags == np::kFirstJoinerDcb)
+			if (r.entity_flags == inmatch::kFirstJoinerDcb)
 				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
 		}
 		if (!expect(host_rec_ok, "0x0C host record echoes the selected local character")) return 1;
@@ -466,21 +465,21 @@ int main() {
 		// A var-less joiner (no CU tags): animSlot stays the retail raw 0, class defaults to 8,
 		// and the netId falls back to the D-NET-137 encoding shim (nonzero).
 		{
-			np::NapiNPConnection bare;
+			inmatch::NapiNPConnection bare;
 			bare.type = 1;
-			bare.connection_id = np::kFirstJoinerDcb + 1;
+			bare.connection_id = inmatch::kFirstJoinerDcb + 1;
 			bare.self_id_seen = true;
-			bare.phase = np::ConnectionPhase::Joined;
+			bare.phase = inmatch::ConnectionPhase::Joined;
 			cctx.np_protocol.connection_list.push_back(bare);
 		}
-		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
-		const w::Entity *cbare = pool0_player(cw, np::kFirstJoinerDcb + 1);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
+		const w::Entity *cbare = pool0_player(cw, inmatch::kFirstJoinerDcb + 1);
 		if (!expect(cbare != nullptr && cbare->anim_slot == 0 && cbare->minimap_net_id == 0,
 		            "var-less joiner: animSlot 0 (tag absent), no char id")) return 1;
 		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
 		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
 		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
-			if (r.entity_flags == np::kFirstJoinerDcb + 1) {
+			if (r.entity_flags == inmatch::kFirstJoinerDcb + 1) {
 				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
 			}
 		}
@@ -496,8 +495,6 @@ int main() {
 	{
 		auto sp_spawn_position = [](uint32_t game_type, w::Vec3 &out) {
 			auto sp_world = std::make_unique<w::World>();
-			auto sp_ai = std::make_unique<w::AiSystem>();
-			sp_world->ai = sp_ai.get();
 			sp_world->registry.configure_pool(0, 16);
 			sp_world->registry.configure_pool(3, 16);
 			w::Entity start;
@@ -508,16 +505,16 @@ int main() {
 			sp_world->registry.spawn(3, start);
 
 			ns::LoopbackChannel sp_loop;
-			np::NapiNPServerCtx sp_ctx;
-			np::GameConfig sp_settings;
+			inmatch::NapiNPServerCtx sp_ctx;
+			inmatch::GameConfig sp_settings;
 			sp_settings.server_name = "SINGLEPLAYERGAME";
 			sp_settings.max_players = 1;
 			sp_settings.game_type = game_type;
-			np::test::bring_up_host(sp_ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+			inmatch::test::bring_up_host(sp_ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 			                        /*host_key=*/0, &sp_loop, sp_settings);
 			sp_ctx.world = sp_world.get();
-			np::Server_InitNewRoundState(sp_ctx);
-			if (np::Server_ProcessPendingPlayerSpawns(sp_ctx, *sp_world) != 1) return false;
+			inmatch::Server_InitNewRoundState(sp_ctx);
+			if (inmatch::Server_ProcessPendingPlayerSpawns(sp_ctx, *sp_world) != 1) return false;
 			const w::Entity *sp_player = sp_world->registry.get(sp_world->cached.local_player);
 			if (sp_player == nullptr) return false;
 			out = sp_player->position;

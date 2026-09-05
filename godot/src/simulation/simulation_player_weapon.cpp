@@ -5,12 +5,17 @@
 // event queue, snapshots the per-frame state dictionary, and routes the two
 // wire request records (net-re §5.62).
 #include "simulation/simulation_internal.h"
+#include "simulation/player_aim_overlay.h"
+#include "simulation/player_weapon_event.h"
+#include "simulation/player_weapon_view.h"
+#include "object/weapon_def.h" // the typed weapon.def row the GUT install seams hand over
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
 #include <cstdio>
 
 using namespace sim_internal;
+using namespace opennova::def;
 
 // The world-side flag mirrors must stay the def parser's exact bits.
 static_assert(opennova::world::weapon_flag::kNoClipsNoDraw ==
@@ -35,29 +40,29 @@ static_assert(opennova::world::weapon_flag2::kInset ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG2_INSET),
 		"kInset drifted from def.h");
 
-void Simulation::request_local_player_weapon_category(int p_category) {
-	if (kernel_->view.binoculars_view_active) return;
+void Simulation::request_local_player_weapon_category(WeaponCategory p_category) {
+	if (kernel_->local.view.binoculars_view_active) return;
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
 	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
 	//  sim mechanics yet — record note.]
-	if (kernel_->weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
-	if (!kernel_->inventory_valid) return;
+	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
+	if (!kernel_->local.inventory_valid) return;
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
 		return;
 	handle_weapon_switch_outcome(opennova::world::weapon_switch_to_handle(
-			kernel_->world.weapons, kernel_->inventory,
+			kernel_->world.tables.weapons, kernel_->local.inventory,
 			p_category * opennova::world::weapon_combo::kRanksPerCategory,
 			local_weapon_switch_gates()));
 }
 
 void Simulation::request_local_player_weapon_cycle(int p_direction) {
-	if (kernel_->view.binoculars_view_active) return;
+	if (kernel_->local.view.binoculars_view_active) return;
 	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
 	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
-	if (kernel_->weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
-	if (!kernel_->inventory_valid) return;
+	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
+	if (!kernel_->local.inventory_valid) return;
 	handle_weapon_switch_outcome(opennova::world::weapon_cycle_slot(
-			kernel_->world.weapons, kernel_->inventory, p_direction,
+			kernel_->world.tables.weapons, kernel_->local.inventory, p_direction,
 			local_weapon_switch_gates()));
 }
 
@@ -72,12 +77,12 @@ void Simulation::request_local_player_weapon_cycle(int p_direction) {
 String Simulation::get_weapon_third_person_model(int p_adm_index) const {
 	if (kernel_ == nullptr || p_adm_index <= 0 || p_adm_index > 0xFF) return String();
 	const opennova::world::WeaponTableEntry *entry =
-			kernel_->world.weapons.by_index(static_cast<uint8_t>(p_adm_index));
+			kernel_->world.tables.weapons.by_index(static_cast<uint8_t>(p_adm_index));
 	if (entry == nullptr) return String();
 	return String::utf8(entry->third_person_model.c_str());
 }
 
-Dictionary Simulation::get_local_player_aim_overlay() const {
+Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// The torso-bend overlay state: the nine per-segment orientations from the exact BAM
 	// blends [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14],
 	// converted once here to mission-euler degrees — yaw via the canonical (90 - heading),
@@ -85,13 +90,11 @@ Dictionary Simulation::get_local_player_aim_overlay() const {
 	// and MissionObjectPlacer performs the matching basis conjugation). The shell builds
 	// Godot bases from these with that single-sourced conversion; delta(body class) is
 	// identity by construction.
-	Dictionary out;
-	out["valid"] = false;
-	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return out;
-	const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return Ref<PlayerAimOverlay>();
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	const opennova::world::Entity *entity =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (!p || !entity) return out;
+	if (!p || !entity) return Ref<PlayerAimOverlay>();
 
 	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
@@ -110,25 +113,20 @@ Dictionary Simulation::get_local_player_aim_overlay() const {
 	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i) {
 		packed[i] = mission_euler_from_overlay(angles[i]);
 	}
-	out["valid"] = true;
-	out["aim_state"] = in.aim_state;
-	out["mount_mode"] = static_cast<int>(in.mount_mode);
-	out["mount_config_valid"] = in.mount_config_valid;
-	out["mount_config"] = in.mount_config_valid ? in.mount_config : 0;
-	out["body"] = mission_euler_from_overlay(
-			angles[opennova::anim::kOverlayBody]);
-	out["angles"] = packed;
+	Ref<PlayerAimOverlay> out;
+	out.instantiate();
+	out->set_state(in.aim_state, static_cast<int>(in.mount_mode), in.mount_config_valid,
+			in.mount_config_valid ? in.mount_config : 0);
 	// The THIRD-PERSON held weapon: its own attach basis, plus retail's draw gate.
 	// The basis is not one of the nine classes above — see the anim contract.
-	out["weapon_attach"] = mission_euler_from_overlay(
-			opennova::anim::compute_held_weapon_attach_angles(in));
-	out["weapon_visible"] = local_held_weapon_visible(*entity);
+	out->set_angles(mission_euler_from_overlay(angles[opennova::anim::kOverlayBody]), packed,
+			mission_euler_from_overlay(opennova::anim::compute_held_weapon_attach_angles(in)));
 	// Which of the two attach frames retail would use for this body — the same 0x80 test
 	// on the weapon channel's hold state that the wire path publishes as
 	// PF_HELD_WEAPON_HAND_FRAME, read here from our own infantry state so the local and
 	// remote legs cannot drift. [orig: gate @ 0x4b21b6 / branch @ 0x4b220f]
-	out["weapon_hand_frame"] =
-			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0;
+	out->set_weapon(local_held_weapon_visible(*entity),
+			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0);
 	return out;
 }
 
@@ -140,59 +138,24 @@ bool Simulation::local_held_weapon_visible(
 		const opennova::world::Entity &p_entity) const {
 	if (!kernel_) return false;
 	return opennova::world::local_held_weapon_visible(kernel_->world, p_entity,
-			kernel_->weapon, kernel_->inventory, kernel_->view.third_person);
+			kernel_->local.weapon, kernel_->local.inventory, kernel_->local.view.third_person);
 }
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
 
-void Simulation::set_local_player_weapon(const Dictionary &p_def,
+void Simulation::set_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(
 			p_def, p_clip_seconds, p_preserve_slot_state, false);
 }
 
-opennova::world::WeaponInstallData Simulation::install_data_from_dict(
-		const Dictionary &p_def, const Dictionary &p_clip_seconds) {
-	using opennova::world::WeaponFsmActionRow;
-	opennova::world::WeaponInstallData data;
-	data.name = String(p_def.get("name", String())).utf8().get_data();
-	data.animadm = String(p_def.get("animadm", String())).utf8().get_data();
-	data.flags = int(p_def.get("flags", 0));
-	data.flags2 = int(p_def.get("flags2", 0));
-	data.heat_per_shot = int(int64_t(p_def.get("heat_per_shot", 0)));
-	data.heat_decay_per_tick = int(int64_t(p_def.get("heat_decay_per_tick", 0)));
-	data.heat_glow_threshold = int(int64_t(p_def.get("heat_glow_threshold", 0)));
-	data.scope_max_mag = float(double(p_def.get("scope_max_mag", 0.0)));
-	data.attack_anim = int(int64_t(p_def.get("attack_anim", 0)));
-	data.run_anim = int(int64_t(p_def.get("run_anim", 0)));
-	data.clipsize = int(p_def.get("clipsize", 0));
-	data.startrounds = int(p_def.get("startrounds", 0));
-	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
-	const Array actions = p_def.get("actions", Array());
-	data.rows.reserve(static_cast<size_t>(actions.size()));
-	for (int i = 0; i < actions.size(); ++i) {
-		const Dictionary a = actions[i];
-		WeaponFsmActionRow row;
-		const CharString name = String(a.get("name", "")).utf8();
-		const CharString anim = String(a.get("anim", "")).utf8();
-		const CharString function = String(a.get("function", "")).utf8();
-		snprintf(row.name, sizeof(row.name), "%s", name.get_data());
-		snprintf(row.anim, sizeof(row.anim), "%s", anim.get_data());
-		snprintf(row.function, sizeof(row.function), "%s", function.get_data());
-		row.delaystart = static_cast<int32_t>(int64_t(a.get("delaystart", -1)));
-		row.delayend = static_cast<int32_t>(int64_t(a.get("delayend", -1)));
-		// The audio/effect legs ride the bake into the pool entries
-		// [orig: ActionDef_ParseScriptLine @ 0x4023c0 rows].
-		const CharString soundset = String(a.get("soundset", "")).utf8();
-		const CharString soundsetend = String(a.get("soundsetend", "")).utf8();
-		const CharString particle = String(a.get("particle", "")).utf8();
-		const CharString userpoint = String(a.get("particleuserpoint", "")).utf8();
-		snprintf(row.soundset, sizeof(row.soundset), "%s", soundset.get_data());
-		snprintf(row.soundsetend, sizeof(row.soundsetend), "%s", soundsetend.get_data());
-		snprintf(row.particle, sizeof(row.particle), "%s", particle.get_data());
-		snprintf(row.particleuserpoint, sizeof(row.particleuserpoint), "%s", userpoint.get_data());
-		data.rows.push_back(row);
-	}
+opennova::world::WeaponInstallData Simulation::install_data_from_def(
+		const DefWeaponDef &p_def, const Dictionary &p_clip_seconds) {
+	// The row half is the engine's (the same builder the kernel's by-name
+	// mount runs); only the clip-variant rings arrive from the shell's .adm
+	// read, keyed by clip name.
+	opennova::world::WeaponInstallData data =
+			opennova::world::weapon_install_data_from_def(p_def);
 	const Array keys = p_clip_seconds.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		std::vector<float> lengths;
@@ -224,33 +187,37 @@ bool Simulation::install_local_player_weapon_by_name(
 			std::string(p_weapon_name.utf8().get_data()), p_preserve_slot_state);
 }
 
-void Simulation::rebake_local_player_weapon(const Dictionary &p_def,
+void Simulation::rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(
 			p_def, p_clip_seconds, p_preserve_slot_state, true);
 }
 
-void Simulation::install_local_player_weapon(const Dictionary &p_def,
+void Simulation::install_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
 		bool p_allow_same_weapon_rebake) {
-	if (!kernel_) return;
-	opennova::world::local_weapon_install(kernel_->world, kernel_->weapon,
-			install_data_from_dict(p_def, p_clip_seconds),
+	if (!kernel_ || p_def.is_null()) return;
+	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon,
+			install_data_from_def(p_def->value(), p_clip_seconds),
 			p_preserve_slot_state, p_allow_same_weapon_rebake,
-			kernel_->inventory_valid ? &kernel_->inventory : nullptr, kernel_->view);
+			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, kernel_->local.view);
 }
 
 void Simulation::clear_local_player_weapon() {
-	opennova::world::local_weapon_clear(kernel_->weapon, kernel_->view);
+	opennova::world::local_weapon_clear(kernel_->local.weapon, kernel_->local.view);
 }
 
 void Simulation::set_local_player_first_person_model_available(bool p_available) {
-	kernel_->weapon.first_person_model_adm = 0xFF;
+	kernel_->local.weapon.first_person_model_adm = 0xFF;
 	if (!p_available || !kernel_) return;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player != nullptr)
-		kernel_->weapon.first_person_model_adm = player->equipped_adm_index;
+		kernel_->local.weapon.first_person_model_adm = player->equipped_adm_index;
+}
+
+bool Simulation::is_local_player_first_person_model_available() const {
+	return kernel_ && kernel_->local.weapon.first_person_model_adm != 0xFF;
 }
 
 void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -258,164 +225,65 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 	// This is the ONE funnel both roles feed (apply_frame_input, once per tick),
 	// so the F3 Weapon window's hold is OR'd in here rather than raced against
 	// the shell's own per-frame write.
-	opennova::world::local_weapon_set_input(kernel_->weapon, kernel_->view,
-			p_fire_held || debug_weapon_fire_held_, p_fire_pressed, p_reload_pressed);
+	opennova::world::local_weapon_set_input(kernel_->local.weapon, kernel_->local.view,
+			p_fire_held || player_.debug_weapon_fire_held, p_fire_pressed, p_reload_pressed);
 }
 
-// One 62.5 Hz pump of the local player's slot, after the world logic tick — the
-// world-side pump body with this binding routing the two wire request records.
-// [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
-void Simulation::tick_local_player_weapon() {
-	if (!kernel_) return;
-	opennova::world::LocalWeaponPumpIO io;
-	io.view = &kernel_->view;
-	io.inventory = kernel_->inventory_valid ? &kernel_->inventory : nullptr;
-	io.is_authority = !joiner_;
-	io.self_wire_handle = joiner_bridge_.self_wire_handle();
-	if (joiner_ && runtime_ != nullptr) {
-		// The joiner's OWN predicted round runs the wire-proxy walk with
-		// the local mount exclusion dead, so resolve the carrier gate from
-		// the self wire row like any decoded remote round — otherwise a
-		// mounted joiner's fire stops on its own vehicle's proxy.
-		io.carrier_exclusion = [this]() {
-			return wire_carrier_exclusion_for(runtime_->state(),
-					joiner_bridge_.self_wire_handle(), kernel_->seat_specs);
-		};
+Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
+	Ref<PlayerWeaponView> out;
+	out.instantiate();
+	opennova::world::LocalPlayerWeaponView v;
+	const opennova::world::LocalPlayerWeapon &w = kernel_->local.weapon;
+	v.active = w.active;
+	if (!w.active) {
+		out->assign(v);
+		return out;
 	}
-	opennova::world::local_weapon_pump_tick(kernel_->world, kernel_->weapon, io);
-	if (io.fired.valid && joiner_ && runtime_ != nullptr) {
-		// The client-side half of Entity_FireWeaponAndSendPacket: the pump
-		// predicted the round; queue the fixed C2S 0x06 descriptor. The pose
-		// helper writes full XYZ, rounded Yaw/Pitch high words, and retail's
-		// five low-word deltas against the live shooter pose. The runtime
-		// stamps its own currentTick when accepting it.
-		// [orig: @0x42A62F/@0x42A6A1..0x42A890]
-		opennova::ClientFiredRound fire;
-		fire.shooter_handle = joiner_bridge_.self_wire_handle();
-		fire.fire_flags = io.fired.round.mode_flags;
-		fire.adm_index = io.fired.adm_index;
-		fire.target_handle = 0xFFFF;
-		// hit_part is NOT a bare sequence: it is
-		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
-		// raw word straight into the GLOBAL word_B7C670 on the network arm
-		// [orig: Server_ClientFiredRound @0x50BAA0 @0x50c2ba / @0x50c774],
-		// and its own composition of the same word packs the shooter's
-		// per-player record slot+20 into bits 9.. exactly this way
-		// [orig: @0x50bda5 `(*((WORD*)v91 + 10) << 9) | (packet & 0x1FF)`].
-		// Sending a bare sequence leaves those bits ZERO, i.e. roster slot
-		// 0, so every round we fired claimed the same owner. Witnessed on
-		// the wire: a retail joiner at mySlot=1 sends
-		// 0x0201/0x0202/0x0203 where we sent 0x0001/0x0002/0x0003
-		// (.scratch/golden/retail-coop-playerinfo-join.pcapng vs
-		// opennova-joiner-profile-kit-verified.pcapng).
-		// SCOPE, corrected 2026-07-26: the packing above is ROUND ATTRIBUTION
-		// only. word_B7C670's entire causal reach is the round record's net id
-		// [orig: CEntityManager_AllocateSlot @0x4EAAE6 adopt-or-mint, @0x4EABD5
-		// stores it at the round record's +120]. An earlier revision of this
-		// comment ALSO blamed it for a retail host's own first-person weapon
-		// reacting to our shots; that was WRONG, and the symptom survived this
-		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
-		fire.hit_part = opennova::pack_fired_round_hit_part(
-				runtime_->local_player_slot(), io.fired.shot_seq);
-		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
-		// into g_ammoDefTable (stride 276). The host stores it onto the remote
-		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
-		// @0x42C01A; the equip-time source WeaponSlot_InitFromEntityDef @0x54673B
-		// copies admEntry[1]'s low word; retail seeds 3 beside the WPN_M4AUTO
-		// default in PlayerClass_InitEntity @0x4B1105, which is why a retail
-		// client was captured sending 0x03]. Only the LOW BYTE crosses the wire —
-		// the writer's parameter is a char @0x42a7da and the receiver reads one
-		// byte @0x51347d — so indices >= 256 are untransmittable by design.
-		// We shipped 0 here until 2026-07-26 (D-WPN-8).
-		fire.extra_byte1 = io.fired.ammo_index >= 0
-				? static_cast<uint8_t>(io.fired.ammo_index)
-				: uint8_t(0);
-		fire.extra_byte2 = io.fired.round.subtype;
-		fire.misc_byte = io.fired.charge;
-		const std::array<int32_t, 5> fire_pose = {
-				io.fired.round.origin_x,
-				io.fired.round.origin_y,
-				io.fired.round.origin_z,
-				io.fired.round.dir_yaw,
-				io.fired.round.dir_pitch,
-		};
-		const std::array<int32_t, 5> shooter_pose = {
-				io.fired.shooter_pose[0],
-				io.fired.shooter_pose[1],
-				io.fired.shooter_pose[2],
-				io.fired.shooter_pose[3],
-				io.fired.shooter_pose[4],
-		};
-		opennova::set_client_fired_round_pose(fire, fire_pose, shooter_pose);
-		runtime_->queue_fired_round(fire);
-	}
-	if (io.reload.valid && runtime_ != nullptr) {
-		opennova::WeaponReload reload;
-		reload.entity_handle = io.reload.entity_handle;
-		reload.reload_param = io.reload.reload_param;
-		if (joiner_) {
-			runtime_->queue_reload_request(reload);
-		} else if (host_owner_.serve_and_play) {
-			// Authority already performed WeaponSlot_ReloadAmmo above. The
-			// loopback request exists to relay 0x49 to every client; the
-			// server handler's local-connection gate prevents a second refill.
-			host_loop_.client_send(
-					0x25, opennova::encode_weapon_reload(reload));
-		}
-	}
-}
-
-Dictionary Simulation::get_local_player_weapon_state() const {
-	Dictionary out;
-	const opennova::world::LocalPlayerWeapon &w = kernel_->weapon;
-	out["active"] = w.active;
-	if (!w.active) return out;
 	const opennova::world::WeaponSlotState &active_slot =
 			*active_local_weapon_slot();
-	out["current"] = active_slot.current;
-	out["next"] = active_slot.next;
-	out["phase"] = static_cast<int>(active_slot.phase);
-	out["switch_deferred"] = w.switch_deferred_action;
-	out["switch_in_flight"] = w.switch_in_flight;
-	out["pending_combo"] = kernel_->inventory.pending_combo;
-	out["anim_key"] = String::utf8(w.anim_key.c_str());
-	out["anim_variant"] = w.anim_variant;
+	v.current_action = active_slot.current;
+	v.next_action = active_slot.next;
+	v.phase = static_cast<int>(active_slot.phase);
+	v.switch_deferred_action = w.switch_deferred_action;
+	v.switch_in_flight = w.switch_in_flight;
+	v.pending_combo = kernel_->local.inventory.pending_combo;
+	v.anim_key = w.anim_key;
+	v.anim_variant = w.anim_variant;
 	// The FP clip channel position: gated per-tick advances since the play, not
 	// wall-clock age — the presenter poses the parts at advance * tick_dt and
 	// nothing free-runs the playhead [orig: the counter-gated
 	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40].
-	out["anim_advance_ticks"] = static_cast<int64_t>(
+	v.anim_advance_ticks = static_cast<int64_t>(
 			w.anim_key.empty() ? 0u : w.anim_advance_ticks);
-	out["play_serial"] = static_cast<int64_t>(w.play_serial);
+	v.play_serial = static_cast<int64_t>(w.play_serial);
 	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
 	// ordered delivery uses drain_local_player_weapon_events().
 	// [orig: ActionSlot_ExecuteActionWithEffect
 	// @ 0x541860 -> ActionSlot_SpawnEffect @ 0x401f20].
-	out["action_serial"] = static_cast<int64_t>(w.action_serial);
+	v.action_serial = static_cast<int64_t>(w.action_serial);
 	if (w.action_started >= 0 &&
 			w.action_started < opennova::world::weapon_action::kCount) {
 		const opennova::world::WeaponFsmAction &act = w.def.actions[w.action_started];
-		out["action_started"] = w.action_started;
-		out["action_soundset"] = String::utf8(act.soundset);
-		out["action_particle"] = String::utf8(act.particle);
-		out["action_particle_userpoint"] = String::utf8(act.particle_userpoint);
+		v.action_started = w.action_started;
+		v.action_soundset = act.soundset;
+		v.action_particle = act.particle;
+		v.action_particle_userpoint = act.particle_userpoint;
 	} else {
-		out["action_started"] = -1;
-		out["action_soundset"] = String();
-		out["action_particle"] = String();
-		out["action_particle_userpoint"] = String();
+		v.action_started = -1;
+		v.action_soundset = std::string();
+		v.action_particle = std::string();
+		v.action_particle_userpoint = std::string();
 	}
 	// The latest END-leg snapshot diagnostic: fire rows carry the per-shot gunshot
 	// here (GS_*), reload rows the completion sound. Ordered delivery uses the batch.
 	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100 plays
 	//  ActionDef+12 at the owner entity].
-	out["action_end_serial"] = static_cast<int64_t>(w.action_end_serial);
+	v.action_end_serial = static_cast<int64_t>(w.action_end_serial);
 	if (w.action_finished >= 0 &&
 			w.action_finished < opennova::world::weapon_action::kCount) {
-		out["action_end_soundset"] =
-				String::utf8(w.def.actions[w.action_finished].soundsetend);
+		v.action_end_soundset = w.def.actions[w.action_finished].soundsetend;
 	} else {
-		out["action_end_soundset"] = String();
+		v.action_end_soundset = std::string();
 	}
 	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
@@ -425,30 +293,25 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 			(w.def.flags & opennova::world::weapon_flag::kPowerThrow) != 0 &&
 			w.power_throw_start_tick != 0 && kernel_ != nullptr &&
 			(active_slot.clip > 0 || w.def.clip_capacity < 0);
-	out["windup_active"] = windup_active;
-	out["windup_held_ticks"] = windup_active
+	v.windup_active = windup_active;
+	v.windup_held_ticks = windup_active
 			? static_cast<int64_t>(kernel_->world.logic_tick - w.power_throw_start_tick)
 			: static_cast<int64_t>(0);
-	out["fired_serial"] = static_cast<int64_t>(w.fired_serial);
+	v.fired_serial = static_cast<int64_t>(w.fired_serial);
 	// The per-slot tracer cadence byte (retail weaponSlot+0x80): each weapon
 	// keeps its own phase across switches — the F3 weapon row shows it.
-	out["tracer_counter"] =
-			static_cast<int64_t>(active_slot.tracer_shot_counter);
-	out["dry_serial"] = static_cast<int64_t>(w.dry_serial);
-	out["reload_serial"] = static_cast<int64_t>(w.reload_serial);
-	out["reload_applied_serial"] =
-			static_cast<int64_t>(w.reload_applied_serial);
-	out["reload_received_serial"] =
-			static_cast<int64_t>(w.reload_received_serial);
-	out["reload_received_entity"] =
-			static_cast<int64_t>(w.reload_received_entity);
-	out["reload_received_param"] =
-			static_cast<int64_t>(w.reload_received_param);
-	out["unscope_serial"] = static_cast<int64_t>(w.unscope_serial);
-	out["rescope_serial"] = static_cast<int64_t>(w.rescope_serial);
-	out["clip"] = active_slot.clip;
-	out["reserve"] = active_slot.reserve;
-	out["kick"] = static_cast<int>(active_slot.kick);
+	v.tracer_counter = static_cast<int64_t>(active_slot.tracer_shot_counter);
+	v.dry_serial = static_cast<int64_t>(w.dry_serial);
+	v.reload_serial = static_cast<int64_t>(w.reload_serial);
+	v.reload_applied_serial = static_cast<int64_t>(w.reload_applied_serial);
+	v.reload_received_serial = static_cast<int64_t>(w.reload_received_serial);
+	v.reload_received_entity = static_cast<int64_t>(w.reload_received_entity);
+	v.reload_received_param = static_cast<int64_t>(w.reload_received_param);
+	v.unscope_serial = static_cast<int64_t>(w.unscope_serial);
+	v.rescope_serial = static_cast<int64_t>(w.rescope_serial);
+	v.clip = active_slot.clip;
+	v.reserve = active_slot.reserve;
+	v.kick = static_cast<int>(active_slot.kick);
 	// Crosshair spread remains in retail's exact integer domains through the
 	// presentation edge: choose the stance triplet, then add the two arithmetic
 	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
@@ -462,9 +325,9 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 		bool aimed_shot_available = false;
 		const opennova::world::Entity *local = nullptr;
 		const AiEntity *body = nullptr;
-		if (kernel_ && kernel_->world.ai && kernel_->world.cached.local_player.valid()) {
+		if (kernel_ && kernel_->world.cached.local_player.valid()) {
 			local = kernel_->world.registry.get(kernel_->world.cached.local_player);
-			body = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+			body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 		}
 		if (body != nullptr) {
 			recoil_pitch = body->inf.recoil_pitch;
@@ -493,7 +356,7 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 		const int row = category + (aimed_shot_available ? 3 : 0);
 		const opennova::world::WeaponTableEntry *weapon =
 				kernel_ != nullptr && local != nullptr
-				? kernel_->world.weapons.by_index(local->equipped_adm_index)
+				? kernel_->world.tables.weapons.by_index(local->equipped_adm_index)
 				: nullptr;
 		const int32_t authored_error = weapon != nullptr
 				? weapon->error_fp16[row]
@@ -503,11 +366,11 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 				opennova::io::bam_add(
 						opennova::io::bam_sar(recoil_pitch, 7),
 						opennova::io::bam_sar(weapon_weight_spread, 7)));
-		out["recoil_pitch_bam"] = recoil_pitch;
-		out["weapon_weight_spread_bam"] = weapon_weight_spread;
-		out["aimed_shot_available"] = aimed_shot_available;
-		out["hud_spread_row"] = row;
-		out["hud_spread_fp16"] = live_error;
+		v.recoil_pitch_bam = recoil_pitch;
+		v.weapon_weight_spread_bam = weapon_weight_spread;
+		v.aimed_shot_available = aimed_shot_available;
+		v.hud_spread_row = row;
+		v.hud_spread_fp16 = live_error;
 	}
 	// Weapon heat has two retail consumers with different clamps: HUD info stops
 	// at 0xFFFF, while the first-person model publishes HEAT_GLOW on the signed
@@ -520,15 +383,15 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 						  w.def, active_slot,
 						  static_cast<int32_t>(kernel_->world.logic_tick))
 				: 0;
-		out["heat"] = heat > opennova::world::weapon_heat::kFull
+		v.heat = heat > opennova::world::weapon_heat::kFull
 				? opennova::world::weapon_heat::kFull
 				: heat;
-		out["heat_glow"] = std::clamp(heat, 0, 0x10000);
+		v.heat_glow = std::clamp(heat, 0, 0x10000);
 	}
-	out["borrowed_usegun_slot"] = w.usegun_slot_active;
-	out["emplaced_controls_valid"] = false;
-	out["emplaced_gun_yaw"] = 0;
-	out["emplaced_gun_pitch"] = 0;
+	v.borrowed_usegun_slot = w.usegun_slot_active;
+	v.emplaced_controls_valid = false;
+	v.emplaced_gun_yaw = 0;
+	v.emplaced_gun_pitch = 0;
 	if (kernel_ && kernel_->world.cached.local_player.valid()) {
 		const opennova::world::Entity *local =
 				kernel_->world.registry.get(kernel_->world.cached.local_player);
@@ -541,29 +404,27 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 		if (mount != nullptr &&
 				mount->primary_weapon_owner == local->handle &&
 				emplaced_weapon_controls_for(
-						kernel_->world, &kernel_->ai, *mount, emplaced)) {
-			out["emplaced_controls_valid"] = true;
-			out["emplaced_gun_yaw"] =
-					static_cast<int>(emplaced.gun_yaw);
-			out["emplaced_gun_pitch"] =
-					static_cast<int>(emplaced.gun_pitch);
+						kernel_->world, *mount, emplaced)) {
+			v.emplaced_controls_valid = true;
+			v.emplaced_gun_yaw = static_cast<int>(emplaced.gun_yaw);
+			v.emplaced_gun_pitch = static_cast<int>(emplaced.gun_pitch);
 		}
 	}
 	// Read-only diagnostics for the local FIRE -> RoundData_AddRound seam. The last
 	// row lets parity tests pin the observed tag-2 mode byte without exposing mutable
 	// ring state. [orig: ((MountSlot.clip & 3) << 4) | 2 sampled before consume
 	// @ WeaponAction_Fire 0x542c11 / 0x542c75].
-	out["round_ring_count"] = kernel_ ? kernel_->world.rounds.count : 0;
-	if (kernel_ && kernel_->world.rounds.count > 0) {
-		const int last = kernel_->world.rounds.cursor == 0
+	v.round_ring_count = kernel_ ? kernel_->world.out.rounds.count : 0;
+	if (kernel_ && kernel_->world.out.rounds.count > 0) {
+		const int last = kernel_->world.out.rounds.cursor == 0
 				? opennova::world::RoundRing::kCapacity - 1
-				: kernel_->world.rounds.cursor - 1;
-		const opennova::world::RoundEvent &round = kernel_->world.rounds.records[
+				: kernel_->world.out.rounds.cursor - 1;
+		const opennova::world::RoundEvent &round = kernel_->world.out.rounds.records[
 				static_cast<std::size_t>(last)];
-		out["last_round_flags"] = round.mode_flags;
-		out["last_round_subtype"] = round.subtype;
-		out["last_round_slot_byte"] = round.slot_byte;
-		out["last_round_seq"] = round.shot_seq;
+		v.last_round_flags = round.mode_flags;
+		v.last_round_subtype = round.subtype;
+		v.last_round_slot_byte = round.slot_byte;
+		v.last_round_seq = round.shot_seq;
 	}
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
 	// + its own playhead for the shell's mask-bone override. The key remains populated
@@ -571,77 +432,51 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	// Empty means the override gate is off (weapon in hands + allowed mount class +
 	// primary state flag 0x40).
 	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
-	out["body_anim_key"] = String();
-	out["body_anim_phase"] = 0;
+	v.body_anim_key = std::string();
+	v.body_anim_phase = 0;
 	// The secondary channel's cross-fade + served variant ride beside the key: the
 	// outgoing clip at its own playhead, the ramping weight, and the ring entry each
 	// play latched [orig: the AnimMap_UpdateEntity @0x40b5f0 re-init + the +68
 	// latch, see docs/world/world-wac-ai-re.md §14.8.7].
-	out["body_anim_prev_key"] = String();
-	out["body_anim_prev_phase"] = 0;
-	out["body_anim_blend_weight"] = 1.0f;
-	out["body_anim_variant"] = 0;
-	out["body_anim_prev_variant"] = 0;
-	if (kernel_ && kernel_->world.ai && kernel_->world.cached.local_player.valid()) {
-		const AiEntity *p = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	v.body_anim_prev_key = std::string();
+	v.body_anim_prev_phase = 0;
+	v.body_anim_blend_weight = 1.0f;
+	v.body_anim_variant = 0;
+	v.body_anim_prev_variant = 0;
+	if (kernel_ && kernel_->world.cached.local_player.valid()) {
+		const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 		const opennova::world::Entity *entity =
 				kernel_->world.registry.get(kernel_->world.cached.local_player);
 		const bool blocked_mount =
 				entity != nullptr && mount_blocks_weapon_channel(*entity);
 		if (p && entity && opennova::world::infantry_weapon_channel_visible(
 					p->inf, w.active, blocked_mount)) {
-			out["body_anim_key"] = infantry_anim_key(p->inf.wpn_state);
-			out["body_anim_phase"] = p->inf.wpn_clip_phase;
-			out["body_anim_variant"] = p->inf.wpn_variant;
+			v.body_anim_key = opennova::world::infantry_anim_key(p->inf.wpn_state);
+			v.body_anim_phase = p->inf.wpn_clip_phase;
+			v.body_anim_variant = p->inf.wpn_variant;
 			if (p->inf.weapon_blend_active()) {
-				out["body_anim_prev_key"] = infantry_anim_key(p->inf.wpn_prev);
-				out["body_anim_prev_phase"] = p->inf.wpn_prev_clip_phase;
-				out["body_anim_blend_weight"] = p->inf.wpn_blend_weight;
-				out["body_anim_prev_variant"] = p->inf.wpn_prev_variant;
+				v.body_anim_prev_key = opennova::world::infantry_anim_key(p->inf.wpn_prev);
+				v.body_anim_prev_phase = p->inf.wpn_prev_clip_phase;
+				v.body_anim_blend_weight = p->inf.wpn_blend_weight;
+				v.body_anim_prev_variant = p->inf.wpn_prev_variant;
 			}
 		}
 	}
+	out->assign(v);
 	return out;
 }
 
-Array Simulation::drain_local_player_weapon_events() {
-	Array out;
+TypedArray<PlayerWeaponEvent> Simulation::drain_local_player_weapon_events() {
+	TypedArray<PlayerWeaponEvent> out;
 	const uint32_t now = kernel_ ? kernel_->world.logic_tick : 0;
 	for (const opennova::world::WeaponPresentationEvent &event :
-			kernel_->weapon.events) {
-		Dictionary row;
-		// Unsigned subtraction intentionally preserves age across logic-tick wrap.
-		// The age pre-ages delayed sound/effect legs only; the FP clip is posed
-		// from the gated anim_advance_ticks, never from this.
-		row["age_ticks"] = static_cast<int64_t>(now - event.tick);
-		// mission (x,y,z) -> Godot (x, z, -y) — the shooter position the
-		// world-side record carries in mission space.
-		row["world_position"] = Vector3(event.world_position.x,
-				event.world_position.z, -event.world_position.y);
-		row["anim_key"] = String::utf8(event.anim_key.c_str());
-		row["anim_variant"] = event.anim_variant;
-		row["action_started"] = event.action_started;
-		row["action_soundset"] = String::utf8(event.action_soundset.c_str());
-		row["action_particle"] = String::utf8(event.action_particle.c_str());
-		row["action_particle_userpoint"] =
-				String::utf8(event.action_particle_userpoint.c_str());
-		row["scope_settled"] = event.scope_settled;
-		row["third_person"] = event.third_person;
-		row["vehicle_attack_context"] = event.vehicle_attack_context;
-		row["action_finished"] = event.action_finished;
-		row["action_end_soundset"] =
-				String::utf8(event.action_end_soundset.c_str());
-		row["action_effect"] = event.action_effect;
-		row["effect_particle"] = String::utf8(event.effect_particle.c_str());
-		row["effect_particle_userpoint"] =
-				String::utf8(event.effect_particle_userpoint.c_str());
-		row["switch_to_weapon"] = String::utf8(event.switch_to_weapon.c_str());
-		row["clear_weapon"] = event.clear_weapon;
-		row["preserve_slot_state"] = event.preserve_slot_state;
-		row["switch_denied"] = event.switch_denied;
+			kernel_->local.weapon.events) {
+		Ref<PlayerWeaponEvent> row;
+		row.instantiate();
+		row->assign(event, now);
 		out.push_back(row);
 	}
-	kernel_->weapon.events.clear();
+	kernel_->local.weapon.events.clear();
 	return out;
 }
 
@@ -685,8 +520,8 @@ DefWeaponAction *find_action_row(DefWeaponDef *row, int action_id) {
 }  // namespace
 
 const opennova::world::LocalPlayerWeapon *Simulation::native_local_player_weapon() const {
-	if (!kernel_ || !kernel_->weapon.active) return nullptr;
-	return &kernel_->weapon;
+	if (!kernel_ || !kernel_->local.weapon.active) return nullptr;
+	return &kernel_->local.weapon;
 }
 
 const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
@@ -694,30 +529,30 @@ const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
 	// The const_cast is confined here: the finder is shared with the mutating
 	// edits below, and the retained parse is this object's own member.
 	return find_weapon_row(const_cast<DefWeaponsFile &>(kernel_->weapon_defs),
-			kernel_->weapon.def_name);
+			kernel_->local.weapon.def_name);
 }
 
 int Simulation::native_equipped_weapon_adm_index() const {
-	if (!kernel_ || kernel_->weapon.def_name.empty()) return -1;
-	return kernel_->world.weapons.index_of(kernel_->weapon.def_name.c_str());
+	if (!kernel_ || kernel_->local.weapon.def_name.empty()) return -1;
+	return kernel_->world.tables.weapons.index_of(kernel_->local.weapon.def_name.c_str());
 }
 
 const opennova::world::WeaponSlotState *Simulation::native_active_weapon_slot() const {
-	if (!kernel_ || !kernel_->weapon.active) return nullptr;
-	return opennova::world::active_local_weapon_slot(kernel_->world, kernel_->weapon);
+	if (!kernel_ || !kernel_->local.weapon.active) return nullptr;
+	return opennova::world::active_local_weapon_slot(kernel_->world, kernel_->local.weapon);
 }
 
 const char *Simulation::native_weapon_input_block() const {
 	if (!kernel_) return "no world";
 	return opennova::world::local_weapon_input_block_name(
-			opennova::world::local_weapon_input_block(kernel_->world, kernel_->weapon));
+			opennova::world::local_weapon_input_block(kernel_->world, kernel_->local.weapon));
 }
 
 std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 	std::vector<std::string> out;
 	if (!kernel_) return out;
-	out.reserve(kernel_->weapon.clip_rings.size());
-	for (const auto &entry : kernel_->weapon.clip_rings) {
+	out.reserve(kernel_->local.weapon.clip_rings.size());
+	for (const auto &entry : kernel_->local.weapon.clip_rings) {
 		out.push_back(entry.first);
 	}
 	return out;
@@ -726,7 +561,7 @@ std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_start,
 		int p_delay_end, bool p_rebake) {
 	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	if (!weapon.active) return false;
 
 	// Mirror into the retained row AS AUTHORED, so a re-install (an armory
@@ -760,7 +595,7 @@ bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_sta
 bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 		const String &p_text) {
 	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	if (!weapon.active) return false;
 	const CharString utf8 = p_text.utf8();
 	const char *value = utf8.get_data() != nullptr ? utf8.get_data() : "";
@@ -807,7 +642,7 @@ bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 
 bool Simulation::debug_weapon_trigger(int p_trigger) {
 	if (!kernel_) return false;
-	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->local.weapon;
 	// The pump's own gate: input it would zero is refused here instead.
 	if (opennova::world::local_weapon_input_block(kernel_->world, weapon) !=
 			opennova::world::LocalWeaponInputBlock::kNone) {
@@ -819,11 +654,11 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	// p_trigger is devtools::WeaponRequest::Trigger, paired at the drain.
 	switch (p_trigger) {
 		case 0:  // Fire: the press edge, latched until the pump consumes it.
-			kernel_->set_weapon_input(weapon.fire_held, true, false);
+			kernel_->local.set_weapon_input(weapon.fire_held, true, false);
 			return true;
 		case 1:  // Reload: refused exactly where the input dispatcher refuses it.
 			if (!opennova::world::weapon_fsm_reload_allowed(weapon.def, *slot)) return false;
-			kernel_->set_weapon_input(weapon.fire_held, false, true);
+			kernel_->local.set_weapon_input(weapon.fire_held, false, true);
 			return true;
 		case 2:  // The ADS toggle request — the same seam the right button uses.
 			request_local_player_scope_toggle();
@@ -834,14 +669,14 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	}
 }
 
-void Simulation::debug_weapon_set_fire_held(bool p_held) { debug_weapon_fire_held_ = p_held; }
+void Simulation::debug_weapon_set_fire_held(bool p_held) { player_.debug_weapon_fire_held = p_held; }
 
 void Simulation::debug_weapon_arm_trace(bool p_armed) {
 	if (!kernel_) return;
-	opennova::world::weapon_trace_arm(kernel_->weapon, p_armed);
+	opennova::world::weapon_trace_arm(kernel_->local.weapon, p_armed);
 }
 
 void Simulation::debug_weapon_clear_trace() {
 	if (!kernel_) return;
-	opennova::world::weapon_trace_clear(kernel_->weapon);
+	opennova::world::weapon_trace_clear(kernel_->local.weapon);
 }

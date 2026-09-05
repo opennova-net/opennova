@@ -13,8 +13,7 @@
 // are UNGUARDED reads of whatever memory follows; reproducing an OOB read
 // would be manufacturing garbage (ADR 0003 class), so every read here is
 // sanitized to false out of range — recorded in the RE record §3a.
-#ifndef OPENNOVA_WORLD_TRIGGER_RELATIONS_H
-#define OPENNOVA_WORLD_TRIGGER_RELATIONS_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -38,8 +37,11 @@ public:
         int32_t alert = kAlertGreen;  // [orig: 0xA33FA4 + 48*g]
         int32_t initial_count = 0;    // [orig: 0xA33FA8] set once at mission start
         int32_t live_count = 0;       // [orig: 0xA33FAC] 62-tick rescan
-        // Authored group velocity. [orig: group row +24 @0xA33FBC]
-        int32_t move_speed_q16_per_tick = 0;
+        // Authored group velocity in 16.16 units per SECOND (km/h × 1000/3600
+        // via retail's truncating (kph·256000/60)<<8/60; the direct xref set
+        // is the writer alone). [orig: Entity_SetMoveSpeedKPH @0x43a960 store
+        // @0x43a9a5, group row @0xA33FBC]
+        int32_t move_speed_q16_per_sec = 0;
     };
 
     // [orig: EventSystem_FreeAll @ 0x453210] — one memset per mission load.
@@ -133,5 +135,3 @@ private:
 };
 
 } // namespace opennova::world
-
-#endif // OPENNOVA_WORLD_TRIGGER_RELATIONS_H

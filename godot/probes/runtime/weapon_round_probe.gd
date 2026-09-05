@@ -54,7 +54,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var hud_presenter := ctx.hud_presenter()
 	if hud_presenter != null:
 		hud_presenter.tick()  # force the lazy HUD build
-		var hud := hud_presenter.get_hud() as HudOverlay
+		var hud := hud_presenter.get_game_hud()
 		var overlay := hud.get_parent() as Control if hud != null else null
 		if overlay != null:
 			ctx.log("overlay=%s rect=%s hud_rect=%s" % [

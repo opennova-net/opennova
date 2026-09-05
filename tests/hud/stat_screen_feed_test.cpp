@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include <net/npruntime/stat_screen_feed.h>
+#include <runtime/inmatch/stat_screen_feed.h>
 
 using namespace opennova;
-using namespace opennova::np;
+using namespace opennova::inmatch;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \

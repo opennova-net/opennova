@@ -104,7 +104,7 @@ int FireSoundQueue::pending_count() const {
 }
 
 void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
-    FireSoundQueue &queue = world.fire_sounds;
+    FireSoundQueue &queue = world.out.fire_sounds;
     // A host with no stamped listener presents nothing — the dedicated-server
     // gate [orig: is_mp_session_peer @ 0x528e57].
     if (!queue.listener_valid()) return;
@@ -130,7 +130,7 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
         //  the +90==64 one-shot stamp gate @ 0x4020ff into
         //  ActionSlot_PlayEndSoundAndDupes @ 0x401100 (both at entity+4);
         //  rows +684/+688 @ 0x42f777/@ 0x42f785 and @ 0x42f98f/@ 0x42f9d0]
-        const WeaponTableEntry *def = world.weapons.by_index(params.adm_index);
+        const WeaponTableEntry *def = world.tables.weapons.by_index(params.adm_index);
         if (def == nullptr) return;
         // The shooter's entity position; a decoded wire shooter with no local
         // entity supplies its row position through the spawn params, and the
@@ -152,7 +152,7 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
     // [orig: WeaponSlot_FireAndSpawnEffects @ 0x53f440 ->
     //  Sound_PlayWithDistanceAttenuation @ 0x528e40; the wire ammo arm
     //  @ 0x42f5dc]
-    const AmmoTableEntry *ammo = world.ammo.by_index(params.ammo_index);
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(params.ammo_index);
     if (ammo == nullptr || ammo->ai_launch_set.empty()) return;
     queue.play_with_distance_delay(ammo->ai_launch_set.c_str(), params.origin,
             source_bms_id);

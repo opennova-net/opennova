@@ -1,4 +1,6 @@
 #include <formats/env/env_celestial.h>
+#include <base/io/fixed.h>
+#include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
 
@@ -525,7 +527,7 @@ CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
 
 float cloud_uv_rate_per_second(const CloudScrollState &scroll) {
 	// 62 ticks of the current rate through the layer-1 2^-28 UV scale.
-	return static_cast<float>(scroll.rate * 62.0 * kCloudUvScaleLayer1);
+	return static_cast<float>(scroll.rate * static_cast<double>(io::kTicksPerSecondInt) * kCloudUvScaleLayer1);
 }
 
 // ---------------------------------------------------------------------------
@@ -813,6 +815,80 @@ void water_project_point(const WaterStripView &view, const float world[3], float
 }
 
 } // namespace
+
+void water_strip_view_from_camera(const float right[3], const float up[3],
+                                  const float forward[3], const float eye[3],
+                                  const float proj_columns[16], int viewport_w,
+                                  int viewport_h, float fog_end_world,
+                                  WaterStripView &out) {
+	const auto dot = [](const float a[3], const float b[3]) {
+		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	};
+	float *view = out.view;
+	view[0] = right[0];
+	view[1] = up[0];
+	view[2] = forward[0];
+	view[3] = 0.0f;
+	view[4] = right[1];
+	view[5] = up[1];
+	view[6] = forward[1];
+	view[7] = 0.0f;
+	view[8] = right[2];
+	view[9] = up[2];
+	view[10] = forward[2];
+	view[11] = 0.0f;
+	view[12] = -dot(right, eye);
+	view[13] = -dot(up, eye);
+	view[14] = -dot(forward, eye);
+	view[15] = 1.0f;
+
+	float *inv = out.view_inv;
+	inv[0] = right[0];
+	inv[1] = right[1];
+	inv[2] = right[2];
+	inv[3] = 0.0f;
+	inv[4] = up[0];
+	inv[5] = up[1];
+	inv[6] = up[2];
+	inv[7] = 0.0f;
+	inv[8] = forward[0];
+	inv[9] = forward[1];
+	inv[10] = forward[2];
+	inv[11] = 0.0f;
+	inv[12] = eye[0];
+	inv[13] = eye[1];
+	inv[14] = eye[2];
+	inv[15] = 1.0f;
+
+	for (int input = 0; input < 4; ++input) {
+		const float input_sign = input == 2 ? -1.0f : 1.0f;
+		for (int k = 0; k < 4; ++k) {
+			out.proj[input * 4 + k] = proj_columns[input * 4 + k] * input_sign;
+		}
+	}
+
+	for (int k = 0; k < 3; ++k) {
+		out.cam_right[k] = right[k];
+		out.cam_forward[k] = forward[k];
+	}
+
+	out.cam_x_fp = io::float_to_fp16_16_round_sat(eye[0]);
+	out.cam_y_fp = io::float_to_fp16_16_round_sat(eye[1]);
+	out.cam_z_fp = io::float_to_fp16_16_round_sat(eye[2]);
+
+	out.vp_min_x = 0;
+	out.vp_min_y = 0;
+	out.vp_max_x = viewport_w - 1;
+	out.vp_max_y = viewport_h - 1;
+	out.vp_center_x = viewport_w / 2;
+	out.vp_center_y = viewport_h / 2;
+
+	int32_t fog_end_fp = io::float_to_fp16_16_round_sat(fog_end_world);
+	if (fog_end_fp < 1) {
+		fog_end_fp = 1;
+	}
+	out.fog_end_fp = fog_end_fp;
+}
 
 void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_height_fp,
                                    WaterScreenBlock &out) {
@@ -1616,9 +1692,13 @@ Rgb weighted_add(const Rgb &light, const Rgb &base, int weight) {
 
 } // namespace
 
+// The byte weight of the terrain light/sky blend: 0xB5/256 = 0.707 as the
+// witnessed integer arithmetic spells it (not terrain lighting's float literal).
+constexpr int kTerrainLightWeightByte = 0xB5;
+
 Rgb combine_terrain_light(const Rgb &light, const Rgb &sky) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57f0b3] — 0xB5/256 = 0.707.
-	return weighted_add(light, sky, 0xB5);
+	return weighted_add(light, sky, kTerrainLightWeightByte);
 }
 
 Rgb combine_terrain_light_low(const Rgb &light, const Rgb &sky) {
@@ -1703,6 +1783,37 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 	if (overrides.has_start_time) {
 		config.curtime = overrides.start_time;
 	}
+}
+
+BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
+                                              int fog_override, const int fog_color[3],
+                                              const int water_color[3], int water_murk) {
+	// [orig: Game_LoadTerrainDuringConnect @ 0x520710 + Game_StartMission @ 0x525371]
+	BmsEnvOverrides overrides;
+	constexpr uint32_t kWaterOverrideEnable = 0x1;
+	constexpr uint32_t kFogDistanceOverrideEnable = 0x2;
+	constexpr uint32_t kFogColorOverrideEnable = 0x4;
+	if ((attrib_flags & kWaterOverrideEnable) != 0) {
+		overrides.has_water_height = true;
+		overrides.water_height = static_cast<float>(water_override);
+	}
+	if ((attrib_flags & kFogDistanceOverrideEnable) != 0) {
+		overrides.has_fog_level = true;
+		overrides.fog_level = static_cast<float>(fog_override);
+	}
+	if ((attrib_flags & kFogColorOverrideEnable) != 0) {
+		overrides.has_fog_color = true;
+		overrides.fog_color = {fog_color[0] / 255.0f, fog_color[1] / 255.0f, fog_color[2] / 255.0f};
+	}
+	if (water_color[0] != 0 || water_color[1] != 0 || water_color[2] != 0) {
+		overrides.has_water_color = true;
+		overrides.water_color = {water_color[0] / 255.0f, water_color[1] / 255.0f, water_color[2] / 255.0f};
+	}
+	if (water_murk != 0) {
+		overrides.has_water_murk = true;
+		overrides.water_murk = static_cast<float>(water_murk) * 0.01f;
+	}
+	return overrides;
 }
 
 float iris_luminance(const Rgb &c) {

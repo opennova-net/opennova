@@ -4,6 +4,8 @@
 
 #include <cstddef>
 
+namespace opennova::threedi {
+
 namespace {
 
 // Exact descriptor order from the 96 populated retail records.
@@ -152,3 +154,5 @@ uint8_t threedi_ctrl_register_loader_ordinal(const char *name)
         ? static_cast<uint8_t>(THREEDI_CTRL_LOD_FRAC)
         : static_cast<uint8_t>(ordinal);
 }
+
+} // namespace opennova::threedi

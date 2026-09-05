@@ -29,7 +29,7 @@ enum class EntityClass : uint8_t {
 // legs, and the player's selected CHARACTER rides the separate avatar channel
 // (S2C 0x29 packedCharId -> CharacterEntity, D-PLAYERINFO-1), never this id.
 // world/player_spawn.h mirrors it as kPlayerInfantryTypeId (the historical wire
-// vocabulary); engine/net/netsim static_asserts the two agree.
+// vocabulary); engine/runtime/replication static_asserts the two agree.
 inline constexpr uint16_t kPlayerPersonTypeId = 0x14B9;
 
 // Map a 4-char items.def class-tag (case-sensitive §5.10b match) to its class.

@@ -1,9 +1,6 @@
-#ifndef GAMEPROFILE_REQUIRED_RESOURCES_H
-#define GAMEPROFILE_REQUIRED_RESOURCES_H
+#pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace opennova::gameprofile {
 
 /* The witnessed boot-required resource manifest (ENG-6): every file
    Jointops.exe demands by literal name to boot to the main menu and start a
@@ -67,8 +64,4 @@ const RequiredResource *gameprofile_required_resource_at(int index);
    only match their literal spelling. */
 const RequiredResource *gameprofile_required_resource_find(const char *name);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* GAMEPROFILE_REQUIRED_RESOURCES_H */
+} // namespace opennova::gameprofile

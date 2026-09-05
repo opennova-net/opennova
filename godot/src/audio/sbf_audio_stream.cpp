@@ -13,6 +13,7 @@
 #include <cstring>
 
 using namespace godot;
+using namespace opennova::sbf;
 
 void SbfAudioStream::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_index"), &SbfAudioStream::get_index);

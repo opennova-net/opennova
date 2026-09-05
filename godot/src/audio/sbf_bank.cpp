@@ -15,6 +15,7 @@
 #include <cstring>
 
 using namespace godot;
+using namespace opennova::sbf;
 
 SbfBank::SbfBank() {
 	std::memset(&_arc, 0, sizeof(_arc));
@@ -290,8 +291,7 @@ Error SbfBank::build_encoded_bytes(PackedByteArray &out) const {
 		return ERR_BUG;
 	}
 
-	out.resize((int)buf_size);
-	std::memcpy(out.ptrw(), buf, buf_size);
+	out = to_packed_bytes(buf, buf_size);
 	sbf_free(buf);
 	return OK;
 }

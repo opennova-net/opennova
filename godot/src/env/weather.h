@@ -25,7 +25,7 @@ class Simulation;
 // the kernel after every logic tick, then this node's color legs), seeds the
 // World's weather from the mission environment at load, and runs the
 // mission-start boundary. This node keeps only device work: the environment
-// NodePath resolution, the _process hook (standalone owners), the iris-sample
+// NodePath resolution, the advance_frame drive the frame pipeline calls, the iris-sample
 // property the in-world shell stamps, and the opennova_* global shader
 // parameter pushes. RE record: docs/env/env-tod-re.md.
 class Weather : public Node3D, private opennova::world::IWeatherRenderTick {
@@ -101,6 +101,14 @@ public:
 	void command_quake(int p_seconds);
 	void command_time_of_day_minutes(int p_minute_of_day);
 	void command_fog_type(int p_type);
+	void command_sky_height(int p_height_raw);
+	void command_sun_fade(int p_percent, int p_seconds);
+	void command_color_fade(int p_seconds);
+	void command_wind_scale(int p_value);
+	// One weather color block by world::WeatherColorTarget index, packed
+	// 0xRRGGBB; the lightning color the same way.
+	void command_weather_color(int p_target, int p_rgb);
+	void command_lightning_color(int p_rgb);
 	void set_wind_duration(int p_seconds);
 	int get_wind_duration() const;
 
@@ -143,13 +151,12 @@ public:
 	opennova::env::WeatherRuntime &runtime() { return runtime_; }
 	const opennova::env::WeatherRuntime &runtime() const { return runtime_; }
 
-	// One render-frame advance (the _process body) — the externally-callable
+	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
 	void _ready() override;
 	void _exit_tree() override;
-	void _process(double p_delta) override;
 	// A Weather freed off-tree never sees _exit_tree: release the sim's
 	// render-owner pointer and the env's weather view here too.
 	~Weather() override;

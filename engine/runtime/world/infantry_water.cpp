@@ -92,7 +92,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
     // own airborne bit: a soldier who WADED in and one who JUMPED in are heard
     // differently. Position is the body's XY at the PLANE, not at its own Z.
     if (!was_afloat) {
-        world.water_crossings.add(e.pos[0], e.pos[1], water,
+        world.out.water_crossings.add(e.pos[0], e.pos[1], water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
@@ -179,7 +179,7 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
             (flags & kEntityFlagDiveLatch) == 0) {
             tick_entity->flags |= kEntityFlagDiveLatch;
             tick_entity->engine_flags |= kEntityFlagDiveLatch;
-            world.water_crossings.add(e.pos[0], e.pos[1], water, /*airborne=*/false);
+            world.out.water_crossings.add(e.pos[0], e.pos[1], water, /*airborne=*/false);
         }
     } else {
         tick_entity->flags &= ~kEntityFlagDiveLatch;
@@ -192,7 +192,7 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     // scope auto-untoggle that sits between them (@0x4b8304-0x4b8360) is
     // presentation and is not modeled here. [orig: @0x4b8182 / @0x4b8363]
     if (!was_afloat) {
-        world.water_crossings.add(e.pos[0], e.pos[1], water,
+        world.out.water_crossings.add(e.pos[0], e.pos[1], water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     tick_entity->flags = (tick_entity->flags & ~kEntityFlagInAir) | kEntityFlagDrowning;

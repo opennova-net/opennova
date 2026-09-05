@@ -2,11 +2,6 @@
 
 namespace godot {
 
-void StarField::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("regenerate", "seed"), &StarField::regenerate);
-	ClassDB::bind_method(D_METHOD("get_count"), &StarField::get_count);
-}
-
 void StarField::regenerate(int p_seed) {
 	prng_state = static_cast<uint32_t>(p_seed == 0 ? 1 : p_seed);
 	opennova::env::generate_star_instances(stars, prng_state);

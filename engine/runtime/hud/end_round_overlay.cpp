@@ -1,4 +1,5 @@
 #include <runtime/hud/end_round_overlay.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -252,9 +253,10 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 		EndRoundLine time = literal_line("%s : %d:%02d:%02d", y);
 		time.args.push_back(key_arg("STROVER_GAMETIME", "!Game time"));
 		const int32_t t = in.round_time_remaining_ticks;
-		time.args.push_back(number_arg(t / 62 / 60 / 60));
-		time.args.push_back(number_arg(t / 62 / 60));
-		time.args.push_back(number_arg(t / 62 % 60));
+		const int32_t seconds = t / io::kTicksPerSecondInt;
+		time.args.push_back(number_arg(seconds / 60 / 60));
+		time.args.push_back(number_arg(seconds / 60));
+		time.args.push_back(number_arg(seconds % 60));
 		out.push_back(time);
 	}
 	return out;

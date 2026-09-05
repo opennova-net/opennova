@@ -70,13 +70,13 @@ func _make_overlay() -> HudOverlay:
 	return hud
 
 
-func _load_weapon(name: String) -> Dictionary:
+func _load_weapon(name: String) -> WeaponDef:
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK,
 		"weapon.def fixture loads")
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0, "%s exists in the weapon.def fixture" % name)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _set_hud_weapon(hud: HudOverlay, def: PlayerHudWeaponDef, display_name: String) -> void:
@@ -90,23 +90,22 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		pending(RetailData.fixture_pending_text("def/hudpos.def"))
 		return
 	var weapon := _load_weapon("WPN_M4AUTO")
-	assert_false(weapon.is_empty())
-	if weapon.is_empty():
+	assert_not_null(weapon)
+	if weapon == null:
 		return
-	assert_eq(int(weapon.get("flags", 0)) & 0x02000003, 0x2,
+	assert_eq(weapon.flags & 0x02000003, 0x2,
 		"M4AUTO is Sighted and has neither Scoped nor NoCardSwitch")
-	var sights: Array = weapon.get("sights", [])
+	var sights := weapon.get_sights()
 	assert_eq(sights.size(), 3, "M4AUTO retains all three authored SIGHTS rows")
 	var textures := PackedStringArray()
-	for entry in sights:
-		var sight: Dictionary = entry
-		textures.append(String(sight.get("texture", "")))
+	for sight: WeaponSightRow in sights:
+		textures.append(sight.get_texture())
 	assert_eq(textures, PackedStringArray([
 		"car15aim.tga", "car15gls.tga", "reddot1.tga",
 	]), "The final authored row is the committed M4 red-dot analogue")
-	var reticle: Dictionary = sights[2]
-	assert_eq(int(reticle.get("blend", -1)), 1, "The red-dot row keeps additive blend")
-	assert_true(bool(reticle.get("scale", false)), "The red-dot row keeps its scale flag")
+	var reticle: WeaponSightRow = sights[2]
+	assert_eq(reticle.get_blend(), 1, "The red-dot row keeps additive blend")
+	assert_true(reticle.is_scale(), "The red-dot row keeps its scale flag")
 
 	var fixture := _load_temp_layout(PackedStringArray([
 		"ALPHAFADE 30 50 3",
@@ -128,16 +127,16 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		assert_not_null(row, "SIGHTS row %d is a drawable Control" % i)
 		assert_true(row.visible, "SIGHTS row %d is visible while the card is up" % i)
 		RenderingServer.canvas_item_set_custom_rect(row.get_canvas_item(), false)
-		var sight: Dictionary = sights[i]
-		var x1 := float(sight.get("x1", 0))
-		var y1 := float(sight.get("y1", 0))
+		var sight: WeaponSightRow = sights[i]
+		var x1 := float(sight.get_x1())
+		var y1 := float(sight.get_y1())
 		# The card scales through the engine's witnessed per-corner pixel snap
 		# (HudPos.scale_rect [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]),
 		# which replaced the old .gd position*scale approximation.
 		var expected := HudPos.scale_rect(Rect2(
 			Vector2(x1, y1),
-			Vector2(float(sight.get("x2", 0)) - x1,
-				float(sight.get("y2", 0)) - y1)), surface)
+			Vector2(float(sight.get_x2()) - x1,
+				float(sight.get_y2()) - y1)), surface)
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
 			"SIGHTS row %d emits its authored draw rectangle" % i)
 	var reticle_row := card.get_child(2) as Control
@@ -168,25 +167,25 @@ func test_overlay_draws_health_from_fixture_layout() -> void:
 	# the health bar at the default hud_detail level 0 and shows it at 1.
 	# (retail: CRenderState_SetLayerVisibility @0x59B0F0; the DMGBAR slot cmp
 	# @0x5A7C99 — see docs/interface/hud-re.md)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads"]), 0,
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads, 0,
 		"the fixture's level-0 declutter mask hides the health bar")
 	hud.set_hud_detail_level(1)
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads_filled"]), 1, "0.5 health emits the fill quad")
-	assert_eq(int(stats["quads_wire"]), 1, "and the wireframe border on top")
-	assert_eq(int(stats["tris"]), 0, "no weapon -> no reticle")
-	assert_eq(int(stats["glyphs"]), 0, "no font -> no text")
+	assert_eq(stats.quads_filled, 1, "0.5 health emits the fill quad")
+	assert_eq(stats.quads_wire, 1, "and the wireframe border on top")
+	assert_eq(stats.tris, 0, "no weapon -> no reticle")
+	assert_eq(stats.glyphs, 0, "no font -> no text")
 	hud.set_hud_detail_level(3)
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["elements_drawn"]), 0,
+	assert_eq(stats.elements_drawn, 0,
 			"retail HUD detail 3 emits no gameplay HUD elements")
-	assert_eq(int(stats["quads"]), 0)
-	assert_eq(int(stats["tris"]), 0)
-	assert_eq(int(stats["lines"]), 0)
-	assert_eq(int(stats["glyphs"]), 0)
-	assert_false(bool(stats["map_visible"]))
-	assert_false(bool(stats["big_map_visible"]))
+	assert_eq(stats.quads, 0)
+	assert_eq(stats.tris, 0)
+	assert_eq(stats.lines, 0)
+	assert_eq(stats.glyphs, 0)
+	assert_false(stats.map_visible)
+	assert_false(stats.big_map_visible)
 	assert_true(hud.visible,
 			"declutter leaves the overlay mounted for PlayerViewEffects")
 	await get_tree().process_frame
@@ -229,36 +228,36 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 		1, 0, 0, 6, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_true(bool(stats["map_visible"]),
+	var stats := hud.get_draw_list_stats()
+	assert_true(stats.map_visible,
 			"An authored HUDSPINMAP rect enables the gameplay spinmap.")
-	assert_eq(int(stats["map_backing_tris"]), 32,
+	assert_eq(stats.map_backing_tris, 32,
 			"The circular backing is the portable 32-sided fan.")
-	assert_gt(int(stats["map_terrain_tris"]), 0,
+	assert_gt(stats.map_terrain_tris, 0,
 			"TerrainData's 16x16 sector routing reaches the minimap compiler.")
-	assert_eq(int(stats["map_sprites"]), 3,
+	assert_eq(stats.map_sprites, 3,
 			"One live retained marker, the single waypoint tip cell, and the compass ring compile.")
-	assert_eq(int(stats["map_lines"]), 1,
+	assert_eq(stats.map_lines, 1,
 			"The waypoint state line reaches the draw list.")
 	# Both label suppressors are BSS-zero in retail (LIVE by default): the
 	# ring-edge distance label and the MAPCOORDS grid label compile with no
 	# authored suppressor token.
-	assert_eq(int(stats["map_labels"]), 2,
+	assert_eq(stats.map_labels, 2,
 			"The distance + grid labels compile by default (BSS-zero suppressors).")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "The complete minimap pass renders safely.")
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["map_texture_filter"]), 4,
+	assert_eq(stats.map_texture_filter, 4,
 			"The spinmap icon strip uses explicit linear mip filtering.")
-	assert_eq(int(stats["map_texture_repeat"]), 1,
+	assert_eq(stats.map_texture_repeat, 1,
 			"The spinmap icon strip clamps past its half texel.")
-	assert_true(bool(stats["map_icon_mipmaps"]),
+	assert_true(stats.map_icon_mipmaps,
 			"The 64px TSDicon cells retain retail's box-filtered mip chain.")
-	assert_eq(int(stats["map_icon_width"]), 64)
-	assert_eq(int(stats["map_icon_height"]), 1920)
-	assert_eq(int(stats["map_water_texture_filter"]), 2,
+	assert_eq(stats.map_icon_width, 64)
+	assert_eq(stats.map_icon_height, 1920)
+	assert_eq(stats.map_water_texture_filter, 2,
 			"The spinmap thresholds the linearly sampled depthspin field.")
-	assert_eq(int(stats["map_water_texture_repeat"]), 1,
+	assert_eq(stats.map_water_texture_repeat, 1,
 			"The spinmap water field clamps at its authored edge.")
 
 	# Unknown versions are rejected as a whole instead of partially walking a
@@ -266,7 +265,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([99, 17, 1]))
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["map_sprites"]), 2,
+	assert_eq(stats.map_sprites, 2,
 			"A malformed snapshot contributes no retained marker rows.")
 	await get_tree().process_frame
 
@@ -281,9 +280,9 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 				1, 0, 0, 6, 1,
 			]))
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["map_sprites"]), 2,
+	assert_eq(stats.map_sprites, 2,
 			"A medic marker draws no blip sprite (waypoint tip + compass remain).")
-	assert_eq(int(stats["map_footprint_tris"]), 6,
+	assert_eq(stats.map_footprint_tris, 6,
 			"The medic marker is the three cross-plate quads as overlay tris.")
 	await get_tree().process_frame
 
@@ -303,9 +302,9 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 				2, 0, 0, 6, 0,
 			]))
 	stats = hud.get_draw_list_stats()
-	assert_gt(int(stats["map_footprint_tris"]), 0,
+	assert_gt(stats.map_footprint_tris, 0,
 			"The footprint feed reaches the compiler's overlay list.")
-	assert_eq(int(stats["map_sprites"]), 2,
+	assert_eq(stats.map_sprites, 2,
 			"The footprint marker draws no icon sprite.")
 	await get_tree().process_frame
 
@@ -315,18 +314,18 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 			PackedInt32Array([4, 17, 0]))
 	await get_tree().process_frame
 	stats = hud.get_draw_list_stats()
-	assert_true(bool(stats["big_map_visible"]),
+	assert_true(stats.big_map_visible,
 			"The stats seam reports the actual large-map draw list, not the corner map.")
-	assert_eq(int(stats["big_map_backing_tris"]), 2,
+	assert_eq(stats.big_map_backing_tris, 2,
 			"The fullscreen large map owns its independent rectangular backing.")
-	assert_gt(int(stats["big_map_terrain_tris"]), 0)
-	assert_eq(int(stats["big_map_texture_filter"]), 4,
+	assert_gt(stats.big_map_terrain_tris, 0)
+	assert_eq(stats.big_map_texture_filter, 4,
 			"The enlarged map icon strip uses explicit linear mip filtering.")
-	assert_eq(int(stats["big_map_texture_repeat"]), 1,
+	assert_eq(stats.big_map_texture_repeat, 1,
 			"The enlarged map icon strip clamps at cell boundaries.")
-	assert_eq(int(stats["big_map_water_texture_filter"]), 2,
+	assert_eq(stats.big_map_water_texture_filter, 2,
 			"The enlarged map thresholds the linearly sampled depthspin field.")
-	assert_eq(int(stats["big_map_water_texture_repeat"]), 1,
+	assert_eq(stats.big_map_water_texture_repeat, 1,
 			"The enlarged map water field clamps at its authored edge.")
 
 
@@ -348,9 +347,9 @@ func test_overlay_unconfigured_draws_nothing() -> void:
 	add_child_autofree(hud)
 	assert_false(hud.is_configured())
 	hud.set_player_state(0, 1.0, 0, 80.0)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads"]), 0)
-	assert_eq(int(stats["elements_drawn"]), 0)
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads, 0)
+	assert_eq(stats.elements_drawn, 0)
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()), Rect2(),
@@ -375,8 +374,8 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], fixture["root"])
 	hud.set_player_state(100, 1.0, 2, 80.0)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads"]), 1, "one stance frame quad (no ghost at elapsed 0)")
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads, 1, "one stance frame quad (no ghost at elapsed 0)")
 	hud.queue_redraw()
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
@@ -401,12 +400,12 @@ func test_stance_index_bounds_safe() -> void:
 	hud.configure(fixture["layout"], fixture["root"])
 	# Out-of-range stance must not crash the compile (including the cross-fade ghost).
 	hud.set_player_state(10, 0.9, 99, 80.0)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads"]), 0, "an out-of-range stance frame draws nothing")
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads, 0, "an out-of-range stance frame draws nothing")
 	await get_tree().process_frame
 	hud.set_player_state(20, 0.9, 1, 80.0)
 	stats = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads"]), 1, "returning in range draws the current frame only")
+	assert_eq(stats.quads, 1, "returning in range draws the current frame only")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "Out-of-range stance index is draw-safe.")
 
@@ -421,22 +420,22 @@ func test_weapon_cluster_artless_safe() -> void:
 	var hp := HudPos.new()
 	assert_eq(hp.load(RetailData.fixture("def/hudpos.def")), OK)
 	hud.configure(hp, null)
-	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_dict({
-		"name": "WPN_AK47",
-		"clipsize": 30,
-		"round_type": "AMMO_762",
-		"error": PackedFloat32Array([0.05, 0.2, 0.25, 0.05, 0.1, 0.15]),
-		"hudclipgfx_texture": "H_clip.tga",
-		"hudclipgfx_offset": Vector2i(0, 0),
-		"hudrndgfx_texture": "H_round.tga",
-		"hudrndgfx_offset": Vector2i(9, 0),
-		"hudrndgfx_layout": Vector3i(18, 0, 1),
-	}), "AK-47")
+	var weapon := WeaponDef.new()
+	weapon.name = "WPN_AK47"
+	weapon.clipsize = 30
+	weapon.round_type = "AMMO_762"
+	weapon.error = PackedFloat32Array([0.05, 0.2, 0.25, 0.05, 0.1, 0.15])
+	weapon.hudclipgfx_texture = "H_clip.tga"
+	weapon.hudclipgfx_offset = Vector2i(0, 0)
+	weapon.hudrndgfx_texture = "H_round.tga"
+	weapon.hudrndgfx_offset = Vector2i(9, 0)
+	weapon.hudrndgfx_layout = Vector3i(18, 0, 1)
+	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_def(weapon), "AK-47")
 	hud.set_weapon_state(true, 12, 90, 0, 0, false, false, false, 0)
 	await get_tree().process_frame
 	# A settled aimed shot hides the crosshair; clearing the weapon clears the cluster.
 	hud.set_weapon_state(true, 12, 90, 0, 0, true, false, false, 0)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 0,
+	assert_eq(hud.get_draw_list_stats().tris, 0,
 		"a settled aimed shot emits no reticle")
 	await get_tree().process_frame
 	hud.clear_weapon()
@@ -453,10 +452,10 @@ func test_crosshair_requires_active_weapon() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], fixture["root"])
 	hud.set_weapon_state(false, -1, -1, 0, 0, false, false, false, 0)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 0,
+	assert_eq(hud.get_draw_list_stats().tris, 0,
 		"No weapon produces no retail crosshair draw commands.")
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 14,
+	assert_eq(hud.get_draw_list_stats().tris, 14,
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
@@ -467,7 +466,7 @@ func test_crosshair_missing_texture_draws_nothing() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], fixture["root"])
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 0,
+	assert_eq(hud.get_draw_list_stats().tris, 0,
 		"A missing crosshair texture produces no invented replacement reticle.")
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
@@ -484,10 +483,10 @@ func test_binocular_view_hides_weapon_crosshair() -> void:
 	hud.configure(fixture["layout"], fixture["root"])
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	hud.set_view_state(true, Vector2.INF)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 0,
+	assert_eq(hud.get_draw_list_stats().tris, 0,
 			"Binocular view hides the normal weapon crosshair without hiding the HUD.")
 	hud.set_view_state(false, Vector2.INF)
-	assert_eq(int(hud.get_draw_list_stats()["tris"]), 14,
+	assert_eq(hud.get_draw_list_stats().tris, 14,
 			"Leaving the binocular view restores the reticle.")
 
 
@@ -518,6 +517,26 @@ func test_crosshair_style_clamps_and_reloads_live() -> void:
 		"Changing style live-reloads the differently sized selected texture.")
 
 
+func test_crosshair_color_and_spread_survive_configure() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]))
+	var hud := _make_overlay()
+	# Set before configure(): both are picked up like the style.
+	hud.set_crosshair_color(0x123456)
+	hud.set_crosshair_spread_enabled(false)
+	hud.configure(fixture["layout"], fixture["root"])
+	assert_eq(hud.get_crosshair_color(), 0x123456,
+			"the pre-configure colour survives the layout rebuild")
+	assert_false(hud.is_crosshair_spread_enabled(),
+			"the pre-configure spread toggle survives the layout rebuild")
+	# Live sets: the colour masks to its 24-bit RGB (retail persists RGB).
+	hud.set_crosshair_color(0x7F00FF00)
+	assert_eq(hud.get_crosshair_color(), 0x00FF00)
+	hud.set_crosshair_spread_enabled(true)
+	assert_true(hud.is_crosshair_spread_enabled())
+
+
 func test_message_feed_draws_and_expires() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",
@@ -529,78 +548,27 @@ func test_message_feed_draws_and_expires() -> void:
 	hud.configure(fixture["layout"], root)
 	hud.set_player_state(50, 1.0, 0, 80.0)
 	hud.push_message("Move to the extraction point")
-	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 		"A pushed triggered-text line lays out glyph quads through the real .fnt.")
 	await get_tree().process_frame
 	# [orig: Chat_AddDebugMessage 930-tick life] — the line is gone at push+930.
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 		"The 930-tick life expires the line.")
 	assert_true(is_instance_valid(hud), "A pushed triggered-text line draws safely.")
 
 
-# The friendly tags (D-HUD-20): the binding feeds projected tags through the
-# compiler's element — FULL mode lays out centered fallback-name glyphs, the
-# mode cycle clamps, BRIEF swaps to the tick lines, OFF draws nothing, and the
-# medic flag adds the three cross-plate quads.
-# [orig: HUD_DrawEntityLabel @0x5a39b0 via HUD_DrawFriendlyTagsPass @0x5a4480]
-func test_friendly_tags_draw_modes() -> void:
-	var fixture := _load_temp_layout(PackedStringArray([
-		"fonthud1_hi Gunpl22b.fnt",
-		"tagcolor_good 005,250,013",
-	]), PackedStringArray())
-	_copy_font_into(fixture["dir"])
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+# The friendly tags (D-HUD-20) draw modes — FULL glyphs, the medic plate, the
+# downed count, BRIEF ticks, OFF — are pinned by the hud_friendly_tags ctest
+# over the compiler; the overlay's mode setter clamps.
+func test_friendly_tag_mode_clamps() -> void:
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
 	assert_eq(hud.get_friendly_tag_mode(), 2, "the boot default mode is FULL")
-	var screens := PackedVector2Array([Vector2(300, 200)])
-	var dists := PackedFloat32Array([100.0])
-	var names := PackedStringArray([""])
-	var ids := PackedInt32Array([24]) # the fallback table's "SGT  Brown"
-	var ratios := PackedInt32Array([0x10000])
-	var flags := PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 11,
-		"FULL lays out the 11 fallback-name glyphs ('^SGT  Brown)")
-	await get_tree().process_frame
-	flags = PackedInt32Array([1]) # medic
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(int(hud.get_draw_list_stats()["quads_filled"]), 3,
-		"the medic plate adds the white square + two red cross bars")
-	await get_tree().process_frame
-	# The downed legs: dead (8) + slot (16) + a revive window (seconds << 8)
-	# appends ": 87" to the name [orig: "%s: %ld" @0x5a400e].
-	flags = PackedInt32Array([8 | 16 | (87 << 8)])
-	ratios = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 15,
-		"a downed slot entry appends the revive count to the label")
-	await get_tree().process_frame
-	ratios = PackedInt32Array([0x10000])
-	hud.set_friendly_tag_mode(3)
-	flags = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	var brief: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(brief["glyphs"]), 0, "BRIEF draws no text")
-	assert_eq(int(brief["lines"]), 3, "BRIEF draws the three tick lines")
-	await get_tree().process_frame
-	# BRIEF draws the bare count above the ticks [orig: "%ld" @0x5a41f0].
-	flags = PackedInt32Array([8 | 16 | (7 << 8)])
-	ratios = PackedInt32Array([0])
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 1,
-		"BRIEF draws the bare one-digit revive count")
-	ratios = PackedInt32Array([0x10000])
-	flags = PackedInt32Array([0])
-	await get_tree().process_frame
-	hud.set_friendly_tag_mode(0)
-	hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0, "OFF draws nothing")
 	hud.set_friendly_tag_mode(99)
 	assert_eq(hud.get_friendly_tag_mode(), 3, "the mode setter clamps to 0..3")
-	assert_true(is_instance_valid(hud), "friendly tags draw safely")
+	hud.set_friendly_tag_mode(0)
+	hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY, 0.0, null)
+	assert_eq(hud.get_draw_list_stats().glyphs, 0, "OFF draws nothing")
 
 
 # The end-of-round overlay element: the resolved Impact38 ladder centred on x
@@ -615,18 +583,18 @@ func test_end_round_overlay_draws_the_ladder() -> void:
 	assert_eq(root.set_root_dir(fixture["dir"]), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], root)
-	var before: Dictionary = hud.get_draw_list_stats()
+	var before := hud.get_draw_list_stats()
 	hud.set_end_round_overlay(true, 0, 768,
 			PackedStringArray(["Mission Completed", "Blue Team : 12", "Game time : 0:01:05"]),
 			PackedInt32Array([300, 414, 478]))
-	var shown: Dictionary = hud.get_draw_list_stats()
-	assert_gt(int(shown["glyphs"]), int(before["glyphs"]),
+	var shown := hud.get_draw_list_stats()
+	assert_gt(shown.glyphs, before.glyphs,
 			"the ladder lays out its lines")
-	assert_gt(int(shown["elements_drawn"]), int(before["elements_drawn"]),
+	assert_gt(shown.elements_drawn, before.elements_drawn,
 			"the overlay element counts once")
 	await get_tree().process_frame
 	hud.set_end_round_overlay(false, 0, 768, PackedStringArray(), PackedInt32Array())
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), int(before["glyphs"]),
+	assert_eq(hud.get_draw_list_stats().glyphs, before.glyphs,
 			"hidden draws nothing")
 	assert_true(is_instance_valid(hud))
 
@@ -643,12 +611,12 @@ func test_heat_bar_draws_at_nonzero_heat() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], fixture["root"])
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
-	assert_eq(int(hud.get_draw_list_stats()["quads"]), 0, "zero heat hides the bar")
+	assert_eq(hud.get_draw_list_stats().quads, 0, "zero heat hides the bar")
 	await get_tree().process_frame
 	hud.set_weapon_state(true, -1, -1, 0x8000, 0, false, false, false, 0)
-	var stats: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(stats["quads_wire"]), 1, "the HUDHEATBORDER wireframe")
-	assert_eq(int(stats["quads_filled"]), 1, "plus the proportional fill")
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads_wire, 1, "the HUDHEATBORDER wireframe")
+	assert_eq(stats.quads_filled, 1, "plus the proportional fill")
 	await get_tree().process_frame
 	hud.set_weapon_state(true, -1, -1, 0x20000, 0, false, false, false, 0) # above the clamp
 	await get_tree().process_frame
@@ -672,22 +640,22 @@ func test_waypoint_label_draws_each_alignment() -> void:
 		hud.configure(fixture["layout"], root)
 		hud.set_player_state(0, 1.0, 0, 80.0)
 		# No waypoint entry: the label hides.
-		assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+		assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"no waypoint entry draws nothing (align %s)" % align)
 		hud.set_waypoint("North Sea Village", 143)
-		var stats: Dictionary = hud.get_draw_list_stats()
-		assert_gt(int(stats["glyphs"]), 0,
+		var stats := hud.get_draw_list_stats()
+		assert_gt(stats.glyphs, 0,
 			"name + distance lay out glyphs for align %s" % align)
-		assert_eq(int(stats["quads_wire"]), 1,
+		assert_eq(stats.quads_wire, 1,
 			"the distance box wireframe draws for align %s" % align)
 		await get_tree().process_frame
 		# The nameless form still draws the distance.
 		hud.set_waypoint("", 9)
-		assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+		assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"a nameless entry still draws the distance for align %s" % align)
 		await get_tree().process_frame
 		hud.clear_waypoint()
-		assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+		assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"clearing the entry hides the label for align %s" % align)
 		assert_true(is_instance_valid(hud), "waypoint label draws for align %s" % align)
 
@@ -722,12 +690,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	effects.size = Vector2(1024, 768)
 	add_child_autofree(effects)
 	effects.set_resource_root(fixture["root"])
-	effects.update_info({
-		"binoculars_view_active": true,
-		"binocular_range": 1000,
-		"nvg_visible": true,
-		"nvg_gain": 4,
-	})
+	effects.update_view(true, 1000, true, 4)
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
 
@@ -752,7 +715,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
 	assert_true(nvg.visible,
 			"First-person-visible NVG enables the post-process.")
-	effects.update_info({"nvg_visible": false})
+	effects.update_view(false, 1, false, 0)
 	assert_false(nvg.visible,
 			"Camera suppression hides the post-process without consuming simulation state.")
 
@@ -802,22 +765,24 @@ func test_vehicle_panel_draws_the_block_silhouette() -> void:
 	var hud := _make_overlay()
 	var layout: HudPos = fixture["layout"]
 	hud.configure(layout, fixture["root"])
-	var block: Dictionary = layout.get_vehicle_hud("dbuggy1")
-	assert_false(block.is_empty(), "The fixture's VEHICLE_HUD block resolves by sid.")
-	var before := int(hud.get_draw_list_stats()["quads_textured"])
+	var block := layout.get_vehicle_hud("dbuggy1")
+	assert_not_null(block, "The fixture's VEHICLE_HUD block resolves by sid.")
+	if block == null:
+		return
+	var before := hud.get_draw_list_stats().quads_textured
 	hud.set_vehicle_panel(true, block, 0, null)
-	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before + 1,
+	assert_eq(hud.get_draw_list_stats().quads_textured, before + 1,
 			"The panel adds exactly the interface silhouette quad.")
 	await get_tree().process_frame
-	hud.set_vehicle_panel(false, {}, 0, null)
-	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
+	hud.set_vehicle_panel(false, null, 0, null)
+	assert_eq(hud.get_draw_list_stats().quads_textured, before,
 			"Hiding the panel removes the silhouette.")
 	# A block whose interface art is missing draws NO panel at all.
-	var missing := block.duplicate()
-	missing["sid"] = "nosuch"
-	missing["interface"] = "missing.tga"
+	var missing := layout.get_vehicle_hud("dbuggy1")
+	missing.sid = "nosuch"
+	missing.interface_texture = "missing.tga"
 	hud.set_vehicle_panel(true, missing, 0, null)
-	assert_eq(int(hud.get_draw_list_stats()["quads_textured"]), before,
+	assert_eq(hud.get_draw_list_stats().quads_textured, before,
 			"Without the interface texture the panel is skipped entirely.")
 
 
@@ -836,21 +801,21 @@ func test_message_log_lists_expired_lines() -> void:
 	hud.configure(fixture["layout"], root)
 	hud.set_player_state(50, 1.0, 0, 80.0)
 	hud.push_chat_line("Taylor: moving to bravo", -1)
-	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"A pushed chat line lays out glyph quads on the HUDCHATTEXT feed.")
 	await get_tree().process_frame
 	# Past the 930-tick life the feed loop drops the line...
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The 930-tick life expires the chat line off the feed.")
 	# ...but the window still lists it.
 	hud.set_message_log_title("Recent Messages")
 	hud.set_message_log_shown(true)
-	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"The Recent Messages window lists the expired chat line (no expiry gate).")
 	await get_tree().process_frame
 	hud.set_message_log_shown(false)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"Closing the window hides the history again.")
 
 
@@ -872,11 +837,11 @@ func test_lfp_panel_device_seam() -> void:
 	assert_eq(root.set_root_dir(fixture["dir"]), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], root)
-	var before: Dictionary = hud.get_draw_list_stats()
+	var before := hud.get_draw_list_stats()
 	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0,
 			{"under_attack": "!Under\nAttack!!", "ready": "!Ready for\nTakeover!"}, null)
-	var shown: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(shown["elements_drawn"]), int(before["elements_drawn"]),
+	var shown := hud.get_draw_list_stats()
+	assert_eq(shown.elements_drawn, before.elements_drawn,
 			"With no zone rows the panel draws nothing.")
 	await get_tree().process_frame
 	hud.set_lfp_panel(false, 0, 0, 0, {}, null)

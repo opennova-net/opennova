@@ -36,8 +36,8 @@ func _retail_attachment_basis(direction: Vector3) -> Basis:
 func _blackhawk_carriers(mission: MissionData) -> Array:
 	var carriers: Array = []
 	for raw in mission.get_all_entities():
-		var entity: Dictionary = raw
-		if int(entity.get("item_id", 0)) == CARRIER_ITEM_ID:
+		var entity: MissionEntityRecord = raw
+		if entity.item_id == CARRIER_ITEM_ID:
 			carriers.append(entity)
 	return carriers
 
@@ -46,8 +46,8 @@ func _blackhawk_anchors(data: ObjectData) -> Array:
 	var anchors: Array = []
 	for wanted in ANCHOR_NAMES:
 		for index in range(data.get_user_point_count()):
-			var candidate: Dictionary = data.get_user_point_info(index)
-			if String(candidate.get("name", "")).to_lower() == wanted:
+			var candidate := data.get_user_point_info(index)
+			if candidate.name.to_lower() == wanted:
 				anchors.append(candidate)
 				break
 	return anchors
@@ -60,11 +60,10 @@ func _authored_attachment_anchors(
 	# retail frame. Whole-name case-insensitive resolve, first match — the same
 	# rule the runtime applies, so the expected frames pair with produced rows.
 	var rows: Array = []
-	for raw in item_db.get_emplacement_attachments(item_id):
-		var authored: Dictionary = raw
-		var wanted := String(authored.get("userpoint", "")).strip_edges()
+	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(item_id):
+		var wanted := authored.userpoint.strip_edges()
 		var row := {
-			"item_id": int(authored.get("item_id", 0)),
+			"item_id": authored.item_id,
 			"source_name": wanted,
 			"subobject": -1,
 			"raw_position": Vector3.ZERO,
@@ -72,14 +71,14 @@ func _authored_attachment_anchors(
 			"anchor_found": false,
 		}
 		for index in range(data.get_user_point_count()):
-			var up: Dictionary = data.get_user_point_info(index)
-			if String(up.get("name", "")).strip_edges().nocasecmp_to(wanted) != 0:
+			var up := data.get_user_point_info(index)
+			if up.name.strip_edges().nocasecmp_to(wanted) != 0:
 				continue
 			row["anchor_found"] = true
-			row["source_name"] = String(up.get("name", ""))
-			row["subobject"] = int(up.get("subobject", -1))
-			row["raw_position"] = up.get("position", Vector3.ZERO)
-			row["raw_rotation"] = up.get("rotation", Vector3.ZERO)
+			row["source_name"] = up.name
+			row["subobject"] = up.subobject
+			row["raw_position"] = up.position
+			row["raw_rotation"] = up.rotation
 			break
 		rows.append(row)
 	return rows
@@ -161,27 +160,23 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	var expected: Array = []
 	for carrier in carriers:
 		var carrier_xform := MissionObjectPlacer.entity_transform(
-				carrier.get("position", Vector3.ZERO),
-				carrier.get("rotation_deg", Vector3.ZERO))
-		for anchor in anchors:
-			var direction: Vector3 = anchor.get("rotation", Vector3.ZERO)
+				carrier.position,
+				carrier.rotation_deg)
+		for anchor: ModelUserPoint in anchors:
+			var direction := anchor.rotation
 			assert_gt(direction.length_squared(), 0.99,
-					"%s carries an authored forward direction" % anchor.get("name", ""))
+					"%s carries an authored forward direction" % anchor.name)
 			expected.append({
-				"label": "SSN %d %s" % [
-						int(carrier.get("bms_id", 0)),
-						String(anchor.get("name", ""))],
-				"position": carrier_xform * (
-						anchor.get("position", Vector3.ZERO) as Vector3),
+				"label": "SSN %d %s" % [carrier.bms_id, anchor.name],
+				"position": carrier_xform * anchor.position,
 				"forward": (
 						carrier_xform.basis
 						* _retail_attachment_basis(direction)
 						* Vector3.BACK).normalized(),
 			})
 
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, CARRIER_ITEM_ID)
-	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 2)
+	var carrier_card := item_db.extract_seat_specs_for_item(root, CARRIER_ITEM_ID)
+	assert_eq(carrier_card.get_emplacement_attachments().size(), 2)
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
 	var sim := Simulation.new()
@@ -189,7 +184,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([CARRIER_TYPE_ID])))
-	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+	assert_gt(sim.get_mounted_graphic_source_count(), 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
@@ -221,7 +216,6 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 		assert_gt(alignment, 0.999,
 				"%s minigun forward follows its own authored userpoint (dot %.6f)" % [
 						wanted["label"], alignment])
-	sim.free()
 
 
 func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
@@ -235,9 +229,8 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, MRK5_ITEM_ID)
-	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 4,
+	var carrier_card := item_db.extract_seat_specs_for_item(root, MRK5_ITEM_ID)
+	assert_eq(carrier_card.get_emplacement_attachments().size(), 4,
 			"the shipped MRK5 has four attachment anchors")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, MRK5_GRAPHIC + ".3di")
@@ -257,9 +250,9 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	assert_eq(mission.create_default(), OK)
 	var carrier_position := Vector3(7.0, -3.0, 2.0)
 	var carrier_rotation := Vector3(0.0, 37.0, 0.0)
-	assert_false(mission.add_entity(
+	assert_not_null(mission.add_entity(
 			MissionData.KIND_ITEM, MRK5_ITEM_ID,
-			carrier_position, carrier_rotation).is_empty())
+			carrier_position, carrier_rotation))
 	var carrier_xform := MissionObjectPlacer.entity_transform(
 			carrier_position, carrier_rotation)
 	var expected: Array = []
@@ -297,7 +290,7 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([MRK5_TYPE_ID])))
-	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+	assert_gt(sim.get_mounted_graphic_source_count(), 0,
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
@@ -331,7 +324,6 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 				(actual_basis * Vector3.UP).dot(expected_basis * Vector3.UP),
 				0.9998,
 				"%s up follows the converted retail frame" % wanted["label"])
-	sim.free()
 
 
 func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
@@ -356,7 +348,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, CARRIER_ITEM_ID,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := MissionObjectPlacer.create(root, item_db)
@@ -365,7 +357,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	assert_not_null(mission_objects)
 	if mission_objects == null:
 		return
-	var rt = preload("res://game/world/mission_presentation.gd").new()
+	var rt = MissionRoot.new()
 	add_child_autofree(rt)
 	var model_options := MissionSetupOptions.new()
 	model_options.resource_root = root
@@ -374,10 +366,10 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	model_options.playable = true
 	assert_gt(int(rt.setup(mission, mission_objects, model_options)), 0)
 	assert_true(rt.tick())
-	var carrier_model := rt.get_registry().resolve(
-			int(placed.get("bms_id", 0)),
+	var carrier_model := rt.get_entity_index().resolve(
+			placed.bms_id,
 			MissionData.KIND_ITEM,
-			int(placed.get("index", 0))) as ObjectModel
+			placed.index) as ObjectModel
 	assert_not_null(carrier_model, "the Blackhawk resolves through the placed registry")
 	if carrier_model == null:
 		return
@@ -391,7 +383,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	# passenger bench, and a passenger never claims the engine-start latch
 	# (+0x170 — retail: Entity_AttachToVehicleSlot @0x4946d0 claims it for
 	# ctrlx/drvrx only), so the rotor would rest in retail too.
-	assert_eq(rt.get_sim().debug_crew_local_player(int(placed.get("bms_id", 0))), OK,
+	assert_eq(rt.get_sim().debug_crew_local_player(placed.bms_id), OK,
 			"the local player takes the Blackhawk's control seat")
 	rt.play()
 	for _tick in range(62):
@@ -438,9 +430,8 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
-	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
-			root, DBUGGY_ITEM_ID)
-	assert_gt((carrier_card.get("emplacement_attachments", []) as Array).size(), 0,
+	var carrier_card := item_db.extract_seat_specs_for_item(root, DBUGGY_ITEM_ID)
+	assert_gt(carrier_card.get_emplacement_attachments().size(), 0,
 			"the shipped DBuggy authors at least one child emplacement")
 	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, DBUGGY_GRAPHIC + ".3di")
@@ -448,8 +439,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if open_err != OK:
 		return
 	var attachments := _authored_attachment_anchors(item_db, DBUGGY_ITEM_ID, data)
-	assert_eq(attachments.size(),
-			(carrier_card.get("emplacement_attachments", []) as Array).size(),
+	assert_eq(attachments.size(), carrier_card.get_emplacement_attachments().size(),
 			"the native extraction carries every authored DBuggy attachment")
 	var child_types := {}
 	var attachment_by_type := {}
@@ -464,12 +454,12 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, DBUGGY_ITEM_ID,
 			Vector3(2, 0, 0), Vector3.ZERO)
-	assert_false(placed.is_empty())
+	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placer := MissionObjectPlacer.create(root, item_db)
 	var placement_stats := placer.place(mission, container)
-	assert_eq(int(placement_stats.get("animated", 0)), 1,
+	assert_eq(placement_stats.animated, 1,
 			"the driven DBuggy has an individually presentable model")
 	var mission_objects := container.get_node_or_null(
 			"MissionObjects") as Node3D
@@ -477,7 +467,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if mission_objects == null:
 		return
 
-	var rt = preload("res://game/world/mission_presentation.gd").new()
+	var rt = MissionRoot.new()
 	add_child_autofree(rt)
 	var node_options := MissionSetupOptions.new()
 	node_options.resource_root = root
@@ -486,10 +476,10 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	node_options.playable = true
 	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
 	assert_true(rt.tick())
-	var carrier_node := rt.get_registry().resolve(
-			int(placed.get("bms_id", 0)),
+	var carrier_node := rt.get_entity_index().resolve(
+			placed.bms_id,
 			MissionData.KIND_ITEM,
-			int(placed.get("index", 0))) as Node3D
+			placed.index) as Node3D
 	assert_not_null(carrier_node, "the DBuggy model resolves through the placed registry")
 	var before_rows := _synthetic_attachment_rows(rt.get_sim(), child_types)
 	assert_eq(before_rows.size(), attachments.size(),
@@ -498,7 +488,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	for handle_v in before_rows:
 		var handle := int(handle_v)
 		var row: Dictionary = before_rows[handle]
-		var child_node := rt.get_wire_presenter().resolve_wire_handle(handle) as Node3D
+		var child_node := rt.get_entity_presenter().resolve_wire_handle(handle) as Node3D
 		assert_not_null(child_node, "attachment %04x has a live model" % handle)
 		if child_node != null and carrier_node != null:
 			var carrier_local := (
@@ -506,7 +496,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 					* child_node.global_transform)
 			relative_before[handle] = carrier_local
 			var attachment: Dictionary = attachment_by_type.get(
-					int(row.get("type_id", 0)), {})
+					row.type_id, {})
 			var authored_forward: Vector3 = attachment.get(
 					"raw_rotation", Vector3.ZERO)
 			assert_gt(authored_forward.length_squared(), 0.99,
@@ -559,7 +549,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			"the real DBuggy model turned under steering input")
 	for handle_v in relative_before:
 		var handle := int(handle_v)
-		var child_node := rt.get_wire_presenter().resolve_wire_handle(handle) as Node3D
+		var child_node := rt.get_entity_presenter().resolve_wire_handle(handle) as Node3D
 		assert_not_null(child_node, "attachment %04x remains materialized" % handle)
 		if child_node != null and carrier_node != null:
 			var expected := carrier_after * (
@@ -593,18 +583,125 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		var settle := MissionFrameInput.new()
 		settle.delta_seconds = Simulation.tick_dt()
 		assert_true(rt.advance_session_frame(settle).did_tick())
-	var view: Dictionary = rt.get_sim().get_local_player_view()
-	assert_true(bool(view.get("third_person", false)),
+	var view := rt.get_sim().get_local_player_view()
+	assert_true(view.third_person,
 			"a control seat resolves the chase camera without any camera write")
-	assert_true(bool(view.get("camera_mounted", false)),
+	assert_true(view.camera_mounted,
 			"a control-seat rider engages the mounted camera leg")
-	assert_true(bool(view.get("camera_pose_valid", false)))
-	var eye: Vector3 = view.get("camera_eye", Vector3.ZERO)
+	assert_true(view.camera_pose_valid)
+	var eye := view.camera_eye
 	var carrier_pos: Vector3 = carrier_node.global_position
 	var horizontal := Vector2(eye.x - carrier_pos.x, eye.z - carrier_pos.z).length()
 	assert_gt(horizontal, 1.5,
 			"the mounted eye backs off further than the on-foot 1.0 u chase")
 	assert_gt(eye.y, carrier_pos.y,
 			"the mounted eye sits above the lifted carrier anchor")
-	assert_lt(float(view.get("camera_pitch_deg", 0.0)), 0.0,
+	assert_lt(view.camera_pitch_deg, 0.0,
 			"the mounted camera looks down on the vehicle")
+
+
+func _culled_wire_after_frames(sim: Simulation, camera: Transform3D, frames: int) -> Dictionary:
+	# Fold the diff-based verdict feed (added count, removed count, ids...)
+	# into the set of wire handles the collector gate currently culls.
+	var culled := {}
+	for _frame in range(frames):
+		sim.run_occlusion_frame(camera, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+		var changes: PackedInt32Array = sim.get_wire_render_culled_changes()
+		if changes.size() < 2:
+			continue
+		# [added_count, added ids..., removed_count, removed ids...] — the
+		# same layout GameWorld's occlusion frame applies.
+		var added := int(changes[0])
+		for i in range(1, 1 + added):
+			culled[int(changes[i])] = true
+		for i in range(2 + added, changes.size()):
+			culled.erase(int(changes[i]))
+	return culled
+
+
+func _camera_behind(origin: Vector3, travel: Vector3) -> Transform3D:
+	var forward := travel.normalized()
+	var eye := origin - forward * 5.0 + Vector3(0.0, 1.5, 0.0)
+	return Transform3D(Basis.looking_at(forward, Vector3.UP), eye)
+
+
+func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
+	# The listen host's own runtime spawns (the DBuggy's addeweap gun) pass the
+	# same collector gate as its placed rows, from their LIVE pose. The host's
+	# loopback 0x0A is header-only, so the decoded row keeps the spawn image:
+	# a sphere pinned there culled the gun as soon as the driven buggy left
+	# it behind ("the emplaced weapon disappears when you drive").
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
+		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
+		return
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	var child_types := {}
+	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(DBUGGY_ITEM_ID):
+		child_types[authored.item_id - 100000] = true
+	assert_gt(child_types.size(), 0, "the shipped DBuggy authors a child emplacement")
+
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var placed := mission.add_entity(
+			MissionData.KIND_ITEM, DBUGGY_ITEM_ID, Vector3(2, 0, 0), Vector3.ZERO)
+	assert_not_null(placed)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var placer := MissionObjectPlacer.create(root, item_db)
+	placer.place(mission, container)
+	var mission_objects := container.get_node_or_null("MissionObjects") as Node3D
+	assert_not_null(mission_objects)
+	if mission_objects == null:
+		return
+	var rt = MissionRoot.new()
+	add_child_autofree(rt)
+	var node_options := MissionSetupOptions.new()
+	node_options.resource_root = root
+	node_options.item_db = item_db
+	node_options.placer = placer
+	node_options.playable = true
+	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
+	assert_true(rt.tick())
+	var sim: Simulation = rt.get_sim()
+	var carrier_node := rt.get_entity_index().resolve(
+			placed.bms_id, MissionData.KIND_ITEM, placed.index) as Node3D
+	assert_not_null(carrier_node)
+	if carrier_node == null:
+		return
+	var handles: Array = _synthetic_attachment_rows(sim, child_types).keys()
+	assert_gt(handles.size(), 0, "the DBuggy attachment reaches the wire-present path")
+
+	# Parked: a camera behind the buggy collects both the buggy and its gun.
+	var parked := carrier_node.global_transform.origin
+	var culled := _culled_wire_after_frames(sim, _camera_behind(parked, Vector3.FORWARD), 4)
+	var culled_bms := sim.get_render_culled_changes()
+	assert_false(Array(culled_bms).slice(1, 1 + int(culled_bms[0])).has(placed.bms_id),
+			"the parked buggy is collected")
+	for handle_v in handles:
+		assert_false(culled.has(int(handle_v)),
+				"attachment %04x is collected beside the parked buggy" % int(handle_v))
+
+	assert_true(sim.local_player_toggle_mount(), "the local player mounts the DBuggy")
+	rt.play()
+	for _tick in range(62 * 6):
+		var input := MissionFrameInput.new()
+		input.delta_seconds = Simulation.tick_dt()
+		input.set_movement(true, false, false, false, false, false, false)
+		var outcome: MissionFrameOutcome = rt.advance_session_frame(input)
+		assert_true(outcome != null and outcome.did_tick(), "each drive frame runs one logic tick")
+	var driven := carrier_node.global_transform.origin
+	var travel := driven - parked
+	assert_gt(travel.length(), 8.0, "the DBuggy drove well clear of its spawn image")
+
+	# Driven: the camera rides behind the buggy, the spawn image is far behind it.
+	culled = _culled_wire_after_frames(sim, _camera_behind(driven, travel), 4)
+	culled_bms = sim.get_render_culled_changes()
+	assert_false(Array(culled_bms).slice(1, 1 + int(culled_bms[0])).has(placed.bms_id),
+			"the driven buggy is collected")
+	for handle_v in handles:
+		assert_false(culled.has(int(handle_v)),
+				"attachment %04x stays collected on the driven buggy (live pose, not the spawn image)" % int(handle_v))

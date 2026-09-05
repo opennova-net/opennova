@@ -7,6 +7,9 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 
+using namespace opennova::adm;
+using namespace opennova::bad;
+
 namespace opennova::simassets {
 
 void AdmRootMotion::clear() {
@@ -130,7 +133,7 @@ int AdmRootMotion::register_adm(const opennova::ResourceIndex *index,
 	}
 	ClipSet set;
 	if (parse_adm(index, adm_name, set) <= 0) {
-		return -1; // no usable clips: caller leaves the entity at adm_id 0 / sourceless
+		return -1; // no usable clips: caller chooses a configured fallback or none
 	}
 	const int adm_id = static_cast<int>(sets_.size());
 	sets_.push_back(std::move(set));

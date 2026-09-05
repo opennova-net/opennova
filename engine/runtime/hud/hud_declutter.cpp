@@ -5,6 +5,9 @@
 #include <runtime/hud/hud_declutter.h>
 
 #include <base/io/strutil.h>
+#include <formats/def/def.h>
+
+using namespace opennova::def;
 
 namespace opennova::hud {
 
@@ -132,6 +135,26 @@ void HudDeclutter::rebuild() {
 		visible_[static_cast<size_t>(slot)] =
 				((1u << level_) & masks_[static_cast<size_t>(slot)]) != 0;
 	}
+}
+
+bool declutter_from_hudpos(const DefHudPosFile &file, HudDeclutter &out) {
+	HudDeclutter authored;
+	authored.begin_authoring();
+	bool any_row = false;
+	for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
+		const char *token = declutter_token_name(slot);
+		for (size_t i = 0; i < file.hud.declutter_count; ++i) {
+			const DefDeclutterEntry &row = file.hud.declutter[i];
+			if (!strutil::iequals(row.name, token)) continue;
+			int flags[4];
+			for (int f = 0; f < 4; ++f) flags[f] = row.flags[f] != 0 ? 1 : 0;
+			authored.set_mask(slot, HudDeclutter::mask_from_flags(flags));
+			any_row = true;
+			break;
+		}
+	}
+	if (any_row) out = authored;
+	return any_row;
 }
 
 } // namespace opennova::hud

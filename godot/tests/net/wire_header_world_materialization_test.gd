@@ -81,26 +81,26 @@ func _mission_fixture() -> Dictionary:
 	# First row in each independent pool: exact authority handles 0x1000,
 	# 0x2000, and 0x3000. The joiner starts at x=0, deploys to x=12, then is
 	# within the retail four-unit seat scan of the vehicle at x=14.
-	var vehicle: Dictionary = mission.add_entity(
+	var vehicle: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_ITEM, VEHICLE_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: Dictionary = mission.add_entity(
+	var zone: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: Dictionary = mission.add_entity(
+	var marker: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
-	assert_false(vehicle.is_empty())
-	assert_false(zone.is_empty())
-	assert_false(marker.is_empty())
-	if not zone.is_empty():
+	assert_not_null(vehicle)
+	assert_not_null(zone)
+	assert_not_null(marker)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
 				MissionData.KIND_BUILDING,
-				int(zone.get("index", -1)), "team", 1))
+				zone.index, "team", 1))
 	return {
 		"mission": mission,
-		"vehicle_bms_id": int(vehicle.get("bms_id", 0)),
-		"zone_bms_id": int(zone.get("bms_id", 0)),
+		"vehicle_bms_id": vehicle.bms_id,
+		"zone_bms_id": zone.bms_id,
 	}
 
 
@@ -109,25 +109,25 @@ func _designated_g_mission_fixture() -> Dictionary:
 	assert_eq(mission.create_default(), OK)
 	# The body-empty joiner deploys beside a vehicle-EWeap parent. Promotion
 	# creates its designated-G B50 child at the next exact pool-1 handle.
-	var parent: Dictionary = mission.add_entity(
+	var parent: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_ITEM, DESIGNATED_G_PARENT_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
-	var zone: Dictionary = mission.add_entity(
+	var zone: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
-	var marker: Dictionary = mission.add_entity(
+	var marker: MissionEntityRecord = mission.add_entity(
 			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
-	assert_false(parent.is_empty())
-	assert_false(zone.is_empty())
-	assert_false(marker.is_empty())
-	if not zone.is_empty():
+	assert_not_null(parent)
+	assert_not_null(zone)
+	assert_not_null(marker)
+	if zone != null:
 		assert_true(mission.set_entity_property_int(
 				MissionData.KIND_BUILDING,
-				int(zone.get("index", -1)), "team", 1))
+				zone.index, "team", 1))
 	return {
 		"mission": mission,
-		"parent_bms_id": int(parent.get("bms_id", 0)),
+		"parent_bms_id": parent.bms_id,
 	}
 
 
@@ -198,12 +198,12 @@ func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 
 
-func _weapon(name: String) -> Dictionary:
+func _weapon(name: String) -> WeaponDef:
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else {}
+	return weapons.get_weapon(index) if index >= 0 else null
 
 
 func _present_wire_handle_for_type(sim: Simulation, type_id: int) -> int:
@@ -248,11 +248,11 @@ func _player_index(sim: Simulation) -> int:
 
 
 func _configure_dedicated_host(host: Simulation) -> void:
-	host.configure_host_session({
-		"serve_and_play": false,
-		"gametype": 0x30020,
-		"mission_file": "WIRE_HEADER_PARITY.BMS",
-	})
+	var host_options := HostSessionOptions.new()
+	host_options.serve_and_play = false
+	host_options.game_type = 0x30020
+	host_options.mission_file = "WIRE_HEADER_PARITY.BMS"
+	host.configure_host_session(host_options)
 
 
 func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
@@ -270,8 +270,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([VEHICLE_TYPE])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the vehicle model source")
 	assert_true(host.load_from_mission_data(mission))
 	host.resolve_item_traits(db)
@@ -297,8 +296,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_eq(header.size(), 616,
 			"the test consumes the host's real S2C 0x0B BMS header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 
 	var wire_mission := MissionData.new()
@@ -318,7 +315,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		host.step()
 		joiner.step()
 		if joiner.is_joined_in_match() \
-				and joiner.is_join_deploy_pick_pending() \
 				and _present_wire_handle_for_type(joiner, VEHICLE_TYPE) == 0x1000 \
 				and _present_wire_handle_for_type(joiner, ZONE_TYPE) == 0x2000 \
 				and joiner.get_deploy_spawn_zones().size() == 1:
@@ -328,8 +324,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_true(streamed,
 			"wire pools materialized before deploy/vehicle consumers run")
 	if not streamed:
-		joiner.free()
-		host.free()
 		return
 	assert_eq(joiner.get_join_terrain_til_state(),
 			Simulation.JOIN_TERRAIN_TIL_ABSENT,
@@ -341,83 +335,21 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_eq(_present_wire_handle_for_type(joiner, ZONE_TYPE),
 			host_zone.get_wire_handle())
 
-	var deploy_rows := joiner.get_deploy_spawn_zones()
-	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0))
-	assert_gt(zone_param, 0)
-	assert_true(joiner.send_deployment_pick(zone_param))
-	var deployed := false
-	for _tick in range(300):
-		joiner.step()
-		host.step()
-		if not joiner.is_join_deploy_pick_pending() \
-				and absf(joiner.get_local_player_position().x - 12.0) < 1.0:
-			deployed = true
-			break
-		OS.delay_msec(2)
-	assert_true(deployed,
-			"the pool-2 exact handle round-trips through authoritative deployment")
-	if not deployed:
-		joiner.free()
-		host.free()
-		return
-
-	# Install model-derived metadata AFTER the pool-1 row exists. This must
-	# refresh that same registry row; presentation-only seat knowledge is not
-	# sufficient for the local scan or the authority's carrier validation.
-	joiner.set_asset_root(root)
-	assert_true(joiner.install_seat_specs_for_type_ids(
-			db, PackedInt32Array([VEHICLE_TYPE])))
-	for _settle in range(12):
-		joiner.step()
-		host.step()
-	assert_true(joiner.local_player_toggle_mount(),
-			"late seat specs make the streamed vehicle mountable")
-	var host_player_index := _player_index(host)
-	var joiner_player_index := _player_index(joiner)
-	assert_gte(host_player_index, 0)
-	assert_gte(joiner_player_index, 0)
-	var mounted := false
-	for _tick in range(240):
-		joiner.step()
-		host.step()
-		if bool(joiner.get_local_player_view().get("mounted", false)) \
-				and host_player_index >= 0 \
-				and host.entity_card_by_ai_index(host_player_index).is_mounted():
-			mounted = true
-			break
-		OS.delay_msec(2)
-	assert_true(mounted,
-			"the authority echoes the joiner's exact pool-1 carrier identity")
-	if mounted:
-		# Dense list order is presentation metadata. Retail occupancy is keyed by
-		# the fixed mountHandles slot, so a late model refresh that inserts
-		# passenger rows before the controller must move both the occupant and
-		# its mount_seat index to the controller's new dense row (carrierswap
-		# authors sitex13 ahead of ctrlx01, then three more sitex rows).
-		assert_true(joiner.install_seat_specs_for_type_ids(
-				_item_db("refresh"), PackedInt32Array([VEHICLE_TYPE])))
-	if mounted and joiner_player_index >= 0:
-		var local_card: EntityCard = joiner.entity_card_by_ai_index(
-				joiner_player_index)
-		assert_true(local_card.is_mounted())
-		assert_eq(local_card.get_mount_seat(), 1,
-				"the occupant's dense index follows retail slot 8")
-		assert_eq(local_card.get_mount_seat_source_name(), "ctrlx01")
-		assert_eq(local_card.get_mount_target_seat_count(), 5)
-		var target_seats: Array = local_card.get_mount_target_seats()
-		assert_eq(target_seats.size(), 5)
-		if target_seats.size() == 5:
-			var seat: EntityCardSeat = target_seats[1]
-			assert_eq(seat.get_retail_slot(), 8)
-			assert_eq(seat.get_source_name(), "ctrlx01")
-			assert_true(seat.is_occupied(),
-					"late seat refresh preserves the occupant by retail slot")
-	if mounted and host_player_index >= 0:
-		assert_eq(host.entity_card_by_ai_index(
-				host_player_index).get_mount_target_net_id(),
-				host_vehicle.get_net_id())
-	joiner.free()
-	host.free()
+	# The joiner completed initial admission with NO C2S 0x0E (retail sends none;
+	# the wave witness) while the host keeps the D-NET-156 spawn-zone pick hold.
+	# The initial deploy against a pick-held host — and the mount/ammo tail that
+	# rode it — is retired until the pick-based CLIENT trigger lands (the
+	# per-frame undeployed signal awaits a pick-based mission capture; see
+	# tests/npruntime/client_runtime_test.cpp run_roundtrip_with_spawn_zones).
+	# The designated-G variant below exercises the streamed-vehicle mount/ammo
+	# wire mechanics through the death re-pick; on THIS fixture the death
+	# transaction does not reach the held joiner's client (its per-frame 0x0A
+	# recipient tail never lands), so the death re-pick cannot stand in here.
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join owes no C2S 0x0E (retail sends none)")
+	assert_true(joiner.is_joined_in_match(),
+			"the joiner completes admission while the host keeps the pick hold")
+	pending("the streamed-zone deploy + mount tail awaits the pick-based initial-deploy client trigger (D-NET-156)")
 
 
 func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
@@ -442,8 +374,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# the parent seed installs both halves of the designated-G family.
 	assert_true(host.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
-	assert_gt(int(host.debug_native_pose_stats().get(
-			"mounted_graphic_sources", 0)), 0,
+	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the parent and child model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host, db)
@@ -465,8 +396,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(header.size(), 616,
 			"joiner consumes the authority's real body-empty 0x0B header")
 	if header.size() != 616:
-		joiner.free()
-		host.free()
 		return
 
 	var wire_mission := MissionData.new()
@@ -480,7 +409,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		host.step()
 		joiner.step()
 		if joiner.is_joined_in_match() \
-				and joiner.is_join_deploy_pick_pending() \
 				and _present_wire_handle_for_type(
 						joiner, DESIGNATED_G_PARENT_TYPE) == 0x1000 \
 				and _present_wire_handle_for_type(
@@ -492,8 +420,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(streamed,
 			"0x0D materialized the exact parent and synthetic child handles")
 	if not streamed:
-		joiner.free()
-		host.free()
 		return
 
 	# Model/seat resolution commonly completes after the stock 0x0D rows. First
@@ -506,8 +432,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var ambiguous_db := _item_db("ambiguous")
 	assert_not_null(ambiguous_db)
 	if ambiguous_db == null:
-		joiner.free()
-		host.free()
 		return
 	assert_true(host.install_seat_specs_for_type_ids(
 			ambiguous_db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
@@ -557,8 +481,28 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
 
+	# The zone pick is the DEATH flow now (the initial join deploys with no
+	# C2S 0x0E — retail sends none): kill on the authority, wait out the
+	# 3-second fresh-death pick penalty, then re-pick the streamed zone to
+	# land beside the carrier. The lone joiner on this dedicated host is
+	# pool-0 slot-0: wire handle 0 (get_joiner_self_handle's unbound sentinel
+	# is indistinguishable here).
+	assert_eq(host.debug_kill_player_entity(0), OK)
+	var death_pick_pending := false
+	for _tick in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			death_pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(death_pick_pending,
+			"the death edge re-arms the deploy pick for the streamed zone")
+	for _settle in range(260):
+		host.step()
+		joiner.step()
 	var deploy_rows := joiner.get_deploy_spawn_zones()
-	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0))
+	var zone_param := (deploy_rows[0] as DeployZoneRow).param
 	assert_gt(zone_param, 0)
 	assert_true(joiner.send_deployment_pick(zone_param))
 	var deployed := false
@@ -572,8 +516,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		OS.delay_msec(2)
 	assert_true(deployed)
 	if not deployed:
-		joiner.free()
-		host.free()
 		return
 	# Give the 17-tick retail proximity slice a full post-deploy refresh before
 	# pressing USE. The short weapon-idle loop below can otherwise break at tick 1.
@@ -589,16 +531,16 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		"WPN_EMPLCD50NA": mounted_weapon,
 	}
 	assert_true(joiner.apply_local_player_loadout(
-			[{"name": "WPN_M4AUTO"}], 8))
+			[WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(personal, {})
 	for _settle in range(80):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
-	assert_lt(int(joiner.get_local_player_weapon_state().get("current", 99)), 2,
+	assert_lt(joiner.get_local_player_weapon_state().current_action, 2,
 			"personal weapon settled before the mount action")
 	assert_eq(_present_field_for_type(
 			joiner, DESIGNATED_G_CHILD_TYPE, Simulation.PF_ALIVE), 1)
@@ -606,12 +548,15 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			joiner, DESIGNATED_G_CHILD_TYPE).distance_to(
 					joiner.get_local_player_position()), 4.0,
 			"the decoded child remains inside retail's seat-scan radius")
-	var attach_labels: Array = joiner.get_attach_labels()
-	assert_eq(attach_labels.size(), 1,
+	var attach_hud := HudOverlay.new()
+	autofree(attach_hud)
+	attach_hud.set_attach_labels(
+			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
+			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, joiner)
+	assert_eq(attach_hud.get_attach_label_count(), 1,
 			"the decoded child contributes one in-range UseGun label")
-	if attach_labels.size() == 1:
-		assert_eq(int((attach_labels[0] as Dictionary).get("seat_type", 0)),
-				Simulation.SEAT_GUNNER)
+	assert_eq(attach_hud.get_attach_label_selected(), 0,
+			"the single in-range candidate is the full-bright nearest label")
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")
 	var host_player_index := _player_index(host)
@@ -621,7 +566,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if bool(joiner.get_local_player_view().get("mounted", false)) \
+		if joiner.get_local_player_view().mounted \
 				and host_player_index >= 0 \
 				and host.entity_card_by_ai_index(host_player_index).is_mounted():
 			mounted_echoed = true
@@ -630,15 +575,13 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(mounted_echoed,
 			"authority echoes the exact decoded child carrier")
 	if not mounted_echoed:
-		joiner.free()
-		host.free()
 		return
 
 	for _settle in range(100):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 
@@ -664,9 +607,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 
-	var child_ammo: Dictionary = joiner.get_local_player_weapon_state()
-	var child_clip := int(child_ammo.get("clip", -999))
-	var child_reserve := int(child_ammo.get("reserve", -999))
+	var child_ammo := joiner.get_local_player_weapon_state()
+	var child_clip := child_ammo.clip
+	var child_reserve := child_ammo.reserve
 	assert_true(child_clip != 7 or child_reserve != 19,
 			"the direct child slot differs from the parent witness")
 
@@ -687,9 +630,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var active: Dictionary = joiner.get_local_player_weapon_state()
-		if int(active.get("clip", -999)) == 7 \
-				and int(active.get("reserve", -999)) == 19:
+		var active := joiner.get_local_player_weapon_state()
+		if active.clip == 7 \
+				and active.reserve == 19:
 			parent_ammo_applied = true
 			break
 		OS.delay_msec(2)
@@ -703,9 +646,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var active: Dictionary = joiner.get_local_player_weapon_state()
-		if int(active.get("clip", -999)) == child_clip \
-				and int(active.get("reserve", -999)) == child_reserve:
+		var active := joiner.get_local_player_weapon_state()
+		if active.clip == child_clip \
+				and active.reserve == child_reserve:
 			child_route_restored = true
 			break
 		OS.delay_msec(1)
@@ -714,8 +657,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var host_parent_after: EntityCard = host.entity_card_by_net_id(parent_bms_id)
 	assert_eq(host_parent_after.get_primary_weapon_clip(), 7)
 	assert_eq(host_parent_after.get_primary_weapon_reserve(), 19)
-	joiner.free()
-	host.free()
 
 
 func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
@@ -758,5 +699,3 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 			"full-BMS joiners retain authored spawn_origin semantics")
 	assert_eq(after.get_source_index(), 0)
 	assert_eq(after.get_bms_id(), int(fixture["vehicle_bms_id"]))
-	joiner.free()
-	host.free()

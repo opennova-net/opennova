@@ -63,7 +63,7 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
         inf.wpn_hold_kind = 0;
         if (const Entity *owner = world.registry.get(e.handle)) {
             if (const WeaponTableEntry *held =
-                        world.weapons.by_index(owner->equipped_adm_index))
+                        world.tables.weapons.by_index(owner->equipped_adm_index))
                 inf.wpn_hold_kind = held->special_hold;
         }
         infantry_weapon_channel_select(e);

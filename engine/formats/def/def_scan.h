@@ -96,9 +96,9 @@ int parse_ints(const char *s, size_t len, int *out, int max_n);
 
 int parse_floats(const char *s, size_t len, float *out, int max_n);
 
-DefHudColor parse_hud_color(Token *vals, int n);
+opennova::def::DefHudColor parse_hud_color(Token *vals, int n);
 
-DefHudColor parse_hud_color_argb(Token *vals, int n);
+opennova::def::DefHudColor parse_hud_color_argb(Token *vals, int n);
 
 void parse_pos_aligned(Token *vals, int n, int *out);
 

@@ -4,8 +4,7 @@
 // own index stays scanned on the layer that served the mission and becomes
 // the kernel's asset source, so the kernel boot (seat specs, .adm clips,
 // terrain, collision, weapon/ammo tables) reads the same layer.
-#ifndef OPENNOVA_TEST_RETAIL_MISSION_OPEN_H
-#define OPENNOVA_TEST_RETAIL_MISSION_OPEN_H
+#pragma once
 
 #include "retail_mission.h"
 #include "retail_mission_files.h"
@@ -50,5 +49,3 @@ inline bool open_mission(opennova::testrig::RetailMissionRig &rig, const std::st
 }
 
 } // namespace retail
-
-#endif // OPENNOVA_TEST_RETAIL_MISSION_OPEN_H

@@ -15,16 +15,16 @@
 #include <cstdint>
 #include <vector>
 
-#include <net/netsim/client_replica_pipeline.h>
-#include <net/netsim/client_scoreboard_view.h>
-#include <net/npwire/game_type.h>
+#include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/replication/client_scoreboard_view.h>
+#include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 
 #include <string>
 
 using namespace opennova;
-using namespace opennova::netsim;
+using namespace opennova::replication;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \
@@ -302,7 +302,7 @@ void test_roster_sync_bumps_revision() {
 	CHECK(view.state().revision == rev0 + 3); // removing an unbound slot holds
 }
 
-// ---- the draw-time projection (netsim::project_scoreboard) ----
+// ---- the draw-time projection (replication::project_scoreboard) ----
 
 // The projection joins "clan name" in the parser's order, reads the LIVE
 // slot's quality/entity binding, and computes the header's players count as

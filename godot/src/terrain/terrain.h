@@ -34,6 +34,17 @@ using FoliageDetailPatch = opennova::FoliageDetailPatch;
 class Terrain : public Node3D {
 	GDCLASS(Terrain, Node3D)
 
+public:
+	// The terrain shader's debug coloring (u_debug_mode), in the property
+	// hint's order: textures, LOD family, sector, surface normal, height.
+	enum DebugMode {
+		DEBUG_MODE_NORMAL = 0,
+		DEBUG_MODE_LOD_COLORS = 1,
+		DEBUG_MODE_SECTOR_COLORS = 2,
+		DEBUG_MODE_NORMALS = 3,
+		DEBUG_MODE_HEIGHTMAP = 4,
+	};
+
 private:
 	Ref<TerrainData> terrain_data;
 	Ref<TerrainTileInfo> tile_info_override;
@@ -137,7 +148,7 @@ private:
 
 	// Debug state (the toggles feed the compiler's TraversalConfig input)
 	opennova::TraversalConfig traversal_config;
-	int debug_mode = 0; // 0=normal, 1=LOD colors, 2=normals
+	DebugMode debug_mode = DEBUG_MODE_NORMAL; // the shader's u_debug_mode
 
 	bool _build_terrain();
 	void _load_textures();
@@ -228,7 +239,7 @@ public:
 
 	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven
-	// by GameFramePipeline through the concrete terrain leg — this node
+	// by the GameWorld leg table through the concrete terrain leg — this node
 	// no longer self-processes.
 	void render_frame();
 
@@ -257,8 +268,10 @@ public:
 	void set_debug_force_lod0(bool v);
 	bool get_debug_force_lod0() const;
 
-	void set_debug_mode(int mode);
-	int get_debug_mode() const;
+	void set_debug_mode(DebugMode mode);
+	DebugMode get_debug_mode() const;
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::Terrain::DebugMode);

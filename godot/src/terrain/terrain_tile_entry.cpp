@@ -27,7 +27,6 @@ void TerrainTileEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_z", "value"), &TerrainTileEntry::set_cell_z);
 	ClassDB::bind_method(D_METHOD("get_cell_z"), &TerrainTileEntry::get_cell_z);
 	ClassDB::bind_method(D_METHOD("set_cell", "cell_x", "cell_z"), &TerrainTileEntry::set_cell);
-	ClassDB::bind_method(D_METHOD("to_dictionary"), &TerrainTileEntry::to_dictionary);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "x_fixed"), "set_x_fixed", "get_x_fixed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "z_fixed"), "set_z_fixed", "get_z_fixed");
@@ -88,15 +87,6 @@ int TerrainTileEntry::get_cell_z() const {
 void TerrainTileEntry::set_cell(int cell_x, int cell_z) {
 	x_fixed = opennova::til_x_fixed_from_cell(cell_x);
 	z_fixed = opennova::til_z_fixed_from_cell(cell_z);
-}
-
-Dictionary TerrainTileEntry::to_dictionary() const {
-	Dictionary out;
-	out["x_fixed"] = x_fixed;
-	out["z_fixed"] = z_fixed;
-	out["tile_index"] = tile_index;
-	out["flags"] = flags;
-	return out;
 }
 
 void TerrainTileEntry::copy_from_native(const opennova::TilOverlayEntry &entry) {

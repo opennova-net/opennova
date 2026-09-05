@@ -1,13 +1,22 @@
 #include "terrain/foliage_dispatcher.h"
+#include "util/data_format.h"
 
+#include "render/visual_layers.h"
 #include "env/weather.h"
 
 #include <godot_cpp/classes/time.hpp>
 
+#include "object/object_data.h"
+#include "resource_index/resource_root.h"
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
 #include "terrain/terrain_foliage_def.h"
+
+#include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/terrain/foliage_detail_collector.h>
 
@@ -203,6 +212,28 @@ void FoliageDispatcher::_bind_methods() {
   ClassDB::bind_static_method("FoliageDispatcher",
                               D_METHOD("bake_fd_image", "image"),
                               &FoliageDispatcher::bake_fd_image);
+  ClassDB::bind_method(
+      D_METHOD("configure_slots_from_defs", "resource_root", "defs"),
+      &FoliageDispatcher::configure_slots_from_defs);
+  ClassDB::bind_method(D_METHOD("clear_asset_cache"),
+                       &FoliageDispatcher::clear_asset_cache);
+  ClassDB::bind_method(D_METHOD("asset_cache_entry_count"),
+                       &FoliageDispatcher::asset_cache_entry_count);
+  ClassDB::bind_method(
+      D_METHOD("list_graphics", "resource_root", "force_refresh"),
+      &FoliageDispatcher::list_graphics, DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("resolve_slot_meshes", "resource_root", "defs"),
+                       &FoliageDispatcher::resolve_slot_meshes);
+  ClassDB::bind_method(
+      D_METHOD("resolve_slot_fd_textures", "resource_root", "defs"),
+      &FoliageDispatcher::resolve_slot_fd_textures);
+  ClassDB::bind_method(D_METHOD("load_fd_texture", "resource_root", "graphic"),
+                       &FoliageDispatcher::load_fd_texture);
+  ClassDB::bind_method(D_METHOD("load_mesh", "resource_root", "graphic"),
+                       &FoliageDispatcher::load_mesh);
+  ClassDB::bind_static_method("FoliageDispatcher",
+                              D_METHOD("aggregate_lod0_submeshes", "submeshes"),
+                              &FoliageDispatcher::aggregate_lod0_submeshes);
 
   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data",
                             PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
@@ -476,14 +507,366 @@ bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
   if (!runtime.build_fd_rgba_mip_chain(pixels.ptr(), width, height, chain)) {
     return false;
   }
-  PackedByteArray packed;
-  packed.resize(static_cast<int64_t>(chain.rgba.size()));
-  for (int64_t index = 0; index < packed.size(); ++index) {
-    packed[index] = chain.rgba[static_cast<size_t>(index)];
-  }
+  const PackedByteArray packed = to_packed_bytes(chain.rgba);
   const bool has_mipmaps = width > 1 || height > 1;
   p_image->set_data(width, height, has_mipmaps, Image::FORMAT_RGBA8, packed);
   return true;
+}
+
+// --- The vegetation asset resolver (the former veg_assets.gd) ---------------
+
+void VegGraphicRow::_bind_methods() {
+  ClassDB::bind_method(D_METHOD("get_basename"), &VegGraphicRow::get_basename);
+  ClassDB::bind_method(D_METHOD("set_basename", "value"),
+                       &VegGraphicRow::set_basename);
+  ClassDB::bind_method(D_METHOD("get_model_path"),
+                       &VegGraphicRow::get_model_path);
+  ClassDB::bind_method(D_METHOD("set_model_path", "value"),
+                       &VegGraphicRow::set_model_path);
+  ClassDB::bind_method(D_METHOD("get_scene_path"),
+                       &VegGraphicRow::get_scene_path);
+  ClassDB::bind_method(D_METHOD("set_scene_path", "value"),
+                       &VegGraphicRow::set_scene_path);
+  ADD_PROPERTY(PropertyInfo(Variant::STRING, "basename"), "set_basename",
+               "get_basename");
+  ADD_PROPERTY(PropertyInfo(Variant::STRING, "model_path"), "set_model_path",
+               "get_model_path");
+  ADD_PROPERTY(PropertyInfo(Variant::STRING, "scene_path"), "set_scene_path",
+               "get_scene_path");
+}
+
+void FoliageDispatcher::configure_slots_from_defs(
+    const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
+  check_asset_cache_epoch();
+  configure_slots(p_defs, resolve_slot_meshes(p_resource_root, p_defs),
+                  resolve_slot_fd_textures(p_resource_root, p_defs));
+}
+
+void FoliageDispatcher::clear_asset_cache() {
+  asset_mesh_cache_.clear();
+  asset_fd_texture_cache_.clear();
+  asset_model_path_cache_.clear();
+  asset_graphics_cache_by_root_.clear();
+}
+
+void FoliageDispatcher::check_asset_cache_epoch() {
+  const uint64_t epoch = static_cast<uint64_t>(ResourceRoot::cache_epoch());
+  if (epoch == asset_cache_epoch_) {
+    return;
+  }
+  asset_cache_epoch_ = epoch;
+  clear_asset_cache();
+}
+
+int FoliageDispatcher::asset_cache_entry_count() {
+  check_asset_cache_epoch();
+  return static_cast<int>(asset_mesh_cache_.size() +
+                          asset_fd_texture_cache_.size() +
+                          asset_model_path_cache_.size() +
+                          asset_graphics_cache_by_root_.size());
+}
+
+TypedArray<VegGraphicRow>
+FoliageDispatcher::list_graphics(const Ref<ResourceRoot> &p_resource_root,
+                                 bool p_force_refresh) {
+  check_asset_cache_epoch();
+  if (p_resource_root.is_null() ||
+      p_resource_root->get_root_dir().is_empty()) {
+    return TypedArray<VegGraphicRow>();
+  }
+  const String key = _asset_root_key(p_resource_root);
+  if (!p_force_refresh && asset_graphics_cache_by_root_.has(key)) {
+    return asset_graphics_cache_by_root_[key].duplicate();
+  }
+
+  TypedArray<VegGraphicRow> out;
+  HashMap<String, bool> seen;
+  const Array entries = p_resource_root->list_file_entries(".3di");
+  for (int64_t i = 0; i < entries.size(); ++i) {
+    const Dictionary entry = entries[i];
+    String model_name = entry.get("logical_name", entry.get("path", ""));
+    String model_ref = entry.get("path", "");
+    if (model_ref.is_empty()) {
+      model_ref = model_name;
+    }
+    const String basename = model_name.get_file().get_basename().to_lower();
+    if (!basename.contains("veg") || seen.has(basename)) {
+      continue;
+    }
+    seen[basename] = true;
+    asset_model_path_cache_[_asset_cache_key(key, basename)] = model_ref;
+    Ref<VegGraphicRow> row;
+    row.instantiate();
+    row->set_basename(basename);
+    row->set_model_path(model_ref);
+    row->set_scene_path(model_ref);
+    out.push_back(row);
+  }
+  // Sorted by basename (the former sort_custom over `a.basename < b.basename`).
+  for (int64_t i = 1; i < out.size(); ++i) {
+    const Ref<VegGraphicRow> key_row = out[i];
+    int64_t j = i - 1;
+    while (j >= 0 &&
+           key_row->get_basename() < Ref<VegGraphicRow>(out[j])->get_basename()) {
+      out[j + 1] = out[j];
+      --j;
+    }
+    out[j + 1] = key_row;
+  }
+  asset_graphics_cache_by_root_[key] = out;
+  return out.duplicate();
+}
+
+Array FoliageDispatcher::resolve_slot_meshes(
+    const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
+  check_asset_cache_epoch();
+  Array meshes;
+  for (int64_t i = 0; i < p_defs.size(); ++i) {
+    const Ref<TerrainFoliageDef> def = p_defs[i];
+    if (def.is_null()) {
+      meshes.push_back(Variant());
+      continue;
+    }
+    const String graphic = def->get_graphic();
+    Ref<Mesh> mesh =
+        graphic.is_empty() ? Ref<Mesh>() : load_mesh(p_resource_root, graphic);
+    meshes.push_back(mesh);
+  }
+  return meshes;
+}
+
+Array FoliageDispatcher::resolve_slot_fd_textures(
+    const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
+  check_asset_cache_epoch();
+  Array textures;
+  for (int64_t i = 0; i < p_defs.size(); ++i) {
+    const Ref<TerrainFoliageDef> def = p_defs[i];
+    if (def.is_null()) {
+      textures.push_back(Variant());
+      continue;
+    }
+    const String graphic = def->get_graphic();
+    textures.push_back(graphic.is_empty()
+                           ? Ref<Texture2D>()
+                           : load_fd_texture(p_resource_root, graphic));
+  }
+  return textures;
+}
+
+Ref<Texture2D>
+FoliageDispatcher::load_fd_texture(const Ref<ResourceRoot> &p_resource_root,
+                                   const String &p_graphic) {
+  check_asset_cache_epoch();
+  if (p_resource_root.is_null() ||
+      p_resource_root->get_root_dir().is_empty()) {
+    return Ref<Texture2D>();
+  }
+  const String basename = p_graphic.get_file().get_basename().to_lower();
+  if (basename.is_empty()) {
+    return Ref<Texture2D>();
+  }
+  const String key =
+      _asset_cache_key(_asset_root_key(p_resource_root), basename);
+  if (asset_fd_texture_cache_.has(key)) {
+    return asset_fd_texture_cache_[key];
+  }
+
+  Ref<Texture2D> diffuse =
+      _mesh_albedo_texture(load_mesh(p_resource_root, p_graphic));
+  if (diffuse.is_null()) {
+    return Ref<Texture2D>();
+  }
+  Ref<Image> image = diffuse->get_image();
+  if (image.is_null()) {
+    return Ref<Texture2D>();
+  }
+  image = image->duplicate();
+  if (image->is_compressed()) {
+    image->decompress();
+  }
+  image->convert(Image::FORMAT_RGBA8);
+
+  Ref<Texture2D> fd;
+  if (bake_fd_image(image)) {
+    fd = ImageTexture::create_from_image(image);
+  } else {
+    UtilityFunctions::push_warning(vformat(
+        "FoliageDispatcher: '%s' diffuse dimensions are unsupported; :fd bake skipped, binding the raw diffuse.",
+        basename));
+    fd = diffuse;
+  }
+  asset_fd_texture_cache_[key] = fd;
+  return fd;
+}
+
+Ref<Texture2D> FoliageDispatcher::_mesh_albedo_texture(const Ref<Mesh> &p_mesh) {
+  if (p_mesh.is_null() || p_mesh->get_surface_count() == 0) {
+    return Ref<Texture2D>();
+  }
+  Ref<BaseMaterial3D> material = p_mesh->surface_get_material(0);
+  if (material.is_null()) {
+    return Ref<Texture2D>();
+  }
+  return material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+}
+
+Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
+                                       const String &p_graphic) {
+  check_asset_cache_epoch();
+  if (p_resource_root.is_null() ||
+      p_resource_root->get_root_dir().is_empty()) {
+    return Ref<Mesh>();
+  }
+  const String key = _asset_root_key(p_resource_root);
+  const String basename = p_graphic.get_file().get_basename().to_lower();
+  if (basename.is_empty()) {
+    return Ref<Mesh>();
+  }
+  const String mesh_key = _asset_cache_key(key, basename);
+  if (asset_mesh_cache_.has(mesh_key)) {
+    // Game_StartMission resets the logical renderer-definition registry, but
+    // MainGame deliberately retains this expensive geometry cache with its
+    // mounted root. A cache hit in the new mission is still a loaded shared
+    // model-def node, so recreate retail's sticky foliage bit without parsing
+    // or rebuilding the .3DI.
+    const String cached_model_path = asset_model_path_cache_.has(mesh_key)
+                                         ? asset_model_path_cache_[mesh_key]
+                                         : basename + String(".3di");
+    ObjectData::mark_cached_network_challenge_foliage_model(cached_model_path);
+    return asset_mesh_cache_[mesh_key];
+  }
+
+  const String model_path = _find_model_path(p_resource_root, basename);
+  if (model_path.is_empty()) {
+    return Ref<Mesh>();
+  }
+
+  Ref<ObjectData> data;
+  data.instantiate();
+  // Retail marks foliage model-def nodes before it freezes the C2S 0x3D
+  // renderer-definition snapshot; they remain renderable but are excluded from
+  // that network page. [orig: CEffectWorld_MarkModelsDirty @0x5b2220 writes node+0x3D4 before CEffectWorld_RebuildAllModelBuffers @0x5b3a80]
+  if (data->open_from_resource_root(p_resource_root, model_path, false) != OK) {
+    return Ref<Mesh>();
+  }
+  const Array submeshes = data->build_lod_submeshes(0);
+  Ref<ArrayMesh> mesh = aggregate_lod0_submeshes(submeshes);
+  if (mesh.is_valid() && !submeshes.is_empty()) {
+    // Retail foliage expands the complete LOD0 model, but owns one :fd
+    // binding per definition. Keep the primary submesh's diffuse only as
+    // that binding's locator; it does not decide which geometry survives.
+    const Dictionary primary = submeshes[0];
+    Ref<Texture2D> diffuse =
+        _load_diffuse_texture(data, int(primary.get("material_index", 0)));
+    if (diffuse.is_valid()) {
+      Ref<StandardMaterial3D> mat;
+      mat.instantiate();
+      mat->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, diffuse);
+      mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+      mat->set_alpha_scissor_threshold(0.33f);
+      mat->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+      mat->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
+      mat->set_texture_filter(BaseMaterial3D::TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
+      mesh->surface_set_material(0, mat);
+    }
+  }
+  if (mesh.is_valid()) {
+    asset_mesh_cache_[mesh_key] = mesh;
+  }
+  return mesh;
+}
+
+Ref<ArrayMesh> FoliageDispatcher::aggregate_lod0_submeshes(
+    const Array &p_submeshes) {
+  Ref<ArrayMesh> aggregate;
+  aggregate.instantiate();
+  for (int64_t i = 0; i < p_submeshes.size(); ++i) {
+    const Dictionary entry = p_submeshes[i];
+    const Ref<Mesh> source = entry.get("mesh", Variant());
+    if (source.is_null()) {
+      continue;
+    }
+    // ArrayMesh sources carry their primitive type and surface names; an
+    // engine-generated PrimitiveMesh is a nameless triangle list.
+    const Ref<ArrayMesh> array_source = source;
+    for (int source_surface = 0; source_surface < source->get_surface_count();
+         ++source_surface) {
+      const Array arrays = source->surface_get_arrays(source_surface);
+      if (arrays.size() < Mesh::ARRAY_MAX) {
+        continue;
+      }
+      aggregate->add_surface_from_arrays(
+          array_source.is_valid()
+              ? array_source->surface_get_primitive_type(source_surface)
+              : Mesh::PRIMITIVE_TRIANGLES,
+          arrays);
+      const String surface_name = array_source.is_valid()
+          ? array_source->surface_get_name(source_surface)
+          : String();
+      if (!surface_name.is_empty()) {
+        aggregate->surface_set_name(aggregate->get_surface_count() - 1,
+                                    surface_name);
+      }
+    }
+  }
+  return aggregate->get_surface_count() > 0 ? aggregate : Ref<ArrayMesh>();
+}
+
+Ref<Texture2D>
+FoliageDispatcher::_load_diffuse_texture(const Ref<ObjectData> &p_data,
+                                         int p_material_index) {
+  const int array_index = p_data->find_material_array_index(p_material_index);
+  if (array_index < 0) {
+    return Ref<Texture2D>();
+  }
+  for (int want_slot : {1, 2}) {
+    Ref<Texture2D> loaded =
+        p_data->load_material_slot_texture(array_index, want_slot);
+    if (loaded.is_valid()) {
+      return loaded;
+    }
+  }
+  return Ref<Texture2D>();
+}
+
+String FoliageDispatcher::_find_model_path(
+    const Ref<ResourceRoot> &p_resource_root, const String &p_basename) {
+  const String key = _asset_root_key(p_resource_root);
+  const String path_key = _asset_cache_key(key, p_basename);
+  if (asset_model_path_cache_.has(path_key)) {
+    return asset_model_path_cache_[path_key];
+  }
+  list_graphics(p_resource_root);
+  if (asset_model_path_cache_.has(path_key)) {
+    return asset_model_path_cache_[path_key];
+  }
+
+  // Resolve through the VFS (loose or PFF). The logical name is enough: it is
+  // only fed back to ObjectData.open_from_resource_root, which reads it
+  // through the VFS.
+  const String logical = p_basename + String(".3di");
+  if (p_resource_root->has_file(logical)) {
+    asset_model_path_cache_[path_key] = logical;
+    return logical;
+  }
+  return String();
+}
+
+String FoliageDispatcher::_asset_root_key(
+    const Ref<ResourceRoot> &p_resource_root) {
+  // Multiple live VFS mounts may share one physical directory while selecting
+  // different expansion/override chains. Include the root object identity so
+  // resolved paths, meshes, and :fd textures never alias between those
+  // mounts.
+  return vformat(
+      "%s|%d",
+      p_resource_root->get_root_dir().replace("\\", "/").rstrip("/").to_lower(),
+      static_cast<int64_t>(p_resource_root->get_instance_id()));
+}
+
+String FoliageDispatcher::_asset_cache_key(const String &p_root_key,
+                                           const String &p_basename) {
+  return vformat("%s|%s", p_root_key, p_basename);
 }
 
 opennova::renderer::FoliageSlotGeometry
@@ -751,10 +1134,12 @@ RID FoliageDispatcher::_ensure_draw_instance(
         instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
     // The generic attenuation catcher cannot reproduce foliage-card alpha,
     // two-sided rasterization, and wind deformation without dark rectangles.
-    // Keep foliage on the ordinary world layer until the retail tile-cache
-    // compositor (which supplies the alpha-lighting term before this pass) is
-    // ported.
-    server->instance_set_layer_mask(instance, 1u << 0);
+    // Foliage rides its own visual layer, admitted by every beauty camera and
+    // excluded from the water mirror: retail's reflection prerender hands
+    // PolyTrn a context with foliage collection OFF, so its mirror draws no
+    // near-foliage patches (see docs/env/env-tod-re.md #30 and
+    // visual_layers::TERRAIN_FOLIAGE).
+    server->instance_set_layer_mask(instance, visual_layers::TERRAIN_FOLIAGE);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
@@ -884,43 +1269,27 @@ int FoliageDispatcher::get_total_instances() const {
       std::min<int64_t>(total, std::numeric_limits<int>::max()));
 }
 
-Dictionary FoliageDispatcher::get_frame_stats() const {
-  Dictionary result;
-  result["frame_calls"] = frame_stats_.frame_calls;
-  result["detail_cells"] = frame_stats_.detail_cells;
-  result["silhouette_anchors_input"] = frame_stats_.silhouette_anchors_input;
-  result["silhouette_anchors_visible"] =
-      frame_stats_.silhouette_anchors_visible;
-  result["runtime_detail_intents"] = frame_stats_.runtime_detail_intents;
-  result["runtime_silhouette_intents"] =
-      frame_stats_.runtime_silhouette_intents;
-  result["detail_high_instances"] = frame_stats_.detail_high_instances;
-  result["detail_low_instances"] = frame_stats_.detail_low_instances;
-  result["silhouette_instances"] = frame_stats_.silhouette_instances;
-  result["detail_vertices"] = frame_stats_.detail_vertices;
-  result["silhouette_vertices"] = frame_stats_.silhouette_vertices;
-  result["render_batches"] = frame_stats_.render_batches;
-  result["detail_cache_hits"] = frame_stats_.detail_cache_hits;
-  result["detail_cache_misses"] = frame_stats_.detail_cache_misses;
-  result["detail_cache_regenerations"] =
-      frame_stats_.detail_cache_regenerations;
-  result["detail_cache_evictions"] = frame_stats_.detail_cache_evictions;
-  result["detail_cache_residents"] = frame_stats_.detail_cache_residents;
-  result["detail_cache_submissions"] = frame_stats_.detail_cache_submissions;
-  result["model_cache_hits"] = frame_stats_.model_cache_hits;
-  result["model_cache_misses"] = frame_stats_.model_cache_misses;
-  result["model_cache_regenerations"] =
-      frame_stats_.model_cache_regenerations;
-  result["model_cache_evictions"] = frame_stats_.model_cache_evictions;
-  result["model_cache_residents"] = frame_stats_.model_cache_residents;
-  result["model_cache_submissions"] = frame_stats_.model_cache_submissions;
-  result["detail_mesh_hits"] = frame_stats_.detail_mesh_hits;
-  result["detail_mesh_uploads"] = frame_stats_.detail_mesh_uploads;
-  result["model_mesh_hits"] = frame_stats_.model_mesh_hits;
-  result["model_mesh_uploads"] = frame_stats_.model_mesh_uploads;
-  result["foliage_backend"] = "rendering_server_rid";
-  result["backend_pool_size"] = static_cast<int64_t>(
-      detail_draw_pool_.size() + model_draw_pool_.size());
+int64_t FoliageDispatcher::backend_server_writes() const {
+  return frame_stats_.backend_instance_creates +
+         frame_stats_.backend_scenario_writes +
+         frame_stats_.backend_configuration_writes +
+         frame_stats_.backend_base_writes +
+         frame_stats_.backend_material_writes +
+         frame_stats_.backend_material_parameter_writes +
+         frame_stats_.backend_uniform_writes +
+         frame_stats_.backend_visibility_writes;
+}
+
+Ref<FoliageFrameStats> FoliageDispatcher::get_frame_stats() const {
+  Ref<FoliageFrameStats> stats;
+  stats.instantiate();
+#define FOLIAGE_FRAME_COUNTER_COPY(m_type, m_name) \
+  stats->set_##m_name(frame_stats_.m_name);
+  FOLIAGE_FRAME_COUNTERS(FOLIAGE_FRAME_COUNTER_COPY)
+#undef FOLIAGE_FRAME_COUNTER_COPY
+  stats->set_foliage_backend("rendering_server_rid");
+  stats->set_backend_pool_size(static_cast<int64_t>(
+      detail_draw_pool_.size() + model_draw_pool_.size()));
   int64_t backend_active_draws = 0;
   int64_t backend_visible_draws = 0;
   const auto count_draws = [&](const std::vector<DrawInstanceStamp> &p_stamps) {
@@ -936,38 +1305,13 @@ Dictionary FoliageDispatcher::get_frame_stats() const {
   };
   count_draws(detail_draw_stamps_);
   count_draws(model_draw_stamps_);
-  result["backend_active_draws"] = backend_active_draws;
-  result["backend_visible_draws"] = backend_visible_draws;
-  result["backend_instance_creates"] =
-      frame_stats_.backend_instance_creates;
-  result["backend_scenario_writes"] =
-      frame_stats_.backend_scenario_writes;
-  result["backend_configuration_writes"] =
-      frame_stats_.backend_configuration_writes;
-  result["backend_base_writes"] = frame_stats_.backend_base_writes;
-  result["backend_material_writes"] = frame_stats_.backend_material_writes;
-  result["backend_material_parameter_writes"] =
-      frame_stats_.backend_material_parameter_writes;
-  result["backend_uniform_writes"] = frame_stats_.backend_uniform_writes;
-  result["backend_visibility_writes"] =
-      frame_stats_.backend_visibility_writes;
-  result["backend_server_writes"] =
-      frame_stats_.backend_instance_creates +
-      frame_stats_.backend_scenario_writes +
-      frame_stats_.backend_configuration_writes +
-      frame_stats_.backend_base_writes +
-      frame_stats_.backend_material_writes +
-      frame_stats_.backend_material_parameter_writes +
-      frame_stats_.backend_uniform_writes +
-      frame_stats_.backend_visibility_writes;
-  result["terrain_scene_counter"] = frame_stats_.terrain_scene_counter;
-  result["native_detail_source"] = frame_stats_.native_detail_source;
-  result["preview_detail_source"] = frame_stats_.preview_detail_source;
-  result["path_blocker_available"] = frame_stats_.path_blocker_available;
-  result["authored_slots"] = authored_slot_count_;
-  result["enabled_slots"] = enabled_slot_count_;
-  result["disabled_slots"] = disabled_slot_count_;
-  return result;
+  stats->set_backend_active_draws(backend_active_draws);
+  stats->set_backend_visible_draws(backend_visible_draws);
+  stats->set_backend_server_writes(backend_server_writes());
+  stats->set_authored_slots(authored_slot_count_);
+  stats->set_enabled_slots(enabled_slot_count_);
+  stats->set_disabled_slots(disabled_slot_count_);
+  return stats;
 }
 
 Dictionary FoliageDispatcher::get_backend_report() const {
@@ -1013,7 +1357,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
       row["casts_shadows"] = false;
-      row["layer_mask"] = static_cast<int64_t>(1u << 0);
+      row["layer_mask"] =
+          static_cast<int64_t>(visual_layers::TERRAIN_FOLIAGE);
       draws.append(row);
       ++active_draws;
       if (stamp.visible) {
@@ -1027,17 +1372,16 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   result["visible_draws"] = visible_draws;
   result["draws"] = draws;
 
-  const Dictionary stats = get_frame_stats();
-  result["instance_creates"] = stats["backend_instance_creates"];
-  result["scenario_writes"] = stats["backend_scenario_writes"];
-  result["configuration_writes"] = stats["backend_configuration_writes"];
-  result["base_writes"] = stats["backend_base_writes"];
-  result["material_writes"] = stats["backend_material_writes"];
+  result["instance_creates"] = frame_stats_.backend_instance_creates;
+  result["scenario_writes"] = frame_stats_.backend_scenario_writes;
+  result["configuration_writes"] = frame_stats_.backend_configuration_writes;
+  result["base_writes"] = frame_stats_.backend_base_writes;
+  result["material_writes"] = frame_stats_.backend_material_writes;
   result["material_parameter_writes"] =
-      stats["backend_material_parameter_writes"];
-  result["uniform_writes"] = stats["backend_uniform_writes"];
-  result["visibility_writes"] = stats["backend_visibility_writes"];
-  result["server_writes"] = stats["backend_server_writes"];
+      frame_stats_.backend_material_parameter_writes;
+  result["uniform_writes"] = frame_stats_.backend_uniform_writes;
+  result["visibility_writes"] = frame_stats_.backend_visibility_writes;
+  result["server_writes"] = backend_server_writes();
   return result;
 }
 

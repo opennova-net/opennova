@@ -111,7 +111,7 @@ PROMOTED_CANONICAL = (
     "godot/game/world/host_session_config.gd",
     "engine/net/novaworld/gate_probe.h",
     "engine/net/npwire/net_ports.h",
-    "engine/net/npwire/game_type.h",
+    "engine/base/gameprofile/game_type.h",
 )
 PROMOTED_EXEMPT = re.compile(r"^\s*#|^\s*//|\[orig|\bconst\s|\bconstexpr\s|#define\s")
 
@@ -189,7 +189,7 @@ def main() -> int:
         print(f"[lint][promoted-literal] {f}")
         print("[lint]   this value has a canonical named home "
               "(HostSessionConfig / novaworld gate_probe.h / npwire net_ports.h / "
-              "npwire game_type.h) — reference it instead of re-minting the literal.")
+              "base/gameprofile game_type.h) — reference it instead of re-minting the literal.")
 
     if (dict_findings or promoted_findings) and args.enforce:
         return 1

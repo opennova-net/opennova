@@ -1,7 +1,8 @@
 # Mission loading screen — reverse-engineering record
 
 Validation record for the mission loading screen (`godot/game/ui/loading_screen.gd`,
-progress wiring in `godot/game/world/game_world.gd` + `godot/src/mission/mission_object_placer.cpp`,
+progress wiring in `godot/src/world/game_world_load.cpp` and
+`godot/game/world_load_coordinator.gd`,
 shell lifecycle in `godot/game/main_game.gd`) against the original engine as witnessed in IDA
 Pro. Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses below are
 that binary's. This file is the committed home for the divergence catalog that code comments
@@ -13,6 +14,9 @@ every axis of the sidecar rule, band layout, fonts, gametype map, throttle/creep
 bar geometry/colors and fill arithmetic re-decompiled and compared — no drift).
 The SP start-mission splash was fully witnessed and ported the same session
 (D-LOADSCR-4 fixed; the splash section below is the complete witness set).
+Re-validated 2026-09-04 against retail JO assets and mission `00TRa.bms`:
+the probe changed the window from 960×720 to 2560×1440 during the synchronous
+load and found loading-art pixels across the extended surface.
 
 ## Verdict table
 
@@ -20,8 +24,9 @@ The SP start-mission splash was fully witnessed and ported the same session
 | --- | --- | --- |
 | Sidecar background resolution (`<missionbase>.pcx` → `loadscrn.pcx`) | **MATCHING** (ported) | witness map below; GUT `godot/tests/game/loading_screen_test.gd` (sidecar name, fallback, custom flag) |
 | MP session text block (title/mission/game-type band + server message) | **MATCHING** (ported; glyph renderer approximated, D-LOADSCR-2) | layout constants + alignment enum + color tags witnessed; GUT gametype-key + SP/MP-split tests |
-| Progress bar (geometry, colors, smoothing, throttle) | **MATCHING** (ported) | exact integer arithmetic ported; GUT smoothing + fill-span tests |
-| Present pump during the blocking load | reimpl code (force_draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; `RenderingServer.force_draw` + `queue_redraw` stand in for BeginScene/Present |
+| Progress bar (geometry, colors, exact checkpoints, throttle) | **MATCHING geometry**; intentional stage-schedule divergence (D-LOADSCR-1) | exact integer fill arithmetic; native + GUT tests pin exact stage values and prohibit autonomous creep |
+| Fullscreen background stretch and live resize | **MATCHING** (ported) | full-backbuffer stretch witnessed at `LoadingScreen_DrawEffectFullscreen @ 0x586ba0`; retail `00TRa.bms` render probe switches to fullscreen during the blocked load, requires window/viewport/loading-surface/capture extents to match, and samples real art beyond the old window bounds |
+| Present pump during the blocking load | reimpl code (direct CanvasItem transforms + forced-draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; event processing, embedded-viewport sync, direct canvas-RID transforms, and `RenderingServer.force_draw` stand in for Game_PumpWindowMessages/BeginScene/Present |
 | Load-flow case handling (SP / host / success / failure / return) | **MATCHING** (ported) | the case matrix below (`Game_StartMission @ 0x524360`): screen resident through the load, released at the end, failure/abort → menu; GUT `main_game_lifecycle_test.gd` (load, return, reload, failed-load rollback) + `game/loading_screen_test.gd` (SP-vs-session `load_info` split) |
 | Joiner spawn-gate hold | **MATCHING** (D-LOADSCR-3 fixed 2026-07-24) | local `world_loaded` leaves the loading presentation raised; `ClientRuntime` keeps pumping while hidden and `GameWorld.join_admission_ready` releases it only at authoritative in-match admission, or transitions it to DEATH when the host requests a player-paced deploy pick |
 | ESC / disconnect abort during load | **DIVERGENT** (D-LOADSCR-7) | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` aborts to `Post Menu`; our SP/host load is one synchronous call the SceneTree cannot interrupt — no reachable window on the synchronous path |
@@ -215,7 +220,7 @@ after the optional SP splash. Every case:
 | Load success | release effect at end, reveal game | `_on_world_loaded` drops the screen immediately for SP/host; a joiner waits for the authoritative edge above — MATCHING |
 | Load failure / abort | `reason = 1`, nav-push `Post Menu` | `_on_world_load_failed` → `_teardown_world_to_menu` — MATCHING |
 | ESC / disconnect DURING load | `Client_CheckDisconnectOrEscDuringLoad` → abort to menu | our SP/host load is a single synchronous call the SceneTree cannot interrupt; ESC is swallowed while `_world_load_pending` — **D-LOADSCR-7** (unreachable window, not a behavioral loss on the synchronous path) |
-| Return to menu (pause → abort) | nav-push `Post Menu` | `_on_return_to_menu` → `_teardown_world_to_menu` — MATCHING |
+| Return to menu (pause → abort) | ABORT's authored actions raise the CONFIRM_EXIT "Are you sure?" panel (shipped game.mnu: `SHOW CONFIRM_EXIT` + `HIDE MAIN_WRAPPER`); the exit is the Command on CONFIRM_YES, then nav-push `Post Menu` | `MenuShell` binds CONFIRM_YES (not ABORT) as the return Command → `_on_return_to_menu` → `_teardown_world_to_menu`; CONFIRM_NO/ESC cancel through the authored actions — MATCHING (the pre-2026-09 port bound ABORT directly and skipped the confirmation) |
 
 ### SP start-mission splash — show_start_mission_splash @ 0x520820 (ported 2026-08-15)
 
@@ -299,14 +304,21 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 - `LoadingScreen` (godot/game/ui/loading_screen.gd) draws the texture stretched
   over the display and the MP text in image space under the image's scale transform — the
   same net composite the original gets by rendering glyphs into the texture then
-  stretching. The bar arithmetic, colors, throttle and creep are ported integer-exact.
-- The blocking-load present pump maps to `DisplayServer`-guarded
-  `RenderingServer.force_draw()` after `queue_redraw()` — the reimpl-side analog of
-  Game_PumpWindowMessages + Present.
-- `GameWorld.load_progress` emits the witnessed anchor values at our stage boundaries
-  (2 → 6 → 26 → 41 → 70 → 90 → 95 → 100), and `MissionObjectPlacer` pulses the constant
-  stage value from inside its per-model loops — the original's exact pump shape
-  (constant-per-stage + creep), on a coarser stage set (D-LOADSCR-1).
+  stretching. The bar geometry, colors, fill arithmetic, and throttle are ported
+  integer-exact. Autonomous retail creep is intentionally omitted so displayed progress
+  always equals the latest completed-operation checkpoint (D-LOADSCR-1).
+- The blocking-load present pump processes display events, synchronizes the optional
+  embedded game viewport to the Window, transforms the existing loading canvas to the new
+  pixel extent through its RenderingServer RID, scales a pre-submitted red fill primitive
+  to the exact checkpoint span, then calls
+  `RenderingServer.force_draw()`. This is the reimpl-side analog of
+  Game_PumpWindowMessages + BeginScene/Present and covers a fullscreen edge in the same
+  blocked call rather than waiting for a SceneTree idle frame.
+- `GameWorld.load_progress` emits actual-operation checkpoints
+  (0 → 10 → 20 → 30 → 40 → 50 → 60 → 70 → 80) and then world-ready 90.
+  Repeated model callbacks repeat the same checkpoint. `WorldLoadCoordinator` emits 100
+  only at the shell's reveal/admission edge, so joiners waiting for authoritative
+  admission remain truthfully incomplete.
 - Shell lifecycle (`main_game.gd`): mount on `_begin_world_load`, dismiss on
   `world_loaded`/`load_failed`/return-to-menu; the world + HUD stay hidden until the load
   lands (the original presents only the loading screen during the load).
@@ -315,14 +327,14 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-LOADSCR-1 | 8 stage-boundary progress values + per-model pulses at the stage constant | ~30 call sites incl. per-subsystem slot++ ticks (62..69) and separate 7/26 loop constants | our load pipeline decomposes differently; the value set and the pump mechanism (constant + creep) match, granularity doesn't. Cosmetic-only. — PERMANENT 2026-08-29 (ADR 0022 register) |
+| D-LOADSCR-1 | Nine actual-operation checkpoints (0..80), local-world-ready 90, and presentation-complete 100; repeated model pulses hold their stage value; no autonomous creep | ~30 call sites incl. per-subsystem slot++ ticks (62..69), separate 7/26 loop constants, and a displayed value that may creep up to reported+10 | our pipeline decomposes differently, and its user-facing bar deliberately never claims unfinished work. Stage progress is deterministic and exact; join admission owns the final 100 edge. — INTENTIONAL 2026-09-04 |
 | D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; Godot line metrics + word wrap | CGameFont glyph composite into the texture, `GameFont_LoadFromBlob`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
 | D-LOADSCR-3 — **FIXED 2026-07-24** | `world_loaded` completes the wire-header world and available shared assets but does not release a joiner's presentation. `ClientRuntime` continues the real session under the hidden world; `Simulation::is_joined_in_match` / `is_join_deploy_pick_pending` feed edge-triggered `GameWorld.join_admission_ready` / `join_deploy_pick_required`, and `MainGame` releases only at one of those authoritative boundaries. The same deploy edge rearms after death without replaying the loading screen | retail holds through TWO blocking waits bracketing its header-driven terrain/assets load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing on the spawn leg or entering the DEATH picker when a spawn choice is owed | real-UDP `main_game_lifecycle_test.gd::test_join_loading_stays_raised_until_authoritative_admission` proves the old early-reveal boundary and the fixed release |
 | D-LOADSCR-4 — **FIXED 2026-08-15** | The SP start-mission splash is ported as a `LoadingScreen` mode: same held background, the blinking centered LT_Continue line (Impac22b.fnt, half-bright, 512 ms white/`0xFF8080` pulse), the cursor-arrow quad at the live mouse position, key-queue-flush entry semantics, any-key/any-mouse-button dismissal, the final background-only frame, and the fire-and-forget START_MISSION one-shot; shell gate + world-tick hold in `main_game.gd` | `show_start_mission_splash @ 0x520820` (the full witness set above) | GUT `loading_screen_splash_test.gd`; the epilog-stage re-show entry split off as D-LOADSCR-8; the 2026-08-15 xref walk corrected the old "or the sound completes" gloss (input-only dismissal) |
 | D-LOADSCR-8 | The epilog-stage splash re-show — the start key at the SP post-spawn stage re-runs the splash then queues the deploy event (branch jnz @ 0x49c871; recomposite @ 0x49c887, splash re-run @ 0x49c88f, release @ 0x49c899) — is not ported | `Input_HandleSpecialKeys @ 0x49c5c0` branch @ 0x49c871 | rides the unported SP epilog/respawn flow (and the configurable start-key binding, D-CTRL-1 territory); witnessed 2026-08-15, deferred with that flow |
 | D-LOADSCR-5 | seven-segment numeric percentage not ported | drawn only under the `g_ShowLoadBarCommandLineArg` command-line flag | debug-only surface; revisit if the launch-flag work wants it |
 | D-LOADSCR-6 | background drawn unmodulated | effect draw modulate `0xFF7F7F7F` = MODULATE2X neutral | net-identical color; documented so nobody "fixes" a half-bright that isn't there — PERMANENT 2026-08-29 (ADR 0022 register) |
-| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `np::JoinSessionPolicy` (`engine/net/npruntime`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. — PERMANENT 2026-08-29 (ADR 0022 register) |
+| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `inmatch::JoinSessionPolicy` (`engine/runtime/inmatch`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. — PERMANENT 2026-08-29 (ADR 0022 register) |
 
 ## Follow-ups / unknowns
 
