@@ -42,6 +42,12 @@
 // Default: rebuild every file in memory and byte-compare the committed
 // copies; `--write` (re)writes them. Every run re-reads the committed bytes
 // and checks the authored facts the consumers pin.
+//
+// The minimal set's own model rides the same run: assets/house.3di is the
+// `house` recipe minted again (byte-identical to the fixture), and the three
+// flat-colour swatch textures it names (wall/roof/wood.tga) are minted beside
+// it. items.def row 108001 places it in mnml.bms (assets/README.md). One
+// recipe owns both copies, so the fixture and the shipped model cannot drift.
 #include "fixtures/minimal_3di_builder.h"
 
 #include <formats/threedi/threedi_panm_pose.h>
@@ -892,6 +898,59 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 
 using test_io::read_file;
 
+// ---------------------------------------------------------------------------
+// The minimal set's copies (assets/): the house and its swatch textures.
+struct AssetTexture {
+	const char *file;
+	uint8_t rgb[3];
+};
+const AssetTexture kAssetTextures[] = {
+	{"wall.tga", {200, 190, 170}}, // plaster
+	{"roof.tga", {140, 60, 50}},   // terracotta
+	{"wood.tga", {110, 75, 45}},   // the chimney's timber
+};
+constexpr int kSwatchSize = 16;
+
+// An uncompressed true-colour TGA (type 2, 24 bpp, bottom-left origin): the
+// 18-byte header, then BGR per texel -- the shape of the retail-loaded
+// mnml_*.tga terrain art, so retail's loose-file texture path takes it as is.
+std::vector<uint8_t> make_swatch_tga(const uint8_t rgb[3]) {
+	std::vector<uint8_t> out(18, 0);
+	out[2] = 2;
+	out[12] = static_cast<uint8_t>(kSwatchSize & 0xFF);
+	out[13] = static_cast<uint8_t>(kSwatchSize >> 8);
+	out[14] = static_cast<uint8_t>(kSwatchSize & 0xFF);
+	out[15] = static_cast<uint8_t>(kSwatchSize >> 8);
+	out[16] = 24;
+	out[17] = 0;
+	for (int i = 0; i < kSwatchSize * kSwatchSize; ++i) {
+		out.push_back(rgb[2]);
+		out.push_back(rgb[1]);
+		out.push_back(rgb[0]);
+	}
+	return out;
+}
+
+// The assets/ copy of one minted file: written under --write, else byte-compared.
+void guard_asset(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
+	if (write_mode) {
+		std::ofstream o(path, std::ios::binary);
+		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
+		return;
+	}
+	std::vector<uint8_t> committed;
+	if (!expect(read_file(path, committed), path + " missing; run with --write")) return;
+	static const char kLfsSentinel[] = "version https://git-lfs";
+	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
+			std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
+		return;
+	}
+	expect(committed == bytes, path + " differs from the generator output; regenerate with --write");
+	std::printf("%-40s %6zu bytes\n", path.c_str(), committed.size());
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -926,6 +985,20 @@ int main(int argc, char **argv) {
 		check_facts(recipe.file, committed);
 		std::printf("%-40s %6zu bytes\n", recipe.file, committed.size());
 	}
-	if (failures == 0 && !write_mode) std::printf("OK: fixtures/threedi/synth byte-reproducible\n");
+
+	// The minimal set's own model: assets/house.3di from the same `house`
+	// recipe, plus the three swatch textures it names.
+	const std::string assets = std::string(test_paths_repo_root(__FILE__)) + "/assets";
+	for (const Recipe &recipe : recipes()) {
+		if (std::strcmp(recipe.file, "house") != 0) continue;
+		std::vector<uint8_t> bytes;
+		if (expect(mint(build_recipe(recipe), scratch, bytes), "assets/house.3di: the writer accepts the model"))
+			guard_asset(assets + "/house.3di", bytes, write_mode);
+	}
+	for (const AssetTexture &texture : kAssetTextures)
+		guard_asset(assets + "/" + texture.file, make_swatch_tga(texture.rgb), write_mode);
+
+	if (failures == 0 && !write_mode)
+		std::printf("OK: fixtures/threedi/synth + assets/house byte-reproducible\n");
 	return failures == 0 ? 0 : 1;
 }

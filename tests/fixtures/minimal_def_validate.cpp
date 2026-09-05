@@ -49,6 +49,7 @@ int main() {
 		CHECK(def_parse_items(path("items.def").c_str(), &items) == 0, "items.def parses");
 		bool has_person = false;
 		bool has_mp_player = false;
+		const DefItemDef *house = nullptr;
 		for (size_t i = 0; i < items.count; ++i) {
 			// type 8 == person in the witnessed mapping (D-ITEMDEF-1); check by
 			// the presence of a spawnable person via its id range instead of the
@@ -60,10 +61,18 @@ int main() {
 			// without this row leaves every hosted/joined player with no graphic
 			// and no anim_def.
 			if (items.entries[i].id == 105305) has_mp_player = true;
+			// The set's own model: the synth house (assets/house.3di), placed in
+			// mnml.bms as a building. 108001 is the first id of our own range.
+			if (items.entries[i].id == 108001) house = &items.entries[i];
 		}
 		CHECK(items.count >= 1, "items.def has at least one item");
 		CHECK(has_person, "items.def carries a spawnable person (player/soldier)");
 		CHECK(has_mp_player, "items.def carries the MP player row (105305 = wire 0x14B9)");
+		CHECK(house != nullptr, "items.def carries the house row (108001)");
+		if (house != nullptr) {
+			CHECK(house->type == DEF_ITEM_TYPE_BUILDING, "the house is a building (the BMS building pool)");
+			CHECK(std::strcmp(house->graphic, "house") == 0, "the house names assets/house.3di");
+		}
 		def_free_items(&items);
 	}
 

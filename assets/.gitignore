@@ -97,6 +97,15 @@
 !/skbphongt.fx
 !/skbphongo.fx
 
+# --- Models + textures we author: the house (items.def 108001, placed in mnml) ---
+# assets/house.3di is the fixtures/threedi/synth `house` recipe minted again by
+# minimal_3di_gen (one recipe, two byte-guarded copies); the three flat-colour
+# swatch textures it names are minted beside it.
+!/house.3di
+!/wall.tga
+!/roof.tga
+!/wood.tga
+
 
 # --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
 # These are RETAIL Joint Operations bytes: the player body + anims, the avatar

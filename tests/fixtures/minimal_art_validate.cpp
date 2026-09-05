@@ -113,6 +113,10 @@ int main() {
 	    {"mnml_f.pcx", true, 0, false},                 // foliagemap
 	    {"newarow1.tga", false, 0, true},               // menu cursor
 	    {"mnml.pcx", true, 0, false},                   // mission-family map overview
+	    // The house's swatches (assets/house.3di names them; minted by minimal_3di_gen).
+	    {"wall.tga", false, 0, false},
+	    {"roof.tga", false, 0, false},
+	    {"wood.tga", false, 0, false},
 	};
 
 	for (const Art &a : art) {

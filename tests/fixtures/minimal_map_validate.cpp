@@ -7,12 +7,14 @@
 //
 // What is worth guarding is what the ENGINE needs, checked against the committed file:
 // it parses, it places the player, it points at the minimal terrain, it starts in daylight,
-// and its offline kit equips the AK-47 by its real weapon identity.
+// its offline kit equips the AK-47 by its real weapon identity, and it places the set's own
+// model, the house (items.def 108001, assets/house.3di).
 //
 // `--write` is deliberately a surgical editor rather than a generator: it loads the committed
 // ONED-authored mission, adds the AK kit row when the mission has no kit (the PR #610 starting
-// state) or changes only the first row's name, and emits it through the production BMS writer
-// (bms::write, from scratch). Existing rows and fields are otherwise preserved.
+// state) or changes only the first row's name, adds the house when no building names it, and
+// emits it through the production BMS writer (bms::write, from scratch). Existing rows and
+// fields are otherwise preserved.
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
@@ -51,6 +53,12 @@ const char *kFirstPlayerWeapon = "WPN_AK47AUTO";
 const int kPlayerStartItemId = 106001;
 const int kBlueTeamStartItemId = 106003;
 const int kRedTeamStartItemId = 106004;
+// The house (items.def 108001, assets/house.3di): the set's first authored model, placed
+// 24 m north of the player start. BMS axes are x east, y north, z up, so a yaw-0 spawn
+// at the origin looks straight at its 8 m x 4 m south wall, with the model's collision-only
+// water tank off its east side.
+const int kHouseItemId = 108001;
+const opennova::mission::EntityTransform kHousePlacement{0.0f, 24.0f, 0.0f, 0, 0, 0};
 
 // start_time is Q8.8 HOURS [orig: the BMS header's Q8.8 start hour widens into the 8.24
 // accumulator at Game_StartMission @ 0x525371]. A mission that starts at 0 renders under the
@@ -151,6 +159,18 @@ int main(int argc, char **argv) {
 			CHECK(loadout.front().name == kFirstPlayerWeapon,
 			      "the first offline weapon is WPN_AK47AUTO (the actual AK identity)");
 
+		int houses = 0;
+		for (const opennova::bms::Entity &rec : doc.buildings)
+			if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++houses;
+		bool house_added = false;
+		if (write_mode && houses == 0) {
+			opennova::mission::add_entity(doc, opennova::mission::EntityKind::Building, kHouseItemId,
+			                              kHousePlacement);
+			houses = 1;
+			house_added = true;
+		}
+		CHECK(houses == 1, "the map places exactly one house (108001), the set's own model");
+
 		int player_starts = 0;
 		int blue_starts = 0;
 		int red_starts = 0;
@@ -173,7 +193,7 @@ int main(int argc, char **argv) {
 		      "the mission starts in daylight (start_time is Q8.8 HOURS; 0 means midnight, and "
 		      "the header overrides the .env's own curtime)");
 
-		if (write_mode && weapon_changed && fail == 0) {
+		if (write_mode && (weapon_changed || house_added) && fail == 0) {
 			std::vector<uint8_t> generated;
 			CHECK(opennova::bms::write(doc, generated, error), error.c_str());
 
@@ -187,6 +207,10 @@ int main(int argc, char **argv) {
 						opennova::mission::weapon_loadout(verify);
 				CHECK(!written_loadout.empty() && written_loadout.front().name == kFirstPlayerWeapon,
 				      "rewritten mnml.bms keeps WPN_AK47AUTO first");
+				int written_houses = 0;
+				for (const opennova::bms::Entity &rec : verify.buildings)
+					if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++written_houses;
+				CHECK(written_houses == 1, "rewritten mnml.bms places the house once");
 			}
 
 			if (fail == 0) {
@@ -197,14 +221,17 @@ int main(int argc, char **argv) {
 					             static_cast<std::streamsize>(generated.size()));
 				CHECK(output.good(), "cannot write mnml.bms");
 				if (output.good())
-					std::printf("wrote %s (%s -> %s, %zu bytes)\n", bms_path.c_str(),
-					            previous_weapon.c_str(), kFirstPlayerWeapon, generated.size());
+					std::printf("wrote %s (kit %s -> %s; house %s, %zu bytes)\n", bms_path.c_str(),
+					            weapon_changed ? previous_weapon.c_str() : "kept", kFirstPlayerWeapon,
+					            house_added ? "added" : "kept", generated.size());
 			}
 		} else if (write_mode && fail == 0) {
-			std::printf("%s already starts with %s\n", bms_path.c_str(), kFirstPlayerWeapon);
+			std::printf("%s already starts with %s and places the house\n", bms_path.c_str(),
+			            kFirstPlayerWeapon);
 		}
 	}
 
-	if (fail == 0) std::printf("OK: minimal map .env + .bms valid; offline kit starts with AK-47\n");
+	if (fail == 0)
+		std::printf("OK: minimal map .env + .bms valid; offline kit starts with AK-47; the house stands\n");
 	return fail == 0 ? 0 : 1;
 }

@@ -14,7 +14,8 @@ hardening, and project health. Divergences from the original engine belong in
       in both zip flavors until replaced. The 47 retail `.fx` are already replaced (the
       authored set under `tests/fixtures/fx/`, retail-validated 2026-08-31) and the
       never-loaded files trimmed against the validated run's `/FRISK` log. The model side
-      has a path (`tests/fixtures/minimal_3di_builder.h` through `threedi_3di3_write`);
+      has a path (`tests/fixtures/minimal_3di_builder.h` through `threedi_3di3_write`;
+      `assets/house.3di` is the first authored model shipped in the set);
       the clip side needs a `.bad` writer (`engine/formats/bad` is parse-only). Land a
       replacement by swapping the file and deleting its allowlist line; the `minimal_*`
       guards and the retail A/B loop stay the acceptance.

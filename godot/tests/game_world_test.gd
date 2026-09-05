@@ -901,6 +901,9 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 		if FileAccess.file_exists(target):
 			assert_eq(DirAccess.remove_absolute(target), OK)
 		assert_eq(DirAccess.copy_absolute(RetailData.fixture(rel), target), OK)
+	# The committed mission's own AK kit would outrank the profile offline.
+	WorldFixture.write_mission_without_loadout(self,
+			root_dir.path_join("mnml.bms"), root_dir.path_join("mnml.bms"))
 
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()
@@ -2234,6 +2237,12 @@ func _stage_viewmodel_fixture(name: String, with_character: bool) -> String:
 		assert_eq(DirAccess.copy_absolute(
 				ProjectSettings.globalize_path("res://../fixtures/threedi/synth/" + pair[0]),
 				root_dir.path_join(pair[1])), OK)
+	# The minimal set ships the retail bring-up Avatars.def: the fixture either
+	# replaces it with its own combo or removes it, so "without a character"
+	# means exactly that.
+	var shipped_avatars := root_dir.path_join("AVATARS.DEF")
+	if FileAccess.file_exists(shipped_avatars):
+		assert_eq(DirAccess.remove_absolute(shipped_avatars), OK)
 	if with_character:
 		WorldFixture.write_file(root_dir.path_join("Avatars.def"),
 				VIEWMODEL_AVATARS_DEF.replace("\n", "\r\n"))
@@ -2332,10 +2341,11 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 
 	var resolved := world.prewarm_challenge_models()
 
-	# The present snapshot's rows warm first (the minimal mission's only row is
-	# the local player's own type -> the player body), then the explicit
-	# player-body / current-gun / character-arms legs, in that order.
-	assert_eq(Array(resolved), [body, body, VIEWMODEL_GUN_GRAPHIC, VIEWMODEL_ARMS_GRAPHIC],
+	# The present snapshot's rows warm first (the minimal mission's rows: the
+	# local player's own type -> the player body, and its placed house), then
+	# the explicit player-body / current-gun / character-arms legs, in that
+	# order.
+	assert_eq(Array(resolved), [body, "house", body, VIEWMODEL_GUN_GRAPHIC, VIEWMODEL_ARMS_GRAPHIC],
 		"the frozen 0x3D source includes every .3DI the first player frame would load "
 		+ "(the character's arms, not a weapon.def field)")
 
@@ -2530,8 +2540,9 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	# director walks at load. The pool-3 marker leg has no real twin (a placed
 	# marker never materializes a node); its shared powerup-only gate is pinned
 	# by the pool-2 building cases.
+	# (108001 is the minimal set's own house row; the staged rows start above it.)
 	var root_dir := _stage_item_fx_fixture("pool_gates", [
-		{"id": 108001, "type": "person", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
+		{"id": 108006, "type": "person", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 		{"id": 108003, "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
@@ -2541,7 +2552,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var cases := [
-		[MissionData.KIND_ORGANIC, 108001, 0],
+		[MissionData.KIND_ORGANIC, 108006, 0],
 		[MissionData.KIND_ITEM, 108002, 1],
 		[MissionData.KIND_ITEM, 108003, 0],
 		[MissionData.KIND_BUILDING, 108004, 0],
@@ -2847,8 +2858,9 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 				# Pool-1 attrib 0x40 is excluded before any effect request.
 				mission.add_entity(
 						MissionData.KIND_ITEM, 108003, Vector3(50, 20, 0), Vector3.ZERO)), OK)
-	assert_eq(world.get_mission_stats().batched, 3,
-			"all three records ride the static populations (no individual node)")
+	assert_eq(world.get_mission_stats().batched, 4,
+			"all three records ride the static populations (no individual node), "
+			+ "beside the minimal mission's own house")
 	var entity_transform := MissionObjectPlacer.entity_transform(
 			Vector3(10, 20, 30), Vector3(0, 90, 0))
 	var fallback_transform := MissionObjectPlacer.entity_transform(

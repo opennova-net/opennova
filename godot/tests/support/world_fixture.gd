@@ -97,6 +97,19 @@ static func stage_sound_bank(root_dir: String, set_names: PackedStringArray,
 	assert(lwf.save_file(root_dir.path_join(bank_name)) == OK, "the fixture bank saves")
 
 
+## Re-emit the mission at `source` through MissionData with its authored
+## weapon kit cleared, into `dest` (the same path is fine). The committed
+## mnml.bms promotes an AK kit that outranks any PLAYER_INFO selection
+## offline, so a fixture that wants the profile to win stages this copy.
+static func write_mission_without_loadout(test: GutTest, source: String, dest: String) -> void:
+	var mission := MissionData.new()
+	test.assert_eq(mission.open_file(source), OK,
+			"the mission opens for the no-kit fixture: %s" % source)
+	test.assert_true(mission.set_weapon_loadout([]),
+			"the profile-over-fallback fixture can clear the authored kit")
+	test.assert_eq(mission.save_as(dest), OK, "the no-kit mission serializes")
+
+
 ## The packaged world scene, instantiated and parented under the test. The
 ## world unloads itself (and clears its mounted root's caches) as it leaves
 ## the tree: a loaded world freed without unload() leaves render state behind
@@ -201,6 +214,8 @@ const SHELL_RESOURCE_FILES := [
 	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
 	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
 	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
+	# The set's own model (items.def 108001, placed in mnml.bms) + its swatches.
+	"house.3di", "wall.tga", "roof.tga", "wood.tga",
 ]
 # The synthetic Tmap terrain (its .trn names the mnml art packed above).
 const SHELL_BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
@@ -262,9 +277,10 @@ static func write_pff(test: GutTest, path: String, entries: Array) -> void:
 ## name, the shipped JO in-world menus (when the reference fixture set is
 ## present) under the game.mnu / weapon.mnu archive names, and
 ## SHELL_WEAPON_DEF as weapon.def. With `without_mission_loadout` the
-## committed mnml.bms is re-emitted through MissionData with its authored
-## kit cleared (saved beside the archives in `staging_dir`), so a shell test
-## can watch the PLAYER_INFO selection win over the engine fallback.
+## committed mnml.bms is re-emitted with its authored kit cleared
+## (write_mission_without_loadout, saved beside the archives in
+## `staging_dir`), so a shell test can watch the PLAYER_INFO selection win
+## over the engine fallback.
 static func shell_archive_entries(test: GutTest, filenames: Array,
 		without_mission_loadout := false, staging_dir := "") -> Array:
 	var entries: Array = []
@@ -288,14 +304,8 @@ static func shell_archive_entries(test: GutTest, filenames: Array,
 				source = MINIMAL_ASSETS_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
 		if filename == "mnml.bms" and without_mission_loadout:
-			var mission := MissionData.new()
-			test.assert_eq(mission.open_file(ProjectSettings.globalize_path(source)), OK,
-					"the committed minimal mission opens for the no-kit fixture")
-			test.assert_true(mission.set_weapon_loadout([]),
-					"the profile-over-fallback fixture can clear the authored kit")
 			var no_kit_path := staging_dir.path_join("mnml_no_kit.bms")
-			test.assert_eq(mission.save_as(no_kit_path), OK,
-					"the no-kit lifecycle mission serializes")
+			write_mission_without_loadout(test, ProjectSettings.globalize_path(source), no_kit_path)
 			bytes = FileAccess.get_file_as_bytes(no_kit_path)
 		if filename == "weapon.def":
 			bytes = SHELL_WEAPON_DEF.to_utf8_buffer()
@@ -341,7 +351,7 @@ static func boot_shell(test: GutTest, without_mission_loadout := false) -> MainG
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(_last_shell_dir), OK)
 	test.assert_eq(SHELL_LANGUAGE_FILES.size() + SHELL_LOCALRES_FILES.size()
-			+ SHELL_RESOURCE_FILES.size(), 31,
+			+ SHELL_RESOURCE_FILES.size(), 35,
 			"the retail-shaped archives contain every minimal fixture resource")
 	stage_shell_archives(test, _last_shell_dir, true, without_mission_loadout)
 

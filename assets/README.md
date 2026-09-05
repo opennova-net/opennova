@@ -76,19 +76,20 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `gametext.bin` | `engine/formats/rtxt` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
 | `vmacros.bin` | `engine/formats/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `engine/formats/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
-| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`. |
+| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`: the house (`108001`, `type building`, `graphic house`, `sid house`, `hp 5000`) is the first entry there, placed by `mnml.bms`. |
 | `main.mnu` (`"Startup"` node) | project-authored MNU | the entry screen `[orig: Menu_InitShellResources @ 0x552651 -> UIScene_LoadAndParseContent @ 0x63c830 -> CUIScene_SelectNodeByName @ 0x63b6b0]`. |
 
 ### Host + join + single player — mission start + menus
 
 | File | Origin | Notes |
 |---|---|---|
-| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Its first single-player kit entry is `WPN_AK47AUTO`: offline mission promotion overrides the hardcoded M4 fallback, while a live session skips the BMS kit and uses the player's profile. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
+| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, and the house (`108001`, in the building pool) 24 m north of the player start (BMS axes: x east, y north, z up). Its first single-player kit entry is `WPN_AK47AUTO`: offline mission promotion overrides the hardcoded M4 fallback, while a live session skips the BMS kit and uses the player's profile. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
 | `mnml.trn` + `mnml.cpt` | terrain writers (`save_trn` + the CDEP builder) | the terrain config and its baked polydata. JO reads the compressed CDEP depth `[orig: Terrain_LoadLodStorage @ 0x603550 — the 'CDEP' fourcc compare @ 0x603620 and the 'DPTH' compare @ 0x6037b3]`; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
 | `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries answer the two names the engine addresses by LITERAL: `WPN_M4AUTO` remains the hardcoded spawn fallback resolved by name `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player can spawn unarmed), while `mnml.bms` promotes `WPN_AK47AUTO` as the actual offline equipped identity and first-person viewmodel name. Both carry the same viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `house.3di` + `wall.tga`/`roof.tga`/`wood.tga` | `minimal_3di_gen` (the `house` recipe through `threedi_3di3_write`; the swatches minted beside it) | the set's own model, byte-identical to `fixtures/threedi/synth/house.3di`: one inert part, three boxes (an 8 x 10 x 4 m wall block, the roof slab, the chimney) over a face box, three CB volumes and the collision-only water-tank prism off its east side; every material `FF_ST_OP`, served by the authored `_ffp.fx`. The three textures are 16 x 16 flat-colour 24 bpp TGAs (the shape of the `mnml_*` terrain art retail already loads loose). |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
 ### Where the mission list looks (witnessed against retail)
@@ -189,9 +190,9 @@ below.
 
 ### Bring-up: the retail model + anim set (retail bytes, committed temporarily)
 
-The set has no models of its own yet, so the player body, its animations and the
-first-person viewmodel are brought up by **copying the retail files into this
-directory**. Since 2026-08-31 they are **committed** — allowlisted by name under
+The set's own model is the house (`house.3di`, above); the player body, its
+animations and the first-person viewmodel are brought up by **copying the retail
+files into this directory**. Since 2026-08-31 they are **committed** — allowlisted by name under
 `.gitignore`'s TEMPORARY banner (the policy exception above) — so the minimal
 set runs from a fresh checkout, and `git ls-files assets` now stages them into
 both zip flavors. Deleting a line from that banner is how a replacement lands.
@@ -225,14 +226,16 @@ kernel's default-set gate does (the coupling below).
 Three things about this set are worth knowing. **`E_STAND.adm` is load-bearing far
 beyond the AI bodies it names.** Infantry locomotion is entirely root-motion driven —
 the playing clip's translation track moves the entity, and there is no non-clip fallback
-(`engine/runtime/world/infantry.cpp` header) — and the kernel resolves each entity's own
+(`engine/runtime/world/infantry.cpp` header) — and when this set was brought up the kernel resolved each entity's own
 `items.def` `anim_def` only once the DEFAULT set
-(`engine/runtime/mission/runtime_boot.h:35`, `"E_STAND.adm"`) has registered
-(`engine/runtime/mission/mission_kernel.cpp:253`/`:299`). Without it `ai.root_motion` is
-null, the local player never picks up `US01.adm`, and it spawns, renders and plays
-`anim_idle` forever while refusing to walk — with the only symptom a single
-`no infantry clips from 'E_STAND.adm'` warning. The coupling itself is tracked in
-[`../TODO.md`](../TODO.md); until it is undone, this file is part of the minimal set.
+(`engine/runtime/mission/runtime_boot.h`, `"E_STAND.adm"`) had registered. Without
+it `ai.root_motion` was null, the local player never picked up `US01.adm`, and it
+spawned, rendered and played `anim_idle` forever while refusing to walk — with the
+only symptom a single `no infantry clips from 'E_STAND.adm'` warning. The kernel's
+per-entity resolve now publishes `ai.root_motion` itself
+(`engine/runtime/mission/mission_kernel.cpp`, `adm_id_for_runtime_type`), so the
+file's remaining role is the default clip set; dropping it from the set needs a
+walk validation without it first.
 
 Two further things. **`Avatars.def` moves the body
 lookup**: with it present the local player's body is the avatar combo's head +
@@ -248,8 +251,10 @@ matching the request's *truncated literal* name, not to substitution.
 
 This set is replaced by our own once that run is green. The model side already
 has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skinned
-`person` rig in the retail bone order through `threedi_3di3_write`. The clip side
-needs a `.bad` **writer** first: `engine/formats/bad/bad.h` is parse-only today.
+`person` rig in the retail bone order through `threedi_3di3_write`, and the house
+(`house.3di`, items.def `108001`) is the first model minted that way to ship in
+the set. The clip side needs a `.bad` **writer** first: `engine/formats/bad/bad.h`
+is parse-only today.
 
 ## Shaders: the authored `.fx` set
 
@@ -284,21 +289,23 @@ rather than asserting byte-equality against a throwaway generator:
 | Guard | Covers |
 |---|---|
 | `minimal_rtxt_gen` | the string tables emit + round-trip |
-| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def` |
+| `minimal_3di_gen` | `house.3di` byte-equals the `house` recipe minted through `threedi_3di3_write` (the `fixtures/threedi/synth` twin) and `wall.tga`/`roof.tga`/`wood.tga` byte-equal their swatch recipes (`minimal_3di_gen_test --write` re-emits them) |
+| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house` |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
-| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, and starts its offline kit with `WPN_AK47AUTO` (`minimal_map_validate_test --write` performs that surgical edit) |
+| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, starts its offline kit with `WPN_AK47AUTO`, and places the house (`108001`) exactly once (`minimal_map_validate_test --write` performs both surgical edits) |
 | `minimal_runtime_loadout` | the production mission kernel boots the real minimal tree and the promoted kit, equipped inventory slot, and player entity all resolve to `WPN_AK47AUTO` |
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
-| `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
+| `minimal_art_validate` | every image `mnml.trn` names decodes, and so do the house's three swatches; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
 | `minimal_fx_gen` | each committed `.fx` byte-equals wrap(its `tests/fixtures/fx/` source) and no stray `.fx` rides in assets/ |
 | `fx_compile_validate` | every authored effect compiles through `D3DXCreateEffect` under the loader's define sets (Skipped without D3DX9/D3D9) |
 | `minimal_pff_manifest` | the explicit `assets/.gitignore` authored manifest is complete and its loose set retains the AK viewmodel + player locomotion chain |
 
 The BMS remains ONED-authored; `minimal_map_validate_test --write` is the
-repeatable command for applying this edit. It adds the singleton AK row when no
+repeatable command for applying these edits. It adds the singleton AK row when no
 kit exists, or changes only the first row's identity while preserving its
-fields and every remaining row, then emits through `MissionDocument`.
+fields and every remaining row; adds the house building when no record names
+`108001`; then emits through `bms::write`.
 
 ## Packaging
 
@@ -350,10 +357,9 @@ Revalidated on retail 2026-09-01 after the loose-package manifest fix: onHook
 moved the reported BMS pose from `(0, 0, 0)` to
 `(-12.835, -12.958, 0.869)`.
 
-Known gaps: the shaders are ours (the authored `.fx` set above), but no model
-or clip here is ours yet — the player body, its animations and the viewmodel
-are the committed retail bring-up set described above, and the
-committed tree still declares graphics it does not carry. The terrain has
+Known gaps: the shaders and the house are ours (the authored `.fx` set and
+`house.3di` above), but no clip is, and the player body, its animations and
+the viewmodel are still the committed retail bring-up set described above. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.
 

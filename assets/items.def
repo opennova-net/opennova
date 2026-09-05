@@ -89,3 +89,14 @@ begin "waypoint"
   id 106005
   type marker
 end
+
+// Our own content (108001+): the synth house, the set's first authored model
+// (assets/house.3di, the fixtures/threedi/synth `house` recipe), placed in
+// mnml.bms as a building. No anim_def or husk: it has neither.
+begin "House"
+  id 108001
+  type building
+  graphic house
+  sid house
+  hp 5000
+end
