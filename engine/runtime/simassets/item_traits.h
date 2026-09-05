@@ -17,6 +17,10 @@
 
 namespace opennova::simassets {
 
+class SimModelCache;
+void resolve_minefields(world::World &world, const def::DefItemsFile &items,
+                        SimModelCache &models);
+
 // The §5.10b wire-dispatch class supplier: maps an items.def definition id to
 // the wire entity-class BYTE (npwire EntityClass values; 0 = Unknown, the
 // fail-closed default for missing/ambiguous definitions). Injected by the

@@ -361,6 +361,9 @@ private:
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
+    bool exact_owner_lod_ = false;
+    bool geometry_visible_ = true;
+    bool rigid_parts_ = false;
 	ObjectID authored_lod_owner_;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
@@ -783,7 +786,9 @@ public:
 	// count (renderer::attachment_lod_index). update_authored_lods applies
 	// the owner's level after the frame's selections; a freed owner reads as
 	// level 0.
-	void set_authored_lod_owner(ObjectModel *p_owner);
+	void set_authored_lod_owner(ObjectModel *p_owner, bool p_exact = false);
+    void set_geometry_visible(bool p_visible);
+    void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;
 	// The retained surface slots (one MeshInstance3D each, sized to the
 	// largest retained level) and the submesh count of one level (0 for a

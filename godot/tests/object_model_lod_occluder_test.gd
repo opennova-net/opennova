@@ -114,6 +114,8 @@ func test_preview_lod_switch_keeps_the_single_lod_memory_contract() -> void:
 	assert_eq(model.get_level_surface_count(0), 0,
 			"the preview still retains only its selected level")
 	assert_eq(model.get_surface_slot_count(), model.get_level_surface_count(1))
+	# Rebuilding queues the previous preview subtree for deletion.
+	await get_tree().process_frame
 
 
 func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> void:
@@ -269,3 +271,47 @@ func test_closed_authored_records_create_section_owned_occluders() -> void:
 	for node in occluders:
 		assert_true((node as OccluderInstance3D).visible,
 				"clearing the section verdict restores the occluder")
+
+
+func test_exact_owner_lod_skips_a_missing_marker_level() -> void:
+	var source := ObjectModel.new()
+	add_child_autofree(source)
+	source.set_authored_lod_enabled(true)
+	source.set_object_data(_data(PUMP_3DI))
+	source.position = Vector3(0, 0, 50)
+	var marker := ObjectModel.new()
+	add_child_autofree(marker)
+	marker.set_authored_lod_enabled(true)
+	marker.set_object_data(_data("res://../fixtures/threedi/synth/crate.3di"))
+	marker.set_authored_lod_owner(source, true)
+	source.set_active_lod(1)
+	ObjectModel.update_authored_lods(Transform3D.IDENTITY, 60, 640, 480)
+	assert_eq(marker.get_active_lod(), 1, "callback LOD is not clamped")
+	assert_eq(_visible_slot_count(_own_instances(marker)), 0)
+	source.set_active_lod(0)
+	ObjectModel.update_authored_lods(Transform3D.IDENTITY, 60, 640, 480)
+	assert_gt(_visible_slot_count(_own_instances(marker)), 0)
+
+func test_hidden_source_geometry_survives_lod_switches() -> void:
+	var source := ObjectModel.new()
+	add_child_autofree(source)
+	source.set_authored_lod_enabled(true)
+	source.set_object_data(_data(PUMP_3DI))
+	source.set_geometry_visible(false)
+	source.set_active_lod(1)
+	assert_true(source.is_present_visible(), "source remains available to visibility and LOD")
+	assert_eq(_visible_slot_count(_own_instances(source)), 0)
+	source.set_active_lod(0)
+	assert_eq(_visible_slot_count(_own_instances(source)), 0)
+
+func test_rigid_marker_parts_ignore_live_panm_and_rest_offsets() -> void:
+	var marker := ObjectModel.new()
+	add_child_autofree(marker)
+	marker.set_authored_lod_enabled(true)
+	marker.set_object_data(_data(PUMP_3DI))
+	marker.set_rigid_parts(true)
+	for level in [0, 1, 0]:
+		marker.set_active_lod(level)
+		ObjectModel.advance_awake_frame(0.125)
+		for part in marker.get_render_part_nodes().values():
+			assert_true((part as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))

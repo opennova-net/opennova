@@ -395,6 +395,29 @@ ProjectileHit CollisionWorld::trace_knife_impact(
     return hit;
 }
 
+// [orig: compute_clamped_displacement @ 0x4AD6A0]
+int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source,
+        FixedVec3 position, bool indoors) const {
+    ProjectileTrace trace;
+    trace.start = position;
+    trace.end = {position.x, position.y, 0};
+    trace.extra_ignore = source;
+    trace.mount_ignore = source;
+    trace.walk_terrain = trace.walk_water = trace.walk_persons = false;
+    trace.include_wire_proxies = world.rules.mp_session && !world.rules.projectile_authority;
+    trace.shooter_carrier_wire_handle = source.packed;
+    // The CFAC-only traversal (no unresolved-model sphere substitute).
+    const ProjectileHit hit = trace_projectile_impl(world, trace, true);
+    const bool object_ground = hit.hit() && hit.distance_q16 < position.z;
+    int32_t height = object_ground ? position.z - hit.distance_q16 : position.z;
+    if (!indoors) {
+        const int32_t floor = terrain ? to_fixed(terrain::height_field_height_world_bilinear(
+                *terrain, position.x * io::kInvFp16One, -position.y * io::kInvFp16One)) : 0;
+        if (!object_ground || height < floor) height = floor;
+    }
+    return height;
+}
+
 ProjectileHit CollisionWorld::trace_projectile_impl(
         const World &world, const ProjectileTrace &trace,
         bool person_faces_only) const {
@@ -452,6 +475,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (!candidate.hit()) return;
         if (!best.hit() || distance < best_distance ||
             (tie_wins && distance == best_distance)) {
+            candidate.distance_q16 = distance;
             best = candidate;
             best_distance = distance;
         }
@@ -520,7 +544,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     }
 
     const Entity *owner = world.registry.get(trace.owner);
-    EntityHandle ignored_mount;
+    EntityHandle ignored_mount = trace.mount_ignore;
     EntityHandle ignored_mount_parent;
     if (owner != nullptr && owner->mounted) {
         if (owner->mount_type == SeatType::Controller ||
@@ -723,7 +747,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 const_cast<CollisionWorld *>(this)->ensure_entity_instance(
                     const_cast<World &>(world), h);
                 target = trace_target_view(world, h);
-                if (target == nullptr) {
+                if (target == nullptr && !person_faces_only) {
                     throw std::logic_error(
                         "CollisionWorld::trace_projectile: pool-1 item has no live collision model");
                 }

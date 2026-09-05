@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 
 #include <algorithm>
+#include <base/io/fixed.h>
 
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_pose_provider.h>
@@ -327,6 +328,7 @@ void EntityPresenter::present_scars() {
 }
 
 void EntityPresenter::present_passes() {
+    present_minefields();
 	fire_->present();
 	destruction_->present();
 	throwable_->present();
@@ -336,6 +338,7 @@ void EntityPresenter::present_passes() {
 }
 
 PackedInt64Array EntityPresenter::profile_present_passes() {
+    present_minefields();
 	PackedInt64Array spans;
 	spans.resize(PASS_PROFILE_SLOT_COUNT);
 	Time *clock = Time::get_singleton();
@@ -1413,3 +1416,71 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 		}
 	}
 }
+
+namespace godot {
+namespace {
+Transform3D mine_transform(const opennova::world::CollisionMatrix &matrix) {
+    const int32_t *m = matrix.m;
+    constexpr float rotation_scale = 1.0f / 4194304.0f;
+    // World mission XYZ -> Godot XZ-Y; model YZX -> mission XYZ.
+    const Basis basis(Vector3(m[1], m[9], -static_cast<double>(m[5])) * rotation_scale,
+            Vector3(m[2], m[10], -static_cast<double>(m[6])) * rotation_scale,
+            Vector3(m[0], m[8], -static_cast<double>(m[4])) * rotation_scale);
+    return Transform3D(basis, Vector3(m[3], m[11], -static_cast<double>(m[7])) *
+            opennova::io::kInvFp16One);
+}
+}
+
+void EntityPresenter::reset_minefields() {
+    for (const auto &entry : minefield_nodes_) {
+        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(entry.second.node)))
+            node->queue_free();
+    }
+    minefield_nodes_.clear();
+    minefield_draws_.clear();
+}
+
+void EntityPresenter::present_minefields() {
+    Simulation *simulation = sim();
+    if (simulation == nullptr || placer_.is_null()) return;
+    simulation->fill_minefield_draw_rows(minefield_draws_);
+    for (auto &entry : minefield_nodes_) entry.second.seen = false;
+    for (const auto &draw : minefield_draws_) {
+        const uint32_t key = (static_cast<uint32_t>(draw.owner.packed) << 4) | draw.slot;
+        auto &entry = minefield_nodes_[key];
+        auto *node = Object::cast_to<ObjectModel>(ObjectDB::get_instance(entry.node));
+        if (node != nullptr && entry.spawn_id != draw.registry_spawn_id) {
+            node->queue_free();
+            node = nullptr;
+        }
+        ObjectModel *source = index_.is_valid() ? index_->resolve(draw.bms_id,
+                opennova::world::spawn_origin_kind(draw.spawn_origin),
+                opennova::world::spawn_origin_index(draw.spawn_origin)) : nullptr;
+        if (source == nullptr) source = resolve_wire_handle(draw.owner.packed);
+        if (node == nullptr) {
+            Node3D *parent = source != nullptr ? source : container();
+            if (parent == nullptr) parent = this;
+            node = placer_->build_model_from_graphic(String(draw.model.c_str()), String(),
+                    parent, String(), String(), true);
+            if (node == nullptr) continue;
+            node->set_name(String("MineMarker_") + String::num_int64(key));
+            node->set_rigid_parts(true);
+            entry.node = node->get_instance_id();
+            entry.spawn_id = draw.registry_spawn_id;
+        }
+        entry.seen = true;
+        node->set_authored_lod_owner(source, true);
+        node->set_active_lod(source != nullptr ? source->get_active_lod() : 0);
+        node->set_global_transform(mine_transform(draw.transform));
+        // Parenting under the source makes this frame's later occlusion
+        // verdict apply to the markers immediately. Their pose stays native.
+        node->set_present_visible(source == nullptr || source->is_present_visible());
+    }
+    for (auto it = minefield_nodes_.begin(); it != minefield_nodes_.end();) {
+        if (it->second.seen) { ++it; continue; }
+        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(it->second.node)))
+            node->queue_free();
+        it = minefield_nodes_.erase(it);
+    }
+}
+} // namespace godot

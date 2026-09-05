@@ -150,6 +150,8 @@ void MissionKernel::resolve_item_traits(simassets::ItemWireClassFn wire_class) {
 void MissionKernel::resweep_item_traits() {
 	if (item_wire_class_ && items_table() != nullptr)
 		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+	if (items_table() != nullptr && !world.tables.ammo.entries.empty())
+		simassets::resolve_minefields(world, *items_table(), models);
 }
 
 int MissionKernel::resolve_collision_instances() {
@@ -622,6 +624,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		if (ammo_ok_now && has_item_db) {
 			step("ai_weapons");
 			simassets::resolve_ai_weapons(world, *items_table());
+			simassets::resolve_minefields(world, *items_table(), models);
 		}
 	}
 	if (!wac_blocked_error.empty()) {

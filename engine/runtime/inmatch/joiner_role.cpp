@@ -407,6 +407,8 @@ void JoinerRole::pump() {
 	const bool preround_active = world.preround_delay_seconds != 0;
 	lp.apply_player_input_pre_tick(); // input latches stay live through the phase
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
+    world.rules.cease_fire = rt.state().cease_fire;
+    materializer_.fill_minefield_actors(rt.state(), self_wire_handle_, world.minefields.remote_actors);
 	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,

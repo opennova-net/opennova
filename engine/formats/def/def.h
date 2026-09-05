@@ -676,19 +676,15 @@ typedef struct DefItemDef {
     char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
-    /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
-       Appended (layout stability). Only the closeattack slot is surfaced: JO
-       riflemen author all four ammo_* names to the same rifle round, and the AI
-       port's single-ammo stand-in consumes one. 32 bytes = the witnessed def slot
-       stride (+0x56B..+0x58B). [orig: ItemDef_ParseProperty 'ammo_closeattack'
-       @ 0x4a1823 -> def+0x56B (marker3 +0x58B, easyrocket +0x5AB, advancedrocket
-       +0x5CB, launchups_* +0x5EB/+0x5FB)] */
+    /* Item fire slots: AI closeattack and lndm's large-mine marker3 ammo.
+       [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
     char ammo_closeattack[32];
+    char ammo_marker3[32];
     /* items.def 'launchups_closeattack' — the def-AUTHORED launch userpoint
        NAME for the closeattack fire family: the AI muzzle is this named point
        on the entity's model, resolved case-insensitively at spawn (JO NPC
-       riflemen author mflash01). Only the closeattack slot is surfaced, like
-       ammo_closeattack above; the rocket/marker3 siblings share the block.
+       riflemen author mflash01). Only the closeattack launch-point slot is surfaced;
+       the rocket/marker3 launch-point siblings share the block.
        [orig: ItemDef_ParseProperty launchups_* stores @ def+0x5EB/+0x5FB;
        resolve Entity_ResolveBoneUserpoints (ex sub_545940) -> modelgpm_FindUserpointByName @ 0x5b2170] */
     char launchups_closeattack[32];

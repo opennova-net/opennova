@@ -6293,14 +6293,14 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 | items.def class binding (ai_function/move_function) | MATCHING | §27.2; the resolve_item_traits feed |
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
 | Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_presenter.cpp` |
-| Landmine items (`lndm`) | witnessed, unported | D-THROW-6 |
+| Mission minefields (`lndm`) | MATCHING (native behavior and render device) | §27.6a; `minefield`, `minefield_retail`, `minefield_replica`; GUT `minefield_present_test`, `object_model_lod_occluder_test`; D-THROW-6 CLOSED 2026-09-04 |
 | MP round/device presentation (tag 2 + S2C 0x59/0x12) | MATCHING: tag-2 client flight plus reliable placed-device spawn/update/removal are live | D-THROW-7 fixed; net-re §5.36; `npruntime_placed_device_relay` |
 
 This is not a blanket MATCHING classification. The audit closes D-THROW-5 and
 D-THROW-9 and fixes the fuse, dry-water, face-normal, cone, and lifecycle bugs
 described below. The 2026-07-21 follow-up also restores the grenade descriptor's
 sound/particle leg mask so a bounce cannot submit the detonation particle;
-D-THROW-6 remains an explicit fidelity gap (D-THROW-2 is PERMANENT since 2026-08-29: the local streams are distribution-faithful and no coupled draw is observable). The
+D-THROW-6 closed on 2026-09-04 after the retail mission corpus established live `lndm` use and the init, think, render and lifecycle chain landed (§27.6a). D-THROW-2 remains PERMANENT for the throwable streams; minefields use the shared mission PRNG B with precipitation. The
 2026-07-22 follow-up closes D-THROW-3 by routing placed-device cone LOS through
 the shared terrain-plus-sector collision query; a type-1 building wall now
 blocks the trigger until removed. The 2026-08-12 follow-up closes D-THROW-1:
@@ -6539,14 +6539,10 @@ The thinks (renamed this session):
   0x20000 → the fan) + `claymorekillzone` (instantkillzone) → destroy.
 - `Entity_AVMineThink @ 0x443BB0` (ex Entity_HandleVehicleDeathExplosion):
   Health ≤ 0 OR `Entity_FindEnemyVehicleInCone @ 0x43c9f0` → `AV_Minekillzone`.
-- `Entity_LandmineThink @ 0x441A40` (ex check_bone_ground_contact): the mission
-  minefield item — up to 14 per-mine bones (int16 triplets, spent mask +308);
-  persons (pool 0, stance z-adjust: stand −1 u, crouch −0.5 u, prone none via
-  MoveOrder +300 bits 0x100/0x200) within the item radius then 0.75 u per
-  bone; ground-clamped moving vehicles by bounds; per-bone size byte[784+n]
-  1/2 → def ammo +692 (`SMALLLANDMINE`) / 3/4 → +696 (`LARGELANDMINE`) via
-  `Weapon_FireProcess @ 0x53f5b0`; all bones spent → destroy. **Unported**
-  (D-THROW-6).
+- Mission-authored `lndm` minefields use `Entity_LandmineThink @ 0x441A40`.
+  They are distinct from the player-thrown AV mine above. Their complete
+  init/contact/render chain is ported in §27.6a; stationary vehicles can trigger
+  them, and no team or health filter applies to their contact scan.
 
 The cone tests: eye = device + 0.3 u; candidate gates active/alive/controller,
 team ≠ device team OR the `TeamTriggerClaymore` host rule (dword_24D1E34 &
@@ -6570,6 +6566,144 @@ Server_IsEntityValidForUpdate; called from `Projectile_ProcessDamageOnTarget`
 round while its owner sits unseated; `EventTrigger_AnySatchelInArea @ 0x547160`
 is a BMS/WAC event condition (satchel-ammo pool-1 entity inside a zone rec);
 `SaveFile_WriteAmmoInstances @ 0x4aae60` persists satchel instances.
+
+### 27.6a Mission minefields (`lndm`, D-THROW-6)
+
+The 2026-09-04 retail corpus scan found **172 placed fields** among 187,410
+entity records in 115 BMS missions. All are item 1896, `items.def` id 101896,
+"All Un-marked Land Mine Section", in base `localres.pff`:
+
+| Mission | Fields | BMS building indices | First / last SSN |
+|---|---:|---|---|
+| `00TRd.bms`, Training: Mortars | 98 | 246-343 | 1247 / 1515 |
+| `CP09.bms`, Operation: Shattered Harbor | 74 | 310-383 | 2331 / 2330 |
+
+The definition authors `graphic lndmine1`, `ai_function lndm`,
+`render_function lndm`, `ammo_closeattack SMALLLANDMINE`,
+`ammo_marker3 LARGELANDMINE`, `huskfinal MStck01`, `husk MStck02`, and
+`LandMine notarget NoShadow`. The shipped `Lndmine1.3di` has nine `small` and
+five `large` points. Definition 101897 names the marked variant (`lndmine2`),
+but the scanned corpus contains no placed 1897 and the mounted archives do
+not supply that graphic. Marked presentation is covered with a writer-minted
+synthetic model; no retail assets are committed.
+
+**Binding and layout.** The AI/event row at `@ 0x813198` selects init
+`Entity_InitHardpoints @ 0x4417D0` and think `Entity_LandmineThink @ 0x441A40`.
+The independent render row at `@ 0x82CFC0` selects
+`Entity_RenderBoneAttachments @ 0x441660` and
+`BoneCallback_Identity @ 0x4E20A0`. Init caches the full placement matrix and
+sets flags `0x20000`; a missing graphic stops there. With a graphic, age is
+`(packed_handle & 127) + 7`; the case-insensitive ammo lookups from
+`ammo_closeattack` and `ammo_marker3` fill entity DWORDs +692/+696. A missing
+lookup yields zero; the fire call consumes only the low byte.
+`[orig: Entity_InitHardpoints @ 0x4417D0]`
+
+Init accepts the first fourteen recognized USRP names, in authored order,
+case-insensitively: `smlmarked` = 1, `small` = 2, `lrgmarked` = 3, `large` = 4.
+The identity bone callback preserves the authored model-global point through
+the attachment walk. Full Euler placement and effective uniform scale apply;
+the helper crosses a float storage boundary before Q16 truncation. World XY
+then samples bilinear terrain. Each axis stores signed 16-bit
+`(point - entity_position) >> 8`, with wrapping, and later reconstructs from
+the **cached** matrix translation plus offset multiplied by 256. All fourteen slots are
+zero-initialized; unused zero slots still participate in contact and exhaustion.
+Flags `0x02000000` exclude the source from the ordinary collision path.
+`[orig: Entity_InitHardpoints @ 0x4417D0; build_bone_attachment_matrix @ 0x56C630;
+Math_TransformPointByMatrix4x4 @ 0x40CF20; BoneCallback_Identity @ 0x4E20A0]`
+
+Every accepted point consumes one PRNG B byte, including unmarked points.
+Mission start seeds B to `0x5ADEADA5` at `@ 0x52460B`; the precipitation reset
+at `@ 0x5249D4` consumes 3 * 3072 draws before entity initialization. The port's
+World owns that stream and the precipitation population. Baseline restore
+rewinds both the stream and layout; resweeping an initialized entity consumes
+nothing. `[orig: PRNG_Next16_B @ 0x6130F0; Precipitation_Reset @ 0x5DF3A0]`
+
+**Contacts and cadence.** Think scans all unspent slots. If all fourteen were
+already spent on entry, it calls `Entity_Destroy @ 0x43E810`, without a kill
+transaction. Otherwise age reloads to 3 on the authority and 1 on a peer.
+Pool 0 is visited in slot order: nonzero item and clear flags bit 0, with no
+health, allegiance or owner filter. Broad distance is truncated Q16 Euclidean
+distance from current actor position to current field position, at most the
+field bound radius. MoveOrder bits `0x300` select the contact Z adjustment:
+zero gives -1, `0x100` alone gives 0, and `0x200` or both give -0.5. Per-mine distance must
+be **strictly less than 49152**, or 0.75 units.
+`[orig: Entity_LandmineThink @ 0x441A40]`
+
+Pool 1 requires nonzero item, clear bit 0, a definition of type 1, and broad
+distance at most field radius + vehicle radius. There is **no speed filter**.
+Ground is queried at vehicle Z +4096: a vertical CFAC-only pool-2/pool-1 ray
+excludes the source vehicle, preserves input Z without a hit indoors, and
+otherwise clamps to bilinear terrain. It never substitutes a BVOL or an
+unresolved-model sphere. Contact Z is ground +32768, and the test is
+`distance - vehicle_radius / 2 < 49152`. All contacts are gathered before
+firing once each in point order. A zero-type slot spends without firing.
+`[orig: Entity_LandmineThink @ 0x441A40; compute_clamped_displacement @ 0x4AD6A0]`
+
+Pool 1 predecrements age before think and unconditionally decrements again
+afterwards, including the new reload. Pool 2 visits `tick & 7`, stride eight,
+after projectiles/explosions; positive age loses eight, otherwise think runs.
+Pool 3 uses `tick & 63`, stride 64, with the same rule. The static-pool reload
+is not decremented on its think tick. These walks also run on peers.
+`[orig: Entity_UpdatePool1Slot @ 0x4B8DD0; Entity_UpdateAllEntities @ 0x4C2100]`
+
+**Fire and networking.** Small types 1/2 use +692, large 3/4 use +696.
+Launch sound/effect presentation precedes authority and ceasefire gating and
+uses the field as its source. The gameplay owner is the primary occupant,
+normally null for these mission decorations. Ordinary unowned peer fields
+spend and present locally; authority fields queue the ammo's real kill zone
+and record owner `0xFFFF`. The existing retail round fan rejects that invalid
+shooter, so no invented mine-state packet or reliable explosion relay is added.
+`[orig: Weapon_FireProcess @ 0x53F5B0; Entity_FireWeaponAndSendPacket @ 0x42BD80]`
+
+The ceasefire value resets at mission start (`@ 0x524392`). S2C 0x0F game
+flag bit 8 sets it; an absent bit does not clear it. S2C 0x24
+`SETCEASEFIRE <value>` uses quoted, case-insensitive tokens and the integer
+value; a missing argument does nothing. Host initial state serializes bit 8.
+`[orig: NapiNPClientMsg_0x00F @ 0x42E200; NetPacket_WriteWorldStateLoad0x0F
+@ 0x502D10; NapiNPClientMsg_HandleTextCommand @ 0x429E70]`
+
+The joiner feeds decoded pool-0 bodies alongside its native local player,
+retaining stance from the committed body after arbitration. Repeated static
+snapshots of the same lifetime preserve locally spent slots; local exhaustion
+stays retired until a new authoritative spawn revision. Baseline restore
+reinitializes the original layout and marker lifetimes. `minefield_replica`
+and `netsim_client_replica_pipeline_body_arbitration` pin those seams.
+
+**Blast LOS correction.** The retail regressions exposed the explosion
+consumer using the wrong shared query. A mine's quantized Z can lie just
+below terrain. The original organic blast caller passes victim, null second
+entity and radius -16384 to `Entity_CheckLineOfSightTerrainAndEntities`; its
+null-entity terrain leg permits a buried endpoint, and the solid leg walks
+the victim's building candidates. This is now the same `entity_los_clear`
+implementation used by audio. The general global-pool `raycast_clear` is a
+different original query. Both the buried-mine synthetic regression and the
+retail missions exercise actual damage through the normal explosion drain.
+`[orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, call @ 0x4EB162;
+Entity_CheckLineOfSightTerrainAndEntities @ 0x53B130;
+Physics_CheckTerrainLineOfSight @ 0x53B080; raycast_find_collision_entity @ 0x539A70]`
+
+**Markers.** The source graphic chooses LOD but submits no ordinary geometry.
+Unspent types `(type & 127) == 1` submit `huskfinal`; type 3 submits `husk`.
+The selected source LOD is used exactly, and a missing marker LOD skips the
+marker. For signed byte `r`, rotation is yaw `uint32(r) << 26`, pitch
+`uint32(r) << 20`, roll zero, postmultiplied onto the cached placement with
+one `+0x200000` rounding term per Q22 dot product. Every marker bone uses
+that same world matrix. `EntityPresenter` owns the retained marker nodes;
+`ObjectModel` only applies the native matrix, rigid parts and exact LOD.
+Parenting markers under the source makes source occlusion apply immediately.
+`[orig: Entity_RenderBoneAttachments @ 0x441660;
+Math_BuildFixedPointRotationMatrixYXZ @ 0x615400;
+Matrix_Multiply3x4_FixedPoint @ 0x613940]`
+
+Evidence: `minefield` covers contact boundaries, all stance states, stationary
+vehicles, CFAC ground, empty slots, cadence, launch gating, signed offset
+wrapping, authored point binding, shared RNG, buried blast damage and reset.
+`minefield_retail` boots both shipped missions through MissionKernel and the
+listen role, checks the 98/74 fields and 9/5 point counts, steps onto an exact
+mine, observes its unowned round and damage, and restores baseline. The GUT
+fixtures cover marked/unmarked selection, rigid multi-part models, missing
+LODs, source geometry suppression, occlusion and stop/restore. No IDA names
+were changed in this follow-up.
 
 ### 27.7 The detonator + owner cleanup
 
@@ -6601,10 +6735,10 @@ death hook).
 | D-THROW-3 | CLOSED 2026-07-22: device LOS uses the shared full terrain-plus-sector query, excluding the device and candidate (`CollisionWorld::raycast_clear`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | `test_claymore_sector_los_blocks_trigger` pins a type-1 building wall blocking the cone and removal exposing the same target |
 | D-THROW-4 | CLOSED 2026-08-12: `throwable_stick_pose` is the exact orient port — the normal rotated into the yaw-local frame by the transposed yaw-only Q22 matrix (+0x200000 rounding), pitch = bias + bam(atan2(z,y)) − 0x40000000, roll = bias + bam(atan2(z,x)) − 0x40000000, yaw KEPT (satchel pitch bias 0xC0000040, claymore 0 — the callers pass the entity's own +0x10); `parent_delta_follow` is the exact full-Euler follow shared by the round motors and the placed-device ride, reading the parent's `saved_live_*` channel (netsim `row_deck_ride` ports the inlined org twins of the same math) | `Entity_OrientToSurfaceNormal @ 0x445fa0` (via `Math_BuildFixedPointRotationMatrixYXZ @ 0x615400` yaw-only + `Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0` + `Math_TransformPointFixedPoint22 @ 0x412e90`, atan2 scale dbl_7C57B8 = −2^31/π); `Entity_InterpolateFromParentDelta @ 0x4a8d60` (code calls from all four round motors @ 0x44443b/0x444e8b/0x4475d1/0x44861f; installed as the placed motor +452 @ 0x5455fd) | `throwables::test_stick_pose_exact` pins the four pose legs; `test_parented_device_adopts_parent_pitch` pins the out-of-plane orbit + pitch adoption. Residue: a parent that never stamps `saved_live_*` (statics — faithful zero delta; joiner wire-materialized rows lack the stamp, tracked with device-on-decoded-vehicle under D-THROW-7/D-WPN-8). The double-trig port carries the established ±2 BAM LSB envelope |
 | D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (now `HudFrameCompiler::element_power`, originally `game_hud.gd _draw_power_bar` — the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
-| D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
+| D-THROW-6 | CLOSED 2026-09-04: mission `lndm` init, contact, cadence, ammo/ceasefire, replica lifetime and marker rendering are ported | §27.6a; `Entity_InitHardpoints @ 0x4417D0`, `Entity_LandmineThink @ 0x441A40`, `Entity_RenderBoneAttachments @ 0x441660` | Retail `00TRd` has 98 fields and `CP09` has 74; native, replica, retail damage/reset and GUT marker/LOD regressions pin the full slice |
 | D-THROW-7 | CLOSED 2026-08-15: authoritative conversion/removal events encode exact S2C 0x59/0x12 records and fan reliably to in-match remotes while skipping host loopback; joiners validate both, select the base/friendly/enemy item from owner/local teams plus MP attribute 0x8000, preserve same-type updates as one lifetime, attach the structural parent, materialize at the exact pool-1 wire handle, and retire it on 0x12. Recorded residual — the client-side REST GAP: retail keeps the non-authority resting round alive 248 ticks and its 0x59 handler copies the client's own resting round into the placed row, so the device never blinks out; ours removes the visual round at rest and shows nothing until the 0x59 arrives | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | `nw_ingame_encode`, `netsim_client_world_materializer`, `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, `npruntime_placed_device_relay`, and `throwables` |
 | D-THROW-8 | CLOSED 2026-08-12: the pool-1 projectile walk demand-resolves a late placed item's retained host collision asset before narrow phase; the model uses CFAC, while failure to bind the clone's required collision model raises a fatal invariant rather than substituting sphere geometry | the item clone is initialized from its model before the ordinary pool-1 CFAC walk `[orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]` | `collision_test::test_late_pool1_item_resolves_cfac_or_raises` pins a sphere-only graze miss, face metadata, allocation-serial-safe packed-slot reuse, and the fatal unresolved-model branch |
-| D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; unported lndm cadence remains under D-THROW-6 |
+| D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; the separate lndm pool cadence is ported under D-THROW-6 (§27.6a) |
 | D-THROW-10 | CLOSED 2026-08-15 (refined post-#500): after the 0x59 conversion event, `place_from_round` counts live same-owner-generation + same-item devices and caps by the CONVERSION MOTOR — the satchel motor's call at 3, the claymore motor's at 4, each keyed on the converting round's own item def (AT mines author `move_function schl` and ride the satchel motor's max-3 call) — removing the armed row with the most-negative age through `remove_device`; nonnegative countdowns are ineligible and ties remain registry-stable. The armed think gates on the PRE-decrement age (`@ 0x4b8e1b`) with the unconditional wrap decrement after (`@ 0x4b8ea0`) | `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`) after each motor's 0x59 send; removal through `Server_RemoveEntityAndNotify` (S2C 0x12) | `throwables` pins both limits, most-negative selection, stable ties, transient unarmed over-cap, age evolution, and owner/item isolation; `npruntime_placed_device_relay` pins one exact remote 0x59 + 0x12 pair and no loopback |
 
 ### 27.9 Open follow-ups

@@ -116,6 +116,7 @@ public:
 	// items.def *_function class tags (raw); empty if the item declares none. The
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
+	String get_render_function(int id) const;
 	String get_move_function(int id) const;
 	// DefItemDef.type (the TYPE_* mirror above); TYPE_UNKNOWN for unknown ids.
 	int get_item_type(int id) const;

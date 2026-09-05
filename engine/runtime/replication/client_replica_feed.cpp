@@ -25,11 +25,28 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 
+#include <base/io/strutil.h>
+#include <algorithm>
+#include <cstdlib>
+#include <iomanip>
+#include <sstream>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace opennova::replication {
+
+// [orig: NapiNPClientMsg_HandleTextCommand @ 0x429E70, SETCEASEFIRE branch @ 0x429F1F]
+void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body) {
+    const auto end = std::find(body.begin(), body.end(), uint8_t{0});
+    std::istringstream input(std::string(body.begin(), end));
+    std::string command, value;
+    if (!(input >> std::quoted(command) >> std::quoted(value))) return;
+    if (strutil::iequals(command, "SETCEASEFIRE")) {
+        state_.cease_fire = std::strtol(value.c_str(), nullptr, 10) != 0;
+        state_.mark_changed();
+    }
+}
 
 void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 	GameEventRecord rec;

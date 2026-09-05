@@ -263,7 +263,24 @@ struct VehicleWakeState {
     uint32_t motion_magnitude_q16 = 0;
 };
 
+// The lndm entity overlay. Zero-filled, unauthored slots still participate.
+// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+struct MinefieldState {
+    static constexpr int kSlots = 14;
+    bool initialized = false;
+    bool think = false;
+    bool render = false;
+    int32_t age = 0;
+    uint32_t ammo_small = 0, ammo_large = 0;
+    int32_t placement[16] = {};
+    int16_t offsets[kSlots][3] = {};
+    uint8_t types[kSlots] = {};
+    uint8_t rotations[kSlots] = {};
+    std::string small_marker, large_marker;
+};
+
 struct Entity {
+    MinefieldState minefield;
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.

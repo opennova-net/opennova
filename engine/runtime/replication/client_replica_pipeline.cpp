@@ -71,6 +71,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::PER_FRAME_UPDATE:
 		apply_frame_update(body);
 		break;
+	case s2c::TEXT_COMMAND:
+        apply_text_command(body);
+        break;
 	case s2c::WORLD_STATE_LOAD: {
 		// The 0x0F's client-global fold modeled here: the deploy-map overlay is
 		// zeroed, then armed from game_flags bit0 UNLESS the death screen is
@@ -82,6 +85,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		WorldStateLoad wsl;
 		if (decode_world_state_load(body.data(), body.size(), wsl,
 				game_type::is_waypoint_family(game_type_))) {
+			// [orig: NapiNPClientMsg_0x00F @ 0x42E200, flag store @ 0x42E314] This flag only sets here.
+			if (wsl.game_flags & 8u) state_.cease_fire = true;
 			state_.deploy_overlay_active =
 					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
 			// The trigger falling is what clears the open latch
@@ -2364,6 +2369,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 					es.anim_channel_ratio,
 					rec.cls == EntityClass::Player, wire_dead, row_was_dead,
 					respawned_this_record);
+            // [orig: NetPacket_SerializePlayerState @ 0x4C09C0, stance stores @ 0x4C11D7..0x4C1242]
+            // The committed FSM state determines MoveOrder, including when
+            // the just-received animation was deferred into the pending slot.
+            if (rec.cls == EntityClass::Player) {
+                const uint32_t flags = world::infantry_anim_flags(es.net_anim_current);
+                es.net_stance_bits = static_cast<uint8_t>(
+                        ((flags & 0x100u) ? 2 : 0) | ((flags & 0x200u) ? 1 : 0));
+            }
 		}
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {

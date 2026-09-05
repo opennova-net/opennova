@@ -494,7 +494,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     return !blocked;
 }
 
-bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
+bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, EntityHandle source,
                                      const int32_t start_in[3], const int32_t end_in[3],
                                      int32_t height_offset) {
     const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
@@ -816,10 +816,10 @@ int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle liste
     if (base > 0xA0000) base = 0xA0000; // min(d/8, 10u) [orig: @ 0x529982]
     // Source z lifted +0x2000 for BOTH rays. [orig: @ 0x52998d / restore @ 0x5299d7]
     const int32_t end[3] = {source_pos[0], source_pos[1], source_pos[2] + 0x2000};
-    const bool ray1_clear = sound_los_clear(world, listener, source, listener_pos, end, 0);
+    const bool ray1_clear = entity_los_clear(world, listener, source, listener_pos, end, 0);
     if (!ray1_clear)
         base = 2 * base + 0x50000; // ray 1 blocked compounds [orig: @ 0x5299b6]
-    const bool ray2_clear = sound_los_clear(world, listener, source, listener_pos, end, -0x8000);
+    const bool ray2_clear = entity_los_clear(world, listener, source, listener_pos, end, -0x8000);
     if (ray_debug_enabled_) {
         ray_debug_record(RayDebugCategory::kSoundOcclusion, world.logic_tick,
                          listener_pos, end, nullptr,

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/minefield.h>
 
 #include "object/entity_index.h"
 #include "object/item_database.h"
@@ -322,6 +323,15 @@ protected:
 	static void _bind_methods();
 
 private:
+    struct MineMarkerNode {
+        ObjectID node;
+        uint64_t spawn_id = 0;
+        bool seen = false;
+    };
+    std::unordered_map<uint32_t, MineMarkerNode> minefield_nodes_;
+    std::vector<opennova::world::MinefieldDraw> minefield_draws_;
+    void present_minefields();
+    void reset_minefields();
 	struct MissionFrameProfile {
 		int64_t core_us = 0;
 		int64_t aim_us = 0;

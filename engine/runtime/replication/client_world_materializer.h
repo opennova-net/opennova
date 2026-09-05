@@ -10,6 +10,7 @@
 
 namespace opennova::world {
 class World;
+struct MinefieldActor;
 }
 
 namespace opennova::replication {
@@ -30,6 +31,8 @@ struct ClientWorldSyncResult {
 // in ClientState/presentation.
 class ClientWorldMaterializer {
 public:
+    static void fill_minefield_actors(const ClientState &state, uint16_t self_handle,
+            std::vector<world::MinefieldActor> &out);
 	ClientWorldSyncResult sync(const ClientState &state, world::World &world);
 	// Stamp every materialized pool-1..3 row that still carries no placed
 	// identity with one: spawn_origin = (kind, per-kind ordinal) and a

@@ -2698,3 +2698,18 @@ if(OPENNOVA_DEVTOOLS)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)
     add_test(NAME devtools COMMAND devtools_test)
 endif()
+
+# Mission-authored lndm callbacks, independent of thrown AT mines.
+add_executable(minefield_test world/minefield_test.cpp)
+target_link_libraries(minefield_test PRIVATE opennova_runtime)
+add_test(NAME minefield COMMAND minefield_test)
+
+add_executable(minefield_retail_test world/minefield_retail_test.cpp)
+target_link_libraries(minefield_retail_test PRIVATE opennova_test_rig)
+target_include_directories(minefield_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(minefield_retail COMMAND minefield_retail_test)
+
+target_include_directories(minefield_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(minefield_replica_test netsim/minefield_replica_test.cpp)
+target_link_libraries(minefield_replica_test PRIVATE opennova_runtime)
+add_test(NAME minefield_replica COMMAND minefield_replica_test)

@@ -41,6 +41,7 @@
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
+#include <runtime/world/minefield.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/waypoint_track.h>
 #include <runtime/world/weapon_table.h>
@@ -473,6 +474,7 @@ struct SessionRules {
     // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
     // run_logic_tick stamps it once so every callback sees the tick's role.
     bool logic_authority = true;
+    bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
     // These explicit host-fed gates keep that option out of ordinary/SP rays.
@@ -547,7 +549,7 @@ struct WorldOutbox {
 
 class World {
 public:
-    World() : commands(*this), vehicles(*this), zones(*this) {}
+    World();
     // World has stable identity: commands binds this object and registered
     // systems retain mission-lifetime relationships. Memberwise copy/move
     // would preserve pointers/references into the source World and create a
@@ -591,6 +593,9 @@ public:
     static constexpr uint32_t kMissionPrng16Seed = 0x1A10101Au;
     uint32_t prng16_state = kMissionPrng16Seed;
     uint16_t next_prng16() noexcept;
+    static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
+    uint32_t prng16_b_state = kMissionPrng16BSeed;
+    uint16_t next_prng16_b() noexcept;
     // The simulation's owner of the CRT rand() recurrence retail draws from
     // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
     // @0x51718A, ...). Retail seeds the process stream from the clock once at
@@ -634,6 +639,7 @@ public:
 
     // Placed throwable devices + class bindings (world-wac-ai-re §27).
     ThrowableSim throwables;
+    MinefieldSystem minefields;
     DeathPieceSim death_pieces;
     DestructionRng destruction_rng;
 
@@ -734,6 +740,8 @@ public:
         uint32_t logic_tick = 0;
         uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
+        uint32_t prng16_b_state = kMissionPrng16BSeed;
+        bool cease_fire = false;
         uint32_t crt_rand_state = 1;
         EntityHandle local_player;
     };

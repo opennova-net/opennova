@@ -44,6 +44,7 @@ inline constexpr uint8_t NOOP = 0x1C;                       // empty stub
 inline constexpr uint8_t END_ROUND_HEADER = 0x1D;           // §5.68 fixed 7-B scoreboard header; triggers c2s::END_ROUND_STATS_REQUEST
 inline constexpr uint8_t GAME_EVENT = 0x1E;                 // §5.26 game event
 inline constexpr uint8_t POOL3_SYNC = 0x20;                 // §5.12 pool-3 marker/waypoint sync batch
+inline constexpr uint8_t TEXT_COMMAND = 0x24;               // NapiNPClientMsg_HandleTextCommand
 inline constexpr uint8_t KILL_SYNC = 0x26;                  // §5.26 kill record
 inline constexpr uint8_t CHAR_MINIMAP_UPDATE = 0x29;        // §5.59 NetId + CharacterEntity rebind
 inline constexpr uint8_t CHAT_HISTORY = 0x2A;               // §5.35 chat history entry

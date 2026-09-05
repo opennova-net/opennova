@@ -364,6 +364,7 @@ void test_explosion_los_excludes_victim_hull() {
     Entity seed;
     seed.kind = EntityKind::Item;
     seed.item_id = 500;
+    seed.has_item_def = true;
     seed.health = 120;
     seed.health_max = 120;
     seed.position = Vec3{4.0f, 0.0f, 0.0f};
@@ -374,6 +375,7 @@ void test_explosion_los_excludes_victim_hull() {
     CollisionWorld collision;
     const int32_t model_id = collision.add_model(solid_box_model(1.0, 2.0));
     collision.assign_entity(victim, model_id);
+    collision.build_initial_tables(w);
 
     ExplosionEntry e;
     e.pos = Vec3{0.0f, 0.0f, 0.0f};
@@ -396,6 +398,7 @@ void test_radius_blast_skips_pool1_los() {
     Entity victim_seed;
     victim_seed.kind = EntityKind::Item;
     victim_seed.item_id = 500;
+    victim_seed.has_item_def = true;
     victim_seed.health = 120;
     victim_seed.health_max = 120;
     victim_seed.position = Vec3{4.0f, 0.0f, 0.5f};
@@ -405,11 +408,14 @@ void test_radius_blast_skips_pool1_los() {
 
     Entity wall_seed;
     wall_seed.kind = EntityKind::Building;
+    wall_seed.item_id = 501;
     wall_seed.position = Vec3{2.0f, 0.0f, 0.0f};
     wall_seed.bound_radius = 1.0f;
     const EntityHandle wall = w.registry.spawn(2, wall_seed);
     CollisionWorld collision;
-    collision.assign_entity(wall, collision.add_model(solid_box_model(0.25, 2.0)));
+    collision.assign_entity(wall, collision.add_model(solid_box_model(0.5, 2.0)));
+
+    collision.build_initial_tables(w); // blast LOS consumes the victim candidate slice
 
     ExplosionEntry e;
     e.pos = Vec3{0.0f, 0.0f, 0.5f};
@@ -426,8 +432,8 @@ void test_radius_blast_skips_pool1_los() {
 }
 
 // Only the movable-item LOS walk lifts both endpoints by 0.25 units. Pool 0
-// uses the authored positions, so low cover that sits below the lifted ray
-// still shields an organic target.
+// uses the authored positions. The -0.25 clip radius shrinks the cover to
+// Z [0.25, 0.5]: the 0.35 ray blocks, while an incorrect +0.25 lift would miss.
 void test_organic_blast_los_is_unlifted() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -437,22 +443,26 @@ void test_organic_blast_los_is_unlifted() {
 
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
+    victim_seed.item_id = 502;
     victim_seed.health = 120;
     victim_seed.health_max = 120;
-    victim_seed.position = Vec3{4.0f, 0.0f, 0.05f};
+    victim_seed.position = Vec3{4.0f, 0.0f, 0.35f};
     victim_seed.bound_radius = 0.6f;
     const EntityHandle victim = w.registry.spawn(0, victim_seed);
 
     Entity wall_seed;
     wall_seed.kind = EntityKind::Building;
+    wall_seed.item_id = 501;
     wall_seed.position = Vec3{2.0f, 0.0f, 0.0f};
-    wall_seed.bound_radius = 0.3f;
+    wall_seed.bound_radius = 1.0f;
     const EntityHandle wall = w.registry.spawn(2, wall_seed);
     CollisionWorld collision;
-    collision.assign_entity(wall, collision.add_model(solid_box_model(0.25, 0.15)));
+    collision.assign_entity(wall, collision.add_model(solid_box_model(0.5, 0.75)));
+
+    collision.build_initial_tables(w); // blast LOS consumes the victim candidate slice
 
     ExplosionEntry e;
-    e.pos = Vec3{0.0f, 0.0f, 0.05f};
+    e.pos = Vec3{0.0f, 0.0f, 0.35f};
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);

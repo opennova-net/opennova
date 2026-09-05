@@ -686,6 +686,7 @@ void apply_round_recoil(const AmmoTableEntry &ammo,
 
 void record_round_fire(World &world, RoundSim &sim,
                        const RoundSpawnParams &params) {
+    if (params.launch_presented) return;
     FireEvent event;
     event.shooter = params.owner;
     event.shooter_handle = params.shooter_handle;
@@ -726,6 +727,10 @@ void RoundSim::reset() noexcept {
 	trails.reset(); // [orig: the pool memset in CEffectEmitterPool_ResetAndBuildStyles
 	                //  @ 0x5db3b0, run from Game_StartMission]
 	remote_visual_tracer_counters_.clear();
+}
+
+void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
+    record_round_fire(world, *this, params);
 }
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &params,

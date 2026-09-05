@@ -201,6 +201,21 @@ const world::Entity *ClientWorldMaterializer::owned(
 			handle, tracked->second.registry_spawn_id});
 }
 
+// [orig: Entity_LandmineThink @ 0x441A40] Pool 0 lives in decoded state on a
+// joiner; omit its predicted local body, which the native registry supplies.
+void ClientWorldMaterializer::fill_minefield_actors(const ClientState &state,
+        uint16_t self_handle, std::vector<world::MinefieldActor> &out) {
+    out.clear();
+    for (const ClientEntityState &row : state.entities) {
+        if ((row.handle >> 12) != 0 || row.handle == self_handle) continue;
+        const uint32_t flags = row.state_flags_known ? row.state_flags : row.spawn_entity_flags;
+        out.push_back({row.handle, row.type_id, flags,
+                static_cast<uint32_t>(row.move_input) |
+                    (static_cast<uint32_t>(row.net_stance_bits) << 8),
+                {row.x, row.y, row.z}});
+    }
+}
+
 ClientWorldSyncResult ClientWorldMaterializer::sync(
 		const ClientState &state, world::World &world) {
 	ClientWorldSyncResult result;

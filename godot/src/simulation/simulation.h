@@ -1,4 +1,5 @@
 #pragma once
+#include <runtime/world/minefield.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -2131,6 +2132,7 @@ public:
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
+	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
 	// Even-tick, simulation-owned watercraft W3/W4 wake samples. The native

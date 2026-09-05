@@ -178,6 +178,7 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
         int32_t pie_slice_bam, uint16_t radial_draw, uint16_t phase_draw);
 
 struct RoundSpawnParams {
+    bool launch_presented = false; // Weapon_FireProcess already emitted ammo launch effects
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
     // The decoded shooter's carrier at fire time (visual-only rounds): keeps a
@@ -483,6 +484,7 @@ public:
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
+    void present_fire(World &world, const RoundSpawnParams &params);
     int spawn(World &world, const RoundSpawnParams &params,
               RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
 
