@@ -399,7 +399,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
 	                    p->seat_type == 2 && p->pitch_byte == 0x21 &&
 	                    p->aim_yaw_byte == 0 && p->anim_state_id == 62 &&
-	                    p->anim_channel_ratio == 19,
+	                    p->anim_channel_ratio == 19 && p->health_class_byte == 0x28,
 	            "player compact mount/pose bytes survive the client fold")) return false;
 	const ns::ClientEntityState *i = view.state().find(0x0002);
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&

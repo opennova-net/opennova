@@ -2247,6 +2247,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.equipped_adm_index = rec.player.anim_def_index;
 			es.state_flags = rec.player.state_flags;
 			es.move_input = rec.player.move_input_byte;
+			es.health_class_byte = rec.player.health_class_byte;
 			if (rec.player.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,

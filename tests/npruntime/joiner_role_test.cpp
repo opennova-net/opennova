@@ -5,13 +5,20 @@
 // ClientHello one-shot over the socket seam, the per-frame clock, the in-match
 // spawn edge for L (H latched, the join-wait latches cleared, the weapon pump
 // gated open the same frame), the mid-frame loadout-grant stamp, and the
-// per-session latch reset. World-effect depth (health folds, mount sync,
-// mirrors) is covered by the GUT net suites and the live LAN pair.
+// per-session latch reset. Confirmed vehicle occupancy, prediction, mount
+// requests and the matching seat overlays run through the production frame.
 
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
 
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_panel_feed.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
@@ -46,8 +53,28 @@ constexpr uint32_t kSessionId = 0x0FE0E112u;
 class CountingSocket final : public opennova::IDatagramSocket {
 public:
 	int sends = 0;
+	std::vector<std::vector<uint8_t>> datagrams;
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
-	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override { ++sends; }
+	void send_to(const PeerAddr &, const uint8_t *data, std::size_t size) override {
+		++sends;
+		datagrams.emplace_back(data, data + size);
+	}
+	bool last_message(uint8_t tag, ProtocolMessage &out) const {
+		for (auto it = datagrams.rbegin(); it != datagrams.rend(); ++it) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!nw_decode_inbound(it->data(), it->size(), opcode, body) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(body.data(), body.size(),
+							kClientScrk, header, messages)) continue;
+			for (auto msg = messages.rbegin(); msg != messages.rend(); ++msg) {
+				if (msg->tag == tag) { out = *msg; return true; }
+			}
+		}
+		return false;
+	}
 };
 
 // The kernel lives on the heap: a World-carrying frame is megabytes.
@@ -199,6 +226,274 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 			"(regression: a by-value inventory_valid froze it at frame entry)");
 }
 
+
+// Retail drives the carrier from the mounted person's C2S 0x0C. Exercise
+// the joiner frame's confirmed mount, input and client prediction together.
+// [orig: Client_ProcessNetworkFrame @0x42c180;
+// Entity_UpdateVehiclePhysics @0x48af00; net-re section 5.13]
+bool run_confirmed_vehicle_drive(int occupancy) {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.add_system(&world.ai);
+	world.load_systems();
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 0x0005;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local && local->handle.packed != self_handle,
+			"vehicle joiner: local body and wire identity differ")) return false;
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 1291;
+	vehicle.has_item_def = true;
+	vehicle.item_type = 1;
+	vehicle.item_attrib = 0x40u;
+	vehicle.spawn_origin = (1u << 24) | 3u;
+	vehicle.position = local->position;
+	vehicle.health = vehicle.health_max = 3000;
+	vehicle.team = local->team;
+	w::Seat controller;
+	controller.type = w::SeatType::Controller;
+	controller.bone_index = 1;
+	controller.retail_slot = 8;
+	controller.source_name = "ctrlx00";
+	if (occupancy == 1) controller.occupant = w::EntityHandle{self_handle};
+	vehicle.seats.push_back(controller);
+	const auto vh = world.registry.spawn(1, vehicle);
+	w::EntityHandle previous_driver;
+	if (occupancy == 2) {
+		w::Entity peer;
+		peer.kind = w::EntityKind::Organic;
+		peer.team = local->team;
+		peer.health = peer.health_max = 100;
+		previous_driver = world.registry.spawn(0, peer);
+		if (!expect(world.vehicles.process_attach(previous_driver, vh, 1),
+				"fixture: previous driver occupies the confirmed seat")) return false;
+		world.registry.get(previous_driver)->team = local->team == 1 ? 2 : 1;
+	}
+	w::VehicleTraits traits;
+	traits.physics = 1;
+	traits.player_control = true;
+	traits.player_speed = 94 * 293;
+	traits.acceleration = 15 * 4;
+	traits.deceleration = 70 * 4;
+	traits.turn_rate = 65 * 192426;
+	traits.turn_rate2 = 41 * 192426;
+	world.vehicles.traits.set(vehicle.item_id, traits);
+	auto &row = h.role.runtime->state().upsert(vh.packed);
+	row.type_id = static_cast<uint16_t>(vehicle.item_id);
+	row.cls = EntityClass::Vehicle;
+	row.x = w::to_fixed(vehicle.position.x);
+	row.y = w::to_fixed(vehicle.position.y);
+	row.z = w::to_fixed(vehicle.position.z);
+	row.heading_known = true;
+	row.heading_bam = w::bam_heading_from_mission_yaw_deg(vehicle.yaw);
+	row.net_has_compact = true;
+	row.compact_revision = 1;
+	auto &self = h.role.runtime->state().upsert(self_handle);
+	self.cls = EntityClass::Player;
+	self.carrier_handle = vh.packed;
+	self.mount_bone = 1;
+	self.state_flags = w::kEntityFlagMounted;
+	self.state_flags_known = true;
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	std::printf("vehicle joiner occupied=%d: mounted=%d local=%04x wire=%04x\n",
+			occupancy, local->mounted, local->handle.packed, self_handle);
+	if (!expect(local->mounted && local->mount_target == vh &&
+			local->mount_type == w::SeatType::Controller,
+			"retail-confirmed controller seat attaches the local joiner body")) return false;
+	if (previous_driver.valid() &&
+			!expect(!world.registry.get(previous_driver)->mounted,
+					"confirmed seat assignment detaches the previous occupant")) return false;
+	if (occupancy == 3) {
+		world.registry.get(vh)->primary_occupant = {};
+		world.registry.get(vh)->seats[0].occupant = {};
+		h.role.run_tick(h.input);
+	}
+	if (!expect(world.registry.get(vh)->primary_occupant == local->handle &&
+			world.registry.get(vh)->seats[0].occupant == local->handle,
+			"confirmed controller relation restores its control link")) return false;
+	h.kernel->local.set_movement_keys(true, false, false, false, false, false, false);
+	for (int tick = 0; tick < 62; ++tick) h.role.run_tick(h.input);
+	const auto *driven = world.registry.get(vh);
+	ProtocolMessage movement;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink uplink;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, movement) &&
+			decode_entity_packet_sub_header(movement.payload.data(), movement.payload.size(),
+					sub, header_bytes) &&
+			decode_player_extended_uplink(movement.payload.data() + header_bytes,
+					movement.payload.size() - header_bytes, uplink, body_bytes) &&
+			sub.handle == self_handle && header_bytes + body_bytes == movement.payload.size(),
+			"the real outgoing C2S movement packet identifies the joiner by its host handle"))
+		return false;
+	const float dx = driven->position.x - vehicle.position.x;
+	const float dy = driven->position.y - vehicle.position.y;
+	std::printf("vehicle joiner: move=%02x carrier=%04x speed=%d distance_squared=%.4f\n",
+			uplink.move_input_byte, uplink.carrier_handle, driven->veh.speed, dx * dx + dy * dy);
+	if (!expect(uplink.carrier_handle == vh.packed &&
+			(uplink.move_input_byte & w::Entity::kMoveOrderMoving) != 0,
+			"mounted joiner uplinks its vehicle and held forward input") ||
+			!expect(driven->veh.speed > 0 && dx * dx + dy * dy > 0.25f,
+					"holding forward predicts motion of the confirmed driver vehicle")) return false;
+
+	def::DefVehicleHudBlock hud_block{};
+	std::vector<hud::HudVehicleSeat> panel;
+	w::fill_vehicle_panel_seats(world, vh, local->handle, hud_block, panel, &h.role);
+	if (!expect(panel.size() == 1 && panel[0].occupied && panel[0].own_seat &&
+			panel[0].health == local->health,
+			"vehicle overlay highlights the confirmed local seat and its health")) return false;
+
+	// The use-item scan can select another nearby carrier while mounted.
+	// It must queue attach, keep the current seat until the echo, then detach
+	// only when no alternative seat is available.
+	w::Entity adjacent = vehicle;
+	adjacent.position = h.kernel->local.player_position();
+	adjacent.position.x += 1.0f;
+	adjacent.seats[0].occupant = {};
+	const auto adjacent_h = world.registry.spawn(1, adjacent);
+	std::vector<w::AttachLabel> labels;
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	bool adjacent_highlighted = false;
+	for (const auto &label : labels) {
+		if (label.nearest && label.entity == adjacent_h && label.seat_index == 0)
+			adjacent_highlighted = true;
+	}
+	if (!expect(adjacent_highlighted,
+			"seat overlay highlights the same nearby seat the mounted action selects")) return false;
+	h.socket.datagrams.clear();
+	if (!expect(h.role.queue_mount_toggle(), "mounted use-item queues a request")) return false;
+	h.role.run_tick(h.input);
+	ProtocolMessage request;
+	if (!expect(h.socket.last_message(0x26, request) &&
+			request.payload == std::vector<uint8_t>({
+					static_cast<uint8_t>(self_handle), 0,
+					static_cast<uint8_t>(adjacent_h.packed),
+					static_cast<uint8_t>(adjacent_h.packed >> 8), 1, 0}) &&
+			h.kernel->local.player()->mount_target == vh,
+			"mounted use-item requests the nearby seat and waits for host confirmation"))
+		return false;
+	h.role.runtime->state().find(self_handle)->carrier_handle = adjacent_h.packed;
+	h.role.run_tick(h.input);
+	if (!expect(h.kernel->local.player()->mount_target == adjacent_h,
+			"seat swap applies on the host's relationship echo")) return false;
+	world.registry.get(vh)->health = 0;
+	h.socket.datagrams.clear();
+	if (!expect(h.role.queue_mount_toggle(), "use-item without another seat queues detach"))
+		return false;
+	h.role.run_tick(h.input);
+	if (!expect(h.socket.last_message(0x27, request) &&
+			h.kernel->local.player()->mount_target == adjacent_h,
+			"dismount also waits for the host's confirmation")) return false;
+	auto *detached_self = h.role.runtime->state().find(self_handle);
+	detached_self->carrier_handle = w::EntityHandle::kInvalid;
+	detached_self->mount_bone = 0;
+	h.role.run_tick(h.input);
+	return expect(!h.kernel->local.player()->mounted &&
+			!world.registry.get(adjacent_h)->seats[0].occupant.valid() &&
+			!world.registry.get(adjacent_h)->primary_occupant.valid(),
+			"confirmed dismount releases the local seat and controller");
+}
+
+
+// A remote player has only a decoded pool-0 row on a joiner. Its current
+// carrier/bone must still occupy the seat for both Use and the health panel.
+bool run_remote_vehicle_occupancy() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	const auto *local = h.kernel->local.player();
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 1291;
+	vehicle.has_item_def = true;
+	vehicle.item_type = 1;
+	vehicle.item_attrib = 0x40u;
+	vehicle.position = local->position;
+	vehicle.health = vehicle.health_max = 3000;
+	vehicle.team = local->team;
+	w::Seat seat;
+	seat.type = w::SeatType::Controller;
+	seat.bone_index = 1;
+	seat.retail_slot = 8;
+	vehicle.seats.push_back(seat);
+	const auto vh = world.registry.spawn(1, vehicle);
+	auto &peer = h.role.runtime->state().upsert(0x0006);
+	peer.cls = EntityClass::Player;
+	peer.type_id = w::kPlayerInfantryTypeId;
+	peer.carrier_handle = vh.packed;
+	peer.mount_bone = 1;
+	peer.net_has_compact = true;
+	peer.health_class_byte = 0x18;
+	peer.team = static_cast<uint8_t>(local->team);
+	peer.team_known = true;
+	def::DefItemDef person_def{};
+	person_def.id = w::kPlayerInfantryTypeId;
+	person_def.hp = 100;
+	def::DefItemsFile items{&person_def, 1};
+	h.kernel->set_items_table(&items);
+	h.role.run_tick(h.input);
+	std::vector<w::AttachLabel> labels;
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	bool ok = expect(labels.empty(), "remote occupied seat has no free-seat label");
+	ok &= expect(!h.role.queue_mount_toggle(), "Use cannot request a remote occupied seat");
+	def::DefVehicleHudBlock block{};
+	std::vector<hud::HudVehicleSeat> panel;
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(panel.size() == 1 && panel[0].occupied && !panel[0].own_seat,
+	             "remote rider appears as occupied in the vehicle panel");
+	ok &= expect(panel[0].health == 59 && panel[0].max_health == 100,
+	             "remote rider health uses the retail compact-tier midpoint");
+
+	// Another wire player can occupy the numeric handle of native L.
+	auto old_peer = *h.role.runtime->state().find(0x0006);
+	old_peer.handle = local->handle.packed;
+	h.role.runtime->state().find(0x0006)->mount_bone = 0;
+	h.role.runtime->state().upsert(local->handle.packed) = old_peer;
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(panel[0].occupied && !panel[0].own_seat,
+	             "a remote wire handle equal to L never highlights an own seat");
+
+	// Same-team passengers can use the remaining seat; an enemy in the
+	// controller seat blocks the whole vehicle, for labels and Use alike.
+	w::Seat passenger = seat;
+	passenger.type = w::SeatType::Passenger;
+	passenger.bone_index = 2;
+	passenger.retail_slot = 0;
+	world.registry.get(vh)->seats.push_back(passenger);
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	ok &= expect(labels.size() == 1 && labels[0].seat_index == 1,
+	             "same-team remote rider leaves other seats available");
+	auto *remote = h.role.runtime->state().find(local->handle.packed);
+	remote->team = local->team == 1 ? 2 : 1;
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	ok &= expect(labels.empty() && !h.role.queue_mount_toggle(),
+	             "a remote enemy blocks the entire vehicle for labels and Use");
+
+	// Compact dismount supersedes even a retained spawn mountHandles entry.
+	world.registry.get(vh)->seats[0].occupant = local->handle;
+	remote->mount_bone = 0;
+	remote->carrier_handle = w::EntityHandle::kInvalid;
+	h.kernel->local.collect_attach_labels(labels, &h.role);
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(labels.size() == 2 && !panel[0].occupied,
+	             "remote dismount frees selection and panel despite stale spawn occupancy");
+	world.registry.get(vh)->seats[0].occupant = w::EntityHandle{0x5000};
+	w::fill_vehicle_panel_seats(world, vh, local->handle, block, panel, &h.role);
+	ok &= expect(!panel[0].occupied,
+	             "an unresolved raw control handle does not draw a rider health marker");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -208,6 +503,11 @@ int main() {
 	ok &= run_in_match_spawn_edge();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();
 	ok &= run_reset_for_join();
+	ok &= run_remote_vehicle_occupancy();
+	ok &= run_confirmed_vehicle_drive(0);
+	ok &= run_confirmed_vehicle_drive(1);
+	ok &= run_confirmed_vehicle_drive(2);
+	ok &= run_confirmed_vehicle_drive(3);
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

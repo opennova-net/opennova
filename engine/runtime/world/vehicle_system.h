@@ -65,6 +65,12 @@ public:
     //      setting 0x40 and binds the parent weapon slot
     //      [orig: Entity_AttachToUseGunSlot @0x546c42-0x546c7c].
     bool process_attach(EntityHandle player, EntityHandle vehicle, uint8_t bone);
+    // Apply an authority-confirmed relation on a client. Replaces the previous
+    // seat occupant and repairs a lost Controller/Driver/Gunner claim even when
+    // the carrier and bone are unchanged; bone 0 / no carrier detaches.
+    // Returns true when the local relationship changed.
+    // [orig: Entity_TryAttachOrDetach @0x436610; client attach @0x435BBA]
+    bool apply_confirmed_mount(EntityHandle player, EntityHandle vehicle, uint8_t bone);
     // Apply one C2S 0x27 detach: release every seat this occupant holds on its mount target,
     // clear the mount fields + any generic-slot 0x40 flag + the stance bits, and run the
     // +368 primary-occupant release (the engine-stop edge fires only for the claimant).
@@ -96,11 +102,11 @@ public:
     // vehicle outright (the own-hull LOS occlusion stand-in until pool-1 collision lands —
     // USE exits, never cycles seats; j), and the emplaced-gun carrier LOS/reject legs
     // (def attrib 0x20 -> groundEntity) are unmodeled.
-    bool find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode);
+    bool find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode, const VehicleOccupancySource *source = nullptr);
     // The toggle's seat candidate, in the witnessed search order: an unmounted
     // player standing on a seat-bearing ground target takes that carrier's best
     // seat first; otherwise the nearest-free-seat scan above (seats mode).
-    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit);
+    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr);
     // The floating seat/armory label list for the local player, a structural translation of
     // the selection half of [orig: draw_vehicle_seat_and_armory_labels @0x5a3290]:
     //  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory
@@ -115,7 +121,7 @@ public:
     //  - armory_mode true: the "armory*" points of Armory-attrib items label instead
     //    [orig: @0x5a36f5..@0x5a38e2].
     // Labels append to out in scan order; nearest marks the scan winner's own label.
-    void collect_attach_labels(const Entity &player, bool armory_mode, bool can_fire, std::vector<AttachLabel> &out, AttachLabelScanStats *stats = nullptr);
+    void collect_attach_labels(const Entity &player, bool armory_mode, bool can_fire, std::vector<AttachLabel> &out, AttachLabelScanStats *stats = nullptr, const VehicleOccupancySource *source = nullptr);
     // The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
     // Entity_TryEnterNearestVehicle @0x4368c0]:
     //  - unmounted, standing ON a seat-bearing carrier (our generic ground_target

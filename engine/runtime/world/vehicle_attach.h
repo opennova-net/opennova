@@ -21,6 +21,34 @@ namespace opennova::world {
 
 class World;
 
+// One query result, never a second entity store. Both the seat selector and
+// HUD read this view; wire identities must not alias native player handles.
+struct VehicleSeatOccupancy {
+    bool occupied = false;
+    bool own_seat = false;
+    int32_t health = 0;
+    int32_t max_health = 0;
+    // Selection tests the retained handle; the HUD additionally resolves
+    // its pool/slot before drawing the rider's marker.
+    bool rider_resolved = false;
+};
+
+// A joiner's remote organics live in its decoded state, outside World pool 0.
+// Supply that source for one synchronous query; authority callers omit it.
+// [orig: Entity_TryAttachOrDetach @0x436610; HUD_DrawVehicleHealthBars @0x5A4FD0]
+class VehicleOccupancySource {
+public:
+    virtual ~VehicleOccupancySource() = default;
+    virtual VehicleSeatOccupancy seat_occupancy(
+            const Entity &carrier, const Seat &seat, EntityHandle requester) const = 0;
+    virtual void collect_hostile_mounts(
+            const Entity &requester, std::vector<EntityHandle> &out) const = 0;
+};
+
+VehicleSeatOccupancy vehicle_seat_occupancy(
+        const World &world, const Entity &carrier, const Seat &seat,
+        EntityHandle requester, const VehicleOccupancySource *source = nullptr);
+
 
 
 // One selected vehicle seat, or an armory point returned by the proximity scan.
@@ -70,7 +98,8 @@ int predict_seat_selection(const std::vector<SeatCandidate> &seats,
 bool find_best_vehicle_seat(
         const World &world, EntityHandle root_vehicle, EntityHandle occupant,
         VehicleSeatSelection &out,
-        SeatSelectionMode mode = SeatSelectionMode::Any);
+        SeatSelectionMode mode = SeatSelectionMode::Any,
+        const VehicleOccupancySource *source = nullptr);
 
 
 

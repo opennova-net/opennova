@@ -117,6 +117,109 @@ void JoinerRole::poll_preload() {
 	++now_tick_;
 }
 
+// Retail's seat readers all resolve the same client entity table. Our local
+// body L is native and remote pool-0 bodies are decoded rows, so join the two
+// only while answering a query (D-NET-157); never copy wire handles into a
+// native organic or let a remote handle equal to L mark an own seat.
+world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
+        const world::Entity &carrier, const world::Seat &seat,
+        world::EntityHandle requester) const {
+	if (!kernel_ || !runtime)
+		return {};
+	const world::Entity *local = kernel_->local.player();
+	if (local != nullptr && local->mounted && local->mount_target == carrier.handle &&
+			local->mount_bone == seat.bone_index) {
+		return {true, local->handle == requester, local->health, local->health_max, true};
+	}
+	const auto &state = runtime->state();
+	const replication::ClientEntityState *rider = nullptr;
+	for (const auto &row : state.entities) {
+		if (row.cls != EntityClass::Player && row.cls != EntityClass::Infantry) continue;
+		if (runtime->has_self_handle() && row.handle == runtime->self_handle()) continue;
+		if (row.state_flags_known && (row.state_flags & world::kEntityFlagDead) != 0) continue;
+		if (row.carrier_handle == carrier.handle.packed && row.mount_bone == seat.bone_index) {
+			rider = &row;
+			break;
+		}
+	}
+	if (rider == nullptr && seat.occupant.valid()) {
+		rider = client_entity_for_handle(state, seat.occupant.packed);
+		// The retained 0x0D slot seeds occupancy until that occupant's first
+		// complete compact. A later dismount/swap supersedes the spawn image.
+		if (rider != nullptr &&
+				((rider->state_flags_known && (rider->state_flags & world::kEntityFlagDead) != 0) ||
+				 (rider->net_has_compact &&
+				  (rider->carrier_handle != carrier.handle.packed || rider->mount_bone != seat.bone_index))))
+			return {};
+		// An occupied raw slot still blocks selection, but an unresolved
+		// client rider has no HUD marker [orig: driver rider-state gate @0x5A56F5].
+		if (rider == nullptr) return {true, false, 0, 0, false};
+	}
+	if (rider == nullptr) return {};
+
+	world::VehicleSeatOccupancy result{true, false, 1, 1, true};
+	const def::DefItemDef *item = nullptr;
+	if (const def::DefItemsFile *items = kernel_->items_table()) {
+		for (size_t i = 0; i < items->count; ++i) {
+			if (items->entries[i].id == rider->type_id) {
+				item = &items->entries[i];
+				break;
+			}
+		}
+	}
+	if (item == nullptr) return result;
+	result.health = result.max_health = item->hp;
+	if (rider->cls == EntityClass::Player && rider->net_has_compact) {
+		// The compact's health/class byte reconstructs a tier midpoint, not
+		// an exact health fraction. Preserve retail's two rounded products.
+		// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580..0x4AD68C]
+		const int32_t upper = static_cast<int32_t>((int64_t(49152) * item->hp + 0x8000) >> 16);
+		const int32_t lower = static_cast<int32_t>((int64_t(28671) * item->hp + 0x8000) >> 16);
+		const uint8_t tier = (rider->health_class_byte >> 4) & 3u;
+		result.health = tier == 2 ? (upper + item->hp) >> 1
+				: tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+	}
+	return result;
+}
+
+void JoinerRole::collect_hostile_mounts(const world::Entity &requester,
+        std::vector<world::EntityHandle> &out) const {
+	if (!runtime) return;
+	// The same live enemy parent-link walk as the native pool-0 scan.
+	// [orig: Vehicle_HasEnemyOccupant @0x4359F0..0x435A5F]
+	for (const auto &row : runtime->state().entities) {
+		if (row.cls != EntityClass::Player && row.cls != EntityClass::Infantry) continue;
+		if (runtime->has_self_handle() && row.handle == runtime->self_handle()) continue;
+		if (!row.team_known || row.team == requester.team || row.mount_bone == 0 ||
+				row.carrier_handle == world::EntityHandle::kInvalid ||
+				(row.state_flags_known && (row.state_flags & world::kEntityFlagDead) != 0)) continue;
+		out.push_back(world::EntityHandle{row.carrier_handle});
+	}
+}
+
+// The non-authority use-item action queues the request and waits for the
+// compact relationship echo before changing the local body.
+// [orig: Entity_ToggleVehicleMount @0x436950;
+// Entity_RequestVehicleAttach @0x4364A0; Entity_SendDetachPacket @0x435510]
+bool JoinerRole::queue_mount_toggle() {
+	if (!kernel_ || !runtime) return false;
+	world::World &world = kernel_->world;
+	const world::Entity *player = kernel_->local.player();
+	if (player == nullptr || !player->alive || player->health <= 0) return false;
+	world::VehicleSeatSelection hit;
+	// Mounted Use first scans for an alternative seat, then falls back to
+	// detach. Both requests wait for the host echo; neither edits L here.
+	// [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
+	if (!world.vehicles.find_mount_toggle_candidate(*player, hit, this))
+		return player->mounted &&
+				runtime->queue_vehicle_detach(player->mount_target.packed);
+	const world::Entity *vehicle = world.registry.get(hit.vehicle);
+	if (vehicle == nullptr || hit.seat_index < 0 ||
+			hit.seat_index >= static_cast<int>(vehicle->seats.size())) return false;
+	return runtime->queue_vehicle_attach(hit.vehicle.packed,
+			vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index);
+}
+
 void JoinerRole::send_stance_change(uint16_t action_id) {
 	if (!runtime) return;
 	send(runtime->send_stance_change(action_id));
@@ -1029,20 +1132,28 @@ void JoinerRole::sync_authoritative_mount() {
 			self->mount_bone != 0 &&
 			replica_world_entity(world, world::EntityHandle{
 					self->carrier_handle}) != nullptr;
-	bool changed = false;
-	if (!wire_mounted) {
-		if (local->mounted)
-			changed = world.vehicles.detach(local->handle);
-	} else if (!local->mounted ||
-			local->mount_target.packed != self->carrier_handle ||
-			local->mount_bone != self->mount_bone) {
-		// Wire-materialized mission entities retain the host's exact packed
-		// pool/slot identity in the joiner's native world. The
-		// server has already validated this exact carrier+bone pair.
-		changed = world.vehicles.process_attach(local->handle,
-				world::EntityHandle{self->carrier_handle},
-				self->mount_bone);
+	if (wire_mounted) {
+		world::Entity *carrier = replica_world_entity(
+				world, world::EntityHandle{self->carrier_handle});
+		// The retained spawn occupancy names H, while the client motor uses
+		// L (section 5.38b). Reconcile only our confirmed seat's identity
+		// before the world-side receive path resolves its previous occupant.
+		for (world::Seat &seat : carrier->seats) {
+			if (seat.bone_index == self->mount_bone &&
+					seat.occupant.packed == rt.self_handle())
+				seat.occupant = local->handle;
+		}
+		if (carrier->primary_occupant.packed == rt.self_handle())
+			carrier->primary_occupant = local->handle;
 	}
+	// Retail repeats the claim check even for an unchanged carrier+bone.
+	// A client consumes the confirmed assignment through the replacement
+	// arm, not the authority's occupied/enemy-seat rejection path.
+	// [orig: Entity_TryAttachOrDetach @0x4366DD; client attach @0x435BBA]
+	const bool changed = world.vehicles.apply_confirmed_mount(local->handle,
+			wire_mounted ? world::EntityHandle{self->carrier_handle}
+			             : world::EntityHandle{},
+			wire_mounted ? self->mount_bone : 0);
 
 	// A designated-G EWeap uses the compact player's seat_type as an
 	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the validated

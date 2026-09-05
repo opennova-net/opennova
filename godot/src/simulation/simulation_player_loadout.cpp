@@ -172,29 +172,8 @@ bool Simulation::local_player_toggle_mount() {
 	if (!opennova::world::weapon_state_allows_mount_toggle(
 				active_slot->current, active_slot->next))
 		return false;
-	if (is_joiner()) {
-		// The non-authority client chooses the same local nearest-seat candidate,
-		// but sends only its packed carrier and authored 1-based model bone. L is
-		// unchanged until the host's 0x0A relationship confirms the request.
-		// [orig: Entity_RequestVehicleAttach @0x4364a0 /
-		// Entity_SendDetachPacket @0x435510]
-		if (!runtime_ || toggle_player == nullptr) return false;
-		// A mounted release is unambiguously a detach request. Wait for the
-		// authoritative 0x0A echo before a later release can select a new seat.
-		if (toggle_player->mounted)
-			return runtime_->queue_vehicle_detach(
-					toggle_player->mount_target.packed);
-		opennova::world::VehicleSeatSelection hit;
-		if (!kernel_->world.vehicles.find_mount_toggle_candidate(*toggle_player, hit))
-			return false;
-		opennova::world::Entity *vehicle = kernel_->world.registry.get(hit.vehicle);
-		if (vehicle == nullptr || hit.seat_index < 0 ||
-				hit.seat_index >= static_cast<int>(vehicle->seats.size()))
-			return false;
-		return runtime_->queue_vehicle_attach(
-				hit.vehicle.packed,
-				vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index);
-	}
+	if (is_joiner())
+		return joiner_role_ && joiner_role_->queue_mount_toggle();
 	// The authority's toggle is the kernel's one body (the out-of-session
 	// UseGun rejection, the seat transition, the view/weapon folds).
 	const bool changed = kernel_->local.toggle_mount();
@@ -205,7 +184,7 @@ bool Simulation::local_player_toggle_mount() {
 bool Simulation::fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const {
 	r_labels.clear();
 	if (!kernel_) return false;
-	kernel_->local.collect_attach_labels(r_labels);
+	kernel_->local.collect_attach_labels(r_labels, is_joiner() ? joiner_role_ : nullptr);
 	return true;
 }
 
