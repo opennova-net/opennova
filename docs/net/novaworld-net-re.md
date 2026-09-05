@@ -2382,6 +2382,58 @@ dismount SENDS ONLY and waits for the 0x0A echo @ 0x4369c7]`. **There is NO conf
 the 0x0A compact record's mounted branch (byte0 bone + carrier, §5.10) is the confirmation
 for everyone including the requester.
 
+
+**Client confirmation and seat queries (re-grill 2026-09-04).** The client consumes
+an already approved assignment through a different arm of the shared attach routine.
+The EquippedSlot busy test and enemy-rider test are authority-only
+[orig: Entity_ProcessVehicleAttach @ 0x435B27 / @ 0x435B3C]. An occupied matching slot
+rejects on the authority, but the client first detaches its previous occupant
+[orig: Entity_ProcessVehicleAttach @ 0x435BA9..0x435BBA]. Even an unchanged carrier and
+bone retries a Controller/Driver/Gunner attachment when the carrier's primary occupant
+is no longer the requester [orig: Entity_TryAttachOrDetach @ 0x4366DD]. Routing this
+confirmation through the authority's occupied-seat rejection left a joiner unable to
+claim the motor after a retained spawn slot or stale rider already occupied it.
+
+`VehicleSystem::apply_confirmed_mount` implements the receive arm;
+`JoinerRole::sync_authoritative_mount` reconciles the confirmed self slot's wire **H**
+with native local **L** (?5.38b) before resolving the previous occupant. The authority's
+request validation remains in `VehicleSystem::process_attach`. Mounted Use first scans
+for another nearby seat, then sends attach when found or detach when absent
+[orig: Entity_ToggleVehicleMount @ 0x4369AC..0x4369C7]. `JoinerRole::queue_mount_toggle`
+now follows that sequence and waits for the compact echo before either local transition.
+
+Remote organics remain in canonical `ClientState`, outside native pool 0.
+`VehicleOccupancySource` is a synchronous read input to nearest/best-seat selection,
+attach labels and the vehicle panel; `JoinerRole` supplies the current decoded
+carrier/bone, team and health. This restores the shared client-table semantics of
+[orig: Entity_FindNearestSeatOrArmory @ 0x435D50;
+draw_vehicle_seat_and_armory_labels @ 0x5A3290;
+HUD_DrawVehicleHealthBars @ 0x5A4FD0] without creating native remote-player copies.
+The retained 0x0D seat handle seeds the query until that rider has a complete compact;
+a later dismount or swap supersedes it. An unresolved raw slot still blocks selection,
+but draws no rider marker (the driver rider-state gate [orig: HUD_DrawVehicleHealthBars @ 0x5A56F5]).
+A remote wire handle numerically equal to **L**
+does not mark the local seat. The live enemy parent-link walk uses decoded organics as
+well [orig: Vehicle_HasEnemyOccupant @ 0x4359F0]. The player compact's retained
+`health_class_byte` reconstructs its health tier midpoint using the authored HP and
+the separately rounded `0xC000`/`0x6FFF` products
+[orig: Entity_SetHealthFromDifficultyByte @ 0x4AD580..0x4AD68C].
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Confirmed local controller occupancy and motion | MATCHING (behavioral proof) | `inmatch_joiner_role`: empty seat, retained H, stale enemy holder, lost control claim; the production frame moves the carrier and emits C2S 0x0C with H, carrier and moving bit |
+| Mounted Use and local overlays | MATCHING (behavioral proof) | Same test decodes actual framed C2S 0x26/0x27, waits for confirmation, and checks the selected label and own-seat health row |
+| Remote seat query bridge | MATCHING (behavioral proof) | Same test covers occupied-seat rejection, teammate co-boarding, hostile riders, H/L numeric collision, tier health, and dismount overriding retained spawn occupancy; `netsim_loopback_identity` preserves the health byte through the real frame decoder |
+
+The game-MCP `retail_parity_visual` attach stage also passes (scope-down labels 2,
+settled ADS 1, third-person 2); its inspected image is a query visualization, not a
+live retail match. A local `onhook_host_lan` attempt on `01TR.bms` / COOP timed out
+before host readiness. It provides no retail driving verdict. These synthetic
+frame/query checks do not establish live NovaWorld driving parity.
+The existing lower attach-definition gates, gun-carrier traversal and own-hull LOS
+stand-in remain tracked under D-NET-157 / D-AI-11. IDA function comments were appended
+at the five receive/toggle/health/HUD anchors above; no symbols were renamed.
+
 Server 0x26 (`NapiNPServerMsg_HandleVehicleAttach @ 0x502390`): authority-gated; sender conn
 → player block (+0x160) → entity cell (+0xC0); **word0 is OVERWRITTEN with the sender's
 authoritative handle** (@ 0x502415 — anti-spoof; the client value is never read); then
@@ -12641,6 +12693,14 @@ weapon-busy gate (EquippedSlot currentAction 0/1/11 @ 0x435b29), the ATTR_Player
 ATTR_EWeap ctrl-seat def gates, gun-carrier traversal in the enemy-occupant scan, and the
 record's gun seatType byte (needs carrier +0x326/+0x312 modeling) are unmodeled. Test:
 `netsim_two_peer_fanout` 0x26 attach → mounted echo → detach round-trip.
+
+**2026-09-04 client receive/query pass:** section 5.10 now records the client-only
+occupied-seat replacement, unchanged-carrier primary-claim repair and mounted Use
+scan-before-detach. The joiner handles H/L explicitly and uses canonical decoded remote
+occupancy for Use, labels and the vehicle panel, including compact health tiers and
+dismounts superseding spawn slots. `inmatch_joiner_role` and `netsim_loopback_identity`
+cover these paths. Live retail/NovaWorld driving remains to be verified; the existing
+lower attach and collision residuals above are not closed by these tests.
 
 **D-NET-156** [reimpl gap, FIXED 2026-07-03; **v32 LIVE: the hold/pick/release chain WORKS
 (picker appears, pick lands, C 0x0E on the wire from both joiners) but the session found the

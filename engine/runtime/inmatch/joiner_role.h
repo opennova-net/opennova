@@ -41,7 +41,7 @@
 
 namespace opennova::inmatch {
 
-class JoinerRole final : public Role {
+class JoinerRole final : public Role, public world::VehicleOccupancySource {
 public:
 	RoleKind kind() const override { return RoleKind::Joiner; }
 
@@ -87,6 +87,13 @@ public:
 	// The witnessed key handlers emit one C2S 0x1D with the action id at once
 	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e].
 	void send_stance_change(uint16_t action_id);
+	// Choose the use-item seat request without mutating the local body.
+	// The caller applies the equipped weapon's busy gate before this action.
+	bool queue_mount_toggle();
+	world::VehicleSeatOccupancy seat_occupancy(const world::Entity &carrier,
+			const world::Seat &seat, world::EntityHandle requester) const override;
+	void collect_hostile_mounts(const world::Entity &requester,
+			std::vector<world::EntityHandle> &out) const override;
 
 	bool spectator() const override { return runtime && runtime->is_spectator(); }
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }

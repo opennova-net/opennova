@@ -102,7 +102,7 @@ public:
     // is_armory_mode = entity Flags & 0x400000 @0x5a32c4]; the nearest-only
     // gate is the CanFire verdict above, computed here so camera changes
     // cannot lag one logic tick.
-    void collect_attach_labels(std::vector<AttachLabel> &out);
+    void collect_attach_labels(std::vector<AttachLabel> &out, const VehicleOccupancySource *source = nullptr);
     // The authority's read of the local player's dead bit (the entity flags;
     // a joiner reads its replica through inmatch::ClientRuntime::local_player_dead).
     bool local_player_dead() const;

@@ -389,8 +389,11 @@ struct ClientEntityState {
 	// distinguishes an unwitnessed zero from a witnessed alive sample.
 	uint8_t state_flags = 0;
 	bool state_flags_known = false;
-	// Last explicit compact health sample. `health_known` prevents a load-only
-	// row from treating its default zero as death.
+	// Player compact health/class byte, retained for remote seat health bands.
+	// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580]
+	uint8_t health_class_byte = 0;
+	// Last explicit vehicle compact health sample. `health_known` prevents a
+	// load-only row from treating its default zero as death.
 	uint16_t health_word = 0;
 	bool health_known = false;
 	// Advances on each witnessed dead -> alive edge. Keeping the epoch in the

@@ -65,7 +65,8 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 	r_state.hull_health = root->health;
 	r_state.hull_max_health = root->health_max;
 	opennova::world::fill_vehicle_panel_seats(kernel_->world, root_h,
-			kernel_->world.cached.local_player, p_block, r_state.seats);
+			kernel_->world.cached.local_player, p_block, r_state.seats,
+			is_joiner() ? joiner_role_ : nullptr);
 	return true;
 }
 

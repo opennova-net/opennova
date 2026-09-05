@@ -48,7 +48,7 @@ bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
 class HostileMountIndex {
 public:
     HostileMountIndex(const World &world, const Entity &requester,
-                      AttachLabelScanStats *stats) {
+                      AttachLabelScanStats *stats, const VehicleOccupancySource *source) {
         if (stats != nullptr) ++stats->enemy_occupancy_registry_passes;
         const std::size_t pool_capacity = world.registry.pool_capacity(0);
         for (std::size_t slot = 0; slot < pool_capacity; ++slot) {
@@ -59,6 +59,14 @@ public:
                 continue;
             const std::size_t target = entity->mount_target.packed;
             if (target < blocked_.size()) blocked_.set(target);
+        }
+        if (source != nullptr) {
+            std::vector<EntityHandle> remote;
+            source->collect_hostile_mounts(requester, remote);
+            for (EntityHandle target : remote) {
+                if (target.valid() && target.packed < blocked_.size())
+                    blocked_.set(target.packed);
+            }
         }
     }
 
@@ -190,9 +198,24 @@ int predict_seat_selection(const std::vector<SeatCandidate> &seats,
     return best;
 }
 
+VehicleSeatOccupancy vehicle_seat_occupancy(
+        const World &world, const Entity &carrier, const Seat &seat,
+        EntityHandle requester, const VehicleOccupancySource *source) {
+    if (source != nullptr) return source->seat_occupancy(carrier, seat, requester);
+    VehicleSeatOccupancy result;
+    result.occupied = seat.occupant.valid();
+    if (const Entity *rider = world.registry.get(seat.occupant)) {
+        result.rider_resolved = true;
+        result.own_seat = seat.occupant == requester;
+        result.health = rider->health;
+        result.max_health = rider->health_max;
+    }
+    return result;
+}
+
 bool find_best_vehicle_seat(
         const World &world, EntityHandle root_vehicle, EntityHandle occupant,
-        VehicleSeatSelection &out, SeatSelectionMode mode) {
+        VehicleSeatSelection &out, SeatSelectionMode mode, const VehicleOccupancySource *source) {
     out = {};
     const Entity *root = world.registry.get(root_vehicle);
     if (root == nullptr) return false;
@@ -210,7 +233,8 @@ bool find_best_vehicle_seat(
                 !seat_allowed_for_selection(seat.type, mode))
                 continue;
             if (!is_root && is_vehicle_control_seat(seat.type)) continue;
-            if (seat.occupant.valid() && seat.occupant != occupant) continue;
+            const auto occupancy = vehicle_seat_occupancy(world, candidate, seat, occupant, source);
+            if (occupancy.occupied && !occupancy.own_seat) continue;
 
             const int32_t weight = seat_priority_weight(seat.type, is_root);
             if (weight >= best_weight) continue;
@@ -287,6 +311,52 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     selection.seat_index = seat_idx;
     selection.type = veh->seats[static_cast<size_t>(seat_idx)].type;
     return world.vehicles.attach_to_seat(player, selection);
+}
+
+// The client receive arm, distinct from the authority's request validation.
+// [orig: Entity_TryAttachOrDetach @0x436610 -> Entity_ProcessVehicleAttach
+// @0x435AA0; authority-only enemy gate @0x435B3C, occupied-seat replacement
+// @0x435BA9..0x435BBA, unchanged driver-claim check @0x4366DD]
+bool VehicleSystem::apply_confirmed_mount(
+        EntityHandle player, EntityHandle vehicle, uint8_t bone) {
+    World &world = world_;
+    Entity *occ = world.registry.get(player);
+    if (occ == nullptr) return false;
+    if (!vehicle.valid() || bone == 0) return detach(player);
+    Entity *veh = world.registry.get(vehicle);
+    if (veh == nullptr || !occ->alive || occ->health <= 0 ||
+        (occ->flags & kEntityFlagDead) != 0 || !veh->alive || veh->health <= 0 ||
+        (veh->flags & kEntityFlagDead) != 0) return false;
+
+    int seat_idx = -1;
+    for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
+        if (veh->seats[i].type != SeatType::None && veh->seats[i].bone_index == bone) {
+            seat_idx = i;
+            break;
+        }
+    }
+    if (seat_idx < 0) return false;
+    Seat &seat = veh->seats[seat_idx];
+    const bool claims_control = is_vehicle_control_seat(seat.type) ||
+                                seat.type == SeatType::Gunner;
+    if (occ->mounted && occ->mount_target == vehicle && occ->mount_bone == bone &&
+        seat.occupant == player && (!claims_control || veh->primary_occupant == player))
+        return false;
+
+    // The host has already selected this occupant. Retail's client first
+    // detaches the previous slot holder, whereas its authority rejects it.
+    // A streamed handle can name a not-yet-materialized pool-0 row; release
+    // its retained slot/claim too, just as detaching retail's fixed empty row.
+    const EntityHandle previous = seat.occupant;
+    if (previous.valid()) {
+        detach(previous);
+        release_primary_occupant(*veh, previous);
+        seat.occupant = {};
+    }
+    if (occ->mounted) detach(player);
+    attach_apply(world, *occ, *veh, seat_idx, bone);
+    world.out.scars.clear_entity(player);
+    return true;
 }
 
 bool VehicleSystem::detach(EntityHandle player) {
@@ -391,7 +461,8 @@ void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
 
 static bool find_nearest_free_seat_impl(World &world, const Entity &player,
                                         VehicleSeatSelection &out, bool armory_mode,
-                                        const HostileMountIndex &hostile_mounts) {
+                                        const HostileMountIndex &hostile_mounts,
+                                        const VehicleOccupancySource *source) {
     // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0].
     const int32_t max_dist3d = player.mounted ? 59652320 : 1073741760;
@@ -448,7 +519,8 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
                 if (s.type == SeatType::None) continue; // [orig: boneIdx == 0 skip]
-                if (s.occupant.valid()) continue;       // [orig: mountHandles != 0xFFFF]
+                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
+                    continue; // [orig: mountHandles != 0xFFFF]
                 consider(cand, seat_world_pos(cand, s), i, s.type);
             }
             return;
@@ -462,21 +534,21 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     return found;
 }
 
-bool VehicleSystem::find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode) {
+bool VehicleSystem::find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode, const VehicleOccupancySource *source) {
     World &world = world_;
-    const HostileMountIndex hostile_mounts(world, player, nullptr);
+    const HostileMountIndex hostile_mounts(world, player, nullptr, source);
     return find_nearest_free_seat_impl(
-            world, player, out, armory_mode, hostile_mounts);
+            world, player, out, armory_mode, hostile_mounts, source);
 }
 
-void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode, bool can_fire, std::vector<AttachLabel> &out, AttachLabelScanStats *stats) {
+void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode, bool can_fire, std::vector<AttachLabel> &out, AttachLabelScanStats *stats, const VehicleOccupancySource *source) {
     World &world = world_;
-    const HostileMountIndex hostile_mounts(world, player, stats);
+    const HostileMountIndex hostile_mounts(world, player, stats, source);
     // No nearest hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory gate
     // @0x5a32e2 brackets the whole pass].
     VehicleSeatSelection nearest;
     if (!find_nearest_free_seat_impl(
-                world, player, nearest, armory_mode, hostile_mounts))
+                world, player, nearest, armory_mode, hostile_mounts, source))
         return;
 
     // One label point [orig: the shared draw block @0x5a3553..0x5a36c9 — the +0.1875 u
@@ -521,7 +593,8 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
                 if (s.type == SeatType::None) continue;
-                if (s.occupant.valid()) continue;
+                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
+                    continue;
                 emit(cand, seat_world_pos(cand, s), i, s.type, false);
             }
             return;
@@ -570,7 +643,7 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
             next_action == weapon_action::kOverheated;
 }
 
-bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit) {
+bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source) {
     World &world = world_;
     // The candidate-PREVIEW form of player_toggle_vehicle_mount's unmounted
     // search (a joiner picks its request target without mutating L): the same
@@ -583,12 +656,12 @@ bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSea
         Entity *ground = world.registry.get(player.ground_target);
         if (ground != nullptr && !ground->seats.empty()) {
             if (find_best_vehicle_seat(
-                        world, ground->handle, player.handle, r_hit)) {
+                        world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source)) {
                 return true;
             }
         }
     }
-    return world.vehicles.find_nearest_free_seat(player, r_hit, false);
+    return world.vehicles.find_nearest_free_seat(player, r_hit, false, source);
 }
 
 } // namespace opennova::world

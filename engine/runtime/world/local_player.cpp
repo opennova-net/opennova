@@ -262,7 +262,7 @@ bool LocalPlayer::local_player_can_fire(const w::AiEntity *body) const {
 	return (flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 || ordinary;
 }
 
-void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out) {
+void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out, const VehicleOccupancySource *source) {
 	World &world = world_;
 	out.clear();
 	const w::Entity *player = world.registry.get(world.cached.local_player);
@@ -271,7 +271,7 @@ void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out) {
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
 	const w::AiEntity *body =
 			world.ai.for_handle(world.cached.local_player);
-	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(body), out);
+	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(body), out, nullptr, source);
 }
 
 bool LocalPlayer::local_player_dead() const {
