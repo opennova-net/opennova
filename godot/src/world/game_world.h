@@ -1,5 +1,8 @@
 #pragma once
 
+#include "world/world_source.h"
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -142,6 +145,18 @@ public:
 	};
 
 	GameWorld();
+
+	// The editor loads the authored nodes directly. Source-derived properties
+	// are inspectable, transient, and restored on unload. No mission session starts.
+	void set_world_source(const Ref<WorldSource> &p_source) { world_source_ = p_source; }
+	Ref<WorldSource> get_world_source() const { return world_source_; }
+	Error load_preview(const String &p_local_directory = String());
+	Error refresh_preview(Camera3D *p_camera);
+	void unload_preview();
+	bool is_preview_active() const { return preview_active_; }
+	Ref<Environment> get_preview_environment() const { return preview_environment_; }
+	String get_preview_status() const { return preview_status_; }
+	PackedStringArray get_preview_diagnostics() const { return preview_diagnostics_; }
 
 	// --- the exported boot options ------------------------------------------
 	// A mission (.bms) to boot into. When set, the mission's header selects the
@@ -513,6 +528,7 @@ public:
 	void on_nw_host_error(const String &p_message);
 
 protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 	static void _bind_methods();
 	void _notification(int p_what);
 
@@ -642,6 +658,16 @@ private:
 	// advances them from render_environment_nodes_frame (the render
 	// diagnostics report it).
 	bool env_presenters_world_driven_ = false;
+
+	PreviewProperties preview_properties_;
+	Ref<Environment> preview_environment_;
+	Ref<Environment> frame_clear_environment() const;
+	void set_preview_configuration(bool enabled);
+	Ref<WorldSource> world_source_;
+	bool preview_active_ = false;
+	String preview_status_ = "idle";
+	PackedStringArray preview_diagnostics_;
+	void collect_preview_diagnostics();
 
 	// --- the mission state ---
 	Ref<TerrainData> terrain_data_;

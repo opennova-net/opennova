@@ -1,0 +1,33 @@
+terrain_name     "Tmap"
+
+water_height     21
+horizon          0
+
+polytrn_colormap         ground.tga
+polytrn_detailmap        mnml_dm.tga
+polytrn_detailmap_c1     mnml_dc1.tga
+polytrn_detailmap_c2     mnml_dc1.tga
+polytrn_detailmap_c3     mnml_dc1.tga
+polytrn_detailmapdist    mnml_dc1.tga
+polytrn_polydata         Tmap.cpt
+polytrn_tilestrip        mnml_t.tga
+polytrn_charmap          Tmap_m.pcx
+polytrn_foliagemap       Tmap_f.pcx
+polytrn_detailblendmap   blend.tga
+
+polytrn_detaildensity		128
+polytrn_detaildensity2		8
+polytrn_sectorcount		8
+polytrn_wrapx			0
+polytrn_wrapy			0
+
+polytrn_origin			-4	-4
+
+polytrn_sectors			0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	1	3	0	0	0
+polytrn_sectors			0	0	0	2	4	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0
+polytrn_sectors			0	0	0	0	0	0	0	0

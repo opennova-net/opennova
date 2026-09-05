@@ -83,6 +83,26 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
+## Preview a world in the Godot editor
+
+Open `godot/project.godot`, then choose **Project > Tools > OpenNova: Open
+example world**. The plugin shows native terrain and mission placements before
+Play. Configure a WorldSource in the Inspector and use Reload after changing
+the selection or its source files.
+
+For a full retail world, copy a stock Joint Operations install's
+`resource.pff`, `localres.pff` and `language.pff` into the ignored
+`local-data/jo/` directory at the repository root. Choose **Project > Tools >
+OpenNova: Open retail world** to preview Operation: Emerald Scorpion
+(`res://examples/retail_world.tscn`).
+
+Select Terrain, FoliageDispatcher, MissionEnvironment, or Water in the scene tree
+to inspect their loaded configuration. Source-derived values are read-only during
+preview; Reload refreshes them from the native data.
+
+See [the preview guide](godot/addons/opennova_world/README.md) for source modes,
+local installation settings, and the first milestone's limits.
+
 ## Run the game and ONED
 
 ```bash

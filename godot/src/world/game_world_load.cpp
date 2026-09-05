@@ -401,7 +401,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 		local_character_profile_ =
 				avatar_db->character_join_profile_from_loadout(player_visuals_->spawn_loadout());
 	} else {
-		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
+		if (!preview_active_) UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
 		local_character_profile_.unref();
 	}
 	panm_clock_->sample_frame();
@@ -551,7 +551,8 @@ bool GameWorld::load_environment(const String &p_env_path) {
 	// (retail Environment_LoadTimeOfDayConfig @ 0x57db30).
 	Ref<EnvFile> overcast;
 	overcast.instantiate();
-	if (overcast->load_from_resource_root(resource_root_, "overcast.def") == OK) {
+	if (resource_root_->has_file("overcast.def") &&
+			overcast->load_from_resource_root(resource_root_, "overcast.def") == OK) {
 		env_->set_overcast_data(overcast);
 	} else {
 		env_->set_overcast_data(Ref<EnvFile>());

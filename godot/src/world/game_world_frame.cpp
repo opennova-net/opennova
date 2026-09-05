@@ -6,6 +6,7 @@
 // world_device_frame.gd (slice G10).
 
 #include "world/game_world.h"
+#include "render/render_view.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -253,6 +254,7 @@ void GameWorld::tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xf
 
 Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 		const Transform3D &p_camera_xform, double p_delta, const Ref<MissionFrameInput> &p_input) {
+	if (preview_active_) return Ref<MissionFrameOutcome>();
 	Ref<MissionFrameInput> input = p_input;
 	if (input.is_null()) {
 		input.instantiate();
@@ -670,7 +672,7 @@ void GameWorld::apply_scene_environment_frame() {
 	bool water_active = is_water_render_active() && is_inside_tree();
 	float eye_y = 0.0f;
 	if (water_active) {
-		Camera3D *cam = get_viewport()->get_camera_3d();
+		Camera3D *cam = render_camera();
 		if (cam == nullptr) {
 			water_active = false;
 		} else {
@@ -693,10 +695,7 @@ void GameWorld::apply_scene_environment_frame() {
 // The live camera the imminent render uses (null for a headless world or a
 // viewport without a current camera).
 Camera3D *GameWorld::render_camera() const {
-	if (is_inside_tree()) {
-		return get_viewport()->get_camera_3d();
-	}
-	return nullptr;
+	return RenderView::camera(const_cast<GameWorld *>(this));
 }
 
 // The view the imminent render uses: the live camera AFTER the local-view
@@ -815,8 +814,8 @@ void GameWorld::render_material_frame() {
 	// at a defined ladder slot (after occlusion resolves visibility, before
 	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
 	// computes model runtime constants during the render sector walk].
-	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
-	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	Camera3D *camera = render_camera();
+	Viewport *viewport = camera != nullptr ? camera->get_viewport() : nullptr;
 	if (camera != nullptr) {
 		const Vector2 viewport_size = viewport->get_visible_rect().size;
 		ObjectModel::update_authored_lods(camera->get_global_transform(), camera->get_fov(),
@@ -1068,10 +1067,8 @@ void GameWorld::stamp_iris_samples(const Transform3D &p_camera_xform) {
 
 void GameWorld::restore_idle_frame_clear_color() {
 	clear_env_generation_ = -1;
-	if (clear_color_ == nullptr || clear_color_->get_environment().is_null()) {
-		return;
-	}
-	clear_color_->get_environment()->set_bg_color(idle_frame_clear_color_);
+	const Ref<Environment> environment = frame_clear_environment();
+	if (environment.is_valid()) environment->set_bg_color(idle_frame_clear_color_);
 }
 
 // The witnessed frame clear: the horizon-blended skyfog above water, the lit
@@ -1086,10 +1083,8 @@ void GameWorld::restore_idle_frame_clear_color() {
 // must stay BG_COLOR with ambient disabled - BG_SKY with no sky renders black
 // and swallows these writes (GUT-pinned).
 void GameWorld::update_frame_clear_color() {
-	if (clear_color_ == nullptr || clear_color_->get_environment().is_null() || env_ == nullptr) {
-		return;
-	}
-	Ref<Environment> environment = clear_color_->get_environment();
+	Ref<Environment> environment = frame_clear_environment();
+	if (environment.is_null() || env_ == nullptr) return;
 	// The clear SELECTION (black indoors / skyfog above water / lit water
 	// underwater) is the engine's (environment_state.h carries the witness);
 	// this device classifies the eye and writes the color. The sentinel

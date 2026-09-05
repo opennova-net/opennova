@@ -132,9 +132,17 @@ void EnvFile::_bind_methods() {
 
 	ADD_GROUP("Models", "");
 	ClassDB::bind_method(D_METHOD("set_sun_3di", "value"), &EnvFile::set_sun_3di);
+	ClassDB::bind_method(D_METHOD("get_sun_3di"), &EnvFile::get_sun_3di);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "sun_3di"), "set_sun_3di", "get_sun_3di");
 	ClassDB::bind_method(D_METHOD("set_moon_3di", "value"), &EnvFile::set_moon_3di);
+	ClassDB::bind_method(D_METHOD("get_moon_3di"), &EnvFile::get_moon_3di);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "moon_3di"), "set_moon_3di", "get_moon_3di");
 	ClassDB::bind_method(D_METHOD("set_glare_3di", "value"), &EnvFile::set_glare_3di);
+	ClassDB::bind_method(D_METHOD("get_glare_3di"), &EnvFile::get_glare_3di);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "glare_3di"), "set_glare_3di", "get_glare_3di");
 	ClassDB::bind_method(D_METHOD("set_star_3di", "value"), &EnvFile::set_star_3di);
+	ClassDB::bind_method(D_METHOD("get_star_3di"), &EnvFile::get_star_3di);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "star_3di"), "set_star_3di", "get_star_3di");
 
 	ADD_GROUP("Time of Day", "tod_");
 	ClassDB::bind_method(D_METHOD("get_tod_keyframes"), &EnvFile::get_tod_keyframes);

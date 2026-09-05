@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include "render/visual_layers.h"
 
 #include <cmath>
@@ -44,6 +46,18 @@ class Weather;
 // RE record: docs/env/env-tod-re.md (env #28/#29/#30).
 class Water : public Node3D {
 	GDCLASS(Water, Node3D)
+
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "terrain_data", "water_height" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 
 public:
 	// The visual-layer allocation is the renderer's contract

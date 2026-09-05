@@ -198,6 +198,8 @@ add_library(${TARGET_NAME} SHARED
     world/item_effect_director.cpp
     world/occlusion_frame.cpp
     world/game_world.cpp
+    world/world_source.cpp
+    world/game_world_preview.cpp
     world/game_world_frame.cpp
     world/game_world_load.cpp
     world/game_world_effects.cpp

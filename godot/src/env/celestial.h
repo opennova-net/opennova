@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
@@ -42,6 +44,18 @@ class MissionEnvironment;
 class Celestial : public Node3D {
 	GDCLASS(Celestial, Node3D)
 
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "terrain_data" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
+
 public:
 	void set_environment_path(const NodePath &p_path);
 	NodePath get_environment_path() const { return environment_path_; }
@@ -50,6 +64,8 @@ public:
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
+	// Remove generated bodies and stars, preserving authored children.
+	void clear();
 	void set_environment_capture_layer_mask(uint32_t p_mask);
 	uint32_t get_environment_capture_layer_mask() const {
 		return environment_capture_layer_mask_;

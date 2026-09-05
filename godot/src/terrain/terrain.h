@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -33,6 +35,18 @@ using FoliageDetailPatch = opennova::FoliageDetailPatch;
 
 class Terrain : public Node3D {
 	GDCLASS(Terrain, Node3D)
+
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "terrain_data", "tile_info_override" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 
 public:
 	// The terrain shader's debug coloring (u_debug_mode), in the property
@@ -236,6 +250,7 @@ public:
 	int get_light_rows_total() const { return light_rows_total; }
 
 	void build();
+	void clear() { set_terrain_data(Ref<TerrainData>()); _clear_terrain(); }
 
 	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven

@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://4l3dbc2a7ie2"]
+
+[ext_resource type="PackedScene" path="res://game/world/game_world.tscn" id="1_world"]
+[ext_resource type="WorldSource" path="res://examples/world_preview.tres" id="2_source"]
+
+[node name="ExampleWorld" unique_id=823835054 instance=ExtResource("1_world")]
+world_source = ExtResource("2_source")

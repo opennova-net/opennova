@@ -1,4 +1,5 @@
 #include "terrain/foliage_dispatcher.h"
+#include "render/render_view.h"
 #include "util/data_format.h"
 
 #include "render/visual_layers.h"
@@ -254,6 +255,27 @@ void FoliageDispatcher::_bind_methods() {
       PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "silhouette_anchors"),
       "set_silhouette_anchors", "get_silhouette_anchors");
 
+  ClassDB::bind_method(D_METHOD("get_slot_meshes"), &FoliageDispatcher::get_slot_meshes);
+  ClassDB::bind_method(D_METHOD("get_slot_textures"), &FoliageDispatcher::get_slot_textures);
+  ClassDB::bind_method(D_METHOD("get_terrain"), &FoliageDispatcher::get_terrain);
+  ClassDB::bind_method(D_METHOD("get_weather"), &FoliageDispatcher::get_weather);
+  ADD_GROUP("Loaded Foliage", "");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_node", PROPERTY_HINT_NODE_TYPE,
+                            "Terrain", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
+               "", "get_terrain");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "weather_node", PROPERTY_HINT_NODE_TYPE,
+                            "Weather", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
+               "", "get_weather");
+  ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slots", PROPERTY_HINT_NONE, "",
+                            PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
+               "", "get_slot_diagnostics");
+  ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slot_meshes", PROPERTY_HINT_ARRAY_TYPE, "Mesh",
+                            PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
+               "", "get_slot_meshes");
+  ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slot_textures", PROPERTY_HINT_ARRAY_TYPE, "Texture2D",
+                            PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
+               "", "get_slot_textures");
+
   BIND_ENUM_CONSTANT(PROBE_DRAW_ALL);
   BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_HIGH);
   BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_LOW_FAR);
@@ -273,6 +295,7 @@ void FoliageDispatcher::_notification(int p_what) {
 void FoliageDispatcher::configure_slots(const Array &p_defs,
                                             const Array &p_meshes,
                                             const Array &p_fd_textures) {
+  slot_meshes_ = p_meshes.duplicate();
   palette_masks_.clear();
   slot_diagnostics_.clear();
   authored_slot_count_ = 0;
@@ -347,6 +370,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
   compiler_.configure_slots(runtime_slots_, source_geometry_);
   reset();
+  notify_property_list_changed();
 }
 
 void FoliageDispatcher::set_terrain(Terrain *p_terrain) {
@@ -1533,13 +1557,7 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
   input.view[8] = b[0][2]; input.view[9] = b[1][2]; input.view[10] = b[2][2]; input.view[11] = 0;
   input.view[12] = o.x; input.view[13] = o.y; input.view[14] = o.z; input.view[15] = 1;
 
-  Camera3D *active_camera = nullptr;
-  if (is_inside_tree()) {
-    Viewport *viewport = get_viewport();
-    if (viewport != nullptr) {
-      active_camera = viewport->get_camera_3d();
-    }
-  }
+  Camera3D *active_camera = RenderView::camera(const_cast<FoliageDispatcher *>(this));
   if (active_camera != nullptr) {
     const Projection proj = active_camera->get_camera_projection();
     for (int col = 0; col < 4; ++col) {

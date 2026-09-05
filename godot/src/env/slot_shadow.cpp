@@ -1,6 +1,7 @@
 #include "env/slot_shadow.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rd_texture_format.hpp>
@@ -282,6 +283,8 @@ void SlotShadow::_notification(int p_what) {
 			request_ready();
 		}
 	} else if (p_what == NOTIFICATION_READY) {
+		// The frozen editor preview has no runtime entity capture pass.
+		if (Engine::get_singleton()->is_editor_hint()) return;
 		_ensure_captures();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		_release_captures();
