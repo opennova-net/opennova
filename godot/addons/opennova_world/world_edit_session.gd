@@ -4,7 +4,7 @@ extends RefCounted
 ## Owns native documents independently of the active scene tab and its preview.
 ## Undo stores native field values; dirty state compares them to the last save.
 
-signal changed
+signal changed(session: WorldEditSession)
 
 const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
 # These are the same-basename sidecars consumed by the normal mission loader.
@@ -223,7 +223,7 @@ func apply_value(field: Field, value: Variant, slot: int = 0) -> void:
 			# Fresh native records preserve the unexposed color and attribute fields.
 			_terrain.set_foliage_defs(defs)
 	_last_error = ""
-	changed.emit()
+	changed.emit(self)
 
 
 func load_preview(world: GameWorld) -> Error:
@@ -256,7 +256,7 @@ func save() -> Error:
 	_remember_disk_versions()
 	ResourceRoot.bump_cache_epoch()
 	_last_error = ""
-	changed.emit()
+	changed.emit(self)
 	return OK
 
 

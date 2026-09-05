@@ -216,6 +216,8 @@ func test_settings_update_shares_documents_keeps_objects_and_never_saves_effecti
 	var mission := world.get_loaded_mission()
 	var terrain := world.get_terrain_data()
 	var population := world.get_static_live_population_count()
+	var objects := world.get_runtime().get_node("MissionObjects")
+	var first_object := objects.get_child(0)
 	var environment := world.get_node("MissionEnvironment") as MissionEnvironment
 	var starting_source := environment.environment_data.source_path
 	session.apply_value(Field.START_TIME, 21 * 256)
@@ -225,6 +227,8 @@ func test_settings_update_shares_documents_keeps_objects_and_never_saves_effecti
 	assert_same(world.get_loaded_mission(), mission)
 	assert_same(world.get_terrain_data(), terrain)
 	assert_eq(world.get_static_live_population_count(), population)
+	assert_same(world.get_runtime().get_node("MissionObjects"), objects)
+	assert_same(objects.get_child(0), first_object)
 	assert_eq(mission.get_info().start_time, 21 * 256)
 	assert_almost_eq(environment.get_time_of_day(), 2100.0, 0.01)
 	assert_almost_eq(environment.environment_data.sky_height, 211.0, 0.001)

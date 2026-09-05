@@ -1,12 +1,24 @@
 @tool
 extends EditorPlugin
-## The authored GameWorld nodes hold the loaded native configuration.
-## Native preview properties keep source-derived data out of scene saves.
+## Godot owns scene composition; editing sessions own the native documents.
+## Active scene nodes display those documents through a transient preview.
 
 const EXAMPLE := "res://examples/world_preview.tscn"
 const RETAIL := "res://examples/retail_world.tscn"
+const Inspector := preload("res://addons/opennova_world/world_inspector.gd")
+const RunSession := preload("res://modtools/game_run_session.gd")
 const TOOLBAR := preload("res://addons/opennova_world/toolbar.tscn")
 
+var _inspector: EditorInspectorPlugin
+var _session: WorldEditSession
+var _sessions: Dictionary[String, WorldEditSession] = {}
+var _scene_sessions: Dictionary[String, Array] = {}
+var _save_failed := false
+var _refresh_queued := false
+var _copy_dialog: ConfirmationDialog
+var _copy_name: LineEdit
+var _reload_dialog: ConfirmationDialog
+var _run := RunSession.new()
 var _toolbar: HBoxContainer
 var _status: Label
 var _details: AcceptDialog
@@ -24,17 +36,30 @@ var _generation := 0
 var _framed_scenes: Dictionary[String, bool] = {}
 
 
+func _get_plugin_name() -> String:
+	return "OpenNova World"
+
+
 func _enter_tree() -> void:
 	_toolbar = TOOLBAR.instantiate() as HBoxContainer
 	_status = _toolbar.get_node("Status") as Label
 	(_toolbar.get_node("Source") as Button).pressed.connect(_inspect_source)
-	(_toolbar.get_node("Reload") as Button).pressed.connect(_reload)
+	(_toolbar.get_node("Reload") as Button).pressed.connect(_request_reload)
 	(_toolbar.get_node("Frame") as Button).pressed.connect(_focus_preview)
 	(_toolbar.get_node("Folder") as Button).pressed.connect(_choose_folder)
 	(_toolbar.get_node("Details") as Button).pressed.connect(_show_details)
+	(_toolbar.get_node("Copy") as Button).pressed.connect(_choose_copy_name)
+	(_toolbar.get_node("Save") as Button).pressed.connect(_save_external_data)
+	(_toolbar.get_node("Play") as Button).pressed.connect(_play_world)
+	(_toolbar.get_node("Stop") as Button).pressed.connect(_run.stop)
+	_run.state_changed.connect(_run_state_changed)
+	_run.status_changed.connect(_run_status_changed)
+	_inspector = Inspector.new()
+	_inspector.setup(get_edit_session, edit_native_value)
+	add_inspector_plugin(_inspector)
 	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar)
 	_details = AcceptDialog.new()
-	_details.title = "World preview"
+	_details.title = "OpenNova world"
 	_toolbar.add_child(_details)
 	_folder = FileDialog.new()
 	_folder.title = "Local game data folder"
@@ -42,7 +67,25 @@ func _enter_tree() -> void:
 	_folder.access = FileDialog.ACCESS_FILESYSTEM
 	_folder.dir_selected.connect(_folder_selected)
 	_toolbar.add_child(_folder)
+	_copy_dialog = ConfirmationDialog.new()
+	_copy_dialog.title = "Create editable world copy"
+	_copy_dialog.ok_button_text = "Create Copy"
+	_copy_dialog.dialog_hide_on_ok = false
+	_copy_name = LineEdit.new()
+	_copy_name.max_length = 12
+	_copy_dialog.add_child(_copy_name)
+	_copy_dialog.confirmed.connect(_create_copy)
+	_toolbar.add_child(_copy_dialog)
+	_reload_dialog = ConfirmationDialog.new()
+	_reload_dialog.title = "Reload native world files"
+	_reload_dialog.ok_button_text = "Discard and Reload"
+	_reload_dialog.add_button("Save and Reload", true, "save")
+	_reload_dialog.confirmed.connect(load_selected_world.bind(true))
+	_reload_dialog.custom_action.connect(_save_and_reload)
+	_toolbar.add_child(_reload_dialog)
 	scene_changed.connect(_scene_changed)
+	scene_closed.connect(_scene_closed)
+	scene_saved.connect(_scene_saved)
 	add_tool_menu_item("OpenNova: Open example world", _open_world.bind(EXAMPLE))
 	add_tool_menu_item("OpenNova: Open retail world", _open_world.bind(RETAIL))
 	_scene_changed(EditorInterface.get_edited_scene_root())
@@ -50,7 +93,11 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	_generation += 1
+	_run.shutdown()
 	_release_world()
+	remove_inspector_plugin(_inspector)
+	_sessions.clear()
+	_scene_sessions.clear()
 	remove_tool_menu_item("OpenNova: Open example world")
 	remove_tool_menu_item("OpenNova: Open retail world")
 	remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar)
@@ -67,6 +114,7 @@ func _scene_changed(root: Node) -> void:
 		_activate.call_deferred(_generation)
 	else:
 		_status.text = "Open a configured GameWorld scene."
+		_refresh_status()
 
 
 func _find_world(node: Node) -> GameWorld:
@@ -85,7 +133,7 @@ func _activate(generation: int) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	if generation == _generation and is_instance_valid(_world):
-		_reload()
+		load_selected_world()
 		var scene_path := EditorInterface.get_edited_scene_root().scene_file_path
 		if not _framed_scenes.has(scene_path):
 			_focus_preview()
@@ -103,9 +151,12 @@ func _set_source(source: WorldSource) -> void:
 func _source_changed() -> void:
 	_stale = true
 	_status.text = "Source changed. Reload to update the preview."
+	_refresh_status()
+	_refresh_inspector()
 
 
 func _process(_delta: float) -> void:
+	_run.poll()
 	if is_instance_valid(_world) and _world.world_source != _source:
 		_set_source(_world.world_source)
 		_source_changed()
@@ -119,28 +170,245 @@ func _process(_delta: float) -> void:
 			_world.refresh_preview(camera)
 
 
-func _reload() -> void:
+## Also the undo target when a copied WorldSource is selected.
+func load_selected_world(reopen: bool = false) -> void:
 	_release_preview()
+	_session = null
 	if not is_instance_valid(_world):
 		return
 	_set_source(_world.world_source)
 	if _source == null:
 		_status.text = "Assign a WorldSource in the Inspector."
 		return
+	var key := WorldEditSession.selection_key(_source, _local_directory())
+	var session := _sessions.get(key) as WorldEditSession
+	var error := OK
+	if session == null:
+		session = WorldEditSession.new()
+		error = session.open(_source, _local_directory())
+		if error == OK:
+			_sessions[key] = session
+			session.changed.connect(_session_changed)
+	elif reopen:
+		error = session.reload_from_disk()
+	if error != OK:
+		_status.text = "World load failed. See Details."
+		_status.tooltip_text = session.get_last_error()
+		_refresh_inspector()
+		return
+	_session = session
+	var scene_path := EditorInterface.get_edited_scene_root().scene_file_path
+	if not _scene_sessions.has(scene_path):
+		_scene_sessions[scene_path] = []
+	if not _scene_sessions[scene_path].has(session):
+		_scene_sessions[scene_path].append(session)
 	for shader_name in RenderingServer.global_shader_parameter_get_list():
 		if String(shader_name).begins_with("opennova_"):
 			_globals[shader_name] = RenderingServer.global_shader_parameter_get(shader_name)
-	var error := _world.load_preview(_local_directory())
+	error = _session.load_preview(_world)
 	if error == OK:
 		_decode = DisplayDecode.new()
 		var clear := _world.get_node_or_null("ClearColor") as WorldEnvironment
 		_decode_compositor = _decode.create_view_compositor(clear.compositor if clear != null else null)
 		_world.add_child(_decode, false, Node.INTERNAL_MODE_BACK)
 	_stale = false
-	_status.text = "%s: %s" % [_source.mission_name, _world.get_preview_status().capitalize()]
-	if error != OK:
-		_status.text = "Preview failed. See Details."
-	_status.tooltip_text = "\n".join(_world.get_preview_diagnostics())
+	_refresh_status()
+	_refresh_inspector()
+
+
+func _request_reload() -> void:
+	if _source == null:
+		return
+	var selected := _sessions.get(WorldEditSession.selection_key(_source, _local_directory())) as WorldEditSession
+	if selected != null and selected.is_dirty():
+		_reload_dialog.dialog_text = "Pending changes in %s. Reload reads the files on disk." % ", ".join(selected.get_dirty_files())
+		_reload_dialog.popup_centered(Vector2i(560, 160))
+	else:
+		load_selected_world(true)
+
+
+func _save_and_reload(action: StringName) -> void:
+	if action == &"save" and _save_sessions():
+		_reload_dialog.hide()
+		load_selected_world(true)
+
+
+func get_edit_session(object: Object) -> WorldEditSession:
+	if _stale or _session == null or not is_instance_valid(_world) or not object is Node:
+		return null
+	return _session if object == _world or _world.is_ancestor_of(object as Node) else null
+
+
+func edit_native_value(session: WorldEditSession, field: WorldEditSession.Field,
+		value: Variant, slot: int = 0) -> String:
+	if session != _session or _stale or not is_instance_valid(_world):
+		return "Reload this world's selected source before editing."
+	var old_value: Variant = session.get_value(field, slot)
+	if old_value == value:
+		return ""
+	var reason := session.validate_edit(field, value, slot)
+	if not reason.is_empty():
+		return reason
+	var field_name := str(WorldEditSession.Field.keys()[field]).capitalize()
+	var action := "%s: %s" % [session.get_file_name(field), field_name]
+	if field >= WorldEditSession.Field.FOLIAGE_GRAPHIC:
+		action += " (slot %d)" % (slot + 1)
+	var undo := get_undo_redo()
+	# Native dirtiness is supplied by _get_unsaved_status; the .tscn need not
+	# change when only a BMS/TRN/ENV field changes.
+	undo.create_action(action, UndoRedo.MERGE_DISABLE, _world, false, false)
+	undo.add_do_method(session, "apply_value", field, value, slot)
+	undo.add_undo_method(session, "apply_value", field, old_value, slot)
+	undo.commit_action()
+	return ""
+
+
+func _session_changed(session: WorldEditSession) -> void:
+	_refresh_status()
+	if session == _session and not _refresh_queued:
+		_refresh_queued = true
+		_update_settings.call_deferred()
+
+
+func _update_settings() -> void:
+	_refresh_queued = false
+	if _session != null and is_instance_valid(_world) and _world.is_preview_active():
+		if _session.update_preview(_world) != OK:
+			_status.text = "Settings refresh failed. Reload the preview."
+		else:
+			_refresh_status()
+
+
+func _refresh_inspector() -> void:
+	var object := EditorInterface.get_inspector().get_edited_object()
+	if is_instance_valid(object):
+		object.notify_property_list_changed()
+
+
+func _refresh_status() -> void:
+	var active := _session != null and is_instance_valid(_world) and not _stale
+	(_toolbar.get_node("Copy") as Button).disabled = not active
+	(_toolbar.get_node("Play") as Button).disabled = not active or _run.is_stopping()
+	(_toolbar.get_node("Save") as Button).disabled = not _any_dirty()
+	(_toolbar.get_node("Stop") as Button).disabled = not _run.is_running() and not _run.is_stopping()
+	if active:
+		var suffix := " | Unsaved" if _session.is_dirty() else ""
+		_status.text = "%s: %s%s" % [_source.mission_name, _world.get_preview_status().capitalize(), suffix]
+		_status.tooltip_text = "\n".join(_session.get_dirty_files()) + "\n" + "\n".join(_world.get_preview_diagnostics())
+
+
+func _any_dirty() -> bool:
+	for session: WorldEditSession in _sessions.values():
+		if session.is_dirty():
+			return true
+	return false
+
+
+func _get_unsaved_status(for_scene: String) -> String:
+	var sessions: Array = _sessions.values() if for_scene.is_empty() else _scene_sessions.get(for_scene, [])
+	var files := PackedStringArray()
+	for session: WorldEditSession in sessions:
+		files.append_array(session.get_dirty_files())
+	return "Native world files have unsaved changes: " + ", ".join(files) if not files.is_empty() else ""
+
+
+func _scene_saved(_path: String) -> void:
+	_save_sessions()
+
+
+func _save_external_data() -> void:
+	_save_sessions()
+
+
+func _build() -> bool:
+	return _save_sessions()
+
+
+func _save_sessions() -> bool:
+	_save_failed = false
+	var errors := PackedStringArray()
+	for session: WorldEditSession in _sessions.values():
+		if session.save() != OK:
+			var reason := session.get_last_error()
+			var recovery := session.write_recovery(ProjectSettings.globalize_path("user://world-recovery"))
+			if not recovery.is_empty():
+				reason += "\nNative recovery files: " + recovery
+			else:
+				reason += "\nRecovery could not be written. Keep the editor open and use Create Copy."
+			errors.append(reason)
+	_save_failed = not errors.is_empty()
+	if _save_failed:
+		_show_error("\n".join(errors))
+		EditorInterface.mark_scene_as_unsaved.call_deferred()
+	_refresh_status()
+	return not _save_failed
+
+
+func _scene_closed(path: String) -> void:
+	# A successful save cleared dirtiness. Closing without saving is the
+	# editor's explicit Discard choice. Failed saves retain their sessions.
+	if _save_failed and _any_dirty():
+		return
+	_scene_sessions.erase(path)
+	for key: String in _sessions.keys():
+		var referenced := false
+		for sessions: Array in _scene_sessions.values():
+			referenced = referenced or sessions.has(_sessions[key])
+		if not referenced:
+			_sessions.erase(key)
+
+
+func _choose_copy_name() -> void:
+	if _session == null:
+		return
+	_copy_name.text = _source.mission_name.get_basename().left(7) + "_edit"
+	_copy_name.tooltip_text = "Creates BMS, TRN, ENV and available mission sidecars in " + _session.get_directory()
+	_copy_dialog.popup_centered(Vector2i(480, 110))
+	_copy_name.grab_focus()
+	_copy_name.select_all()
+
+
+func _create_copy() -> void:
+	if _session == null:
+		return
+	var source := _session.create_editable_copy(_copy_name.text.strip_edges())
+	if source == null:
+		_show_error(_session.get_last_error())
+		return
+	_copy_dialog.hide()
+	var undo := get_undo_redo()
+	undo.create_action("Select editable world copy", UndoRedo.MERGE_DISABLE, _world)
+	undo.add_do_property(_world, "world_source", source)
+	undo.add_undo_property(_world, "world_source", _source)
+	undo.add_do_method(self, "load_selected_world")
+	undo.add_undo_method(self, "load_selected_world")
+	undo.commit_action()
+
+
+func _play_world() -> void:
+	if _session == null or _stale or not _save_sessions():
+		return
+	var conflict := _session.disk_conflict()
+	if not conflict.is_empty():
+		_show_error(conflict)
+		return
+	if not _run.run_world(_session.get_directory(), _session.get_source()):
+		_show_error(_run.get_last_error())
+
+
+func _run_state_changed(_state: Dictionary) -> void:
+	_refresh_status()
+
+
+func _run_status_changed(text: String, kind: StringName) -> void:
+	(_toolbar.get_node("Play") as Button).tooltip_text = text
+	if kind == &"error":
+		_show_error(text)
+
+
+func _show_error(text: String) -> void:
+	_details.dialog_text = text
+	_details.popup_centered(Vector2i(640, 180))
 
 
 func _focus_preview() -> void:
@@ -218,6 +486,7 @@ func _release_world() -> void:
 	if is_instance_valid(_world) and _world.tree_exiting.is_connected(_release_world):
 		_world.tree_exiting.disconnect(_release_world)
 	_world = null
+	_session = null
 
 
 func _inspect_source() -> void:
@@ -247,7 +516,7 @@ func _folder_selected(path: String) -> void:
 	if _source != null and not _source.install_key.is_empty():
 		EditorInterface.get_editor_settings().set_project_metadata(
 				"opennova_world", _source.install_key, path)
-		_reload()
+		load_selected_world()
 
 
 func _show_details() -> void:
@@ -257,6 +526,8 @@ func _show_details() -> void:
 		lines.append("Source changed. Reload to apply the saved selection.")
 	if is_instance_valid(_world):
 		lines.append_array(_world.get_preview_diagnostics())
+	if not _status.tooltip_text.is_empty():
+		lines.append(_status.tooltip_text)
 	_details.dialog_text = "\n".join(lines)
 	_details.popup_centered(Vector2i(680, 240))
 

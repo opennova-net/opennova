@@ -286,3 +286,35 @@ func test_shutdown_waits_for_a_stop_already_under_way() -> void:
 	assert_eq(int(platform.waited[0]["timeout"]), Session.STOP_WAIT_MSEC)
 	assert_eq(platform.released, [pid])
 	assert_false(session.is_running())
+
+
+func test_play_world_preserves_each_source_lookup_policy_and_selected_mission() -> void:
+	for kind in [WorldSource.LOOSE_SOURCE, WorldSource.RETAIL_INSTALL, WorldSource.EDITABLE_GAME_DATA]:
+		var platform := FakePlatform.new()
+		var session := Session.new(platform)
+		var source := WorldSource.new()
+		source.source_kind = kind
+		source.mission_name = "island_edit.bms"
+		source.game_code = "JODEMO"
+		source.expansion = "jox01"
+		assert_true(session.run_world("C:/assets", source))
+		assert_eq(platform.spawned.size(), 1)
+		assert_true(platform.stage_calls.is_empty())
+		var args := platform.spawned[0]["args"] as PackedStringArray
+		assert_eq(args.has("--loose-root"), kind == WorldSource.LOOSE_SOURCE)
+		assert_eq(args.has("/d"), kind != WorldSource.RETAIL_INSTALL)
+		var mission_flag := "--mission" if kind == WorldSource.RETAIL_INSTALL else "--loose-mission"
+		assert_eq(args[args.find(mission_flag) + 1], "island_edit.bms")
+		assert_eq(args[args.find("/game") + 1], "jodemo")
+		assert_eq(args[args.find("/exp") + 1], "jox01")
+		assert_true(session.shutdown())
+		assert_eq(platform.killed, [4000], "Stop only owns the editor's child")
+
+
+func test_play_world_rejects_a_non_mission_before_launch() -> void:
+	var platform := FakePlatform.new()
+	var session := Session.new(platform)
+	var source := WorldSource.new()
+	source.mission_name = "../bad.bms"
+	assert_false(session.run_world("C:/assets", source))
+	assert_true(platform.spawned.is_empty())
