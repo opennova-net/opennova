@@ -1,6 +1,8 @@
 #pragma once
 
 #include <godot_cpp/classes/resource.hpp>
+#include "resource_index/resource_root.h"
+#include "mission/mission_data.h"
 
 namespace godot {
 
@@ -8,7 +10,7 @@ namespace godot {
 class WorldSource : public Resource {
 	GDCLASS(WorldSource, Resource)
 public:
-	enum SourceKind { LOOSE_SOURCE, RETAIL_INSTALL };
+	enum SourceKind { LOOSE_SOURCE, RETAIL_INSTALL, EDITABLE_GAME_DATA };
 private:
 	SourceKind source_kind_ = LOOSE_SOURCE;
 	String data_directory_;
@@ -16,9 +18,15 @@ private:
 	String mission_name_;
 	String game_code_ = "jo";
 	String expansion_;
+	Error last_error_code_ = OK;
+	String last_error_;
 protected:
 	static void _bind_methods();
 public:
+	Ref<ResourceRoot> open_root(const String &p_local_directory = String());
+	Ref<MissionData> open_mission(const Ref<ResourceRoot> &p_root);
+	Error get_last_error_code() const { return last_error_code_; }
+	String get_last_error() const { return last_error_; }
 	void set_source_kind(SourceKind p_value);
 	SourceKind get_source_kind() const { return source_kind_; }
 	void set_data_directory(const String &p_value);

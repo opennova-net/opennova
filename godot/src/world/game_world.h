@@ -151,6 +151,12 @@ public:
 	void set_world_source(const Ref<WorldSource> &p_source) { world_source_ = p_source; }
 	Ref<WorldSource> get_world_source() const { return world_source_; }
 	Error load_preview(const String &p_local_directory = String());
+	// Authoring sessions retain these documents across scene switches. The
+	// preview owns a separate effective ENV so mission overrides never edit the base.
+	Error load_preview_documents(const Ref<ResourceRoot> &p_root, const Ref<MissionData> &p_mission,
+			const Ref<TerrainData> &p_terrain, const Ref<EnvFile> &p_environment);
+	// Refresh the supported settings (clock, ENV, foliage) without replacing objects.
+	Error update_preview_settings(const Ref<EnvFile> &p_environment);
 	Error refresh_preview(Camera3D *p_camera);
 	void unload_preview();
 	bool is_preview_active() const { return preview_active_; }
@@ -626,6 +632,7 @@ private:
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
 	bool load_terrain(const String &p_trn_path);
+	bool bind_terrain_data(const Ref<TerrainData> &p_data);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();

@@ -873,6 +873,10 @@ bool GameWorld::load_terrain(const String &p_trn_path) {
 	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}
+	return bind_terrain_data(data);
+}
+
+bool GameWorld::bind_terrain_data(const Ref<TerrainData> &data) {
 	if (terrain_ == nullptr) {
 		return false;
 	}

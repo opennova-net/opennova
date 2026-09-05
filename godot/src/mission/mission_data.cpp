@@ -212,6 +212,7 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_event_action", "event_index", "action"), &MissionData::add_event_action);
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &MissionData::save_to_path);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
@@ -1051,6 +1052,15 @@ Error MissionData::save_file() {
 }
 
 Error MissionData::save_as(const String &path) {
+	const Error error = save_to_path(path);
+	if (error == OK) {
+		source_path = path;
+		modified = false;
+	}
+	return error;
+}
+
+Error MissionData::save_to_path(const String &path) {
 	last_error = String();
 	if (path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
@@ -1104,8 +1114,6 @@ Error MissionData::save_as(const String &path) {
 		last_error = String(error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
-	source_path = path;
-	modified = false;
 	return OK;
 }
 

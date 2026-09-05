@@ -562,6 +562,9 @@ void GameWorld::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "world_source", PROPERTY_HINT_RESOURCE_TYPE,
 			"WorldSource"), "set_world_source", "get_world_source");
 	ClassDB::bind_method(D_METHOD("load_preview", "local_directory"), &GameWorld::load_preview, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("load_preview_documents", "root", "mission", "terrain", "environment"),
+			&GameWorld::load_preview_documents);
+	ClassDB::bind_method(D_METHOD("update_preview_settings", "environment"), &GameWorld::update_preview_settings);
 	ClassDB::bind_method(D_METHOD("refresh_preview", "camera"), &GameWorld::refresh_preview);
 	ClassDB::bind_method(D_METHOD("unload_preview"), &GameWorld::unload_preview);
 	ClassDB::bind_method(D_METHOD("is_preview_active"), &GameWorld::is_preview_active);

@@ -96,6 +96,15 @@ environment, mission runtime, and audio under one embeddable root. The standalon
 game is the sole live mission runtime (ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
+**World source**:
+The selected native mission and game-data set from which a world is opened.
+_Avoid_: imported world, editor database
+
+**Editable world copy**:
+A separately named native mission, terrain, environment, and mission sidecars
+created from an existing world, sharing its unchanged supporting game assets.
+_Avoid_: imported project, baked scene
+
 **NovaWorld**:
 NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
 _Avoid_: emulator, lobby server

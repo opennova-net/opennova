@@ -1,6 +1,5 @@
 #include "world/game_world.h"
 
-#include <godot_cpp/classes/project_settings.hpp>
 #include "render/render_view.h"
 #include "object/material_info.h"
 #include "mission/mission_info.h"
@@ -39,32 +38,49 @@ Error GameWorld::load_preview(const String &p_local_directory) {
 	};
 	if (world_source_.is_null()) return fail(ERR_UNCONFIGURED, "Assign a WorldSource in the Inspector.");
 	const String name = world_source_->get_mission_name().strip_edges();
-	if (name.is_empty() || name != name.get_file() || name.get_extension().to_lower() != "bms")
-		return fail(ERR_INVALID_PARAMETER, "Mission must name a top-level .bms file.");
-	String directory = world_source_->get_data_directory().strip_edges();
-	if (!world_source_->get_install_key().is_empty()) {
-		directory = p_local_directory;
-		if (directory.is_empty())
-			return fail(ERR_UNCONFIGURED, "Set the local folder for install '" + world_source_->get_install_key() + String("'."));
-	}
-	if (directory.is_empty()) return fail(ERR_UNCONFIGURED, "Set a data directory or local install key.");
-	if (!directory.is_absolute_path()) directory = String("res://").path_join(directory);
-	directory = ProjectSettings::get_singleton()->globalize_path(directory);
-	Ref<ResourceRoot> root;
-	root.instantiate();
-	const bool loose = world_source_->get_source_kind() == WorldSource::LOOSE_SOURCE;
-	Error error = loose ? root->set_root_dir(directory) :
-			root->mount_runtime(directory, world_source_->get_expansion(), false, world_source_->get_game_code());
-	if (error != OK) return fail(error, root->get_last_error());
-	Ref<MissionData> mission;
-	mission.instantiate();
-	error = mission->open_from_resource_root(root, name, loose ?
-			ResourceRoot::LOOKUP_SESSION_DEFAULT : ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY);
-	if (error != OK) return fail(error, name + String(": ") + mission->get_last_error());
+	Ref<ResourceRoot> root = world_source_->open_root(p_local_directory);
+	if (root.is_null()) return fail(world_source_->get_last_error_code(), world_source_->get_last_error());
+	Ref<MissionData> mission = world_source_->open_mission(root);
+	if (mission.is_null()) return fail(world_source_->get_last_error_code(), world_source_->get_last_error());
+	Ref<TerrainData> terrain;
+	terrain.instantiate();
 	const String terrain_name = mission->get_terrain_ref() + String(".trn");
 	const String environment_name = mission->get_environment_ref() + String(".env");
 	for (const String &dependency : { terrain_name, environment_name }) {
 		if (!root->has_file(dependency))
+			return fail(ERR_FILE_NOT_FOUND, name + String(" requires ") + dependency);
+	}
+	if (terrain->load_from_resource_root(root, terrain_name) != OK)
+		return fail(ERR_CANT_OPEN, "Could not load " + terrain_name);
+	Ref<EnvFile> environment;
+	environment.instantiate();
+	if (environment->load_from_resource_root(root, environment_name) != OK)
+		return fail(ERR_CANT_OPEN, "Could not load " + environment_name);
+	return load_preview_documents(root, mission, terrain, environment);
+}
+
+Error GameWorld::load_preview_documents(const Ref<ResourceRoot> &p_root,
+		const Ref<MissionData> &p_mission, const Ref<TerrainData> &p_terrain,
+		const Ref<EnvFile> &p_environment) {
+	if (!is_node_ready() || (world_ready_ && !preview_active_)) return ERR_BUSY;
+	unload_preview();
+	preview_diagnostics_.clear();
+	preview_status_ = "failed";
+	auto fail = [&](Error error, const String &message) {
+		unload_preview();
+		preview_status_ = "failed";
+		preview_diagnostics_.append(message);
+		return error;
+	};
+	if (world_source_.is_null() || p_root.is_null() || p_mission.is_null() || !p_mission->is_loaded() ||
+			p_terrain.is_null() || !p_terrain->is_loaded() || p_environment.is_null() ||
+			!p_environment->is_loaded() || p_environment->has_mission_overrides())
+		return fail(ERR_INVALID_PARAMETER, "Preview requires an open source and native base documents.");
+	const String name = world_source_->get_mission_name().strip_edges();
+	const String terrain_name = p_mission->get_terrain_ref() + String(".trn");
+	const String environment_name = p_mission->get_environment_ref() + String(".env");
+	for (const String &dependency : { terrain_name, environment_name }) {
+		if (!p_root->has_file(dependency))
 			return fail(ERR_FILE_NOT_FOUND, name + String(" requires ") + dependency);
 	}
 	if (terrain_ == nullptr || env_ == nullptr)
@@ -79,28 +95,50 @@ Error GameWorld::load_preview(const String &p_local_directory) {
 	mission_file_ = name;
 	terrain_file_ = terrain_name;
 	env_file_ = environment_name;
-	resource_root_ = root;
-	load_mission_tile_info(name, root, PackedByteArray(), false);
+	resource_root_ = p_root;
+	load_mission_tile_info(name, p_root, PackedByteArray(), false);
 	if (!load_environment(environment_name))
 		return fail(ERR_CANT_OPEN, "Could not load " + environment_name);
-	apply_mission_environment_overrides(mission);
-	Ref<MissionInfo> info = mission->get_info();
+	if (!env_->get_environment_data()->load_bytes(p_environment->to_bytes()))
+		return fail(ERR_PARSE_ERROR, "Could not apply the environment document.");
+	apply_mission_environment_overrides(p_mission);
+	Ref<MissionInfo> info = p_mission->get_info();
 	env_->configure_mission_clock(info->get_start_time(), info->get_minutes_per_day());
 	prepare_autonomous_weather();
 	set_weather_world_tick_driven(true);
-	if (!load_terrain(terrain_name))
+	if (!bind_terrain_data(p_terrain))
 		return fail(ERR_CANT_OPEN, "Could not load " + terrain_name);
 	if (sky_dome_ != nullptr && !sky_dome_->is_built()) sky_dome_->build();
 	if (water_ != nullptr && !water_->is_built()) water_->build();
-	loaded_mission_ = mission;
+	loaded_mission_ = p_mission;
 	loaded_mission_file_ = name;
 	start_mission_root();
-	place_mission_objects(mission);
+	place_mission_objects(p_mission);
 	// Placement samples the runtime clock. Reset its shared sample before
 	// the first editor render and never sample the wall clock in preview.
 	panm_clock_->sample(0, -1);
 	world_ready_ = true;
 	set_water_world_rendering_enabled(true);
+	collect_preview_diagnostics();
+	preview_status_ = preview_diagnostics_.is_empty() ? "ready" : "partial";
+	return OK;
+}
+
+Error GameWorld::update_preview_settings(const Ref<EnvFile> &p_environment) {
+	if (!preview_active_ || !world_ready_ || env_ == nullptr) return ERR_UNAVAILABLE;
+	if (p_environment.is_null() || !p_environment->is_loaded() || p_environment->has_mission_overrides())
+		return ERR_INVALID_PARAMETER;
+	Ref<EnvFile> effective = env_->get_environment_data();
+	if (effective.is_null() || !effective->load_bytes(p_environment->to_bytes())) return ERR_PARSE_ERROR;
+	apply_mission_environment_overrides(loaded_mission_);
+	Ref<MissionInfo> info = loaded_mission_->get_info();
+	env_->configure_mission_clock(info->get_start_time(), info->get_minutes_per_day());
+	prepare_autonomous_weather();
+	set_weather_world_tick_driven(true);
+	if (weather_ != nullptr) weather_->resync_colors();
+	configure_foliage();
+	if (environment_cube_ != nullptr) environment_cube_->force_capture();
+	preview_diagnostics_.clear();
 	collect_preview_diagnostics();
 	preview_status_ = preview_diagnostics_.is_empty() ? "ready" : "partial";
 	return OK;
