@@ -76,21 +76,17 @@ int main() {
 		def_free_items(&items);
 	}
 
-	// weapon.def — one selectable rifle so a joined player spawns armed, and
-	// the first-person viewmodel slice that rifle submits. The name is the one
-	// the viewmodel bring-up resolves, so a rename silently blanks the view.
+	// weapon.def — the ONE rifle: WPN_M4AUTO, the spawn/equip default the engine
+	// resolves by LITERAL [orig: PlayerClass_InitEntity @ 0x4B1116 ->
+	// AvatarDef_FindIndexByName("WPN_M4AUTO")], carrying the first-person
+	// viewmodel slice the bring-up set ships (the AKM model). A set without that
+	// name spawns the player unarmed; a second name would only restate the rows.
 	{
 		DefWeaponsFile weapons{};
 		CHECK(def_parse_weapons(path("weapon.def").c_str(), &weapons) == 0, "weapon.def parses");
-		CHECK(weapons.count >= 1, "weapon.def has at least one weapon");
-		// Both names the engine addresses by LITERAL: the spawn/equip default
-		// [orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]
-		// and the one the first-person viewmodel bring-up resolves. A minimal set
-		// missing either spawns the player unarmed or blanks the view.
-		CHECK(find_weapon(weapons, "WPN_M4AUTO") != nullptr,
-				"weapon.def carries WPN_M4AUTO (the spawn/equip default)");
-		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_AK47AUTO");
-		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the bring-up viewmodel name)");
+		CHECK(weapons.count == 1, "weapon.def carries exactly one weapon");
+		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_M4AUTO");
+		CHECK(rifle != nullptr, "weapon.def carries WPN_M4AUTO (the spawn/equip default)");
 		if (rifle != nullptr) {
 			CHECK(std::strcmp(rifle->gfx1, "AKM_1st") == 0, "the rifle names its first-person model");
 			CHECK(std::strcmp(rifle->animadm, "AKM_1ST") == 0, "the rifle names its first-person .adm");

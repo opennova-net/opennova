@@ -83,12 +83,12 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 
 | File | Origin | Notes |
 |---|---|---|
-| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, and the house (`108001`, in the building pool) 24 m north of the player start (BMS axes: x east, y north, z up). Its first single-player kit entry is `WPN_AK47AUTO`: offline mission promotion overrides the hardcoded M4 fallback, while a live session skips the BMS kit and uses the player's profile. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
+| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, and the house (`108001`, in the building pool) 24 m north of the player start (BMS axes: x east, y north, z up). No offline weapon kit: the player spawns with the engine's `WPN_M4AUTO` default, the one rifle `weapon.def` ships. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
 | `mnml.trn` + `mnml.cpt` | terrain writers (`save_trn` + the CDEP builder) | the terrain config and its baked polydata. JO reads the compressed CDEP depth `[orig: Terrain_LoadLodStorage @ 0x603550 — the 'CDEP' fourcc compare @ 0x603620 and the 'DPTH' compare @ 0x6037b3]`; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
-| `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries answer the two names the engine addresses by LITERAL: `WPN_M4AUTO` remains the hardcoded spawn fallback resolved by name `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player can spawn unarmed), while `mnml.bms` promotes `WPN_AK47AUTO` as the actual offline equipped identity and first-person viewmodel name. Both carry the same viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. ONE entry, `WPN_M4AUTO`: the spawn/equip default the engine resolves by LITERAL `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without a definition of that name the player spawns unarmed), carrying the viewmodel the bring-up set has (the AKM first-person model) — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
 | `house.3di` + `wall.tga`/`roof.tga`/`wood.tga` | `minimal_3di_gen` (the `house` recipe through `threedi_3di3_write`; the swatches minted beside it) | the set's own model, byte-identical to `fixtures/threedi/synth/house.3di`: one inert part, three boxes (an 8 x 10 x 4 m wall block, the roof slab, the chimney) over a face box, three CB volumes and the collision-only water-tank prism off its east side; every material `FF_ST_OP`, served by the authored `_ffp.fx`. The three textures are 16 x 16 flat-colour 24 bpp TGAs (the shape of the `mnml_*` terrain art retail already loads loose). |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
@@ -290,10 +290,9 @@ rather than asserting byte-equality against a throwaway generator:
 |---|---|
 | `minimal_rtxt_gen` | the string tables emit + round-trip |
 | `minimal_3di_gen` | `house.3di` byte-equals the `house` recipe minted through `threedi_3di3_write` (the `fixtures/threedi/synth` twin) and `wall.tga`/`roof.tga`/`wood.tga` byte-equal their swatch recipes (`minimal_3di_gen_test --write` re-emits them) |
-| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house` |
+| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house`; `weapon.def` carries exactly one weapon, `WPN_M4AUTO`, with the AKM viewmodel slice |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
-| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, starts its offline kit with `WPN_AK47AUTO`, and places the house (`108001`) exactly once (`minimal_map_validate_test --write` performs both surgical edits) |
-| `minimal_runtime_loadout` | the production mission kernel boots the real minimal tree and the promoted kit, equipped inventory slot, and player entity all resolve to `WPN_AK47AUTO` |
+| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, carries no offline weapon kit, and places the house (`108001`) exactly once (`minimal_map_validate_test --write` performs the surgical edits) |
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes, and so do the house's three swatches; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
@@ -302,10 +301,9 @@ rather than asserting byte-equality against a throwaway generator:
 | `minimal_pff_manifest` | the explicit `assets/.gitignore` authored manifest is complete and its loose set retains the AK viewmodel + player locomotion chain |
 
 The BMS remains ONED-authored; `minimal_map_validate_test --write` is the
-repeatable command for applying these edits. It adds the singleton AK row when no
-kit exists, or changes only the first row's identity while preserving its
-fields and every remaining row; adds the house building when no record names
-`108001`; then emits through `bms::write`.
+repeatable command for applying these edits. It clears a weapon kit if one is
+present, adds the house building when no record names `108001`, and emits
+through `bms::write`; every other record and field is preserved.
 
 ## Packaging
 

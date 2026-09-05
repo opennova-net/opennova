@@ -7,14 +7,14 @@
 //
 // What is worth guarding is what the ENGINE needs, checked against the committed file:
 // it parses, it places the player, it points at the minimal terrain, it starts in daylight,
-// its offline kit equips the AK-47 by its real weapon identity, and it places the set's own
-// model, the house (items.def 108001, assets/house.3di).
+// it carries no offline weapon kit (the one rifle the set ships is the engine's own WPN_M4AUTO
+// spawn default, so a kit would only restate it), and it places the set's own model, the
+// house (items.def 108001, assets/house.3di).
 //
 // `--write` is deliberately a surgical editor rather than a generator: it loads the committed
-// ONED-authored mission, adds the AK kit row when the mission has no kit (the PR #610 starting
-// state) or changes only the first row's name, adds the house when no building names it, and
-// emits it through the production BMS writer (bms::write, from scratch). Existing rows and
-// fields are otherwise preserved.
+// ONED-authored mission, clears a kit if one is present, adds the house when no building names
+// it, and emits it through the production BMS writer (bms::write, from scratch). Existing
+// records and fields are otherwise preserved.
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
@@ -29,7 +29,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace {
@@ -45,7 +44,6 @@ int fail = 0;
 	} while (0)
 
 const char *kMapBase = "mnml";
-const char *kFirstPlayerWeapon = "WPN_AK47AUTO";
 // Only ids the engine addresses BY NUMBER are reserved; 106001 is the player start marker the
 // engine reads to place the hardcoded player item. The team starts are the MP spawn markers
 // the host/join acceptance step depends on -- a map without both loads completely and leaves
@@ -81,6 +79,13 @@ bool is_lfs_pointer(const std::vector<uint8_t> &b) {
 	static const char kSentinel[] = "version https://git-lfs";
 	const size_t n = sizeof(kSentinel) - 1;
 	return b.size() >= n && std::equal(kSentinel, kSentinel + n, b.begin());
+}
+
+int count_houses(const opennova::bms::File &doc) {
+	int houses = 0;
+	for (const opennova::bms::Entity &rec : doc.buildings)
+		if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++houses;
+	return houses;
 }
 
 } // namespace
@@ -134,40 +139,26 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
+		bool changed = false;
+
+		// No offline kit: the player spawns with the engine's WPN_M4AUTO default, the one rifle
+		// weapon.def ships. A kit here would either restate that or name a weapon the set does
+		// not carry.
 		std::vector<opennova::mission::WeaponLoadoutEntry> loadout =
 				opennova::mission::weapon_loadout(doc);
-		std::string previous_weapon;
-		bool weapon_changed = false;
-		if (write_mode && (loadout.empty() || loadout.front().name != kFirstPlayerWeapon)) {
-			if (loadout.empty()) {
-				previous_weapon = "<none>";
-				opennova::mission::WeaponLoadoutEntry first;
-				first.name = kFirstPlayerWeapon;
-				first.ammo_primary = "6";
-				first.ammo_secondary = "-1";
-				first.flags = "-1";
-				loadout.push_back(std::move(first));
-			} else {
-				previous_weapon = loadout.front().name;
-				loadout.front().name = kFirstPlayerWeapon;
-			}
-			CHECK(opennova::mission::set_weapon_loadout(doc, loadout, error), error.c_str());
-			weapon_changed = fail == 0;
+		if (write_mode && !loadout.empty()) {
+			CHECK(opennova::mission::set_weapon_loadout(doc, {}, error), error.c_str());
+			loadout.clear();
+			changed = true;
 		}
-		CHECK(!loadout.empty(), "the mission carries an offline weapon kit");
-		if (!loadout.empty())
-			CHECK(loadout.front().name == kFirstPlayerWeapon,
-			      "the first offline weapon is WPN_AK47AUTO (the actual AK identity)");
+		CHECK(loadout.empty(), "the mission carries no offline weapon kit (the engine default equips)");
 
-		int houses = 0;
-		for (const opennova::bms::Entity &rec : doc.buildings)
-			if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++houses;
-		bool house_added = false;
+		int houses = count_houses(doc);
 		if (write_mode && houses == 0) {
 			opennova::mission::add_entity(doc, opennova::mission::EntityKind::Building, kHouseItemId,
 			                              kHousePlacement);
 			houses = 1;
-			house_added = true;
+			changed = true;
 		}
 		CHECK(houses == 1, "the map places exactly one house (108001), the set's own model");
 
@@ -193,7 +184,7 @@ int main(int argc, char **argv) {
 		      "the mission starts in daylight (start_time is Q8.8 HOURS; 0 means midnight, and "
 		      "the header overrides the .env's own curtime)");
 
-		if (write_mode && (weapon_changed || house_added) && fail == 0) {
+		if (write_mode && changed && fail == 0) {
 			std::vector<uint8_t> generated;
 			CHECK(opennova::bms::write(doc, generated, error), error.c_str());
 
@@ -203,14 +194,9 @@ int main(int argc, char **argv) {
 				CHECK(opennova::bms::parse(generated.data(), generated.size(), verify, error),
 				      "rewritten mnml.bms parses");
 			if (fail == 0) {
-				const std::vector<opennova::mission::WeaponLoadoutEntry> written_loadout =
-						opennova::mission::weapon_loadout(verify);
-				CHECK(!written_loadout.empty() && written_loadout.front().name == kFirstPlayerWeapon,
-				      "rewritten mnml.bms keeps WPN_AK47AUTO first");
-				int written_houses = 0;
-				for (const opennova::bms::Entity &rec : verify.buildings)
-					if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++written_houses;
-				CHECK(written_houses == 1, "rewritten mnml.bms places the house once");
+				CHECK(opennova::mission::weapon_loadout(verify).empty(),
+				      "rewritten mnml.bms carries no kit");
+				CHECK(count_houses(verify) == 1, "rewritten mnml.bms places the house once");
 			}
 
 			if (fail == 0) {
@@ -221,17 +207,13 @@ int main(int argc, char **argv) {
 					             static_cast<std::streamsize>(generated.size()));
 				CHECK(output.good(), "cannot write mnml.bms");
 				if (output.good())
-					std::printf("wrote %s (kit %s -> %s; house %s, %zu bytes)\n", bms_path.c_str(),
-					            weapon_changed ? previous_weapon.c_str() : "kept", kFirstPlayerWeapon,
-					            house_added ? "added" : "kept", generated.size());
+					std::printf("wrote %s (%zu bytes)\n", bms_path.c_str(), generated.size());
 			}
 		} else if (write_mode && fail == 0) {
-			std::printf("%s already starts with %s and places the house\n", bms_path.c_str(),
-			            kFirstPlayerWeapon);
+			std::printf("%s already carries no kit and places the house\n", bms_path.c_str());
 		}
 	}
 
-	if (fail == 0)
-		std::printf("OK: minimal map .env + .bms valid; offline kit starts with AK-47; the house stands\n");
+	if (fail == 0) std::printf("OK: minimal map .env + .bms valid; no kit; the house stands\n");
 	return fail == 0 ? 0 : 1;
 }

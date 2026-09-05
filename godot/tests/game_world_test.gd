@@ -901,9 +901,6 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 		if FileAccess.file_exists(target):
 			assert_eq(DirAccess.remove_absolute(target), OK)
 		assert_eq(DirAccess.copy_absolute(RetailData.fixture(rel), target), OK)
-	# The committed mission's own AK kit would outrank the profile offline.
-	WorldFixture.write_mission_without_loadout(self,
-			root_dir.path_join("mnml.bms"), root_dir.path_join("mnml.bms"))
 
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()
@@ -2061,19 +2058,19 @@ func test_unload_forgets_the_viewmodel_def_memo() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	# The debug viewmodel rig (the `set_viewmodel_weapon` control's seam).
-	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4AUTO"))
 	assert_not_null(world.local_player_viewmodel_def())
-	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
+	assert_eq(world.local_player_weapon_name(), "WPN_M4AUTO",
 			"the first decode installs the weapon dict")
 	world.unload()
 	# The same resolved name in the next mission must re-decode from that
 	# mission's weapon.def instead of returning the memo over an empty dict
 	# (unload drops the previous entity's selection, so it is re-rigged).
 	assert_eq(world.load_mission("mnml.bms"), OK)
-	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4AUTO"))
 	var again: PlayerViewmodelDef = world.local_player_viewmodel_def()
 	assert_not_null(again)
-	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
+	assert_eq(world.local_player_weapon_name(), "WPN_M4AUTO",
 			"a reload with the same weapon name repopulates the weapon dict")
 	world.unload()
 
@@ -2092,17 +2089,17 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 
 	# The root stays mounted across unload, so the next entity's rig resolves
 	# against its weapon.def even before the next mission loads.
-	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4AUTO"))
 	var restored: PlayerViewmodelDef = world.local_player_viewmodel_def()
 	assert_not_null(restored, "a new mission is not stuck with the previous entity's NONE state")
 	if restored != null:
-		assert_eq(restored.weapon_name, "WPN_AK47AUTO",
+		assert_eq(restored.weapon_name, "WPN_M4AUTO",
 			"the next mission can resolve a weapon after the previous entity selected NONE")
 
 
 # --- The real first-person viewmodel over a staged root -----------------------
 # The staged weapon.def rows, appended to the minimal pack's file (the same row
-# shape as its WPN_AK47AUTO: the magazine/reserve keys the parser reads plus
+# shape as its WPN_M4AUTO: the magazine/reserve keys the parser reads plus
 # the nine action rows the FSM bakes, so the sim's retained table accepts the
 # mount). WPN_TEST names a synthetic FP gun; WPN_AVENGER is a valid
 # retail-shaped emplaced definition with NO fpModel [orig: the Flags 0x80

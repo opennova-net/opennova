@@ -205,9 +205,6 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	world.set_local_player_spawn_loadout(loadout)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	# The committed mission's own AK kit outranks the profile offline; this
-	# harness drives the profile's M4 + satchel, so the kit is cleared.
-	assert_true(mission.set_weapon_loadout([]), "the authored kit clears for the profile harness")
 	if baked_terrain:
 		assert_true(mission.set_header_string("terrain", "Tmap"))
 		assert_true(mission.set_header_string("environment", "mnml"))
