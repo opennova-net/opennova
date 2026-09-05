@@ -1,5 +1,6 @@
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/world.h>
+#include <base/io/rotating_prng.h>
 #include <runtime/devtools/tick_profile.h>
 
 #include <algorithm>
@@ -105,6 +106,12 @@ static void pose_emplacement_attachments(World &world) {
 // World
 // ----------------------------------------------------------------------------
 
+// Precipitation_Reset precedes mission entities and consumes the shared B stream.
+// [orig: Game_StartMission @ 0x524360, seed @ 0x52460B / reset @ 0x5249D4]
+World::World() : commands(*this), vehicles(*this), zones(*this) {
+    weather.precipitation.reset(&io::rotating_prng_callback, &prng16_b_state);
+}
+
 uint16_t World::next_prng16() noexcept {
     // [orig: PRNG_Next16 @0x6130a0 / @0x613140, both over
     // dword_31BFBB0] s = rol4(s + rol11(s)) ^ 1; return low word.
@@ -113,6 +120,11 @@ uint16_t World::next_prng16() noexcept {
     next = ((next << 4) | (next >> 28)) ^ 1u;
     prng16_state = next;
     return static_cast<uint16_t>(next);
+}
+
+// [orig: PRNG_Next16_B @ 0x6130F0]
+uint16_t World::next_prng16_b() noexcept {
+    return io::rotating_prng_next16(prng16_b_state);
 }
 
 void World::add_system(ISystem *sys) {
@@ -189,6 +201,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         throwables.events.clear();
         throwables.tick(*this, ai.collision, tables.terrain);
     }
+    if (gameplay) minefields.tick_pool(*this, 1);
     // The precipitation fall: while it rains every drop slot lowers by the
     // kind's per-tick amount, once per ENTITY update — retail runs it inside
     // Entity_UpdateAllEntities after the pool-1 walk and before
@@ -253,6 +266,10 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
                            water_z, out.destruction);
         destruction_tick_dead_items(*this, tables.terrain, water_z, out.destruction);
         death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
+    }
+    if (gameplay) {
+        minefields.tick_pool(*this, 2);
+        minefields.tick_pool(*this, 3);
     }
     lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
     // The waypoint current-selection pass, from the local player's position (the
@@ -363,6 +380,8 @@ World::Snapshot World::snapshot() const {
     s.logic_tick = logic_tick;
     s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
+    s.prng16_b_state = prng16_b_state;
+    s.cease_fire = rules.cease_fire;
     s.crt_rand_state = crt_rand.state;
     s.local_player = cached.local_player;
     return s;
@@ -381,6 +400,9 @@ void World::restore(const Snapshot &s) {
     logic_tick = s.logic_tick;
     preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
+    prng16_b_state = s.prng16_b_state;
+    rules.cease_fire = s.cease_fire;
+    minefields.remote_actors.clear();
     crt_rand.state = s.crt_rand_state;
     // Reset per-tick health/proximity counters, then restore only the stable
     // ownership identity captured with the registry. A post-snapshot player may

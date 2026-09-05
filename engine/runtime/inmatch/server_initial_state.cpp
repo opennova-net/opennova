@@ -205,6 +205,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			ctx.is_in_session != 0) {
 		game_flags |= 0x02u;
 	}
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @ 0x502D10, flag store @ 0x502DC7]
+	if (ctx.world != nullptr && ctx.world->rules.cease_fire) game_flags |= 8u;
 	b.push_back(game_flags);
 	// bit0 = SpawnZoneList nonempty; bit1 = the target-less spawn restriction
 	// while in session. [orig: NetPacket_WriteWorldStateLoad0x0F

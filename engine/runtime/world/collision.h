@@ -683,6 +683,7 @@ struct ProjectileTrace {
     uint32_t ammo_flags = 0;
     // The additional per-projectile exclusion carried by the retail ray context.
     EntityHandle extra_ignore;
+    EntityHandle mount_ignore; // explicit ray[18], used by the lndm ground query
     // Remote decoded proxies (person + dynamic) are a client-presentation input
     // only. The caller opts in explicitly for a VisualOnly round and supplies
     // the wire shooter identity for the normal flag-4-aware self-collision rule.
@@ -706,6 +707,7 @@ struct ProjectileTrace {
 };
 
 struct ProjectileHit {
+    int32_t distance_q16 = 0;
     ProjectileHitClass hit_class = ProjectileHitClass::None;
     EntityHandle geometry_entity;
     int32_t t_q16 = 0x10000;
@@ -975,6 +977,9 @@ public:
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
     // snapshots at the normal tick seam before tracing.
+    int32_t minefield_ground(const World &world, EntityHandle source,
+                             FixedVec3 position, bool indoors) const;
+
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;
 
@@ -1110,6 +1115,14 @@ public:
     // don't exist in our world yet (organics are pool 0, unwalked, like retail).
     bool raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                        EntityHandle exclude_a, EntityHandle exclude_b);
+    // Terrain plus the querying entity's building-candidate slice. A null
+    // second entity permits a buried endpoint; height_offset raises/lowers the
+    // terrain ray and shrinks/inflates the solid clip. Audio and blasts share
+    // this distinct retail query [orig: Entity_CheckLineOfSightTerrainAndEntities
+    // @ 0x53B130; Physics_CheckTerrainLineOfSight @ 0x53B080].
+    bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
+                         const int32_t start[3], const int32_t end[3],
+                         int32_t height_offset);
     // Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
@@ -1585,12 +1598,6 @@ private:
     // rejects models without a solid volume.
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
                       int32_t &radius_out, bool solid_only) const;
-
-    // One sound-occlusion LOS ray (terrain + building legs); true = clear.
-    // [orig: Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130]
-    bool sound_los_clear(World &world, EntityHandle listener, EntityHandle source,
-                         const int32_t start[3], const int32_t end[3],
-                         int32_t height_offset);
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed

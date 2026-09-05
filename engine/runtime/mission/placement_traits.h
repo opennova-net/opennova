@@ -4,6 +4,8 @@
 // (engine/formats/def carries the attrib bit constants) and the mission
 // entity record; the shell applier owns every node/mesh build.
 #pragma once
+#include <base/io/strutil.h>
+#include <string_view>
 
 #include <cstdint>
 
@@ -81,6 +83,12 @@ inline bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 // building section handles; docs/render/render-occlusion-re.md). Multiple
 // authored RLODs are no reason to leave the batch: the retained populations
 // select the level per instance.
+// [orig: Entity_RenderBoneAttachments @ 0x441660] Its source model selects LOD;
+// the callback submits only its marker submodels. Keep that source addressable.
+inline bool uses_submodel_renderer(std::string_view tag) {
+    return strutil::iequals(tag.substr(0, 4), "lndm");
+}
+
 inline bool needs_individual_node(int item_type, uint32_t attrib2, bool has_anim_def,
 		bool has_occlusion_records) {
 	if (item_type == kItemTypePerson)

@@ -240,11 +240,12 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "disk_function", 13)) {
             consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
             parsed = 1;
-        /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5): only the
-           closeattack name is kept — JO riflemen author all four ammo_* slots to the same
-           rifle round. [orig: ItemDef_ParseProperty 'ammo_closeattack' @ 0x4a1823 -> def+0x56B] */
+        /* [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
         } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
             consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "ammo_marker3", 12)) {
+            consume_value_str(trimmed, tlen, 12, current.ammo_marker3, sizeof(current.ammo_marker3));
             parsed = 1;
         /* The closeattack launch USERPOINT name (the AI muzzle; see def.h)
            [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB] */

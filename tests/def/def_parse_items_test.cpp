@@ -842,7 +842,8 @@ int main(void) {
         def_free_items(&rifle_items);
         return 1;
     }
-    if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0) {
+    if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0 ||
+        strcmp(rifle_items.entries[0].ammo_marker3, "AMMO_AK47_556MM") != 0) {
         fprintf(stderr, "FAIL: rifleman ammo_closeattack mismatch: '%s'\n",
                 rifle_items.entries[0].ammo_closeattack);
         def_free_items(&rifle_items);

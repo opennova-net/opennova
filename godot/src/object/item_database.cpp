@@ -231,6 +231,11 @@ String ItemDatabase::get_anim_def(int id) const {
 	return row == nullptr ? String() : String(row->anim_def);
 }
 
+String ItemDatabase::get_render_function(int id) const {
+    const auto *row = row_(id);
+    return row == nullptr ? String() : String(row->render_function);
+}
+
 String ItemDatabase::get_ai_function(int id) const {
 	const opennova::def::DefItemDef *row = row_(id);
 	return row == nullptr ? String() : String(row->ai_function);

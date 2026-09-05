@@ -36,7 +36,8 @@ w::WeatherSeed seed_800() {
 }
 
 void test_seed_installs_the_snapshot_and_zeroes_the_transients() {
-	w::WeatherState ws;
+	w::World world;
+	auto &ws = world.weather;
 	ws.command_quake(3);
 	ws.command_flash();
 	ws.core.hit_dim.intensity = 0xA000;
@@ -59,7 +60,7 @@ void test_seed_installs_the_snapshot_and_zeroes_the_transients() {
 		const uint32_t sum = b + rol11;
 		b = ((sum << 4) | (sum >> 28)) ^ 1u;
 	}
-	CHECK(ws.prng16_b_state == b);
+	CHECK(world.prng16_b_state == b);
 	// The pool re-seeded from the B stream (the same draws the test in
 	// tests/environment pins); every slot inside the seed volume.
 	CHECK(ws.precipitation.slots[0].x != 0 || ws.precipitation.slots[0].y != 0);

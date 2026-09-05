@@ -154,14 +154,12 @@ decided it needs answered. Get the current list straight from the ledger:
 grep -n 'NEEDS-RE' docs/divergence-ledger.md
 ```
 
-One row across the ledger is explicitly tagged **`research starter`** in its
-Slice column — the `NEEDS-RE` row D-THROW-6 (the `lndm` minefield def wiring).
-D-HUD-6 dropped the tag when it narrowed to the centre announce banner
-(2026-08-21). D-PLAYERINFO-1 closed on 2026-08-15 after the packed
-character-id, world/first-person submit, and per-part `TEX_CAMO` paths were
-witnessed and ported. D-HUD-7 closed with the 2026-07-31 recoil/spread grill;
-D-NET-49 closed pre-2026-08-01 (its stale ledger row was reconciled in #403).
-The remaining one is scoped small enough to be somebody's first grill.
+The former research starter D-THROW-6 closed on 2026-09-04: `lndm` mission
+minefields occur in retail `00TRd` and `CP09`, and their init, contact, fire,
+replica and marker-rendering chain is ported. See
+[world-wac-ai-re.md §27.6a](world/world-wac-ai-re.md#276a-mission-minefields-lndm-d-throw-6)
+for the evidence and tests. Select further research from the ledger's current
+`NEEDS-RE` rows.
 
 ## The instruments that keep this honest
 

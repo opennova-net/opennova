@@ -196,6 +196,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/minefield.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/spawn_select.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tracer_trails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_attach.cpp

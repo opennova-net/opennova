@@ -35,6 +35,12 @@
 using namespace sim_internal;
 
 
+void Simulation::fill_minefield_draw_rows(
+        std::vector<opennova::world::MinefieldDraw> &r_rows) const {
+    r_rows.clear();
+    if (kernel_) kernel_->world.minefields.compile_draws(kernel_->world, r_rows);
+}
+
 void Simulation::fill_throwable_visual_rows(
 		std::vector<opennova::world::ThrowableVisualRow> &r_rows) const {
 	r_rows.clear();

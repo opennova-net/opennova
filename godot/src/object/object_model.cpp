@@ -556,7 +556,7 @@ void ObjectModel::set_panm_clock(const Ref<PanmClock> &p_clock) {
 }
 
 void ObjectModel::set_active_lod(int p_lod_index) {
-	const int next_lod = clamp_lod_index(p_lod_index);
+	const int next_lod = exact_owner_lod_ ? p_lod_index : clamp_lod_index(p_lod_index);
 	if (active_lod_ == next_lod) {
 		return;
 	}
@@ -580,7 +580,9 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 	apply_runtime_state(0.0);
 }
 
-void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner) {
+void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner, bool p_exact) {
+    exact_owner_lod_ = p_exact;
+    if (p_exact && authored_lod_enabled_) authored_lod_models_.insert(this);
 	authored_lod_owner_ = p_owner != nullptr && p_owner != this
 			? p_owner->get_instance_id()
 			: ObjectID();
@@ -913,7 +915,8 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			continue;
 		}
 		const ObjectModel *owner = attachment->get_authored_lod_owner();
-		const int level = opennova::renderer::attachment_lod_index(
+		const int level = attachment->exact_owner_lod_ && owner != nullptr ? owner->active_lod_
+                : opennova::renderer::attachment_lod_index(
 				owner != nullptr ? owner->active_lod_ : 0,
 				static_cast<int>(attachment->authored_lod_thresholds_q16_.size()));
 		if (level < 0 || level == attachment->active_lod_) {
@@ -1477,7 +1480,27 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	}
 }
 
+void ObjectModel::set_geometry_visible(bool p_visible) {
+    if (geometry_visible_ == p_visible) return;
+    geometry_visible_ = p_visible;
+    apply_level_surfaces();
+}
+
+void ObjectModel::set_rigid_parts(bool p_rigid) {
+    if (rigid_parts_ == p_rigid) return;
+    rigid_parts_ = p_rigid;
+    panm_applied_revision_ = 0;
+    apply_robj_transforms();
+    bounds_dirty_ = true;
+    point_light_draw_parts_dirty_ = true;
+    wake_runtime_frame();
+}
+
 bool ObjectModel::apply_robj_transforms() {
+    if (rigid_parts_) {
+        for (const auto &part : robj_nodes_) part.value->set_transform(Transform3D());
+        return true;
+    }
 	if (object_data_.is_null() || robj_nodes_.is_empty()) {
 		return false;
 	}
@@ -1792,8 +1815,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_active_lod);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_enabled", "enabled"),
 			&ObjectModel::set_authored_lod_enabled);
-	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner"),
-			&ObjectModel::set_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
+            &ObjectModel::set_authored_lod_owner, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
+    ClassDB::bind_method(D_METHOD("set_rigid_parts", "rigid"), &ObjectModel::set_rigid_parts);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
 			&ObjectModel::get_authored_lod_owner);
 	ClassDB::bind_method(D_METHOD("get_surface_slot_count"),

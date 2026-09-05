@@ -3,16 +3,23 @@
 // read that went through the item database's getter surface now reads the
 // DefItemDef row directly; the getters were field-for-field projections, so
 // the miss defaults (0 / empty / TYPE unset) are preserved exactly.
-#include <runtime/simassets/item_traits.h>
 
-#include <base/io/strutil.h>
+#include <runtime/simassets/item_traits.h>
+#include <runtime/simassets/sim_model_cache.h>
 #include <formats/mission/mission.h>
+#include <runtime/mission/placement_traits.h>
+#include <base/io/fixed.h>
+#include <base/io/strutil.h>
+#include <runtime/terrain_query/height_field.h>
+
+#include <algorithm>
+#include <cstring>
+#include <unordered_map>
+
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
 
-#include <algorithm>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -429,4 +436,73 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     return armed;
 }
 
+} // namespace opennova::simassets
+
+namespace opennova::simassets {
+namespace {
+uint8_t point_type(const char *name) {
+    if (strutil::iequals(name, "smlmarked")) return 1;
+    if (strutil::iequals(name, "small")) return 2;
+    if (strutil::iequals(name, "lrgmarked")) return 3;
+    if (strutil::iequals(name, "large")) return 4;
+    return 0;
+}
+uint32_t ammo_id(const world::World &world, const char *name) {
+    const int index = world.tables.ammo.index_of(name);
+    return index < 0 ? 0u : static_cast<uint32_t>(index);
+}
+}
+
+// [orig: Entity_InitHardpoints @ 0x4417D0]
+// lndm's bone callback is BoneCallback_Identity @ 0x4E20A0. Its model-global
+// userpoints therefore retain the authored rest position through the bone walk.
+void resolve_minefields(world::World &world, const def::DefItemsFile &items,
+                        SimModelCache &models) {
+    const auto definitions = index_items(items);
+    world.registry.for_each([&](const world::Entity &row) {
+        if (row.minefield.initialized) return;
+        const auto it = definitions.find(row.item_id + mission::kItemIdOffset);
+        if (it == definitions.end()) return;
+        const auto &def = *it->second;
+        const bool think = strutil::iequals(std::string_view(def.ai_function).substr(0, 4), "lndm");
+        const bool render = mission::uses_submodel_renderer(def.render_function);
+        if (!think && !render) return;
+        world::Entity *entity = world.registry.get(row.handle);
+        const auto *model = models.model_for(def.graphic);
+        std::vector<world::MinefieldPoint> points;
+        if (think && model != nullptr) {
+            const world::CollisionMatrix placement = world::entity_placement_matrix(*entity);
+            for (size_t i = 0; i < model->user_point_count && points.size() < 14; ++i) {
+                const auto &up = model->user_points[i];
+                const uint8_t type = point_type(up.name);
+                if (!type) continue;
+                const int32_t local[3] = {up.x, up.y, up.z};
+                int32_t transformed[3]{};
+                // The attachment helper converts to float before transforming.
+                // Preserve that float storage boundary and truncate back to Q16.
+                for (int axis = 0; axis < 3; ++axis) {
+                    // Math_TransformPointByMatrix4x4 @ 0x40CF20: translation
+                    // is last; render X (mission -Y) sums X,Z,Y products.
+                    const int order[3] = {0, axis == 1 ? 2 : 1, axis == 1 ? 1 : 2};
+                    double value = 0;
+                    for (int k : order)
+                        value += static_cast<double>(static_cast<float>(
+                                placement.m[4*axis+k] / 4194304.0f)) *
+                                static_cast<float>(local[k] * io::kInvFp16One);
+                    value += static_cast<float>(placement.m[4*axis+3] * io::kInvFp16One);
+                    transformed[axis] = static_cast<int32_t>(
+                            static_cast<float>(value) * io::kFp16One);
+                }
+                transformed[2] = world.tables.terrain ? static_cast<int32_t>(
+                        terrain::height_field_height_world_bilinear(*world.tables.terrain,
+                            transformed[0] * io::kInvFp16One,
+                            -transformed[1] * io::kInvFp16One) * io::kFp16One) : 0;
+                points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
+            }
+        }
+        world.minefields.initialize(world, *entity, think, render, model != nullptr,
+                ammo_id(world, def.ammo_closeattack), ammo_id(world, def.ammo_marker3),
+                def.huskfinal, def.husk, points);
+    });
+}
 } // namespace opennova::simassets

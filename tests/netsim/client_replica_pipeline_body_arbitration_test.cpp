@@ -105,6 +105,7 @@ void test_tapped_roll_locks_and_queues() {
 	if (es == nullptr) return;
 	expect(es->net_anim_current == as::kIdleProne, "first record seeds current");
 	expect(es->net_anim_pending == 0, "...with no pending");
+	expect(es->net_stance_bits == 1, "prone receive maps animation flag 0x200 to MoveOrder 0x100");
 
 	view.apply(0x0A, player_frame(as::kRollLeft, 6));
 	view.apply(0x0A, player_frame(as::kIdleProne, 60));
@@ -125,6 +126,7 @@ void test_tapped_roll_locks_and_queues() {
 	view.apply(0x0A, player_frame(as::kIdle, 0));
 	expect(es->net_anim_current == as::kRollLeft, "the lock still stands");
 	expect(es->net_anim_pending == as::kIdle, "the pending retargets");
+	expect(es->net_stance_bits == 1, "queued standing byte retains prone MoveOrder");
 }
 
 // The channel promotes the pending at the locked one-shot's end and the

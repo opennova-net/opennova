@@ -223,6 +223,7 @@ struct ClientEntityState {
 	// fallback shows it, which is the parked byte's visible outcome.
 	int16_t net_anim_current = -1;
 	int16_t net_anim_pending = 0;
+	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
 	// The pending promotion boundary in the growing rm_phase convention,
 	// armed by the tick when a pending is present (retail: the deferral ORs
 	// 0x40000 into the channel each tick and AnimChannel_AdvancePlayback
@@ -688,6 +689,7 @@ struct ClientState {
 	// networking and maintenance remain live while nonzero.
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
+	bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
 	// folded from the 0x0A sub-block-1 timer snapshot: 62 x the wire's whole
 	// seconds, or -1 when the wire value is negative. Feeds the end-round

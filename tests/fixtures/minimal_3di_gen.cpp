@@ -624,6 +624,13 @@ const std::vector<Recipe> &recipes() {
 		{"bird", make_bird, nullptr},
 		{"person", make_person, nullptr},
 		{"pump", make_pump, nullptr},
+        {"pump_minefield", make_pump, [](Model &m) {
+            m.add_user_point("ignored", Vec3{}, kUp, 0, kUserPointGameplay);
+            const char *names[] = {"SMLMARKED", "small", "LrgMarked", "large"};
+            for (int i = 0; i < 16; ++i)
+                m.add_user_point(names[i % 4], Vec3{double(i) / 4, -0.5, 2.0},
+                        kUp, i % 5, kUserPointGameplay);
+        }},
 		{"armory", make_armory, nullptr},
 		{"mount", make_mount, nullptr},
 		{"carrier", make_carrier, nullptr},

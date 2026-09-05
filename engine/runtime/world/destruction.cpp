@@ -275,16 +275,30 @@ Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point
 bool blast_los_clear(World &world, CollisionWorld *collision,
                      const terrain::TerrainHeightField *terrain,
                      const Vec3 &from, const Vec3 &to,
-                     EntityHandle endpoint, EntityHandle source, float z_bias) {
+                     EntityHandle endpoint, float z_bias) {
     const int32_t a[3] = {to_fixed(from.x), to_fixed(from.y), to_fixed(from.z + z_bias)};
     const int32_t b[3] = {to_fixed(to.x), to_fixed(to.y), to_fixed(to.z + z_bias)};
     if (collision != nullptr) {
         const CollisionWorld::RayDebugScope ray_scope(
                 collision, CollisionWorld::RayDebugCategory::kExplosionLos);
-        return collision->raycast_clear(world, a, b, endpoint, source);
+        // The blast caller passes entity B = null and radius -0.25, using
+        // the victim's candidate slice, not the global pool ray. A quantized
+        // mine point just below terrain therefore remains reachable.
+        // [orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, calls @ 0x4EB162/0x4EB4F6]
+        return collision->entity_los_clear(world, endpoint, {}, a, b, -0x4000);
     }
-    if (terrain != nullptr && terrain->valid())
-        return !los_terrain_blocked(*terrain, a, b);
+    if (terrain != nullptr && terrain->valid()) {
+        // The same null-entity terrain leg when no collision device is bound.
+        // [orig: Physics_CheckTerrainLineOfSight @ 0x53B080]
+        const auto buried = [&](const int32_t p[3]) {
+            return to_fixed(terrain::height_field_height_world_bilinear(*terrain,
+                    p[0] * io::kInvFp16One, -p[1] * io::kInvFp16One)) > p[2];
+        };
+        if (buried(a) || buried(b)) return true;
+        const int32_t raised_a[3] = {a[0], a[1], a[2] + 0x4000};
+        const int32_t raised_b[3] = {b[0], b[1], b[2] + 0x4000};
+        return !los_terrain_blocked(*terrain, raised_a, raised_b);
+    }
     return true;
 }
 
@@ -586,7 +600,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // The LOS gate [orig: @ 0x4eb162 — type 4 direct hits skip it].
                 if (e.type != ammo_kz::kRadiusBlast &&
                     !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, e.owner, 0.0f))
+                                     t->handle, 0.0f))
                     continue;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
             }
@@ -613,7 +627,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca].
                 if (e.type != ammo_kz::kRadiusBlast &&
                     !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, e.owner, 0.25f))
+                                     t->handle, 0.25f))
                     continue;
                 if (!cone_gate(e, cone_half, d)) continue;
                 // Destructible-class targets record the blast center as the

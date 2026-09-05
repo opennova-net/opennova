@@ -351,11 +351,11 @@ void ObjectModel::apply_level_surfaces() {
 			instance->set_material_override(surface.material);
 		}
 		bind_skin(instance, surface.is_skinned);
-		instance->set_visible(true);
+		instance->set_visible(geometry_visible_);
 		// The level's collector decides the Q3 copy (never a per-vertex
 		// skinned level); the registration follows the material's glow
 		// capability and re-reads the swapped mesh once.
-		if (surface.q3_admitted) {
+		if (surface.q3_admitted && geometry_visible_) {
 			FrameFx::register_q3_object_source(instance, surface.material);
 		} else {
 			FrameFx::unregister_q3_source(instance);
@@ -384,7 +384,7 @@ void ObjectModel::apply_level_surfaces() {
 				auxiliary->set_material_override(surface.auxiliary_material);
 			}
 			bind_skin(auxiliary, surface.is_skinned);
-			auxiliary->set_visible(true);
+			auxiliary->set_visible(geometry_visible_);
 		} else if (slot.auxiliary != nullptr) {
 			slot.auxiliary->set_visible(false);
 		}

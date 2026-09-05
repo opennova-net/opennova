@@ -1,4 +1,5 @@
 #include <runtime/environment/environment_state.h>
+#include <base/io/rotating_prng.h>
 #include <base/io/fixed.h>
 
 #include <formats/env/tod_clock.h>
@@ -138,6 +139,8 @@ void EnvironmentState::reset_standalone_weather(int wind_scale) {
 			: weather_seed_from_config(Config{}, header);
 	seed.wind_scale = wind_scale;
 	standalone_weather_.seed(seed);
+	uint32_t precipitation_seed = io::kPrng16BSeed;
+	standalone_weather_.precipitation.reset(&io::rotating_prng_callback, &precipitation_seed);
 	if (!clock_configured_) {
 		// No mission clock configured: a preview holds its render TOD (the
 		// authored curtime or the embedder's scrub) and does not run it.

@@ -1395,6 +1395,8 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	// The rule is the engine's (placement_traits.h); the occlusion-record probe
 	// is an asset-cache leg, so it runs only when the cheaper tests said no.
 	const int item_type = item_db_->get_item_type(p_item_id);
+    if (opennova::mission::uses_submodel_renderer(
+            item_db_->get_render_function(p_item_id).utf8().get_data())) return true;
 	const bool has_anim_def = !item_db_->get_anim_def(p_item_id).is_empty();
 	if (opennova::mission::needs_individual_node(item_type, item_db_->get_attrib2(p_item_id),
 				has_anim_def, false)) {
@@ -1445,6 +1447,8 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	if (p_model == nullptr || item_db_.is_null()) {
 		return;
 	}
+    p_model->set_geometry_visible(!opennova::mission::uses_submodel_renderer(
+            item_db_->get_render_function(p_item_id).utf8().get_data()));
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
 			item_db_->get_attrib2(p_item_id)));
