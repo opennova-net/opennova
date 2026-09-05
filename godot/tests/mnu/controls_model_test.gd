@@ -85,6 +85,38 @@ func test_ctrl_combo_records_and_round_trips() -> void:
 			"Ctrl - Y or Up", "the modifier word round-trips the blob")
 
 
+# The gameplay sampler over live device state follows the keyboard
+# dispatcher's two passes [orig: Input_ProcessKeyboardEvents @0x49d327..0x49d3ac
+# (the modifier pass), @0x49d3ba..0x49d488 (the fallback, only when the modifier
+# pass matched nothing)]: a bare 1 fires Knife, Ctrl+1 fires seat1 and never
+# Knife.
+func test_is_token_pressed_follows_the_two_passes() -> void:
+	var model := ControlsModel.new()
+	_press(KEY_1, true)
+	assert_true(model.is_token_pressed("Knife"), "a bare 1 fires Knife")
+	assert_false(model.is_token_pressed("seat1"), "a bare 1 never fires the Ctrl+1 seat row")
+	assert_eq(model.pressed_key_for_token("Knife"), 0x31, "the firing VK reports")
+	_press(KEY_CTRL, true)
+	assert_true(model.is_token_pressed("seat1"), "Ctrl+1 fires seat1")
+	assert_false(model.is_token_pressed("Knife"),
+			"the modifier pass claims the key: Knife stays silent")
+	assert_eq(model.pressed_key_for_token("Knife"), 0, "no VK fires the silenced row")
+	_press(KEY_1, false)
+	_press(KEY_CTRL, false)
+	assert_false(model.is_token_pressed("seat1"), "released")
+	assert_false(model.is_token_pressed("Knife"), "released")
+
+
+# Physical key state through Input, flushed so the sampler sees it this frame.
+func _press(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
+
+
 # The witnessed capture button->mask map lives at the seam
 # [orig: the mouse capture callback @ 0x55c78b..0x55c7d5].
 func test_mouse_mask_seam_translation() -> void:

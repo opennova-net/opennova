@@ -62,6 +62,19 @@ func after_all() -> void:
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# A key a failed assertion left down must not leak into the next case.
+	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7]:
+		_hold(keycode, false)
+
+
+# Physical key state through Input, flushed so the router's next sample sees it.
+func _hold(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 
 
 # --- real-world staging -------------------------------------------------------
@@ -424,6 +437,71 @@ func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	_frame(world, presenter, camera, 2)
 	assert_eq(world.local_player_view().nvg_gain, 0,
 			"'-' steps the gain down and the sim clamps at the floor")
+
+
+# The router's digit rows over the LIVE binding table and key state, on a row
+# that samples without mouse capture (the weapon-category rows need it and
+# headless has no cursor to capture): radarout rebound to 7 fires on a bare 7
+# (the dispatcher's fallback pass), a 7 pressed while USE (the `useitem` row,
+# default Shift) is held is the special-key seat chord and reaches no row,
+# Ctrl+7 is the seat7 row alone (the modifier pass claims the key), and the
+# same bare 7 afterwards fires again.
+# [orig: Input_HandleSpecialKeys @0x49c6d8..0x49c730;
+#  Input_ProcessKeyboardEvents @0x49d327..0x49d3ac (modifier pass),
+#  @0x49d3ba..0x49d488 (fallback)]
+func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var radar_out := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Radar Zoom Out":
+			radar_out = model.action_index_for_row(i)
+	assert_gte(radar_out, 0, "the radarout row is in the table")
+	assert_true(model.assign_godot_key(radar_out, KEY_7, false), "radarout takes 7 as its second key")
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var zoom := sim.get_hud_radar_zoom_q16()
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "a bare 7 fires the rebound radarout row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+	zoom = sim.get_hud_radar_zoom_q16()
+
+	_hold(KEY_SHIFT, true)
+	_frame(world, presenter, camera, 2)  # the hold must have been live LAST frame
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 3)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
+			"a digit under the USE hold is the seat chord and reaches no row")
+	_hold(KEY_7, false)
+	_hold(KEY_SHIFT, false)
+	_frame(world, presenter, camera, 2)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "releasing the hold fires nothing")
+
+	_hold(KEY_CTRL, true)
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 3)
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
+			"Ctrl+7 is the seat7 row: the modifier pass claims the key")
+	_hold(KEY_7, false)
+	_hold(KEY_CTRL, false)
+	_frame(world, presenter, camera, 2)
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "the same bare 7 fires again")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
 
 
 # --- the camera cluster -------------------------------------------------------

@@ -55,12 +55,18 @@ public:
 	// secondary; modifiers not included — display/diagnostic use).
 	PackedInt32Array godot_keys_for_token(const String &p_token) const;
 
-	// Whether the token's binding is held RIGHT NOW: keyboard slots (their
-	// modifier word gating Ctrl-/Shift- combos) plus the held-sampleable
-	// mouse-mask buttons (wheel masks are impulse-only and never sample).
-	// The one gameplay-sampler entry point — samples Godot Input here at the
-	// device seam.
+	// Whether the token's binding is held RIGHT NOW: keyboard slots under the
+	// dispatcher's two passes (engine BindingSet::pressed_key over Godot's
+	// physical key state: a row's modifier word must be held, and a
+	// modifier-less row yields its key to a held-modifier row that claims it)
+	// plus the held-sampleable mouse-mask buttons (wheel masks are
+	// impulse-only and never sample). The one gameplay-sampler entry point —
+	// samples Godot Input here at the device seam.
 	bool is_token_pressed(const String &p_token) const;
+	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
+	// those same two passes — the sampler's seam for rules that look at WHICH
+	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.
+	int pressed_key_for_token(const String &p_token) const;
 	// The in-game display string of a token's binding — the death screen's
 	// "call a medic" hint formatter (engine controls format_display_string;
 	// retail KeyBinding_FormatDisplayString @0x496bd0). "" when unbound.

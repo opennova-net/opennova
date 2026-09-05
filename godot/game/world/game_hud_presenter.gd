@@ -476,15 +476,17 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The HUD binding rows, sampled in retail's catalog order: huddetail (row
-	# 50, default F6) precedes hudcolor (row 76, default F6) in the
-	# first-match-wins key scan, so a shared key fires only huddetail —
-	# poll_hud_keys carries that shadowing; hudcolor stays a live row on its
-	# own key (D-CTRL-4). showhud (row 27) ships unbound.
-	# [orig: the key scan @0x49d42f; huddetail dispatch @0x4E0601; showhud
-	#  dispatch @0x4E0561]
-	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) \
-			or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT)
+	# The HUD binding rows. hudcolor (row 76) defaults to Ctrl+F6 beside
+	# huddetail's bare F6 (row 50): the binding sampler's two passes keep them
+	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and when a remap
+	# lands both rows on one modifier-less key retail's first-match scan fires
+	# only huddetail (row 50 < 76) -- poll_hud_keys carries that shadowing
+	# (D-CTRL-4). showhud (row 27) ships unbound. Ctrl is a binding modifier,
+	# never a chord guard here; Shift/Alt chords stay ours (the debug pick
+	# rides Shift+F6).
+	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
+	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
+	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	poll_hud_keys(ControlsBindings.pressed("huddetail"),
 			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
 			gameplay_input_active)
@@ -772,8 +774,9 @@ func cycle_friendly_tags() -> void:
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
 ## drive). Two reimpl guards: (1) the edge latches from the UNGATED key state,
 ## so a press held across an armory/F3 window cannot re-fire when the gate
-## reopens; (2) a chorded press (Shift/Ctrl/Alt — our debug picks ride
-## Shift+F6) never cycles — the retail row binds the bare key.
+## reopens; (2) a Shift/Alt-chorded press (our debug picks ride Shift+F6)
+## never cycles; Ctrl is the row's own modifier (hudcolor defaults to Ctrl+F6)
+## and the binding sampler already resolved it.
 ## [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
 func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
 	if color_down and not _hud_color_was_down and active and not chorded:

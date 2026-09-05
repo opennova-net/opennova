@@ -26,9 +26,10 @@ const CHANGE_DIR_KEY := KEY_F9
 # armory volume (entity Flags 0x400000, maintained by the collision resolver)
 # [orig: Input_HandleActionBinding_0 case 0xB1 @0x4e0b3f ->
 # UI_OpenMenuScreen("weapon.mnu", "WEAPON"); the parallel action 218 @0x49b8e3
-# ships with no binding row]. Out of zone the key falls through to its use-item
-# leg (unported; our motor separately polls Shift as the run modifier).
-const ARMORY_KEY := KEY_SHIFT
+# ships with no binding row]. Out of zone the key's other arms are the input
+# router's per-frame chain over the polled `useitem` row (the hold latch, the
+# USE+digit seat pick, the mount toggle on release); the shell only matches
+# the press event against that row's live keys (_is_use_item_key).
 # F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
 const DEV_TOOLS_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
@@ -85,7 +86,6 @@ var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (p
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
-var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
@@ -371,15 +371,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null:
 		return
-	# The USE-ITEM release edge: a latched press runs the mount toggle on RELEASE
-	# [orig: Input_ProcessFrame @0x49d520 consumes the latch on key release
-	# -> Entity_ToggleVehicleMount @0x49d6dc].
-	if not key.pressed and key.keycode == ARMORY_KEY:
-		if _use_latched:
-			_use_latched = false
-			if is_gameplay_input_active() and _try_toggle_mount():
-				get_viewport().set_input_as_handled()
-		return
 	if not key.pressed or key.echo:
 		return
 	# F11 fullscreen uses the shared runtime window policy.
@@ -398,7 +389,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
 			and _world.is_loaded() and (is_gameplay_input_active() \
 			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
-		_use_latched = false  # the chord consumed the Shift press: no mount toggle on release
+		if _player_presenter != null:
+			# The chord consumed the USE hold: no mount toggle on its release.
+			_player_presenter.consume_use_hold()
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
@@ -408,20 +401,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			and _hud_presenter.handle_gameplay_key(key.keycode):
 		get_viewport().set_input_as_handled()
 		return
-	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
-	# weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d] — otherwise the
-	# key is the vehicle mount/dismount toggle on the same witnessed action [orig: the
-	# LABEL_121 latch @0x4e0b71 -> Input_ProcessFrame release edge @0x49d6dc ->
-	# Entity_ToggleVehicleMount @0x436950]. (The vehicle-loadout-volume vehicle.mnu leg
-	# @0x4e0bfe awaits that screen's port.)
-	if key.keycode == ARMORY_KEY and is_gameplay_input_active():
+	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
+	# press opens weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
+	# Every other arm of the key is the input router's per-frame chain over the
+	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
+	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
+	# this arm opens leaves gameplay input inactive, which resets that chain.
+	# (The vehicle-loadout-volume vehicle.mnu arm @0x4e0bfe awaits that screen's
+	# port.)
+	if is_gameplay_input_active() and _is_use_item_key(key.keycode):
 		if _try_open_armory():
-			get_viewport().set_input_as_handled()
-		else:
-			# No zone leg consumed the press: latch — the toggle runs on the release
-			# edge [orig: dword_24C18DC set @0x4e0b71; a press consumed by a zone leg
-			# suppresses the release, our latch-only-on-miss].
-			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
 	# Gameplay keys (B/N/NVG, Z/X/C stance) live on LocalPlayerPresenter; view rows on GameHudPresenter.
@@ -434,10 +423,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # Play reuses the normal gameplay gate and capture route without hiding ImGui.
 func _on_dev_tools_open_changed(open: bool) -> void:
 	_refresh_dev_tools_game_state()
-	if open:
-		# A press begun before F3 must not turn into a mount action when Shift is
-		# released behind the tools.
-		_use_latched = false
+	if open and _player_presenter != null:
+		# A USE hold begun before F3 must not turn into a mount action when the
+		# key is released behind the tools.
+		_player_presenter.consume_use_hold()
 
 
 func _on_dev_tools_game_input_mode_changed(_playing: bool) -> void:
@@ -693,17 +682,10 @@ func _try_open_armory() -> bool:
 	return _armory_presenter.try_open()
 
 
-# The USE-ITEM mount toggle: outside the armory volume the same key enters/exits
-# vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
-# [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
-func _try_toggle_mount() -> bool:
-	var runtime := get_runtime()
-	if runtime == null:
-		return false
-	var sim: Simulation = runtime.get_sim()
-	if sim == null:
-		return false
-	return sim.local_player_toggle_mount()
+# Whether a key event is the `useitem` row's (retail default Shift; catalog row
+# 44, rebindable in Options -> Controls).
+func _is_use_item_key(keycode: Key) -> bool:
+	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
 
 # --- Resource dir picker (first launch) --------------------------------------

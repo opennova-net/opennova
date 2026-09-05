@@ -121,6 +121,21 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	return String::utf8(opennova::controls::format_display_string(*r).c_str());
 }
 
+int ControlsModel::pressed_key_for_token(const String &p_token) const {
+	Input *input = Input::get_singleton();
+	if (input == nullptr) {
+		return 0;
+	}
+	// The device's held state by VK (the engine rule reads it as retail's
+	// g_input_key_down_states[vk]).
+	const auto physical_vk_down = [input](int vk) {
+		const int key = godot_key_from_vk(vk);
+		return key != 0 && input->is_physical_key_pressed(static_cast<Key>(key));
+	};
+	return bindings_.pressed_key(bindings_.index_of_token(p_token.utf8().get_data()),
+			physical_vk_down);
+}
+
 bool ControlsModel::is_token_pressed(const String &p_token) const {
 	const int index = bindings_.index_of_token(p_token.utf8().get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -131,27 +146,7 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
 	if (input == nullptr) {
 		return false;
 	}
-	auto key_held = [&](uint16_t scan, uint16_t mod) {
-		if (scan == 0) {
-			return false;
-		}
-		const int key = godot_key_from_vk(scan);
-		if (key == 0 ||
-				!input->is_physical_key_pressed(static_cast<Key>(key))) {
-			return false;
-		}
-		if (mod != 0) {
-			// A Ctrl-/Shift- combo binding requires its modifier held too.
-			const int mod_key = godot_key_from_vk(mod);
-			if (mod_key == 0 ||
-					!input->is_physical_key_pressed(static_cast<Key>(mod_key))) {
-				return false;
-			}
-		}
-		return true;
-	};
-	if (key_held(r->primary, r->primary_mod) ||
-			key_held(r->secondary, r->secondary_mod)) {
+	if (pressed_key_for_token(p_token) != 0) {
 		return true;
 	}
 	// Wheel masks (0x400/0x800) are impulse events with no held state — they
@@ -294,6 +289,8 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::godot_keys_for_token);
 	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
 			&ControlsModel::is_token_pressed);
+	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
+			&ControlsModel::pressed_key_for_token);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
 	ClassDB::bind_static_method("ControlsModel", D_METHOD("weapon_category_tokens"),

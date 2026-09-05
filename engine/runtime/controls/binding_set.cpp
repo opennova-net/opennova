@@ -275,6 +275,50 @@ std::vector<int> BindingSet::keys_for_token(const std::string &token) const {
   return keys;
 }
 
+int BindingSet::pressed_key(int index,
+                            const std::function<bool(int)> &key_down) const {
+  const BindingRecord *r = record(index);
+  if (r == nullptr) {
+    return 0;
+  }
+  auto slot_down = [&](uint16_t vk) { return vk != 0 && key_down(vk); };
+  auto row_mod_down = [&](const BindingRecord &rec) {
+    return slot_down(rec.primary_mod) || slot_down(rec.secondary_mod);
+  };
+  const uint16_t keys[2] = {r->primary, r->secondary};
+  // Pass 1: the row's modifier is held and one of its keys is down
+  // [orig: @0x49d35b..0x49d3a7].
+  if (row_mod_down(*r)) {
+    for (const uint16_t key : keys) {
+      if (slot_down(key)) {
+        return key;
+      }
+    }
+    return 0;
+  }
+  // Fallback: both modifier words zero [orig: @0x49d3c1..0x49d3d2], for a key
+  // no pass-1 row claims (a pass-1 fire skips the fallback @0x49d437).
+  if (r->primary_mod != 0 || r->secondary_mod != 0) {
+    return 0;
+  }
+  for (const uint16_t key : keys) {
+    if (!slot_down(key)) {
+      continue;
+    }
+    bool claimed = false;
+    for (const BindingRecord &other : records_) {
+      if ((other.primary == key || other.secondary == key) && row_mod_down(other)) {
+        claimed = true;
+        break;
+      }
+    }
+    if (!claimed) {
+      return key;
+    }
+  }
+  return 0;
+}
+
 const BindingRecord *BindingSet::record(int index) const {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return nullptr;
