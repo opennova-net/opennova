@@ -9,7 +9,7 @@ const Inspector := preload("res://addons/opennova_world/world_inspector.gd")
 const RunSession := preload("res://modtools/game_run_session.gd")
 const TOOLBAR := preload("res://addons/opennova_world/toolbar.tscn")
 
-var _inspector: EditorInspectorPlugin
+var _inspector: Inspector
 var _session: WorldEditSession
 var _sessions: Dictionary[String, WorldEditSession] = {}
 var _scene_sessions: Dictionary[String, Array] = {}
@@ -56,6 +56,7 @@ func _enter_tree() -> void:
 	_run.status_changed.connect(_run_status_changed)
 	_inspector = Inspector.new()
 	_inspector.setup(get_edit_session, edit_native_value)
+	_inspector.pending_changed.connect(_refresh_status)
 	add_inspector_plugin(_inspector)
 	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar)
 	_details = AcceptDialog.new()
@@ -292,12 +293,16 @@ func _refresh_status() -> void:
 	(_toolbar.get_node("Save") as Button).disabled = not _any_dirty()
 	(_toolbar.get_node("Stop") as Button).disabled = not _run.is_running() and not _run.is_stopping()
 	if active:
-		var suffix := " | Unsaved" if _session.is_dirty() else ""
-		_status.text = "%s: %s%s" % [_source.mission_name, _world.get_preview_status().capitalize(), suffix]
-		_status.tooltip_text = "\n".join(_session.get_dirty_files()) + "\n" + "\n".join(_world.get_preview_diagnostics())
+		var files := _session.get_dirty_files()
+		files.append_array(_inspector.get_pending_files())
+		var prefix := "Unsaved | " if not files.is_empty() else ""
+		_status.text = "%s%s: %s" % [prefix, _source.mission_name, _world.get_preview_status().capitalize()]
+		_status.tooltip_text = "\n".join(files) + "\n" + "\n".join(_world.get_preview_diagnostics())
 
 
 func _any_dirty() -> bool:
+	if _inspector != null and not _inspector.get_pending_files().is_empty():
+		return true
 	for session: WorldEditSession in _sessions.values():
 		if session.is_dirty():
 			return true
@@ -309,7 +314,15 @@ func _get_unsaved_status(for_scene: String) -> String:
 	var files := PackedStringArray()
 	for session: WorldEditSession in sessions:
 		files.append_array(session.get_dirty_files())
+	var scene := EditorInterface.get_edited_scene_root()
+	if _inspector != null and (for_scene.is_empty() or (scene != null and scene.scene_file_path == for_scene)):
+		files.append_array(_inspector.get_pending_files())
 	return "Native world files have unsaved changes: " + ", ".join(files) if not files.is_empty() else ""
+
+
+func _apply_changes() -> void:
+	if _inspector != null:
+		_inspector.flush_pending_edits()
 
 
 func _scene_saved(_path: String) -> void:
@@ -326,7 +339,9 @@ func _build() -> bool:
 
 func _save_sessions() -> bool:
 	_save_failed = false
-	var errors := PackedStringArray()
+	var errors := _inspector.flush_pending_edits()
+	# Invalid widget text blocks Play, but must not prevent other valid native
+	# edits from being saved when Godot is closing the scene or editor.
 	for session: WorldEditSession in _sessions.values():
 		if session.save() != OK:
 			var reason := session.get_last_error()
@@ -481,6 +496,7 @@ func _release_preview() -> void:
 
 
 func _release_world() -> void:
+	_apply_changes()
 	_release_preview()
 	_set_source(null)
 	if is_instance_valid(_world) and _world.tree_exiting.is_connected(_release_world):

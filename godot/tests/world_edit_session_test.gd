@@ -36,6 +36,12 @@ func _source(archive: bool = false) -> WorldSource:
 	definition.attrib_flags = 1 # force_on is independent of shadow
 	terrain.set_foliage_defs([definition])
 	assert_eq(terrain.save_to_path(directory.path_join("Tmap.trn")), OK)
+	# Seed real TRN color modes that the initial Inspector does not expose.
+	var trn_path := directory.path_join("Tmap.trn")
+	var trn_text := FileAccess.get_file_as_string(trn_path).replace("color_lower     0", "color_lower     2").replace("color_upper     0", "color_upper     1")
+	var trn_file := FileAccess.open(trn_path, FileAccess.WRITE)
+	trn_file.store_string(trn_text)
+	trn_file.close()
 	if archive:
 		var entries: Array = []
 		for filename in DirAccess.get_files_at(directory):
@@ -99,6 +105,9 @@ func test_save_reopens_native_documents_and_keeps_other_mission_and_foliage_fiel
 	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(source.open_root(), "Tmap.trn"), OK)
 	assert_ne((terrain.get_foliage_defs()[0] as TerrainFoliageDef).attrib_flags & 1, 0)
+	var saved_trn := FileAccess.get_file_as_string(source.data_directory.path_join("Tmap.trn"))
+	assert_string_contains(saved_trn, "color_lower     2")
+	assert_string_contains(saved_trn, "color_upper     1")
 
 
 func test_undo_across_save_and_reload_tracks_the_saved_values() -> void:

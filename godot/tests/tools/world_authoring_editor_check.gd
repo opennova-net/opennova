@@ -47,10 +47,10 @@ func input_for(caption: String, type: String) -> Control:
 	return null
 
 
-func dialog_named(title: String) -> ConfirmationDialog:
+func dialog_named(title: String) -> AcceptDialog:
 	for child in _bar.get_children():
-		if child is ConfirmationDialog and (child as ConfirmationDialog).title == title:
-			return child as ConfirmationDialog
+		if child is AcceptDialog and (child as AcceptDialog).title == title:
+			return child as AcceptDialog
 	return null
 
 
@@ -186,12 +186,52 @@ func run_check() -> void:
 	environment.load()
 	expect(environment.sky_height == 233, "Godot Save persisted base sky height")
 	expect(not (_bar.get_node("Status") as Label).text.contains("Unsaved"), "Save clears native dirty state")
+	EditorInterface.inspect_object(world.get_node("MissionEnvironment"))
+	await frames()
+	var sky_map := input_for("Sky map 1", "LineEdit") as LineEdit
+	sky_map.grab_focus()
+	await frames(2)
+	sky_map.text = "ground.tga"
+	expect(EditorInterface.save_scene() == OK, "Save flushes focused Inspector text")
+	await frames()
+	environment.load()
+	expect(environment.sky_map1 == "ground.tga", "Native save includes text not yet submitted with Enter")
+	height = input_for("Sky height", "SpinBox") as SpinBox
+	var height_text := height.get_line_edit()
+	height_text.grab_focus()
+	await frames(2)
+	height_text.text = "234"
+	height_text.text_changed.emit(height_text.text)
+	expect(not (_bar.get_node("Save") as Button).disabled,
+			"Pending numeric text enables Save")
+	expect((_bar.get_node("Status") as Label).text.contains("Unsaved"),
+			"Pending numeric text appears in native dirty status")
+	expect(EditorInterface.save_scene() == OK, "Save flushes focused numeric text")
+	await frames()
+	environment.load()
+	expect(environment.sky_height == 234, "Native save includes a pending numeric value")
+	height.value = 235
+	await frames()
+	sky_map.text = "missing-sky.tga"
+	(_bar.get_node("Save") as Button).pressed.emit()
+	await frames()
+	environment.load()
+	expect(environment.sky_height == 235, "Invalid input does not lose other valid native edits")
+	expect(environment.sky_map1 == "ground.tga", "Invalid asset input keeps the saved filename")
+	var error_dialog := dialog_named("OpenNova world") as AcceptDialog
+	expect(error_dialog != null and error_dialog.visible, "Save reports invalid pending input")
+	if error_dialog != null:
+		error_dialog.hide()
+	sky_map.text = "ground.tga"
+	(_bar.get_node("Save") as Button).pressed.emit()
+	await frames()
+	expect((_bar.get_node("Save") as Button).disabled, "Reverting invalid text restores clean save state")
 	var saved_scene := FileAccess.get_file_as_string(SCENE)
 	for forbidden in ["TerrainData", "MissionObjects", "WorldEditSession", "CompositorEffect"]:
 		expect(not saved_scene.contains(forbidden), "Scene excludes " + forbidden)
 	(_bar.get_node("Copy") as Button).pressed.emit()
 	await frames()
-	var copy_dialog := dialog_named("Create editable world copy")
+	var copy_dialog := dialog_named("Create editable world copy") as ConfirmationDialog
 	for child in copy_dialog.get_children():
 		if child is LineEdit:
 			(child as LineEdit).text = "editor_copy"

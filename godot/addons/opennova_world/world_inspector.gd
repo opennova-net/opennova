@@ -3,6 +3,8 @@ extends EditorInspectorPlugin
 
 const Property := preload("res://addons/opennova_world/world_property.gd")
 const Field := WorldEditSession.Field
+signal pending_changed
+var _properties: Array[WeakRef] = []
 var _session_for: Callable
 var _request_edit: Callable
 
@@ -10,6 +12,36 @@ var _request_edit: Callable
 func setup(session_for: Callable, request_edit: Callable) -> void:
 	_session_for = session_for
 	_request_edit = request_edit
+
+
+func get_pending_files() -> PackedStringArray:
+	var files := PackedStringArray()
+	for property: EditorProperty in _live_properties():
+		var filename: String = property.get_pending_file()
+		if not filename.is_empty() and not files.has(filename):
+			files.append(filename)
+	return files
+
+
+func flush_pending_edits() -> PackedStringArray:
+	var errors := PackedStringArray()
+	for property: EditorProperty in _live_properties():
+		var reason: String = property.flush_pending_edit()
+		if not reason.is_empty():
+			errors.append(reason)
+	return errors
+
+
+func _live_properties() -> Array[EditorProperty]:
+	var live: Array[EditorProperty] = []
+	var refs: Array[WeakRef] = []
+	for reference in _properties:
+		var property := reference.get_ref() as EditorProperty
+		if property != null and property.is_inside_tree():
+			live.append(property)
+			refs.append(reference)
+	_properties = refs
+	return live
 
 
 func _can_handle(object: Object) -> bool:
@@ -45,6 +77,8 @@ func _parse_begin(object: Object) -> void:
 func _field(session: WorldEditSession, field: WorldEditSession.Field, caption: String, slot: int = 0) -> void:
 	var editor := Property.new()
 	editor.setup(session, field, slot, caption, _request_edit)
+	editor.pending_changed.connect(pending_changed.emit)
+	_properties.append(weakref(editor))
 	add_custom_control(editor)
 
 

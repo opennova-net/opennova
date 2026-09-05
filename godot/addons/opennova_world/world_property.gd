@@ -2,6 +2,8 @@
 extends EditorProperty
 ## One native document field, presented in Godot's regular Inspector layout.
 
+signal pending_changed
+
 var _session: WorldEditSession
 var _field: WorldEditSession.Field
 var _slot := 0
@@ -27,6 +29,7 @@ func setup(session: WorldEditSession, field: WorldEditSession.Field, slot: int,
 			spin.max_value = 500 if field == WorldEditSession.Field.SKY_HEIGHT else 255
 			spin.step = 1
 			spin.value_changed.connect(_number_changed)
+			spin.get_line_edit().text_changed.connect(_text_changed)
 			spin.editable = session.is_editable()
 			_input = spin
 		WorldEditSession.Field.FOLIAGE_SHADOW:
@@ -37,6 +40,7 @@ func setup(session: WorldEditSession, field: WorldEditSession.Field, slot: int,
 		_:
 			var line := LineEdit.new()
 			line.text_submitted.connect(_text_submitted)
+			line.text_changed.connect(_text_changed)
 			line.focus_exited.connect(_text_finished)
 			line.editable = session.is_editable()
 			line.placeholder_text = "HH:MM" if field == WorldEditSession.Field.START_TIME else "Asset filename"
@@ -54,11 +58,38 @@ func setup(session: WorldEditSession, field: WorldEditSession.Field, slot: int,
 	_refresh()
 
 
+func get_pending_file() -> String:
+	var text := _displayed_text
+	if _input is LineEdit:
+		text = (_input as LineEdit).text.strip_edges()
+	elif _input is SpinBox:
+		text = (_input as SpinBox).get_line_edit().text.strip_edges()
+	return _session.get_file_name(_field) if text != _displayed_text else ""
+
+
+func flush_pending_edit() -> String:
+	if _input is LineEdit:
+		_text_finished()
+	elif _input is SpinBox:
+		(_input as SpinBox).apply()
+	return _error.text if _error.visible else ""
+
+
+func _text_changed(_text: String) -> void:
+	if not _updating:
+		pending_changed.emit()
+
+
 func _refresh(_changed_session: WorldEditSession = null) -> void:
 	_updating = true
 	var value: Variant = _session.get_value(_field, _slot)
 	if _input is SpinBox:
-		(_input as SpinBox).set_value_no_signal(float(value))
+		var spin := _input as SpinBox
+		spin.set_value_no_signal(float(value))
+		# SpinBox normally updates its text on draw. Synchronize it now so
+		# save/close hooks compare against the newly displayed integer value.
+		_displayed_text = str(roundi(spin.value))
+		spin.get_line_edit().text = _displayed_text
 	elif _input is CheckBox:
 		(_input as CheckBox).set_pressed_no_signal(bool(value))
 	else:
@@ -84,6 +115,7 @@ func _text_submitted(_text: String) -> void:
 func _text_finished() -> void:
 	var text := (_input as LineEdit).text.strip_edges()
 	if text == _displayed_text:
+		_error.hide()
 		return
 	if _field == WorldEditSession.Field.START_TIME:
 		var parts := text.split(":")
