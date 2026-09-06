@@ -75,6 +75,7 @@ subobject_index = 18
 
 [sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_v0ne6"]
 subobject_index = 19
+matrix_index = 255
 
 [sub_resource type="ModelLodSpec" id="ModelLodSpec_uijwq"]
 part_animations = Array[ModelPartAnimationRow]([SubResource("ModelPartAnimationRow_m6k6e"), SubResource("ModelPartAnimationRow_pc7kv"), SubResource("ModelPartAnimationRow_ya25r"), SubResource("ModelPartAnimationRow_mjxwm"), SubResource("ModelPartAnimationRow_0btna"), SubResource("ModelPartAnimationRow_bopfv"), SubResource("ModelPartAnimationRow_06t4u"), SubResource("ModelPartAnimationRow_hjvf6"), SubResource("ModelPartAnimationRow_5qvps"), SubResource("ModelPartAnimationRow_eenud"), SubResource("ModelPartAnimationRow_gmn5g"), SubResource("ModelPartAnimationRow_fimss"), SubResource("ModelPartAnimationRow_kqyrt"), SubResource("ModelPartAnimationRow_5gbht"), SubResource("ModelPartAnimationRow_6fham"), SubResource("ModelPartAnimationRow_6vjy6"), SubResource("ModelPartAnimationRow_0uvqc"), SubResource("ModelPartAnimationRow_3nr4j"), SubResource("ModelPartAnimationRow_c6vqv"), SubResource("ModelPartAnimationRow_v0ne6")])

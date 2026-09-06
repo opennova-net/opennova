@@ -80,8 +80,8 @@ int main() {
 		def_free_items(&items);
 	}
 
-	// weapon.def — the ONE rifle: WPN_AK47AUTO, the AKM first-person model the
-	// bring-up set ships. The engine's hardcoded WPN_M4AUTO spawn default
+	// weapon.def — the ONE rifle: WPN_AK47AUTO, the authored akm first-person
+	// model on the retail AKM clips. The engine's hardcoded WPN_M4AUTO spawn default
 	// [orig: PlayerClass_InitEntity @ 0x4B1116] is deliberately unanswered: the
 	// mission's kit arms the player (minimal_map_validate pins it).
 	{
@@ -91,11 +91,11 @@ int main() {
 		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_AK47AUTO");
 		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the one rifle)");
 		if (rifle != nullptr) {
-			CHECK(std::strcmp(rifle->gfx1, "AKM_1st") == 0, "the rifle names its first-person model");
+			CHECK(std::strcmp(rifle->gfx1, "akm") == 0, "the rifle names the authored first-person model");
 			CHECK(std::strcmp(rifle->animadm, "AKM_1ST") == 0, "the rifle names its first-person .adm");
 			// GFX1A is parse-and-discard in the original (the arms come from the
 			// character), carried for retail-shape fidelity.
-			CHECK(std::strcmp(rifle->gfx1a, "ARMSG") == 0, "the rifle carries the retail arms row");
+			CHECK(std::strcmp(rifle->gfx1a, "arms") == 0, "the rifle carries the arms row");
 			// Raw def units; the /256 scale is the consumer's
 			// [runtime/simassets/fp_viewmodel_spec.h kWeaponDefPosScale].
 			CHECK(rifle->pos[0] == 10.0f && rifle->pos[2] == -201.0f, "the hip viewmodel offset");

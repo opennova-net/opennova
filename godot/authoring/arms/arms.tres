@@ -1,0 +1,185 @@
+[gd_resource type="ModelAuthoringManifest" format=3]
+
+[ext_resource type="PackedScene" path="res://authoring/arms/arms.tscn" id="1_scene"]
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_01"]
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_02"]
+subobject_index = 1
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_03"]
+subobject_index = 2
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_04"]
+parent_subobject = 1
+subobject_index = 3
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_05"]
+parent_subobject = 2
+subobject_index = 4
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_06"]
+parent_subobject = 3
+subobject_index = 5
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_07"]
+parent_subobject = 4
+subobject_index = 6
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_08"]
+parent_subobject = 5
+subobject_index = 7
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_09"]
+parent_subobject = 6
+subobject_index = 8
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_10"]
+parent_subobject = 7
+subobject_index = 9
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_11"]
+parent_subobject = 8
+subobject_index = 10
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_12"]
+parent_subobject = 5
+subobject_index = 11
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_13"]
+parent_subobject = 6
+subobject_index = 12
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_14"]
+parent_subobject = 11
+subobject_index = 13
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_15"]
+parent_subobject = 12
+subobject_index = 14
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_16"]
+parent_subobject = 13
+subobject_index = 15
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_17"]
+parent_subobject = 14
+subobject_index = 16
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_18"]
+parent_subobject = 5
+subobject_index = 17
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_19"]
+parent_subobject = 6
+subobject_index = 18
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_20"]
+parent_subobject = 17
+subobject_index = 19
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_21"]
+parent_subobject = 18
+subobject_index = 20
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_22"]
+parent_subobject = 19
+subobject_index = 21
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_23"]
+parent_subobject = 20
+subobject_index = 22
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_24"]
+parent_subobject = 5
+subobject_index = 23
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_25"]
+parent_subobject = 6
+subobject_index = 24
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_26"]
+parent_subobject = 23
+subobject_index = 25
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_27"]
+parent_subobject = 24
+subobject_index = 26
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_28"]
+parent_subobject = 25
+subobject_index = 27
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_29"]
+parent_subobject = 26
+subobject_index = 28
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_30"]
+parent_subobject = 5
+subobject_index = 29
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_31"]
+parent_subobject = 6
+subobject_index = 30
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_32"]
+parent_subobject = 29
+subobject_index = 31
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_33"]
+parent_subobject = 30
+subobject_index = 32
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_34"]
+parent_subobject = 31
+subobject_index = 33
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_35"]
+parent_subobject = 32
+subobject_index = 34
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_36"]
+parent_subobject = 9
+subobject_index = 35
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_37"]
+parent_subobject = 10
+subobject_index = 36
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_38"]
+subobject_index = 37
+matrix_index = 255
+
+[sub_resource type="ModelLodSpec" id="ModelLodSpec_lod0"]
+part_animations = Array[ModelPartAnimationRow]([SubResource("ModelPartAnimationRow_01"), SubResource("ModelPartAnimationRow_02"), SubResource("ModelPartAnimationRow_03"), SubResource("ModelPartAnimationRow_04"), SubResource("ModelPartAnimationRow_05"), SubResource("ModelPartAnimationRow_06"), SubResource("ModelPartAnimationRow_07"), SubResource("ModelPartAnimationRow_08"), SubResource("ModelPartAnimationRow_09"), SubResource("ModelPartAnimationRow_10"), SubResource("ModelPartAnimationRow_11"), SubResource("ModelPartAnimationRow_12"), SubResource("ModelPartAnimationRow_13"), SubResource("ModelPartAnimationRow_14"), SubResource("ModelPartAnimationRow_15"), SubResource("ModelPartAnimationRow_16"), SubResource("ModelPartAnimationRow_17"), SubResource("ModelPartAnimationRow_18"), SubResource("ModelPartAnimationRow_19"), SubResource("ModelPartAnimationRow_20"), SubResource("ModelPartAnimationRow_21"), SubResource("ModelPartAnimationRow_22"), SubResource("ModelPartAnimationRow_23"), SubResource("ModelPartAnimationRow_24"), SubResource("ModelPartAnimationRow_25"), SubResource("ModelPartAnimationRow_26"), SubResource("ModelPartAnimationRow_27"), SubResource("ModelPartAnimationRow_28"), SubResource("ModelPartAnimationRow_29"), SubResource("ModelPartAnimationRow_30"), SubResource("ModelPartAnimationRow_31"), SubResource("ModelPartAnimationRow_32"), SubResource("ModelPartAnimationRow_33"), SubResource("ModelPartAnimationRow_34"), SubResource("ModelPartAnimationRow_35"), SubResource("ModelPartAnimationRow_36"), SubResource("ModelPartAnimationRow_37"), SubResource("ModelPartAnimationRow_38")])
+
+[sub_resource type="ModelTextureRow" id="ModelTextureRow_01"]
+texture_name = "arms.tga"
+
+[sub_resource type="ModelTextureRow" id="ModelTextureRow_02"]
+texture_name = "arms_n.tga"
+slot = 3
+type = 5
+
+[sub_resource type="ModelMaterialSpec" id="ModelMaterialSpec_01"]
+material_name = "arms"
+shader_tag = "VS_SKBUMPPHONGT"
+textures = Array[ModelTextureRow]([SubResource("ModelTextureRow_01"), SubResource("ModelTextureRow_02")])
+
+[sub_resource type="ModelTextureSource" id="ModelTextureSource_01"]
+source_path = "res://authoring/arms/arms.png"
+output_name = "arms.tga"
+
+[sub_resource type="ModelTextureSource" id="ModelTextureSource_02"]
+source_path = "res://authoring/arms/arms_n.png"
+output_name = "arms_n.tga"
+with_alpha = true
+
+[resource]
+model_name = "arms"
+skinned = true
+scene = ExtResource("1_scene")
+materials = Array[ModelMaterialSpec]([SubResource("ModelMaterialSpec_01")])
+lods = Array[ModelLodSpec]([SubResource("ModelLodSpec_lod0")])
+texture_sources = Array[ModelTextureSource]([SubResource("ModelTextureSource_01"), SubResource("ModelTextureSource_02")])
+expected_bone_rows = 38

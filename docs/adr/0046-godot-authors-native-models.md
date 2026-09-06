@@ -102,8 +102,8 @@ travels with it without a second content model or importer-private state.
   scope beside `opennova_world`.
 - The first authored model is the crate (`godot/authoring/crate/`: a Blender
   box through the glTF importer; `items.def 108002`, placed once in
-  `mnml.bms`). The body and head on the 19-row rig, then the arms and rifle on
-  the 46-row rig, follow in this slice; the clips need the `.bad`/`.adm`
+  `mnml.bms`), then the body and head on the 19-row rig and the arms and rifle
+  on the 46-row rig; the clips need the `.bad`/`.adm`
   writers of the next one, so `US01.ADM`, `E_STAND.adm` and the 156 clips stay
   under the banner until then.
 

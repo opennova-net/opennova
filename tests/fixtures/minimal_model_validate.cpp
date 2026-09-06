@@ -30,6 +30,13 @@ namespace {
 
 int failures = 0;
 
+bool iequals(const std::string &a, const std::string &b) {
+	if (a.size() != b.size()) return false;
+	for (size_t i = 0; i < a.size(); ++i)
+		if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+	return true;
+}
+
 #define CHECK(cond, msg)                                              \
 	do {                                                              \
 		if (cond) {                                                   \
@@ -40,12 +47,33 @@ int failures = 0;
 		}                                                             \
 	} while (0)
 
-const char *const kAuthoredModels[] = {"crate.3di", "person.3di", "person_hd.3di"};
+const char *const kAuthoredModels[] = {"crate.3di", "person.3di", "person_hd.3di", "akm.3di", "arms.3di"};
 
-// The reset clip whose bone rows the skinned models must reproduce until our
-// own clips exist (ADR 0046 decision 5): the clips pair with model rows by
-// index, and every clip is measured against this one bind.
-const char *const kBodyResetClip = "DT1RST.BAD";
+// The reset clip whose bone rows a rigged model must reproduce until our own
+// clips exist (ADR 0046 decision 5): the clips pair with model rows by index,
+// and every clip is measured against this one bind. The row count is the
+// model's own (retail's arms carry 38 of the FP rig's 46 rows, its rifle 45);
+// the coupled rows exclude the ground proxy part retail's skinned models end
+// with (the body's 20th row has no clip row; the arms' 38th sits on the clip's
+// gun-root row, and retail's own ArmsG.3di puts the proxy there too).
+struct RigCoupling {
+	const char *model;
+	const char *reset_clip;
+	int rows;
+	int coupled;
+};
+const RigCoupling kRigCouplings[] = {
+    {"person.3di", "DT1RST.BAD", 20, 19},
+    {"person_hd.3di", "DT1RST.BAD", 20, 19},
+    {"akm.3di", "rAKM_RST.bad", 45, 45},
+    {"arms.3di", "rAKM_RST.bad", 38, 37},
+};
+
+const RigCoupling *rig_coupling_for(const char *file) {
+	for (const RigCoupling &row : kRigCouplings)
+		if (iequals(row.model, file)) return &row;
+	return nullptr;
+}
 
 // Shader tag -> the authored .fx artifact that serves it (assets/README.md "Shaders").
 struct TagEffect {
@@ -59,12 +87,6 @@ const TagEffect kTagEffects[] = {
 	{"VS_SKBUMPPHONGOBJ", "skbphongo.fx"},
 };
 
-bool iequals(const std::string &a, const std::string &b) {
-	if (a.size() != b.size()) return false;
-	for (size_t i = 0; i < a.size(); ++i)
-		if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
-	return true;
-}
 
 // The authored allowlist (assets/.gitignore "!/name" lines), the set's one manifest.
 std::vector<std::string> allowlist(const std::string &assets) {
@@ -140,18 +162,22 @@ int main() {
 				CHECK(allowlisted(names, texture), ("the texture is an allowlisted asset: " + texture).c_str());
 			}
 		}
-		if (model.header.mesh_type == THREEDI_MESH_SKINNED && model.lod_count >= 1) {
+		const RigCoupling *coupling = rig_coupling_for(file);
+		CHECK((coupling != nullptr) || model.header.mesh_type != THREEDI_MESH_SKINNED,
+				"a skinned model names the reset clip it is coupled to");
+		if (coupling != nullptr && model.lod_count >= 1) {
 			// The rig coupling: the model's parent table and pivots, run through the
 			// engine's own bind relation, reproduce the reset clip's bone table.
 			opennova::bad::BadFile reset = {};
-			const std::string clip_path = assets + "/" + kBodyResetClip;
+			const std::string clip_path = assets + "/" + coupling->reset_clip;
 			if (opennova::bad::bad_parse(clip_path.c_str(), &reset) != 0) {
-				std::printf("FAIL: %s does not parse\n", kBodyResetClip);
+				std::printf("FAIL: %s does not parse\n", coupling->reset_clip);
 				++failures;
 			} else {
 				const ThreediLod &lod0 = model.lods[0];
-				CHECK(lod0.render_object_count >= reset.num_bones,
-						"the rig carries at least the reset clip's bone rows");
+				CHECK(static_cast<int>(lod0.render_object_count) == coupling->rows,
+						"the rig carries the row count the coupling table names");
+				const size_t coupled = std::min<size_t>(static_cast<size_t>(coupling->coupled), reset.num_bones);
 				std::vector<int> parents;
 				std::vector<opennova::anim::Vec3> rel;
 				for (size_t pi = 0; pi < lod0.render_object_count; ++pi) {
@@ -160,15 +186,15 @@ int main() {
 					rel.push_back(opennova::anim::Vec3{ro.rel[0], ro.rel[1], ro.rel[2]});
 				}
 				bool parents_match = true;
-				for (size_t b = 0; b < reset.num_bones && b < parents.size(); ++b) {
+				for (size_t b = 0; b < coupled && b < parents.size(); ++b) {
 					const int clip_parent = reset.bones[b].parent_index;
 					if ((clip_parent < 0 ? -1 : clip_parent) != parents[b]) parents_match = false;
 				}
-				CHECK(parents_match, "the first rows' parents equal the reset clip's bone parents");
+				CHECK(parents_match, "the coupled rows' parents equal the reset clip's bone parents");
 				const std::vector<opennova::anim::Vec3> derived =
 						opennova::anim::positions_from_model(reset, parents, rel);
 				float worst = 0.0f;
-				for (size_t b = 0; b < reset.num_bones && b < derived.size(); ++b) {
+				for (size_t b = 0; b < coupled && b < derived.size(); ++b) {
 					const float dx = derived[b].x - reset.bones[b].position[0];
 					const float dy = derived[b].y - reset.bones[b].position[1];
 					const float dz = derived[b].z - reset.bones[b].position[2];

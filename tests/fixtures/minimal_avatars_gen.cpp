@@ -10,9 +10,8 @@
 // and avatars_roundtrip.
 //
 // The same writer also mints the minimal set's own table, assets/AVATARS.DEF:
-// one head and one body (the Godot-authored person_hd.3di / person.3di on the
-// retail rig), the arms (interim: the retail ArmsG.3di under the TEMPORARY
-// banner until the 46-row rig is authored), and one nationality per alignment
+// one head, one body and the arms (the Godot-authored person_hd.3di /
+// person.3di / arms.3di on the retail rigs), and one nationality per alignment
 // carrying one division with that one combo, so the join profile's packed
 // character ids resolve for both sides. Retail's own file left the set with
 // that swap (assets/README.md).
@@ -239,7 +238,7 @@ bool build_assets_table(std::vector<uint8_t> &bytes, std::string &err) {
 	                     AVATAR_SEX_MALE));
 	parts.push_back(part(AVATAR_PART_BODY, "ON_BODY_PERSON", "AV_ON_BODY_PERSON", "person.3di", 0, 0,
 	                     AVATAR_SEX_MALE));
-	parts.push_back(part(AVATAR_PART_ARMS, "ON_ARMS_PERSON", "AV_ON_ARMS_PERSON", "ArmsG.3di", 0, 0,
+	parts.push_back(part(AVATAR_PART_ARMS, "ON_ARMS_PERSON", "AV_ON_ARMS_PERSON", "arms.3di", 0, 0,
 	                     AVATAR_SEX_MALE));
 	std::vector<std::vector<AvatarCombo>> combos(2);
 	std::vector<std::vector<AvatarDivision>> divisions(2);

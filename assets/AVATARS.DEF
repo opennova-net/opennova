@@ -21,7 +21,7 @@ define body ON_BODY_PERSON
 define arms ON_ARMS_PERSON
 {
 	name		AV_ON_ARMS_PERSON
-	graphic		ArmsG.3di
+	graphic		arms.3di
 	camo		0 0 0
 	voice		0
 	sex		m

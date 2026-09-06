@@ -119,25 +119,34 @@
 !/person.tga
 !/person_hd.3di
 !/person_hd.tga
+# The first-person rifle (rigid, 45 parts) and arms (skinned, 38 rows) on the
+# retail rAKM_RST.bad rig with AKM_1st's pivots (the arms share the rifle's
+# table; ArmsG's ground proxy ends theirs), minted from godot/authoring/akm and
+# arms: weapon.def's GFX1 and the AVATARS.DEF arms. The type-5 normal slots
+# take a flat 32 bpp TGA (the normal rides the alpha, retail's flat_N.tga form).
+!/akm.3di
+!/akm.tga
+!/akm_n.tga
+!/brass.tga
+!/arms.3di
+!/arms.tga
+!/arms_n.tga
 
 # --- Definitions we author with the engine writers ---
-# The avatar table: one head, one body, the arms (interim: the retail ArmsG.3di
-# below), one nationality per alignment. Minted by minimal_avatars_gen (--write).
+# The avatar table: one head, one body, the arms, one nationality per
+# alignment. Minted by minimal_avatars_gen (--write).
 !/AVATARS.DEF
 
 
 # --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
-# These are RETAIL Joint Operations bytes: the player body + anims, the avatar
-# combo, the first-person rifle, the default infantry clip set and their
-# textures -- the bring-up set README.md describes. Committed by explicit
-# decision so the minimal set runs (and ships) from a fresh checkout; every
-# line is deleted as our own writer-produced replacement lands (the 3di
-# builder exists; the .bad writer is still parse-only). Names stay
-# individually listed on purpose: removing one is the same conscious call
-# as adding one.
-# models (the arms and rifle, until the 46-row rig is authored)
-!/AKM_1st.3di
-!/ArmsG.3di
+# These are RETAIL Joint Operations bytes: the player body anims, the
+# first-person rifle clips and the default infantry clip set -- the bring-up
+# set README.md describes (the models, textures and avatar table are ours
+# now, above). Committed by explicit decision so the minimal set runs (and
+# ships) from a fresh checkout; every line is deleted as our own
+# writer-produced replacement lands (the .bad writer is still parse-only).
+# Names stay individually listed on purpose: removing one is the same
+# conscious call as adding one.
 # anim defs
 !/AKM_1ST.adm
 !/E_STAND.adm
@@ -302,13 +311,3 @@
 !/skisitP2.bad
 !/trudsi.bad
 !/z3sitR.bad
-# textures + sidecars
-!/AHand_B.dds
-!/AHand_B1.dds
-!/AHand_G.dds
-!/A_pat5.dds
-!/AhandCam.dds
-!/AhandSnp.dds
-!/Bullet2.dds
-!/flat_N.tga
-!/rpk74_6.dds

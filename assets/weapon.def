@@ -42,8 +42,8 @@ weapon "WPN_AK47AUTO"
 	flags       auto
 
 	ANIMADM	AKM_1ST
-	GFX1	AKM_1st
-	GFX1A	ARMSG
+	GFX1	akm
+	GFX1A	arms
 	pos		10.0		0.0		-201.0			0.0		0.0		1.0
 	TPOS	-28.046		21.531		-187.857		0.0		0.0		0.0
 
