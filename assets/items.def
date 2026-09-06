@@ -8,8 +8,8 @@ begin "Player #1, Single player"
   id 105310
   type person
   unit_type 9
-  graphic US01
-  graphicenemy Indo01
+  graphic person
+  graphicenemy person
   sid player1_sp
   anim_def US01
   attrib: aidata fo pfoil
@@ -35,8 +35,8 @@ begin "Player #1, Multiplayer"
   id 105305
   type person
   unit_type 9
-  graphic US01
-  graphicenemy Indo01
+  graphic person
+  graphicenemy person
   sid player1_mp
   anim_def US01
   attrib: aidata fo pfoil

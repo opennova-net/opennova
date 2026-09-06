@@ -350,15 +350,26 @@ bool ModelSceneExporter::collect_static_parts(Node3D *p_lod_node, std::vector<Pa
 
 bool ModelSceneExporter::collect_skinned_parts(Node3D *p_lod_node, Skeleton3D *&r_skeleton,
 		std::vector<PartRef> &r_parts) {
+	// The one Skeleton3D anywhere under the LOD node (Godot's importer nests it
+	// under the armature node a DCC exported).
 	r_skeleton = nullptr;
-	for (int i = 0; i < p_lod_node->get_child_count(); ++i) {
-		Skeleton3D *skeleton = Object::cast_to<Skeleton3D>(p_lod_node->get_child(i));
-		if (skeleton != nullptr) {
-			if (r_skeleton != nullptr) {
-				fail("more than one Skeleton3D under " + String(p_lod_node->get_name()));
-				return false;
+	std::vector<Node *> pending;
+	pending.push_back(p_lod_node);
+	while (!pending.empty()) {
+		Node *current = pending.back();
+		pending.pop_back();
+		for (int i = 0; i < current->get_child_count(); ++i) {
+			Node *child = current->get_child(i);
+			Skeleton3D *skeleton = Object::cast_to<Skeleton3D>(child);
+			if (skeleton != nullptr) {
+				if (r_skeleton != nullptr) {
+					fail("more than one Skeleton3D under " + String(p_lod_node->get_name()));
+					return false;
+				}
+				r_skeleton = skeleton;
+				continue;
 			}
-			r_skeleton = skeleton;
+			pending.push_back(child);
 		}
 	}
 	if (r_skeleton == nullptr) {
@@ -400,7 +411,13 @@ bool ModelSceneExporter::collect_skinned_parts(Node3D *p_lod_node, Skeleton3D *&
 			int parent_index = 0;
 			threedi_scene_parse_bone_name(opennova::to_std(r_skeleton->get_bone_name(parent_bone)), parent_index);
 			ref.parent = parent_index;
-			ref.rel = skeleton_global.basis.xform(r_skeleton->get_bone_rest(entry.second).origin);
+			// The local rest origin lives in the parent's rest frame (a DCC rig's
+			// bones are rotated); the parent-relative pivot is that origin turned
+			// by the parent's global rest, the exact term Godot added to reach
+			// this bone's global rest.
+			const Transform3D parent_global = r_skeleton->get_bone_global_rest(parent_bone);
+			ref.rel = skeleton_global.basis.xform(
+					parent_global.basis.xform(r_skeleton->get_bone_rest(entry.second).origin));
 		}
 		r_parts.push_back(ref);
 	}
@@ -826,9 +843,23 @@ bool ModelSceneExporter::export_collision(Node3D *p_collision, int p_part_count,
 		}
 		const ThreediBuildVec3 offset = mission_from_presentation(node->get_position());
 		int cobj = -1;
+		// A bone sphere: the typed node's center/radius, or a plain mesh child
+		// named "CO## sphere" whose bounds (in the section's frame) give both.
+		const String sphere_name = String(node->get_name()) + String(" sphere");
+		MeshInstance3D *sphere_mesh = nullptr;
+		for (int i = 0; i < node->get_child_count(); ++i) {
+			MeshInstance3D *candidate = Object::cast_to<MeshInstance3D>(node->get_child(i));
+			if (candidate != nullptr && String(candidate->get_name()) == sphere_name) sphere_mesh = candidate;
+		}
 		if (typed != nullptr && typed->get_sphere()) {
 			cobj = r_model.add_sphere_cobj(parent_part, offset, mission_from_presentation(typed->get_sphere_center()),
 					typed->get_sphere_radius());
+		} else if (sphere_mesh != nullptr && sphere_mesh->get_mesh().is_valid()) {
+			const AABB local = relative_transform(sphere_mesh, node).xform(sphere_mesh->get_mesh()->get_aabb());
+			const Vector3 center = node->get_position() + local.get_center();
+			const Vector3 half = local.size * 0.5f;
+			cobj = r_model.add_sphere_cobj(parent_part, offset, mission_from_presentation(center),
+					std::max(half.x, std::max(half.y, half.z)));
 		} else {
 			cobj = r_model.add_cobj(parent_part, offset);
 		}
@@ -837,6 +868,7 @@ bool ModelSceneExporter::export_collision(Node3D *p_collision, int p_part_count,
 			Node3D *child = Object::cast_to<Node3D>(node->get_child(i));
 			if (child == nullptr) continue;
 			MeshInstance3D *mesh_node = Object::cast_to<MeshInstance3D>(child);
+			if (mesh_node == sphere_mesh && sphere_mesh != nullptr) continue;
 			if (mesh_node != nullptr && String(child->get_name()) == faces_name) {
 				const Ref<Mesh> resource = mesh_node->get_mesh();
 				if (resource.is_null()) continue;

@@ -1,0 +1,101 @@
+[gd_resource type="ModelAuthoringManifest" format=3]
+
+[ext_resource type="PackedScene" path="res://authoring/person/person.tscn" id="1_djfnm"]
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_m6k6e"]
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_pc7kv"]
+subobject_index = 1
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_ya25r"]
+parent_subobject = 1
+subobject_index = 2
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_mjxwm"]
+parent_subobject = 2
+subobject_index = 3
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_0btna"]
+parent_subobject = 2
+subobject_index = 4
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_bopfv"]
+parent_subobject = 3
+subobject_index = 5
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_06t4u"]
+parent_subobject = 4
+subobject_index = 6
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_hjvf6"]
+subobject_index = 7
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_5qvps"]
+subobject_index = 8
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_eenud"]
+parent_subobject = 5
+subobject_index = 9
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_gmn5g"]
+parent_subobject = 6
+subobject_index = 10
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_fimss"]
+parent_subobject = 7
+subobject_index = 11
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_kqyrt"]
+parent_subobject = 8
+subobject_index = 12
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_5gbht"]
+parent_subobject = 2
+subobject_index = 13
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_6fham"]
+parent_subobject = 13
+subobject_index = 14
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_6vjy6"]
+parent_subobject = 10
+subobject_index = 15
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_0uvqc"]
+parent_subobject = 9
+subobject_index = 16
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_3nr4j"]
+parent_subobject = 11
+subobject_index = 17
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_c6vqv"]
+parent_subobject = 12
+subobject_index = 18
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_v0ne6"]
+subobject_index = 19
+
+[sub_resource type="ModelLodSpec" id="ModelLodSpec_uijwq"]
+part_animations = Array[ModelPartAnimationRow]([SubResource("ModelPartAnimationRow_m6k6e"), SubResource("ModelPartAnimationRow_pc7kv"), SubResource("ModelPartAnimationRow_ya25r"), SubResource("ModelPartAnimationRow_mjxwm"), SubResource("ModelPartAnimationRow_0btna"), SubResource("ModelPartAnimationRow_bopfv"), SubResource("ModelPartAnimationRow_06t4u"), SubResource("ModelPartAnimationRow_hjvf6"), SubResource("ModelPartAnimationRow_5qvps"), SubResource("ModelPartAnimationRow_eenud"), SubResource("ModelPartAnimationRow_gmn5g"), SubResource("ModelPartAnimationRow_fimss"), SubResource("ModelPartAnimationRow_kqyrt"), SubResource("ModelPartAnimationRow_5gbht"), SubResource("ModelPartAnimationRow_6fham"), SubResource("ModelPartAnimationRow_6vjy6"), SubResource("ModelPartAnimationRow_0uvqc"), SubResource("ModelPartAnimationRow_3nr4j"), SubResource("ModelPartAnimationRow_c6vqv"), SubResource("ModelPartAnimationRow_v0ne6")])
+
+[sub_resource type="ModelTextureRow" id="ModelTextureRow_c2j5v"]
+texture_name = "person.tga"
+
+[sub_resource type="ModelMaterialSpec" id="ModelMaterialSpec_qc5p5"]
+material_name = "body"
+shader_tag = "VS_SKBASIC"
+textures = Array[ModelTextureRow]([SubResource("ModelTextureRow_c2j5v")])
+
+[sub_resource type="ModelTextureSource" id="ModelTextureSource_64vni"]
+source_path = "res://authoring/person/person.png"
+output_name = "person.tga"
+
+[resource]
+model_name = "person"
+skinned = true
+scene = ExtResource("1_djfnm")
+materials = Array[ModelMaterialSpec]([SubResource("ModelMaterialSpec_qc5p5")])
+lods = Array[ModelLodSpec]([SubResource("ModelLodSpec_uijwq")])
+texture_sources = Array[ModelTextureSource]([SubResource("ModelTextureSource_64vni")])
+expected_bone_rows = 20

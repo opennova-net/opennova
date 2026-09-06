@@ -85,7 +85,9 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
+| `AVATARS.DEF` | `minimal_avatars_gen` (the `engine/formats/avatars` writer, ADR 0021; `--write` re-emits it) | the avatar table: one head (`person_hd.3di`), one body (`person.3di`), the arms (interim: the retail `ArmsG.3di` under the TEMPORARY banner until the 46-row rig is authored), and one nationality per alignment (`N00` good, `N01` evil) carrying one division with that one combo, so the join profile's packed character ids resolve on both sides. CRLF from the writer. |
 | `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. ONE entry, `WPN_AK47AUTO`: the rifle the bring-up set actually ships (the AKM first-person model, its `.adm` and clips). The engine's hardcoded spawn default `WPN_M4AUTO` `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` is deliberately unanswered: `mnml.bms` arms the player instead (below). The entry carries `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `person.3di` + `person.tga`, `person_hd.3di` + `person_hd.tga` | the Godot model tool: `godot/authoring/person/` and `person_hd/` (Blender rigs through the glTF importer) | the player body and head on the retail reset clip's rig: the twenty `DT1RST.BAD` rows (`BN01 Hips` .. `BN19 L Foot` plus the ground-level proxy part) with retail's own pivots, so the retail clips still under the banner animate them (`minimal_model_validate` runs the engine's bind relation over the pivots and pins the clip's bone positions to 2 mm); blocky limb boxes weighted one bone each, a bone sphere per section and a body hull on the root section, the `Look` (head) and `GFlash01` (left hand) user points retail's models carry; `VS_SKBASIC` over one 32 x 32 texture each. `AVATARS.DEF` names them as the one combo of one nationality per alignment. |
 | `crate.3di` + `crate.tga` | the Godot model tool (ADR 0046): `godot/authoring/crate/` (a Blender box through Godot's glTF importer, the manifest beside it) exported by the `opennova_model` addon through `threedi_3di3_write`; re-exported and byte-compared by `godot/tests/model_export_guard_test.gd` | the first model authored in Godot (`items.def 108002`, `type building`, placed once in `mnml.bms` 8 m east and 18 m north of the player start): one part, one box, a 12-face collision box and one CB volume, the `ground` user point; material `FF_ST_OP` served by the authored `_ffp.fx`; the texture a 16 x 16 plank checker exported from its PNG source through `engine/formats/tga`. |
 | `house.3di` + `wall.tga`/`roof.tga`/`wood.tga` | `minimal_3di_gen` (the `house` recipe through `threedi_3di3_write`; the swatches minted beside it) | the set's own model, byte-identical to `fixtures/threedi/synth/house.3di`: one inert part, three boxes (an 8 x 10 x 4 m wall block, the roof slab, the chimney) over a face box, three CB volumes and the collision-only water-tank prism off its east side; every material `FF_ST_OP`, served by the authored `_ffp.fx`. The three textures are 16 x 16 flat-colour 24 bpp TGAs (the shape of the `mnml_*` terrain art retail already loads loose). |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
@@ -197,16 +199,17 @@ both zip flavors. Deleting a line from that banner is how a replacement lands.
 
 What is committed, from an extracted retail resource tree (213 files, trimmed
 2026-08-31 to what the validated retail run actually loads — see the trim note
-below):
+below; 172 remain after the body and head swap of 2026-09-06 retired the four
+body models, their 36 textures and the retail avatar table):
 
 | Group | Files |
 |---|---|
-| player body + anims | `US01.3di`, `US01.ADM`, the **149** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
-| avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
+| player body anims | `US01.ADM`, the **149** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`); the body itself (`US01.3di`), the AI body (`Indo01.3di`) and the combo's head and torso (`Boonie.3di`, `JntOpsB1.3di`) are RETIRED: `person.3di` / `person_hd.3di` above stand on the same rig |
+| avatar arms | `ArmsG.3di`, the combo's arms (the retail `Avatars.def` is retired: the authored `AVATARS.DEF` above names it) |
 | sound profiles | `SndProf.def` — the 49-profile retail table; a miss AVs the first footstep (see the omitted list) |
 | weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
 | the default infantry clip set | `E_STAND.adm` and the shared subset of the `.bad` clips it names — the file itself is **required for the player to walk at all**, see below |
-| textures | the stems the five models name, resolved to whatever extension ships them — 37 `.dds`, one `.tga`, plus the seven `.MDT` normal-map fills the materials actually request |
+| textures | the stems the arms and rifle name, resolved to whatever extension ships them — 8 `.dds` and one `.tga` (the body models' 36 retired with them) |
 
 The `.fx` shaders are **no longer retail bytes**: since 2026-08-31 the set
 ships our own authored effects (see "Shaders" below), so they moved out of

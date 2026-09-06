@@ -112,6 +112,18 @@
 # 108002, placed in mnml) is the first: a Blender box through Godot's glTF importer.
 !/crate.3di
 !/crate.tga
+# The player body and head on the retail reset clip's 20-row rig (DT1RST.BAD bone
+# order and pivots, until our own clips exist; ADR 0046 decision 5): the avatar
+# combo AVATARS.DEF names, minted from godot/authoring/person and person_hd.
+!/person.3di
+!/person.tga
+!/person_hd.3di
+!/person_hd.tga
+
+# --- Definitions we author with the engine writers ---
+# The avatar table: one head, one body, the arms (interim: the retail ArmsG.3di
+# below), one nationality per alignment. Minted by minimal_avatars_gen (--write).
+!/AVATARS.DEF
 
 
 # --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
@@ -123,19 +135,14 @@
 # builder exists; the .bad writer is still parse-only). Names stay
 # individually listed on purpose: removing one is the same conscious call
 # as adding one.
-# models
+# models (the arms and rifle, until the 46-row rig is authored)
 !/AKM_1st.3di
 !/ArmsG.3di
-!/Boonie.3di
-!/Indo01.3di
-!/JntOpsB1.3di
-!/US01.3di
 # anim defs
 !/AKM_1ST.adm
 !/E_STAND.adm
 !/US01.ADM
 # retail defs
-!/AVATARS.DEF
 !/charattr.def
 !/SndProf.def
 # clips
@@ -296,45 +303,9 @@
 !/trudsi.bad
 !/z3sitR.bad
 # textures + sidecars
-!/ACAMINDO.dds
-!/ACM2INDO.dds
 !/AHand_B.dds
 !/AHand_B1.dds
 !/AHand_G.dds
-!/AINDOHD1.MDT
-!/AIndoHd1.dds
-!/AUS1_CMW.MDT
-!/AUS1_CmW.dds
-!/AUS1_Gr1.dds
-!/AUS1_HG1.MDT
-!/AUS1_HG1.dds
-!/AUS1_Hd1.dds
-!/AUS1_VSG.MDT
-!/AUS1_VSG.dds
-!/AVBMOD00000.dds
-!/A_B1RNGR.MDT
-!/A_B1Rngr.dds
-!/A_B1SAS.dds
-!/A_B1SEAL.MDT
-!/A_B1SEAL.dds
-!/A_B1Sptz.dds
-!/A_B1USMC.dds
-!/A_Boon_J.dds
-!/A_Boon_W.dds
-!/A_Gear_B.dds
-!/A_Gear_F.dds
-!/A_Gear_G.dds
-!/A_Gear_O.dds
-!/A_Gear_S.dds
-!/A_J_MHD3.MDT
-!/A_J_mHd3.dds
-!/A_J_mHd5.dds
-!/A_J_mHd7.dds
-!/A_R_mHd2.dds
-!/A_hatAus.dds
-!/A_pat.dds
-!/A_pat2.dds
-!/A_pat4.dds
 !/A_pat5.dds
 !/AhandCam.dds
 !/AhandSnp.dds

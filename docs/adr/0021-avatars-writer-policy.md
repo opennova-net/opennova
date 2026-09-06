@@ -43,6 +43,10 @@ from the in-memory model:
 - **Comments and decorative whitespace are not preserved.** The retail file's
   `////` banners and tab art are authoring decoration, not data; the canonical
   writer does not reproduce them.
+- **Lines end in CRLF.** Retail's own `Avatars.def` ships CRLF and its text
+  parsers are not LF-tolerant (`assets/README.md`, "CRLF is mandatory"); the
+  canonical form is the shape the shipped table (`assets/AVATARS.DEF`, minted
+  by `minimal_avatars_gen`) has to load in `Jointops.exe` (ADR 0046).
 
 ## Round-trip contract
 

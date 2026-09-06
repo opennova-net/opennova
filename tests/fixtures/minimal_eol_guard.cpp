@@ -34,6 +34,9 @@ int fail = 0;
 const char *kAuthoredText[] = {
     "items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu", "sp.mnu",
     "menu_style.mns", "earlyerr.txt",
+    // Writer-minted (minimal_avatars_gen), pinned here too: retail's own table
+    // ships CRLF and its parsers fail silently on LF.
+    "AVATARS.DEF",
 };
 
 std::string path(const char *name) {

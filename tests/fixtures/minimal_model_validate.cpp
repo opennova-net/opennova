@@ -9,6 +9,7 @@
 // rule, docs/threedi/3di-gp-format-re.md).
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -16,7 +17,9 @@
 #include <vector>
 
 #include "common/test_paths.h"
+#include <formats/bad/bad.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/anim/anim_sample.h>
 #include <runtime/renderer/material_descriptor.h>
 
 #include "common/file_io.h"
@@ -37,7 +40,12 @@ int failures = 0;
 		}                                                             \
 	} while (0)
 
-const char *const kAuthoredModels[] = {"crate.3di"};
+const char *const kAuthoredModels[] = {"crate.3di", "person.3di", "person_hd.3di"};
+
+// The reset clip whose bone rows the skinned models must reproduce until our
+// own clips exist (ADR 0046 decision 5): the clips pair with model rows by
+// index, and every clip is measured against this one bind.
+const char *const kBodyResetClip = "DT1RST.BAD";
 
 // Shader tag -> the authored .fx artifact that serves it (assets/README.md "Shaders").
 struct TagEffect {
@@ -130,6 +138,48 @@ int main() {
 			for (uint32_t t = 0; t < m.texture_count; ++t) {
 				const std::string texture(m.textures[t].name);
 				CHECK(allowlisted(names, texture), ("the texture is an allowlisted asset: " + texture).c_str());
+			}
+		}
+		if (model.header.mesh_type == THREEDI_MESH_SKINNED && model.lod_count >= 1) {
+			// The rig coupling: the model's parent table and pivots, run through the
+			// engine's own bind relation, reproduce the reset clip's bone table.
+			opennova::bad::BadFile reset = {};
+			const std::string clip_path = assets + "/" + kBodyResetClip;
+			if (opennova::bad::bad_parse(clip_path.c_str(), &reset) != 0) {
+				std::printf("FAIL: %s does not parse\n", kBodyResetClip);
+				++failures;
+			} else {
+				const ThreediLod &lod0 = model.lods[0];
+				CHECK(lod0.render_object_count >= reset.num_bones,
+						"the rig carries at least the reset clip's bone rows");
+				std::vector<int> parents;
+				std::vector<opennova::anim::Vec3> rel;
+				for (size_t pi = 0; pi < lod0.render_object_count; ++pi) {
+					const ThreediRenderObject &ro = lod0.render_objects[pi];
+					parents.push_back(ro.parent_index == static_cast<int32_t>(pi) ? -1 : ro.parent_index);
+					rel.push_back(opennova::anim::Vec3{ro.rel[0], ro.rel[1], ro.rel[2]});
+				}
+				bool parents_match = true;
+				for (size_t b = 0; b < reset.num_bones && b < parents.size(); ++b) {
+					const int clip_parent = reset.bones[b].parent_index;
+					if ((clip_parent < 0 ? -1 : clip_parent) != parents[b]) parents_match = false;
+				}
+				CHECK(parents_match, "the first rows' parents equal the reset clip's bone parents");
+				const std::vector<opennova::anim::Vec3> derived =
+						opennova::anim::positions_from_model(reset, parents, rel);
+				float worst = 0.0f;
+				for (size_t b = 0; b < reset.num_bones && b < derived.size(); ++b) {
+					const float dx = derived[b].x - reset.bones[b].position[0];
+					const float dy = derived[b].y - reset.bones[b].position[1];
+					const float dz = derived[b].z - reset.bones[b].position[2];
+					const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+					if (d > worst) worst = d;
+				}
+				char msg[160];
+				std::snprintf(msg, sizeof(msg),
+						"the pivots reproduce the reset clip's bone positions (worst %.4f m)", worst);
+				CHECK(worst < 0.002f, msg);
+				opennova::bad::bad_free(&reset);
 			}
 		}
 		for (size_t li = 0; li < model.lod_count; ++li) {

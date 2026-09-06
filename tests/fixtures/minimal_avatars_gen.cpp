@@ -9,8 +9,16 @@
 // table is carried: the shipped file is the reference-tree leg of avatars_parse
 // and avatars_roundtrip.
 //
-// Default: rebuild in memory and byte-compare the committed file. `--write`
-// (re)writes it.
+// The same writer also mints the minimal set's own table, assets/AVATARS.DEF:
+// one head and one body (the Godot-authored person_hd.3di / person.3di on the
+// retail rig), the arms (interim: the retail ArmsG.3di under the TEMPORARY
+// banner until the 46-row rig is authored), and one nationality per alignment
+// carrying one division with that one combo, so the join profile's packed
+// character ids resolve for both sides. Retail's own file left the set with
+// that swap (assets/README.md).
+//
+// Default: rebuild in memory and byte-compare the committed files. `--write`
+// (re)writes them.
 #include "common/test_paths.h"
 
 #include <formats/avatars/avatars.h>
@@ -224,34 +232,109 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 
 using test_io::read_file;
 
+// The minimal set's own table (assets/AVATARS.DEF).
+bool build_assets_table(std::vector<uint8_t> &bytes, std::string &err) {
+	std::vector<AvatarPart> parts;
+	parts.push_back(part(AVATAR_PART_HEAD, "ON_HEAD_PERSON", "AV_ON_HEAD_PERSON", "person_hd.3di", 0, 1,
+	                     AVATAR_SEX_MALE));
+	parts.push_back(part(AVATAR_PART_BODY, "ON_BODY_PERSON", "AV_ON_BODY_PERSON", "person.3di", 0, 0,
+	                     AVATAR_SEX_MALE));
+	parts.push_back(part(AVATAR_PART_ARMS, "ON_ARMS_PERSON", "AV_ON_ARMS_PERSON", "ArmsG.3di", 0, 0,
+	                     AVATAR_SEX_MALE));
+	std::vector<std::vector<AvatarCombo>> combos(2);
+	std::vector<std::vector<AvatarDivision>> divisions(2);
+	std::vector<AvatarNationality> nationalities(2);
+	static const char *const kNatKeys[2] = {"AV_NAT_OPENNOVA", "AV_NAT_OPENNOVA_OPFOR"};
+	for (int n = 0; n < 2; ++n) {
+		combos[static_cast<size_t>(n)].push_back(combo(1, "ON_HEAD_PERSON", "ON_BODY_PERSON", "ON_ARMS_PERSON"));
+		AvatarDivision div;
+		std::memset(&div, 0, sizeof(div));
+		SETSTR(div.raw_id, "D00");
+		div.id = 0;
+		SETSTR(div.name_key, "AV_DIV_OPENNOVA");
+		div.combos = combos[static_cast<size_t>(n)].data();
+		div.combos_count = combos[static_cast<size_t>(n)].size();
+		divisions[static_cast<size_t>(n)].push_back(div);
+		AvatarNationality &nat = nationalities[static_cast<size_t>(n)];
+		std::memset(&nat, 0, sizeof(nat));
+		char raw[8];
+		std::snprintf(raw, sizeof(raw), "N%02d", n);
+		SETSTR(nat.raw_id, raw);
+		nat.id = n;
+		SETSTR(nat.name_key, kNatKeys[n]);
+		nat.has_alignment = 1;
+		nat.alignment = n == 0 ? AVATAR_ALIGN_GOOD : AVATAR_ALIGN_EVIL;
+		nat.divisions = divisions[static_cast<size_t>(n)].data();
+		nat.divisions_count = divisions[static_cast<size_t>(n)].size();
+	}
+	AvatarsFile file;
+	std::memset(&file, 0, sizeof(file));
+	file.parts = parts.data();
+	file.parts_count = parts.size();
+	file.nationalities = nationalities.data();
+	file.nationalities_count = nationalities.size();
+	char *data = nullptr;
+	size_t size = 0;
+	if (avatars_write(&file, &data, &size) != 0) {
+		err = "avatars_write failed";
+		return false;
+	}
+	AvatarsFile back;
+	if (avatars_parse_memory(data, size, &back) != 0) {
+		avatars_free_buffer(data);
+		err = "the written table does not parse";
+		return false;
+	}
+	const bool shape_ok = back.parts_count == 3 && back.nationalities_count == 2 && total_combos(back) == 2 &&
+	                      back.diagnostics_count == 0;
+	bytes.assign(data, data + size);
+	avatars_free(&back);
+	avatars_free_buffer(data);
+	if (!shape_ok) {
+		err = "the re-parsed table lost a pinned field";
+		return false;
+	}
+	return true;
+}
+
+// One committed copy: written under --write, else byte-compared (an unpulled
+// LFS pointer skips).
+bool guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
+	if (write_mode) {
+		std::ofstream o(path, std::ios::binary);
+		if (!expect(static_cast<bool>(o), ("cannot open for writing: " + path).c_str())) return false;
+		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
+		return true;
+	}
+	std::vector<uint8_t> committed;
+	if (!expect(read_file(path, committed), ("committed file missing; run with --write: " + path).c_str())) return false;
+	static const char kLfsSentinel[] = "version https://git-lfs";
+	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
+	    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
+		return true;
+	}
+	if (!expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str()))
+		return false;
+	std::printf("OK: %s byte-reproducible (%zu bytes)\n", path.c_str(), bytes.size());
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	bool write_mode = false;
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
-	const std::string path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/avatars/synth_avatars.def";
+	const std::string root = std::string(test_paths_repo_root(__FILE__));
 
 	std::vector<uint8_t> bytes;
 	std::string err;
 	if (!expect(build(bytes, err), ("synth_avatars.def: " + err).c_str())) return 1;
-	if (write_mode) {
-		std::ofstream o(path, std::ios::binary);
-		if (!expect(static_cast<bool>(o), ("cannot open for writing: " + path).c_str())) return 1;
-		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
-		return 0;
-	}
-	std::vector<uint8_t> committed;
-	if (!expect(read_file(path, committed), ("committed file missing; run with --write: " + path).c_str())) return 1;
-	static const char kLfsSentinel[] = "version https://git-lfs";
-	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
-	    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
-		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
-		return 0;
-	}
-	if (!expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str()))
-		return 1;
-	std::printf("OK: fixtures/avatars/synth_avatars.def byte-reproducible (%zu bytes)\n", bytes.size());
-	return 0;
+	bool ok = guard(root + "/fixtures/avatars/synth_avatars.def", bytes, write_mode);
+	std::vector<uint8_t> assets_bytes;
+	if (!expect(build_assets_table(assets_bytes, err), ("assets/AVATARS.DEF: " + err).c_str())) return 1;
+	ok = guard(root + "/assets/AVATARS.DEF", assets_bytes, write_mode) && ok;
+	return ok ? 0 : 1;
 }

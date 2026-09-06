@@ -8,17 +8,17 @@ hardening, and project health. Divergences from the original engine belong in
 ## Cleanup & verification backlog
 
 - [ ] Replace the committed retail bring-up set with authored assets. `assets/` carries
-      213 retail files (models, anim defs, clips, textures, `Avatars.def`/`charattr.def`/`SndProf.def`)
+      172 retail files (the arms and rifle models, anim defs, clips, textures, `charattr.def`/`SndProf.def`)
       by explicit 2026-08-31 decision, allowlisted by name under the TEMPORARY banner in
       `assets/.gitignore`, so the minimal set runs from a fresh checkout — and they ship
       in both zip flavors until replaced. The 47 retail `.fx` are already replaced (the
       authored set under `tests/fixtures/fx/`, retail-validated 2026-08-31) and the
       never-loaded files trimmed against the validated run's `/FRISK` log. The model side
       has its tool (ADR 0046: `godot/addons/opennova_model/` exports an authoring scene
-      under `godot/authoring/` through `threedi_3di3_write`; `assets/crate.3di` is the
-      first model authored that way, `house.3di` the first from a C++ recipe); the six
-      retail models and their 45 textures fall once the body/head (19-row `DT1RST` rig)
-      and arms/rifle (46-row `rAKM_RST` rig) are authored; the clip side needs a `.bad`
+      under `godot/authoring/` through `threedi_3di3_write`; the crate, the body and the
+      head are authored that way, the house from a C++ recipe; the body and head stand on
+      the retail `DT1RST` rig so the retail clips still drive them); the arms and rifle
+      fall once the 46-row `rAKM_RST` rig is authored; the clip side needs a `.bad`
       writer (`engine/formats/bad` is parse-only). Land a replacement by swapping the
       file and deleting its allowlist line; the `minimal_*` guards, the GUT export guard
       and the retail A/B loop stay the acceptance.

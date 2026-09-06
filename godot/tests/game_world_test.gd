@@ -2345,7 +2345,7 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 	# local player's own type -> the player body, and its placed house), then
 	# the explicit player-body / current-gun / character-arms legs, in that
 	# order.
-	assert_eq(Array(resolved), [body, "house", body, VIEWMODEL_GUN_GRAPHIC, VIEWMODEL_ARMS_GRAPHIC],
+	assert_eq(Array(resolved), [body, "house", "crate", body, VIEWMODEL_GUN_GRAPHIC, VIEWMODEL_ARMS_GRAPHIC],
 		"the frozen 0x3D source includes every .3DI the first player frame would load "
 		+ "(the character's arms, not a weapon.def field)")
 
@@ -2497,7 +2497,7 @@ func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> vo
 	# item effect the reattach met under the RESTORED switch was deferred, not
 	# lost -- it attaches exactly once when the preference lifts.
 	var root_dir := _stage_item_fx_fixture("warm_switch", [
-		{"id": 108002, "graphic": FX_GUN_GRAPHIC,
+		{"id": 108902, "graphic": FX_GUN_GRAPHIC,
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)
@@ -2505,7 +2505,7 @@ func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> vo
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(10, 20, 30), Vector3.ZERO)), OK)
+						MissionData.KIND_ITEM, 108902, Vector3(10, 20, 30), Vector3.ZERO)), OK)
 	var effects := world.get_effect_world()
 	assert_true(world.is_particles_hidden(), "the persistent preference survives the load")
 	assert_true(effects.are_particles_hidden(),
@@ -2540,23 +2540,24 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	# director walks at load. The pool-3 marker leg has no real twin (a placed
 	# marker never materializes a node); its shared powerup-only gate is pinned
 	# by the pool-2 building cases.
-	# (108001 is the minimal set's own house row; the staged rows start above it.)
+	# (108001 and 108002 are the minimal set's own house and crate rows; the staged rows
+	# live at 108900+, above everything the shipped set will ever number.)
 	var root_dir := _stage_item_fx_fixture("pool_gates", [
-		{"id": 108006, "type": "person", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108003, "attribs": "PlayerControl",
+		{"id": 108906, "type": "person", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
+		{"id": 108902, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
+		{"id": 108903, "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108004, "type": "building", "attribs": "Powerup",
+		{"id": 108904, "type": "building", "attribs": "Powerup",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108005, "type": "building", "attribs": "PlayerControl",
+		{"id": 108905, "type": "building", "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var cases := [
-		[MissionData.KIND_ORGANIC, 108006, 0],
-		[MissionData.KIND_ITEM, 108002, 1],
-		[MissionData.KIND_ITEM, 108003, 0],
-		[MissionData.KIND_BUILDING, 108004, 0],
-		[MissionData.KIND_BUILDING, 108005, 1],
+		[MissionData.KIND_ORGANIC, 108906, 0],
+		[MissionData.KIND_ITEM, 108902, 1],
+		[MissionData.KIND_ITEM, 108903, 0],
+		[MissionData.KIND_BUILDING, 108904, 0],
+		[MissionData.KIND_BUILDING, 108905, 1],
 	]
 	var world := WorldFixture.make_world(self)
 	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
@@ -2601,7 +2602,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 			"a replayed attach cannot duplicate an existing attach")
 	if nodes[1] != null:
 		world.get_item_effect_director().on_wire_node_spawned(
-				nodes[1], MissionData.KIND_ITEM, 108002)
+				nodes[1], MissionData.KIND_ITEM, 108902)
 		assert_eq(_fx_rows_for_node(world, nodes[1]).size(), 1,
 				"a replayed wire-node callback cannot duplicate an existing attach")
 
@@ -2614,9 +2615,9 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(10, 20, 0), Vector3.ZERO))
+						MissionData.KIND_ITEM, 108902, Vector3(10, 20, 0), Vector3.ZERO))
 				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(20, 20, 0), Vector3.ZERO))), OK)
+						MissionData.KIND_ITEM, 108902, Vector3(20, 20, 0), Vector3.ZERO))), OK)
 	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
 			"a hidden load defers every persistent attachment")
 	# A wire node may despawn while particles are disabled: the deferred entry
@@ -2841,26 +2842,26 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	# first-16 mask RULE (duplicates, beyond-16 exclusion) is native and pinned
 	# by the threedi user-point-mask ctest.
 	var root_dir := _stage_item_fx_fixture("static_descriptors", [
-		{"id": 108002, "graphic": FX_GUN_GRAPHIC,
+		{"id": 108902, "graphic": FX_GUN_GRAPHIC,
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108003, "graphic": FX_GUN_GRAPHIC, "attribs": "PlayerControl",
+		{"id": 108903, "graphic": FX_GUN_GRAPHIC, "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108009, "type": "building", "graphic": FX_SHED_GRAPHIC,
+		{"id": 108909, "type": "building", "graphic": FX_SHED_GRAPHIC,
 				"effect": FX_FALLBACK_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(10, 20, 30), Vector3(0, 90, 0))
+						MissionData.KIND_ITEM, 108902, Vector3(10, 20, 30), Vector3(0, 90, 0))
 				mission.add_entity(
-						MissionData.KIND_BUILDING, 108009, Vector3(-5, 6, 7), Vector3(0, 45, 0))
+						MissionData.KIND_BUILDING, 108909, Vector3(-5, 6, 7), Vector3(0, 45, 0))
 				# Pool-1 attrib 0x40 is excluded before any effect request.
 				mission.add_entity(
-						MissionData.KIND_ITEM, 108003, Vector3(50, 20, 0), Vector3.ZERO)), OK)
-	assert_eq(world.get_mission_stats().batched, 4,
+						MissionData.KIND_ITEM, 108903, Vector3(50, 20, 0), Vector3.ZERO)), OK)
+	assert_eq(world.get_mission_stats().batched, 5,
 			"all three records ride the static populations (no individual node), "
-			+ "beside the minimal mission's own house")
+			+ "beside the minimal mission's own house and crate")
 	var entity_transform := MissionObjectPlacer.entity_transform(
 			Vector3(10, 20, 30), Vector3(0, 90, 0))
 	var fallback_transform := MissionObjectPlacer.entity_transform(
@@ -2911,14 +2912,14 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	# attached group's pose after the effect world's owner sync, and the
 	# runtime's own presented_entity_effect_transform seam for the absent leg.
 	var root_dir := _stage_item_fx_fixture("item_owner_pose", [
-		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
+		{"id": 108902, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)
 	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(6, 4, 5), Vector3.ZERO))), OK)
+						MissionData.KIND_ITEM, 108902, Vector3(6, 4, 5), Vector3.ZERO))), OK)
 	var node := _placed_node(world, placed[0])
 	if node == null:
 		return
@@ -2960,7 +2961,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 
 func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 	var root_dir := _stage_item_fx_fixture("static_hidden", [
-		{"id": 108002, "graphic": FX_GUN_GRAPHIC,
+		{"id": 108902, "graphic": FX_GUN_GRAPHIC,
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)
@@ -2968,7 +2969,7 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(3, 4, 5), Vector3.ZERO)), OK)
+						MissionData.KIND_ITEM, 108902, Vector3(3, 4, 5), Vector3.ZERO)), OK)
 	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
 			"a world-bound persistent source survives a hidden mission load as values, unspawned")
 	var director := world.get_item_effect_director()
