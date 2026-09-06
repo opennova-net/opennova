@@ -399,9 +399,9 @@ jobs:
           python scripts/ci/retail_gates_ran.py --gut-log gut.log \
             --roots jo_dir,jo_assets
 
-  # One job, the workflow's two zips. The DEV zip (game + ONED + loose assets/,
+  # One job, the workflow's two zips. The DEV zip (game + loose assets/,
   # one copy of the data) is what PRs and master builds hand out; the GAME zip
-  # (opennova.exe + the packed pffs, built by ONED's
+  # (opennova.exe + the packed pffs, built by the source project's
   # --pack-game CLI) is what tagged releases ship — built here on every run so
   # the pack path is exercised long before a tag needs it.
   package-godot-windows:
@@ -447,7 +447,7 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
-      # The imgui-godot addon must be present for BOTH export modes (ONED ships it
+      # The imgui-godot addon must be present for BOTH export modes (the editor scans it
       # always; the game's export plugin keeps it for a debug export and strips it
       # from a release one, export_presets.cfg imgui/*): package_godot_windows.ps1
       # runs scripts/bootstrap_imgui_godot.sh itself, never bootstrap_godot.sh, so
@@ -510,7 +510,7 @@ jobs:
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Dev build: game + ONED + loose assets (opennova.exe, opennova-modtools.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
+              `| Dev build: game + loose assets (opennova.exe) | [opennova-windows.zip](${process.env.WINDOWS_URL}) |`,
               `| Game build: opennova.exe + packed pffs (the tagged-release flavour) | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

@@ -729,7 +729,7 @@ func _on_dir_selected(dir: String) -> void:
 
 
 ## The picker's accept leg. `process_local` is resolved from --resource-dir at
-## the signal callback above: an ONED-selected directory is process-local,
+## the signal callback above: an editor-selected directory is process-local,
 ## so persisting a picker escape would overwrite the game's saved preference.
 ## Parameterized for
 ## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick

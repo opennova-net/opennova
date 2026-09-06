@@ -1,8 +1,9 @@
+@tool
 class_name GamePacker
 extends RefCounted
 
 ## Turns a game-data directory into a runnable game directory. Retail staging
-## accepts either loose files or an existing packed PFF layout; the hidden
+## accepts either loose files or an existing packed PFF layout; the project
 ## `--pack-game` CLI creates release archives from loose sources.
 ##
 ##  - [method stage_loose] is the DEV/retail-test flavor: every file loose plus the
@@ -54,8 +55,8 @@ static var EXCLUDED_DIRS: Array = Array(PffDocument.pack_excluded_dirs())
 
 static var PFF_NAME_BYTES: int = PffDocument.pff_name_bytes()
 
-## Written into every packed dir. Stage & Run Retail stages into ONED's own
-## user://packed directory, while release packaging takes an arbitrary output dir. The marker
+## Written into every packed dir. Stage & Run Retail stages into the editor project's own
+## .godot/opennova/retail directory, while release packaging takes an arbitrary output dir. The marker
 ## identifies our output and lets a repack wipe stale files; a non-empty directory without it
 ## is somebody else's and is never touched.
 const MARKER_NAME := ".gitignore"
@@ -65,19 +66,20 @@ const MARKER_TEXT := MARKER_HEADER + "\n*\n"
 
 ## Pack `root_dir`'s files into `out_dir` as a runnable game dir.
 ##
-## Returns { ok, archive, archived, loose, skipped, skipped_dirs, error } — `archived`/`loose`
+## Returns a GamePackResult — `archived`/`loose`
 ## are name arrays so a caller can report exactly what shipped. A previous pack's output in
 ## `out_dir` is removed first, so a renamed or deleted asset cannot survive as a stale loose
 ## file that retail's `/d` lookup would prefer over the freshly archived one.
-static func pack(root_dir: String, out_dir: String) -> Dictionary:
-	var result := {
-		"ok": false, "archive": "", "archived": PackedStringArray(),
-		"loose": PackedStringArray(), "skipped": PackedStringArray(),
-		"skipped_dirs": PackedStringArray(), "error": "",
-	}
+static func pack(root_dir: String, out_dir: String) -> GamePackResult:
+	var result := GamePackResult.new()
+	var output_error := output_directory_error(root_dir, out_dir)
+	if not output_error.is_empty():
+		result.error = output_error
+		return result
 	root_dir = ProjectSettings.globalize_path(root_dir.strip_edges()).simplify_path()
+	out_dir = ProjectSettings.globalize_path(out_dir.strip_edges()).simplify_path()
 	if root_dir.is_empty() or not DirAccess.dir_exists_absolute(root_dir):
-		result["error"] = "Resource directory not found: %s" % root_dir
+		result.error = "Resource directory not found: %s" % root_dir
 		return result
 
 	# Walk the directory. Deliberately NOT ResourceRoot.list_files() or the ResourceIndex:
@@ -89,8 +91,12 @@ static func pack(root_dir: String, out_dir: String) -> Dictionary:
 	for file_name in DirAccess.get_files_at(root_dir):
 		names.append(String(file_name))
 	names.sort()
+	for name in names:
+		if BOOT_ARCHIVE_NAMES.has(String(name).to_lower()):
+			result.error = "Packing requires loose source files; existing boot archives are not unpacked."
+			return result
 	if names.is_empty():
-		result["error"] = "Resource directory has no files: %s" % root_dir
+		result.error = "Resource directory has no files: %s" % root_dir
 		return result
 
 	var skipped_dirs := PackedStringArray()
@@ -105,7 +111,7 @@ static func pack(root_dir: String, out_dir: String) -> Dictionary:
 
 	var prepare_error := _prepare_out_dir(out_dir)
 	if not prepare_error.is_empty():
-		result["error"] = prepare_error
+		result.error = prepare_error
 		return result
 
 	var archive := PffDocument.new()
@@ -127,7 +133,7 @@ static func pack(root_dir: String, out_dir: String) -> Dictionary:
 		if _has_extension(lower, LOOSE_EXTENSIONS):
 			var copy_err := _copy_file(src, out_dir.path_join(name.get_file()))
 			if copy_err != OK:
-				result["error"] = "Copying %s into %s failed: %s" % [
+				result.error = "Copying %s into %s failed: %s" % [
 						name, out_dir, error_string(copy_err)]
 				return result
 			loose.append(name)
@@ -149,15 +155,15 @@ static func pack(root_dir: String, out_dir: String) -> Dictionary:
 	var archive_path := out_dir.path_join(ARCHIVE_NAME)
 	var save_err := archive.save_as(archive_path)
 	if save_err != OK:
-		result["error"] = "Writing %s failed: %s" % [archive_path, archive.get_last_error()]
+		result.error = "Writing %s failed: %s" % [archive_path, archive.get_last_error()]
 		return result
 
-	result["ok"] = true
-	result["archive"] = archive_path
-	result["archived"] = archived
-	result["loose"] = loose
-	result["skipped"] = skipped
-	result["skipped_dirs"] = skipped_dirs
+	result.ok = true
+	result.archive = archive_path
+	result.archived = archived
+	result.loose = loose
+	result.skipped = skipped
+	result.skipped_dirs = skipped_dirs
 	return result
 
 
@@ -166,7 +172,7 @@ static func pack(root_dir: String, out_dir: String) -> Dictionary:
 static func _prepare_out_dir(out_dir: String) -> String:
 	if DirAccess.dir_exists_absolute(out_dir):
 		var existing := DirAccess.get_files_at(out_dir)
-		if not existing.is_empty() and not _is_pack_output(out_dir):
+		if (not existing.is_empty() or not DirAccess.get_directories_at(out_dir).is_empty()) and not _is_pack_output(out_dir):
 			return ("Refusing to pack into %s: it is not empty and was not written by a previous "
 					+ "pack (no %s marker). Point at an empty directory, or delete it first.") % [
 					out_dir, MARKER_NAME]
@@ -203,14 +209,16 @@ static func _is_pack_output(dir: String) -> bool:
 ## docs/vfs/vfs-pff-mount-re.md), and under `/d` the loose `FindFirstFile *.bms` walk
 ## lists the mission. Same marker/wipe/refuse discipline as [method pack] on its own
 ## output dir; the 16-byte PFF name cap does not apply to loose files.
-static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
-	var result := {
-		"ok": false, "staged": PackedStringArray(), "skipped": PackedStringArray(),
-		"skipped_dirs": PackedStringArray(), "error": "",
-	}
+static func stage_loose(root_dir: String, out_dir: String) -> GamePackResult:
+	var result := GamePackResult.new()
+	var output_error := output_directory_error(root_dir, out_dir)
+	if not output_error.is_empty():
+		result.error = output_error
+		return result
 	root_dir = ProjectSettings.globalize_path(root_dir.strip_edges()).simplify_path()
+	out_dir = ProjectSettings.globalize_path(out_dir.strip_edges()).simplify_path()
 	if root_dir.is_empty() or not DirAccess.dir_exists_absolute(root_dir):
-		result["error"] = "Resource directory not found: %s" % root_dir
+		result.error = "Resource directory not found: %s" % root_dir
 		return result
 
 	var names := PackedStringArray()
@@ -218,7 +226,7 @@ static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
 		names.append(String(file_name))
 	names.sort()
 	if names.is_empty():
-		result["error"] = "Resource directory has no files: %s" % root_dir
+		result.error = "Resource directory has no files: %s" % root_dir
 		return result
 
 	var skipped_dirs := PackedStringArray()
@@ -233,7 +241,7 @@ static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
 
 	var prepare_error := _prepare_out_dir(out_dir)
 	if not prepare_error.is_empty():
-		result["error"] = prepare_error
+		result.error = prepare_error
 		return result
 
 	var staged := PackedStringArray()
@@ -252,7 +260,7 @@ static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
 			continue
 		var copy_err := _copy_file(src, out_dir.path_join(name.get_file()))
 		if copy_err != OK:
-			result["error"] = "Copying %s into %s failed: %s" % [
+			result.error = "Copying %s into %s failed: %s" % [
 					name, out_dir, error_string(copy_err)]
 			return result
 		staged.append(name)
@@ -263,13 +271,13 @@ static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
 		var token := PffDocument.new()
 		var token_err := token.save_as(out_dir.path_join("resource.pff"))
 		if token_err != OK:
-			result["error"] = "Writing the resource.pff boot token failed: %s" % token.get_last_error()
+			result.error = "Writing the resource.pff boot token failed: %s" % token.get_last_error()
 			return result
 
-	result["ok"] = true
-	result["staged"] = staged
-	result["skipped"] = skipped
-	result["skipped_dirs"] = skipped_dirs
+	result.ok = true
+	result.staged = staged
+	result.skipped = skipped
+	result.skipped_dirs = skipped_dirs
 	return result
 
 
@@ -277,24 +285,28 @@ static func stage_loose(root_dir: String, out_dir: String) -> Dictionary:
 ## plus every loose-by-contract file — overwriting only those names.
 ##
 ## This is the "update the shipped game" seam: the dir legitimately holds things that are not
-## ours (opennova.exe, ONED, the DLL, a retail runtime), so unlike [method pack]'s own
+## ours (opennova.exe, the DLL, a retail runtime), so unlike [method pack]'s own
 ## output dirs it is never wiped and never refused. The pack itself runs in a private scratch
-## under user://, where pack()'s marker/wipe rules apply as usual.
+## in the project cache, where pack()'s marker/wipe rules apply as usual.
 ##
 ## Consumer: the headless `--pack-game` release CLI.
-static func export_game(root_dir: String, game_dir: String) -> Dictionary:
-	var scratch := ProjectSettings.globalize_path("user://pack-export")
+static func export_game(root_dir: String, game_dir: String) -> GamePackResult:
+	var output_error := output_directory_error(root_dir, game_dir)
+	if not output_error.is_empty():
+		return GamePackResult.failure(output_error)
+	game_dir = ProjectSettings.globalize_path(game_dir.strip_edges()).simplify_path()
+	var scratch := ProjectSettings.globalize_path("res://.godot/opennova/pack-export")
 	var packed := pack(root_dir, scratch)
-	if not bool(packed.get("ok", false)):
+	if not packed.ok:
 		return packed
 
 	if not DirAccess.dir_exists_absolute(game_dir):
 		var mk_err := DirAccess.make_dir_recursive_absolute(game_dir)
 		if mk_err != OK and not DirAccess.dir_exists_absolute(game_dir):
-			return { "ok": false, "error": "Cannot create game directory: %s" % game_dir }
+			return GamePackResult.failure("Cannot create game directory: %s" % game_dir)
 
-	var artifacts := PackedStringArray([String(packed["archive"]).get_file()])
-	for name in packed["loose"]:
+	var artifacts := PackedStringArray([String(packed.archive).get_file()])
+	for name in packed.loose:
 		artifacts.append(String(name).get_file())
 
 	var exported := PackedStringArray()
@@ -304,15 +316,30 @@ static func export_game(root_dir: String, game_dir: String) -> Dictionary:
 			continue
 		var copy_err := _copy_file(src, game_dir.path_join(artifact))
 		if copy_err != OK:
-			packed["ok"] = false
-			packed["error"] = "Copying %s into %s failed: %s" % [
+			packed.ok = false
+			packed.error = "Copying %s into %s failed: %s" % [
 					artifact, game_dir, error_string(copy_err)]
 			return packed
 		exported.append(artifact)
 
-	packed["game_dir"] = game_dir
-	packed["exported"] = exported
+	packed.game_dir = game_dir
+	packed.exported = exported
 	return packed
+
+
+## Pack/stage output must be separate from every source tree, even when a
+## source is itself an earlier pack carrying our output marker.
+static func output_directory_error(source_dir: String, output_dir: String) -> String:
+	if source_dir.strip_edges().is_empty() or output_dir.strip_edges().is_empty():
+		return "Choose separate source and output directories."
+	var source := ProjectSettings.globalize_path(source_dir.strip_edges()).simplify_path().replace("\\", "/").trim_suffix("/")
+	var output := ProjectSettings.globalize_path(output_dir.strip_edges()).simplify_path().replace("\\", "/").trim_suffix("/")
+	if OS.get_name() == "Windows":
+		source = source.to_lower()
+		output = output.to_lower()
+	if source == output or source.begins_with(output + "/") or output.begins_with(source + "/"):
+		return "Choose an output directory outside the source tree and its parents."
+	return ""
 
 
 static func _has_extension(lower_name: String, extensions: Array) -> bool:
@@ -373,9 +400,12 @@ static func retail_install_error(retail_dir: String) -> String:
 ## seam GameRunSession's retail mode calls through its platform.
 ## Every runtime file is required: a stage that silently came up short would launch a stale
 ## exe, or reproduce the no-game.cfg hang, while reporting success.
-static func stage_retail(root_dir: String, retail_dir: String) -> RetailStageResult:
-	var out_dir := ProjectSettings.globalize_path("user://packed")
+static func stage_retail(root_dir: String, retail_dir: String, out_dir: String) -> RetailStageResult:
+	out_dir = ProjectSettings.globalize_path(out_dir.strip_edges()).simplify_path()
 	var clean_retail := retail_dir.strip_edges()
+	var output_error := output_directory_error(clean_retail, out_dir)
+	if not output_error.is_empty():
+		return RetailStageResult.failure(output_error)
 	var install_error := retail_install_error(clean_retail)
 	if not install_error.is_empty():
 		return RetailStageResult.failure(install_error)
@@ -394,8 +424,8 @@ static func stage_retail(root_dir: String, retail_dir: String) -> RetailStageRes
 		sources.append({ "src": src, "dst": out_dir.path_join(String(entry["to"])) })
 
 	var packed := stage_loose(root_dir, out_dir)
-	if not bool(packed.get("ok", false)):
-		return RetailStageResult.failure(String(packed.get("error", "Staging failed.")))
+	if not packed.ok:
+		return RetailStageResult.failure(packed.error)
 
 	for item in sources:
 		var copy_err := _copy_file(String(item["src"]), String(item["dst"]))

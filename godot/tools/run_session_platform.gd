@@ -30,7 +30,7 @@ func retail_install_error(retail_dir: String) -> String:
 
 
 func stage_retail(resource_dir: String, retail_dir: String) -> RetailStageResult:
-	return GamePacker.stage_retail(resource_dir, retail_dir)
+	return GamePacker.stage_retail(resource_dir, retail_dir, "res://.godot/opennova/retail")
 
 
 func spawn_process(path: String, args: PackedStringArray, cwd: String) -> int:
@@ -66,13 +66,10 @@ func release_process(pid: int) -> void:
 		Process.release(pid)
 
 
-func oned_executable_path() -> String:
+func editor_executable_path() -> String:
 	return OS.get_executable_path()
 
 
 func project_dir() -> String:
 	return ProjectSettings.globalize_path("res://")
 
-
-func is_dev_mode() -> bool:
-	return OS.has_feature("editor")

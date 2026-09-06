@@ -16,7 +16,7 @@ namespace godot {
 // addon created (handed to the engine once, ImGuiGD.GetImGuiPtrs ->
 // ImGuiPass::attach_imgui) and the per-frame layout bracket (a _process just
 // under the addon's own render pass, after every game callback of the frame).
-// A product subclass (DevTools for the game, OnedUi for ONED) owns the engine
+// The DevTools subclass owns the engine
 // pass and its window set and reports it through engine_pass().
 //
 // Attachment only governs drawing: the editor and headless runs (the

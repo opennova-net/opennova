@@ -112,7 +112,6 @@
 #include "devtools/debug_control_table.h"
 #include "devtools/debug_shell_host.h"
 #include "devtools/frame_stats.h"
-#include "devtools/oned_ui.h"
 #include "hud/hud_pos.h"
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
@@ -472,7 +471,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
-	// parse; the release DLL's DevTools is inert, OnedUi runs everywhere.
+	// parse; the release DLL's DevTools is inert.
 	GDREGISTER_CLASS(FrameStatsWindow);
 	GDREGISTER_CLASS(FrameStats);
 	GDREGISTER_ABSTRACT_CLASS(ImGuiPassNode);
@@ -486,8 +485,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DebugInvokeResult);
 	GDREGISTER_CLASS(DebugShellHost);
 	GDREGISTER_CLASS(DebugControlTable);
-	GDREGISTER_CLASS(OnedUiRequest);
-	GDREGISTER_CLASS(OnedUi);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {

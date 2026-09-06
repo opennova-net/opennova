@@ -5,7 +5,7 @@ extends Node
 ## server the game process runs when launched with `--mcp-port <n>`
 ## (LaunchFlags; ADR 0041). A normal standalone launch carries no such flag
 ## and starts nothing. The endpoint lives as long as the game: `game_control
-## quit` is the stop. ONED runs no MCP of its own (ADR 0037); this is the
+## quit` is the stop. The editor runs no MCP of its own; this is the
 ## runtime's, driven from outside by agents and the scripts/mcp clients.
 ## GameDebugAdapter.start_runtime_endpoint loads this script BY PATH: the
 ## transport (godot/game/mcp/) leaves the Runtime export (ADR 0043 d12), so

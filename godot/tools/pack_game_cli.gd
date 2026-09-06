@@ -1,16 +1,11 @@
+@tool
 class_name PackGameCli
 extends RefCounted
 
-## Hidden release-packaging entry point:
-##   opennova-modtools.exe --headless -- --pack-game <src_dir> <game_dir>
-##
-## This is release-workflow infrastructure, not part of ONED's interactive surface.
+## Headless project command used by local and CI release packaging:
+##   godot --headless --path godot --script res://tools/pack_game.gd -- --pack-game <src_dir> <game_dir>
 
 const FLAG := "--pack-game"
-
-
-static func wants_run(user_args: PackedStringArray) -> bool:
-	return user_args.has(FLAG)
 
 
 static func run(user_args: PackedStringArray) -> int:
@@ -27,13 +22,13 @@ static func run(user_args: PackedStringArray) -> int:
 		printerr("pack-game: source directory not found: %s" % src)
 		return 1
 
-	var out: Dictionary = GamePacker.export_game(src, game_dir)
-	if not bool(out.get("ok", false)):
-		printerr("pack-game: %s" % String(out.get("error", "packing failed")))
+	var out: GamePackResult = GamePacker.export_game(src, game_dir)
+	if not out.ok:
+		printerr("pack-game: %s" % out.error)
 		return 1
 	print("pack-game: %d files archived into %s; exported %s -> %s" % [
-			(out["archived"] as PackedStringArray).size(),
-			String(out["archive"]).get_file(),
-			", ".join(out["exported"] as PackedStringArray),
+			(out.archived as PackedStringArray).size(),
+			String(out.archive).get_file(),
+			", ".join(out.exported as PackedStringArray),
 			game_dir])
 	return 0

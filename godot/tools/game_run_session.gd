@@ -2,7 +2,7 @@
 class_name GameRunSession
 extends RefCounted
 
-## Owns one standalone child process for ONED or the Godot world editor.
+## Owns one standalone child process for the Godot editor.
 ## Runs OpenNova over selected game data, or stages it for retail.
 ## Starting either target first stops the currently managed child.
 
@@ -10,10 +10,6 @@ signal status_changed(text: String, kind: StringName)
 signal state_changed(state: Dictionary)
 
 const RUNTIME_SCENE := "res://game/game_runtime_root.tscn"
-const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
-	"opennova.exe", "opennova.x86_64", "opennova",
-	"../../../opennova.app/Contents/MacOS/opennova",
-]
 const STOP_WAIT_MSEC := 5000
 # The portable exit-wait fallback's poll interval.
 const EXIT_POLL_MSEC := 50
@@ -38,26 +34,27 @@ class Request:
 	var loose_root := true
 	var loose_mission := true
 
-	static func opennova(root: String, game: String, exp: String) -> Request:
+	static func game(root: String, source: WorldSource) -> Request:
 		var request := Request.new()
 		request.mode = Mode.OPENNOVA
 		request.resource_dir = root
-		request.game_code = game
-		request.expansion = exp
-		return request
-
-	static func world(root: String, source: WorldSource) -> Request:
-		var request := opennova(root, source.game_code, source.expansion)
-		request.mission_name = source.mission_name
+		request.game_code = source.game_code
+		request.expansion = source.expansion
 		request.loose_override = source.source_kind != WorldSource.RETAIL_INSTALL
 		request.loose_root = source.source_kind == WorldSource.LOOSE_SOURCE
 		request.loose_mission = source.source_kind != WorldSource.RETAIL_INSTALL
 		return request
 
-	static func retail(root: String) -> Request:
+	static func world(root: String, source: WorldSource) -> Request:
+		var request := game(root, source)
+		request.mission_name = source.mission_name
+		return request
+
+	static func retail(root: String, loose_override: bool) -> Request:
 		var request := Request.new()
 		request.mode = Mode.RETAIL
 		request.resource_dir = root
+		request.loose_override = loose_override
 		return request
 
 
@@ -120,14 +117,10 @@ func get_last_error() -> String:
 	return _last_error
 
 
-func opennova_readiness(resource_dir: String, game_code: String = "jo",
-		expansion: String = "") -> String:
+func opennova_readiness(resource_dir: String) -> String:
 	var root := _absolute_root(resource_dir)
 	if root.is_empty() or not _platform.valid_resource_dir(root):
 		return "Select a valid resource directory first."
-	var request := Request.opennova(root, game_code, expansion)
-	if _current_plan(request) == null:
-		return "No OpenNova runtime or development project is available."
 	return ""
 
 
@@ -140,14 +133,14 @@ func retail_readiness(resource_dir: String, retail_dir: String) -> String:
 	return _platform.retail_install_error(retail_dir.strip_edges())
 
 
-func run_opennova(resource_dir: String, game_code: String = "jo",
-		expansion: String = "") -> bool:
-	var reason := opennova_readiness(resource_dir, game_code, expansion)
+## Open the game menu using the selected world's mount policy.
+func run_game(resource_dir: String, source: WorldSource) -> bool:
+	if source == null:
+		return _fail("Select a WorldSource before Run Game.", &"warn")
+	var reason := opennova_readiness(resource_dir)
 	if not reason.is_empty():
 		return _fail(reason, &"warn")
-	var request := Request.opennova(
-			_absolute_root(resource_dir), _clean_game_code(game_code), expansion.strip_edges())
-	return _replace_with(request)
+	return _replace_with(Request.game(_absolute_root(resource_dir), source))
 
 
 ## Play the selected saved mission with the same mount policy as its preview.
@@ -155,17 +148,17 @@ func run_world(resource_dir: String, source: WorldSource) -> bool:
 	if source == null or source.mission_name != source.mission_name.get_file() \
 			or source.mission_name.get_extension().to_lower() != "bms":
 		return _fail("Select a top-level BMS mission before Play World.", &"warn")
-	var reason := opennova_readiness(resource_dir, source.game_code, source.expansion)
+	var reason := opennova_readiness(resource_dir)
 	if not reason.is_empty():
 		return _fail(reason, &"warn")
 	return _replace_with(Request.world(_absolute_root(resource_dir), source))
 
 
-func run_retail(resource_dir: String, retail_dir: String) -> bool:
+func run_retail(resource_dir: String, retail_dir: String, loose_override: bool = true) -> bool:
 	var reason := retail_readiness(resource_dir, retail_dir)
 	if not reason.is_empty():
 		return _fail(reason, &"warn")
-	return _replace_with(Request.retail(_absolute_root(resource_dir)), retail_dir.strip_edges())
+	return _replace_with(Request.retail(_absolute_root(resource_dir), loose_override), retail_dir.strip_edges())
 
 
 ## Ask the managed process to stop. Returns true when the stop is under way
@@ -205,7 +198,7 @@ func poll() -> void:
 				_fail("The running process did not exit after it was stopped.")
 
 
-## The synchronous last resort for the app's exit: stop and wait for the
+## The synchronous last resort when the editor exits: stop and wait for the
 ## process here, because nothing polls once the tree is gone.
 func shutdown() -> bool:
 	if _state == State.STOPPED:
@@ -243,33 +236,23 @@ static func runtime_flags(request: Request) -> PackedStringArray:
 
 
 static func launch_plan(
-	oned_exe: String,
+	editor_exe: String,
 	project_dir: String,
-	dev_mode: bool,
 	request: Request,
 	file_exists: Callable
 ) -> LaunchPlan:
 	if request.mode == Mode.RETAIL:
 		if request.exe_path.is_empty() or not bool(file_exists.call(request.exe_path)):
 			return null
-		return LaunchPlan.make(
-				request.exe_path,
-				PackedStringArray(["/w", "/d", "/FRISK"]),
-				request.exe_path.get_base_dir())
+		var flags := PackedStringArray(["/w"])
+		if request.loose_override:
+			flags.append("/d")
+		flags.append("/FRISK")
+		return LaunchPlan.make(request.exe_path, flags, request.exe_path.get_base_dir())
 
-	var runtime_args := runtime_flags(request)
-	var exe_dir := oned_exe.get_base_dir()
-	for candidate in PACKAGED_RUNTIME_CANDIDATES:
-		var path := exe_dir.path_join(candidate).simplify_path()
-		if bool(file_exists.call(path)):
-			var args := PackedStringArray(["--"])
-			args.append_array(runtime_args)
-			return LaunchPlan.make(path, args)
-	if dev_mode:
-		var args := PackedStringArray(["--path", project_dir, RUNTIME_SCENE, "--"])
-		args.append_array(runtime_args)
-		return LaunchPlan.make(oned_exe, args)
-	return null
+	var args := PackedStringArray(["--path", project_dir, RUNTIME_SCENE, "--"])
+	args.append_array(runtime_flags(request))
+	return LaunchPlan.make(editor_exe, args)
 
 
 func _replace_with(request: Request, retail_dir: String = "") -> bool:
@@ -308,7 +291,7 @@ func _spawn_request(request: Request, retail_dir: String) -> bool:
 		return _fail(
 				"The staged retail executable is unavailable."
 				if request.mode == Mode.RETAIL else
-				"No OpenNova runtime or development project is available.")
+				"The editor runtime is unavailable.")
 	var pid := _platform.spawn_process(plan.path, plan.args, plan.cwd)
 	if pid <= 0:
 		return _fail("Could not launch %s." % _mode_name(request.mode))
@@ -327,9 +310,8 @@ func _spawn_request(request: Request, retail_dir: String) -> bool:
 
 func _current_plan(request: Request) -> LaunchPlan:
 	return launch_plan(
-			_platform.oned_executable_path(),
+			_platform.editor_executable_path(),
 			_platform.project_dir(),
-			_platform.is_dev_mode(),
 			request,
 			func(path: String) -> bool: return _platform.file_exists(path))
 

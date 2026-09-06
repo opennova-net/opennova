@@ -6,9 +6,13 @@ extends EditorPlugin
 const EXAMPLE := "res://examples/world_preview.tscn"
 const RETAIL := "res://examples/retail_world.tscn"
 const Inspector := preload("res://addons/opennova_world/world_inspector.gd")
-const RunSession := preload("res://modtools/game_run_session.gd")
+const RunSession := preload("res://tools/game_run_session.gd")
+const GAME_DATA := preload("res://addons/opennova_world/game_data_panel.tscn")
+const DataPanel := preload("res://addons/opennova_world/game_data_panel.gd")
 const TOOLBAR := preload("res://addons/opennova_world/toolbar.tscn")
 
+var _dock: EditorDock
+var _data_panel: DataPanel
 var _inspector: Inspector
 var _session: WorldEditSession
 var _sessions: Dictionary[String, WorldEditSession] = {}
@@ -89,6 +93,19 @@ func _enter_tree() -> void:
 	scene_saved.connect(_scene_saved)
 	add_tool_menu_item("OpenNova: Open example world", _open_world.bind(EXAMPLE))
 	add_tool_menu_item("OpenNova: Open retail world", _open_world.bind(RETAIL))
+	_dock = EditorDock.new()
+	_dock.title = "OpenNova"
+	_dock.available_layouts = EditorDock.DOCK_LAYOUT_HORIZONTAL | EditorDock.DOCK_LAYOUT_FLOATING
+	_dock.default_slot = EditorDock.DOCK_SLOT_BOTTOM
+	_data_panel = GAME_DATA.instantiate() as DataPanel
+	_dock.add_child(_data_panel)
+	add_dock(_dock)
+	_data_panel.setup(EditorInterface.get_editor_settings())
+	_data_panel.run_game_requested.connect(_run_game)
+	_data_panel.run_retail_requested.connect(_run_retail)
+	_data_panel.pack_requested.connect(_pack_game)
+	_data_panel.stop_requested.connect(_run.stop)
+	add_tool_menu_item("OpenNova: Game data tools", _dock.make_visible)
 	_scene_changed(EditorInterface.get_edited_scene_root())
 
 
@@ -96,6 +113,9 @@ func _exit_tree() -> void:
 	_generation += 1
 	_run.shutdown()
 	_release_world()
+	remove_tool_menu_item("OpenNova: Game data tools")
+	remove_dock(_dock)
+	_dock.queue_free()
 	remove_inspector_plugin(_inspector)
 	_sessions.clear()
 	_scene_sessions.clear()
@@ -180,6 +200,7 @@ func load_selected_world(reopen: bool = false) -> void:
 	_set_source(_world.world_source)
 	if _source == null:
 		_status.text = "Assign a WorldSource in the Inspector."
+		_refresh_status()
 		return
 	var key := WorldEditSession.selection_key(_source, _local_directory())
 	var session := _sessions.get(key) as WorldEditSession
@@ -195,6 +216,7 @@ func load_selected_world(reopen: bool = false) -> void:
 	if error != OK:
 		_status.text = "World load failed. See Details."
 		_status.tooltip_text = session.get_last_error()
+		_refresh_status()
 		_refresh_inspector()
 		return
 	_session = session
@@ -287,11 +309,15 @@ func _refresh_inspector() -> void:
 
 
 func _refresh_status() -> void:
-	var active := _session != null and is_instance_valid(_world) and not _stale
+	var active := _session != null and is_instance_valid(_world) and _world.is_preview_active() and not _stale
 	(_toolbar.get_node("Copy") as Button).disabled = not active
 	(_toolbar.get_node("Play") as Button).disabled = not active or _run.is_stopping()
 	(_toolbar.get_node("Save") as Button).disabled = not _any_dirty()
 	(_toolbar.get_node("Stop") as Button).disabled = not _run.is_running() and not _run.is_stopping()
+	if _data_panel != null:
+		var blocked := "" if active else "Load the selected world before running or packing."
+		_data_panel.set_context(_source, _session.get_directory() if active else "", blocked,
+				_run.is_running(), _run.is_stopping())
 	if active:
 		var files := _session.get_dirty_files()
 		files.append_array(_inspector.get_pending_files())
@@ -400,15 +426,47 @@ func _create_copy() -> void:
 	undo.commit_action()
 
 
-func _play_world() -> void:
+func _prepare_workflow() -> bool:
 	if _session == null or _stale or not _save_sessions():
-		return
+		return false
 	var conflict := _session.disk_conflict()
 	if not conflict.is_empty():
 		_show_error(conflict)
+		return false
+	return true
+
+
+func _play_world() -> void:
+	if _prepare_workflow():
+		_run.run_world(_session.get_directory(), _session.get_source())
+
+
+func _run_game() -> void:
+	if _prepare_workflow():
+		_run.run_game(_session.get_directory(), _session.get_source())
+
+
+func _run_retail(retail_directory: String) -> void:
+	if _prepare_workflow():
+		_run.run_retail(_session.get_directory(), retail_directory,
+				_session.get_source().source_kind != WorldSource.RETAIL_INSTALL)
+
+
+func _pack_game(output_directory: String) -> void:
+	if not _prepare_workflow() or _session.get_source().source_kind != WorldSource.LOOSE_SOURCE:
 		return
-	if not _run.run_world(_session.get_directory(), _session.get_source()):
-		_show_error(_run.get_last_error())
+	var result := GamePacker.pack(_session.get_directory(), output_directory)
+	if not result.ok:
+		_show_error(result.error)
+		return
+	var message := "Packed %d files into %s; %d files kept loose." % [
+			(result.archived as PackedStringArray).size(), result.archive,
+			(result.loose as PackedStringArray).size()]
+	if not result.skipped.is_empty():
+		message += "\nSkipped files: " + ", ".join(result.skipped)
+	if not result.skipped_dirs.is_empty():
+		message += "\nSkipped directories: " + ", ".join(result.skipped_dirs)
+	_data_panel.show_status(message)
 
 
 func _run_state_changed(_state: Dictionary) -> void:
@@ -416,12 +474,15 @@ func _run_state_changed(_state: Dictionary) -> void:
 
 
 func _run_status_changed(text: String, kind: StringName) -> void:
+	_data_panel.show_status(text)
 	(_toolbar.get_node("Play") as Button).tooltip_text = text
-	if kind == &"error":
+	if kind in [&"error", &"warn"]:
 		_show_error(text)
 
 
 func _show_error(text: String) -> void:
+	if _data_panel != null:
+		_data_panel.show_status(text)
 	_details.dialog_text = text
 	_details.popup_centered(Vector2i(640, 180))
 
