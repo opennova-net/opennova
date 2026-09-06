@@ -1,7 +1,10 @@
 @tool
+class_name FileTransaction
 extends RefCounted
 ## Stages every native writer before replacing any document. Originals stay
 ## available for rollback until all replacements succeed, on the same volume.
+## Shared by the world and model editor plugins (ADR 0045: workflow modules
+## live under godot/tools).
 
 
 static func write(directory: String, writers: Dictionary, preflight: Callable,
@@ -29,7 +32,7 @@ static func write(directory: String, writers: Dictionary, preflight: Callable,
 	var installed: PackedStringArray = []
 	for filename: String in writers:
 		var target := directory.path_join(filename)
-		if replace_existing:
+		if replace_existing and FileAccess.file_exists(target):
 			var backup := staging.path_join(filename + ".original")
 			if DirAccess.rename_absolute(target, backup) != OK:
 				return _rollback(staging, staged, installed, backups, "Cannot replace %s." % target)

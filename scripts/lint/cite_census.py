@@ -43,12 +43,12 @@ REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "cite_census_baseline.json"
 
 SCOPES = ("engine", "godot/src", "godot/game", "godot/tools", "godot/probes",
-          "godot/addons/opennova_world", "apps", "tests")
+          "godot/addons/opennova_world", "godot/addons/opennova_model", "apps", "tests")
 SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".gd")
 # Vendored trees: third_party/ and every godot/addons/<x>/ except the
 # first-party editor plugin (opennova_world, ADR 0044/0045), which is a scope.
 EXCLUDED_PARTS = ("third_party",)
-FIRST_PARTY_ADDONS = ("opennova_world",)
+FIRST_PARTY_ADDONS = ("opennova_world", "opennova_model")
 
 # The anchor address of a cite (`@0x52b630`, `@ 0x52b630`) and the far end of a
 # cited range (`0x40F157..0x40F173`). Both are witnesses.

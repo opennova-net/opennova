@@ -1,7 +1,7 @@
 extends GutTest
 
 const Field := WorldField.Id
-const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
+const Files := preload("res://tools/file_transaction.gd")
 const DOCUMENT_EXTENSIONS: Array[String] = ["bms", "trn", "env"]
 const DATA := "res://../assets"
 var _dirs: PackedStringArray = []

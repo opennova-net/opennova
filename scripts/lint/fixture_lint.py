@@ -187,7 +187,8 @@ def main() -> int:
     size_exceptions = {row["path"]: row["why"] for row in allow.get("size_exceptions", [])}
     fixtures = tracked("fixtures/")
     assets = tracked("assets/")
-    attrs = lfs_attributes(fixtures + assets)
+    authoring = tracked("godot/authoring/")
+    attrs = lfs_attributes(fixtures + assets + authoring)
     corpus = reference_corpus()
     gen_names = generator_names()
 
@@ -224,7 +225,16 @@ def main() -> int:
         else:
             classes[cls] += 1
 
-    for rel in fixtures + assets:
+    # The authored model sources (godot/authoring/): binaries in LFS, text plain.
+    for rel in authoring:
+        is_lfs = attrs.get(rel) == "lfs"
+        if is_text_file(rel):
+            if is_lfs:
+                hits["lfs"].append(f"{rel}: plain-text source is LFS-tracked (carve its extension out in .gitattributes)")
+        elif not is_lfs:
+            hits["lfs"].append(f"{rel}: binary source is not LFS-tracked (.gitattributes godot/authoring/** rules)")
+
+    for rel in fixtures + assets + authoring:
         try:
             size = blob_size(rel, attrs.get(rel) == "lfs")
         except subprocess.CalledProcessError:

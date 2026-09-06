@@ -51,7 +51,7 @@ BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 # is shipping GDScript like godot/game; the vendored addons (gut, imgui-godot)
 # stay out.
 LINT_SCOPES = ("godot/tools/", "godot/game/", "godot/src/", "godot/probes/",
-               "godot/addons/opennova_world/")
+               "godot/addons/opennova_world/", "godot/addons/opennova_model/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.
@@ -110,7 +110,7 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
 PROMOTED_SCOPES = ("godot/src/", "godot/game/", "godot/tools/",
-                   "godot/addons/opennova_world/", "engine/", "apps/")
+                   "godot/addons/opennova_world/", "godot/addons/opennova_model/", "engine/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
     "godot/game/world/host_session_config.gd",

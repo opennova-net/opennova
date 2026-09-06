@@ -6,7 +6,7 @@ extends RefCounted
 
 signal changed(session: WorldEditSession)
 
-const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
+const Files := preload("res://tools/file_transaction.gd")
 # These are the same-basename sidecars consumed by the normal mission loader.
 const SIDECAR_EXTENSIONS := ["til", "wac", "bin", "pcx"]
 

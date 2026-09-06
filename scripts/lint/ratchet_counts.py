@@ -120,9 +120,9 @@ def _in_build_dir(parts) -> bool:
 
 # godot/addons/ holds two kinds of tree: the vendored third-party addons (gut,
 # imgui-godot) that no counter may judge, and the first-party editor plugin
-# (opennova_world, ADR 0044/0045), which is shipping OpenNova GDScript like
+# (opennova_world and opennova_model, ADR 0044/0045/0046), which is shipping OpenNova GDScript like
 # godot/game and godot/tools and is counted with them.
-FIRST_PARTY_ADDONS = ("opennova_world",)
+FIRST_PARTY_ADDONS = ("opennova_world", "opennova_model")
 # The shipping GDScript trees, relative to godot/: every counter that judges
 # production scripts walks exactly these.
 SHIPPING_GD_SUBDIRS = ("game", "tools") + tuple(f"addons/{a}" for a in FIRST_PARTY_ADDONS)
@@ -343,8 +343,9 @@ GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|pr
 # The shipping Godot layer routes diagnostics through push_error/push_warning,
 # print_verbose, or the dev tools (F3).
 GD_PRINT_ALLOWLIST: set[str] = {
-    # Hidden release-build CLI: stdout/stderr is its user interface.
+    # Headless project commands: stdout/stderr is their user interface.
     "godot/tools/pack_game_cli.gd",
+    "godot/tools/export_models_cli.gd",
 }
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("

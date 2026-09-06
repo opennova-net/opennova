@@ -39,7 +39,7 @@ import/use_multiple_threads=false
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg", "res://addons/opennova_world/plugin.cfg")
+enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg", "res://addons/opennova_world/plugin.cfg", "res://addons/opennova_model/plugin.cfg")
 
 [physics]
 

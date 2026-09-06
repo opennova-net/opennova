@@ -317,14 +317,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: native fixtures and game assets
+          lfs: false   # scoped below: native fixtures, game assets and the authored model sources
           submodules: recursive
 
       - name: Pull Git LFS assets (fixtures and assets)
         shell: bash
         run: |
           git lfs install --local
-          git lfs pull --include="fixtures/**,assets/**"
+          git lfs pull --include="fixtures/**,assets/**,godot/authoring/**"
 
       # The retail data the asset gates need (docs/asset-gated-tests.md); the
       # same composite action as the engine test job.
