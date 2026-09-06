@@ -81,7 +81,7 @@ int main() {
 	}
 
 	// weapon.def — the ONE rifle: WPN_AK47AUTO, the authored akm first-person
-	// model on the retail AKM clips. The engine's hardcoded WPN_M4AUTO spawn default
+	// model and clip set. The engine's hardcoded WPN_M4AUTO spawn default
 	// [orig: PlayerClass_InitEntity @ 0x4B1116] is deliberately unanswered: the
 	// mission's kit arms the player (minimal_map_validate pins it).
 	{
@@ -92,7 +92,7 @@ int main() {
 		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the one rifle)");
 		if (rifle != nullptr) {
 			CHECK(std::strcmp(rifle->gfx1, "akm") == 0, "the rifle names the authored first-person model");
-			CHECK(std::strcmp(rifle->animadm, "AKM_1ST") == 0, "the rifle names its first-person .adm");
+			CHECK(std::strcmp(rifle->animadm, "akm") == 0, "the rifle names the authored first-person clip set");
 			// GFX1A is parse-and-discard in the original (the arms come from the
 			// character), carried for retail-shape fidelity.
 			CHECK(std::strcmp(rifle->gfx1a, "arms") == 0, "the rifle carries the arms row");

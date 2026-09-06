@@ -103,6 +103,7 @@ behavior is summarized and cited.
 | [0044](adr/0044-godot-authors-native-worlds.md) | Godot authors native worlds through WorldSource and WorldEditSession; native documents remain authoritative |
 | [0045](adr/0045-godot-owns-development-workflows.md) | Godot owns run, retail staging and packing; ONED is removed, with one exported game and a shared source-project pack command |
 | [0046](adr/0046-godot-authors-native-models.md) | Godot authors native models: the scene under `godot/authoring/` is the source, the `.3di` and its `.tga` textures are byte-guarded artifacts; stock importers plus the naming contract and a typed manifest carry the Nova words (implements ADR 0038 d4) |
+| [0047](adr/0047-godot-authors-native-clips.md) | Godot authors native clips: a rig scene's Animations are the source, `ClipProjector` samples them into `.bad` clips (identity bind, presentation-frame pivots, translations only off the pivots' kinematics), `ClipSetSource` carries the file names, root motion, triggers and the `.adm` rows, the `.bad`/`.adm` writers return from scratch, the body and rifle clip sets replace the last 159 retail clips and tables |
 
 ## RE records by domain
 

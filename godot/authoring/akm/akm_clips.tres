@@ -1,0 +1,71 @@
+[gd_resource type="ClipSetSource" format=3]
+
+[ext_resource type="PackedScene" path="res://authoring/akm/fp_rig.tscn" id="1_ihj0i"]
+
+[sub_resource type="ClipSpec" id="ClipSpec_ghrcj"]
+clip_name = "akm_rst"
+capsule_bottom = 0.0
+capsule_top = 0.6
+
+[sub_resource type="ClipSpec" id="ClipSpec_luset"]
+animation = "idle"
+clip_name = "akm_idle"
+capsule_bottom = 0.0
+capsule_top = 0.6
+
+[sub_resource type="ClipSpec" id="ClipSpec_knb3s"]
+animation = "fire"
+clip_name = "akm_fire"
+loop = false
+capsule_bottom = 0.0
+capsule_top = 0.6
+
+[sub_resource type="ClipSpec" id="ClipSpec_ygklf"]
+animation = "reload"
+clip_name = "akm_reload"
+loop = false
+capsule_bottom = 0.0
+capsule_top = 0.6
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_irkal"]
+key = "anim_reset"
+variants = PackedStringArray("akm_rst")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_wvyhr"]
+key = "anim_wpn_idle"
+variants = PackedStringArray("akm_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_hco36"]
+key = "anim_wpn_fire"
+variants = PackedStringArray("akm_fire")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_4fwgk"]
+key = "anim_wpn_recoil"
+variants = PackedStringArray("akm_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_xcwgu"]
+key = "anim_wpn_reload"
+variants = PackedStringArray("akm_reload")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_00gmm"]
+key = "anim_wpn_empty"
+variants = PackedStringArray("akm_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_qaffv"]
+key = "anim_wpn_switchto"
+variants = PackedStringArray("akm_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_dp8di"]
+key = "anim_wpn_switchfrom"
+variants = PackedStringArray("akm_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ywkwf"]
+key = "anim_wpn_switchrank"
+variants = PackedStringArray("akm_idle")
+
+[resource]
+adm_name = "akm"
+scene = ExtResource("1_ihj0i")
+ground_bone = 0
+clips = Array[ClipSpec]([SubResource("ClipSpec_ghrcj"), SubResource("ClipSpec_luset"), SubResource("ClipSpec_knb3s"), SubResource("ClipSpec_ygklf")])
+rows = Array[AnimSetRow]([SubResource("AnimSetRow_irkal"), SubResource("AnimSetRow_wvyhr"), SubResource("AnimSetRow_hco36"), SubResource("AnimSetRow_4fwgk"), SubResource("AnimSetRow_xcwgu"), SubResource("AnimSetRow_00gmm"), SubResource("AnimSetRow_qaffv"), SubResource("AnimSetRow_dp8di"), SubResource("AnimSetRow_ywkwf")])

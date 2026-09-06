@@ -31,8 +31,9 @@ easier to relay than to rediscover.
   `game/` (the game shell plus its game-level GDScript runtime — world,
   debug, mission, object, terrain, ui, ...),
   `addons/opennova_world/` (native world authoring in Godot, ADR 0044),
-  `addons/opennova_model/` + `authoring/` (native model authoring: a scene
-  is the source, the `.3di` in `assets/` its byte-guarded artifact, ADR 0046),
+  `addons/opennova_model/` + `authoring/` (native model and clip authoring: a
+  scene is the source, the `.3di`, `.bad` and `.adm` in `assets/` its
+  byte-guarded artifacts, ADRs 0046 / 0047),
   `tools/` (shared editor process/staging/packing workflows and headless release command),
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from the game export preset, ADR 0041; see `docs/mcp.md`),

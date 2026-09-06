@@ -11,7 +11,8 @@
 > decision 4 is implemented by the Godot model tool (a scene <-> 3DI seam over
 > Godot's stock importers, the naming contract and a typed manifest) and
 > decision 6 is amended (LODs, collision, user points and lights have an explicit
-> scene form). The retired `.bad`/`.adm` writers return with the clip tool.
+> scene form). The retired `.bad`/`.adm` writers returned with the clip tool
+> ([ADR 0047](0047-godot-authors-native-clips.md), 2026-09-06).
 
 ## Context
 

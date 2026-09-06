@@ -224,6 +224,7 @@ Ref<ClipDocument> ClipProjector::project(Node3D *p_model_root, const Ref<Animati
 			}
 		}
 		std::vector<Vector3> fk_model(row_count);
+		std::vector<Vector3> actual_model_rows(row_count);
 		std::vector<Basis> rotation_model(row_count);
 		float top = -1.0e30f;
 		for (size_t r = 0; r < row_count; ++r) {
@@ -235,16 +236,18 @@ Ref<ClipDocument> ClipProjector::project(Node3D *p_model_root, const Ref<Animati
 			channels[r][k] = BadQuaternion{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z),
 				static_cast<float>(q.w)};
 			// The forward kinematics the runtime runs over the pivots: root at its
-			// pivot, a child at the parent's position plus the parent's rotation
-			// applied to its parent-relative pivot.
+			// pivot, a child at the parent's (translated) position plus the
+			// parent's rotation applied to its parent-relative pivot; a bone's
+			// translation is what it adds beyond that.
 			const Vector3 rel_model = model_vec(row.rel);
+			const Vector3 actual_model = model_vec(global.origin);
 			if (row.parent < 0) {
 				fk_model[r] = rel_model;
 			} else {
-				fk_model[r] = fk_model[static_cast<size_t>(row.parent)] +
+				fk_model[r] = actual_model_rows[static_cast<size_t>(row.parent)] +
 						rotation_model[static_cast<size_t>(row.parent)].xform(rel_model);
 			}
-			const Vector3 actual_model = model_vec(global.origin);
+			actual_model_rows[r] = actual_model;
 			translations[k][r] = actual_model - fk_model[r];
 			if (translations[k][r].length() > 1.0e-4f) translated = true;
 			if (static_cast<int>(r) != ground_row && actual_model.y > top) top = actual_model.y;

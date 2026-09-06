@@ -3,6 +3,9 @@
 - **Status**: accepted (2026-09-06)
 - **Owners**: the Godot layer (the `opennova_model` editor plugin, `godot/src/model/`),
   the 3DI format library
+- **Updated by**: [ADR 0047](0047-godot-authors-native-clips.md) (2026-09-06)
+  extends the record to clips and retires decision 5's interim (the rigs now
+  stand on their own reset clips).
 - **Supersedes/updates**: implements [ADR 0038](0038-native-runtime-assets-glb-editor.md)
   decision 4 (the reserved scene <-> 3DI seam) and amends its decision 6
   (LODs, collision, user points and lights now have an explicit scene form);
@@ -103,9 +106,7 @@ travels with it without a second content model or importer-private state.
 - The first authored model is the crate (`godot/authoring/crate/`: a Blender
   box through the glTF importer; `items.def 108002`, placed once in
   `mnml.bms`), then the body and head on the 19-row rig and the arms and rifle
-  on the 46-row rig; the clips need the `.bad`/`.adm`
-  writers of the next one, so `US01.ADM`, `E_STAND.adm` and the 156 clips stay
-  under the banner until then.
+  on the 46-row rig; the clips followed under ADR 0047.
 
 ## Verification
 
