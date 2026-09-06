@@ -30,7 +30,9 @@ easier to relay than to rediscover.
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime — world,
   debug, mission, object, terrain, ui, ...),
-  `addons/opennova_world/` (native world authoring in Godot),
+  `addons/opennova_world/` (native world authoring in Godot, ADR 0044),
+  `addons/opennova_model/` + `authoring/` (native model authoring: a scene
+  is the source, the `.3di` in `assets/` its byte-guarded artifact, ADR 0046),
   `tools/` (shared editor process/staging/packing workflows and headless release command),
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from the game export preset, ADR 0041; see `docs/mcp.md`),
@@ -189,7 +191,9 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
 - [godot/tools/README.md](godot/tools/README.md) — the game data workflows
   (Run Game, Stage & Run Retail, Stop, Pack Game Data) and the headless
-  release pack command; [godot/addons/opennova_world/README.md](godot/addons/opennova_world/README.md)
+  release pack command; [godot/addons/opennova_model/README.md](godot/addons/opennova_model/README.md)
+  — the OpenNova Model editor plugin: Open model, the authoring tree, the
+  manifest, Export and Verify (ADR 0046); [godot/addons/opennova_world/README.md](godot/addons/opennova_world/README.md)
   — the OpenNova World editor plugin: WorldSource, the native preview, Create
   Copy, Inspector editing, save and Play World (ADRs 0044/0045).
 - [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,

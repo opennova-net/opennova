@@ -104,3 +104,7 @@ bytes.
 - Industry formats (`.tga`, `.dds`, `.wav`, pcap) keep using platform or
   standard loaders per the engine-wide CRT/OS exclusion; `.pcx` has a lib
   only because no platform loader exists.
+  ([ADR 0046](0046-godot-authors-native-models.md) adds the one write-only
+  exception: `engine/formats/tga` encodes the truecolor TGA a model names,
+  because no platform writer exists and the authored set is minted by our own
+  writers; decoding stays with the platform loader).

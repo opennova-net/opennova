@@ -42,7 +42,8 @@ table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
 windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
-editor plugin scripts go to `godot/addons/opennova_world/`; the run, staging
+editor plugin scripts go to `godot/addons/opennova_world/` or
+`godot/addons/opennova_model/`; the run, staging
 and packing workflow scripts go to `godot/tools/`.
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,

@@ -86,6 +86,7 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
 | `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. ONE entry, `WPN_AK47AUTO`: the rifle the bring-up set actually ships (the AKM first-person model, its `.adm` and clips). The engine's hardcoded spawn default `WPN_M4AUTO` `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` is deliberately unanswered: `mnml.bms` arms the player instead (below). The entry carries `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `crate.3di` + `crate.tga` | the Godot model tool (ADR 0046): `godot/authoring/crate/` (a Blender box through Godot's glTF importer, the manifest beside it) exported by the `opennova_model` addon through `threedi_3di3_write`; re-exported and byte-compared by `godot/tests/model_export_guard_test.gd` | the first model authored in Godot (`items.def 108002`, `type building`, placed once in `mnml.bms` 8 m east and 18 m north of the player start): one part, one box, a 12-face collision box and one CB volume, the `ground` user point; material `FF_ST_OP` served by the authored `_ffp.fx`; the texture a 16 x 16 plank checker exported from its PNG source through `engine/formats/tga`. |
 | `house.3di` + `wall.tga`/`roof.tga`/`wood.tga` | `minimal_3di_gen` (the `house` recipe through `threedi_3di3_write`; the swatches minted beside it) | the set's own model, byte-identical to `fixtures/threedi/synth/house.3di`: one inert part, three boxes (an 8 x 10 x 4 m wall block, the roof slab, the chimney) over a face box, three CB volumes and the collision-only water-tank prism off its east side; every material `FF_ST_OP`, served by the authored `_ffp.fx`. The three textures are 16 x 16 flat-colour 24 bpp TGAs (the shape of the `mnml_*` terrain art retail already loads loose). |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
@@ -246,12 +247,16 @@ this set: the models ask `<stem>.tga`, miss loose, and all 37 staged loose
 archive. The 2026-08-18 "ship `.dds` archived" trap applies to a loose file
 matching the request's *truncated literal* name, not to substitution.
 
-This set is replaced by our own once that run is green. The model side already
-has a path — `engine/formats/threedi/threedi_build.h` mints a nineteen-part skinned
-`person` rig in the retail bone order through `threedi_3di3_write`, and the house
-(`house.3di`, items.def `108001`) is the first model minted that way to ship in
-the set. The clip side needs a `.bad` **writer** first: `engine/formats/bad/bad.h`
-is parse-only today.
+This set is replaced by our own once that run is green. The model side has
+its tool: the Godot model tool (ADR 0046, `godot/addons/opennova_model/`)
+exports an authoring scene under `godot/authoring/` through
+`threedi_3di3_write`; the crate (`crate.3di`, items.def `108002`) is the first
+model shipped that way, the house (`house.3di`, `108001`) the first minted from
+a C++ recipe (`engine/formats/threedi/threedi_build.h`, which also carries a
+nineteen-part skinned `person` rig in the retail bone order). A rig that the
+retail clips animate must keep its reset clip's bone-row order until our own
+clips exist. The clip side needs a `.bad` **writer** first:
+`engine/formats/bad/bad.h` is parse-only today.
 
 ## Shaders: the authored `.fx` set
 
@@ -287,9 +292,10 @@ rather than asserting byte-equality against a throwaway generator:
 |---|---|
 | `minimal_rtxt_gen` | the string tables emit + round-trip |
 | `minimal_3di_gen` | `house.3di` byte-equals the `house` recipe minted through `threedi_3di3_write` (the `fixtures/threedi/synth` twin) and `wall.tga`/`roof.tga`/`wood.tga` byte-equal their swatch recipes (`minimal_3di_gen_test --write` re-emits them) |
-| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house`; `weapon.def` carries exactly one weapon, `WPN_AK47AUTO`, with its AKM viewmodel slice |
+| `minimal_model_validate` | every model authored in Godot (`crate.3di`) names itself, carries a runtime-safe collision block, shader tags the authored `.fx` set serves, allowlisted `.tga` textures and the tangent vertex format iff a tag reads TANGENT; the bytes themselves are guarded by the GUT `model_export_guard_test.gd` over `godot/authoring/` |
+| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house` and the crate row `108002`; `weapon.def` carries exactly one weapon, `WPN_AK47AUTO`, with its AKM viewmodel slice |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
-| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, arms `WPN_AK47AUTO` as its kit and lists it as its one allowed weapon, and places the house (`108001`) exactly once (`minimal_map_validate_test --write` performs the surgical edits) |
+| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, arms `WPN_AK47AUTO` as its kit and lists it as its one allowed weapon, and places the house (`108001`) and the crate (`108002`) exactly once each (`minimal_map_validate_test --write` performs the surgical edits) |
 | `minimal_runtime_loadout` | the production mission kernel boots the real minimal tree and the promoted kit, equipped inventory slot, and player entity all resolve to `WPN_AK47AUTO` (the set answers no `WPN_M4AUTO`, so this is the proof the player spawns armed) |
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes, and so do the house's three swatches; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |

@@ -48,6 +48,9 @@
 - A new `class_name` (a fixture, a production class) is invisible to a headless GUT run
   until `"$GODOT_BIN" --headless --path godot --import` refreshes the class cache; the
   symptom is "Could not find base class" and a silently dropped script.
+- The models authored in Godot (`godot/authoring/<name>/`, ADR 0046) are re-exported
+  and byte-compared against `assets/` by `model_export_guard_test.gd`; rebuild an
+  artifact with `--export-models` after changing its source, never by hand.
 - Every 3DI model the suite loads is synthetic: `fixtures/threedi/synth/*.3di` are
   minted by `tests/fixtures/minimal_3di_gen.cpp` through the engine's parity writer
   (eleven base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material

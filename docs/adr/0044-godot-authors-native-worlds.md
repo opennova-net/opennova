@@ -9,6 +9,9 @@
   standalone game is the only live mission runtime), ADR 0038 (native runtime
   assets), ADR 0042 and ADR 0043 (Godot is the permanent shell; the world is
   C++ Nodes) stand unchanged and are what this record builds on.
+  Updated by [ADR 0046](0046-godot-authors-native-models.md) (2026-09-06:
+  decisions 1 and 3 hold for worlds; for MODELS the Godot scene under
+  `godot/authoring/` is the source and the `.3di` a byte-guarded artifact).
 
 ## Context
 

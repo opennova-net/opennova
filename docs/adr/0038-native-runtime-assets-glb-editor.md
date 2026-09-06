@@ -7,6 +7,12 @@
   ADR 0024. Updates ADRs 0027, 0029, 0034, and 0037 where they describe those
   retired surfaces. Their runtime and layering decisions remain in force.
 
+> **Updated by [ADR 0046](0046-godot-authors-native-models.md)** (2026-09-06):
+> decision 4 is implemented by the Godot model tool (a scene <-> 3DI seam over
+> Godot's stock importers, the naming contract and a typed manifest) and
+> decision 6 is amended (LODs, collision, user points and lights have an explicit
+> scene form). The retired `.bad`/`.adm` writers return with the clip tool.
+
 ## Context
 
 The repository carried several overlapping object-authoring routes: a Qt

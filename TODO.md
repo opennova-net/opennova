@@ -14,11 +14,14 @@ hardening, and project health. Divergences from the original engine belong in
       in both zip flavors until replaced. The 47 retail `.fx` are already replaced (the
       authored set under `tests/fixtures/fx/`, retail-validated 2026-08-31) and the
       never-loaded files trimmed against the validated run's `/FRISK` log. The model side
-      has a path (`engine/formats/threedi/threedi_build.h` through `threedi_3di3_write`;
-      `assets/house.3di` is the first authored model shipped in the set);
-      the clip side needs a `.bad` writer (`engine/formats/bad` is parse-only). Land a
-      replacement by swapping the file and deleting its allowlist line; the `minimal_*`
-      guards and the retail A/B loop stay the acceptance.
+      has its tool (ADR 0046: `godot/addons/opennova_model/` exports an authoring scene
+      under `godot/authoring/` through `threedi_3di3_write`; `assets/crate.3di` is the
+      first model authored that way, `house.3di` the first from a C++ recipe); the six
+      retail models and their 45 textures fall once the body/head (19-row `DT1RST` rig)
+      and arms/rifle (46-row `rAKM_RST` rig) are authored; the clip side needs a `.bad`
+      writer (`engine/formats/bad` is parse-only). Land a replacement by swapping the
+      file and deleting its allowlist line; the `minimal_*` guards, the GUT export guard
+      and the retail A/B loop stay the acceptance.
 
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
