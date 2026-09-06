@@ -209,6 +209,10 @@ add_library(${TARGET_NAME} SHARED
     model/model_scene_projector.cpp
     model/model_scene_exporter.cpp
     model/model_texture_encoder.cpp
+    model/clip_document.cpp
+    model/anim_def_document.cpp
+    model/clip_set_source.cpp
+    model/clip_projector.cpp
     world/game_world_preview.cpp
     world/game_world_frame.cpp
     world/game_world_load.cpp

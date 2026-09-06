@@ -68,6 +68,10 @@
 #include "model/model_scene_projector.h"
 #include "model/model_texture_encoder.h"
 #include "model/model_user_point_3d.h"
+#include "model/clip_document.h"
+#include "model/anim_def_document.h"
+#include "model/clip_set_source.h"
+#include "model/clip_projector.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
 #include "world/resource_root_resolver.h"
@@ -444,6 +448,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ModelBoundingVolume3D);
 	GDREGISTER_CLASS(ModelUserPoint3D);
 	GDREGISTER_CLASS(ModelLight3D);
+	GDREGISTER_CLASS(ClipDocument);
+	GDREGISTER_CLASS(AnimDefDocument);
+	GDREGISTER_CLASS(ClipSpec);
+	GDREGISTER_CLASS(AnimSetRow);
+	GDREGISTER_CLASS(ClipSetSource);
+	GDREGISTER_CLASS(ClipProjector);
 	GDREGISTER_CLASS(ModelSceneProjector);
 	GDREGISTER_CLASS(ModelSceneExporter);
 	GDREGISTER_CLASS(ModelTextureEncoder);
