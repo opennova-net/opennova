@@ -98,12 +98,12 @@ func test_a_swing_about_x_keys_the_model_space_rotation() -> void:
 	assert_eq(clip.get_channel_key_count(1), 31)
 	assert_true(clip.get_channel_rotation(1, 0).is_equal_approx(Quaternion.IDENTITY))
 	assert_true(clip.get_channel_rotation(1, 30).is_equal_approx(Quaternion(Vector3.RIGHT, HEAD_ROT)),
-			"a rotation about the mirrored axis crosses the frame unchanged")
+			"the rotation is keyed as authored")
 	assert_true(clip.get_channel_rotation(0, 30).is_equal_approx(Quaternion.IDENTITY), "the hips stay")
 	assert_false(clip.has_translations(), "a bone turning on its own pivot follows the forward kinematics")
 
 
-func test_a_swing_about_y_crosses_into_the_model_frame_mirrored() -> void:
+func test_a_swing_about_y_crosses_unchanged_too() -> void:
 	var root := _rig()
 	add_child_autofree(root)
 	var projector := ClipProjector.new()
@@ -112,8 +112,8 @@ func test_a_swing_about_y_crosses_into_the_model_frame_mirrored() -> void:
 	if clip == null:
 		return
 	var q := clip.get_channel_rotation(1, 30)
-	assert_true(q.is_equal_approx(Quaternion(Vector3.UP, -HEAD_ROT)),
-			"the presentation frame mirrors x, so a turn about y reverses its sense")
+	assert_true(q.is_equal_approx(Quaternion(Vector3.UP, HEAD_ROT)),
+			"the clip's frame is the presentation frame: a turn about y keeps its sense")
 
 
 func test_the_runtime_loader_plays_the_projected_clip_back() -> void:
@@ -153,3 +153,35 @@ func test_the_runtime_loader_plays_the_projected_clip_back() -> void:
 	assert_true(hips.basis.get_rotation_quaternion().is_equal_approx(Quaternion.IDENTITY))
 	var start := anim.eval_pose("anim_idle", 0.0)
 	assert_true((start[1] as Transform3D).basis.get_rotation_quaternion().is_equal_approx(Quaternion.IDENTITY))
+
+
+func test_the_runtime_loader_keeps_a_turn_about_y() -> void:
+	var root := _rig()
+	add_child_autofree(root)
+	var projector := ClipProjector.new()
+	var reset := projector.project(root, null, _spec("rst", ""), FPS, -1)
+	var swing_spec := _spec("swingy", "swingy")
+	swing_spec.loop = false
+	var swing := projector.project(root, _swing(Vector3.UP), swing_spec, FPS, -1)
+	assert_not_null(reset)
+	assert_not_null(swing)
+	if reset == null or swing == null:
+		return
+	var dir := OS.get_cache_dir().path_join("clip_projector_y_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	assert_eq(reset.save_to_path(dir.path_join("rst.bad")), OK)
+	assert_eq(swing.save_to_path(dir.path_join("swingy.bad")), OK)
+	var resource_root := ResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(dir), OK)
+	var anim := SkeletalAnim.new()
+	var origins := PackedVector3Array([Vector3(0, 1, 0), Vector3(0, 0.7, 0), Vector3(0, -1, 0)])
+	var parents := PackedInt32Array([-1, 0, 0])
+	assert_true(anim.load_from_bad_files(resource_root, "rst.bad", {"anim_idle": "swingy.bad"}, origins, parents),
+			anim.get_last_error())
+	var pose := anim.eval_pose("anim_idle", 1.0)
+	assert_eq(pose.size(), 3)
+	if pose.size() != 3:
+		return
+	var head: Transform3D = pose[1]
+	assert_true(head.basis.get_rotation_quaternion().is_equal_approx(Quaternion(Vector3.UP, HEAD_ROT)),
+			"the runtime plays a turn about y back with the authored sense: %s" % head.basis.get_rotation_quaternion())

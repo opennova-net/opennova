@@ -40,13 +40,16 @@ carry as their bind.
    words, capsule overrides, and the table binding anim keys to clip rings.
    The exported `assets/<clip>.bad` files and `assets/<set>.adm` are built
    artifacts, byte-guarded by re-export (`godot/tests/clip_export_guard_test.gd`).
-2. The projection is the inverse of the runtime's load. `ClipProjector`
-   samples the scene's `Skeleton3D` through the Animation's bone tracks at
-   every key tick (`frame_count + 1` keys, the header counting intervals),
-   keys each BN## row's model-space rotation relative to its rest, stores the
-   presentation-frame parent-relative pivots as the bone positions (what
-   `positions_from_model` reconstructs), and emits a per-frame translation
-   block only when a bone leaves the pivots' forward kinematics.
+2. The projection is the inverse of the runtime's load. A clip's frame is
+   the presentation frame Godot shows (the model frame mirrored on x): the
+   runtime's skeleton carries the model's pivots mirrored that way, which is
+   what `BadBone.position` stores and `positions_from_model` reconstructs,
+   and every channel applies to them as-is. `ClipProjector` samples the
+   scene's `Skeleton3D` through the Animation's bone tracks at every key tick
+   (`frame_count + 1` keys, the header counting intervals), keys each BN##
+   row's rotation relative to its rest as authored, stores the
+   parent-relative pivots as the bone positions, and emits a per-frame
+   translation block only when a bone leaves the pivots' forward kinematics.
 3. Our rigs carry an identity bind: every clip's bone records hold the
    identity rotation and the reset clip holds the rest pose, so
    channel-at-reset is the identity the stored bind inverts to. The runtime's
@@ -102,8 +105,8 @@ carry as their bind.
   `person_rst.bad` / `akm_rst.bad`), `minimal_pff_package`,
   `minimal_def_validate`, `minimal_runtime_loadout`.
 - GUT: `clip_document_test.gd`, `anim_def_document_test.gd`,
-  `clip_projector_test.gd` (the rest hold, the mirrored-axis crossing, and
-  the runtime's own loader playing a projected clip back to the Godot pose),
+  `clip_projector_test.gd` (the rest hold, swings about x and y keyed as
+  authored, and the runtime's own loader playing both back to the Godot pose),
   `clip_export_guard_test.gd` (every clip set re-projects byte-equal).
 - The retail A/B of `assets/README.md`: the player walks and fires with our
   clips on our rigs in `Jointops.exe /w /d /FRISK`.
