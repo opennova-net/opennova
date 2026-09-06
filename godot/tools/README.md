@@ -63,3 +63,6 @@ Run `game_packer_test.gd`, `game_run_session_test.gd` and `export_presets_test.g
 for focused GUT coverage. The real dock check is
 `res://tests/tools/game_workflow_editor_check.gd`; run it in a disposable editor
 project from the Script editor's **File > Run** action.
+
+Use a disposable project with its own editor cache and stable copies of the
+editor addon. Do not edit its scripts while a native preview check is running.

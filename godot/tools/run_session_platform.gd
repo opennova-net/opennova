@@ -72,4 +72,3 @@ func editor_executable_path() -> String:
 
 func project_dir() -> String:
 	return ProjectSettings.globalize_path("res://")
-
