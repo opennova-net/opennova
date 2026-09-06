@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -1247,6 +1248,8 @@ void FrameFx::_notification(int p_what) {
 			request_ready();
 		}
 	} else if (p_what == NOTIFICATION_READY) {
+		// Gameplay compositors are generated state, never editor scene data.
+		if (Engine::get_singleton()->is_editor_hint()) return;
 		build_compositor();
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
@@ -1272,9 +1275,19 @@ Dictionary FrameFx::get_backend_report() const {
 	return result;
 }
 
-void DisplayDecode::_bind_methods() {}
+void DisplayDecode::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("create_view_compositor", "base"),
+			&DisplayDecode::create_view_compositor, DEFVAL(Ref<Compositor>()));
+}
+
+Ref<Compositor> DisplayDecode::create_view_compositor(const Ref<Compositor> &p_base) {
+	if (effect_.is_null()) effect_.instantiate();
+	installed_compositor_ = compositor_with_terminal(p_base, effect_);
+	return installed_compositor_;
+}
 
 void DisplayDecode::install() {
+	if (installed_compositor_.is_valid()) return;
 	if (effect_.is_null())
 		effect_.instantiate();
 	Node *scope = get_parent() != nullptr ? get_parent() : this;

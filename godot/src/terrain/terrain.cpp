@@ -1,6 +1,7 @@
 // Terrain — Godot Node3D that builds and renders terrain meshes from CPT data.
 
 #include "terrain/terrain.h"
+#include "render/render_view.h"
 #include "terrain/terrain_surface_inputs.h"
 #include "terrain/terrain_tile_info.h"
 #include "env/slot_shadow.h"
@@ -415,9 +416,7 @@ void Terrain::render_frame() {
 		return;
 	}
 	// Sample the scene camera — the one device input the compiler needs.
-	Camera3D* cam = nullptr;
-	Viewport* vp = get_viewport();
-	if (vp) cam = vp->get_camera_3d();
+	Camera3D* cam = RenderView::camera(this);
 	if (!cam || !cam->is_inside_tree()) {
 		return;
 	}

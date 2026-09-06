@@ -1,0 +1,16 @@
+begin "Preview crate"
+ id 108001
+ type decoration
+ graphic crate
+end
+
+begin "Preview house"
+ id 108002
+ type building
+ graphic house
+end
+
+begin "Start"
+ id 106001
+ type marker
+end

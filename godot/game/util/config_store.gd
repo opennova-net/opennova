@@ -2,7 +2,7 @@ class_name ConfigStore
 extends RefCounted
 
 ## The load-modify-save helper behind the small user:// ConfigFile stores used
-## by ONED, the game runtime, and the NovaWorld client. Each caller owns its path,
+## by the game runtime and the NovaWorld client. Each caller owns its path,
 ## section, keys, and domain rules; this class owns only the disk protocol.
 
 

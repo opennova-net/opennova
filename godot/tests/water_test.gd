@@ -275,6 +275,9 @@ func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it(
 	water.advance_frame(TICK)
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_ALWAYS, "the strip and mirror resume after re-entry")
+	assert_same(water.get_water_material().get_shader_parameter("u_reflection"),
+			water.get_reflection_viewport().get_texture(),
+			"re-entry reconnects the reflection texture cleared on exit")
 
 	# The explicit process-exit release converges with the EXIT_TREE leg.
 	water.release_runtime_renderer_resources()

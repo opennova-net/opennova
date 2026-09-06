@@ -48,7 +48,7 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
   comments. Do not merge — the maintainer merges.
 - CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
   PRs build the `template_debug` GDExtension; master and manual runs also build
-  `template_release`. Packaging publishes the game and ONED development
+  `template_release`. Packaging publishes the game development
   archive plus the game-only archive. There are no Python or add-on jobs.
 
 ## 5. Advance the train

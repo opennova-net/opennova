@@ -28,20 +28,20 @@ We chose Godot as the shell. Other options were considered (SDL3 + bgfx, a custo
 stack), but Godot is powerful enough that rebuilding the original engine's features
 on top of it is largely a matter of mapping NovaLogic concepts onto Godot ones. It
 also gives us a mature rendering pipeline and cross-platform packaging. The portable
-engine core is C++; Godot is the shell that renders it and powers the game and ONED.
+engine core is C++; Godot is the shell that renders it and powers the game and its editor tools.
 
 ## A source-first game-data loop
 
 The game's canonical files live in an ordinary source tree. Native format tools and,
-eventually, the GLB/GLTF editor may produce those files; OpenNova consumes and validates
+the Godot world editor and future GLB/GLTF asset tools may produce those files; OpenNova consumes and validates
 them without requiring a proprietary project database.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-ONED deliberately stays small. It stores the loose-data and retail-install settings,
-runs OpenNova against the selected loose tree, stages and runs retail against the
-same tree, and stops the child it owns. It does not duplicate the format tools as an
-integrated asset editor. CI uses the same shipped executable's hidden pack command to
-turn the tracked source tree into the standalone packed game layout.
+Godot is the first-class authoring environment: its scene tree, Inspector, undo,
+save and viewport operate on native world documents. The editor also runs the
+selected world, stages retail data, and packs loose sources. CI uses the same
+packing module through a headless project command. OpenNova is the only exported
+Godot application; there is no separate modtools app.
 
 ## Target games
 

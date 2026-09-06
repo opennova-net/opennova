@@ -21,6 +21,27 @@ OpenNova keeps that shape. Catch-up is capped at 31 ticks, render reads the
 latest state without interpolation, and WAC/BMS dividers remain inside their
 own systems.
 
+## Editor preview
+
+The OpenNova World editor plugin loads the active scene's authored GameWorld
+nodes directly. A WorldSource Resource persists the selection of native data.
+GameWorld.load_preview shares environment, terrain and object placement with
+mission loading, but never starts Simulation, mission audio or effects. Its
+refresh supplies the primary editor camera through a scoped RenderView and
+runs shared device operations at fixed time. The live frame table is unchanged.
+
+Terrain, foliage, environment and water expose their loaded configuration in
+the ordinary Inspector. PreviewProperties marks source-derived properties as
+read-only and non-stored while loaded, then restores their authored values on
+unload. Generated meshes and models have no scene owner. No duplicate GameWorld
+is instanced, so preview cannot create a cyclic scene inclusion on Save.
+The editor camera borrows a separate environment and DisplayDecode compositor;
+the authored ClearColor resource is unchanged. Teardown restores the camera and
+shader globals and clears generated resources. Runtime compositors remain
+dormant during editor scene entry. Native format I/O remains direct; WorldSource
+is editor configuration, not a second mission document.
+See [the preview guide](../godot/addons/opennova_world/README.md).
+
 ## Live OpenNova path
 
 [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) splits the frame
@@ -190,7 +211,7 @@ the leg table (`render_particle_frame`, `render_material_frame`, and the
 per-model advance is one static driver over a shared awake set
 (`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
 its portrait models drive that same static advance from the game process loop
-outside a live mission. ONED has no preview-model loop (ADR 0037).
+outside a live mission. The Godot editor uses a frozen native world preview (ADRs 0044/0045).
 
 D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement

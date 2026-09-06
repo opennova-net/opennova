@@ -175,6 +175,11 @@ public:
 class DisplayDecode : public Node3D {
 	GDCLASS(DisplayDecode, Node3D)
 
+public:
+	// Build a decoder for a caller-owned camera without changing scene resources.
+	Ref<Compositor> create_view_compositor(const Ref<Compositor> &p_base = Ref<Compositor>());
+
+
 private:
 	Ref<FrameFxCompositorEffect> effect_;
 	// The owning WorldEnvironment by identity: an embedder may free it before

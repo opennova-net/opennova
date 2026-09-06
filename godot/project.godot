@@ -18,7 +18,6 @@ run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
-run/main_scene.modtools="res://modtools/oned_main.tscn"
 run/main_scene.runtime_game="res://game/game_runtime_root.tscn"
 
 [autoload]
@@ -40,7 +39,7 @@ import/use_multiple_threads=false
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg")
+enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg", "res://addons/opennova_world/plugin.cfg")
 
 [physics]
 
@@ -48,11 +47,11 @@ enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg")
 
 [rendering]
 
-limits/global_shader_variables/buffer_size=262144
 rendering_device/driver.windows="d3d12"
 textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
 textures/default_filters/anisotropic_filtering_level=4
+limits/global_shader_variables/buffer_size=262144
 environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 [shader_globals]

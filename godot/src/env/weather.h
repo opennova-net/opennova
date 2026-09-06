@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -30,6 +32,18 @@ class Simulation;
 // parameter pushes. RE record: docs/env/env-tod-re.md.
 class Weather : public Node3D, private opennova::world::IWeatherRenderTick {
 	GDCLASS(Weather, Node3D)
+
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "wind_strength", "iris_samples" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 
 public:
 	void set_environment_path(const NodePath &p_path);

@@ -118,7 +118,7 @@ Run loop:
   any open editor (no hot-reload). Add a GDScript smoke test
   `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via
   the `gut` skill.
-- ONED is run-only. Format libraries do not add a workspace, inspector,
+- Native documents remain authoritative. Format libraries do not add a workspace,
   project surface, or import flow; see ADR 0037.
 
 ## 6. Extracting an existing parser out of runtime/ (the ADR 0030 recipe)

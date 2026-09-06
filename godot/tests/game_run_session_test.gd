@@ -1,6 +1,6 @@
 extends GutTest
 
-const Session := preload("res://modtools/game_run_session.gd")
+const Session := preload("res://tools/game_run_session.gd")
 
 
 # The deterministic platform: every OS/process/staging verb answers from the
@@ -23,9 +23,8 @@ class FakePlatform:
 	var next_pid := 4000
 	var kill_ok := true
 	var wait_ok := true
-	var oned_exe := "C:/tools/opennova-modtools.exe"
+	var editor_exe := "C:/tools/godot.exe"
 	var project_root := "C:/project"
-	var dev_mode := true
 	var clock_msec := 0
 
 	func valid_resource_dir(path: String) -> bool:
@@ -75,21 +74,18 @@ class FakePlatform:
 		released.append(pid)
 		events.append("release")
 
-	func oned_executable_path() -> String:
-		return oned_exe
+	func editor_executable_path() -> String:
+		return editor_exe
 
 	func project_dir() -> String:
 		return project_root
-
-	func is_dev_mode() -> bool:
-		return dev_mode
 
 	func now_msec() -> int:
 		return clock_msec
 
 
 func test_runtime_flags_are_only_the_loose_resource_contract() -> void:
-	var request := Session.Request.opennova("C:/assets", "JODEMO", "jox01")
+	var request := Session.Request.game("C:/assets", _source("JODEMO", "jox01"))
 	assert_eq(Session.runtime_flags(request), PackedStringArray([
 		"/d",
 		"--resource-dir", "C:/assets",
@@ -98,7 +94,7 @@ func test_runtime_flags_are_only_the_loose_resource_contract() -> void:
 		"/game", "jodemo",
 	]))
 
-	var base := Session.Request.opennova("C:/assets", "", "")
+	var base := Session.Request.game("C:/assets", _source("", ""))
 	assert_eq(Session.runtime_flags(base), PackedStringArray([
 		"/d",
 		"--resource-dir", "C:/assets",
@@ -109,10 +105,10 @@ func test_runtime_flags_are_only_the_loose_resource_contract() -> void:
 
 func test_dev_launch_plan_runs_the_game_scene_without_a_pack() -> void:
 	assert_eq(Session.RUNTIME_SCENE, "res://game/game_runtime_root.tscn",
-			"ONED launches through the debug embedding decision")
-	var request := Session.Request.opennova("C:/assets", "jo", "")
+			"The editor launches through the debug embedding decision")
+	var request := Session.Request.game("C:/assets", _source())
 	var plan := Session.launch_plan(
-		"C:/godot/godot.exe", "C:/project", true, request,
+		"C:/godot/godot.exe", "C:/project", request,
 		func(_path: String) -> bool: return false)
 	assert_not_null(plan)
 	assert_eq(plan.path, "C:/godot/godot.exe")
@@ -124,15 +120,15 @@ func test_dev_launch_plan_runs_the_game_scene_without_a_pack() -> void:
 	]))
 
 
-func test_packaged_plan_finds_the_sibling_opennova_executable() -> void:
+func test_editor_ignores_a_stale_sibling_runtime() -> void:
 	var expected := "C:/dist/opennova.exe"
-	var request := Session.Request.opennova("C:/assets", "jo", "")
+	var request := Session.Request.game("C:/assets", _source())
 	var plan := Session.launch_plan(
-		"C:/dist/opennova-modtools.exe", "C:/project", false, request,
+		"C:/dist/godot.exe", "C:/project", request,
 		func(path: String) -> bool: return path.replace("\\", "/") == expected)
 	assert_not_null(plan)
-	assert_eq(plan.path.replace("\\", "/"), expected)
-	assert_eq(plan.args[0], "--")
+	assert_eq(plan.path.replace("\\", "/"), "C:/dist/godot.exe")
+	assert_eq(plan.args[0], "--path")
 	assert_true(plan.args.has("--resource-dir"))
 	assert_false(plan.args.has("--pack-game"))
 
@@ -144,7 +140,7 @@ func test_invalid_resource_dir_refuses_before_spawn_or_stage() -> void:
 	session.status_changed.connect(
 		func(text: String, kind: StringName) -> void:
 			statuses.append({"text": text, "kind": kind}))
-	assert_false(session.run_opennova("C:/missing"))
+	assert_false(session.run_game("C:/missing", _source()))
 	assert_false(session.run_retail("C:/missing", "C:/retail"))
 	assert_true(platform.spawned.is_empty())
 	assert_true(platform.stage_calls.is_empty())
@@ -155,7 +151,7 @@ func test_invalid_resource_dir_refuses_before_spawn_or_stage() -> void:
 func test_opennova_launches_directly_and_never_stages() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets", "JODEMO", "jox01"))
+	assert_true(session.run_game("C:/assets", _source("JODEMO", "jox01")))
 	assert_eq(platform.spawned.size(), 1)
 	assert_true(platform.stage_calls.is_empty())
 	var launch: Dictionary = platform.spawned[0]
@@ -172,7 +168,7 @@ func test_opennova_launches_directly_and_never_stages() -> void:
 func test_starting_another_target_stops_the_first_then_spawns_from_poll() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var first_pid := int(session.get_state()["pid"])
 	assert_true(session.run_retail("C:/assets", "C:/retail"))
 	assert_eq(platform.killed, [first_pid])
@@ -190,7 +186,7 @@ func test_starting_another_target_stops_the_first_then_spawns_from_poll() -> voi
 func test_stop_reports_the_deadline_when_the_process_lingers() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var pid := int(session.get_state()["pid"])
 	assert_true(session.stop())
 	platform.alive[pid] = true  # the kill was sent but the process has not exited
@@ -242,7 +238,7 @@ func test_retail_stage_failure_never_spawns() -> void:
 func test_natural_exit_is_polled_and_released() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var pid := int(session.get_state()["pid"])
 	platform.alive[pid] = false
 	session.poll()
@@ -255,7 +251,7 @@ func test_stop_failure_preserves_the_owned_process() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
 	platform.kill_ok = false
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var pid := int(session.get_state()["pid"])
 	assert_false(session.stop())
 	assert_true(session.is_running())
@@ -267,7 +263,7 @@ func test_stop_failure_preserves_the_owned_process() -> void:
 func test_shutdown_stops_and_releases_the_child_synchronously() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var pid := int(session.get_state()["pid"])
 	assert_true(session.shutdown())
 	assert_eq(platform.killed, [pid])
@@ -278,11 +274,75 @@ func test_shutdown_stops_and_releases_the_child_synchronously() -> void:
 func test_shutdown_waits_for_a_stop_already_under_way() -> void:
 	var platform := FakePlatform.new()
 	var session := Session.new(platform)
-	assert_true(session.run_opennova("C:/assets"))
+	assert_true(session.run_game("C:/assets", _source()))
 	var pid := int(session.get_state()["pid"])
 	assert_true(session.stop())
-	platform.alive[pid] = true  # still exiting when the app closes
+	platform.alive[pid] = true  # still exiting when the editor closes
 	assert_true(session.shutdown())
 	assert_eq(int(platform.waited[0]["timeout"]), Session.STOP_WAIT_MSEC)
 	assert_eq(platform.released, [pid])
 	assert_false(session.is_running())
+
+
+func test_play_world_preserves_each_source_lookup_policy_and_selected_mission() -> void:
+	for kind in [WorldSource.LOOSE_SOURCE, WorldSource.RETAIL_INSTALL, WorldSource.EDITABLE_GAME_DATA]:
+		var platform := FakePlatform.new()
+		var session := Session.new(platform)
+		var source := WorldSource.new()
+		source.source_kind = kind
+		source.mission_name = "island_edit.bms"
+		source.game_code = "JODEMO"
+		source.expansion = "jox01"
+		assert_true(session.run_world("C:/assets", source))
+		assert_eq(platform.spawned.size(), 1)
+		assert_true(platform.stage_calls.is_empty())
+		var args := platform.spawned[0]["args"] as PackedStringArray
+		assert_eq(args.has("--loose-root"), kind == WorldSource.LOOSE_SOURCE)
+		assert_eq(args.has("/d"), kind != WorldSource.RETAIL_INSTALL)
+		var mission_flag := "--mission" if kind == WorldSource.RETAIL_INSTALL else "--loose-mission"
+		assert_eq(args[args.find(mission_flag) + 1], "island_edit.bms")
+		assert_eq(args[args.find("/game") + 1], "jodemo")
+		assert_eq(args[args.find("/exp") + 1], "jox01")
+		assert_true(session.shutdown())
+		assert_eq(platform.killed, [4000], "Stop only owns the editor's child")
+
+
+func test_play_world_rejects_a_non_mission_before_launch() -> void:
+	var platform := FakePlatform.new()
+	var session := Session.new(platform)
+	var source := WorldSource.new()
+	source.mission_name = "../bad.bms"
+	assert_false(session.run_world("C:/assets", source))
+	assert_true(platform.spawned.is_empty())
+
+
+func _source(game: String = "jo", expansion: String = "") -> WorldSource:
+	var source := WorldSource.new()
+	source.source_kind = WorldSource.LOOSE_SOURCE
+	source.game_code = game
+	source.expansion = expansion
+	return source
+
+
+func test_run_game_uses_selected_source_policy_without_launching_a_mission() -> void:
+	for kind in [WorldSource.LOOSE_SOURCE, WorldSource.RETAIL_INSTALL, WorldSource.EDITABLE_GAME_DATA]:
+		var platform := FakePlatform.new()
+		var session := Session.new(platform)
+		var source := _source()
+		source.source_kind = kind
+		source.mission_name = "island.bms"
+		assert_true(session.run_game("C:/assets", source))
+		var args := platform.spawned[0]["args"] as PackedStringArray
+		assert_eq(args.has("--loose-root"), kind == WorldSource.LOOSE_SOURCE)
+		assert_eq(args.has("/d"), kind != WorldSource.RETAIL_INSTALL)
+		assert_false(args.has("--mission"))
+		assert_false(args.has("--loose-mission"))
+		assert_true(session.shutdown())
+
+
+func test_retail_archive_policy_does_not_enable_loose_overrides() -> void:
+	var platform := FakePlatform.new()
+	var session := Session.new(platform)
+	assert_true(session.run_retail("C:/assets", "C:/retail", false))
+	assert_eq(platform.spawned[0]["args"], PackedStringArray(["/w", "/FRISK"]))
+	assert_true(session.shutdown())

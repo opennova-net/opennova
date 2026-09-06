@@ -1,0 +1,49 @@
+[gd_scene format=3]
+
+[node name="WorldPreviewToolbar" type="HBoxContainer"]
+theme_override_constants/separation = 4
+
+[node name="Source" type="Button" parent="."]
+text = "Source"
+tooltip_text = "Inspect the saved world selection."
+
+[node name="Frame" type="Button" parent="."]
+text = "Frame"
+tooltip_text = "Move the editor camera to the mission's authored starting area."
+
+[node name="Reload" type="Button" parent="."]
+text = "Reload"
+tooltip_text = "Read the selected native files again."
+
+[node name="Folder" type="Button" parent="."]
+text = "Folder"
+tooltip_text = "Set the machine-local directory for this source's install key."
+
+[node name="Copy" type="Button" parent="."]
+text = "Create Copy"
+tooltip_text = "Create separately named native world files alongside the selected game data."
+disabled = true
+
+[node name="Save" type="Button" parent="."]
+text = "Save"
+tooltip_text = "Save pending native world edits. Godot Save and Save All also save these files."
+disabled = true
+
+[node name="Play" type="Button" parent="."]
+text = "Play World"
+tooltip_text = "Save native edits and start this mission in the ordinary game."
+disabled = true
+
+[node name="Stop" type="Button" parent="."]
+text = "Stop"
+tooltip_text = "Stop the game started by this editor."
+disabled = true
+
+[node name="Status" type="Label" parent="."]
+custom_minimum_size = Vector2(150, 0)
+size_flags_horizontal = 3
+clip_text = true
+text = "Open a configured GameWorld scene."
+
+[node name="Details" type="Button" parent="."]
+text = "Details"

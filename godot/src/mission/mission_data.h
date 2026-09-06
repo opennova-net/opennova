@@ -336,6 +336,8 @@ public:
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);
+	// Write a copy without adopting its path or clearing the document dirty flag.
+	Error save_to_path(const String &path);
 	// Stage editor-sampled terrain base heights for the NEXT save that routes through the
 	// .mis writer: one 16.16 fixed-point height per entity, FLAT in WRITE ORDER (items,
 	// buildings, markers, organics). The .mis writer emits each as the entity's

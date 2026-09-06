@@ -2,8 +2,8 @@
 
 OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
-runtime, native format readers, NovaWorld-compatible services, the ONED run and
-packaging utility, and the project web and launcher applications.
+runtime, native format readers, NovaWorld-compatible services, Godot world authoring and
+packaging tools, and the project web and launcher applications.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -13,7 +13,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | Path | Purpose |
 | --- | --- |
 | `engine/` | Native formats, runtime, networking, and service code. |
-| `godot/` | Godot game, ONED, project resources, and GDScript tests. |
+| `godot/` | Godot game, editor tools, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `assets/` | Source-controlled game data consumed by OpenNova. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
@@ -26,7 +26,7 @@ The project does not ship a Python, Qt, Blender, or standalone asset-importer
 toolchain. Runtime asset loading is native and the supported object input is
 3DI.
 
-A future editor will use GLB/GLTF as its scene interchange: GLB/GLTF to 3DI
+Future asset tools will use GLB/GLTF as its scene interchange: GLB/GLTF to 3DI
 for runtime assets and 3DI to GLB for editing. That converter is not part of
 the current repository. Its scene contract is documented without depending on
 importer metadata or DCC custom properties.
@@ -71,21 +71,23 @@ Build the GDExtension, point `GODOT_BIN` at Godot 4.6.1, then run:
 $GODOT_BIN --path godot
 ```
 
-ONED is the companion utility for choosing data, running the game, staging a
-retail-compatible tree, and building release data:
+Open the world editor to configure native world data, edit time, sky and foliage,
+play the selected world, stage retail data, or pack a loose source tree:
 
 ```bash
-$GODOT_BIN --path godot res://modtools/oned_main.tscn
+$GODOT_BIN --editor --path godot res://examples/world_preview.tscn
 ```
 
-See [godot/modtools/README.md](godot/modtools/README.md) for its scope.
+See the [world editor guide](godot/addons/opennova_world/README.md) and
+[game data workflows](godot/tools/README.md).
 
 ## Downloads
 
 Tagged releases publish one Windows game archive named
 `opennova-game-windows-v<version>.zip`. It contains `opennova.exe`, the matching
 GDExtension, and packed game data. Development archives produced by CI also
-include ONED and loose tracked data for testing.
+contain the game with loose tracked data for testing. Authoring tools live in the
+Godot source project.
 
 ## Documentation
 

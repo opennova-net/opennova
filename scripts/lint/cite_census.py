@@ -42,7 +42,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "cite_census_baseline.json"
 
-SCOPES = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/probes",
+SCOPES = ("engine", "godot/src", "godot/game", "godot/tools", "godot/probes",
           "apps", "tests")
 SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".gd")
 EXCLUDED_PARTS = ("third_party", "addons")

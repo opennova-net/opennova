@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <cstdint>
 #include <memory>
 
@@ -31,6 +33,18 @@ namespace godot {
 // docs/render/render-lighting-re.md (CubeEnvironment section).
 class EnvironmentCubeCapture : public Node {
 	GDCLASS(EnvironmentCubeCapture, Node)
+
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "terrain_data" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 
 public:
 	static constexpr int kFaceCount =

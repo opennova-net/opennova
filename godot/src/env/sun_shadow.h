@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/directional_light3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
@@ -25,6 +27,18 @@ class MissionEnvironment;
 class SunShadow : public DirectionalLight3D {
 	GDCLASS(SunShadow, DirectionalLight3D)
 
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "projection_mode", "transform", "position", "rotation", "rotation_degrees", "quaternion", "visible", "shadow_enabled", "light_cull_mask", "shadow_caster_mask" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
+
 public:
 	enum ProjectionMode {
 		PROJECTION_DYNAMIC = 0,
@@ -39,7 +53,7 @@ public:
 	// drive the test harness uses; the engine's virtual delegates here.
 	void advance_frame(double p_delta);
 
-	void _ready() override;
+	SunShadow();
 
 protected:
 	static void _bind_methods();

@@ -2716,15 +2716,12 @@ add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socke
 add_subdirectory(playersav)
 
 # The in-engine dev tools (ADR 0039, engine/runtime/devtools). The frame-stats
-# board, the ImGui pass and ONED's surface are unconditional; the game-window
+# board and the ImGui pass are unconditional; the game-window
 # test needs them compiled in (OPENNOVA_DEVTOOLS, the root default). The ImGui
 # tests drive a null backend.
 add_executable(frame_stats_board_test devtools/frame_stats_board_test.cpp)
 target_link_libraries(frame_stats_board_test PRIVATE opennova_runtime)
 add_test(NAME frame_stats_board COMMAND frame_stats_board_test)
-add_executable(oned_ui_test devtools/oned_ui_test.cpp)
-target_link_libraries(oned_ui_test PRIVATE opennova_runtime opennova_imgui)
-add_test(NAME oned_ui COMMAND oned_ui_test)
 if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)

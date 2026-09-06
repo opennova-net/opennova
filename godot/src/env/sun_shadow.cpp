@@ -41,7 +41,9 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 	_update_direction();
 }
 
-void SunShadow::_ready() {
+SunShadow::SunShadow() {
+	// Native defaults must exist before scene deserialization so editor Save
+	// does not persist device initialization as authored property overrides.
 	// The light's OWN visual layer decides which views render it - and
 	// therefore which views re-render the directional shadow
 	// atlas. The beauty camera (0x38C01) and the water mirror (0x8001) need

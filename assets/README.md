@@ -1,13 +1,13 @@
 # `assets/` — the game's source-owned assets
 
 These are **the game's assets** — the loose source tree OpenNova is built from
-and committed here. They are not an ONED project or a test fixture: the
-per-format `fixtures/<fmt>/` sets and the retail-derived ones are expected to
-give way to this tree as it grows.
+and committed here. The per-format `fixtures/<fmt>/` sets and the
+retail-derived ones are expected to give way to this tree as it grows.
 
-Every byte is authored from scratch by our own writers and tools; no retail
-asset is committed. Retail `Jointops.exe` is the **oracle**, not the target: it
-is the original consumer, so an asset it loads and renders is a correct asset.
+The native source set is authored by our own writers and tools, with the
+explicit temporary retail bring-up exception documented below. Retail
+`Jointops.exe` is the **oracle**, not the target: it is the original consumer,
+so an asset it loads and renders is a correct asset.
 That is the whole reason the retail loop exists — proving compatibility both
 validates our writers and source files and tells our own engine what it has to
 accept.
@@ -21,11 +21,11 @@ parity writers emit bytes a stock client loads.
 ## Why this can be committed (asset policy)
 
 [../docs/asset-gated-tests.md](../docs/asset-gated-tests.md) forbids
-committing retail assets. Nothing here is a retail asset: every byte is
-produced by an OpenNova writer from an authored source, MIT-licensed, exactly
-like the existing per-format `fixtures/<fmt>/` sets. The retail install is
-needed only to *validate* the set (launch JO), which is the asset-gated
-acceptance step, never a committed input.
+committing retail assets. The authored files here are produced by OpenNova
+writers from MIT-licensed sources, like the per-format `fixtures/<fmt>/` sets;
+the temporary exception below identifies the remaining retail files. For the
+authored set, the retail install serves as the asset-gated validation consumer
+(launch JO).
 
 **One deliberate, temporary exception (2026-08-31):** the bring-up model +
 anim + texture set below IS retail data, committed by explicit decision so the
@@ -49,17 +49,14 @@ rule: authored from scratch by our own writers.
   once let loose retail copies slip into a commit. `.gitattributes` keeps that
   `.gitignore` a plain text blob on every checkout (an LFS pointer ignores
   nothing).
-- ONED's Stage & Run Retail stages this tree and the retail runtime into
-  **ONED's own data dir** (`user://packed`) — never beside the source
-  assets.
+- The Godot **OpenNova** dock stages the active world source and retail
+  runtime into `godot/.godot/opennova/retail/` for **Stage & Run Retail**.
 - **This tree also ships, in two flavors**: the dev zip (`opennova-windows`)
   stages the tracked files here under `assets/` — the game default-mounts that
-  loose tree and ONED offers it as the implicit loose-data selection, so the
-  game runs the tracked source files with no packing in the loop. The
-  tagged-release zip
-  (`opennova-game-windows`) carries the same game packed into `localres.pff`
-  beside `opennova.exe`, built by ONED's hidden
-  `opennova-modtools.exe --headless -- --pack-game <src> <game_dir>` command.
+  loose tree, so the game runs the tracked source files with no packing in
+  the loop. The tagged-release zip (`opennova-game-windows`) carries the same game packed into `localres.pff`
+  beside `opennova.exe`, built through the source project
+  [headless pack command](../godot/tools/README.md#headless-release-packaging).
 
 ## The set (grounded in required-resources.md)
 
@@ -327,11 +324,13 @@ field is preserved.
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 
-ONED's Stage & Run Retail is the everyday compatibility loop: it stages the
-selected tree loose under ONED's own data dir (`user://packed`), adds
-the zero-entry `resource.pff` boot token, stages the retail runtime beside it,
-and runs it with `/d`; Stop ends that managed child. The hidden `--pack-game`
-command instead builds the packed `localres.pff` layout used by releases.
+The Godot **OpenNova** dock provides **Stage & Run Retail** and **Stop** for
+the active world source. It preserves existing boot archives; a loose-only
+source receives a zero-entry `resource.pff` token. That staging path does not
+archive loose `.fx` files, so use the shader-bearing install from
+`minimal_pff_package_test --install` for this set's retail viewmodel validation.
+The source-project `--pack-game` command builds the packed `localres.pff`
+layout used by releases. See [game data workflows](../godot/tools/README.md).
 
 ## Validation (asset-gated — needs a retail JO install)
 

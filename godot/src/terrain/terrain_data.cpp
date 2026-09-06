@@ -868,7 +868,7 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	if (cpt_bytes.is_empty()) {
 		loaded = true;
 		UtilityFunctions::push_warning("TerrainData: CPT '", cpt_path,
-			"' missing; continuing without baked terrain (run Export to generate it)");
+			"' missing; this source has no baked terrain");
 		return OK;
 	}
 
