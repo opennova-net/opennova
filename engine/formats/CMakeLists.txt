@@ -8,6 +8,7 @@
 add_library(opennova_formats STATIC
     # adm — .adm animation definition map (anim slots -> .bad clip variant rings)
     ${CMAKE_CURRENT_SOURCE_DIR}/adm/adm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/adm/adm_write.cpp
     # aip — AI profile text (PARTIAL PORT: the two witnessed speed keys; the
     # remainder is the ledgered D-AI-11(h) gap and lands here when witnessed)
     ${CMAKE_CURRENT_SOURCE_DIR}/aip/aip.cpp
@@ -15,6 +16,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/avatars/avatars.cpp
     # bad — skeletal animation
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_write.cpp
     # bink — native BIKi menu-video decode
     ${CMAKE_CURRENT_SOURCE_DIR}/bink/bink.cpp
     # bfc1 — compressed container (inflates through the vendored miniz,
