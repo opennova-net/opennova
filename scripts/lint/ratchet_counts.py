@@ -118,12 +118,32 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
+# godot/addons/ holds two kinds of tree: the vendored third-party addons (gut,
+# imgui-godot) that no counter may judge, and the first-party editor plugin
+# (opennova_world, ADR 0044/0045), which is shipping OpenNova GDScript like
+# godot/game and godot/tools and is counted with them.
+FIRST_PARTY_ADDONS = ("opennova_world",)
+# The shipping GDScript trees, relative to godot/: every counter that judges
+# production scripts walks exactly these.
+SHIPPING_GD_SUBDIRS = ("game", "tools") + tuple(f"addons/{a}" for a in FIRST_PARTY_ADDONS)
+
+
+def _in_third_party_addon(parts) -> bool:
+    """True under godot/addons/<x>/ for every <x> except the first-party
+    plugins in FIRST_PARTY_ADDONS."""
+    parts = tuple(parts)
+    for i, part in enumerate(parts):
+        if part == "addons":
+            return i + 1 >= len(parts) or parts[i + 1] not in FIRST_PARTY_ADDONS
+    return False
+
+
 def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
     for sub in subdirs:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -144,11 +164,11 @@ def count_test_private_pokes() -> int:
 
 def count_gd_foreign_private_accesses() -> int:
     """Foreign `._member` accesses in the SHIPPING GDScript (godot/game,
-    godot/tools): the annex pattern -- a RefCounted "method annex" split
+    godot/tools, the first-party addons): the annex pattern -- a RefCounted "method annex" split
     off its owner for size and reaching back through `_owner._field` -- is
     C++ `friend` without the keyword. A class owns its state; an object that
     needs another's privates is a method of that other class (ADR 0043)."""
-    return _count_private_pokes(("game", "tools"))
+    return _count_private_pokes(SHIPPING_GD_SUBDIRS)
 
 
 CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
@@ -160,10 +180,10 @@ TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?
 
 def _production_class_names() -> set[str]:
     names: set[str] = set()
-    for sub in ("game", "tools"):
+    for sub in SHIPPING_GD_SUBDIRS:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -184,7 +204,7 @@ def count_gd_test_production_subclasses() -> int:
     count = 0
     for path in (REPO / "godot" / "tests").rglob("*.gd"):
         parts = path.relative_to(REPO).parts
-        if "addons" in parts or _in_build_dir(parts):
+        if _in_third_party_addon(parts) or _in_build_dir(parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -245,10 +265,10 @@ def count_godot_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
-    for sub in ("game", "tools", "probes"):
+    for sub in SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -339,7 +359,7 @@ def count_gd_prints_outside_debug() -> int:
     godot/probes log through their ProbeContext, so they are in scope.
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
-    for sub in ("src", "game", "tools", "probes"):
+    for sub in ("src",) + SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             rel = path.relative_to(REPO).as_posix()
             if rel in GD_PRINT_ALLOWLIST:
@@ -369,7 +389,7 @@ def count_has_method_guards() -> int:
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
     count = 0
-    for sub in ("src", "game", "tools", "probes"):
+    for sub in ("src",) + SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -469,10 +489,10 @@ def count_gd_dict_key_sites() -> int:
     is the documented transport edges (the dict-contract allowlist in this
     file's baseline)."""
     count = 0
-    for sub in ("game", "tools"):
+    for sub in SHIPPING_GD_SUBDIRS:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             if sub == "game" and len(parts) > 2 and parts[2] in ("mcp", "probe"):
                 continue
@@ -524,7 +544,7 @@ def count_godot_node_meta_sites() -> int:
         if path.suffix not in (".gd", ".cpp", ".h"):
             continue
         parts = path.relative_to(REPO).parts
-        if "addons" in parts or "third_party" in parts or _in_build_dir(parts):
+        if _in_third_party_addon(parts) or "third_party" in parts or _in_build_dir(parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

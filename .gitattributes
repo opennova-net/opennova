@@ -13,7 +13,6 @@ screenshots/** filter=lfs diff=lfs merge=lfs -text -eol
 # Binary game assets — must come AFTER any *.ext text rules above so the
 # subtree exception wins (gitattributes uses last-match precedence).
 godot/game/assets/** -text -eol
-godot/modtools/assets/** -text -eol
 apps/novaworld_server/static/** -text -eol
 
 # Deploy env files are read inside Linux containers — keep them LF, not the
@@ -75,6 +74,10 @@ screenshots/**/*.json -text filter= diff= merge=
 # Last-match precedence: this block has to stay at the END of the file to win
 # over both assets/** and the *.env rule above.
 assets/**/*.def -text -eol filter= diff= merge=
+# Attribute patterns match case-sensitively on Linux (only core.ignorecase
+# folds them on Windows); the uppercase retail name needs its own rule or it
+# falls through to the assets/** LFS filter while its blob is plain text.
+assets/**/*.DEF -text -eol filter= diff= merge=
 assets/**/*.mnu -text -eol filter= diff= merge=
 assets/**/*.mns -text -eol filter= diff= merge=
 assets/**/*.trn -text -eol filter= diff= merge=
