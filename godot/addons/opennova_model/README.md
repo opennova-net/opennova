@@ -66,6 +66,10 @@ and projector share the engine's axis maps (`threedi_build.h`).
 - The viewport toolbar's **Export .3di** writes the scene's artifacts into the
   manifest's `output_directory` (default `res://../assets`) through one staged
   transaction; **Verify** re-exports in memory and reports what differs.
+- **OpenNova: Export all authored clips** projects every `ClipSetSource`
+  under the authoring tree (its scene's Animations through `ClipProjector`)
+  into its `.bad` files and `.adm`, installed the same way; headless:
+  `godot --headless --path godot --script res://tools/export_clips.gd -- --export-clips [--verify] [folder/file...]`.
 - **OpenNova: Export all authored models** rebuilds every manifest's
   artifacts. Headless:
   `godot --headless --path godot --script res://tools/export_models.gd -- --export-models [--verify] [name...]`.

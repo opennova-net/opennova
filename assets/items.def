@@ -11,7 +11,7 @@ begin "Player #1, Single player"
   graphic person
   graphicenemy person
   sid player1_sp
-  anim_def US01
+  anim_def person
   attrib: aidata fo pfoil
   hp 150
   armor 0 0
@@ -38,7 +38,7 @@ begin "Player #1, Multiplayer"
   graphic person
   graphicenemy person
   sid player1_mp
-  anim_def US01
+  anim_def person
   attrib: aidata fo pfoil
   hp 150
   armor 0 0

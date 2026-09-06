@@ -49,13 +49,12 @@ bool iequals(const std::string &a, const std::string &b) {
 
 const char *const kAuthoredModels[] = {"crate.3di", "person.3di", "person_hd.3di", "akm.3di", "arms.3di"};
 
-// The reset clip whose bone rows a rigged model must reproduce until our own
-// clips exist (ADR 0046 decision 5): the clips pair with model rows by index,
-// and every clip is measured against this one bind. The row count is the
-// model's own (retail's arms carry 38 of the FP rig's 46 rows, its rifle 45);
-// the coupled rows exclude the ground proxy part retail's skinned models end
-// with (the body's 20th row has no clip row; the arms' 38th sits on the clip's
-// gun-root row, and retail's own ArmsG.3di puts the proxy there too).
+// The reset clip whose bone rows a rigged model must reproduce (ADR 0046
+// decision 5, ADR 0047): the clips pair with model rows by index, and every
+// clip is measured against this one bind. The row count is the model's own
+// (the arms carry 38 of the FP rig's 46 rows, the rifle 45); the coupled rows
+// exclude the arms' ground proxy, which sits on the clip's gun-root row (the
+// shape retail's ArmsG.3di had too).
 struct RigCoupling {
 	const char *model;
 	const char *reset_clip;
@@ -63,10 +62,10 @@ struct RigCoupling {
 	int coupled;
 };
 const RigCoupling kRigCouplings[] = {
-    {"person.3di", "DT1RST.BAD", 20, 19},
-    {"person_hd.3di", "DT1RST.BAD", 20, 19},
-    {"akm.3di", "rAKM_RST.bad", 45, 45},
-    {"arms.3di", "rAKM_RST.bad", 38, 37},
+    {"person.3di", "person_rst.bad", 20, 20},
+    {"person_hd.3di", "person_rst.bad", 20, 20},
+    {"akm.3di", "akm_rst.bad", 45, 45},
+    {"arms.3di", "akm_rst.bad", 38, 37},
 };
 
 const RigCoupling *rig_coupling_for(const char *file) {

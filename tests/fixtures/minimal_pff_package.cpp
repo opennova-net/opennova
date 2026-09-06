@@ -174,11 +174,10 @@ bool manifest_has_all(const FileList &files, std::initializer_list<const char *c
 // allowlist is staged, while these make an accidental removal of the AK viewmodel or the
 // player locomotion chain fail the read-only package check with a useful message.
 const char *const kRequiredBringup[] = {
-    "akm.3di",      "AKM_1ST.adm", "arms.3di",      "RAKM_1f.bad",
-    "RAKM_1f2.bad", "RAKM_1i.bad", "RAKM_1i2.bad", "RAKM_1r.bad",
-    "rAKM_RST.bad", "akm.tga",     "E_STAND.adm",  "person.3di",
-    "US01.ADM",     "DT1runF.bad",  "FAILSAFE.BAD", "AVATARS.DEF",
-    "SndProf.def"};
+    "akm.3di",      "akm.adm",      "arms.3di",      "akm_fire.bad",
+    "akm_idle.bad", "akm_reload.bad", "akm_rst.bad", "akm.tga",
+    "person.adm",   "person.3di",   "person_rst.bad", "pers_run.bad",
+    "pers_walkf.bad", "failsafe.bad", "AVATARS.DEF",  "SndProf.def"};
 const char *const kRequiredShaders[] = {"_ffp.fx", "_baseinc.fx", "phongt.fx",
                                         "skbasic.fx"};
 

@@ -82,7 +82,7 @@ func _hold(keycode: Key, pressed: bool) -> void:
 # names the production resolvers ask for: the shipped weapon.def from the
 # reference fixture set (should_skip_script without it; WPN_M4AUTO with
 # its gfx/animadm/pos rows), a person items.def row for the player visual item
-# (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
+# (105310 -> person + soldier.adm), the infantry clip set (person.adm) so
 # the motor's body selection runs, and the 19-bone person staged as the M4's
 # FP gun/arms rig with a wpn-key clip set over the committed .bads.
 
@@ -161,7 +161,7 @@ nationality 0 STAGED_NAT
 		["M4_3RD.3di", PERSON_FIXTURE],
 		["armsG.3di", PERSON_FIXTURE],
 		["soldier.adm", SOLDIER_ADM_FIXTURE],
-		["E_STAND.adm", SOLDIER_ADM_FIXTURE],
+		["person.adm", SOLDIER_ADM_FIXTURE],
 		["idle.bad", IDLE_BAD_FIXTURE],
 		["walk.bad", WALK_BAD_FIXTURE],
 	]:
