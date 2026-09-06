@@ -57,6 +57,7 @@
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
 #include "world/world_source.h"
+#include "world/world_entity_proxy.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
 #include "world/resource_root_resolver.h"
@@ -421,6 +422,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_INTERNAL_CLASS(LiveWorldView);
 	GDREGISTER_INTERNAL_CLASS(LiveArmoryWorldView);
 	GDREGISTER_CLASS(WorldSource);
+	GDREGISTER_CLASS(WorldEntityProxy);
 	GDREGISTER_CLASS(GameWorld);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);

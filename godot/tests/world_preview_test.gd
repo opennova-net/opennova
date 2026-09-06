@@ -230,3 +230,127 @@ func test_missing_named_sky_dependency_is_partial() -> void:
 	assert_eq(world.load_preview(), OK)
 	assert_eq(world.get_preview_status(), "partial")
 	assert_string_contains("\n".join(world.get_preview_diagnostics()), "mnml.env requires absent.pcx")
+
+
+func test_preview_refresh_shares_the_frame_file_rows_and_settles_exposure() -> void:
+	# ADR 0043 d9: every leg table lives in game_world_frame.cpp; the preview
+	# runs the frozen replay's settle prefix (minus the Simulation-only iris
+	# stamp) and then the live camera-producer legs at delta 0.
+	var preview := Array(GameWorld.preview_leg_names())
+	assert_eq(preview, [
+		"celestial_settle", "sun_veil", "weather_settle",
+		"scene_environment", "environment_nodes", "terrain", "water", "foliage",
+		"lights", "materials", "clear", "environment_cube",
+	])
+	var live := Array(GameWorld.frame_leg_names())
+	var replay := Array(GameWorld.frozen_pose_leg_names())
+	for name in preview:
+		assert_true(live.has(name) or replay.has(name),
+				"%s is a shared row, never a preview-only leg body" % name)
+	for omitted in ["begin", "session", "local_view", "network", "blink", "iris", "iris_stamp",
+			"occlusion", "sky_settle", "water_settle", "particles", "framefx", "slot_shadows",
+			"precipitation", "audio", "finish"]:
+		assert_false(preview.has(omitted), "the preview omits the %s leg" % omitted)
+
+
+func test_preview_refresh_runs_every_row_against_the_editor_camera() -> void:
+	var world := _world()
+	assert_eq(world.load_preview(), OK)
+	var viewport := SubViewport.new()
+	add_child_autofree(viewport)
+	viewport.size = Vector2i(320, 240)
+	var camera := Camera3D.new()
+	viewport.add_child(camera)
+	camera.position = Vector3(0, 60, 40)
+	camera.look_at(Vector3(0, 20, 0))
+	camera.make_current()
+	var cube := world.get_node("EnvironmentCubeCapture") as EnvironmentCubeCapture
+	var cube_frames_before := cube.get_render_frame_index()
+	# Every row runs against the editor camera and the world stays a preview:
+	# no Simulation, no EffectWorld, the authored clock untouched. The cube
+	# leg's frame counter is the observable proof the table reached its tail.
+	var environment := world.get_node("MissionEnvironment") as MissionEnvironment
+	var time_before := environment.get_time_of_day()
+	for frame in range(2):
+		assert_eq(world.refresh_preview(camera), OK)
+		await get_tree().process_frame
+	assert_eq(cube.get_render_frame_index(), cube_frames_before + 2)
+	assert_eq(environment.get_time_of_day(), time_before)
+	assert_null(world.get_sim())
+	assert_null(world.get_effect_world())
+	assert_not_null(world.get_effect_light_report())
+	world.unload_preview()
+	assert_false(world.is_preview_active())
+
+
+func test_preview_projects_one_proxy_per_record_and_none_outside_a_preview() -> void:
+	var world := _world()
+	assert_eq(world.get_preview_entity_proxies().size(), 0)
+	assert_eq(world.load_preview(), OK)
+	var mission := world.get_loaded_mission()
+	var proxies := world.get_preview_entity_proxies()
+	assert_eq(proxies.size(), mission.get_all_entities().size())
+	# The projection is transient: no proxy has a scene owner, so Save never
+	# persists it (ADR 0044).
+	for proxy in proxies:
+		assert_null(proxy.owner)
+	var start := world.get_preview_entity_proxy(MissionData.KIND_MARKER, 0)
+	assert_not_null(start)
+	assert_eq(start.get_item_id(), MissionData.PLAYER_START_ITEM_ID)
+	assert_eq(start.get_representation(), WorldEntityProxy.UNPLACED)
+	var house := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 0)
+	assert_not_null(house)
+	assert_eq(house.get_representation(), WorldEntityProxy.STATIC_INSTANCE)
+	assert_eq(house.get_graphic(), "house")
+	assert_ne(house.get_bms_id(), 0)
+	assert_null(world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 99))
+	world.unload_preview()
+	assert_eq(world.get_preview_entity_proxies().size(), 0)
+
+
+func test_update_preview_entity_restamps_the_static_instance_and_its_proxy() -> void:
+	var world := _world()
+	assert_eq(world.load_preview(), OK)
+	var mission := world.get_loaded_mission()
+	var record := mission.get_entity(MissionData.KIND_BUILDING, 1)
+	var proxy := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 1)
+	var before := proxy.transform
+	var position := record.get_position() + Vector3(12, -7, 0)
+	var rotation := record.get_rotation_deg() + Vector3(0, 90, 0)
+	assert_true(mission.set_entity_transform(MissionData.KIND_BUILDING, 1, position, rotation))
+	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, 1), OK)
+	# The proxy reads back the placer's retained instance, so its move proves
+	# the batched rows were re-stamped, not just the record.
+	var expected := MissionObjectPlacer.entity_transform(position, rotation)
+	assert_false(proxy.transform.is_equal_approx(before))
+	assert_true(proxy.transform.origin.is_equal_approx(expected.origin))
+	assert_true(proxy.transform.basis.is_equal_approx(expected.basis))
+	assert_eq(proxy.get_representation(), WorldEntityProxy.STATIC_INSTANCE)
+	# The other instances of the same population are untouched.
+	var sibling := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 0)
+	var sibling_record := mission.get_entity(MissionData.KIND_BUILDING, 0)
+	assert_true(sibling.transform.origin.is_equal_approx(MissionObjectPlacer.entity_transform(
+			sibling_record.get_position(), sibling_record.get_rotation_deg()).origin))
+	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, 99), ERR_DOES_NOT_EXIST)
+	assert_eq(world.get_preview_status(), "ready")
+
+
+func test_reload_preview_entities_projects_added_records() -> void:
+	var world := _world()
+	assert_eq(world.load_preview(), OK)
+	var mission := world.get_loaded_mission()
+	var count := world.get_preview_entity_proxies().size()
+	var item_count := mission.get_entity_count(MissionData.KIND_ITEM)
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 108001, Vector3(30, 30, 0), Vector3.ZERO))
+	# A record the preview never projected is not an update.
+	assert_eq(world.update_preview_entity(MissionData.KIND_ITEM, item_count), ERR_DOES_NOT_EXIST)
+	assert_eq(world.reload_preview_entities(), OK)
+	assert_eq(world.get_preview_entity_proxies().size(), count + 1)
+	var added := world.get_preview_entity_proxy(MissionData.KIND_ITEM, item_count)
+	assert_not_null(added)
+	assert_eq(added.get_item_id(), 108001)
+	assert_eq(added.get_representation(), WorldEntityProxy.STATIC_INSTANCE)
+	assert_true(added.transform.origin.is_equal_approx(
+			MissionObjectPlacer.entity_transform(Vector3(30, 30, 0), Vector3.ZERO).origin))
+	assert_eq(world.get_preview_status(), "ready")
+	world.unload_preview()

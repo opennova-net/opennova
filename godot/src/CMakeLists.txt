@@ -198,6 +198,7 @@ add_library(${TARGET_NAME} SHARED
     world/occlusion_frame.cpp
     world/game_world.cpp
     world/world_source.cpp
+    world/world_entity_proxy.cpp
     world/game_world_preview.cpp
     world/game_world_frame.cpp
     world/game_world_load.cpp

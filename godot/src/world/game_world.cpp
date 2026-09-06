@@ -571,6 +571,10 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_preview_environment"), &GameWorld::get_preview_environment);
 	ClassDB::bind_method(D_METHOD("get_preview_status"), &GameWorld::get_preview_status);
 	ClassDB::bind_method(D_METHOD("get_preview_diagnostics"), &GameWorld::get_preview_diagnostics);
+	ClassDB::bind_method(D_METHOD("get_preview_entity_proxies"), &GameWorld::get_preview_entity_proxies);
+	ClassDB::bind_method(D_METHOD("get_preview_entity_proxy", "kind", "index"), &GameWorld::get_preview_entity_proxy);
+	ClassDB::bind_method(D_METHOD("update_preview_entity", "kind", "index"), &GameWorld::update_preview_entity);
+	ClassDB::bind_method(D_METHOD("reload_preview_entities"), &GameWorld::reload_preview_entities);
 	ADD_SIGNAL(MethodInfo(kSignalWorldLoaded));
 	ADD_SIGNAL(MethodInfo(kSignalLoadFailed, PropertyInfo(Variant::STRING, "reason")));
 	// A joiner's authoritative session record (post-auth S2C 0x7B) resolved
@@ -712,6 +716,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_names"), &GameWorld::frame_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frozen_pose_leg_names"),
 			&GameWorld::frozen_pose_leg_names);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("preview_leg_names"), &GameWorld::preview_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_stops_frame", "name"),
 			&GameWorld::frame_leg_stops_frame);
 	ClassDB::bind_method(D_METHOD("debug_refresh_render_pose", "camera"),

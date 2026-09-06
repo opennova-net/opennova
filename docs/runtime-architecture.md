@@ -28,7 +28,13 @@ nodes directly. A WorldSource Resource persists the selection of native data.
 GameWorld.load_preview shares environment, terrain and object placement with
 mission loading, but never starts Simulation, mission audio or effects. Its
 refresh supplies the primary editor camera through a scoped RenderView and
-runs shared device operations at fixed time. The live frame table is unchanged.
+runs the third leg table, `kPreviewRefresh` in
+`godot/src/world/game_world_frame.cpp` beside `kFrameLegs` and
+`kFrozenPoseRefresh` (ADR 0043 d9: one frame-leg home), pinned by
+`preview_leg_names()`. It runs the frozen replay's settle prefix (celestial
+glare, sun veil, the exposure chain) and then the live camera-producer legs
+at delta 0, including the point-light select and the environment cube; every
+omitted row is annotated in that file. The live frame table is unchanged.
 
 Terrain, foliage, environment and water expose their loaded configuration in
 the ordinary Inspector. PreviewProperties marks source-derived properties as
@@ -40,6 +46,21 @@ the authored ClearColor resource is unchanged. Teardown restores the camera and
 shader globals and clears generated resources. Runtime compositors remain
 dormant during editor scene entry. Native format I/O remains direct; WorldSource
 is editor configuration, not a second mission document.
+
+Placement authoring reads and moves entities through the preview's entity
+projections. Every preview load mints one `WorldEntityProxy` per mission
+entity record under the runtime root's `PreviewEntities` node (no scene
+owner, so Save never persists them): its transform is the placed world
+transform, its typed identity names the record, and its representation says
+whether the preview rendered a retained batched static instance, an individual
+model, or nothing. `GameWorld.update_preview_entity(kind, index)` re-projects
+one record after its transform changed: the placer re-stamps the retained
+instance's population rows, RLOD sphere, light-draw and item-effect rows and
+terrain shadow source in place (`MissionObjectPlacer.set_static_instance_transform`,
+keeping the spatial bin placement assigned), or moves the individual model.
+`reload_preview_entities()` re-places the whole document for added or removed
+records and changed items; a changed item id under `update_preview_entity`
+falls through to it. Pinned by `godot/tests/world_preview_test.gd`.
 See [the preview guide](../godot/addons/opennova_world/README.md).
 
 ## Live OpenNova path

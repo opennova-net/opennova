@@ -3,6 +3,11 @@
 #include "render/render_view.h"
 #include "object/material_info.h"
 #include "mission/mission_info.h"
+#include "mission/mission_records.h"
+#include "mission/mission_root.h"
+#include "object/entity_ref.h"
+
+#include <godot_cpp/core/object.hpp>
 
 using namespace godot;
 
@@ -114,11 +119,156 @@ Error GameWorld::load_preview_documents(const Ref<ResourceRoot> &p_root,
 	loaded_mission_file_ = name;
 	start_mission_root();
 	place_mission_objects(p_mission);
+	// The placed models' authored light records into the point-light pool:
+	// the director walk mission start runs beside the effect catalog warm-up.
+	// The preview has no EffectWorld, so only this half of that pair applies.
+	if (light_director_.is_valid()) light_director_->reattach();
 	// Placement samples the runtime clock. Reset its shared sample before
 	// the first editor render and never sample the wall clock in preview.
 	panm_clock_->sample(0, -1);
+	build_preview_entities();
 	world_ready_ = true;
 	set_water_world_rendering_enabled(true);
+	collect_preview_diagnostics();
+	preview_status_ = preview_diagnostics_.is_empty() ? "ready" : "partial";
+	return OK;
+}
+
+// --- the editor's entity projections (ADR 0044) ------------------------------
+
+namespace {
+const char *kPreviewEntitiesName = "PreviewEntities";
+
+String preview_entity_name(int p_kind, int p_index) {
+	return vformat("Entity_%d_%d", p_kind, p_index);
+}
+} // namespace
+
+Node3D *GameWorld::preview_entities() const {
+	return Object::cast_to<Node3D>(ObjectDB::get_instance(preview_entities_id_));
+}
+
+void GameWorld::free_preview_entities() {
+	Node3D *container = preview_entities();
+	preview_entities_id_ = ObjectID();
+	if (container == nullptr) return;
+	if (Node *parent = container->get_parent()) parent->remove_child(container);
+	memdelete(container);
+}
+
+ObjectModel *GameWorld::placed_model_for(int p_kind, int p_index) const {
+	if (placer_.is_null()) return nullptr;
+	const TypedArray<ObjectModel> models = placer_->get_placed_models();
+	for (int i = 0; i < models.size(); ++i) {
+		ObjectModel *model = Object::cast_to<ObjectModel>(models[i]);
+		if (model == nullptr) continue;
+		const Ref<EntityRef> ref = model->get_entity_ref();
+		if (ref.is_valid() && ref->get_kind() == p_kind && ref->get_index() == p_index) return model;
+	}
+	return nullptr;
+}
+
+void GameWorld::sync_preview_entity_proxy(WorldEntityProxy *p_proxy,
+		const Ref<MissionEntityRecord> &p_record) {
+	p_proxy->set_kind(p_record->get_kind());
+	p_proxy->set_index(p_record->get_index());
+	p_proxy->set_bms_id(p_record->get_bms_id());
+	p_proxy->set_item_id(p_record->get_item_id());
+	p_proxy->set_graphic(placer_.is_valid() ? placer_->graphic_for(p_record->get_item_id()) : String());
+	const int bms_id = p_record->get_bms_id();
+	if (placer_.is_valid() && bms_id != 0 && placer_->has_static_instance(bms_id)) {
+		p_proxy->set_representation(WorldEntityProxy::STATIC_INSTANCE);
+		p_proxy->set_transform(placer_->get_static_instance_transform(bms_id));
+		p_proxy->set_local_bounds(placer_->get_static_instance_local_bounds(bms_id));
+		return;
+	}
+	if (ObjectModel *model = placed_model_for(p_record->get_kind(), p_record->get_index())) {
+		p_proxy->set_representation(WorldEntityProxy::MODEL);
+		p_proxy->set_transform(model->get_transform());
+		p_proxy->set_local_bounds(model->get_model_bounds());
+		return;
+	}
+	p_proxy->set_representation(WorldEntityProxy::UNPLACED);
+	p_proxy->set_transform(MissionObjectPlacer::entity_transform(p_record->get_position(),
+			p_record->get_rotation_deg()));
+	p_proxy->set_local_bounds(AABB());
+}
+
+void GameWorld::build_preview_entities() {
+	free_preview_entities();
+	MissionRoot *runtime = get_runtime();
+	if (runtime == nullptr || loaded_mission_.is_null()) return;
+	Node3D *container = memnew(Node3D);
+	container->set_name(kPreviewEntitiesName);
+	runtime->add_child(container);
+	preview_entities_id_ = container->get_instance_id();
+	const TypedArray<MissionEntityRecord> records = loaded_mission_->get_all_entities();
+	for (int i = 0; i < records.size(); ++i) {
+		const Ref<MissionEntityRecord> record = records[i];
+		if (record.is_null()) continue;
+		WorldEntityProxy *proxy = memnew(WorldEntityProxy);
+		proxy->set_name(preview_entity_name(record->get_kind(), record->get_index()));
+		container->add_child(proxy);
+		sync_preview_entity_proxy(proxy, record);
+	}
+}
+
+TypedArray<WorldEntityProxy> GameWorld::get_preview_entity_proxies() const {
+	TypedArray<WorldEntityProxy> out;
+	Node3D *container = preview_entities();
+	if (container == nullptr) return out;
+	for (int i = 0; i < container->get_child_count(); ++i) {
+		WorldEntityProxy *proxy = Object::cast_to<WorldEntityProxy>(container->get_child(i));
+		if (proxy != nullptr) out.append(proxy);
+	}
+	return out;
+}
+
+WorldEntityProxy *GameWorld::get_preview_entity_proxy(int p_kind, int p_index) const {
+	Node3D *container = preview_entities();
+	if (container == nullptr) return nullptr;
+	return Object::cast_to<WorldEntityProxy>(
+			container->get_node_or_null(NodePath(preview_entity_name(p_kind, p_index))));
+}
+
+Error GameWorld::update_preview_entity(int p_kind, int p_index) {
+	if (!preview_active_ || !world_ready_ || loaded_mission_.is_null() || placer_.is_null())
+		return ERR_UNAVAILABLE;
+	const Ref<MissionEntityRecord> record =
+			loaded_mission_->get_entity(static_cast<MissionData::EntityKind>(p_kind), p_index);
+	if (record.is_null()) return ERR_DOES_NOT_EXIST;
+	WorldEntityProxy *proxy = get_preview_entity_proxy(p_kind, p_index);
+	if (proxy == nullptr) return ERR_DOES_NOT_EXIST;
+	// A different item is a different model: only a re-place projects it.
+	if (proxy->get_item_id() != record->get_item_id()) return reload_preview_entities();
+	const Transform3D xform = placer_->placement_transform(record->get_position(),
+			record->get_rotation_deg(), record->get_item_id());
+	const int bms_id = record->get_bms_id();
+	if (bms_id != 0 && placer_->has_static_instance(bms_id)) {
+		placer_->set_static_instance_transform(bms_id, xform);
+	} else if (ObjectModel *model = placed_model_for(p_kind, p_index)) {
+		// The individual model carries its own shadow casters as children;
+		// only its terrain shadow source is a placer row.
+		model->set_transform(xform);
+		const Ref<EntityRef> ref = model->get_entity_ref();
+		if (ref.is_valid()) ref->set_position(record->get_position());
+		placer_->update_static_terrain_shadow_source_transform(
+				static_cast<MissionData::EntityKind>(p_kind), p_index, xform);
+	}
+	sync_preview_entity_proxy(proxy, record);
+	return OK;
+}
+
+Error GameWorld::reload_preview_entities() {
+	if (!preview_active_ || !world_ready_ || loaded_mission_.is_null()) return ERR_UNAVAILABLE;
+	// The same placement the load ran: place() clears the previous
+	// MissionObjects, the director re-walks the placed lights, and the
+	// clock sample stays at the authored time.
+	place_mission_objects(loaded_mission_);
+	if (light_director_.is_valid()) light_director_->reattach();
+	panm_clock_->sample(0, -1);
+	build_preview_entities();
+	preview_diagnostics_.clear();
 	collect_preview_diagnostics();
 	preview_status_ = preview_diagnostics_.is_empty() ? "ready" : "partial";
 	return OK;
@@ -225,24 +375,17 @@ Error GameWorld::refresh_preview(Camera3D *p_camera) {
 	frame_camera_xform_ = p_camera->get_camera_transform();
 	frame_stats_on_ = false;
 	frame_timing_ = false;
-	// Shared device legs, all at the fixed authored time. No session, wall
-	// clock, script, audio, or effect simulation enters this table.
-	static const FrameLeg legs[] = {
-		{ "scene_environment", -1, &GameWorld::leg_scene_environment, kLegNone },
-		{ "environment", -1, &GameWorld::leg_environment_nodes, kLegNone },
-		{ "terrain", -1, &GameWorld::leg_terrain, kLegNone },
-		{ "water", -1, &GameWorld::leg_water, kLegNone },
-		{ "foliage", -1, &GameWorld::leg_foliage, kLegNone },
-		{ "materials", -1, &GameWorld::leg_materials, kLegNone },
-		{ "clear", -1, &GameWorld::leg_clear, kLegNone },
-	};
+	// The preview table lives with the other two in game_world_frame.cpp
+	// (ADR 0043 d9: one frame-leg home); its rows and omissions are
+	// annotated there.
 	FrameContext ctx;
-	run_leg_table(legs, sizeof(legs) / sizeof(legs[0]), ctx, false);
+	run_leg_table(kPreviewRefresh, kPreviewRefreshCount, ctx, false);
 	return OK;
 }
 
 void GameWorld::unload_preview() {
 	if (!preview_active_) return;
+	free_preview_entities();
 	unload();
 	// Runtime unload keeps the last terrain for its loading transition.
 	// Preview unload must remove it before another scene becomes visible.
