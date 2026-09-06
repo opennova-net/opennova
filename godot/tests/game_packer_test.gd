@@ -278,7 +278,7 @@ func test_stage_retail_stages_every_runtime_file() -> void:
 
 func test_pack_and_stage_refuse_overlapping_source_and_output_even_with_a_marker() -> void:
 	var root := _make_root({"items.def": "original", ".gitignore": PackerScript.MARKER_TEXT})
-	for output in [root, root.path_join("child"), root.get_base_dir(), root.path_join("../" + root.get_file())]:
+	for output in [root, root.path_join("child"), root.get_base_dir(), root.path_join("../" + root.get_file()), "relative-output"]:
 		assert_false(PackerScript.pack(root, output).ok)
 		assert_false(PackerScript.stage_loose(root, output).ok)
 		assert_false(PackerScript.export_game(root, output).ok)

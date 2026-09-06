@@ -334,6 +334,8 @@ static func output_directory_error(source_dir: String, output_dir: String) -> St
 		return "Choose separate source and output directories."
 	var source := ProjectSettings.globalize_path(source_dir.strip_edges()).simplify_path().replace("\\", "/").trim_suffix("/")
 	var output := ProjectSettings.globalize_path(output_dir.strip_edges()).simplify_path().replace("\\", "/").trim_suffix("/")
+	if not source.is_absolute_path() or not output.is_absolute_path():
+		return "Use absolute directories, or res:// and user:// paths."
 	if OS.get_name() == "Windows":
 		source = source.to_lower()
 		output = output.to_lower()
