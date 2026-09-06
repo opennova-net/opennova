@@ -9,6 +9,7 @@ const AUTHORING_DIR := ModelExport.AUTHORING_DIR
 const MENU_OPEN := "OpenNova: Open model..."
 const MENU_EXPORT := "OpenNova: Export model to .3di"
 const MENU_EXPORT_ALL := "OpenNova: Export all authored models"
+const MENU_EXPORT_CLIPS := "OpenNova: Export all authored clips"
 
 var _open_dialog: FileDialog
 var _confirm: ConfirmationDialog
@@ -59,6 +60,7 @@ func _enter_tree() -> void:
 	add_tool_menu_item(MENU_OPEN, _open_model)
 	add_tool_menu_item(MENU_EXPORT, _export_current)
 	add_tool_menu_item(MENU_EXPORT_ALL, _export_all)
+	add_tool_menu_item(MENU_EXPORT_CLIPS, _export_clips)
 	scene_changed.connect(_scene_changed)
 	_scene_changed(EditorInterface.get_edited_scene_root())
 
@@ -67,6 +69,7 @@ func _exit_tree() -> void:
 	remove_tool_menu_item(MENU_OPEN)
 	remove_tool_menu_item(MENU_EXPORT)
 	remove_tool_menu_item(MENU_EXPORT_ALL)
+	remove_tool_menu_item(MENU_EXPORT_CLIPS)
 	remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar)
 	_toolbar.queue_free()
 
@@ -226,6 +229,17 @@ func _export_all() -> void:
 	if lines.is_empty():
 		lines.append("No manifests under %s." % AUTHORING_DIR)
 	_show("\n".join(lines))
+
+
+func _export_clips() -> void:
+	var lines := PackedStringArray()
+	for source in ClipExport.list_sources():
+		var result := ClipExport.export_source(source)
+		lines.append("%s: %s" % [source.get_file(), ("exported " + ", ".join(result.artifacts)) if result.ok else result.error])
+	if lines.is_empty():
+		lines.append("No clip sets under %s." % AUTHORING_DIR)
+	_show("
+".join(lines))
 
 
 func _show(text: String) -> void:

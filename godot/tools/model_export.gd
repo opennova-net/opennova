@@ -21,8 +21,11 @@ static func list_manifests(authoring_dir: String = AUTHORING_DIR) -> PackedStrin
 		return manifests
 	for folder in DirAccess.get_directories_at(root):
 		for file in DirAccess.get_files_at(root.path_join(folder)):
-			if file.ends_with(".tres"):
-				manifests.append(authoring_dir.path_join(folder).path_join(file))
+			if not file.ends_with(".tres"):
+				continue
+			var path := authoring_dir.path_join(folder).path_join(file)
+			if load(path) is ModelAuthoringManifest:
+				manifests.append(path)
 	manifests.sort()
 	return manifests
 
@@ -124,7 +127,7 @@ static func verify_manifest(manifest_path: String) -> ModelExportResult:
 			result.mismatches.append("%s: missing" % result.artifacts[i])
 			continue
 		var committed := FileAccess.get_file_as_bytes(path)
-		if _is_pointer(committed):
+		if is_lfs_pointer(committed):
 			result.mismatches.append("%s: unpulled LFS pointer" % result.artifacts[i])
 		elif committed != bytes[i]:
 			result.mismatches.append("%s: differs from a fresh export" % result.artifacts[i])
@@ -134,6 +137,7 @@ static func verify_manifest(manifest_path: String) -> ModelExportResult:
 	return result
 
 
-static func _is_pointer(data: PackedByteArray) -> bool:
+## True for an unpulled Git LFS pointer stub (the artifact's bytes are not local).
+static func is_lfs_pointer(data: PackedByteArray) -> bool:
 	return data.size() >= LFS_POINTER.length() \
 			and data.slice(0, LFS_POINTER.length()).get_string_from_ascii() == LFS_POINTER

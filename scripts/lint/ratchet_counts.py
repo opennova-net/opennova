@@ -346,6 +346,7 @@ GD_PRINT_ALLOWLIST: set[str] = {
     # Headless project commands: stdout/stderr is their user interface.
     "godot/tools/pack_game_cli.gd",
     "godot/tools/export_models_cli.gd",
+    "godot/tools/export_clips_cli.gd",
 }
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
