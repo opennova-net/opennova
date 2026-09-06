@@ -2,7 +2,7 @@
 
 - **Status**: accepted (2026-09-05)
 - **Updates**: ADR 0037's authoring direction; its ONED run and packaging contracts
-  remain in place until their replacement is delivered.
+  were replaced by [ADR 0045](0045-godot-owns-development-workflows.md).
 
 Godot is the home for OpenNova world authoring. Native BMS, TRN, ENV, and mission
 sidecar files remain authoritative; Godot scenes describe composition and editor
@@ -20,5 +20,5 @@ documents and are never a second saved content model.
 One world editing session owns the open native documents and their pending
 changes. Environment base values remain separate from the mission's effective
 overrides. Godot undo and save act on those documents, and Play starts the ordinary
-game against their saved files. A later phase moves ONED's remaining launch and
-packaging responsibilities before removing the separate modtools executable.
+game against their saved files. ADR 0045 completes the remaining launch and
+packaging migration and removes the separate modtools executable.

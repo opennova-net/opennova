@@ -16,7 +16,7 @@
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, simassets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
-    allowlist; the pass, the frame-stats board and ONED's run surface build in
+    allowlist; the pass and the frame-stats board build in
     every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
     the release GDExtension flavour; ImGui headers never leave the group, the
     shell hands the context over as plain pointers via `devtools/imgui_abi.h`).

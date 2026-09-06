@@ -96,11 +96,14 @@ and foliage changes. The effective environment is a separate view of the base
 ENV plus mission overrides. Native codecs and format behavior remain in their
 existing engine owners.
 
-The next phase moves ONED's remaining run and packaging responsibilities into
-the Godot workflow before removing `opennova-modtools.exe`. Placement editing,
-more native document fields, scene composition improvements, and asset tools
-follow in separate phases. This phase edits the existing foliage slots; it does
-not paint foliage maps or add object placement tools.
+The **OpenNova** dock in Godot's bottom panel supplies Run Game, Stage & Run
+Retail, Stop, and Pack Game Data. All use this scene's selected source and save
+pending native edits first. See [game data workflows](../../tools/README.md)
+for installation, output and headless packaging details.
+
+Next comes native mission placement editing through Godot selection and transforms.
+More document fields, scene composition and asset tools follow in separate phases.
+The current foliage controls edit existing slots; they do not paint foliage maps.
 
 ## Validation
 

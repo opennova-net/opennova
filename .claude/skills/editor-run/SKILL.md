@@ -1,21 +1,13 @@
 ---
-name: oned-run
-description: Runs this repo's ONED utility or OpenNova game runtime with the native extension and game data correctly set up, then watches and stops the process. Use when asked to run, launch, demo, or visually verify ONED/the runtime, or when either appears to load stale native code. For driving a running game (state, captures, probes) use the game-mcp skill.
+name: editor-run
+description: Runs the Godot world editor or OpenNova game with the native extension and game data correctly set up, then observes and stops the owned process. For a running game's state, captures and probes use game-mcp.
 ---
 
-# Run ONED / the OpenNova runtime
+# Run the Godot editor or OpenNova
 
-The Godot project is `godot/` (Godot 4.6.1). Its default main scene is the
-game runtime root, `res://game/game_runtime_root.tscn` (on a debug windowed
-run with the imgui-godot addon it embeds MainGame in a SubViewport for the F3
-Game window; otherwise it hands off to `res://game/main_game.tscn` directly,
-`GameRuntimeRoot.should_embed_game_view`). The ONED scene
-`res://modtools/oned_main.tscn` is the `modtools` feature override for
-the packaged `opennova-modtools.exe`; pass that scene explicitly when running
-ONED from source. ONED is run-only (ADR 0037): Settings, Run OpenNova,
-Stage & Run Retail, and Stop. It has no workspaces and no MCP server; the game
-it runs carries the `opennova-game` endpoint (`docs/mcp.md`, the `game-mcp`
-skill).
+The Godot project is `godot/` (Godot 4.6.1). World authoring and run/staging/
+packing controls live in the editor's OpenNova dock. There is no separate tools
+executable. The game's main scene is `res://game/game_runtime_root.tscn`.
 
 All commands below are Git Bash from the repository root.
 
@@ -37,25 +29,24 @@ terminal, or point `GODOT_BIN` at the plain runtime executable.
 ## 2. Preflight the GDExtension
 
 - Fresh worktree: initialize submodules, then run `bash scripts/bootstrap_godot.sh`
-  (it installs GUT and the imgui-godot addon `OnedUi` draws through;
+  (it installs GUT and the imgui-godot addon the game F3 tools draw through;
   `scripts/build_godot.sh` does NOT run it), then `bash scripts/build_godot.sh`.
-  Nothing Godot-side works without the DLL, and without the addon `OnedUi` has
+  Nothing Godot-side works without the DLL, and without the addon `DevTools` has
   no ImGui context.
 - If `godot/src/` behavior looks stale, rebuild and fully stop every running
-  Godot/ONED process. GDExtension registration does not hot-reload, and a live
+  Godot process owned by this task. GDExtension registration does not hot-reload, and a live
   process can hold the DLL lock.
 - After a fresh checkout or resource-heavy branch switch, run
   `"$GODOT_BIN" --headless --path godot --import` once.
 - A stale or missing DLL usually appears as parse errors naming engine classes
-  (`Simulation`, `Terrain`, `ResourceRoot`, `DevTools`, `OnedUi`, ...) or
+  (`Simulation`, `Terrain`, `ResourceRoot`, `DevTools`, ...) or
   silently dropped GUT scripts.
 
 ## 3. Game data
 
-ONED persists its selected loose or packed game-data directory in `user://oned.cfg`. A
-packaged dev build with no explicit choice defaults to the `assets/` directory
-beside its executable. Running retail also needs a user-selected JO install
-containing `Jointops.exe`, Bink, and `game.cfg`.
+The editor's WorldSource supplies its selected directory; local paths live in
+Godot project metadata. Retail staging needs a JO installation with Jointops.exe,
+Bink and game.cfg. See godot/tools/README.md for the supported source policies.
 
 From source, the game takes its data as launch flags after `--`
 (`docs/dev-env-vars.md`): `--resource-dir <dir>` (a packed install or a loose
@@ -72,14 +63,12 @@ local path.
   `"$GODOT_BIN" --path godot -- --resource-dir "$OPENNOVA_JO_DIR" [--mission 00TRa.bms]`
 - Game from source with its MCP endpoint (drive it with the `game-mcp` skill):
   `python scripts/mcp/game_mcp.py launch --windowed --resource-dir "$OPENNOVA_JO_DIR"`
-- ONED from source, windowed:
-  `"$GODOT_BIN" --path godot res://modtools/oned_main.tscn`
-- Packaged dev build: run `opennova-modtools.exe`, select the loose source
-  tree in Settings, then use Run OpenNova, Stage & Run Retail, or Stop.
-  ONED owns one child; starting another mode replaces it.
+- World editor: `"$GODOT_BIN" --editor --path godot res://examples/world_preview.tscn`.
+  Use the OpenNova dock for Run Game / Stage & Run Retail / Stop, or the viewport
+  toolbar's Play World. The editor owns one child; changing targets replaces it.
 - Headless pack smoke:
-  `opennova-modtools.exe --headless -- --pack-game <src_dir> <game_dir>`.
-  Success requires exit 0 and `localres.pff` in the destination.
+  `"$GODOT_BIN" --headless --path godot --script res://tools/pack_game.gd -- --pack-game <src_dir> <game_dir>`.
+  Success requires exit 0 and localres.pff in the destination.
 - Observation, captures and runtime probes go through the game MCP
   (`game_probe`, `docs/mcp.md`); the former `godot/tests/*_probe.gd` scripts
   are gone (ADR 0041). Use raw `$GODOT_BIN` for CLI flags such as
@@ -89,8 +78,7 @@ local path.
 
 Watch output for `SCRIPT ERROR`, `ERROR:`, and GDExtension load complaints.
 Done means the target launched cleanly, the requested behavior was observed,
-and every process was stopped. Never leave a headless Godot or an ONED-managed
+and every process was stopped. Never leave a headless Godot or an editor-managed
 game running.
 
-Read `godot/modtools/README.md` for ONED, retail-stage, and release-pack
-contracts.
+Read `godot/tools/README.md` for editor run, retail staging and release packaging contracts.

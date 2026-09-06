@@ -133,7 +133,7 @@ Each domain's next step is named in its own record, not centrally:
 | Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
 
-Work that is **not** a parity divergence — ONED and OpenNova Launcher UX, project health, code
+Work that is **not** a parity divergence — Godot editor and OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
 (the NovaWorld-integration era), `engine/runtime/inmatch/ROADMAP.md`,
@@ -166,7 +166,7 @@ for the evidence and tests. Select further research from the ledger's current
 | Instrument | What it prevents | How it runs |
 |---|---|---|
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
-| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; shipping GDScript reaching into another object's privates (`gd_foreign_private_accesses`, the annex pattern, ADR 0043); witness citations growing Godot-side (`godot_orig_cites`, ONE `[orig:` count over `godot/src` + `godot/game` + `godot/modtools` + `godot/probes` — non-increasing, banked in the baseline; a decrease means code moved to its engine home or died); any witness cite under `godot/game/mcp` (`mcp_boundary_cites`, an absolute zero floor) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`); the mcp floor is absolute, no baseline key |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; shipping GDScript reaching into another object's privates (`gd_foreign_private_accesses`, the annex pattern, ADR 0043); witness citations growing Godot-side (`godot_orig_cites`, ONE `[orig:` count over `godot/src` + `godot/game` + `godot/tools` + `godot/probes` — non-increasing, banked in the baseline; a decrease means code moved to its engine home or died); any witness cite under `godot/game/mcp` (`mcp_boundary_cites`, an absolute zero floor) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`); the mcp floor is absolute, no baseline key |
 | `scripts/lint/cite_census.py` | a witness address (`@0xADDR`) silently disappearing from the code trees during a structural move; a wire-frozen name or a docs citation/ledger id lost in a rename (`--audit-range`, the local diff guard) | CI, hard-fail against `scripts/lint/cite_census_baseline.json`; a deliberate deletion is banked with `--write-baseline` and named in the commit |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
 | `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission/world may include only terrain_query's six seam headers (`coords.h`, `height_field.h`, `surface_type_map.h`, `terrain_field_store.h` — ADR 0042 d4's engine field builder — `terrain_raycast.h`, `terrain_scorch_record.h`, under the group-qualified `runtime/terrain_query/` prefix), never the terrain-format stack; Dear ImGui includes escaping `engine/runtime/devtools` + `tests/devtools` (ADR 0042 d6) | CI, hard-fail |
