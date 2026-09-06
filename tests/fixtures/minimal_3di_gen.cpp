@@ -48,6 +48,7 @@
 // flat-colour swatch textures it names (wall/roof/wood.tga) are minted beside
 // it. items.def row 108001 places it in mnml.bms (assets/README.md). One
 // recipe owns both copies, so the fixture and the shipped model cannot drift.
+#include <formats/tga/tga_write.h>
 #include <formats/threedi/threedi_build.h>
 
 #include <formats/threedi/threedi_panm_pose.h>
@@ -909,23 +910,21 @@ const AssetTexture kAssetTextures[] = {
 };
 constexpr int kSwatchSize = 16;
 
-// An uncompressed true-colour TGA (type 2, 24 bpp, bottom-left origin): the
-// 18-byte header, then BGR per texel -- the shape of the retail-loaded
-// mnml_*.tga terrain art, so retail's loose-file texture path takes it as is.
+// A uniform flat-colour swatch through the engine TGA encoder (type 2, 24 bpp,
+// bottom-up rows): the shape of the retail-loaded mnml_*.tga terrain art, so
+// retail's loose-file texture path takes it as is.
 std::vector<uint8_t> make_swatch_tga(const uint8_t rgb[3]) {
-	std::vector<uint8_t> out(18, 0);
-	out[2] = 2;
-	out[12] = static_cast<uint8_t>(kSwatchSize & 0xFF);
-	out[13] = static_cast<uint8_t>(kSwatchSize >> 8);
-	out[14] = static_cast<uint8_t>(kSwatchSize & 0xFF);
-	out[15] = static_cast<uint8_t>(kSwatchSize >> 8);
-	out[16] = 24;
-	out[17] = 0;
+	opennova::tga::TgaImage img;
+	img.width = kSwatchSize;
+	img.height = kSwatchSize;
+	img.bpp = 24;
 	for (int i = 0; i < kSwatchSize * kSwatchSize; ++i) {
-		out.push_back(rgb[2]);
-		out.push_back(rgb[1]);
-		out.push_back(rgb[0]);
+		img.pixels.push_back(rgb[2]);
+		img.pixels.push_back(rgb[1]);
+		img.pixels.push_back(rgb[0]);
 	}
+	std::vector<uint8_t> out;
+	opennova::tga::tga_encode(img, out);
 	return out;
 }
 

@@ -94,6 +94,8 @@ add_library(opennova_formats STATIC
     # sph — the /PROFILE server-log FOURCC chunk container (payload records:
     # engine/net/npwire serverlog_decode)
     ${CMAKE_CURRENT_SOURCE_DIR}/sph/sph.cpp
+    # tga — truecolor TGA encode (write-only; decode is the platform image loader)
+    ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_write.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3

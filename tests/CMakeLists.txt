@@ -85,6 +85,13 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
+# The TGA encoder: the shape retail's loose-texture loader and the menu cursor
+# depend on (type 2, 24/32 bpp, bottom-up rows).
+add_executable(tga_write_test tga/tga_write_test.cpp)
+target_link_libraries(tga_write_test PRIVATE opennova_formats)
+target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_write COMMAND tga_write_test)
+
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
 foreach(test comment trim_value parse variants)
