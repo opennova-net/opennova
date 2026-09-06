@@ -19,9 +19,10 @@ void WorldSource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_data_directory", "value"), &WorldSource::set_data_directory);
 	ClassDB::bind_method(D_METHOD("get_data_directory"), &WorldSource::get_data_directory);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "data_directory"), "set_data_directory", "get_data_directory");
-	ClassDB::bind_method(D_METHOD("set_install_key", "value"), &WorldSource::set_install_key);
-	ClassDB::bind_method(D_METHOD("get_install_key"), &WorldSource::get_install_key);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "install_key"), "set_install_key", "get_install_key");
+	ClassDB::bind_method(D_METHOD("set_local_install_name", "value"), &WorldSource::set_local_install_name);
+	ClassDB::bind_method(D_METHOD("get_local_install_name"), &WorldSource::get_local_install_name);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "local_install_name"), "set_local_install_name",
+			"get_local_install_name");
 	ClassDB::bind_method(D_METHOD("set_mission_name", "value"), &WorldSource::set_mission_name);
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &WorldSource::get_mission_name);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mission_name"), "set_mission_name", "get_mission_name");
@@ -45,9 +46,9 @@ void WorldSource::set_data_directory(const String &p_value) {
 	emit_changed();
 }
 
-void WorldSource::set_install_key(const String &p_value) {
-	if (install_key_ == p_value) return;
-	install_key_ = p_value;
+void WorldSource::set_local_install_name(const String &p_value) {
+	if (local_install_name_ == p_value) return;
+	local_install_name_ = p_value;
 	emit_changed();
 }
 
@@ -72,11 +73,12 @@ void WorldSource::set_expansion(const String &p_value) {
 Ref<ResourceRoot> WorldSource::open_root(const String &p_local_directory) {
 	last_error_code_ = OK;
 	last_error_ = String();
-	String directory = install_key_.is_empty() ? data_directory_.strip_edges() : p_local_directory.strip_edges();
+	String directory = local_install_name_.is_empty() ? data_directory_.strip_edges() : p_local_directory.strip_edges();
 	if (directory.is_empty()) {
 		last_error_code_ = ERR_UNCONFIGURED;
-		last_error_ = install_key_.is_empty() ? String("Set a data directory or local install key.") :
-				String("Set the local folder for install '") + install_key_ + String("'.");
+		last_error_ = local_install_name_.is_empty() ? String("Set a data directory or a local install name.") :
+				String("Choose this computer's folder for local install '") + local_install_name_ +
+				String("' with the toolbar's Folder button.");
 		return Ref<ResourceRoot>();
 	}
 	if (!directory.is_absolute_path()) directory = String("res://").path_join(directory);

@@ -83,9 +83,12 @@ tools and the parity tests cannot read.
   and shadow flag. The foliage controls edit existing slots; they do not paint
   maps. Machine-local installation paths are Godot project metadata, never
   scene content.
-- The retail example scene (`godot/examples/retail_world.tscn`) reads stock
-  archives from the ignored `local-data/jo/` directory; the synthetic example
-  (`examples/world_preview/`) is tracked and LFS-pulled by CI.
+- The example scene (`godot/examples/world_preview.tscn`) previews the
+  game's own tracked source tree, `assets/mnml.bms`; there is no separate
+  example data set. The retail example scene (`godot/examples/retail_world.tscn`)
+  reads stock archives from the ignored `local-data/jo/` directory. The
+  minimal set deliberately omits art the engine tolerates missing (its sky
+  maps), so its pristine preview reports those as diagnostics.
 - The plugin is shipping GDScript and is counted by the maturity ratchets and
   the citation census beside `godot/game` and `godot/tools`; the vendored
   addons stay out.
@@ -102,7 +105,7 @@ tools and the parity tests cannot read.
 ## Verification
 
 - `godot/tests/world_edit_session_test.gd` drives the real session over a copy
-  of `examples/world_preview/`: save and reopen preserving unexposed TRN fields,
+  of `assets/`: save and reopen preserving unexposed TRN fields,
   undo across a save, an archive copy with sidecars and shared assets, name
   collision and traversal rejection, refusal after an external change, writer
   failure rollback, settings updates keeping placed objects, base versus

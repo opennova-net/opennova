@@ -29,14 +29,14 @@ func run_check() -> void:
 	_tree = EditorInterface.get_base_control().get_tree()
 	await frames(60)
 	var directory := TestFs.stage_terrain_root("editor_workflow_%d" % Time.get_ticks_usec())
-	var example := ProjectSettings.globalize_path("res://../examples/world_preview")
+	var example := ProjectSettings.globalize_path("res://../assets")
 	for name in DirAccess.get_files_at(example):
 		DirAccess.copy_absolute(example.path_join(name), directory.path_join(name))
 	var output := directory + "_packed"
 	var source := WorldSource.new()
 	source.data_directory = directory
 	source.source_kind = WorldSource.LOOSE_SOURCE
-	source.mission_name = "preview.bms"
+	source.mission_name = "mnml.bms"
 	var scene := load("res://examples/world_preview.tscn").instantiate() as GameWorld
 	scene.world_source = source
 	var packed := PackedScene.new()
@@ -93,7 +93,7 @@ func run_check() -> void:
 	var readback := WorldSource.new()
 	readback.data_directory = output
 	readback.source_kind = WorldSource.RETAIL_INSTALL
-	readback.mission_name = "preview.bms"
+	readback.mission_name = "mnml.bms"
 	var mission := readback.open_mission(root)
 	expect(mission != null and mission.get_info().start_time == 0x0680, "Pack flushes pending Inspector input into the native archive")
 	root.clear()
@@ -121,9 +121,9 @@ func run_check() -> void:
 	(toolbar.get_node("Reload") as Button).pressed.emit()
 	await frames(45)
 	expect(not pack_button.disabled, "Returning to the loose source restores packing")
-	# Capture only the synthetic world, and hide machine paths from the evidence.
-	(panel.get_node("%Source") as Label).text = "preview.bms | Synthetic game data"
-	destination.text = "Synthetic pack output"
+	# Capture only the minimal world, and hide machine paths from the evidence.
+	(panel.get_node("%Source") as Label).text = "mnml.bms | Minimal game data"
+	destination.text = "Minimal pack output"
 	status.text = "Packed game data verified through the ordinary runtime loader."
 	await frames()
 	await RenderingServer.frame_post_draw

@@ -30,7 +30,7 @@ var _recovery_state: Array = []
 static func selection_key(source: WorldSource, local_directory: String = "") -> String:
 	if source == null:
 		return ""
-	var directory := (local_directory if not source.install_key.is_empty() else source.data_directory).strip_edges()
+	var directory := (local_directory if not source.local_install_name.is_empty() else source.data_directory).strip_edges()
 	if not directory.is_absolute_path():
 		directory = "res://".path_join(directory)
 	directory = ProjectSettings.globalize_path(directory).simplify_path().replace("\\", "/")

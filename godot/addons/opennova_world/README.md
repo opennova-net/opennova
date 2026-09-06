@@ -1,7 +1,8 @@
 # OpenNova worlds in Godot
 
 Enable **OpenNova World** in Project Settings > Plugins (enabled in this project).
-Use **Project > Tools > OpenNova: Open example world** for synthetic data, or
+Use **Project > Tools > OpenNova: Open example world** for the game's own
+tracked source tree (`assets/mnml.bms`, the minimal playable set), or
 **OpenNova: Open retail world** for Operation: Emerald Scorpion (`CP01.bms`).
 
 For the retail example, copy `resource.pff`, `localres.pff`, and `language.pff`
@@ -63,9 +64,12 @@ Create an inherited scene from `res://game/world/game_world.tscn` and assign a
   this mode for a retail copy; a loose copy stays in Loose source mode.
 - `data_directory`: a project-relative directory, such as `res://../assets`.
   Plain relative paths are relative to the Godot project.
-- `install_key`: an optional local installation name. **Folder** records this
-  computer's directory in project metadata and overrides `data_directory`.
-  Machine paths need not enter source control.
+- `local_install_name`: optional. Name a data folder that lives somewhere
+  different on every computer (a stock JO install, say `jo`), then press
+  **Folder** to choose that folder on this computer. The choice is kept in the
+  editor's project metadata, never in the scene, so the scene stays shareable
+  and machine paths never enter source control. While set it overrides
+  `data_directory`.
 - `game_code` and `expansion`: the mount's title/decode key and expansion;
   defaults are `jo` and no expansion.
 

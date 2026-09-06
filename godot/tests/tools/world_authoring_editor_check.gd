@@ -1,7 +1,7 @@
 @tool
 extends EditorScript
 ## Run in a disposable editor project: drives real Inspector fields, undo,
-## toolbar actions, scene switches and Godot Save, with synthetic native data.
+## toolbar actions, scene switches and Godot Save, over a copy of the minimal set.
 
 const SCENE := "res://examples/world_authoring_check.tscn"
 var failures: PackedStringArray = []
@@ -70,22 +70,22 @@ func run_check() -> void:
 	await frames(60)
 	_directory = OS.get_cache_dir().path_join("opennova_editor_author_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(_directory)
-	var source_dir := ProjectSettings.globalize_path("res://../examples/world_preview")
+	var source_dir := ProjectSettings.globalize_path("res://../assets")
 	for filename in DirAccess.get_files_at(source_dir):
 		DirAccess.copy_absolute(source_dir.path_join(filename), _directory.path_join(filename))
 	var source := WorldSource.new()
-	source.mission_name = "preview.bms"
+	source.mission_name = "mnml.bms"
 	source.data_directory = _directory
 	var initial_mission := source.open_mission(source.open_root())
 	initial_mission.set_header_int("start_time", 1743)
-	initial_mission.save_as(_directory.path_join("preview.bms"))
+	initial_mission.save_as(_directory.path_join("mnml.bms"))
 	var terrain := TerrainData.new()
-	terrain.load_from_resource_root(source.open_root(), "Tmap.trn")
+	terrain.load_from_resource_root(source.open_root(), "mnml.trn")
 	var definition := TerrainFoliageDef.new()
-	definition.graphic = "crate.3di"
+	definition.graphic = "house.3di"
 	definition.match = 254
 	terrain.set_foliage_defs([definition])
-	terrain.save_to_path(_directory.path_join("Tmap.trn"))
+	terrain.save_to_path(_directory.path_join("mnml.trn"))
 	var scene_world := load("res://examples/world_preview.tscn").instantiate() as GameWorld
 	scene_world.world_source = source
 	var packed := PackedScene.new()
@@ -179,7 +179,7 @@ func run_check() -> void:
 	expect(EditorInterface.save_scene() == OK, "Godot Save completes")
 	await frames()
 	var mission := MissionData.new()
-	expect(mission.open_file(_directory.path_join("preview.bms")) == OK, "Saved BMS reopens")
+	expect(mission.open_file(_directory.path_join("mnml.bms")) == OK, "Saved BMS reopens")
 	expect(mission.get_info().start_time == 0x1280, "Godot Save persisted native time")
 	var environment := EnvFile.new()
 	environment.source_path = _directory.path_join("mnml.env")
@@ -191,11 +191,11 @@ func run_check() -> void:
 	var sky_map := input_for("Sky map 1", "LineEdit") as LineEdit
 	sky_map.grab_focus()
 	await frames(2)
-	sky_map.text = "ground.tga"
+	sky_map.text = "wall.tga"
 	expect(EditorInterface.save_scene() == OK, "Save flushes focused Inspector text")
 	await frames()
 	environment.load()
-	expect(environment.sky_map1 == "ground.tga", "Native save includes text not yet submitted with Enter")
+	expect(environment.sky_map1 == "wall.tga", "Native save includes text not yet submitted with Enter")
 	height = input_for("Sky height", "SpinBox") as SpinBox
 	var height_text := height.get_line_edit()
 	height_text.grab_focus()
@@ -217,12 +217,12 @@ func run_check() -> void:
 	await frames()
 	environment.load()
 	expect(environment.sky_height == 235, "Invalid input does not lose other valid native edits")
-	expect(environment.sky_map1 == "ground.tga", "Invalid asset input keeps the saved filename")
+	expect(environment.sky_map1 == "wall.tga", "Invalid asset input keeps the saved filename")
 	var error_dialog := dialog_named("OpenNova world") as AcceptDialog
 	expect(error_dialog != null and error_dialog.visible, "Save reports invalid pending input")
 	if error_dialog != null:
 		error_dialog.hide()
-	sky_map.text = "ground.tga"
+	sky_map.text = "wall.tga"
 	(_bar.get_node("Save") as Button).pressed.emit()
 	await frames()
 	expect((_bar.get_node("Save") as Button).disabled, "Reverting invalid text restores clean save state")

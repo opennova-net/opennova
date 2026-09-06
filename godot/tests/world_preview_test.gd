@@ -1,7 +1,7 @@
 extends GutTest
 
 const EXAMPLE := "res://examples/world_preview.tscn"
-const DATA := "res://../examples/world_preview"
+const DATA := "res://../assets"
 
 var _worlds: Array[GameWorld] = []
 var _dirs: PackedStringArray = []
@@ -26,6 +26,30 @@ func _world(source: WorldSource = null) -> GameWorld:
 	return world
 
 
+## The tracked minimal set names environment art the engine tolerates missing
+## (assets/README.md: nothing the engine skips gracefully on miss is authored),
+## so a pristine preview may already be "partial". Tests compare against that
+## baseline instead of assuming "ready".
+var _pristine: PackedStringArray
+var _pristine_known := false
+
+
+func _pristine_diagnostics() -> PackedStringArray:
+	if not _pristine_known:
+		var world := _world()
+		assert_eq(world.load_preview(), OK)
+		_pristine = world.get_preview_diagnostics()
+		_pristine_known = true
+		world.unload_preview()
+	return _pristine
+
+
+func _assert_pristine(world: GameWorld, note: String = "") -> void:
+	var baseline := _pristine_diagnostics()
+	assert_eq(world.get_preview_status(), "ready" if baseline.is_empty() else "partial", note)
+	assert_eq(Array(world.get_preview_diagnostics()), Array(baseline), note)
+
+
 func _staged_source() -> WorldSource:
 	var directory := OS.get_cache_dir().path_join("opennova_preview_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(directory), OK)
@@ -36,14 +60,14 @@ func _staged_source() -> WorldSource:
 				directory.path_join(filename)), OK)
 	var source := WorldSource.new()
 	source.data_directory = directory
-	source.mission_name = "preview.bms"
+	source.mission_name = "mnml.bms"
 	return source
 
 
 func test_example_loads_without_gameplay_and_camera_can_belong_to_another_viewport() -> void:
 	var world := _world()
 	assert_eq(world.load_preview(), OK)
-	assert_eq(world.get_preview_status(), "ready", "\n".join(world.get_preview_diagnostics()))
+	_assert_pristine(world)
 	assert_null(world.get_sim())
 	assert_null(world.get_mission_audio())
 	assert_null(world.get_effect_world())
@@ -74,10 +98,10 @@ func test_missing_dependency_is_partial_and_reload_discards_old_content() -> voi
 	var source := _staged_source()
 	var world := _world(source)
 	assert_eq(world.load_preview(), OK)
-	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("crate.tga")), OK)
+	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("wall.tga")), OK)
 	assert_eq(world.load_preview(), OK)
 	assert_eq(world.get_preview_status(), "partial")
-	assert_string_contains("\n".join(world.get_preview_diagnostics()), "crate.tga")
+	assert_string_contains("\n".join(world.get_preview_diagnostics()), "wall.tga")
 	source.mission_name = "missing.bms"
 	assert_ne(world.load_preview(), OK)
 	assert_eq(world.get_preview_status(), "failed")
@@ -89,11 +113,11 @@ func test_missing_dependency_is_partial_and_reload_discards_old_content() -> voi
 
 func test_missing_cpt_is_explicit_instead_of_ready_over_empty_terrain() -> void:
 	var source := _staged_source()
-	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("Tmap.cpt")), OK)
+	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("mnml.cpt")), OK)
 	var world := _world(source)
 	assert_eq(world.load_preview(), OK)
 	assert_eq(world.get_preview_status(), "partial")
-	assert_string_contains("\n".join(world.get_preview_diagnostics()), "Tmap.cpt")
+	assert_string_contains("\n".join(world.get_preview_diagnostics()), "mnml.cpt")
 
 
 func test_required_environment_failure_and_local_install_configuration() -> void:
@@ -102,12 +126,12 @@ func test_required_environment_failure_and_local_install_configuration() -> void
 	var world := _world(source)
 	assert_eq(world.load_preview(), ERR_FILE_NOT_FOUND)
 	assert_string_contains("\n".join(world.get_preview_diagnostics()), "mnml.env")
-	source.install_key = "my_local_data"
+	source.local_install_name = "my_local_data"
 	assert_eq(world.load_preview(), ERR_UNCONFIGURED)
 	assert_string_contains("\n".join(world.get_preview_diagnostics()), "my_local_data")
 	source.data_directory = "irrelevant"
 	assert_eq(world.load_preview(ProjectSettings.globalize_path(DATA)), OK)
-	assert_eq(world.get_preview_status(), "ready")
+	_assert_pristine(world)
 
 
 func _property_usage(object: Object, name: String) -> int:
@@ -135,8 +159,8 @@ func test_saved_scene_keeps_source_while_authored_nodes_hold_loaded_configuratio
 	var original_compositor := (authored.get_node("ClearColor") as WorldEnvironment).compositor
 	terrain.lod_quality = 1.7
 	assert_eq(authored.load_preview(), OK)
-	assert_eq(authored.mission_file, "preview.bms")
-	assert_eq(authored.terrain_file, "Tmap.trn")
+	assert_eq(authored.mission_file, "mnml.bms")
+	assert_eq(authored.terrain_file, "mnml.trn")
 	assert_eq(authored.env_file, "mnml.env")
 	assert_not_null(terrain.terrain_data)
 	assert_same(terrain.terrain_data, water.terrain_data)
@@ -171,7 +195,7 @@ func test_saved_scene_keeps_source_while_authored_nodes_hold_loaded_configuratio
 	assert_not_null(terrain.terrain_data, "Save keeps the node configured")
 	var reopened := (ResourceLoader.load(scene_path, "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene).instantiate() as GameWorld
 	autofree(reopened)
-	assert_eq(reopened.world_source.mission_name, "preview.bms")
+	assert_eq(reopened.world_source.mission_name, "mnml.bms")
 	assert_almost_eq((reopened.get_node("Terrain") as Terrain).lod_quality, 1.7, 0.001)
 	assert_null((reopened.get_node("Terrain") as Terrain).terrain_data)
 	assert_eq(reopened.mission_file, original_mission)
@@ -201,22 +225,24 @@ func test_retail_and_loose_sources_choose_their_own_bms_and_dependencies() -> vo
 				source.data_directory.path_join(filename))})
 	assert_eq(TestPff.write(source.data_directory.path_join("resource.pff"), entries), OK)
 	var loose := MissionData.new()
-	assert_eq(loose.open_file(source.data_directory.path_join("preview.bms")), OK)
+	assert_eq(loose.open_file(source.data_directory.path_join("mnml.bms")), OK)
+	var archived_name := loose.get_mission_name()
 	assert_true(loose.set_header_string("mission_name", "Loose selection"))
-	assert_eq(loose.save_as(source.data_directory.path_join("preview.bms")), OK)
-	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("crate.tga")), OK)
+	assert_eq(loose.save_as(source.data_directory.path_join("mnml.bms")), OK)
+	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("wall.tga")), OK)
 	var world := _world(source)
 	assert_eq(world.load_preview(), OK)
 	assert_eq(world.get_loaded_mission().get_mission_name(), "Loose selection")
 	assert_eq(world.get_preview_status(), "partial")
-	assert_string_contains("\n".join(world.get_preview_diagnostics()), "crate.tga",
+	assert_string_contains("\n".join(world.get_preview_diagnostics()), "wall.tga",
 			"Loose mode cannot silently fill a missing dependency from an archive")
 	source.source_kind = WorldSource.RETAIL_INSTALL
 	assert_eq(world.load_preview(), OK)
-	assert_eq(world.get_loaded_mission().get_mission_name(), "World preview",
+	assert_eq(world.get_loaded_mission().get_mission_name(), archived_name,
 			"Retail mode ignores the edited loose BMS")
-	assert_eq(world.get_preview_status(), "ready",
+	assert_false("\n".join(world.get_preview_diagnostics()).contains("wall.tga"),
 			"Retail mode resolves the archived texture")
+	_assert_pristine(world)
 
 
 func test_missing_named_sky_dependency_is_partial() -> void:
@@ -304,6 +330,7 @@ func test_preview_projects_one_proxy_per_record_and_none_outside_a_preview() -> 
 	assert_eq(house.get_graphic(), "house")
 	assert_ne(house.get_bms_id(), 0)
 	assert_null(world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 99))
+	assert_null(world.get_preview_entity_proxy(MissionData.KIND_ITEM, 0), "the set places no items")
 	world.unload_preview()
 	assert_eq(world.get_preview_entity_proxies().size(), 0)
 
@@ -312,13 +339,13 @@ func test_update_preview_entity_restamps_the_static_instance_and_its_proxy() -> 
 	var world := _world()
 	assert_eq(world.load_preview(), OK)
 	var mission := world.get_loaded_mission()
-	var record := mission.get_entity(MissionData.KIND_BUILDING, 1)
-	var proxy := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 1)
+	var record := mission.get_entity(MissionData.KIND_BUILDING, 0)
+	var proxy := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 0)
 	var before := proxy.transform
 	var position := record.get_position() + Vector3(12, -7, 0)
 	var rotation := record.get_rotation_deg() + Vector3(0, 90, 0)
-	assert_true(mission.set_entity_transform(MissionData.KIND_BUILDING, 1, position, rotation))
-	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, 1), OK)
+	assert_true(mission.set_entity_transform(MissionData.KIND_BUILDING, 0, position, rotation))
+	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, 0), OK)
 	# The proxy reads back the placer's retained instance, so its move proves
 	# the batched rows were re-stamped, not just the record.
 	var expected := MissionObjectPlacer.entity_transform(position, rotation)
@@ -326,13 +353,13 @@ func test_update_preview_entity_restamps_the_static_instance_and_its_proxy() -> 
 	assert_true(proxy.transform.origin.is_equal_approx(expected.origin))
 	assert_true(proxy.transform.basis.is_equal_approx(expected.basis))
 	assert_eq(proxy.get_representation(), WorldEntityProxy.STATIC_INSTANCE)
-	# The other instances of the same population are untouched.
-	var sibling := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, 0)
-	var sibling_record := mission.get_entity(MissionData.KIND_BUILDING, 0)
+	# The other records are untouched.
+	var sibling := world.get_preview_entity_proxy(MissionData.KIND_MARKER, 1)
+	var sibling_record := mission.get_entity(MissionData.KIND_MARKER, 1)
 	assert_true(sibling.transform.origin.is_equal_approx(MissionObjectPlacer.entity_transform(
 			sibling_record.get_position(), sibling_record.get_rotation_deg()).origin))
 	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, 99), ERR_DOES_NOT_EXIST)
-	assert_eq(world.get_preview_status(), "ready")
+	_assert_pristine(world)
 
 
 func test_reload_preview_entities_projects_added_records() -> void:
@@ -340,17 +367,17 @@ func test_reload_preview_entities_projects_added_records() -> void:
 	assert_eq(world.load_preview(), OK)
 	var mission := world.get_loaded_mission()
 	var count := world.get_preview_entity_proxies().size()
-	var item_count := mission.get_entity_count(MissionData.KIND_ITEM)
-	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 108001, Vector3(30, 30, 0), Vector3.ZERO))
+	var houses := mission.get_entity_count(MissionData.KIND_BUILDING)
+	assert_not_null(mission.add_entity(MissionData.KIND_BUILDING, 108001, Vector3(30, 30, 0), Vector3.ZERO))
 	# A record the preview never projected is not an update.
-	assert_eq(world.update_preview_entity(MissionData.KIND_ITEM, item_count), ERR_DOES_NOT_EXIST)
+	assert_eq(world.update_preview_entity(MissionData.KIND_BUILDING, houses), ERR_DOES_NOT_EXIST)
 	assert_eq(world.reload_preview_entities(), OK)
 	assert_eq(world.get_preview_entity_proxies().size(), count + 1)
-	var added := world.get_preview_entity_proxy(MissionData.KIND_ITEM, item_count)
+	var added := world.get_preview_entity_proxy(MissionData.KIND_BUILDING, houses)
 	assert_not_null(added)
 	assert_eq(added.get_item_id(), 108001)
 	assert_eq(added.get_representation(), WorldEntityProxy.STATIC_INSTANCE)
 	assert_true(added.transform.origin.is_equal_approx(
 			MissionObjectPlacer.entity_transform(Vector3(30, 30, 0), Vector3.ZERO).origin))
-	assert_eq(world.get_preview_status(), "ready")
+	_assert_pristine(world)
 	world.unload_preview()

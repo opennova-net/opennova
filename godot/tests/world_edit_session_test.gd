@@ -3,7 +3,7 @@ extends GutTest
 const Field := WorldField.Id
 const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
 const DOCUMENT_EXTENSIONS: Array[String] = ["bms", "trn", "env"]
-const DATA := "res://../examples/world_preview"
+const DATA := "res://../assets"
 var _dirs: PackedStringArray = []
 var _worlds: Array[GameWorld] = []
 
@@ -27,18 +27,19 @@ func _source(archive: bool = false) -> WorldSource:
 		assert_eq(DirAccess.copy_absolute(source_dir.path_join(filename), directory.path_join(filename)), OK)
 	var source := WorldSource.new()
 	source.data_directory = directory
-	source.mission_name = "preview.bms"
+	source.mission_name = "mnml.bms"
 	var root := source.open_root()
 	var terrain := TerrainData.new()
-	assert_eq(terrain.load_from_resource_root(root, "Tmap.trn"), OK)
+	assert_eq(terrain.load_from_resource_root(root, "mnml.trn"), OK)
 	var definition := TerrainFoliageDef.new()
-	definition.graphic = "crate.3di"
+	definition.graphic = "house.3di"
 	definition.match = 17
 	definition.attrib_flags = 1 # force_on is independent of shadow
 	terrain.set_foliage_defs([definition])
-	assert_eq(terrain.save_to_path(directory.path_join("Tmap.trn")), OK)
-	# Seed real TRN color modes that the initial Inspector does not expose.
-	var trn_path := directory.path_join("Tmap.trn")
+	assert_eq(terrain.save_to_path(directory.path_join("mnml.trn")), OK)
+	# Seed real TRN color modes that the Inspector does not expose: the saved
+	# foliage block above wrote them at their defaults.
+	var trn_path := directory.path_join("mnml.trn")
 	var trn_text := FileAccess.get_file_as_string(trn_path).replace("color_lower     0", "color_lower     2").replace("color_upper     0", "color_upper     1")
 	var trn_file := FileAccess.open(trn_path, FileAccess.WRITE)
 	trn_file.store_string(trn_text)
@@ -48,7 +49,7 @@ func _source(archive: bool = false) -> WorldSource:
 		for filename in DirAccess.get_files_at(directory):
 			entries.append({"name": filename, "bytes": FileAccess.get_file_as_bytes(directory.path_join(filename))})
 		for extension in WorldEditSession.SIDECAR_EXTENSIONS:
-			entries.append({"name": "preview." + extension, "bytes": "synthetic sidecar " + extension})
+			entries.append({"name": "mnml." + extension, "bytes": "synthetic sidecar " + extension})
 		assert_eq(TestPff.write(directory.path_join("resource.pff"), entries), OK)
 		for filename in DirAccess.get_files_at(directory):
 			if filename != "resource.pff":
@@ -82,10 +83,10 @@ func test_save_reopens_native_documents_and_keeps_other_mission_and_foliage_fiel
 	assert_eq(original.save_to_path(source.data_directory.path_join("copy.bms")), OK)
 	assert_eq(original.get_source_path(), original_path, "a staged write never adopts its path")
 	assert_true(original.is_modified(), "a staged write is not an adopted save")
-	assert_eq(session.validate_edit(Field.FOLIAGE_GRAPHIC, "crate.3di"), "")
+	assert_eq(session.validate_edit(Field.FOLIAGE_GRAPHIC, "house.3di"), "")
 	session.apply_value(Field.START_TIME, 18 * 256)
 	session.apply_value(Field.SKY_HEIGHT, 243.0)
-	session.apply_value(Field.SKY_MAP_1, "ground.tga")
+	session.apply_value(Field.SKY_MAP_1, "wall.tga")
 	session.apply_value(Field.FOLIAGE_MATCH, 73)
 	session.apply_value(Field.FOLIAGE_SHADOW, true)
 	assert_true(session.is_dirty())
@@ -96,7 +97,7 @@ func test_save_reopens_native_documents_and_keeps_other_mission_and_foliage_fiel
 	var reopened := _session(source)
 	assert_eq(reopened.get_value(Field.START_TIME), 18 * 256)
 	assert_almost_eq(float(reopened.get_value(Field.SKY_HEIGHT)), 243.0, 0.001)
-	assert_eq(reopened.get_value(Field.SKY_MAP_1), "ground.tga")
+	assert_eq(reopened.get_value(Field.SKY_MAP_1), "wall.tga")
 	assert_eq(reopened.get_value(Field.FOLIAGE_MATCH), 73)
 	assert_true(reopened.get_value(Field.FOLIAGE_SHADOW))
 	var mission := source.open_mission(source.open_root())
@@ -104,9 +105,9 @@ func test_save_reopens_native_documents_and_keeps_other_mission_and_foliage_fiel
 	assert_eq(mission.get_terrain_ref(), original.get_terrain_ref())
 	assert_eq(mission.get_environment_ref(), original.get_environment_ref())
 	var terrain := TerrainData.new()
-	assert_eq(terrain.load_from_resource_root(source.open_root(), "Tmap.trn"), OK)
+	assert_eq(terrain.load_from_resource_root(source.open_root(), "mnml.trn"), OK)
 	assert_ne((terrain.get_foliage_defs()[0] as TerrainFoliageDef).attrib_flags & 1, 0)
-	var saved_trn := FileAccess.get_file_as_string(source.data_directory.path_join("Tmap.trn"))
+	var saved_trn := FileAccess.get_file_as_string(source.data_directory.path_join("mnml.trn"))
 	assert_string_contains(saved_trn, "color_lower     2")
 	assert_string_contains(saved_trn, "color_upper     1")
 
@@ -142,6 +143,7 @@ func test_archive_copy_preserves_sidecars_and_shares_assets_using_editable_polic
 	var session := _session(source)
 	assert_false(session.is_editable())
 	assert_ne(session.validate_edit(Field.START_TIME, 8 * 256), "")
+	var archived_name := source.open_mission(source.open_root()).get_mission_name()
 	var archive_hash := FileAccess.get_sha256(source.data_directory.path_join("resource.pff"))
 	var copy := session.create_editable_copy("island_edit")
 	assert_not_null(copy, session.get_last_error())
@@ -155,22 +157,22 @@ func test_archive_copy_preserves_sidecars_and_shares_assets_using_editable_polic
 	assert_not_null(mission)
 	assert_eq(mission.get_terrain_ref(), "island_edit")
 	assert_eq(mission.get_environment_ref(), "island_edit")
-	assert_eq(mission.get_mission_name(), "World preview")
+	assert_eq(mission.get_mission_name(), archived_name)
 	for extension in WorldEditSession.SIDECAR_EXTENSIONS:
 		assert_eq(FileAccess.get_file_as_string(source.data_directory.path_join("island_edit." + extension)),
 				"synthetic sidecar " + extension)
-	assert_true(root.has_file("ground.tga"), "supporting art stays in the archive")
-	assert_false(FileAccess.file_exists(source.data_directory.path_join("ground.tga")))
+	assert_true(root.has_file("wall.tga"), "supporting art stays in the archive")
+	assert_false(FileAccess.file_exists(source.data_directory.path_join("wall.tga")))
 	var editing := _session(copy)
 	assert_true(editing.is_editable())
 	editing.apply_value(Field.START_TIME, 7 * 256)
 	assert_eq(editing.save(), OK, editing.get_last_error())
 	assert_eq(copy.open_mission(copy.open_root()).get_info().start_time, 7 * 256)
 	assert_eq(FileAccess.get_sha256(source.data_directory.path_join("resource.pff")), archive_hash)
-	assert_eq(source.open_mission(source.open_root()).get_mission_name(), "World preview")
+	assert_eq(source.open_mission(source.open_root()).get_mission_name(), archived_name)
 	assert_eq(DirAccess.remove_absolute(source.data_directory.path_join("island_edit.bms")), OK)
 	assert_null(copy.open_mission(copy.open_root()))
-	copy.mission_name = "preview.bms"
+	copy.mission_name = "mnml.bms"
 	assert_null(copy.open_mission(copy.open_root()), "even an existing archived BMS cannot hide a missing loose mission")
 
 
@@ -178,7 +180,7 @@ func test_copy_rejects_collisions_and_path_traversal_without_writes() -> void:
 	var source := _source(true)
 	var session := _session(source)
 	var before := DirAccess.get_files_at(source.data_directory)
-	assert_null(session.create_editable_copy("preview"), "an archive entry is also a collision")
+	assert_null(session.create_editable_copy("mnml"), "an archive entry is also a collision")
 	assert_string_contains(session.get_last_error(), "already exists")
 	for name in ["../escape", "too_long_for_pff", "", "dir/file"]:
 		assert_null(session.create_editable_copy(name))
@@ -189,7 +191,7 @@ func test_copy_rejects_collisions_and_path_traversal_without_writes() -> void:
 func test_external_change_refuses_save_and_failed_reload_preserves_edits() -> void:
 	var source := _source()
 	var session := _session(source)
-	var mission_before := FileAccess.get_file_as_bytes(source.data_directory.path_join("preview.bms"))
+	var mission_before := FileAccess.get_file_as_bytes(source.data_directory.path_join("mnml.bms"))
 	session.apply_value(Field.START_TIME, 22 * 256)
 	session.apply_value(Field.SKY_HEIGHT, 260.0)
 	var environment_path := source.data_directory.path_join("mnml.env")
@@ -197,7 +199,7 @@ func test_external_change_refuses_save_and_failed_reload_preserves_edits() -> vo
 	assert_ne(session.save(), OK)
 	assert_string_contains(session.get_last_error(), "mnml.env changed on disk")
 	assert_true(session.is_dirty())
-	assert_eq(FileAccess.get_file_as_bytes(source.data_directory.path_join("preview.bms")), mission_before)
+	assert_eq(FileAccess.get_file_as_bytes(source.data_directory.path_join("mnml.bms")), mission_before)
 	assert_ne(session.reload_from_disk(), OK)
 	assert_true(session.is_dirty())
 	assert_eq(session.get_value(Field.START_TIME), 22 * 256)
@@ -206,16 +208,16 @@ func test_external_change_refuses_save_and_failed_reload_preserves_edits() -> vo
 
 func test_writer_failure_leaves_all_originals_and_removes_staging_files() -> void:
 	var source := _source()
-	var before := FileAccess.get_file_as_bytes(source.data_directory.path_join("preview.bms"))
+	var before := FileAccess.get_file_as_bytes(source.data_directory.path_join("mnml.bms"))
 	var session := _session(source)
 	var mission := source.open_mission(source.open_root())
 	mission.set_header_int("start_time", 19 * 256)
 	var reason: String = Files.write(session.get_directory(), {
-		"preview.bms": mission.save_to_path,
+		"mnml.bms": mission.save_to_path,
 		"mnml.env": func(_path: String) -> Error: return ERR_FILE_CANT_WRITE,
 	}, func() -> String: return "", true)
 	assert_string_contains(reason, "mnml.env")
-	assert_eq(FileAccess.get_file_as_bytes(source.data_directory.path_join("preview.bms")), before)
+	assert_eq(FileAccess.get_file_as_bytes(source.data_directory.path_join("mnml.bms")), before)
 	assert_true(DirAccess.get_directories_at(source.data_directory).is_empty())
 
 
@@ -292,7 +294,7 @@ func test_field_validation_rejects_invalid_time_ranges_and_missing_assets() -> v
 	assert_ne(session.validate_edit(Field.START_TIME, 24 * 256), "")
 	assert_ne(session.validate_edit(Field.SKY_HEIGHT, NAN), "")
 	assert_ne(session.validate_edit(Field.FOLIAGE_MATCH, 256), "")
-	assert_ne(session.validate_edit(Field.SKY_MAP_1, "../ground.tga"), "")
+	assert_ne(session.validate_edit(Field.SKY_MAP_1, "../wall.tga"), "")
 	assert_ne(session.validate_edit(Field.SKY_MAP_1, "missing.pcx"), "")
 	assert_ne(session.validate_edit(Field.FOLIAGE_MATCH, 12, 4), "")
 	assert_eq(session.validate_edit(Field.SKY_MAP_1, ""), "")
@@ -304,7 +306,7 @@ func test_failed_save_has_native_recovery_without_overwriting_external_edits() -
 	var session := _session(source)
 	session.apply_value(Field.START_TIME, 5 * 256)
 	session.apply_value(Field.SKY_HEIGHT, 301.0)
-	var mission_path := source.data_directory.path_join("preview.bms")
+	var mission_path := source.data_directory.path_join("mnml.bms")
 	var external := source.open_mission(source.open_root())
 	external.set_header_int("start_time", 23 * 256)
 	assert_eq(external.save_as(mission_path), OK)
@@ -312,7 +314,7 @@ func test_failed_save_has_native_recovery_without_overwriting_external_edits() -
 	var recovery := session.write_recovery(source.data_directory.path_join("recovery"))
 	assert_false(recovery.is_empty())
 	var recovered := MissionData.new()
-	assert_eq(recovered.open_file(recovery.path_join("preview.bms")), OK)
+	assert_eq(recovered.open_file(recovery.path_join("mnml.bms")), OK)
 	assert_eq(recovered.get_info().start_time, 5 * 256)
 	var environment := EnvFile.new()
 	environment.source_path = recovery.path_join("mnml.env")
@@ -327,7 +329,7 @@ func test_mission_overrides_remain_effective_while_base_environment_is_saved() -
 	var mission := source.open_mission(source.open_root())
 	assert_true(mission.set_header_int("fog_override", 650))
 	assert_true(mission.set_header_flag(2, true)) # native fog-distance override flag
-	assert_eq(mission.save_as(source.data_directory.path_join("preview.bms")), OK)
+	assert_eq(mission.save_as(source.data_directory.path_join("mnml.bms")), OK)
 	var base := EnvFile.new()
 	assert_eq(base.load_from_resource_root(source.open_root(), "mnml.env"), OK)
 	var base_fog := base.fog_level

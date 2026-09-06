@@ -122,7 +122,7 @@ func run_check() -> void:
 	source.mission_name = "missing.bms"
 	(bar.get_node("Reload") as Button).pressed.emit()
 	expect(not preview_of(world).is_preview_active(), "Missing mission clears preview")
-	source.mission_name = "preview.bms"
+	source.mission_name = "mnml.bms"
 	(bar.get_node("Reload") as Button).pressed.emit()
 	for frame in range(15):
 		await _tree.process_frame

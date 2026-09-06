@@ -600,15 +600,15 @@ func _inspect_source() -> void:
 
 
 func _local_directory() -> String:
-	if _source == null or _source.install_key.is_empty():
+	if _source == null or _source.local_install_name.is_empty():
 		return ""
 	return str(EditorInterface.get_editor_settings().get_project_metadata(
-			"opennova_world", _source.install_key, ""))
+			"opennova_world", _source.local_install_name, ""))
 
 
 func _choose_folder() -> void:
-	if _source == null or _source.install_key.is_empty():
-		_details.dialog_text = "Set an install_key on WorldSource to use a machine-local folder.\nUse data_directory for a shared project-relative source."
+	if _source == null or _source.local_install_name.is_empty():
+		_details.dialog_text = "Give the WorldSource a Local Install Name (for example \"jo\") to point it at a folder on this computer; the folder is kept in editor metadata, not in the scene.\nLeave it empty and set Data Directory for a shared project-relative source."
 		_details.popup_centered()
 		return
 	_folder.current_dir = _local_directory()
@@ -616,9 +616,9 @@ func _choose_folder() -> void:
 
 
 func _folder_selected(path: String) -> void:
-	if _source != null and not _source.install_key.is_empty():
+	if _source != null and not _source.local_install_name.is_empty():
 		EditorInterface.get_editor_settings().set_project_metadata(
-				"opennova_world", _source.install_key, path)
+				"opennova_world", _source.local_install_name, path)
 		load_selected_world()
 
 

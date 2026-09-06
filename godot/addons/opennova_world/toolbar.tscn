@@ -17,7 +17,7 @@ tooltip_text = "Read the selected native files again."
 
 [node name="Folder" type="Button" parent="."]
 text = "Folder"
-tooltip_text = "Set the machine-local directory for this source's install key."
+tooltip_text = "Choose this computer's folder for the source's Local Install Name (kept in editor metadata, not in the scene)."
 
 [node name="Copy" type="Button" parent="."]
 text = "Create Copy"

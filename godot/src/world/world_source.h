@@ -14,7 +14,7 @@ public:
 private:
 	SourceKind source_kind_ = LOOSE_SOURCE;
 	String data_directory_;
-	String install_key_;
+	String local_install_name_;
 	String mission_name_;
 	String game_code_ = "jo";
 	String expansion_;
@@ -31,8 +31,12 @@ public:
 	SourceKind get_source_kind() const { return source_kind_; }
 	void set_data_directory(const String &p_value);
 	String get_data_directory() const { return data_directory_; }
-	void set_install_key(const String &p_value);
-	String get_install_key() const { return install_key_; }
+	// A name for a machine-local data folder ("jo", "dfx2"): the folder itself
+	// is chosen per machine through the toolbar's Folder button and kept in
+	// the editor's project metadata, never in the scene. Overrides
+	// data_directory while set.
+	void set_local_install_name(const String &p_value);
+	String get_local_install_name() const { return local_install_name_; }
 	void set_mission_name(const String &p_value);
 	String get_mission_name() const { return mission_name_; }
 	void set_game_code(const String &p_value);
