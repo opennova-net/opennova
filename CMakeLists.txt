@@ -7,8 +7,8 @@ add_subdirectory(third_party/bcrypt)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(third_party/miniz)
 
-# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour: they
-# host ONED's run surface. OPENNOVA_DEVTOOLS adds the game's debug-only dev-tool
+# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour.
+# OPENNOVA_DEVTOOLS adds the game's debug-only dev-tool
 # windows (godot/src turns it off for template_release); ON here so the root
 # ctest build always covers them.
 add_subdirectory(third_party/imgui)

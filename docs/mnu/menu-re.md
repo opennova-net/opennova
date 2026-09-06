@@ -1110,7 +1110,7 @@ The lossless document model remains (ADR 0014): typed node fields exactly
 partition the file bytes, so an untouched parse -> serialize is byte-identical
 and an edited value changes only its own line. Runtime flattening is a separate
 retail evaluator because malformed source may still need inspection or repair
-outside ONED.
+outside the editor.
 
 Observed runtime rules:
 

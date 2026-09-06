@@ -181,8 +181,8 @@ interpolation (faithful to §1.6). `MissionRoot.tick()` survives as the
 deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
 the same session state machine. `MainGame` → `GameWorld` (its frame-leg table) is
 the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
-ONED's Run OpenNova loose action launches the standalone game against the
-selected loose assets. The portable `engine/runtime/world` per-tick
+the Godot editor's Play World (ADR 0045) launches the standalone game against
+the selected world source. The portable `engine/runtime/world` per-tick
 motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
 wrong. Pinned by `mission_presentation_test.gd`
 (`test_session_frame_*`, `test_distance_per_real_second_is_frame_rate_independent`).

@@ -128,7 +128,8 @@ textures, a `.def` points at a `.3di` and its `.bad` animations, a mission point
 definitions ([GOALS.md](../GOALS.md)). Honoring those conventions instead of
 hardcoding is the project's second pillar. Format tools write the canonical files
 directly, and the runtime resolves their names without an editor-owned project or
-asset database (same doc; [ADR 0037](adr/0037-oned-runs-game-data.md)).
+asset database (same doc; [ADR 0037](adr/0037-oned-runs-game-data.md),
+[ADR 0045](adr/0045-godot-owns-development-workflows.md)).
 
 ### Wire format / network compatibility
 
@@ -226,9 +227,11 @@ Order of operations when you need an engine truth:
      frame-stats board and the Entities window over
      `world::inspect::entity_directory` (records in, typed requests out, ADR
      0042 d6), further inspection/control windows as they are wanted (`engine/runtime/devtools/README.md` is the recipe). Debug builds
-     only. ONED's Run OpenNova loose action launches that same standalone game
-     against the selected data directory; ONED has no embedded preview or dev
-     tools (its own run surface is an engine ImGui window on the same pass).
+     only. The Godot editor's Run Game and Play World actions ([ADR
+     0045](adr/0045-godot-owns-development-workflows.md)) launch that same
+     standalone game against the selected world source; the editor's own
+     native preview ([ADR 0044](adr/0044-godot-authors-native-worlds.md)) shows
+     the authored starting state, not a running game, and carries no dev tools.
    - `Simulation` introspection: `get_present_snapshot()`, the typed
      `entity_directory()` / `entity_card(handle)` records (`world::inspect`,
      ADR 0042 d5), `get_fired_events_snapshot()`,

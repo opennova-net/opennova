@@ -5747,8 +5747,8 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    `object_editor` green in isolation. The drive surface at the time was curated ONED MCP tools
    (`object_load_anims`/`object_play_clip`/`object_rig_state` rest+posed joint dumps;
    `mission_play` for the now-retired Play-in-Editor path). Current live mission validation
-   uses ONED's Run OpenNova loose action to launch the selected loose tree in the
-   standalone game; game MCP, when enabled independently, attaches to that child.
+   uses the Godot editor's Play World (ADR 0045) to launch the selected world
+   source in the standalone game; game MCP, when enabled independently, attaches to that child.
 5. **Still open**: the D-INF-14 tail — reload direction + left-hand/finger pose vs retail
    footage (def `rot` bias signs *hip-idle confirmed, seventh pass*); the `pos`→`tpos` ADS
    swap (value plumbed, swap unwired) *(landed — the §5.62 FSM/ADS pass)*; velocity lead +
@@ -5953,8 +5953,8 @@ Godot binding (all callers updated). Historical validation used the then-current
 Play-in-Editor on both SKUs: REVX `AKM_1st` and JOX `ak47_1st` (fully broken shipped
 positions) render the master-identical close-up hold, user-confirmed live against retail
 memory. [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md) later
-retired PIE; the current equivalent runs the selected loose tree through ONED's
-Run OpenNova loose action and the standalone `MainGame`/`GameWorld` lifecycle.
+retired PIE; the current equivalent runs the selected world source through the
+Godot editor's Play World (ADR 0045) and the standalone `MainGame`/`GameWorld` lifecycle.
 
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 

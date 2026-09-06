@@ -5,14 +5,14 @@
         <p class="text-sm uppercase tracking-[0.3em] text-accent">Game releases</p>
         <h1 class="mt-4 text-4xl font-bold text-ink sm:text-5xl">OpenNova downloads</h1>
         <p class="mt-6 max-w-3xl mx-auto text-lg text-ink-muted">
-          OpenNova keeps game data as ordinary source-controlled files. ONED is the compact
-          companion for selecting loose or packed game data, running OpenNova, staging and
-          running retail for comparison, and stopping the process it started. Runtime game
-          data stays in ordinary source-controlled files.
+          OpenNova keeps game data as ordinary source-controlled files. The Godot editor is
+          the development workflow: it previews and edits native worlds, runs OpenNova,
+          stages and runs the retail game for comparison, and packs game data for release.
+          Runtime game data stays in ordinary source-controlled files.
         </p>
         <p class="mt-4 max-w-3xl mx-auto text-lg text-ink-muted">
           Everything is pre-1.0, open source, and under active development. Tagged releases
-          publish the Windows game. CI development builds pair the game, ONED, and the loose
+          publish the Windows game. CI development builds pair the game with the loose
           sources. Start with the README and docs for current workflows and known limits.
         </p>
       </div>

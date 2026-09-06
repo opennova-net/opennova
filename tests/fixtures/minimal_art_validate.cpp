@@ -2,7 +2,7 @@
 // and the mission-family map overview.
 //
 // This used to be a GENERATOR: it filled each image with a solid colour and asserted the
-// committed bytes matched. The terrain art is now authored in ONED and exported through the
+// committed bytes matched. The terrain art is now authored in the editor and exported through the
 // engine's own terrain writer, so the byte guard only asserted that the throwaway C++ writer
 // still agreed with itself -- and it went red the moment the editor authored a real colormap,
 // which is the wrong signal entirely.

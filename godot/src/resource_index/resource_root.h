@@ -84,8 +84,9 @@ protected:
 public:
 	static bool is_valid_root(const String &path);
 
-	// Loose-source mount: PFF archives are ignored. The ONED fallback and
-	// format/runtime fixtures use this path over an unpacked game-data tree.
+	// Loose-source mount: PFF archives are ignored. The editor's loose-source
+	// WorldSource (ADR 0044) and the format/runtime fixtures use this path over
+	// an unpacked game-data tree.
 	Error set_root_dir(const String &path);
 	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive
 	// must open; a loose-only directory is not a viable install, including under `/d`. `expansion`

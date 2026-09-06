@@ -27,8 +27,8 @@ anything marked *re-grep at execution* drifts too easily to pin.
 > this program's scope as it stood at close. ONED has since gained a thirteenth,
 > Particles, which landed with the `.ptl` stack on 2026-07-12 and was never on
 > this program's matrix. The live count is
-> `EditorWorkstation._workspace_defs()`; the live list is
-> [`godot/modtools/README.md`](../../godot/modtools/README.md).
+> `EditorWorkstation._workspace_defs()`; the live list was
+> `godot/modtools/README.md` (removed with ONED by ADR 0045).
 
 ## The bar (what "up to snuff" means, per workspace)
 

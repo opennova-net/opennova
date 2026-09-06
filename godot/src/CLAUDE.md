@@ -42,7 +42,8 @@ table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
 windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
-ONED scripts go to `godot/tools/`.
+editor plugin scripts go to `godot/addons/opennova_world/`; the run, staging
+and packing workflow scripts go to `godot/tools/`.
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
 `cpp_binding_console_writes`): a failure the caller already receives through the
@@ -51,7 +52,7 @@ drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
 dev tools (F3: engine-owned ImGui windows; `devtools/` here is the
-`ImGuiPassNode` seam with its two product nodes `DevTools`/`OnedUi` and the
+`ImGuiPassNode` seam with its product node `DevTools` and the
 `FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
 `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping

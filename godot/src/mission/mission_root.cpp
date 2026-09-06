@@ -179,7 +179,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
-	// seam, but ONED does not. A co-op LAN host additionally binds a real UDP
+	// seam; the editor preview (ADR 0044) does not. A co-op LAN host additionally binds a real UDP
 	// socket; a joiner is the non-authority client.
 	const bool playable = options->get_playable();
 	const Ref<JoinTarget> join_target = options->get_join_target();
@@ -289,8 +289,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			return 0;
 		}
 	} else {
-		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. ONED live
-		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
+		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Editor
+		// Play World reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
 		sim_->enable_listen_server(true);
 	}
 	// S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the

@@ -5,9 +5,9 @@
 // context (created by its ImGui bridge) and the frame bracket (call
 // draw_frame between the bridge's NewFrame and Render).
 //
-// Two products compose it today: the game's F3 workspace
-// (game_dev_tools.h; compiled with OPENNOVA_DEVTOOLS) and ONED's run surface
-// (oned_ui.h; every flavour). Not an editor (ADR 0037).
+// One product composes it today: the game's F3 workspace (game_dev_tools.h;
+// compiled with OPENNOVA_DEVTOOLS). Not an editor: world authoring and the
+// development workflows live in the Godot editor (ADR 0044, ADR 0045).
 //
 // Ownership: a pass is a plain object its composer owns; there is no
 // process-wide instance. Windows are registered once and live as long as the

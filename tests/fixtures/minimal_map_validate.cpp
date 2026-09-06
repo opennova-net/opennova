@@ -1,7 +1,7 @@
 // Validator for the minimal map's .env (time-of-day) and .bms (mission) legs.
 //
 // This used to be a GENERATOR: it built both files from scratch and asserted the committed
-// bytes matched its own writer output. Both are now authored in ONED and committed, so a
+// bytes matched its own writer output. Both are now authored in the editor and committed, so a
 // byte-equality guard would only assert that the C++ writer still agrees with itself -- and it
 // went red the moment the editor authored the mission, which is the wrong signal entirely.
 //
@@ -13,7 +13,7 @@
 // the set's own model, the house (items.def 108001, assets/house.3di).
 //
 // `--write` is deliberately a surgical editor rather than a generator: it loads the committed
-// ONED-authored mission, sets the kit and the availability list to the AK when they differ,
+// editor-authored mission, sets the kit and the availability list to the AK when they differ,
 // adds the house when no building names it, and emits it through the production BMS writer
 // (bms::write, from scratch). Existing records and fields are otherwise preserved.
 //

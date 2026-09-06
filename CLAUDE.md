@@ -187,8 +187,11 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   it plus the ADRs before touching `godot/src/mission/mission_root.cpp`,
   `godot/src/world/game_world_frame.cpp` (the frame-leg table), the native present appliers
   (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
-- [godot/modtools/README.md](godot/modtools/README.md) — ONED,
-  retail staging, and hidden release pack command.
+- [godot/tools/README.md](godot/tools/README.md) — the game data workflows
+  (Run Game, Stage & Run Retail, Stop, Pack Game Data) and the headless
+  release pack command; [godot/addons/opennova_world/README.md](godot/addons/opennova_world/README.md)
+  — the OpenNova World editor plugin: WorldSource, the native preview, Create
+  Copy, Inspector editing, save and Play World (ADRs 0044/0045).
 - [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,
   `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog and the
   `game_probe` runtime probes (ADR 0041); drive it with the `game-mcp` skill.

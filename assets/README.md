@@ -200,12 +200,12 @@ below):
 
 | Group | Files |
 |---|---|
-| player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
+| player body + anims | `US01.3di`, `US01.ADM`, the **149** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
 | avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
 | sound profiles | `SndProf.def` — the 49-profile retail table; a miss AVs the first footstep (see the omitted list) |
 | weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
 | the default infantry clip set | `E_STAND.adm` and the shared subset of the `.bad` clips it names — the file itself is **required for the player to walk at all**, see below |
-| textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the seven `.MDT` normal-map fills the materials actually request |
+| textures | the stems the five models name, resolved to whatever extension ships them — 37 `.dds`, one `.tga`, plus the seven `.MDT` normal-map fills the materials actually request |
 
 The `.fx` shaders are **no longer retail bytes**: since 2026-08-31 the set
 ships our own authored effects (see "Shaders" below), so they moved out of
@@ -298,7 +298,7 @@ rather than asserting byte-equality against a throwaway generator:
 | `fx_compile_validate` | every authored effect compiles through `D3DXCreateEffect` under the loader's define sets (Skipped without D3DX9/D3D9) |
 | `minimal_pff_manifest` | the explicit `assets/.gitignore` authored manifest is complete and its loose set retains the AK viewmodel + player locomotion chain |
 
-The BMS remains ONED-authored; `minimal_map_validate_test --write` is the
+The BMS remains an authored document, not a generated one; `minimal_map_validate_test --write` is the
 repeatable command for applying these edits. It sets the kit and the
 availability list to the AK when they differ, adds the house building when no
 record names `108001`, and emits through `bms::write`; every other record and

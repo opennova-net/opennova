@@ -878,7 +878,7 @@ public:
 	~Simulation() override;
 
 	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
-	// ONED gameplay launches only from a saved loose .bms (GameWorld.load_mission).
+	// editor Play World launches only from a saved .bms (GameWorld.load_mission).
 	bool load_from_mission_data(const Ref<MissionData> &p_mission);
 	// S9 (ADR 0028): the ordered mission boot — engine/runtime/mission
 	// runtime_boot owns the sequence + the file-resolution policy; this entry

@@ -13,7 +13,10 @@
   records; ENGINE facts arrive as typed records the embedder pushes, and
   window mutations leave as typed requests the embedder drains; `DevTools`
   holds the `Simulation` natively; the imgui include lint is added by the
-  campaign.
+  campaign. Updated by [ADR 0045](0045-godot-owns-development-workflows.md)
+  (2026-09-05): ONED's run surface (`OnedUi`, `oned_ui.h`, its ctest and the
+  `OnedUi` seam node) is removed; the pass composes the game's F3 dev tools
+  only.
 
 ## Context
 

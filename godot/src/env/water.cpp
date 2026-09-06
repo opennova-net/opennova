@@ -674,8 +674,8 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 		return;
 	}
 	const Vector2 source_size = viewport->get_visible_rect().size;
-	// A one-pixel viewport is a real transient state while ONED swaps or
-	// lays out workspaces. The strip builder below already treats either
+	// A one-pixel viewport is a real transient state while the Godot editor
+	// lays out or resizes its viewports. The strip builder below already treats either
 	// dimension <= 1 as non-drawable; stop the mirror projection here too,
 	// before an extreme aspect asks Camera3D for an out-of-range FOV.
 	if (source_size.x <= 1.0f || source_size.y <= 1.0f) {

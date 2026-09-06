@@ -7,6 +7,12 @@
   ONED authoring consequences of ADRs 0016, 0033, and 0034; updates ADR 0029
   by removing the `opennova_oned_edit` interface leaf and editor-only `refs`
   subsystem. Their engine, runtime, and layering decisions remain in force.
+  Updated by [ADR 0044](0044-godot-authors-native-worlds.md) (2026-09-05:
+  Godot authors native worlds, replacing this record's authoring direction)
+  and replaced by [ADR 0045](0045-godot-owns-development-workflows.md)
+  (2026-09-05: the run, retail staging and packing contract moves into the
+  Godot editor and `godot/tools`; `opennova-modtools.exe`, its scene,
+  settings and native UI are removed).
 
 ## Context
 

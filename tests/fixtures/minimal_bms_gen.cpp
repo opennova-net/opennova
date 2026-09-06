@@ -1,5 +1,5 @@
 // Generator + guard for fixtures/bms/synth_dense.bms: a synthetic mission
-// authored through the bms_edit free functions (the same seam ONED writes with) and
+// authored through the bms_edit free functions (the same seam the world editor writes with) and
 // serialized by bms::write, dense the way the shipped missions are — every
 // entity pool populated (items, buildings, markers, organics; a few hundred
 // records on a grid, one item id per pool so the .mis pool classification

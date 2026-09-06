@@ -9,7 +9,7 @@
 // .fx shader set → resource.
 //
 // Nothing is generated here any more: every byte, the baked mnml.cpt included, is authored
-// in ONED and committed. The tool reads assets/ and only writes for `--write-pff` or
+// in the editor and committed. The tool reads assets/ and only writes for `--write-pff` or
 // `--install <dir>`; `--check` validates the shared manifest read-only in CTest. It once
 // wrote generated music banks over the committed ones. See assets/README.md.
 #include <formats/pff/pff.h>
@@ -253,7 +253,7 @@ bool write_and_verify(const fs::path &root, const char *archive,
 // @ 0x4a6f44 — witnessed with a 20-byte archive on retail 2026-08-23,
 // docs/vfs/vfs-pff-mount-re.md]. The loose `FindFirstFile *.bms` walk is what lists the
 // mission in this layout, so the token's name does not matter to the mission list the way
-// the packed archive's does (ONED's packer: localres.pff).
+// the packed archive's does (the release packer: localres.pff).
 //
 // The retail models name .tga textures while the bring-up set carries their witnessed .dds
 // substitutes. Under /d, Texture_LoadByNameWithChannel @ 0x58b470 (its loose .dds probe

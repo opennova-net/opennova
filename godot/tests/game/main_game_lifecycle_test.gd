@@ -346,7 +346,7 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 
 
 func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
-	# The ONED run contract: with --loose-root, a directory
+	# The editor run contract (ADR 0045): with --loose-root, a directory
 	# holding none of the packed archives mounts as the loose file set being
 	# authored; without it, retail's no-archives fatal stands. Parameterized
 	# entry so the contract is testable without process arguments (ADR 0018).

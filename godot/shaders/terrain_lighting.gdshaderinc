@@ -68,11 +68,13 @@ uniform bool u_below_water = false;
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
 // PolyTrn_RenderTile composes the mission .til base layer into the terrain
-// tile before the same ps.1.4 lighting chain used by runtime and ONED.
+// tile before the same ps.1.4 lighting chain the runtime and the editor
+// preview share.
 uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
-// Declared for the ONED authored-slot binding only; the top-tier chain does
+// Declared for the former terrain-workspace slot binding only (retired by
+// ADR 0037); the top-tier chain does
 // not consume it (the generated coefficient map belongs to the unported
 // ps.1.1 tiers at stage 7).
 uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
@@ -148,7 +150,7 @@ vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
 
 vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
 	// Retail writes UV1 as source_position * (polytrn_detaildensity / 512).
-	// Runtime and ONED instead carry normalized UVs for the full 1024 terrain
+	// The runtime and the editor preview instead carry normalized UVs for the full 1024 terrain
 	// atlas, so multiply by two before applying either authored density.
 	// [orig: configData+0x1738 @ 0x31BE270; density/512 global write
 	// @ 0x6029a0..0x6029aa; UV1 stores @ 0x602db5..0x602dbe]

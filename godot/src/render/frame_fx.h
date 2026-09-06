@@ -164,8 +164,8 @@ public:
 	Ref<Image> get_q3_target_image() const;
 };
 
-// The display decode for a 3D view that has no FrameFx (ONED
-// workspace previews, the menu avatar preview, probes). Every engine shader
+// The display decode for a 3D view that has no FrameFx (the editor
+// world preview, the menu avatar preview, probes). Every engine shader
 // writes gamma-domain numbers into the scene target and relies on exactly one
 // terminal decode before Godot's sRGB output encode; without it a viewport
 // shows the scene encoded twice. This node installs a decode-only

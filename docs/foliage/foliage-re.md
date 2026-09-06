@@ -19,7 +19,7 @@ remain in place; ONED's paint and eyedropper consumers were removed by ADR 0037.
 
 | Surface | Retail witness | Reimpl result | Verdict |
 |---|---|---|---|
-| Definition/map source data | `.trn` foliage defs, charmap, foliagemap | formats and DETAIL's flat wrapped coordinate policy retained; no ONED authoring UI | matching format/coordinate helpers |
+| Definition/map source data | `.trn` foliage defs, charmap, foliagemap | formats and DETAIL's flat wrapped coordinate policy retained; no editor authoring UI | matching format/coordinate helpers |
 | Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, cap 128 | the same handoff from the ported traversal into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13) |
 | Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |

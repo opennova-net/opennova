@@ -641,7 +641,7 @@ void Terrain::render_frame() {
 				}
 			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-			// one multiply; the shared runtime/ONED tile path consumes this uniform.
+			// one multiply; the runtime and editor-preview tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 			terrain_material->set_shader_parameter(
