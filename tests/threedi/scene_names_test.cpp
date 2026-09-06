@@ -71,6 +71,11 @@ int main() {
 			type == 8 && flags == 0x2E);
 	TEST_EXPECT(threedi_scene_parse_collision_volume_name("CX01-colonly", type, flags, ordinal) && type == -1);
 	TEST_EXPECT(!threedi_scene_parse_collision_volume_name("CB01", type, flags, ordinal));
+	// The importer-converted stem (Godot strips its own -colonly hint).
+	TEST_EXPECT(threedi_scene_parse_collision_volume_stem("CB01", type, flags, ordinal) && type == 1 && ordinal == 0);
+	TEST_EXPECT(threedi_scene_parse_collision_volume_stem("BBL02", type, flags, ordinal) && type == 8 && flags == 0x2E && ordinal == 1);
+	TEST_EXPECT(!threedi_scene_parse_collision_volume_stem("CO01", type, flags, ordinal));
+	TEST_EXPECT(!threedi_scene_parse_collision_volume_stem("CB", type, flags, ordinal));
 	TEST_EXPECT(!threedi_scene_parse_collision_volume_name("ZZ01-colonly", type, flags, ordinal));
 	TEST_EXPECT(!threedi_scene_parse_collision_volume_name("BBQ01-colonly", type, flags, ordinal));
 

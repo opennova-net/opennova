@@ -106,6 +106,13 @@
 !/roof.tga
 !/wood.tga
 
+# --- Models + textures authored in Godot (sources under godot/authoring/<name>/) ---
+# Exported by the opennova_model addon through the parity writer and re-exported
+# + byte-compared by godot/tests/model_export_guard_test.gd. The crate (items.def
+# 108002, placed in mnml) is the first: a Blender box through Godot's glTF importer.
+!/crate.3di
+!/crate.tga
+
 
 # --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
 # These are RETAIL Joint Operations bytes: the player body + anims, the avatar

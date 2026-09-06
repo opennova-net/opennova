@@ -48,8 +48,14 @@ func _source(archive: bool = false) -> WorldSource:
 		var entries: Array = []
 		for filename in DirAccess.get_files_at(directory):
 			entries.append({"name": filename, "bytes": FileAccess.get_file_as_bytes(directory.path_join(filename))})
+		# The synthetic sidecars REPLACE the set's own mnml.pcx / mnml.bin entries: an
+		# archive with two entries of one name resolves by index layout, not by intent.
 		for extension in WorldEditSession.SIDECAR_EXTENSIONS:
-			entries.append({"name": "mnml." + extension, "bytes": "synthetic sidecar " + extension})
+			var synthetic_name: String = "mnml." + String(extension)
+			for index in range(entries.size() - 1, -1, -1):
+				if String(entries[index]["name"]).to_lower() == synthetic_name:
+					entries.remove_at(index)
+			entries.append({"name": synthetic_name, "bytes": "synthetic sidecar " + extension})
 		assert_eq(TestPff.write(directory.path_join("resource.pff"), entries), OK)
 		for filename in DirAccess.get_files_at(directory):
 			if filename != "resource.pff":

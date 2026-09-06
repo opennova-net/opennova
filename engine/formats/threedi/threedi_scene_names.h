@@ -59,6 +59,12 @@ std::string threedi_scene_collision_volume_name(int32_t collidable_type, int32_t
 bool threedi_scene_parse_collision_volume_name(std::string_view name, int32_t &collidable_type,
 		int32_t &flags, int &ordinal);
 
+// The same name without its "-colonly" suffix. Godot's scene importer takes
+// that suffix as its own hint (the mesh becomes a collision body) and names
+// the body by the stem ("CB01"), so a converter meets this form too.
+bool threedi_scene_parse_collision_volume_stem(std::string_view stem, int32_t &collidable_type,
+		int32_t &flags, int &ordinal);
+
 // Occlusion records ("-oconly" suffix): recognised so a converter can refuse
 // them explicitly while the occlusion scene form is undefined.
 bool threedi_scene_is_occlusion_name(std::string_view name);

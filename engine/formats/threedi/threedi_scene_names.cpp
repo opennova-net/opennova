@@ -184,7 +184,14 @@ bool threedi_scene_parse_collision_volume_name(std::string_view name, int32_t &c
 	static constexpr std::string_view kSuffix = "-colonly";
 	if (name.size() < 2 + 2 + kSuffix.size()) return false;
 	if (name.substr(name.size() - kSuffix.size()) != kSuffix) return false;
-	std::string_view body = name.substr(0, name.size() - kSuffix.size());
+	return threedi_scene_parse_collision_volume_stem(name.substr(0, name.size() - kSuffix.size()),
+			collidable_type, flags, ordinal);
+}
+
+bool threedi_scene_parse_collision_volume_stem(std::string_view stem, int32_t &collidable_type,
+		int32_t &flags, int &ordinal) {
+	if (stem.size() < 4) return false;
+	std::string_view body = stem;
 	const std::string_view code = body.substr(0, 2);
 	int32_t type = -1;
 	for (const CollidableCode &entry : kCollidableCodes) {

@@ -65,6 +65,11 @@ const int kRedTeamStartItemId = 106004;
 // water tank off its east side.
 const int kHouseItemId = 108001;
 const opennova::mission::EntityTransform kHousePlacement{0.0f, 24.0f, 0.0f, 0, 0, 0};
+// The crate (items.def 108002, assets/crate.3di): the first model authored in Godot
+// (godot/authoring/crate/), placed 8 m east and 18 m north of the player start, so a
+// yaw-0 spawn sees the house's south wall with the crate off to its right.
+const int kCrateItemId = 108002;
+const opennova::mission::EntityTransform kCratePlacement{8.0f, 18.0f, 0.0f, 0, 0, 0};
 
 // start_time is Q8.8 HOURS [orig: the BMS header's Q8.8 start hour widens into the 8.24
 // accumulator at Game_StartMission @ 0x525371]. A mission that starts at 0 renders under the
@@ -100,11 +105,11 @@ bool availability_is_the_rifle(const opennova::bms::File &doc) {
 	return rows.size() == 1 && rows.front().name == kRifle && rows.front().status == kMissionAllowedStatus;
 }
 
-int count_houses(const opennova::bms::File &doc) {
-	int houses = 0;
+int count_buildings(const opennova::bms::File &doc, int item_id) {
+	int count = 0;
 	for (const opennova::bms::Entity &rec : doc.buildings)
-		if (opennova::mission::entity_item_id(rec) == kHouseItemId) ++houses;
-	return houses;
+		if (opennova::mission::entity_item_id(rec) == item_id) ++count;
+	return count;
 }
 
 } // namespace
@@ -185,7 +190,7 @@ int main(int argc, char **argv) {
 		}
 		CHECK(availability_is_the_rifle(doc), "the mission lists WPN_AK47AUTO as its one allowed weapon");
 
-		int houses = count_houses(doc);
+		int houses = count_buildings(doc, kHouseItemId);
 		if (write_mode && houses == 0) {
 			opennova::mission::add_entity(doc, opennova::mission::EntityKind::Building, kHouseItemId,
 			                              kHousePlacement);
@@ -193,6 +198,14 @@ int main(int argc, char **argv) {
 			changed = true;
 		}
 		CHECK(houses == 1, "the map places exactly one house (108001), the set's own model");
+		int crates = count_buildings(doc, kCrateItemId);
+		if (write_mode && crates == 0) {
+			opennova::mission::add_entity(doc, opennova::mission::EntityKind::Building, kCrateItemId,
+			                              kCratePlacement);
+			crates = 1;
+			changed = true;
+		}
+		CHECK(crates == 1, "the map places exactly one crate (108002), the first Godot-authored model");
 
 		int player_starts = 0;
 		int blue_starts = 0;
@@ -228,7 +241,8 @@ int main(int argc, char **argv) {
 			if (fail == 0) {
 				CHECK(kit_is_the_rifle(verify), "rewritten mnml.bms keeps the rifle kit");
 				CHECK(availability_is_the_rifle(verify), "rewritten mnml.bms keeps the rifle allowed");
-				CHECK(count_houses(verify) == 1, "rewritten mnml.bms places the house once");
+				CHECK(count_buildings(verify, kHouseItemId) == 1, "rewritten mnml.bms places the house once");
+				CHECK(count_buildings(verify, kCrateItemId) == 1, "rewritten mnml.bms places the crate once");
 			}
 
 			if (fail == 0) {

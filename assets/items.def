@@ -100,3 +100,14 @@ begin "House"
   sid house
   hp 5000
 end
+
+// The crate: the first model authored in Godot (godot/authoring/crate/, a Blender box
+// through the glTF importer, exported as assets/crate.3di by the opennova_model addon),
+// placed in mnml.bms as a building beside the house.
+begin "Crate"
+  id 108002
+  type building
+  graphic crate
+  sid crate
+  hp 500
+end

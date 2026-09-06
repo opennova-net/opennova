@@ -8,6 +8,10 @@
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/box_shape3d.hpp>
+#include <godot_cpp/classes/collision_shape3d.hpp>
+#include <godot_cpp/classes/concave_polygon_shape3d.hpp>
+#include <godot_cpp/classes/convex_polygon_shape3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/skin.hpp>
@@ -78,6 +82,47 @@ bool parse_face_surface_name(const String &p_name, int &r_poly_type, uint32_t &r
 	if (!poly.is_valid_int() || flags.is_empty()) return false;
 	r_poly_type = poly.to_int();
 	r_material_flags = static_cast<uint32_t>(flags.hex_to_int());
+	return true;
+}
+
+// The first CollisionShape3D under `p_node` (the body Godot's importer made
+// from a "-colonly" mesh), or null.
+CollisionShape3D *find_collision_shape(Node *p_node) {
+	for (int i = 0; i < p_node->get_child_count(); ++i) {
+		Node *child = p_node->get_child(i);
+		CollisionShape3D *shape = Object::cast_to<CollisionShape3D>(child);
+		if (shape != nullptr) return shape;
+		shape = find_collision_shape(child);
+		if (shape != nullptr) return shape;
+	}
+	return nullptr;
+}
+
+// The AABB (in `p_relative_to`'s frame) of a box, convex or concave shape.
+bool shape_box(CollisionShape3D *p_shape_node, const Node *p_relative_to, AABB &r_box) {
+	const Ref<Shape3D> shape = p_shape_node->get_shape();
+	if (shape.is_null()) return false;
+	const Transform3D local = relative_transform(p_shape_node, p_relative_to);
+	const Ref<BoxShape3D> box = shape;
+	if (box.is_valid()) {
+		const Vector3 size = box->get_size();
+		r_box = local.xform(AABB(-size * 0.5f, size));
+		return true;
+	}
+	PackedVector3Array points;
+	const Ref<ConcavePolygonShape3D> concave = shape;
+	const Ref<ConvexPolygonShape3D> convex = shape;
+	if (concave.is_valid()) {
+		points = concave->get_faces();
+	} else if (convex.is_valid()) {
+		points = convex->get_points();
+	}
+	if (points.is_empty()) return false;
+	AABB out(local.xform(points[0]), Vector3());
+	for (int64_t i = 1; i < points.size(); ++i) {
+		out = out.expand(local.xform(points[i]));
+	}
+	r_box = out;
 	return true;
 }
 
@@ -874,6 +919,21 @@ bool ModelSceneExporter::export_collision(Node3D *p_collision, int p_part_count,
 			if (threedi_scene_is_occlusion_name(std_name(child))) {
 				fail(String(child->get_name()) + ": occlusion records have no scene form yet");
 				return false;
+			}
+			// The importer-converted form: Godot took the "-colonly" hint, made a
+			// collision body named by the stem, and left a shape under it.
+			if (threedi_scene_parse_collision_volume_stem(std_name(child), type, flags, ordinal)) {
+				CollisionShape3D *shape_node = find_collision_shape(child);
+				AABB aabb;
+				if (shape_node == nullptr || !shape_box(shape_node, node, aabb)) {
+					fail(String(child->get_name()) + ": a converted volume needs a box, convex or concave collision shape");
+					return false;
+				}
+				ThreediBuildBox box;
+				box.min = mission_from_presentation(aabb.position);
+				box.max = mission_from_presentation(aabb.position + aabb.size);
+				r_model.add_volume(cobj, type < 0 ? 1 : type, flags, box);
+				continue;
 			}
 		}
 	}

@@ -97,6 +97,14 @@ target_link_libraries(tga_write_test PRIVATE opennova_formats)
 target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_write COMMAND tga_write_test)
 
+# The models authored in Godot (godot/authoring/ -> assets/*.3di): what the engine and
+# retail need from each file (runtime-safe collision, shader tags the authored .fx set
+# serves, allowlisted textures, the tangent vertex-format rule).
+add_executable(minimal_model_validate_test fixtures/minimal_model_validate.cpp)
+target_link_libraries(minimal_model_validate_test PRIVATE opennova_runtime)
+target_include_directories(minimal_model_validate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_model_validate COMMAND minimal_model_validate_test)
+
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
 foreach(test comment trim_value parse variants)
