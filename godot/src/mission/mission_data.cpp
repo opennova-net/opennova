@@ -251,9 +251,11 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 	BIND_CONSTANT(ITEM_ID_OFFSET);
+	BIND_CONSTANT(PLAYER_START_ITEM_ID);
 }
 
 static_assert(MissionData::ITEM_ID_OFFSET == mission::kItemIdOffset);
+static_assert(MissionData::PLAYER_START_ITEM_ID == 6001 + mission::kItemIdOffset);
 // Every ATTRIB_* mirror is pinned to its engine home (engine/formats/mission
 // bms.h AttribFlags) — a drifted copy here would silently mis-edit headers.
 static_assert(MissionData::ATTRIB_FORCE_INDOORS ==

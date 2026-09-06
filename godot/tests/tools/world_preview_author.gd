@@ -14,7 +14,7 @@ func _initialize() -> void:
 	assert(mission.set_header_string("environment", "mnml"))
 	assert(mission.set_header_int("start_time", 12 * 256))
 	var start := Vector3(0, terrain.get_height_world(Vector3.ZERO), 0)
-	assert(mission.add_entity(MissionData.KIND_MARKER, 106001,
+	assert(mission.add_entity(MissionData.KIND_MARKER, MissionData.PLAYER_START_ITEM_ID,
 			MissionObjectPlacer.godot_to_bms_position(start), Vector3.ZERO) != null)
 	for point in [Vector3(-10, 0, -12), Vector3(10, 0, -12), Vector3(-10, 0, 12), Vector3(10, 0, 12)]:
 		var position: Vector3 = point

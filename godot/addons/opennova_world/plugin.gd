@@ -10,6 +10,7 @@ const RunSession := preload("res://tools/game_run_session.gd")
 const GAME_DATA := preload("res://addons/opennova_world/game_data_panel.tscn")
 const DataPanel := preload("res://addons/opennova_world/game_data_panel.gd")
 const TOOLBAR := preload("res://addons/opennova_world/toolbar.tscn")
+const UNSAVED_SCENE_KEY := "unsaved-scene:"
 
 var _dock: EditorDock
 var _data_panel: DataPanel
@@ -128,6 +129,7 @@ func _exit_tree() -> void:
 func _scene_changed(root: Node) -> void:
 	_generation += 1
 	_release_world()
+	_forget_closed_scenes("")
 	_world = _find_world(root)
 	if is_instance_valid(_world):
 		_world.tree_exiting.connect(_release_world, CONNECT_ONE_SHOT)
@@ -155,10 +157,25 @@ func _activate(generation: int) -> void:
 	await get_tree().process_frame
 	if generation == _generation and is_instance_valid(_world):
 		load_selected_world()
-		var scene_path := EditorInterface.get_edited_scene_root().scene_file_path
-		if not _framed_scenes.has(scene_path):
+		var scene_key := _scene_key(EditorInterface.get_edited_scene_root())
+		if not _framed_scenes.has(scene_key):
 			_focus_preview()
-			_framed_scenes[scene_path] = true
+			_framed_scenes[scene_key] = true
+
+
+## Sessions and framing are remembered per scene tab. A scene that has never
+## been saved has no path yet, so its root instance stands in for one.
+static func _scene_key(root: Node) -> String:
+	if root == null:
+		return ""
+	if not root.scene_file_path.is_empty():
+		return root.scene_file_path
+	return UNSAVED_SCENE_KEY + str(root.get_instance_id())
+
+
+static func _is_closed_unsaved_scene(key: String) -> bool:
+	return key.begins_with(UNSAVED_SCENE_KEY) \
+			and instance_from_id(int(key.trim_prefix(UNSAVED_SCENE_KEY))) == null
 
 
 func _set_source(source: WorldSource) -> void:
@@ -220,11 +237,11 @@ func load_selected_world(reopen: bool = false) -> void:
 		_refresh_inspector()
 		return
 	_session = session
-	var scene_path := EditorInterface.get_edited_scene_root().scene_file_path
-	if not _scene_sessions.has(scene_path):
-		_scene_sessions[scene_path] = []
-	if not _scene_sessions[scene_path].has(session):
-		_scene_sessions[scene_path].append(session)
+	var scene_key := _scene_key(EditorInterface.get_edited_scene_root())
+	if not _scene_sessions.has(scene_key):
+		_scene_sessions[scene_key] = []
+	if not _scene_sessions[scene_key].has(session):
+		_scene_sessions[scene_key].append(session)
 	for shader_name in RenderingServer.global_shader_parameter_get_list():
 		if String(shader_name).begins_with("opennova_"):
 			_globals[shader_name] = RenderingServer.global_shader_parameter_get(shader_name)
@@ -262,7 +279,7 @@ func get_edit_session(object: Object) -> WorldEditSession:
 	return _session if object == _world or _world.is_ancestor_of(object as Node) else null
 
 
-func edit_native_value(session: WorldEditSession, field: WorldEditSession.Field,
+func edit_native_value(session: WorldEditSession, field: WorldField.Id,
 		value: Variant, slot: int = 0) -> String:
 	if session != _session or _stale or not is_instance_valid(_world):
 		return "Reload this world's selected source before editing."
@@ -272,9 +289,9 @@ func edit_native_value(session: WorldEditSession, field: WorldEditSession.Field,
 	var reason := session.validate_edit(field, value, slot)
 	if not reason.is_empty():
 		return reason
-	var field_name := str(WorldEditSession.Field.keys()[field]).capitalize()
-	var action := "%s: %s" % [session.get_file_name(field), field_name]
-	if field >= WorldEditSession.Field.FOLIAGE_GRAPHIC:
+	var spec := WorldField.spec(field)
+	var action := "%s: %s" % [session.get_file_name(field), spec.label]
+	if spec.slotted:
 		action += " (slot %d)" % (slot + 1)
 	var undo := get_undo_redo()
 	# Native dirtiness is supplied by _get_unsaved_status; the .tscn need not
@@ -386,11 +403,20 @@ func _save_sessions() -> bool:
 
 
 func _scene_closed(path: String) -> void:
-	# A successful save cleared dirtiness. Closing without saving is the
-	# editor's explicit Discard choice. Failed saves retain their sessions.
+	_forget_closed_scenes(path)
+
+
+## A successful save cleared dirtiness. Closing without saving is the
+## editor's explicit Discard choice. Failed saves retain their sessions.
+## Unsaved scenes close without a path; their keys expire with their roots.
+func _forget_closed_scenes(closed_path: String) -> void:
 	if _save_failed and _any_dirty():
 		return
-	_scene_sessions.erase(path)
+	if not closed_path.is_empty():
+		_scene_sessions.erase(closed_path)
+	for key: String in _scene_sessions.keys():
+		if _is_closed_unsaved_scene(key):
+			_scene_sessions.erase(key)
 	for key: String in _sessions.keys():
 		var referenced := false
 		for sessions: Array in _scene_sessions.values():
@@ -503,7 +529,7 @@ func _focus_preview() -> void:
 	var found := false
 	for kind in [MissionData.KIND_MARKER, MissionData.KIND_BUILDING, MissionData.KIND_ITEM]:
 		for entity: MissionEntityRecord in mission.get_entities(kind):
-			if kind == MissionData.KIND_MARKER and entity.get_item_id() != 106001:
+			if kind == MissionData.KIND_MARKER and entity.get_item_id() != MissionData.PLAYER_START_ITEM_ID:
 				continue
 			center = MissionObjectPlacer.bms_to_godot_position(entity.get_position())
 			found = true

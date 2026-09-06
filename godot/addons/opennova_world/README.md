@@ -96,6 +96,23 @@ and foliage changes. The effective environment is a separate view of the base
 ENV plus mission overrides. Native codecs and format behavior remain in their
 existing engine owners.
 
+## The field table
+
+`WorldField` (`world_field.gd`) is the one description of every editable
+native value: its owning document (BMS, TRN or ENV), Inspector section and
+caption, widget kind with range or placeholder, whether it repeats per foliage
+slot, and the typed read and write of its value against the session's
+documents. The session reads, validates, applies and snapshots through that
+table; the Inspector plugin lays it out in table order under the node that
+presents each document; the property widget builds itself from the spec; undo
+actions take their names from it. Nothing else switches on a field id.
+
+To add a field: append its id to `WorldField.Id`, add one `_row(...)` in
+`WorldField._build` with its read and write functions, and, if the value needs
+a new presentation, add a `Widget` kind to `world_property.gd` and its
+validation to `WorldEditSession.validate_edit`. `world_edit_session_test.gd`
+checks that the table covers every id once and names the right document.
+
 The **OpenNova** dock in Godot's bottom panel supplies Run Game, Stage & Run
 Retail, Stop, and Pack Game Data. All use this scene's selected source and save
 pending native edits first. See [game data workflows](../../tools/README.md)

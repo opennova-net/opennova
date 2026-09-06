@@ -1,8 +1,9 @@
 @tool
 extends EditorInspectorPlugin
+## Lays the WorldField table out under the scene node that presents each
+## native document. Sections and captions come from the table, in its order.
 
 const Property := preload("res://addons/opennova_world/world_property.gd")
-const Field := WorldEditSession.Field
 signal pending_changed
 var _properties: Array[WeakRef] = []
 var _session_for: Callable
@@ -48,35 +49,55 @@ func _can_handle(object: Object) -> bool:
 	return object is GameWorld or object is MissionEnvironment or object is FoliageDispatcher
 
 
+## The scene node that presents each native document in the Inspector.
+static func _document_for(object: Object) -> int:
+	if object is GameWorld:
+		return WorldField.Document.MISSION
+	if object is MissionEnvironment:
+		return WorldField.Document.ENVIRONMENT
+	if object is FoliageDispatcher:
+		return WorldField.Document.TERRAIN
+	return -1
+
+
 func _parse_begin(object: Object) -> void:
 	var session := _session_for.call(object) as WorldEditSession
-	if session == null:
+	var document := _document_for(object)
+	if session == null or document < 0:
 		return
-	if object is GameWorld:
-		_heading("Mission - " + session.get_file_name(Field.START_TIME))
-		_field(session, Field.START_TIME, "Start time")
-	elif object is MissionEnvironment:
-		_heading("Environment - " + session.get_file_name(Field.SKY_HEIGHT))
-		_note(session.get_environment_note())
-		_field(session, Field.SKY_MAP_1, "Sky map 1")
-		_field(session, Field.SKY_MAP_2, "Sky map 2")
-		_field(session, Field.SKY_HEIGHT, "Sky height")
-	elif object is FoliageDispatcher:
-		_heading("Foliage - " + session.get_file_name(Field.FOLIAGE_GRAPHIC))
+	var group := ""
+	var slotted: Array[WorldField] = []
+	for spec in WorldField.for_document(document as WorldField.Document):
+		if spec.slotted:
+			slotted.append(spec)
+			continue
+		group = _section(session, spec, group)
+		_field(session, spec.id)
+	if not slotted.is_empty():
+		group = _section(session, slotted[0], group)
 		for slot in range(session.get_foliage_count()):
 			_heading("Slot %d" % (slot + 1))
-			_field(session, Field.FOLIAGE_GRAPHIC, "Graphic", slot)
-			_field(session, Field.FOLIAGE_MATCH, "Map match", slot)
-			_field(session, Field.FOLIAGE_SHADOW, "Cast shadow", slot)
+			for spec in slotted:
+				_field(session, spec.id, slot)
 		if session.get_foliage_count() == 0:
 			_note("This terrain has no foliage slots.")
 	if not session.is_editable():
 		_note("Use Create Copy in the world toolbar to edit native values.")
 
 
-func _field(session: WorldEditSession, field: WorldEditSession.Field, caption: String, slot: int = 0) -> void:
+## Opens the spec's section when it differs from the open one; returns the open section.
+func _section(session: WorldEditSession, spec: WorldField, open_group: String) -> String:
+	if spec.group == open_group:
+		return open_group
+	_heading("%s - %s" % [spec.group, session.get_file_name(spec.id)])
+	if spec.document == WorldField.Document.ENVIRONMENT:
+		_note(session.get_environment_note())
+	return spec.group
+
+
+func _field(session: WorldEditSession, field: WorldField.Id, slot: int = 0) -> void:
 	var editor := Property.new()
-	editor.setup(session, field, slot, caption, _request_edit)
+	editor.setup(session, field, slot, _request_edit)
 	editor.pending_changed.connect(pending_changed.emit)
 	_properties.append(weakref(editor))
 	add_custom_control(editor)

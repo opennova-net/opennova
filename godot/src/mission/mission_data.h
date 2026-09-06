@@ -135,6 +135,12 @@ public:
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
 		// entity records — mission/mission.h]
 		ITEM_ID_OFFSET = 100000,
+		// The player start marker the engine addresses BY NUMBER: marker family
+		// 6001 (+ ITEM_ID_OFFSET), the start the spawn pose resolver falls back
+		// to when no mode-specific marker exists (the witness lives with
+		// resolve_player_spawn_pose in engine/runtime/world/spawn_select.cpp;
+		// pinned in the .cpp). Bound so the editor never re-hardcodes 106001.
+		PLAYER_START_ITEM_ID = 106001,
 	};
 
 	Error open_file(const String &path);

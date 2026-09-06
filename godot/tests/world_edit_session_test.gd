@@ -1,7 +1,8 @@
 extends GutTest
 
-const Field := WorldEditSession.Field
+const Field := WorldField.Id
 const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
+const DOCUMENT_EXTENSIONS: Array[String] = ["bms", "trn", "env"]
 const DATA := "res://../examples/world_preview"
 var _dirs: PackedStringArray = []
 var _worlds: Array[GameWorld] = []
@@ -253,6 +254,37 @@ func test_settings_update_shares_documents_keeps_objects_and_never_saves_effecti
 	assert_eq(base.load_from_resource_root(source.open_root(), "mnml.env"), OK)
 	assert_false(base.has_mission_overrides())
 	assert_almost_eq(base.sky_height, 211.0, 0.001)
+
+
+func test_field_table_covers_every_id_once_and_names_its_document() -> void:
+	var table := WorldField.all()
+	assert_eq(table.size(), WorldField.Id.size(), "one row per field id")
+	var session := _session(_source())
+	for i in range(table.size()):
+		var spec := table[i]
+		assert_eq(spec.id, i, "the table is indexed by id")
+		assert_false(spec.label.is_empty())
+		assert_false(spec.group.is_empty())
+		assert_true(spec.read.is_valid() and spec.write.is_valid(), spec.label)
+		assert_eq(session.get_file_name(spec.id).get_extension(), DOCUMENT_EXTENSIONS[spec.document], spec.label)
+		if spec.slotted:
+			assert_eq(spec.document, WorldField.Document.TERRAIN, "slots address the terrain's foliage")
+		match spec.widget:
+			WorldField.Widget.INT_SPIN, WorldField.Widget.FLOAT_SPIN, WorldField.Widget.TIME_TEXT:
+				assert_lt(spec.min_value, spec.max_value, spec.label)
+				assert_false(spec.range_message.is_empty(), spec.label)
+			WorldField.Widget.FILENAME_TEXT:
+				assert_false(spec.placeholder.is_empty(), spec.label)
+		# Every row reads the value it just wrote through the session's documents
+		# (the fixture seeds one foliage slot, so slot 0 is valid for slotted rows).
+		var before: Variant = session.get_value(spec.id, 0)
+		assert_not_null(before, spec.label)
+		session.apply_value(spec.id, before, 0)
+		assert_eq(session.get_value(spec.id, 0), before, spec.label)
+	assert_false(session.is_dirty(), "rewriting the current values changes nothing")
+	for document in range(WorldField.Document.size()):
+		assert_false(WorldField.for_document(document as WorldField.Document).is_empty(),
+				"every document exposes at least one field")
 
 
 func test_field_validation_rejects_invalid_time_ranges_and_missing_assets() -> void:

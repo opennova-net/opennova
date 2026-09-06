@@ -9,13 +9,13 @@ signal changed(session: WorldEditSession)
 const Files := preload("res://addons/opennova_world/world_file_transaction.gd")
 # These are the same-basename sidecars consumed by the normal mission loader.
 const SIDECAR_EXTENSIONS := ["til", "wac", "bin", "pcx"]
-enum Field { START_TIME, SKY_MAP_1, SKY_MAP_2, SKY_HEIGHT, FOLIAGE_GRAPHIC, FOLIAGE_MATCH, FOLIAGE_SHADOW }
 
 var _source: WorldSource
 var _root: ResourceRoot
 var _mission: MissionData
 var _terrain: TerrainData
 var _environment: EnvFile
+# Indexed by WorldField.Document: the BMS, its TRN, its base ENV.
 var _names: PackedStringArray = []
 var _paths: PackedStringArray = []
 var _disk_versions: PackedStringArray = []
@@ -65,6 +65,7 @@ func _open_documents(source: WorldSource, local_directory: String) -> Error:
 	var mission := selected.open_mission(root)
 	if mission == null:
 		return _fail(selected.get_last_error_code(), selected.get_last_error())
+	# WorldField.Document order: the BMS, its TRN, its base ENV.
 	var names := PackedStringArray([selected.mission_name, mission.get_terrain_ref() + ".trn",
 			mission.get_environment_ref() + ".env"])
 	for filename in names:
@@ -131,8 +132,8 @@ func get_dirty_files() -> PackedStringArray:
 	return files
 
 
-func get_file_name(field: Field) -> String:
-	return _names[_document_index(field)]
+func get_file_name(field: WorldField.Id) -> String:
+	return _names[WorldField.spec(field).document]
 
 
 func get_foliage_count() -> int:
@@ -147,55 +148,45 @@ func get_environment_note() -> String:
 	if info.has_fog_distance_override or info.has_fog_color_override:
 		overrides.append("fog")
 	if overrides.is_empty():
-		return "Editing base environment values in %s." % _names[2]
+		return "Editing base environment values in %s." % _names[WorldField.Document.ENVIRONMENT]
 	return "Editing base values in %s. %s supplies the effective %s overrides." % [
-			_names[2], _names[0], " and ".join(overrides)]
+			_names[WorldField.Document.ENVIRONMENT], _names[WorldField.Document.MISSION],
+			" and ".join(overrides)]
 
 
-func get_value(field: Field, slot: int = 0) -> Variant:
-	match field:
-		Field.START_TIME: return _mission.get_info().start_time
-		Field.SKY_MAP_1: return _environment.sky_map1
-		Field.SKY_MAP_2: return _environment.sky_map2
-		Field.SKY_HEIGHT: return _environment.sky_height
-	var defs := _terrain.get_foliage_defs()
-	if slot < 0 or slot >= defs.size():
+func get_value(field: WorldField.Id, slot: int = 0) -> Variant:
+	var spec := WorldField.spec(field)
+	if not _has_slot(spec, slot):
 		return null
-	var definition := defs[slot] as TerrainFoliageDef
-	match field:
-		Field.FOLIAGE_GRAPHIC: return definition.graphic
-		Field.FOLIAGE_MATCH: return definition.match
-		Field.FOLIAGE_SHADOW: return definition.shadow
-	return null
+	return spec.read.call(_mission, _terrain, _environment, slot)
 
 
-func validate_edit(field: Field, value: Variant, slot: int = 0) -> String:
+func validate_edit(field: WorldField.Id, value: Variant, slot: int = 0) -> String:
 	if not _editable:
 		return "Create an editable copy to change this world."
-	if field >= Field.FOLIAGE_GRAPHIC and (slot < 0 or slot >= get_foliage_count()):
+	var spec := WorldField.spec(field)
+	if not _has_slot(spec, slot):
 		return "That foliage slot is unavailable."
-	match field:
-		Field.START_TIME:
-			if not value is int or value < 0 or value >= 24 * 256:
-				return "Start time must be between 00:00 and 23:59."
-		Field.SKY_HEIGHT:
-			if not (value is float or value is int) or not is_finite(float(value)) or value < 10 or value > 500:
-				return "Sky height must be between 10 and 500."
-		Field.FOLIAGE_MATCH:
-			if not value is int or value < -1 or value > 255:
-				return "Map match must be between -1 and 255."
-		Field.FOLIAGE_SHADOW:
+	match spec.widget:
+		WorldField.Widget.TIME_TEXT, WorldField.Widget.INT_SPIN:
+			if not value is int or value < spec.min_value or value > spec.max_value:
+				return spec.range_message
+		WorldField.Widget.FLOAT_SPIN:
+			if not (value is float or value is int) or not is_finite(float(value)) \
+					or value < spec.min_value or value > spec.max_value:
+				return spec.range_message
+		WorldField.Widget.CHECK:
 			if not value is bool:
-				return "Shadow must be enabled or disabled."
-		Field.SKY_MAP_1, Field.SKY_MAP_2, Field.FOLIAGE_GRAPHIC:
+				return spec.range_message
+		WorldField.Widget.FILENAME_TEXT:
 			if not value is String:
 				return "Enter an asset filename."
 			var filename := str(value)
 			if not filename.is_empty():
 				if filename != filename.get_file() or filename.contains(":") or filename != filename.strip_edges():
 					return "Use a filename from this world's game data."
-				if field == Field.FOLIAGE_GRAPHIC and filename.get_extension().is_empty():
-					filename += ".3di"
+				if filename.get_extension().is_empty():
+					filename += spec.default_extension
 				if not _root.has_file(filename):
 					return "%s is missing from this world's game data." % filename
 	return ""
@@ -203,27 +194,19 @@ func validate_edit(field: Field, value: Variant, slot: int = 0) -> String:
 
 ## Public undo/redo target. The caller validates a new user edit before creating
 ## its action. Undo may restore a stock value outside the current UI's ranges.
-func apply_value(field: Field, value: Variant, slot: int = 0) -> void:
+func apply_value(field: WorldField.Id, value: Variant, slot: int = 0) -> void:
 	if not _editable:
 		return
-	match field:
-		Field.START_TIME: _mission.set_header_int("start_time", int(value))
-		Field.SKY_MAP_1: _environment.sky_map1 = str(value)
-		Field.SKY_MAP_2: _environment.sky_map2 = str(value)
-		Field.SKY_HEIGHT: _environment.sky_height = float(value)
-		_:
-			var defs := _terrain.get_foliage_defs()
-			if slot < 0 or slot >= defs.size():
-				return
-			var definition := defs[slot] as TerrainFoliageDef
-			match field:
-				Field.FOLIAGE_GRAPHIC: definition.graphic = str(value)
-				Field.FOLIAGE_MATCH: definition.match = int(value)
-				Field.FOLIAGE_SHADOW: definition.shadow = bool(value)
-			# Fresh native records preserve the unexposed color and attribute fields.
-			_terrain.set_foliage_defs(defs)
+	var spec := WorldField.spec(field)
+	if not _has_slot(spec, slot):
+		return
+	spec.write.call(_mission, _terrain, _environment, slot, value)
 	_last_error = ""
 	changed.emit(self)
+
+
+func _has_slot(spec: WorldField, slot: int) -> bool:
+	return not spec.slotted or (slot >= 0 and slot < get_foliage_count())
 
 
 func load_preview(world: GameWorld) -> Error:
@@ -239,17 +222,12 @@ func save() -> Error:
 		return OK
 	if not _editable:
 		return _fail(ERR_UNAUTHORIZED, "Create an editable copy before saving.")
-	var writers: Dictionary = {}
-	for filename in get_dirty_files():
-		match _names.find(filename):
-			0: writers[filename] = _mission.save_to_path
-			1: writers[filename] = _terrain.save_to_path
-			2: writers[filename] = _environment.save_to_path
 	# Paths preserve actual on-disk case, while the native references may differ.
-	var disk_writers: Dictionary = {}
-	for filename: String in writers:
-		disk_writers[_paths[_names.find(filename)].get_file()] = writers[filename]
-	var reason: String = Files.write(get_directory(), disk_writers, _save_preflight, true)
+	var writers: Dictionary[String, Callable] = {}
+	for filename in get_dirty_files():
+		var document := _names.find(filename) as WorldField.Document
+		writers[_paths[document].get_file()] = _writer(document)
+	var reason: String = Files.write(get_directory(), writers, _save_preflight, true)
 	if not reason.is_empty():
 		return _fail(ERR_FILE_CANT_WRITE, reason)
 	_saved = _snapshot()
@@ -270,17 +248,18 @@ func disk_conflict() -> String:
 func write_recovery(parent_directory: String) -> String:
 	if _recovery_state == _snapshot() and DirAccess.dir_exists_absolute(_recovery_path):
 		return _recovery_path
-	var directory := parent_directory.path_join("%s-%d" % [_names[0].get_basename(), Time.get_ticks_usec()])
+	var directory := parent_directory.path_join("%s-%d" % [
+			_names[WorldField.Document.MISSION].get_basename(), Time.get_ticks_usec()])
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return ""
-	var reason: String = Files.write(directory, {
-		_names[0]: _mission.save_to_path,
-		_names[1]: _terrain.save_to_path,
-		_names[2]: _environment.save_to_path,
-	}, func() -> String: return "", false)
+	var writers: Dictionary[String, Callable] = {}
+	for document in range(WorldField.Document.size()):
+		writers[_names[document]] = _writer(document as WorldField.Document)
+	var reason: String = Files.write(directory, writers, func() -> String: return "", false)
 	if not reason.is_empty():
 		return ""
-	var note := "Pending native world edits. Original game data: %s\nMission: %s\n" % [get_directory(), _names[0]]
+	var note := "Pending native world edits. Original game data: %s\nMission: %s\n" % [
+			get_directory(), _names[WorldField.Document.MISSION]]
 	note += "These BMS, TRN and ENV files use the original game's supporting assets.\n"
 	note += "To recover, back up the destination files, copy these documents into the original data folder, then Reload in Godot.\n"
 	_write_bytes(directory.path_join("RECOVERY.txt"), note.to_utf8_buffer())
@@ -296,13 +275,13 @@ func create_editable_copy(basename: String) -> WorldSource:
 	if regex.search(basename) == null:
 		_fail(ERR_INVALID_PARAMETER, "Use 1-12 letters, digits, underscores or hyphens for the world name.")
 		return null
-	var writers: Dictionary = {
+	var writers: Dictionary[String, Callable] = {
 		basename + ".bms": _write_copy_mission.bind(basename),
 		basename + ".trn": _terrain.save_to_path,
 		basename + ".env": _environment.save_to_path,
 	}
 	for extension: String in SIDECAR_EXTENSIONS:
-		var original := _names[0].get_basename() + "." + extension
+		var original := _names[WorldField.Document.MISSION].get_basename() + "." + extension
 		if _root.has_file(original):
 			writers[basename + "." + extension] = _write_bytes.bind(_root.read_file(original))
 	var names: Array = writers.keys()
@@ -368,20 +347,27 @@ func _remember_disk_versions() -> void:
 		_disk_versions.append(FileAccess.get_sha256(path) if not path.is_empty() else "")
 
 
+## One value list per document, in WorldField.Document order, so a document is
+## dirty exactly when one of its editable values differs from the last save.
 func _snapshot() -> Array:
 	if _mission == null or _environment == null or _terrain == null:
 		return []
-	var foliage: Array = []
-	for definition: TerrainFoliageDef in _terrain.get_foliage_defs():
-		foliage.append([definition.graphic, definition.match, definition.attrib_flags])
-	return [[_mission.get_info().start_time],
-			foliage, [_environment.sky_map1, _environment.sky_map2, _environment.sky_height]]
+	var documents: Array = []
+	for document in range(WorldField.Document.size()):
+		var values: Array = []
+		for spec in WorldField.for_document(document as WorldField.Document):
+			var slots := get_foliage_count() if spec.slotted else 1
+			for slot in range(slots):
+				values.append(spec.read.call(_mission, _terrain, _environment, slot))
+		documents.append(values)
+	return documents
 
 
-static func _document_index(field: Field) -> int:
-	if field == Field.START_TIME:
-		return 0
-	return 1 if field >= Field.FOLIAGE_GRAPHIC else 2
+func _writer(document: WorldField.Document) -> Callable:
+	match document:
+		WorldField.Document.MISSION: return _mission.save_to_path
+		WorldField.Document.TERRAIN: return _terrain.save_to_path
+	return _environment.save_to_path
 
 
 func _fail(error: Error, message: String) -> Error:
