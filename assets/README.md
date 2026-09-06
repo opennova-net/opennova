@@ -364,9 +364,18 @@ Revalidated on retail 2026-09-01 after the loose-package manifest fix: onHook
 moved the reported BMS pose from `(0, 0, 0)` to
 `(-12.835, -12.958, 0.869)`.
 
-Known gaps: the shaders and the house are ours (the authored `.fx` set and
-`house.3di` above), but no clip is, and the player body, its animations and
-the viewmodel are still the committed retail bring-up set described above. The terrain has
+Revalidated on retail 2026-09-06 with the Godot-authored models: a `/FRISK`
+boot on the `--install` staging logs `person.3DI`, `person_hd.3DI`,
+`arms.3DI`, `akm.3DI`, `crate.3DI`, their `.TGA` textures (the 32 bpp flat
+normals on the type-5 slots included) and the authored `AVATARS.DEF` as
+loaded; mission entry with the drawn viewmodel is owed to the next onHook
+session. Our own runtime on the same staging draws the rifle and arms in first
+person and the body in the chase camera, posed by the retail clips.
+
+Known gaps: the shaders, the house, the crate, the body and head, the rifle
+and arms and the avatar table are ours (above), but no clip is: the player's
+animations, the rifle's clips and their `.adm` tables are still the committed
+retail bring-up set described above. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.
 
