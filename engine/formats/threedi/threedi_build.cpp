@@ -46,9 +46,19 @@ void threedi_build_assemble(const ThreediBuildModel &m, ThreediAssembled &out) {
 			ro.abs[0] = static_cast<float>(abs.x);
 			ro.abs[1] = static_cast<float>(abs.y);
 			ro.abs[2] = static_cast<float>(abs.z);
-			ro.rel[0] = static_cast<float>(abs.x - parent_pivot.x);
-			ro.rel[1] = static_cast<float>(abs.y - parent_pivot.y);
-			ro.rel[2] = static_cast<float>(abs.z - parent_pivot.z);
+			// The derived form keeps the writer's signed-zero convention; the
+			// caller's own value (a scene node's exact local origin) wins only
+			// where the two differ as floats.
+			ThreediBuildVec3 rel{abs.x - parent_pivot.x, abs.y - parent_pivot.y, abs.z - parent_pivot.z};
+			if (part.has_rel) {
+				const ThreediBuildVec3 given = threedi_build_to_model(part.rel);
+				if (static_cast<float>(given.x) != static_cast<float>(rel.x)) rel.x = given.x;
+				if (static_cast<float>(given.y) != static_cast<float>(rel.y)) rel.y = given.y;
+				if (static_cast<float>(given.z) != static_cast<float>(rel.z)) rel.z = given.z;
+			}
+			ro.rel[0] = static_cast<float>(rel.x);
+			ro.rel[1] = static_cast<float>(rel.y);
+			ro.rel[2] = static_cast<float>(rel.z);
 			double mn[3] = {1e9, 1e9, 1e9}, mx[3] = {-1e9, -1e9, -1e9};
 			bool any = false;
 			// Opaque strips first, then alpha strips (the renderer's walk).

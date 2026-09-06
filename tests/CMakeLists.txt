@@ -51,6 +51,11 @@ foreach(test ctrl decode pose runtime wave)
 endforeach()
 
 # Placement ground-anchor resolution (ground userpoint, else the model origin)
+add_executable(threedi_scene_names_test threedi/scene_names_test.cpp)
+target_link_libraries(threedi_scene_names_test PRIVATE opennova_formats)
+target_include_directories(threedi_scene_names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_scene_names COMMAND threedi_scene_names_test)
+
 add_executable(threedi_ground_anchor_test threedi/ground_anchor_test.cpp)
 target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_formats)
 target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

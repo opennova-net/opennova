@@ -15,6 +15,7 @@
     "formats/wac/command_table.cpp",
     "net/npwire/replay/wire_capture.cpp",
     "formats/threedi/threedi_build.cpp",
+    "formats/threedi/threedi_scene_names.cpp",
     "tga"
   ],
   "counters": {

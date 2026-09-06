@@ -26,10 +26,6 @@
 // stored pre-quantized so a read -> write round trip reproduces the bytes:
 // int/65536.0f, int/16384.0f and int/256.0f multiply back exactly in binary
 // float, so int -> float -> int is the identity on every platform.
-//
-// STAGED, NOT WIRED outside tests/: the live owner is the Godot model
-// exporter and projector under godot/src/model/ (the next slice of the
-// authoring roadmap); tests/fixtures/minimal_3di_gen.cpp consumes it today.
 #pragma once
 
 #include <formats/threedi/threedi_3di3.h>
@@ -82,7 +78,14 @@ struct ThreediBuildStrip {
 
 struct ThreediBuildPart {
 	int parent = 0; // the root references itself
-	ThreediBuildVec3 pivot;     // mission axes
+	ThreediBuildVec3 pivot;     // mission axes (ROBJ abs)
+	// The parent-relative pivot (ROBJ rel) when the caller carries it as an
+	// exact value of its own (a scene node's local origin). Assembly derives
+	// abs - parent abs and takes this value only where the two differ as
+	// floats (a recipe's double pivots leave a rel the float abs cannot
+	// re-derive), so the derived signed-zero convention survives.
+	bool has_rel = false;
+	ThreediBuildVec3 rel;
 	std::vector<ThreediBuildStrip> strips;
 };
 
@@ -152,10 +155,14 @@ struct ThreediBuildModel {
 		return static_cast<int>(lods.size()) - 1;
 	}
 
-	int add_part(int lod, int parent, ThreediBuildVec3 pivot) {
+	int add_part(int lod, int parent, ThreediBuildVec3 pivot, const ThreediBuildVec3 *rel = nullptr) {
 		ThreediBuildPart part;
 		part.parent = parent;
 		part.pivot = pivot;
+		if (rel != nullptr) {
+			part.has_rel = true;
+			part.rel = *rel;
+		}
 		lods[lod].parts.push_back(part);
 		return static_cast<int>(lods[lod].parts.size()) - 1;
 	}

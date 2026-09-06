@@ -101,6 +101,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_write.cpp  # Threedi3di3 -> 3DI3 (parity writer, ADR 0003)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_build.cpp       # the construction API over the writer (recipe -> Threedi3di3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_scene_names.cpp # the scene naming contract (docs/threedi/scene-naming-contract.md)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_ground_anchor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_ctrl_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm.cpp

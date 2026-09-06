@@ -199,6 +199,16 @@ add_library(${TARGET_NAME} SHARED
     world/game_world.cpp
     world/world_source.cpp
     world/world_entity_proxy.cpp
+    model/model_document.cpp
+    model/model_material_spec.cpp
+    model/model_authoring_manifest.cpp
+    model/model_collision_section_3d.cpp
+    model/model_bounding_volume_3d.cpp
+    model/model_user_point_3d.cpp
+    model/model_light_3d.cpp
+    model/model_scene_projector.cpp
+    model/model_scene_exporter.cpp
+    model/model_texture_encoder.cpp
     world/game_world_preview.cpp
     world/game_world_frame.cpp
     world/game_world_load.cpp

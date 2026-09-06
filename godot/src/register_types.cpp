@@ -58,6 +58,16 @@
 #include "world/game_world.h"
 #include "world/world_source.h"
 #include "world/world_entity_proxy.h"
+#include "model/model_authoring_manifest.h"
+#include "model/model_bounding_volume_3d.h"
+#include "model/model_collision_section_3d.h"
+#include "model/model_document.h"
+#include "model/model_light_3d.h"
+#include "model/model_material_spec.h"
+#include "model/model_scene_exporter.h"
+#include "model/model_scene_projector.h"
+#include "model/model_texture_encoder.h"
+#include "model/model_user_point_3d.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
 #include "world/resource_root_resolver.h"
@@ -423,6 +433,20 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_INTERNAL_CLASS(LiveArmoryWorldView);
 	GDREGISTER_CLASS(WorldSource);
 	GDREGISTER_CLASS(WorldEntityProxy);
+	GDREGISTER_CLASS(ModelDocument);
+	GDREGISTER_CLASS(ModelTextureRow);
+	GDREGISTER_CLASS(ModelMaterialSpec);
+	GDREGISTER_CLASS(ModelPartAnimationRow);
+	GDREGISTER_CLASS(ModelLodSpec);
+	GDREGISTER_CLASS(ModelTextureSource);
+	GDREGISTER_CLASS(ModelAuthoringManifest);
+	GDREGISTER_CLASS(ModelCollisionSection3D);
+	GDREGISTER_CLASS(ModelBoundingVolume3D);
+	GDREGISTER_CLASS(ModelUserPoint3D);
+	GDREGISTER_CLASS(ModelLight3D);
+	GDREGISTER_CLASS(ModelSceneProjector);
+	GDREGISTER_CLASS(ModelSceneExporter);
+	GDREGISTER_CLASS(ModelTextureEncoder);
 	GDREGISTER_CLASS(GameWorld);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);
