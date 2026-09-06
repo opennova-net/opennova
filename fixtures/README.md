@@ -65,7 +65,7 @@ records, and this README.
 ## threedi/synth — the synthetic 3DI model set (minted)
 
 `tests/fixtures/minimal_3di_gen.cpp` authors every model in memory
-(`tests/fixtures/minimal_3di_builder.h`, mission axes: x forward, y left, z up,
+(`engine/formats/threedi/threedi_build.h`, mission axes: x forward, y left, z up,
 origin on the ground unless noted) and writes it through `threedi_3di3_write`.
 Eleven base models stand in for the retail models the tests once loaded, shaped
 after what those tests key on:

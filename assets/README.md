@@ -247,7 +247,7 @@ archive. The 2026-08-18 "ship `.dds` archived" trap applies to a loose file
 matching the request's *truncated literal* name, not to substitution.
 
 This set is replaced by our own once that run is green. The model side already
-has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skinned
+has a path — `engine/formats/threedi/threedi_build.h` mints a nineteen-part skinned
 `person` rig in the retail bone order through `threedi_3di3_write`, and the house
 (`house.3di`, items.def `108001`) is the first model minted that way to ship in
 the set. The clip side needs a `.bad` **writer** first: `engine/formats/bad/bad.h`

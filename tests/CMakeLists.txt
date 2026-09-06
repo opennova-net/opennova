@@ -77,7 +77,7 @@ add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
 # The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
-# writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
+# writer from engine/formats/threedi/threedi_build.h and byte-compared every run
 # (--write regenerates). Every 3DI consumer below reads from that directory.
 add_executable(minimal_3di_gen_test fixtures/minimal_3di_gen.cpp)
 target_link_libraries(minimal_3di_gen_test PRIVATE opennova_formats)
