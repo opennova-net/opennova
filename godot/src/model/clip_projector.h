@@ -14,15 +14,17 @@ namespace godot {
 
 // Samples an Animation over an authored rig into a .bad clip: the inverse of
 // the runtime's clip load (SkeletalAnim over anim_sample.h). The rig is the
-// scene's Skeleton3D with BN## bones (the model rows, ADR 0046); the clip's
-// channels carry each row's model-space rotation relative to its rest, one
-// key per frame tick plus the terminal key, against an identity bind (our
+// scene's Skeleton3D with BN## bones (the model rows, ADR 0046). A clip's
+// frame is the presentation frame Godot shows (the model frame mirrored on x:
+// the runtime's skeleton carries the model's pivots mirrored that way, which
+// is what BadBone.position stores and positions_from_model reconstructs), so
+// the channels carry each row's rotation relative to its rest as authored,
+// one key per frame tick plus the terminal key, against an identity bind (our
 // reset clips hold the rest pose, so channel-at-reset is the identity the
-// stored bind must invert to). Bone positions are the presentation-frame
-// parent-relative pivots (what positions_from_model reconstructs under an
-// identity bind), and a bone that leaves the pivots' forward kinematics gets
-// a per-frame translation (flags bit 1). Events carry the spec's root motion
-// per frame, the capsule heights above the ground proxy, and the triggers.
+// stored bind must invert to). A bone that leaves the pivots' forward
+// kinematics gets a per-frame translation (flags bit 1). Events carry the
+// spec's root motion per frame, the capsule heights above the ground proxy,
+// and the triggers.
 class ClipProjector : public RefCounted {
 	GDCLASS(ClipProjector, RefCounted)
 

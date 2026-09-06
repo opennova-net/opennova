@@ -33,58 +33,58 @@ forward_speed = 0.5
 animation = "walk"
 clip_name = "pers_walkfr"
 forward_speed = 1.06065
-lateral_speed = 1.06065
+lateral_speed = -1.06065
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_s5ou5"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkfr"
 forward_speed = 0.63639
-lateral_speed = 0.63639
+lateral_speed = -0.63639
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_44wb5"]
 animation = "crawl"
 clip_name = "pers_crwlfr"
 forward_speed = 0.35355
-lateral_speed = 0.35355
+lateral_speed = -0.35355
 
 [sub_resource type="ClipSpec" id="ClipSpec_x6o48"]
 animation = "walk"
 clip_name = "pers_walkr"
-lateral_speed = 1.5
+lateral_speed = -1.5
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_w1dca"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkr"
-lateral_speed = 0.9
+lateral_speed = -0.9
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_qoab3"]
 animation = "crawl"
 clip_name = "pers_crwlr"
-lateral_speed = 0.5
+lateral_speed = -0.5
 
 [sub_resource type="ClipSpec" id="ClipSpec_nn2iw"]
 animation = "walk"
 clip_name = "pers_walkbr"
 forward_speed = -1.06065
-lateral_speed = 1.06065
+lateral_speed = -1.06065
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_pb7j0"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkbr"
 forward_speed = -0.63639
-lateral_speed = 0.63639
+lateral_speed = -0.63639
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_8i8ss"]
 animation = "crawl"
 clip_name = "pers_crwlbr"
 forward_speed = -0.35355
-lateral_speed = 0.35355
+lateral_speed = -0.35355
 
 [sub_resource type="ClipSpec" id="ClipSpec_skt83"]
 animation = "walk"
@@ -107,58 +107,58 @@ forward_speed = -0.5
 animation = "walk"
 clip_name = "pers_walkbl"
 forward_speed = -1.06065
-lateral_speed = -1.06065
+lateral_speed = 1.06065
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_p3lf3"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkbl"
 forward_speed = -0.63639
-lateral_speed = -0.63639
+lateral_speed = 0.63639
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_4mcyu"]
 animation = "crawl"
 clip_name = "pers_crwlbl"
 forward_speed = -0.35355
-lateral_speed = -0.35355
+lateral_speed = 0.35355
 
 [sub_resource type="ClipSpec" id="ClipSpec_huul3"]
 animation = "walk"
 clip_name = "pers_walkl"
-lateral_speed = -1.5
+lateral_speed = 1.5
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_dnnj2"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkl"
-lateral_speed = -0.9
+lateral_speed = 0.9
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_7qgc1"]
 animation = "crawl"
 clip_name = "pers_crwll"
-lateral_speed = -0.5
+lateral_speed = 0.5
 
 [sub_resource type="ClipSpec" id="ClipSpec_6ujm7"]
 animation = "walk"
 clip_name = "pers_walkfl"
 forward_speed = 1.06065
-lateral_speed = -1.06065
+lateral_speed = 1.06065
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_uh0jf"]
 animation = "crouch_walk"
 clip_name = "pers_cwlkfl"
 forward_speed = 0.63639
-lateral_speed = -0.63639
+lateral_speed = 0.63639
 triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
 
 [sub_resource type="ClipSpec" id="ClipSpec_jb8ta"]
 animation = "crawl"
 clip_name = "pers_crwlfl"
 forward_speed = 0.35355
-lateral_speed = -0.35355
+lateral_speed = 0.35355
 
 [sub_resource type="ClipSpec" id="ClipSpec_2fac2"]
 animation = "run"

@@ -1,6 +1,5 @@
 #include "model/clip_projector.h"
 
-#include "model/model_frames.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/variant/basis.hpp>
@@ -51,17 +50,6 @@ Skeleton3D *find_skeleton(Node *p_node) {
 		if (skeleton != nullptr) return skeleton;
 	}
 	return nullptr;
-}
-
-// The presentation frame is the model frame mirrored on x; a rotation crosses
-// by conjugation with that mirror (a proper rotation again).
-Basis model_basis_from_presentation(const Basis &p_basis) {
-	const Basis mirror(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1));
-	return mirror * p_basis * mirror;
-}
-
-Vector3 model_vec(const Vector3 &p_presentation) {
-	return vec3_from_build(model_from_presentation(p_presentation));
 }
 
 struct Row {
@@ -223,37 +211,37 @@ Ref<ClipDocument> ClipProjector::project(Node3D *p_model_root, const Ref<Animati
 				resolved[static_cast<size_t>(*it)] = true;
 			}
 		}
-		std::vector<Vector3> fk_model(row_count);
-		std::vector<Vector3> actual_model_rows(row_count);
-		std::vector<Basis> rotation_model(row_count);
+		std::vector<Vector3> fk(row_count);
+		std::vector<Vector3> actual(row_count);
+		std::vector<Basis> rotation(row_count);
 		float top = -1.0e30f;
 		for (size_t r = 0; r < row_count; ++r) {
 			const Row &row = rows[r];
 			const Transform3D global = skeleton_global * pose_global[static_cast<size_t>(row.bone)];
-			const Basis relative = global.basis * row.global_rest.basis.inverse();
-			rotation_model[r] = model_basis_from_presentation(relative);
-			const Quaternion q = rotation_model[r].get_rotation_quaternion().normalized();
+			// The clip's frame is the presentation frame: the runtime's skeleton
+			// carries the model's pivots x-mirrored (BadBone.position is that
+			// same mirrored rel, positions_from_model) and applies each channel to
+			// them as-is, so a rotation authored over the Godot rig crosses unchanged.
+			rotation[r] = global.basis * row.global_rest.basis.inverse();
+			const Quaternion q = rotation[r].get_rotation_quaternion().normalized();
 			channels[r][k] = BadQuaternion{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z),
 				static_cast<float>(q.w)};
 			// The forward kinematics the runtime runs over the pivots: root at its
 			// pivot, a child at the parent's (translated) position plus the
 			// parent's rotation applied to its parent-relative pivot; a bone's
 			// translation is what it adds beyond that.
-			const Vector3 rel_model = model_vec(row.rel);
-			const Vector3 actual_model = model_vec(global.origin);
+			actual[r] = global.origin;
 			if (row.parent < 0) {
-				fk_model[r] = rel_model;
+				fk[r] = row.rel;
 			} else {
-				fk_model[r] = actual_model_rows[static_cast<size_t>(row.parent)] +
-						rotation_model[static_cast<size_t>(row.parent)].xform(rel_model);
+				fk[r] = actual[static_cast<size_t>(row.parent)] + rotation[static_cast<size_t>(row.parent)].xform(row.rel);
 			}
-			actual_model_rows[r] = actual_model;
-			translations[k][r] = actual_model - fk_model[r];
+			translations[k][r] = actual[r] - fk[r];
 			if (translations[k][r].length() > 1.0e-4f) translated = true;
-			if (static_cast<int>(r) != ground_row && actual_model.y > top) top = actual_model.y;
+			if (static_cast<int>(r) != ground_row && actual[r].y > top) top = actual[r].y;
 		}
-		const float ground = model_vec(skeleton_global.xform(pose_global[static_cast<size_t>(rows[static_cast<size_t>(ground_row)].bone)].origin)).y;
-		const float root_height = model_vec(skeleton_global.xform(pose_global[static_cast<size_t>(rows[0].bone)].origin)).y;
+		const float ground = skeleton_global.xform(pose_global[static_cast<size_t>(rows[static_cast<size_t>(ground_row)].bone)].origin).y;
+		const float root_height = skeleton_global.xform(pose_global[static_cast<size_t>(rows[0].bone)].origin).y;
 		bottoms[k] = p_spec->get_capsule_bottom() >= 0.0f ? p_spec->get_capsule_bottom() : root_height - ground;
 		tops[k] = p_spec->get_capsule_top() >= 0.0f ? p_spec->get_capsule_top() : top - ground;
 	}
