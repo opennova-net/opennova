@@ -1564,7 +1564,7 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	vp.anchor_x = 300; vp.anchor_y = 400;
 	vp.stance_offset_x = -12; vp.stance_offset_y = 6;
 	vp.hull_health = 100; vp.hull_max_health = 100;
-	// No silhouette texture: the seats must still draw.
+	// No interface texture: retail hides seats as well as the silhouette.
 	vp.silhouette_valid = false;
 	HudVehicleSeat driver; driver.x = 5; driver.y = 7;
 	driver.occupied = true; driver.health = 100; driver.max_health = 100;
@@ -1572,6 +1572,16 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	HudVehicleSeat empty; empty.x = 40; empty.y = 7; empty.label = "2";
 	vp.seats.push_back(driver);
 	vp.seats.push_back(empty);
+
+	const HudDrawList missing = compiler.compile(state, 1024.0f, 768.0f);
+	vp.shown = false;
+	const HudDrawList hidden = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(missing.quads.size() == hidden.quads.size() &&
+	      missing.glyphs.size() == hidden.glyphs.size(),
+	      "missing vehicle interface texture hides the entire panel");
+	vp.shown = true;
+	vp.silhouette_valid = true;
+	vp.silhouette_w = 64; vp.silhouette_h = 32;
 
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	// Exactly ONE filled seat box -- the occupied seat. The empty seat draws a
@@ -1581,12 +1591,11 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 		if (q.filled && q.texture == opennova::hud::kHudTexNone) ++filled;
 	CHECK(filled >= 1, "the occupied seat draws a filled box");
 
-	// A missing silhouette texture emits no panel quad but does not suppress
-	// the seats -- the panel degrades rather than disappearing.
+	// With a valid texture, the silhouette and seats are both present.
 	size_t panel_quads = 0;
 	for (const auto &q : list.quads)
 		if (q.texture == opennova::hud::kHudTexVehiclePanel) ++panel_quads;
-	CHECK(panel_quads == 0, "no silhouette quad without its texture");
+	CHECK(panel_quads == 1, "one silhouette quad with the vehicle interface texture");
 
 	// The digit and the X are CENTRED on their boxes: the text's top sits
 	// above the box centre by half the label height (centre + 1 - h/2), not

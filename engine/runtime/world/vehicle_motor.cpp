@@ -50,9 +50,60 @@ int32_t cos22_of_bam(int32_t bam) {
 
 } // namespace
 
+void VehicleSystem::tick_health(Entity &veh, const VehicleTraits &traits) {
+    // All five movers build the same stagger key with LEA x9 then LEA x4.
+    // The decompiler's current_tick[9 * DcbId] is byte-scaled pointer math.
+    // [orig: Entity_UpdateVehiclePhysics @0x48AF00, sites @0x48AF24..0x48AF2D;
+    // Entity_UpdateAircraftPhysics @0x490310, sites @0x490334..0x490340]
+    if (!world_.ai.is_authority || veh.health <= 0 ||
+        ((world_.logic_tick + 36u * static_cast<uint32_t>(veh.net_id)) & 63u) != 0)
+        return;
+    if (veh.health > traits.critical_hp) {
+        // Strict inequality: a hull at max - regen does not regenerate.
+        // [orig: @0x48B015..0x48B03F, @0x48D57C..0x48D5A6;
+        // aircraft health read/store @0x4903F9..0x49042D]
+        if (traits.non_critical_regen != 0 &&
+            veh.health < veh.health_max - traits.non_critical_regen)
+            veh.health += traits.non_critical_regen;
+    } else {
+        // The critical band burns to zero; clients only render this state.
+        // [orig: @0x48B06C..0x48B083, @0x48D5FF..0x48D616;
+        // aircraft critical-band entry @0x490434]
+        veh.health = veh.health > traits.critical_drain
+                ? veh.health - traits.critical_drain : 0;
+    }
+}
+
 VehicleCtrlRegisters vehicle_ctrl_registers(
-        const Entity::VehicleMotorState &state) {
+        const Entity::VehicleMotorState &state, VehicleRenderFamily render_family,
+        const AiEntity *ai) {
     VehicleCtrlRegisters out;
+    // Each render callback owns a different subset of the shared register bank.
+    // Tank suspension needs the separate six-probe projection and stays unowned
+    // until that state is modeled; its independent tracks are available here.
+    // [orig: @0x4929B0 (cveh), @0x449C10 (tank), @0x48F1A0 (chel), @0x48F140 (cpln)]
+    switch (render_family) {
+    case VehicleRenderFamily::Ground:
+        out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TIRES; break;
+    case VehicleRenderFamily::Tank:
+        out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TRACKS; break;
+    case VehicleRenderFamily::Helicopter: out.mask = VC_ROTORS; break;
+    case VehicleRenderFamily::Plane: out.mask = VC_STEERING | VC_ROTORS | VC_WHEELS; break;
+    case VehicleRenderFamily::None: break;
+    }
+    if (ai != nullptr && render_family != VehicleRenderFamily::None) {
+        // MOVSX of the active BAM high words, unlike unsigned wheel/rotor phases.
+        // [orig: HUD_CacheEntityDisplayInfo @0x4A3D90; tank tail @0x449ECF..0x449EE2]
+        out.gun_yaw = io::bam_sar(ai->brain.f[AiBrain::kActiveYaw], 16);
+        out.gun_pitch = io::bam_sar(ai->brain.f[AiBrain::kActivePitch], 16);
+        if (render_family == VehicleRenderFamily::Tank || ai->profile.type == 2)
+            out.mask |= VC_VEHICLE_GUN;
+        if (render_family == VehicleRenderFamily::Helicopter ||
+            (render_family != VehicleRenderFamily::Tank && ai->profile.type == 1))
+            out.mask |= VC_HELO_GUN;
+    }
+    for (size_t i = 0; i < out.tracks.size(); ++i)
+        out.tracks[i] = static_cast<int32_t>(static_cast<uint32_t>(state.track_phase[i]) >> 16);
 
     // entity+0x2B6 is the high word of the vehicle wheel/steer dword. MOVZX
     // makes a negative wheel deflection a 0..0xFFFF cyclic phase; the following
@@ -83,6 +134,11 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
     out.tail_rotor = out.rotor;
     out.wheels = static_cast<int32_t>(
             static_cast<uint32_t>(state.wheel_phase) >> 16);
+    const auto tire = [](int32_t value) { return std::clamp(value, 0, 0x10000); };
+    out.tires = {tire(state.wheel_comp[0]), tire(state.wheel_comp[1]),
+        tire(io::bam_sar(io::bam_add(state.wheel_comp[0], state.wheel_comp[2]), 1)),
+        tire(io::bam_sar(io::bam_add(state.wheel_comp[1], state.wheel_comp[3]), 1)),
+        tire(state.wheel_comp[3]), tire(state.wheel_comp[2])};
     return out;
 }
 
@@ -340,6 +396,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
     // physics is deferred with the state machine) [orig: @0x48af61 `!(Flags & 2) &&
     // Health <= 0 -> mode 21`; the drive block also rejects on Flags bit 1 via the
     // 0x10000002 mask below].
+    tick_health(veh, traits);
     const bool wrecked = veh.health <= 0;
 
     // ------------------------------------------------------------------ input block
@@ -533,6 +590,9 @@ if (traits.family != VehicleFamily::Bike &&
         }
     }
 
+    if (traits.family == VehicleFamily::Tank)
+        track_phase_tick(m.track_phase, m.speed, m.wheel_rate_bam);
+
     bool collided = false;
 
     // ------------------------------------------- velocity, gravity, integration
@@ -612,13 +672,19 @@ if (traits.family != VehicleFamily::Bike &&
         // Submerged drag: while the solve-owned in-water flag is up, planar and
         // vertical velocity shed 1/4 per tick [orig: `test Flags,0x8000` then
         // `v -= (v+2)>>2` on all three @0x48d013..0x48d052; identical in the
-        // bike mover @0x4865bb..0x4865ed]. The authority drown-drain countdown
-        // (word +0x11E -> overlay clear) is authority-gated — deferred with the
-        // authority damage legs [orig: @0x48d05a..0x48d083].
+        // bike mover @0x4865bb..0x4865ed]. The two-HP drown drain
+        // (health word +0x11E) is authority-gated — ported below;
+        // the attacker clear remains unmodeled [orig: @0x48d05a..0x48d083].
         if ((veh.flags & 0x8000u) != 0) {
             m.vel_x -= (m.vel_x + 2) >> 2;
             m.vel_y -= (m.vel_y + 2) >> 2;
             m.slide_z -= (m.slide_z + 2) >> 2;
+            // All ground families lose two health per submerged authority tick.
+            // Boats use capsize damage; their afloat flag is normal operation.
+            // [orig: cveh @0x48D05A..0x48D083; cbik @0x4865F3..0x48661C;
+            // ctan @0x48A87B..0x48A8A4]
+            if (world.ai.is_authority && veh.health > 0)
+                veh.health = std::max(0, veh.health - 2);
         }
 
         const int32_t prev[3] = {to_fixed(veh.position.x), to_fixed(veh.position.y),
@@ -722,11 +788,14 @@ if (traits.family != VehicleFamily::Bike &&
                 normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
     }
 
+    slew_turret(veh, 0x2108421);
+
     // Publish the final motor state into the generic, host-owned persistent
     // emitter seam. The claimant gate lives in the sound consumer because the
     // motor still needs to settle an unoccupied PlayerControl vehicle.
     // [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
     world.vehicles.update_ground_sound(veh, traits, wrecked, collided);
+    update_engine_sound(veh, traits);
     // The part-animation accumulators, at the mover's tail [orig: the
     // Entity_UpdatePartSpinAccumulator call @0x48AE3D in this mover].
     world.vehicles.part_anim_tick(veh, traits);
@@ -1512,6 +1581,7 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
     World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;
+    update_engine_sound(veh, traits);
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
@@ -1828,6 +1898,9 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
         watercraft_seed_platform_latch(world, veh, traits);
     }
 
+    tick_health(veh, traits);
+    update_engine_sound(veh, traits);
+
     // A DEAD hull skips everything to the matrix-build tail — no input, no
     // integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA]. Retail has
     // ONE flags word; our death chain latches the dead bit on engine_flags
@@ -1838,7 +1911,7 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     // drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
     // |Roll|/|Pitch| > 0x471C7180, Health -= 200, floor 0; the overlayFlags
     // zero at the kill edge is an unmodeled slot].
-    if (veh.health > 0 &&
+    if (world.ai.is_authority && veh.health > 0 &&
         (io::bam_abs(m.air_roll_bam) > 0x471C7180 ||
          io::bam_abs(m.air_pitch_bam) > 0x471C7180)) {
         veh.health -= 200;

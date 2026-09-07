@@ -27,9 +27,9 @@
 // lives in vehicle_motor_air.cpp + AiSystem::chel_ai_drive (2026-09-01).
 // Tracked deferrals (D-NET-161): the skid/tire-slip model (`tireSlip`/
 // `slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
-// vehicle-vs-vehicle collision loop, the authority drown-drain countdown, the
+// vehicle-vs-vehicle collision loop, the wreck-state tails, the
 // solve's contact-direction store feeding a slope-following velocity
-// re-derive (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the
+// re-derive (@0x47E65D../@0x48cf97.. — the ground mover uses the full basis; the
 // tank keeps its full-basis drive with the same store deferred), specialized
 // vehicle sound families beyond the ground idle/drive/reverse pass in
 // vehicle_sound.cpp, and the vehicle AI state machine's non-drive states
@@ -46,6 +46,7 @@
 namespace opennova::world {
 
 class World;
+struct AiEntity;
 
 // Per-item vehicle physics parameters, PRE-SCALED by the items.def parser exactly like
 // the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]:
@@ -95,7 +96,17 @@ struct VehicleWakeEffect {
     std::string userpoint;
 };
 
+// Selected independently of the mover by items.def render_function.
+// [orig: renderer callback rows @0x82CFD0..0x82D00F]
+enum class VehicleRenderFamily : uint8_t { None, Ground, Tank, Helicopter, Plane };
+
+enum VehicleControlMask : uint16_t {
+    VC_STEERING = 1, VC_SPEED = 2, VC_ROTORS = 4, VC_WHEELS = 8,
+    VC_TIRES = 16, VC_TRACKS = 32, VC_VEHICLE_GUN = 64, VC_HELO_GUN = 128,
+};
+
 struct VehicleTraits {
+    VehicleRenderFamily render_family = VehicleRenderFamily::Ground;
     int32_t physics = 0;       // itemDef+0x8DC ground-dispatch selector; direct air ignores it
     int32_t player_speed = 0;  // itemDef+0x8E8
     int32_t acceleration = 0;  // itemDef+0x8E0
@@ -136,7 +147,7 @@ struct VehicleTraits {
     // to criticalHp (AiSystem::apply_min_ai_crew_clamp).
     int32_t min_ai = 0;        // itemDef+0x8D8 raw — the crew count threshold
     int32_t critical_hp = 0;   // itemDef+0x180 i16 raw — the clamp ceiling
-    // The aircraft mover's authority health machine [orig: the every-64th-tick
+    // The family movers' authority health machine [orig: the every-64th-tick
     // block of Entity_UpdateAircraftPhysics @0x4903F4..0x4904A7]: above
     // criticalHp the hull regens nonCriticalRegen up to healthMax - regen; at or
     // below it the hull burns criticalDrain per 64 ticks.
@@ -212,6 +223,9 @@ struct VehicleDriveCmd {
 // owner gives rendering and native tests one implementation of the original
 // word selection, wrapping absolute value, and saturation rules.
 struct VehicleCtrlRegisters {
+    uint16_t mask = 0;
+    std::array<int32_t, 2> tracks{};
+    int32_t gun_yaw = 0, gun_pitch = 0;
     int32_t steering = 0;
     int32_t speed = 0;
     // The part-animation words: the rotor angle accumulator's high word for
@@ -223,10 +237,15 @@ struct VehicleCtrlRegisters {
     int32_t rotor = 0;
     int32_t tail_rotor = 0;
     int32_t wheels = 0;
+    // VEHICLE_TIRE00..05: front L/R, midpoint L/R, rear R/L.
+    // [orig: Entity_CacheVehicleHUDStats @0x4929F6..0x492AC5]
+    std::array<int32_t, 6> tires{};
 };
 
 VehicleCtrlRegisters vehicle_ctrl_registers(
-        const Entity::VehicleMotorState &state);
+        const Entity::VehicleMotorState &state,
+        VehicleRenderFamily render_family = VehicleRenderFamily::Ground,
+        const AiEntity *ai = nullptr);
 
 // abs((0xFFFF * signed_speed) >> 15), kept as Q16 control magnitude. The
 // arithmetic shift occurs before absolute value, including its one-unit

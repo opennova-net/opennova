@@ -18,6 +18,9 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 
 | Component | Verdict | Evidence |
 |---|---|---|
+| Family health cadence, ground submersion, rotor timing, turret slew and track phases | MATCHING (read-only grill; regression-pinned port, 2026-09-07) | Section 11; `vehicle_motor`, `vehicle_part_anim`, `vehicle_mount` |
+| Renderer-selected suspension/track/turret controls | MATCHING for the modeled channels; tank six-probe suspension and helo gear remain unported | Section 11; `netsim_present_rows`, `simassets_item_traits`, GUT `mission_present_pass_test.gd` |
+| Mounted panel texture admission | MATCHING (read-only grill) | Section 11; `hud_frame_compiler` |
 | Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
 | Watercraft mover AUTHORITY half (`@ 0x48D480`, gate `@ 0x48DF8C`) | MATCHING — ported (`tick_watercraft_motor` + `AiSystem::watercraft_ai_drive`; shared `watercraft_motor_core`) | §1.12 spec (witnessed 2026-08-06); `watercraft_client_motor` ctest authority legs; `00trg_defense_probe.gd` (host boats drive their event routes) |
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
@@ -597,7 +600,7 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
   Both legs fall into the steer integrator @ 0x48E82C (§3, the ported core).
 
 Deferrals staying with D-NET-161: the every-8th-tick groundEntity refresh
-[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the [135]
+[@ 0x48D51F] + deck-carrier follow, the fire-FX leg (health is ported in section 11), the [135]
 mirror, and the wake-anim lerp. Ported 2026-09-01: the MoveOrder merge (the
 occupant's own word, wire-visible in the echo), the submerged-driver cut
 (`watercraft_driver_submerged` — a body with no derived eye height keeps the
@@ -3564,13 +3567,12 @@ accumulator, no separate tail-rotor state.
 **Port**: `engine/runtime/world/vehicle_part_anim.{h,cpp}` (`RotorState` =
 `VehicleMotorState::PartSpin` +0x460/+0x464/+0x468, `wheel_phase` +0x2B8; the
 two arms selected by the profile type, `rotor_rate_needs_roll` /
-`rotor_rate_from_roll` on `World::next_prng16`, `rotor_tick`), called at every
-mover tail and, for the host's helicopters whose mover is the unported HELO
-movement physics, from the authority pass at the missing tail site;
+`rotor_rate_from_roll` on `World::next_prng16`, `rotor_tick`), called at the ground mover tails and the aircraft mover head before the
+rotor-up gate (section 11); boats advance only their wheel phase;
 `vehicle_ctrl_registers` publishes rotor/tail_rotor/wheels beside
 steering/speed; `present_rows.h` `PF_VEHICLE_ROTOR/_TAIL_ROTOR/_WHEELS` →
 `entity_presenter` (`CtrlNames` += HELO_ROTOR / HELO_TAILROTOR /
-VEHICLE_WHEELS, the ctrl leg 18 → 21 fields, append-only) →
+VEHICLE_WHEELS, the ctrl memoization table includes all published fields) →
 `ObjectModel::set_ctrl_override`; the seed in `entity_spawn.cpp`. Pinned by
 ctest `vehicle_part_anim` (the pure pins; a player-control buggy spins only
 while mounted and decays after dismount; exactly one PRNG draw per unoccupied
@@ -3808,6 +3810,42 @@ Witnessed and ported (`stage_air_vehicle_input` + the register-mirror gate in
 
 ---
 
+## Section 11: health, turret state, animation ownership and sound edges (2026-09-07)
+
+This pass uses retail `Jointops.exe.kong.i64`, imagebase `0x400000`.
+Implementation: `vehicle_motor.cpp`, `vehicle_motor_air.cpp`,
+`vehicle_part_anim.{h,cpp}`, `vehicle_sound.cpp`, the item-traits fold,
+`inmatch/present_rows.cpp`, and Godot's `entity_presenter.cpp`.
+The proof is an instruction/decompiler grill and regression tests, not
+complete mission-level vehicle parity.
+
+| Witness | Ported behavior |
+|---|---|
+| `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, phase `@ 0x48AF24..0x48AF2D`, health `@ 0x48AFFD..0x48B083`; boat `@ 0x48D561..0x48D616`; aircraft `@ 0x4903F4..0x490480` | All families use `(tick + 36 * DcbId) & 63`, authority only. Above critical HP, regeneration requires `health < max - regen` strictly. At/below critical HP, criticalDrain floors at zero. The x9 LEA is scaled by four again: the decompiler's `tick[9 * id]` is not a nine-tick offset. Boat health runs before authority-only capsize damage. |
+| `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, drain `@ 0x48D05A..0x48D083` | Ground/bike/tank lose two HP per submerged authority tick. Boat flag 0x8000 means normal afloat operation and must not use this drain. The attacker-slot clear at death remains unmodeled. |
+| `[orig: Entity_UpdateAircraftPhysics @ 0x490310]`, `@ 0x490459..0x4904A6` | The burning hull's -2886390 BAM yaw step shares the authority 64-tick cadence. The separate pilot-yaw follow remains unported. |
+| `[orig: Entity_UpdateHeloRotorSpin @ 0x48FA70]`, call `@ 0x4905A6` | Rotor integration runs before the lift gate; the exact full-speed crossing opens the gate that tick. A cold occupied player-control rotor plays slot 30 using the vehicle profile and pilot position only above water and at speed <= 10737417.6. Aircraft does not advance the ground wheel phase. Each caller admits only its own profile type (ground 2, helo 1); other air profiles bypass rotor run-up without running a different spin machine. |
+| Ground `@ 0x48D0E3..0x48D15D`, bike `@ 0x48669A..0x486711`, tank `@ 0x48AA23..0x48AA9E`, aircraft `@ 0x492694..0x492703` | Movers slew active brain yaw (+0x1D8) toward staged yaw (+0x1F0). Below absolute wrapped delta 0x2108421, all six staged words commit; equality takes the yaw-only step. Ground/bike/tank step by signed 0x2108421. Aircraft uses retained signed yaw demand (`@ 0x491CE4..0x491CF8`), not the damped yaw velocity. Watercraft has no such slew block. |
+| `[orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0]`, `@ 0x489F6E..0x489FA0` | Before velocity/contact solving, +0x2BC adds `((speed << 12) - yawRate) << 3`; +0x2C0 adds `((speed << 12) + yawRate) << 3`, with 32-bit wrap. Stationary steering counter-rotates the tracks. |
+| `[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]`, `@ 0x4929F6..0x492AC5` | TIRE00..05 are clamp(comp0), clamp(comp1), clamp((comp0+comp2)>>1), clamp((comp1+comp3)>>1), clamp(comp3), clamp(comp2). Average before clamping. |
+| Renderer table `@ 0x82CFD0..0x82D00F`; `[orig: HUD_CacheEntityDebugStats @ 0x449C10]`; `[orig: HUD_CacheInfantryDisplayInfo @ 0x48F1A0]`; `[orig: HUD_CacheVehicleDisplayInfo @ 0x48F140]` | `render_function` selects independently of `move_function`. Tank WHEELS00..03 alternate unsigned track high words. Gun yaw/pitch use signed active-brain high words (`@ 0x449ECF..0x449EE2`). Ground, tank, helo and plane own different channel subsets; absent channels are released. The curated tank/helo function names were retained despite their misleading descriptions. |
+| `[orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]`, `@ 0x5294A8..0x5294D8`, `@ 0x52953B..0x52959D`; ground caller `@ 0x48D196..0x48D1B8` | A submerged player claimant takes the stop branch. Zero speed substitutes saved-live-pose XYZ displacement, then sqrt/clamp/truncate and the 256 deadband. Ground's speed denominator falls back to brain speed A, then command speed. |
+| `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, sound tail; `[orig: Entity_UpdateWatercraftPhysics @ 0x48D480]`, engine edge | Ground lights emit slot 24 on the rising edge. First claimant emits slot 30 when the occupant eye is above water. Claimant loss clears motion lanes and emits slot 31 subject to the hull water gate. Explicit detach clears the same latch, avoiding a second stop. Mover stop includes +0x18000 clearance; detach has its own gate. |
+| Mounted panel gate `@ 0x5A5038` | A missing interface texture suppresses both silhouette and seats. A valid texture admits both. |
+
+The presentation mask carries ownership only. Joiner compact rows still do
+not publish authoritative vehicle controls. Native regressions cover
+cadence/authority, submersion, sound transitions, rotor timing, wrapped track
+math, turret commit boundaries and snapshot transport. GUT covers channel
+updates and ground-to-tank-to-helo ownership changes.
+
+D-NET-161 and D-SND-17 remain open. Tank TIRE00..13 needs its distinct six-probe
+state (+0x2D4..+0x2E8); publishing the ground six-tire layout would be wrong.
+Helo gear +0x470, downwash/bone-trail effects, contact-driven skid/high-rev
+sound, dedicated aircraft loop families, and remaining force/contact/death
+state tails are explicit follow-ups. IDB instruction annotations record the
+phase, track, rotor-call and turret-commit witnesses; no names changed.
+
 ## IDB changes made during these sessions
 
 2026-08-21 (the post-merge tidy): `Vehicle_ApplyBrakingForce @0x45CEB0` →
@@ -3848,17 +3886,12 @@ renamed `Entity_UpdatePlayerInfantryMovement` → `Entity_UpdateLightVehiclePhys
 
 ## Open items
 
-The unresolved residuals live as explicit entries in the D-NET-196 ledger row
-and the §5.38e disposition (the wheeled/light solves, the tank mover deltas
-and the aircraft local-driver input map CLOSED 2026-08-06 — §8/§9/§10): the
-ground-family shared deferrals (the contact-direction slope-velocity feed —
-D-NET-161; the crash-request producers whose inputs are unported — §7.3; the
-spring sinks/oscillators themselves are WIRED 2026-08-21),
-the bike lean smoother (`Entity_SmoothHeadingToTarget @ 0x45B2C0` —
-FPU-garbled, disasm-pinned), the analog collective channel, the tank
-track-scroll/turret-slew presentation, the
-`Math_FixedPointMatrixToEulerAngles` interior
-(`@ 0x613310`), the `Transform_ComparePartial` field scope (§6.15 — ported as
-planar XY by structural argument), and the HOST-side platform scope (authority
-boats still ride the generic motor; retail's authority runs the solve — the
-ungated call `@ 0x48ECE7`).
+D-NET-161 and D-NET-196 retain vehicle-vs-vehicle contact, contact-direction
+and tire slip, remaining crash-request/force-based wreck transitions, the
+bike lean smoother, analog collective, pilot burn-yaw follow, spawn-parent
+anchor lift, and vehicle deck-carrier/contact integration. Family contact
+solves, authority boat platform motion, spring sinks/oscillators, track
+phases and mover turret slew are already ported. Animation and sound
+residuals are listed in section 11; D-SND-17 remains open. The
+`Math_FixedPointMatrixToEulerAngles` interior (`@ 0x613310`) and
+`Transform_ComparePartial` scope (section 6.15) remain research items.

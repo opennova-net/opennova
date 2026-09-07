@@ -22,6 +22,7 @@
 #include "simulation/destruction_events.h"
 #include "simulation/present_event_records.h"
 #include "simulation/simulation.h"
+#include <runtime/world/vehicle_motor.h>
 #include "world/item_effect_director.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
@@ -47,6 +48,15 @@ struct CtrlNames {
 	String helo_rotor = String("HELO_ROTOR");
 	String helo_tailrotor = String("HELO_TAILROTOR");
 	String vehicle_wheels = String("VEHICLE_WHEELS");
+	String vehicle_tires[6] = {String("VEHICLE_TIRE00"), String("VEHICLE_TIRE01"),
+		String("VEHICLE_TIRE02"), String("VEHICLE_TIRE03"),
+		String("VEHICLE_TIRE04"), String("VEHICLE_TIRE05")};
+	String vehicle_tracks[4] = {String("VEHICLE_WHEELS00"), String("VEHICLE_WHEELS01"),
+		String("VEHICLE_WHEELS02"), String("VEHICLE_WHEELS03")};
+	String vehicle_gun_yaw = String("VEHICLE_GUNYAW");
+	String vehicle_gun_pitch = String("VEHICLE_GUNPITCH");
+	String helo_gun_yaw = String("HELO_GUNYAW");
+	String helo_gun_pitch = String("HELO_GUNPITCH");
 	String tex_team = String("TEX_TEAM");
 	String team_swing = String("TEAMSWING");
 	String lfp_camp_percent = String("LFP_CAMPPERCENT");
@@ -689,31 +699,34 @@ void emplaced_clear_typed(ObjectModel *model) {
 
 int vehicle_motion_apply_typed(ObjectModel *model,
 		const PackedFloat32Array &snap, int base) {
+	using namespace opennova::world;
 	const CtrlNames &n = names();
 	const float *p = snap.ptr();
-	if (field_i(p, base, Simulation::PF_VEHICLE_MOTION_VALID) == 1) {
-		// Both fields are owned even at rest (literal zero), exactly as the
-		// cveh callback stores them immediately before model submission.
-		// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
-		//  stores @0x4929D7 / @0x4929F1]
-		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering,
-				field_i(p, base, Simulation::PF_VEHICLE_STEERING));
-		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed,
-				field_i(p, base, Simulation::PF_VEHICLE_SPEED));
-		// The part-animation words are stored by the same callback, again as
-		// literal zero at rest [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
-		// the rotor word @0x492ACA..0x492ADE for both rotor ordinals, the wheel
-		// word @0x4929B4; see docs/world/vehicle-client-movers-re.md §14].
-		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor,
-				field_i(p, base, Simulation::PF_VEHICLE_ROTOR));
-		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor,
-				field_i(p, base, Simulation::PF_VEHICLE_TAIL_ROTOR));
-		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels,
-				field_i(p, base, Simulation::PF_VEHICLE_WHEELS));
-		return 5;
-	}
-	vehicle_motion_clear_typed(model);
-	return 0;
+	const int mask = field_i(p, base, Simulation::PF_VEHICLE_MOTION_VALID) == 1
+			? field_i(p, base, Simulation::PF_VEHICLE_CTRL_MASK) : 0;
+	int writes = 0;
+	const auto apply = [&](const String &name, int flag, int field) {
+		if ((mask & flag) != 0) {
+			set_owned_ctrl(model, n.owner_vehicle_motion, name, field_i(p, base, field));
+			++writes;
+		} else {
+			clear_owned_ctrl(model, n.owner_vehicle_motion, name);
+		}
+	};
+	apply(n.vehicle_steering, VC_STEERING, Simulation::PF_VEHICLE_STEERING);
+	apply(n.vehicle_speed, VC_SPEED, Simulation::PF_VEHICLE_SPEED);
+	apply(n.helo_rotor, VC_ROTORS, Simulation::PF_VEHICLE_ROTOR);
+	apply(n.helo_tailrotor, VC_ROTORS, Simulation::PF_VEHICLE_TAIL_ROTOR);
+	apply(n.vehicle_wheels, VC_WHEELS, Simulation::PF_VEHICLE_WHEELS);
+	for (int i = 0; i < 6; ++i)
+		apply(n.vehicle_tires[i], VC_TIRES, Simulation::PF_VEHICLE_TIRE00 + i);
+	for (int i = 0; i < 4; ++i)
+		apply(n.vehicle_tracks[i], VC_TRACKS, Simulation::PF_VEHICLE_TRACK_LEFT + (i & 1));
+	apply(n.vehicle_gun_yaw, VC_VEHICLE_GUN, Simulation::PF_VEHICLE_GUN_YAW);
+	apply(n.vehicle_gun_pitch, VC_VEHICLE_GUN, Simulation::PF_VEHICLE_GUN_PITCH);
+	apply(n.helo_gun_yaw, VC_HELO_GUN, Simulation::PF_VEHICLE_GUN_YAW);
+	apply(n.helo_gun_pitch, VC_HELO_GUN, Simulation::PF_VEHICLE_GUN_PITCH);
+	return writes;
 }
 
 void vehicle_motion_clear_typed(ObjectModel *model) {
@@ -723,6 +736,14 @@ void vehicle_motion_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels);
+	for (const String &tire : n.vehicle_tires)
+		clear_owned_ctrl(model, n.owner_vehicle_motion, tire);
+	for (const String &track : n.vehicle_tracks)
+		clear_owned_ctrl(model, n.owner_vehicle_motion, track);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_gun_yaw);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_gun_pitch);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_gun_yaw);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_gun_pitch);
 }
 
 int zone_team_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,

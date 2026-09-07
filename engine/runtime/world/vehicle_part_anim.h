@@ -26,6 +26,7 @@
 // Entity_UpdateHeloRotorSpin @0x48FA70 — device work for the shell's audio/particle presenters.
 
 #include <cstdint>
+#include <base/io/bam.h>
 
 #include <runtime/world/entity.h>
 
@@ -114,14 +115,14 @@ inline void rotor_tick(RotorState &s, bool occupied, int32_t decay = kRotorDecay
 	if (occupied) {
 		s.speed += s.rate;
 		if (s.speed > kRotorSpeedMax) s.speed = kRotorSpeedMax;
-		s.angle += s.speed;
+		s.angle = io::bam_add(s.angle, s.speed);
 		return;
 	}
 	if (s.speed != 0) {
 		s.speed -= decay;
 		if (s.speed < 0) s.speed = 0;
 	}
-	s.angle += s.speed;
+	s.angle = io::bam_add(s.angle, s.speed);
 	s.rate = 0;
 }
 
@@ -160,13 +161,24 @@ inline uint16_t part_register(int32_t accumulator) {
 // D-NET-161 level-frame re-derive does not carry — a peer integrates with
 // slip 0; the wheelspin kick is that ledger row's, not something approximated.
 inline int32_t wheel_phase_step(int32_t phase, int32_t speed, int32_t slip_abs) {
-	return phase + slip_abs + (speed << 13);
+	return io::bam_add(io::bam_add(phase, slip_abs),
+            static_cast<int32_t>(static_cast<uint32_t>(speed) << 13));
 }
 
 // A watercraft's phase rides the brain's forward command instead.
 inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
-	return phase + (forward << 13);
+	return io::bam_add(phase, static_cast<int32_t>(static_cast<uint32_t>(forward) << 13));
 }
 
+
+// Differential track phases, before the tank velocity/contact solve.
+// [orig: Entity_UpdateTankVehiclePhysics @0x489F6E..0x489FA0]
+inline void track_phase_tick(int32_t (&phase)[2], int32_t speed, int32_t yaw_rate) {
+    const uint32_t drive = static_cast<uint32_t>(speed) << 12;
+    phase[0] = static_cast<int32_t>(static_cast<uint32_t>(phase[0]) +
+            ((drive - static_cast<uint32_t>(yaw_rate)) << 3));
+    phase[1] = static_cast<int32_t>(static_cast<uint32_t>(phase[1]) +
+            ((drive + static_cast<uint32_t>(yaw_rate)) << 3));
+}
 
 } // namespace opennova::world

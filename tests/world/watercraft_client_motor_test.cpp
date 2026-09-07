@@ -2079,7 +2079,11 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	boat->roll = 110; // seeds air_roll_bam = 110 * 11930464 > 0x471C7180
 	boat->health = 1000;
 	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
-	bool ok = expect(boat->health == 800, "capsized hull drained 200 hp");
+	bool ok = expect(boat->health == 1000, "client capsize does not drain health");
+	r.world.ai.is_authority = true;
+	boat->veh.air_roll_bam = 110 * 11930464;
+	r.world.vehicles.tick_watercraft_motor(*boat, r.traits, nullptr);
+	ok &= expect(boat->health == 800, "authority capsized hull drained 200 hp");
 
 	boat->flags |= w::kEntityFlagDead;
 	const float x0 = boat->position.x;

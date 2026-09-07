@@ -57,13 +57,19 @@ inline int32_t wfield_i(const float *p, int base, int field) {
 // over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
 // is class-private); the static_assert in present_one_wire_row pins the
 // mirror.
-constexpr int kCtrlLegFieldCount = 21;
+constexpr int kCtrlLegFieldCount = 32;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
 	Simulation::PF_EWEAP_GUNYAW,
 	Simulation::PF_EWEAP_GUNPITCH,
 	Simulation::PF_VEHICLE_MOTION_VALID,
+	Simulation::PF_VEHICLE_CTRL_MASK,
+	Simulation::PF_VEHICLE_TRACK_LEFT,
+	Simulation::PF_VEHICLE_TRACK_RIGHT,
+	Simulation::PF_VEHICLE_GUN_YAW,
+	Simulation::PF_VEHICLE_GUN_PITCH,
+
 	Simulation::PF_VEHICLE_STEERING,
 	Simulation::PF_VEHICLE_SPEED,
 	Simulation::PF_TEX_TEAM_VALID,
@@ -83,6 +89,12 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_VEHICLE_ROTOR,
 	Simulation::PF_VEHICLE_TAIL_ROTOR,
 	Simulation::PF_VEHICLE_WHEELS,
+	Simulation::PF_VEHICLE_TIRE00,
+	Simulation::PF_VEHICLE_TIRE01,
+	Simulation::PF_VEHICLE_TIRE02,
+	Simulation::PF_VEHICLE_TIRE03,
+	Simulation::PF_VEHICLE_TIRE04,
+	Simulation::PF_VEHICLE_TIRE05,
 };
 
 // Compare-and-refresh one leg's input cache. Returns true when every field is

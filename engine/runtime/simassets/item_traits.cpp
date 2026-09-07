@@ -297,6 +297,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     // the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
                     vt.amphibian = fam == "catv";
                 }
+                const std::string render = fourcc_prefix(def->render_function);
+                vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
+                        : render == "tank" ? world::VehicleRenderFamily::Tank
+                        : render == "chel" ? world::VehicleRenderFamily::Helicopter
+                        : render == "cpln" ? world::VehicleRenderFamily::Plane
+                        : world::VehicleRenderFamily::None;
                 // Vehicle audio belongs to the vehicle ItemDef, not to the
                 // mounted NPC's AiProfile. Resolve the profile name and the
                 // item-level soundloop overrides once at this portable boundary.

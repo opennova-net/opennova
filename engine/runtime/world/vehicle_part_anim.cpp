@@ -1,7 +1,7 @@
 #include <runtime/world/vehicle_system.h>
 // The vehicle part-animation tick: the rotor spin machine (ground or helo,
-// by the brain's profile type) and the wheel phase, run at the tail of every
-// family mover.
+// by the brain's profile type) and the wheel phase. Ground runs at the
+// mover tail; the aircraft rotor runs at its head before the lift gate.
 // [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 (ground, profile type 2);
 //  the HELO twin @0x48FA70 (profile type 1, decay 46603); the wheel phase
 //  increment @0x48C4C5..0x48C4F4 / the watercraft form @0x48E9F0..0x48E9F9]
@@ -20,15 +20,35 @@ namespace {
 // `== 1` twin inside @0x48FA70]. A row with no brain has no profile to read;
 // its family stands in (vehicle_part_anim.h).
 RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &traits) {
+	const RotorMachine called = vehicle_family_uses_direct_air_mover(traits.family)
+			? RotorMachine::Helo : RotorMachine::Ground;
 	if (const AiEntity *ai = world.ai.for_handle(veh.handle))
-		return rotor_machine_for_profile(ai->profile.type);
-	return (traits.family == VehicleFamily::Helicopter ||
-	        traits.family == VehicleFamily::Plane)
-			? RotorMachine::Helo
-			: RotorMachine::Ground;
+		return rotor_machine_for_profile(ai->profile.type) == called
+				? called : RotorMachine::None;
+	return called;
 }
 
 } // namespace
+
+// The mover commits all six staged words only inside the strict alignment
+// threshold. Outside it, only yaw changes; pitch and range stay active.
+// [orig: cveh @0x48D0E3..0x48D15D; cbik @0x48669A..0x486711;
+// ctan @0x48AA23..0x48AA9E; aircraft @0x492694..0x492703]
+void VehicleSystem::slew_turret(Entity &veh, int32_t step) {
+    AiEntity *ai = world_.ai.for_handle(veh.handle);
+    if (ai == nullptr) return;
+    AiBrain &b = ai->brain;
+    const int32_t delta = io::bam_sub(b.f[AiBrain::kStagingBlock + 3],
+                                     b.f[AiBrain::kActiveYaw]);
+    if (io::bam_abs(delta) < 0x2108421u) {
+        for (int i = 0; i < 6; ++i)
+            b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
+    } else {
+        b.f[AiBrain::kActiveYaw] = delta > 0
+                ? io::bam_add(b.f[AiBrain::kActiveYaw], step)
+                : io::bam_sub(b.f[AiBrain::kActiveYaw], step);
+    }
+}
 
 void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
@@ -56,6 +76,8 @@ void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
 		int32_t rolled = 0;
 		if (rotor_rate_needs_roll(m.part_spin, traits.player_control))
 			rolled = rotor_rate_from_roll(world.next_prng16());
+		if (machine == RotorMachine::Helo && occupied)
+			play_rotor_start_sound(veh, traits);
 		rotor_seed_rate(m.part_spin, traits.player_control, occupied, rolled);
 		rotor_tick(m.part_spin, occupied, rotor_decay_for(machine));
 	}
@@ -63,6 +85,7 @@ void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
 	// The wheel phase: |slip| + (speed << 13) [orig: @0x48C4C5..0x48C4D0]; the
 	// slip register (+0x46C) rides the D-NET-161 level-frame re-derive and is
 	// 0 here.
+	if (vehicle_family_uses_direct_air_mover(traits.family)) return;
 	if (traits.family == VehicleFamily::Watercraft)
 		m.wheel_phase = watercraft_wheel_phase_step(m.wheel_phase, m.cmd_speed);
 	else

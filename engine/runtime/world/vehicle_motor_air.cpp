@@ -182,34 +182,24 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     }
     const int32_t ground = m.ground_cache;
 
-    // ---- 0. The authority health machine at the mover head [orig:
-    // @0x4903F0..0x490480, on the (tick + 9*DcbId) & 0x3F cadence]: above
-    // criticalHp the hull regens nonCriticalRegen up to healthMax - regen
-    // (@0x4903f9..0x49042d); at or below it the hull BURNS — criticalDrain per
-    // cadence (@0x490434..0x490480) and, airborne with the altitude target more
-    // than 1 u above the ground, the yaw spins 2886390 BAM per tick — the
-    // tail-rotor-loss spiral (@0x49048e..0x4904be; the pilot's own yaw follows
-    // it unless free-looking, a look write the client owns — D-NET-161). The
-    // smoke/fire emitters and the every-64th-tick fire sound are presentation
-    // seams. A dead hull takes none of it.
     const bool motor_is_authority = world.ai.is_authority;
-    if (motor_is_authority && veh.health > 0) {
-        const bool cadence64 =
-                ((world.logic_tick + 9u * static_cast<uint32_t>(veh.net_id)) & 0x3Fu) == 0;
-        if (veh.health > traits.critical_hp) {
-            if (cadence64 && traits.non_critical_regen != 0 &&
-                veh.health < veh.health_max - traits.non_critical_regen)
-                veh.health += traits.non_critical_regen;
-        } else {
-            if (cadence64) {
-                veh.health -= traits.critical_drain;
-                if (veh.health < 0) veh.health = 0;
-            }
-            if ((veh.flags & kEntityFlagInAir) != 0 && ground != INT32_MIN &&
-                m.net_alt_target - ground > 0x10000)
-                m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
-        }
+    const bool burning = veh.health > 0 && veh.health <= traits.critical_hp;
+    tick_health(veh, traits);
+    // The hull spiral shares the authority health cadence; the pilot look
+    // follow below it is a separate, per-tick write (still unported).
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, hull altitude/yaw
+    // @0x49048E..0x49049F; the separate pilot altitude read is @0x4904BE]
+    if (motor_is_authority && burning &&
+        ((world.logic_tick + 36u * static_cast<uint32_t>(veh.net_id)) & 63u) == 0 &&
+        (veh.flags & kEntityFlagInAir) != 0 && ground != INT32_MIN &&
+        m.net_alt_target - ground > 0x10000) {
+        m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
     }
+    // Update BEFORE the rotor-up/input gate: collective becomes available on
+    // the very tick the rotor reaches full speed.
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, call gate @0x490592..0x4905A6]
+    if (veh.health > 0 && (veh.flags & 1u) == 0)
+        part_anim_tick(veh, traits);
 
     // ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
     // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
@@ -339,10 +329,14 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         //  return is `!is_authority || speed >= 0x0CCCCCC0`; the LABEL_328 arm
         //  @0x491ca7..0x491cc2 parks every command until it holds]. A hull
         // commands nothing until its rotor reaches full speed — the spool-up a
-        // cold helicopter sits through. Our part-anim machine runs at the mover
-        // tail, so the gate reads the previous tick's speed.
+        // cold helicopter sits through. The head spin tick makes this gate see
+        // the current tick's rate, including the exact full-speed crossing.
+        const AiEntity *rotor_ai = world.ai.for_handle(veh.handle);
+        // The helo helper returns success immediately for a different profile.
+        // [orig: Entity_UpdateHeloRotorSpin @0x48FA70, entry class gate]
+        const bool needs_runup = rotor_ai == nullptr || rotor_ai->profile.type == 1;
         const bool rotor_up = veh.health > 0 && (veh.flags & 0x1u) == 0 &&
-                              m.part_spin.speed >= kRotorSpeedMax;
+                              (!needs_runup || m.part_spin.speed >= kRotorSpeedMax);
         if (!rotor_up) {
             if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
             m.net_climb = 0;
@@ -361,6 +355,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         m.steer_target_bam = m.yaw_bam;
     }
 
+    int32_t turret_step = 0;
     // ---- 3. Yaw servo (second order) [orig: @0x491CC8..0x491D27].
     {
         int32_t step = io::bam_sar(io::bam_add(
@@ -369,6 +364,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         if (step > tr) step = tr;
         const int32_t neg_tr = io::bam_sub(0, tr);
         if (step < neg_tr) step = neg_tr;
+        turret_step = step;
         m.wheel_rate_bam = io::bam_add(
                 m.wheel_rate_bam, io::bam_sar(io::bam_add(step, 4), 3));
         const int32_t astep = io::bam_abs(step);
@@ -627,6 +623,10 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         if (veh.health < 0) veh.health = 0;
     }
 
+    // Aircraft uses the retained, signed yaw demand as the slew amount.
+    // [orig: @0x4926EB/@0x4926F9 reads var_B4, stored at @0x491CE4..0x491CF8]
+    slew_turret(veh, turret_step);
+
     veh.position.x = static_cast<float>(from_fixed(px));
     veh.position.y = static_cast<float>(from_fixed(py));
     veh.position.z = static_cast<float>(from_fixed(pz));
@@ -650,9 +650,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
             static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
     veh.roll = static_cast<int16_t>(std::lround(
             static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
-    // The part-animation accumulators — the air mover's tail call [orig:
-    // Entity_UpdatePartSpinAccumulator @0x4928B0 from the CHel/cpln callback].
-    world.vehicles.part_anim_tick(veh, traits);
+
 }
 
 } // namespace opennova::world
