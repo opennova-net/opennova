@@ -81,6 +81,16 @@ class Snapshot:
 					e.get("emplaced_gun_pitch", 0))
 			out[b + Simulation.PF_VEHICLE_MOTION_VALID] = float(
 					e.get("vehicle_motion_valid", 0))
+			out[b + Simulation.PF_VEHICLE_CTRL_MASK] = float(
+					e.get("vehicle_ctrl_mask", 31))
+			out[b + Simulation.PF_VEHICLE_TRACK_LEFT] = float(
+					e.get("vehicle_track_left", 0))
+			out[b + Simulation.PF_VEHICLE_TRACK_RIGHT] = float(
+					e.get("vehicle_track_right", 0))
+			out[b + Simulation.PF_VEHICLE_GUN_YAW] = float(
+					e.get("vehicle_gun_yaw", 0))
+			out[b + Simulation.PF_VEHICLE_GUN_PITCH] = float(
+					e.get("vehicle_gun_pitch", 0))
 			out[b + Simulation.PF_VEHICLE_STEERING] = float(
 					e.get("vehicle_steering", 0))
 			out[b + Simulation.PF_VEHICLE_SPEED] = float(
@@ -91,6 +101,9 @@ class Snapshot:
 					e.get("vehicle_tail_rotor", 0))
 			out[b + Simulation.PF_VEHICLE_WHEELS] = float(
 					e.get("vehicle_wheels", 0))
+			for tire in range(6):
+				out[b + Simulation.PF_VEHICLE_TIRE00 + tire] = float(
+						e.get("vehicle_tires", [0, 0, 0, 0, 0, 0])[tire])
 			out[b + Simulation.PF_TEX_TEAM_VALID] = float(
 					e.get("tex_team_valid", 0))
 			out[b + Simulation.PF_TEX_TEAM] = float(
@@ -446,6 +459,7 @@ func test_vehicle_motion_controls_publish_and_release_as_one_owned_pair() -> voi
 		"vehicle_rotor": 0x1234,
 		"vehicle_tail_rotor": 0x1234,
 		"vehicle_wheels": 0xABCD,
+		"vehicle_tires": [0, 100, 200, 300, 400, 65536],
 	}]
 	_present(p, snap)
 	assert_eq(model.get_ctrl_values(), {
@@ -454,7 +468,13 @@ func test_vehicle_motion_controls_publish_and_release_as_one_owned_pair() -> voi
 		"HELO_ROTOR": 0x1234,
 		"HELO_TAILROTOR": 0x1234,
 		"VEHICLE_WHEELS": 0xABCD,
-	}, "the cveh callback's five words publish by semantic retail name")
+		"VEHICLE_TIRE00": 0,
+		"VEHICLE_TIRE01": 100,
+		"VEHICLE_TIRE02": 200,
+		"VEHICLE_TIRE03": 300,
+		"VEHICLE_TIRE04": 400,
+		"VEHICLE_TIRE05": 65536,
+	}, "the cveh callback's eleven words publish by semantic retail name")
 
 	# The part-animation words are owned at rest too: literal zero is a write,
 	# exactly like the steer/speed pair (Entity_CacheVehicleHUDStats stores all
@@ -467,10 +487,36 @@ func test_vehicle_motion_controls_publish_and_release_as_one_owned_pair() -> voi
 			"a resting rotor publishes literal zero rather than releasing")
 	assert_eq(_ctrl(model, "VEHICLE_WHEELS"), 0)
 
+	snap.entities[0]["vehicle_tires"][2] = 1234
+	_present(p, snap)
+	assert_eq(_ctrl(model, "VEHICLE_TIRE02"), 1234)
+
+	# Tank owns two alternating track phases and signed turret controls.
+	snap.entities[0]["vehicle_ctrl_mask"] = 1 | 2 | 4 | 8 | 32 | 64
+	snap.entities[0]["vehicle_track_left"] = 0xFFFF
+	snap.entities[0]["vehicle_track_right"] = 0x2345
+	snap.entities[0]["vehicle_gun_yaw"] = -123
+	snap.entities[0]["vehicle_gun_pitch"] = 456
+	_present(p, snap)
+	for tire in range(6):
+		assert_false(model.get_ctrl_values().has("VEHICLE_TIRE%02d" % tire))
+	for track in range(4):
+		assert_eq(_ctrl(model, "VEHICLE_WHEELS%02d" % track),
+				0xFFFF if track % 2 == 0 else 0x2345)
+	assert_eq(_ctrl(model, "VEHICLE_GUNYAW"), -123)
+	assert_eq(_ctrl(model, "VEHICLE_GUNPITCH"), 456)
+	# Helo render ownership releases ground/tank channels on the same node.
+	snap.entities[0]["vehicle_ctrl_mask"] = 4 | 128
+	_present(p, snap)
+	assert_eq(model.get_ctrl_values(), {
+		"HELO_ROTOR": 0, "HELO_TAILROTOR": 0,
+		"HELO_GUNYAW": -123, "HELO_GUNPITCH": 456,
+	})
+
 	snap.entities[0]["vehicle_motion_valid"] = 0
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().is_empty(),
-			"an unavailable/non-authoritative row releases all five cveh writers")
+			"an unavailable/non-authoritative row releases all cveh writers")
 
 
 func test_sector_and_zone_controls_preserve_write_validity_and_scoped_release() -> void:

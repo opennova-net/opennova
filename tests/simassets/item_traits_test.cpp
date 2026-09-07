@@ -395,6 +395,7 @@ int main() {
         CHECK(vt->flip == 220);
         // ctank keys the 4-byte ctan row -> the tank mover [orig: @0x82ABC0].
         CHECK(vt->family == VehicleFamily::Tank);
+        CHECK(vt->render_family == VehicleRenderFamily::Ground); // render cveh, move ctank
         CHECK(vt->player_control);
         CHECK(!vt->amphibian);
         CHECK(vt->sound_profile == "SP_Tank");

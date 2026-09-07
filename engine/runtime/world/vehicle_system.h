@@ -270,21 +270,27 @@ public:
     // authored engine-stop one-shot when strictly above the mission water plane. The
     // idle lane is not refreshed and expires from its 30-tick keep-alive, matching
     // the original zero-argument movement-sound call.
-    void stop_ground_sound(Entity &vehicle);
+    void stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16 = 0);
+    void update_engine_sound(Entity &vehicle, const VehicleTraits &traits);
+    void play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits);
     // ---------------------------------------------------------------------------
-    // The per-tick entry every family mover calls at its tail. Picks the rotor
-    // machine by the brain's profile type (a brainless row — a lib embedder's
+    // Ground calls at the tail; aircraft calls at the head before its lift gate.
+    // The called rotor machine must match the brain's profile type (a brainless row — a lib embedder's
     // loose vehicle, a unit rig — has no profile, and its family stands in: the
     // Helicopter/Plane movers are where retail calls the HELO twin from), runs it
     // (seeding the rate from the shared PRNG when a non-player-control item needs
     // a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
-    // once per unoccupied tick for such an item) and advances the wheel phase
-    // from the motor's own speed register. A WATERCRAFT runs no rotor machine at
+    // once per unoccupied tick for such an item). Ground advances wheel phase
+    // from speed; aircraft has no wheel-phase write. A WATERCRAFT runs no rotor machine at
     // all — its mover Entity_UpdateWatercraftPhysics @0x48D480 calls neither
     // @0x4928B0 nor @0x48FA70 — only the wheel phase.
     // `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
     // occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
     void part_anim_tick(Entity &veh, const VehicleTraits &traits);
+    // Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
+    // ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
+    void tick_health(Entity &veh, const VehicleTraits &traits);
+    void slew_turret(Entity &veh, int32_t step);
 
 private:
     World &world_;

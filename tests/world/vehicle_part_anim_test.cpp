@@ -352,7 +352,110 @@ void test_watercraft_runs_no_rotor_machine() {
 			"one authority tick advances the phase by one step");
 }
 
+
+void test_suspension_registers_and_rotor_threshold_tick() {
+    Entity::VehicleMotorState state;
+    state.wheel_comp[0] = -100;
+    state.wheel_comp[1] = 0x2000;
+    state.wheel_comp[2] = 0x20000;
+    state.wheel_comp[3] = 0x6000;
+    const auto regs = vehicle_ctrl_registers(state);
+    CHECK((regs.tires == std::array<int32_t,6>{0,0x2000,65486,0x4000,0x6000,0x10000}),
+          "tires clamp after the midpoint average, rear order is right then left");
+    CHECK(wheel_phase_step(INT32_MAX, -1, 1) == 2147475456,
+          "reverse wheel accumulation wraps without signed-shift UB");
+    RotorState rotor;
+    rotor.angle = INT32_MAX;
+    rotor.speed = 1;
+    rotor_tick(rotor, true);
+    CHECK(rotor.angle == INT32_MIN, "rotor angle wraps at the signed boundary");
+
+    Rig r;
+    VehicleTraits t = buggy_traits(true);
+    t.family = VehicleFamily::Helicopter;
+    t.climb_speed = 1000;
+    r.mount();
+    r.veh().veh.part_spin.speed = kRotorSpeedMax - kRotorRateFull;
+    r.veh().veh.part_spin.rate = kRotorRateFull;
+    r.veh().veh.ground_cache = 0;
+    r.veh().veh.net_alt_target = 65536;
+    r.veh().veh.net_climb = 65536;
+    r.veh().veh.ai_drive = true;
+    r.veh().veh.wheel_phase = 123;
+    r.w.vehicles.aircraft_client_tick(r.veh(), t);
+    CHECK(r.veh().veh.part_spin.speed == kRotorSpeedMax, "rotor reaches full speed");
+    CHECK(r.veh().veh.net_engine_on, "collective opens on the threshold tick");
+    CHECK(r.veh().veh.wheel_phase == 123, "the air mover has no ground wheel phase");
+}
+
+void test_tracks_and_turret_motor_commit() {
+    {
+        Rig r;
+        auto t = buggy_traits(true);
+        t.family = VehicleFamily::Helicopter;
+        AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+        ai.profile.type = 2;
+        r.veh().veh.part_spin.speed = 123;
+        r.veh().veh.part_spin.rate = 456;
+        r.w.vehicles.part_anim_tick(r.veh(), t);
+        CHECK(r.veh().veh.part_spin.speed == 123 && r.veh().veh.part_spin.angle == 0,
+              "air mover does not call the ground rotor machine for a ground profile");
+        t.family = VehicleFamily::Ground;
+        ai.profile.type = 1;
+        r.w.vehicles.part_anim_tick(r.veh(), t);
+        CHECK(r.veh().veh.part_spin.speed == 123,
+              "ground mover does not call the helo rotor machine for a helo profile");
+    }
+    int32_t phases[2] = {};
+    track_phase_tick(phases, 0, 8192);
+    CHECK(phases[0] == -65536 && phases[1] == 65536,
+          "stationary steering counter-rotates the two tracks");
+    track_phase_tick(phases, -2, 0);
+    CHECK(phases[0] == -131072 && phases[1] == 0,
+          "reverse drive advances both tracks backwards");
+    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Tank}) {
+        Rig r;
+        auto t = buggy_traits(true);
+        t.family = family;
+        AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+        ai.profile.type = 2;
+        for (int i = 0; i < 6; ++i) ai.brain.f[AiBrain::kStagingBlock+i] = 10+i;
+        ai.brain.f[AiBrain::kStagingBlock+3] = 0x2108421;
+        ai.brain.f[AiBrain::kActivePitch] = 99;
+        r.w.vehicles.tick_motor(r.veh(), t);
+        CHECK(ai.brain.f[AiBrain::kActiveYaw] == 0x2108421,
+              "the exact threshold slews yaw by one ground step");
+        CHECK(ai.brain.f[AiBrain::kActivePitch] == 99,
+              "pitch does not commit on the equality boundary");
+        r.w.vehicles.tick_motor(r.veh(), t);
+        for (int i = 0; i < 6; ++i)
+            CHECK(ai.brain.f[AiBrain::kActiveBlock+i] == ai.brain.f[AiBrain::kStagingBlock+i],
+                  "alignment commits the entire staged transform");
+        ai.brain.f[AiBrain::kActiveYaw] = INT32_MAX;
+        ai.brain.f[AiBrain::kStagingBlock+3] = INT32_MIN + 10;
+        r.w.vehicles.tick_motor(r.veh(), t);
+        CHECK(ai.brain.f[AiBrain::kActiveYaw] == INT32_MIN + 10,
+              "yaw alignment uses the wrapped shortest delta");
+        ai.brain.f[AiBrain::kActivePitch] = -65536;
+        r.veh().veh.track_phase[0] = -65536;
+        r.veh().veh.track_phase[1] = 0x23450000;
+        const auto tank = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Tank, &ai);
+        CHECK(tank.tracks[0] == 65535 && tank.tracks[1] == 0x2345,
+              "tank track phase words are unsigned");
+        CHECK(tank.gun_yaw == -32768 && tank.gun_pitch == -1,
+              "turret yaw and pitch words are signed");
+        CHECK((tank.mask & VC_TRACKS) && !(tank.mask & VC_TIRES) && (tank.mask & VC_VEHICLE_GUN),
+              "tank render selects track and turret ownership");
+        ai.profile.type = 1;
+        const auto helo = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Helicopter, &ai);
+        CHECK(helo.mask == (VC_ROTORS | VC_HELO_GUN), "helo owns its rotor and gun channels");
+    }
+}
+
 int main() {
+    test_tracks_and_turret_motor_commit();
+    test_suspension_registers_and_rotor_threshold_tick();
+
 	test_watercraft_runs_no_rotor_machine();
 	test_player_control_rotor_symmetry();
 	test_rolled_rate();

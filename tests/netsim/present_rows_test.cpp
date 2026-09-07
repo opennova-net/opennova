@@ -10,6 +10,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/present_rows.h>
+#include <runtime/world/vehicle_motor.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -159,7 +160,44 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 
 } // namespace
 
+
+bool test_vehicle_suspension_reaches_present_rows() {
+    opennova::mission::MissionKernel kernel;
+    kernel.world.registry.configure_pool(1, 16);
+    w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
+    if (!expect(e != nullptr, "vehicle row exists")) return false;
+    w::VehicleTraits traits;
+    traits.physics = 1;
+    kernel.world.vehicles.traits.set(1291, traits);
+    e->veh.wheel_comp[0] = 100;
+    e->veh.wheel_comp[1] = 200;
+    e->veh.wheel_comp[2] = 500;
+    e->veh.wheel_comp[3] = 1000;
+    im::PoolPresentLifecycleMap lifecycle;
+    std::vector<float> rows;
+    im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows);
+    if (!expect(rows.size() == w::PF_STRIDE, "one vehicle presentation row")) return false;
+    const int expected[] = {100, 200, 300, 600, 1000, 500};
+    bool ok = expect(rows[w::PF_VEHICLE_MOTION_VALID] == 1, "vehicle controls valid");
+    for (int i = 0; i < 6; ++i)
+        ok = expect(rows[w::PF_VEHICLE_TIRE00+i] == expected[i],
+                    "suspension compression reaches the model snapshot") && ok;
+    traits.render_family = w::VehicleRenderFamily::Tank;
+    kernel.world.vehicles.traits.set(1291, traits);
+    e->veh.track_phase[0] = -65536;
+    e->veh.track_phase[1] = 0x12340000;
+    im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows);
+    ok = expect((static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TRACKS) != 0 &&
+                (static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TIRES) == 0,
+                "tank render selects tracks without ground suspension ownership") && ok;
+    ok = expect(rows[w::PF_VEHICLE_TRACK_LEFT] == 65535 &&
+                rows[w::PF_VEHICLE_TRACK_RIGHT] == 0x1234,
+                "both track phases reach the model snapshot") && ok;
+    return ok;
+}
+
 int main() {
+    test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;
 	ok = test_world_rows_carry_the_authoritative_record() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;

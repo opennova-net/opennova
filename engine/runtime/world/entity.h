@@ -826,6 +826,8 @@ struct Entity {
         int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
         int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
         int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
+        bool engine_sound_latched = false; // brain+0x318 bit 0: claimant start/stop
+        bool light_sound_latched = false;  // brain+0x318 bit 2: lights-on audio edge
         bool reverse_sound_latched = false; // movement-sound direction bit
                                             // [orig: vehicleData+0x318 bit 2]
         uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
@@ -905,6 +907,7 @@ struct Entity {
         };
         PartSpin part_spin;
         int32_t wheel_phase = 0; // +0x2B8
+        int32_t track_phase[2] = {}; // +0x2BC/+0x2C0, tank left/right tracks
         // --- Suspension spring leg (world/vehicle_suspension.cpp +
         // world/ground_conform.h). Per-wheel compression sinks, the four
         // oscillator blocks, the spring energy word, and the park latch bytes

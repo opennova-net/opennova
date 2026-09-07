@@ -12523,6 +12523,19 @@ Server_UpdateCaptureZones @0x53B8F0; GameEvent_FlagCapture @0x50F6F0;
 Server_EnforceZoneEntityTeams @0x519600; NetPacket_WriteZoneTimerWindow @0x506D00;
 NetPacket_WriteZonePresenceCount @0x506DE0]`
 
+Current D-NET-161 disposition (2026-09-07): family health cadence (36*DcbId),
+ground drowning, rotor startup/gate timing, mover turret slew, tank track
+phases, renderer-selected suspension/track/gun controls and engine/light
+sound edges are ported. See
+[vehicle-client-movers-re section 11](../world/vehicle-client-movers-re.md#section-11-health-turret-state-animation-ownership-and-sound-edges-2026-09-07).
+Ground/bike/tank/air contact-solve subsets and the authority boat platform
+path were already ported. Still open: contact-direction/tire slip,
+vehicle-vs-vehicle collision, remaining force/crash/death-state tails, tank
+six-probe suspension animation, helo gear/effects, analog collective, pilot
+burn-yaw follow, spawn-parent lift and vehicle deck-carrier integration.
+D-SND-17 retains the remaining sound inputs and families. The dated history
+below records earlier port boundaries.
+
 **D-NET-161** [reimpl gap, PORTED 2026-07-04 (ground-family core; verify v35)] **The host
 never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the
 §5.13 drive-authority subsection for the witness). Ported: the items.def physics-property

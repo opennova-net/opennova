@@ -1069,7 +1069,178 @@ static void test_helo_waits_for_its_boarders() {
     CHECK(!ai.vehicle_waits_for_boarders(w, *hv));
 }
 
+
+// Exercise the real family entries: same cadence, distinct water behavior.
+void test_family_health_cadence_and_submersion() {
+    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Bike,
+            VehicleFamily::Tank, VehicleFamily::Watercraft, VehicleFamily::Helicopter,
+            VehicleFamily::Plane}) {
+        Rig r;
+        VehicleTraits t = buggy_traits();
+        t.family = family;
+        t.critical_hp = 100;
+        t.critical_drain = 7;
+        t.non_critical_regen = 10;
+        t.climb_speed = 1000;
+        r.veh().net_id = 1;
+        r.veh().health_max = 500;
+        const auto tick = [&] {
+            if (vehicle_family_uses_direct_air_mover(family)) {
+                r.veh().veh.ai_drive = true;
+                r.w.vehicles.aircraft_client_tick(r.veh(), t);
+            } else if (family == VehicleFamily::Watercraft) {
+                r.w.vehicles.tick_watercraft_motor(r.veh(), t);
+            } else {
+                r.w.vehicles.tick_motor(r.veh(), t);
+            }
+        };
+        r.veh().health = 200;
+        r.w.logic_tick = 55; // the incorrect x9 cadence would fire here
+        tick();
+        CHECK(r.veh().health == 200);
+        r.w.logic_tick = 28; // (28 + 36 * 1) & 63 == 0
+        tick();
+        CHECK(r.veh().health == 210);
+        r.veh().health = 490;
+        tick();
+        CHECK(r.veh().health == 490); // strict max - regen boundary
+        r.veh().health = 100;
+        tick();
+        CHECK(r.veh().health == 93);
+        r.veh().health = 3;
+        tick();
+        CHECK(r.veh().health == 0);
+        tick();
+        CHECK(r.veh().health == 0);
+        r.w.ai.is_authority = false;
+        r.veh().health = 100;
+        tick();
+        CHECK(r.veh().health == 100);
+
+        if (family == VehicleFamily::Ground || family == VehicleFamily::Bike ||
+            family == VehicleFamily::Tank) {
+            r.w.logic_tick = 29; // isolate per-tick drown damage
+            r.veh().flags |= 0x8000u;
+            tick();
+            CHECK(r.veh().health == 100); // no client-side health mutation
+            r.w.ai.is_authority = true;
+            r.veh().flags |= 0x8000u;
+            tick();
+            CHECK(r.veh().health == 98);
+            r.veh().health = 1;
+            r.veh().flags |= 0x8000u;
+            tick();
+            CHECK(r.veh().health == 0);
+        }
+    }
+}
+
+void test_zero_speed_displacement_and_submerged_sound() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 41600;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.mount();
+    stamp_saved_live_pose(r.veh());
+    r.veh().position.x += 300.0f / 65536.0f;
+    r.veh().position.y += 400.0f / 65536.0f;
+    r.veh().position.z += 1200.0f / 65536.0f;
+    r.w.out.sound_emitters.clear();
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    if (r.w.out.sound_emitters.size() == 2) {
+        CHECK(r.w.out.sound_emitters[0].lane == 10);
+        CHECK(r.w.out.sound_emitters[0].volume_q8_8 == 0x8000); // length=1300
+        CHECK(r.w.out.sound_emitters[1].lane == 0);
+    }
+    r.veh().veh.speed = 1; // only EXACTLY zero substitutes displacement
+    r.w.out.sound_emitters.clear();
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, false);
+    CHECK(r.w.out.sound_emitters.size() == 1);
+    if (!r.w.out.sound_emitters.empty()) CHECK(r.w.out.sound_emitters[0].lane == 0);
+    r.veh().veh.speed = 1000;
+    r.drv().eye_offset_z = 65536;
+    r.w.env.water_z = static_cast<int32_t>(r.drv().position.z * 65536.0f) + 65536;
+    r.w.out.sound_emitters.clear();
+    r.w.vehicles.update_ground_sound(r.veh(), t, false, true);
+    CHECK(r.w.out.sound_emitters.size() == 2);
+    for (size_t i = 0; i < r.w.out.sound_emitters.size(); ++i) {
+        const auto &event = r.w.out.sound_emitters[i];
+        CHECK(event.lane != 0); // underwater stop takes precedence over collision idle
+        CHECK(event.volume_q8_8 == 0 && event.pitch_q16 == 0);
+    }
+}
+
+void test_engine_and_light_sound_edges() {
+    Rig r;
+    static constexpr char profile[] =
+            "begin \"SP_Edges\"\n"
+            "SSAudio1 V_LIGHT\nenginestart V_START\nenginestop V_STOP\nend\n";
+    CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile)-1) == 1);
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Edges";
+    r.w.vehicles.traits.set(r.veh().item_id, t);
+    r.mount();
+    r.veh().flags |= 0x80;
+    r.w.vehicles.update_engine_sound(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.size() == 2);
+    CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotAudio1);
+    CHECK(r.w.out.slot_sounds[1].slot == opennova::audio::kSlotEngineStart);
+    r.w.out.slot_sounds.clear();
+    r.w.vehicles.update_engine_sound(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.empty());
+    r.veh().flags &= ~0x80u;
+    r.w.vehicles.update_engine_sound(r.veh(), t);
+    r.veh().flags |= 0x80;
+    r.w.vehicles.update_engine_sound(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.size() == 1);
+    CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotAudio1);
+    r.w.out.slot_sounds.clear();
+    CHECK(r.w.vehicles.detach(r.drv_h));
+    CHECK(r.w.out.slot_sounds.size() == 1);
+    CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStop);
+    r.w.out.slot_sounds.clear();
+    r.w.vehicles.update_engine_sound(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.empty()); // detach already cleared the edge
+
+    r.mount();
+    t.family = VehicleFamily::Helicopter;
+    r.veh().veh.part_spin = {};
+    r.w.vehicles.part_anim_tick(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.size() == 1);
+    CHECK(r.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStart);
+    CHECK(r.w.out.slot_sounds[0].source_handle == r.drv_h.packed);
+    r.w.out.slot_sounds.clear();
+    r.w.vehicles.part_anim_tick(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.empty());
+    r.veh().veh.part_spin = {};
+    r.w.env.water_z = 20 << 16;
+    r.w.vehicles.part_anim_tick(r.veh(), t);
+    CHECK(r.w.out.slot_sounds.empty()); // submerged hull cannot start its sound
+
+    // The authority boat entry owns the same claimant edge, independently
+    // of the decoded/client mover. It does not play the ground light slot.
+    Rig boat;
+    CHECK(boat.w.tables.sound_profiles.parse(profile, sizeof(profile)-1) == 1);
+    t.family = VehicleFamily::Watercraft;
+    t.water_speed = t.player_speed;
+    boat.w.vehicles.traits.set(boat.veh().item_id, t);
+    boat.mount();
+    boat.veh().flags |= 0x80u;
+    boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+    CHECK(boat.w.out.slot_sounds.size() == 1);
+    CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStart);
+    boat.w.out.slot_sounds.clear();
+    boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+    CHECK(boat.w.out.slot_sounds.empty());
+}
+
 int main() {
+    test_engine_and_light_sound_edges();
+    test_family_health_cadence_and_submersion();
+    test_zero_speed_displacement_and_submerged_sound();
+
     test_def_physics_scaling();
     test_def_decel_default();
     test_ctrl_register_projection();

@@ -38,7 +38,9 @@ uint32_t band_color(const HudLayout &layout, SeatHealthBand band) {
 void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w,
 		float h) {
 	const HudVehiclePanelState &vp = state.vehicle_panel;
-	if (!vp.shown) return;
+	// The interface texture gates the entire retail panel, including seats.
+	// [orig: HUD_DrawVehicleHealthBars @0x5A5038]
+	if (!vp.shown || !vp.silhouette_valid) return;
 
 	// The base rides the stance, so the whole panel moves with the stance icon.
 	int base_x = 0;
@@ -47,8 +49,7 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 			vp.stance_offset_y, base_x, base_y);
 
 	// 1. The silhouette, tinted by the HULL's band -- the vehicle's own health,
-	// not any rider's. A missing texture leaves the seats readable rather than
-	// dropping the panel.
+	// not any rider's. The texture gate above applies to every panel element.
 	if (vp.silhouette_valid && vp.silhouette_w > 0 && vp.silhouette_h > 0) {
 		const uint32_t tint =
 				band_color(layout_, seat_health_band(vp.hull_health, vp.hull_max_health));

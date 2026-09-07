@@ -103,13 +103,19 @@ enum PresentField : int {
 			PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 	PF_EWEAP_GUNYAW,
 	PF_EWEAP_GUNPITCH,
-	// Ground-vehicle render controls projected from the authoritative cveh
-	// motor state. Joiner compacts do not carry either source field, so those
+	// Vehicle render controls projected from authoritative motor/brain state.
+	// CTRL_MASK selects the callback-owned groups. Joiner compacts lack the source fields, so those
 	// rows remain invalid rather than inferring motion from lossy transforms.
 	// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
 	//  VEHICLE_STEERING @ 0x4929C0..0x4929D7;
 	//  VEHICLE_SPEED @ 0x4929DC..0x4929F1]
 	PF_VEHICLE_MOTION_VALID,
+	PF_VEHICLE_CTRL_MASK,
+	PF_VEHICLE_TRACK_LEFT,
+	PF_VEHICLE_TRACK_RIGHT,
+	PF_VEHICLE_GUN_YAW,
+	PF_VEHICLE_GUN_PITCH,
+
 	PF_VEHICLE_STEERING,
 	PF_VEHICLE_SPEED,
 	// The part-animation registers the same callback publishes: the rotor
@@ -121,6 +127,12 @@ enum PresentField : int {
 	PF_VEHICLE_ROTOR,
 	PF_VEHICLE_TAIL_ROTOR,
 	PF_VEHICLE_WHEELS,
+	PF_VEHICLE_TIRE00,
+	PF_VEHICLE_TIRE01,
+	PF_VEHICLE_TIRE02,
+	PF_VEHICLE_TIRE03,
+	PF_VEHICLE_TIRE04,
+	PF_VEHICLE_TIRE05,
 	// Retail CTRL writers around a rendered world model. TEX_TEAM is written
 	// for every sector-model submission and again by the generic callback for
 	// numbered zones. TEAMSWING is owned by that zone callback. LFP is a
