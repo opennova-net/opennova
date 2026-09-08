@@ -1423,10 +1423,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 			// normalized ray @0x4EA20A, final argument @0x4EA73A]
 			const int32_t magnitude = fixed_magnitude(velocity_q16);
 			const int32_t inverse = magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-			const int32_t incoming[3] = { int32_t((int64_t(inverse) * velocity_q16.x + 32768) >>
-												  16),
-				int32_t((int64_t(inverse) * velocity_q16.y + 32768) >> 16),
-				int32_t((int64_t(inverse) * velocity_q16.z + 32768) >> 16) };
+			const int32_t incoming[3] = { retail_q16_mul_rhu(inverse, velocity_q16.x),
+				retail_q16_mul_rhu(inverse, velocity_q16.y),
+				retail_q16_mul_rhu(inverse, velocity_q16.z) };
 			const int32_t hit[3] = { impact_q16.x, impact_q16.y, impact_q16.z };
 			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
 		}
