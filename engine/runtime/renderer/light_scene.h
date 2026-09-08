@@ -100,6 +100,9 @@
 //    moved directly; only a zero word spawns radius 1.5/color 0xFFE0A0. Every
 //    shot sets mode 4/duration 5, owner=shooter/section 0, position and blend
 //    1.0. Five ticks later the slot dies while the cached word stays nonzero.
+//    The Godot director deliberately replaces that expired lease on the next
+//    shot (docs/render/render-lighting-re.md, D-RLIT-11); pool expiry and
+//    rejection of stale setters remain as documented here.
 //  - impact flash [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3]: ammo
 //    `light_impact` radius/color/ticks, spawned radius/2 above the impact,
 //    mode 2, gated on the impact-effect leg actually presenting; also sets

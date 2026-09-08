@@ -177,9 +177,9 @@ func test_director_muzzle_and_round_glow_routes() -> void:
 	var report_contract: Variant = director.get_report()
 	assert_true(report_contract is EffectLightReport,
 			"the director hands out the native LightScene report record")
-	# The muzzle glow: spawn-once per shooter, re-armed per shot, dead five
-	# ticks after the last shot — and the cached handle stays dead (the
-	# witnessed per-life behavior, light_scene.h map).
+	# The muzzle glow: one active instance per shooter, re-armed per shot, dead five
+	# ticks after the last shot. The next shot replaces the expired lease
+	# (render-lighting-re.md, D-RLIT-11).
 	director.on_muzzle_fire(7, Vector3(1.0, 1.0, 1.0))
 	assert_eq(director.get_report().live, 1,
 			"one shooter spawns one muzzle glow")
@@ -193,8 +193,11 @@ func test_director_muzzle_and_round_glow_routes() -> void:
 	assert_eq(director.get_report().live, 0,
 			"five ticks after the last shot the muzzle glow dies")
 	director.on_muzzle_fire(7, Vector3(1.0, 1.0, 1.0))
-	assert_eq(director.get_report().live, 0,
-			"the cached shooter handle stays dead this life")
+	assert_eq(director.get_report().live, 1,
+			"the next shot replaces the expired muzzle lease")
+	for i in range(5):
+		director.advance_fixed_tick()
+	assert_eq(director.get_report().live, 0, "the replacement also expires")
 	# The light_move round glow follows the sim rows and despawns with them.
 	director.sync_round_glows([_round_glow(11, Vector3(5.0, 5.0, 5.0))])
 	assert_eq(director.get_report().live, 1,

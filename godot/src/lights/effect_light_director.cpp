@@ -834,7 +834,10 @@ void EffectLightDirector::on_muzzle_fire(int64_t p_shooter_handle, const Vector3
 	if (const int64_t *cached = entity_effect_handles_.getptr(owner_id)) {
 		handle = *cached;
 	}
-	if (handle == 0) {
+	// Expiry retires the lease while the entity still caches it. Allocate a
+	// fresh glow so later shots light again without writing through a stale
+	// pool slot (intentional divergence: render-lighting-re.md, D-RLIT-11).
+	if (!scene()->is_alive(handle)) {
 		handle = scene()->spawn_glow(GlowSpawn::make(p_world_pos, LightScene::muzzle_glow_radius(),
 				LightScene::muzzle_glow_color())
 						->fading(3, -1)

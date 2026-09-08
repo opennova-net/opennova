@@ -140,7 +140,8 @@ public:
 	// (D-AI-8d). The cache is deliberately shared with model LGHT: if
 	// mission-start spawn left entity+0x1B4 nonzero, retail re-arms and moves
 	// that final authored lease instead of allocating the 1.5-unit
-	// muzzle-color light.
+	// muzzle-color light. Expired leases are replaced on the next shot
+	// (docs/render/render-lighting-re.md, D-RLIT-11).
 	void on_muzzle_fire(int64_t p_shooter_handle, const Vector3 &p_world_pos);
 	// One presented round impact whose ammo authors light_impact [orig:
 	// AmmoDef_ProcessImpactEffect @ 0x40a2b3 — spawned radius/2 above the

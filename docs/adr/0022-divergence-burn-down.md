@@ -133,6 +133,10 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
 **Original-bug / garbage class** (basis:
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 
+- **D-RLIT-11** — renew an expired muzzle-light lease on the next shot. Retail
+  leaves a dead handle cached and may write through it into a reused slot;
+  renewing the lease restores repeat-shot illumination while keeping stale
+  writes rejected (2026-09-08; `render/render-lighting-re.md`).
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not
   reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry

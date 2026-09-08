@@ -1038,6 +1038,14 @@ Closed 2026-08-22: **D-RORD-3** -> `FIXED` — every retained rigid alpha strip 
 
 ### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
 
+Minted-and-closed 2026-09-08: **D-RLIT-11** -> `PERMANENT` (class D,
+original-bug correction; register below) — replace an expired muzzle-light
+lease on the next shot so the arms and weapon light repeatedly, retaining
+retail's five-tick expiry and the safe rejection of stale pool writes.
+The original dead-handle path was re-verified at `0x56c965`/`0x56c996` and
+`0x5aa1ab`/`0x5aa1b9`; GUT `muzzle_light_test` covers the actual fire route,
+viewmodel surfaces, and unrelated slot reuse.
+
 Minted at the REN-5 session (2026-07-06), which also closed env #17 (the
 modulator chain went live) and D-RMAT-5 (the composed FF lighting model) in
 the same slice, converted the last `UNAUDITED` render system, and answered
@@ -1321,6 +1329,7 @@ one-line rationale for why porting it would be *wrong*.
 
 | ID | Divergence | Why porting it would be wrong |
 |---|---|---|
+| D-RLIT-11 | Expired muzzle-light leases are replaced on the next shot, where retail retains a dead/reused pool handle | Restores repeat-shot illumination without permitting stale writes to alter unrelated lights; original color, radius, lifetime and owner gate remain intact ([render/render-lighting-re.md](render/render-lighting-re.md)). |
 | env #11 | Original packs negative color components as garbage (no lower clamp); the reimpl clamps to 0 | Reproducing unclamped negative-color UB would carry garbage bytes through the parser for no defined behavior. |
 | D-NET-133 (empty-slot facet) | An in-capacity EMPTY 0x18 slot replies a zeroed type-0 record; retail serializes the slot's raw (possibly stale) memory | The observable effect is identical (the client stops at the type gate either way); reproducing retail's stale-memory bytes would be manufacturing garbage. |
 | D-MUS-7 | `op_callvl` (`0x0A` call form) resolves against an uninitialised-BSS name table in Jointops, so the opcode is dead; the reimpl mirrors the dead stub (push 0) | The original behavior *is* "do nothing" (the table is never populated); porting a "working" call would invent behavior the engine never had. |
