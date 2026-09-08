@@ -676,6 +676,7 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 		emitter_init(emitter, &definition, group.pose.position,
 				seed_for(impl_->config.random_seed, group.id.value, ordinal));
 		emitter.forward = normalized_or_forward(group.pose.forward);
+		emitter.force_zone = request.force_zone;
 		group.emitter_slots.push_back(emitter_slot);
 	}
 
@@ -908,7 +909,7 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 				Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
 				if (record.active) {
 					emitter_advance(
-							record.emitter, impl_->config.simulation_tick_seconds);
+							record.emitter, impl_->config.simulation_tick_seconds, request.forces);
 				}
 			}
 		}

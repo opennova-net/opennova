@@ -1007,6 +1007,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 						opennova::io::bam_add(p->pitch, p->inf.recoil_pitch);
 				w.round_sequence = static_cast<uint16_t>(w.round_sequence + 1u);
 				const uint16_t shot_seq = w.round_sequence;
+				world.vehicles.weapon_recoil(*shooter,
+						w.def.actions[weapon_action::kFire].action_value, dir_yaw, dir_pitch);
 
 				RoundEvent round_event;
 				round_event.shooter_handle = !io.is_authority
@@ -1243,6 +1245,7 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 		std::snprintf(r.name, sizeof(r.name), "%s", act.name);
 		std::snprintf(r.anim, sizeof(r.anim), "%s", act.anim);
 		std::snprintf(r.function, sizeof(r.function), "%s", act.function);
+		r.action_value = act.action_value;
 		r.delaystart = act.delaystart;
 		r.delayend = act.delayend;
 		std::snprintf(r.soundset, sizeof(r.soundset), "%s", act.soundset);

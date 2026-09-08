@@ -2,6 +2,7 @@
 #include <base/io/tick_rate.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -27,7 +28,7 @@ int32_t parse_int(const std::string &s) {
 // sets the x87 control word to 0xC00 before every fistp) — matched by the
 // C++ double->int32 cast. [orig: AIProfile_ParseProperty fldcw/fistp sites]
 int32_t deg_to_bam(const std::string &s) {
-    return static_cast<int32_t>(std::atof(s.c_str()) * 11930464.0); // [orig: dbl_7C6E18]
+	return int32_t(uint32_t(int64_t(std::atof(s.c_str()) * 11930464.0))); // [orig: dbl_7C6E18]
 }
 int32_t secs_to_ticks(const std::string &s) {
     return static_cast<int32_t>(std::atof(s.c_str()) * io::kTickHz); // [orig: dbl_7C3B48]
@@ -75,6 +76,23 @@ void apply_mode_flags(uint32_t &flags, const std::vector<std::string> &toks) {
         else if (t == "ateam_lock") flags |= 0x40;
         else if (t == "rc_fire") flags |= 0x80;
     }
+}
+
+// The name table really stores GROUND_FOLLOWWP=17 (dispatch row 16).
+// Keep its literal data values; do not reinterpret it as the runtime enum.
+// [orig: AIState_LookupByName @0x457530, table @0x815198]
+int32_t state_by_name(const std::string &name) {
+	static const char *names[] = { "null", "helo_land", "helo_followwp", "helo_combat", "helo_hunt",
+		"helo_evade", "helo_formation", "helo_returntobase", "helo_dying", "helo_pretty",
+		"helo_dead", "ground_followwp", "ground_combat", "ground_evade", "ground_formation",
+		"ground_returntobase", "ground_dying", "ground_pretty", "ground_dead" };
+	static constexpr int32_t ids[] = { 0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21,
+		22, 23, 24 };
+	const std::string lower = strutil::to_lower(name);
+	for (size_t index = 0; index < sizeof(ids) / sizeof(ids[0]); ++index)
+		if (lower == names[index])
+			return ids[index];
+	return 0;
 }
 
 // One GROUND-type weapon block's key set; `which` = "primary"/"secondary".
@@ -127,16 +145,43 @@ Profile parse_profile(const uint8_t *text, size_t size) {
             else if (v == "organic") prof.type = 3;
             continue;
         }
-        // The HELO (type 1) flight set — shared keys (view/radar/priorities/
-        // react/EVADE_FLAGS/weapons) fall through to the common dispatch below;
-        // the flight-specific keys are handled here first. GROUND (2) takes the
-        // common set; ORGANIC (3) accepts nothing.
-        // [orig: the type-1 branch of AIProfile_ParseProperty @0x45f684..0x45f9eb
-        //  — profile +200..+236 (+56 for use_waypoint_z); the shared keys are the
-        //  same rows both types write]
-        if (prof.type == 1) {
-            if (key == "patrol_speed") { prof.helo_patrol_speed = speed_fixed(value); continue; }          // @0x45f6cf..0x45f70d -> +200
-            if (key == "patrol_altitude") { prof.helo_patrol_altitude = parse_int(value) << 16; continue; } // atol << 16 @0x45f733..0x45f747 -> +204
+		// [orig: AIProfile_ParseProperty @0x45DE70, subtype stores +20]
+		if (key == "subtype" && (prof.type == 1 || prof.type == 2)) {
+			const std::string v = strutil::to_lower(value);
+			if (v == "std")
+				prof.subtype = 0;
+			else if (prof.type == 1 && v == "plane")
+				prof.subtype = 2;
+			else if (prof.type == 2 && v == "boat")
+				prof.subtype = 1;
+			else if (prof.type == 2 && v == "train")
+				prof.subtype = 3;
+			continue;
+		}
+		// The HELO (type 1) flight set — shared keys (view/radar/priorities/
+		// react/EVADE_FLAGS/weapons) fall through to the common dispatch below;
+		// the flight-specific keys are handled here first. GROUND (2) takes the
+		// common set; ORGANIC (3) accepts nothing.
+		// [orig: the type-1 branch of AIProfile_ParseProperty @0x45f684..0x45f9eb
+		//  — profile +200..+236 (+56 for use_waypoint_z); the shared keys are the
+		//  same rows both types write]
+		if (prof.type == 1) {
+			if (key == "hunt_limit") {
+				prof.hunt_limit = secs_to_ticks(value);
+				continue;
+			}
+			if (key == "hunt_flags") {
+				prof.hunt_flags = 0;
+				for (size_t index = 1; index < toks.size(); ++index)
+					if (strutil::to_lower(toks[index]) == "maintain_speed")
+						prof.hunt_flags |= 1;
+				continue;
+			}
+			if (key == "patrol_speed") {
+				prof.helo_patrol_speed = speed_fixed(value);
+				continue;
+			} // @0x45f6cf..0x45f70d -> +200
+			if (key == "patrol_altitude") { prof.helo_patrol_altitude = parse_int(value) << 16; continue; } // atol << 16 @0x45f733..0x45f747 -> +204
             if (key == "patrol_climb") { prof.helo_patrol_climb = climb_fixed(value); continue; }          // @0x45f687..0x45f6bf -> +208
             if (key == "combat_speed") { prof.helo_combat_speed = speed_fixed(value); continue; }          // @0x45f79f..0x45f7dd -> +212
             if (key == "combat_altitude") { prof.helo_combat_altitude = parse_int(value) << 16; continue; } // atol << 16 @0x45f803..0x45f817 -> +216
@@ -159,12 +204,54 @@ Profile parse_profile(const uint8_t *text, size_t size) {
         rtoks.insert(rtoks.end(), toks.begin(), toks.end());
         // rtoks[1] = key, rtoks[2] = first value token.
 
-        if (key == "aim_skill") {
-            prof.aim_skill = parse_int(value);
+		if (key == "default_state") {
+			prof.default_state = state_by_name(value);
+			continue;
+		}
+		if (key == "rank") {
+			prof.rank = parse_int(value);
+			continue;
+		}
+		if (key == "drive_skill" || key == "flight_skill") {
+			prof.drive_skill = std::clamp(parse_int(value), 0, 4);
+			continue;
+		}
+		if (key == "alert") {
+			const std::string name = strutil::to_lower(value);
+			prof.alert = name == "yellow" ? 1 : name == "red" ? 2 : 0;
+			continue;
+		}
+		if (key == "check_six_rate") {
+			prof.check_six_rate = int32_t(std::atof(value.c_str()) * 655.36);
+			continue;
+		}
+		if (key == "target_eval_rate") {
+			prof.target_eval_rate = int32_t(std::atof(value.c_str()) * 655.36);
+			continue;
+		}
+		if (key == "radio_distance") {
+			prof.radio_distance = parse_int(value);
+			continue;
+		}
+		if (key == "radio_delay") {
+			prof.radio_delay = parse_int(value);
+			continue;
+		}
+		if (key == "turn_rate") {
+			prof.turn_rate_bam_tick = int32_t(uint32_t(parse_int(value)) * 11930464u) / 62;
+			continue;
+		}
+		if (key == "accel_time") {
+			prof.accel_ticks = int32_t(62u * uint32_t(parse_int(value)));
+			continue;
+		}
+		if (key == "aim_skill") {
+			prof.aim_skill = parse_int(value);
             if (prof.aim_skill > 4) prof.aim_skill = 4;   // [orig: clamp 0..4]
             if (prof.aim_skill < 0) prof.aim_skill = 0;
-        } else if (key == "view_fov") prof.view_fov_bam = deg_to_bam(value);
-        else if (key == "view_dist") prof.view_dist = parse_int(value) << 16;
+		} else if (key == "view_fov")
+			prof.view_fov_bam = deg_to_bam(value);
+		else if (key == "view_dist") prof.view_dist = parse_int(value) << 16;
         else if (key == "radar_fov") prof.radar_fov_bam = deg_to_bam(value);
         else if (key == "radar_dist") prof.radar_dist = parse_int(value) << 16;
         else if (key == "priority_air") prof.priority_air = parse_int(value);
@@ -175,13 +262,23 @@ Profile parse_profile(const uint8_t *text, size_t size) {
         else if (key == "tether_dist") prof.tether_dist = parse_int(value) << 16;
         else if (key == "min_chase_dist") prof.min_chase = units_fixed(value);
         else if (key == "max_chase_dist") prof.max_chase = units_fixed(value);
-        else if (key == "evade_flags") apply_mode_flags(prof.evade_flags, rtoks);
-        else if (key == "combat_flags") apply_mode_flags(prof.combat_flags, rtoks);
-        else if (key == "patrol_speed") prof.patrol_speed = parse_int(value);
-        else if (key == "combat_speed") prof.combat_speed = parse_int(value);
-        else if (!apply_weapon_key(prof.primary, key, "primary", rtoks))
-            (void)apply_weapon_key(prof.secondary, key, "secondary", rtoks);
-    }
+		else if (key == "evade_flags") {
+			uint32_t value_flags = 0;
+			apply_mode_flags(value_flags, rtoks);
+			prof.evade_flags |= value_flags & 0x1fu;
+		} else if (key == "combat_flags")
+			apply_mode_flags(prof.combat_flags, rtoks);
+		else if (key == "patrol_speed") {
+			prof.patrol_speed = parse_int(value);
+			prof.ground_patrol_speed = speed_fixed(value);
+			prof.has_ground_patrol_speed = true;
+		} else if (key == "combat_speed") {
+			prof.combat_speed = parse_int(value);
+			prof.ground_combat_speed = speed_fixed(value);
+			prof.has_ground_combat_speed = true;
+		} else if (!apply_weapon_key(prof.primary, key, "primary", rtoks))
+			(void)apply_weapon_key(prof.secondary, key, "secondary", rtoks);
+	}
     return prof;
 }
 

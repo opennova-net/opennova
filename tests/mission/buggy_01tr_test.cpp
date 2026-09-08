@@ -14,6 +14,8 @@
 //
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
 #include "common/retail_mission_files.h"
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/player_weapon.h>
 #include "common/retail_paths.h"
 
 #include <cmath>
@@ -88,8 +90,14 @@ int main() {
 	// Stand beside the buggy and mount it.
 	const w::Vec3 bpos = rig.world.registry.get(buggy_h)->position;
 	rig.world.commands.set_entity_position(rig.world.cached.local_player,
-			w::Vec3{bpos.x + 1.6f, bpos.y, bpos.z});
+			w::Vec3{ bpos.x, bpos.y, bpos.z + buggy->bound_radius + 1.0f });
 	rig.tick(31);
+	// Query beside the live (settled) hull rather than the earlier spawn pose.
+	const w::Vec3 live = rig.world.registry.get(buggy_h)->position;
+	rig.world.commands.set_entity_position(
+			rig.world.cached.local_player, w::Vec3{ live.x - 1.0f, live.y, live.z + 1.0f });
+	rig.world.collision->build_initial_tables(rig.world);
+	rig.local.player()->ground_target = {};
 	if (!expect(rig.local.toggle_mount(), "USE mounts the buggy")) return 1;
 	rig.tick(31);
 	const w::Entity *pl = rig.local.player();
@@ -100,7 +108,15 @@ int main() {
 	if (!expect(pl->mount_target == buggy_h || pl->mount_target == gun_h,
 				"the toggle mounted the buggy family")) return 1;
 
-	// --- Symptom 1: USE from the buggy family EXITS, never cycles onto the gun.
+	// The scan can choose the mounted gun, whose equip animation must finish
+	// before USE is accepted. Exercise the same live idle/overheat gate.
+	for (int i = 0; i < 250; ++i) {
+		const auto *slot = w::active_local_weapon_slot(rig.world, rig.local.weapon);
+		if (!slot || w::weapon_state_allows_mount_toggle(slot->current, slot->next))
+			break;
+		rig.tick();
+	}
+	// --- Symptom 1: USE from the buggy family exits through the hull query.
 	if (!expect(rig.local.toggle_mount(), "the second USE is accepted")) return 1;
 	rig.tick(31);
 	pl = rig.local.player();
@@ -121,6 +137,10 @@ int main() {
 	const w::Vec3 here = rig.local.player_position();
 	rig.world.commands.set_entity_position(buggy_h, w::Vec3{here.x + 1.6f, here.y, here.z});
 	rig.tick(19);
+	const w::Vec3 remount = rig.world.registry.get(buggy_h)->position;
+	rig.world.commands.set_entity_position(rig.world.cached.local_player,
+			w::Vec3{ remount.x - 1.0f, remount.y, remount.z + 1.0f });
+	rig.world.collision->build_initial_tables(rig.world);
 	if (!expect(rig.local.toggle_mount(), "USE remounts the buggy")) return 1;
 	rig.tick(31);
 	if (!expect(rig.local.select_numbered_seat(0) || rig.local.player()->mount_target == buggy_h,

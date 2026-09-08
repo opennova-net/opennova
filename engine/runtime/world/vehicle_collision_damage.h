@@ -5,30 +5,24 @@
 
 namespace opennova::world {
 
-// VEHICLE COLLISION DAMAGE — what happens when a vehicle runs a person over
-// [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620].
-//
-// STAGED, NOT WIRED (2026-08-25 tidy): the roadkill leg is unported. Retail
-// reaches it from ONE site — the damage-queue dispatcher's kind-1 arm, which
-// selects this handler (over Entity_ApplyWeaponDamage /
-// GameEvent_HandleMedicInteraction) for a queued vehicle-collision damage entry
-// [orig: Projectile_ProcessExplosionQueue @0x4EAD80, the jumptable @0x4EADC6
-// case 1 -> the callback store @0x4EAE1C, gated on
-// AnimMap_IsSlotActive(playerClass, 4)]. The live owner-to-be is the engine's
-// damage-queue dispatch in engine/runtime/world/round_sim.cpp (the vehicle
-// movers queue the kind-1 entries), and the hit itself — the health subtract
-// @0x4e672e, the death-anim pick Entity_ComputeAnimSlotIndex(cause 2, quadrant
-// from the atan2 @0x4e668d..0x4e66b1) @0x4e6735, the +0x178 attacker store
-// @0x4e66c6, the death callback @0x4e6752 and Score_ProcessKillEvent @0x4e6773
-// — lands with that arm. The predicates below are the witnessed gates it will
-// call. Consumed by tests/world/vehicle_collision_damage_test.cpp only until
-// then (scripts/lint/orphan_header_check.py).
-//
-// This is roadkill, and it is the one damage path with no weapon behind it:
-// the attacker is resolved through the vehicle's parent chain so the DRIVER
-// gets the kill, not the hull.
-
-// Only a PERSON takes collision damage [orig: the `itemDef->type ==
+// The kind-1 death quadrant ends with the source/target atan2. [orig: @0x4E66B1]
+// Historical damage-queue predicates. The IDB name
+// Entity_ApplyVehicleCollisionDamage at 0x4E6620 describes the kind-1 melee
+// callback, not the movement resolver roadkill arm. Its source argument is
+// a damage record, not a vehicle entity. The live roadkill predicates below
+// are consumed by collision_resolve.cpp at Entity_MovementCollisionResolver.
+// These kind-1 predicates remain pinned by vehicle_collision_damage_test.
+// [orig: @0x4E6620]
+// [orig: @0x4EAD80]
+// [orig: @0x4EADC6]
+// [orig: @0x4EAE1C]
+// [orig: @0x4e672e]
+// [orig: @0x4e668d]
+// [orig: @0x4e6735]
+// [orig: @0x4e66c6]
+// [orig: @0x4e6752]
+// [orig: @0x4e6773]
+// Only a PERSON takes kind-1 damage [orig: the `itemDef->type ==
 // ItemType_Person` test @0x4E6633 (jnz @0x4e663e)]. A vehicle hitting another
 // vehicle goes through the physics contact path instead, not this one.
 inline constexpr int32_t kCollisionDamageTargetType = 0; // ItemType_Person
@@ -40,10 +34,10 @@ inline constexpr int32_t kCollisionDamageTargetType = 0; // ItemType_Person
 inline constexpr uint32_t kEntityFlagDeadOrDying = 0x2u;
 inline constexpr uint32_t kEntityFlagNoCollisionDamage = 0x4000000u;
 
-// The self-hit guard: an entity never applies collision damage to itself
+// The self-hit guard: an entity never applies kind-1 damage to itself
 // [orig: the `targetEntity != attacker` test @0x4E6657, attacker = the
 // source's +0x20 entity]. Without it a driver
-// whose own hull resolves back to them takes their own roadkill.
+// whose own hull resolves back to them takes their own hit.
 inline bool collision_damage_applies(int32_t target_type, uint32_t target_flags,
 		bool target_is_attacker) {
 	if (target_type != kCollisionDamageTargetType) return false;
@@ -56,8 +50,8 @@ inline bool collision_damage_applies(int32_t target_type, uint32_t target_flags,
 // ATTRIBUTION WALKS UP, NOT DOWN. The credited attacker is resolved through
 // the parent chain, and when that parent is itself DEAD the walk continues to
 // ITS attacker [orig: the `attacker->Health <= 0 && !(Flags & 0x100)` arm
-// @0x4E66CC..0x4E6707]. So a dead driver's vehicle still credits whoever
-// killed the driver, rather than crediting a corpse or nobody. The walk is
+// @0x4E66CC..0x4E6707]. So a dead source still credits whoever
+// killed the source, rather than crediting a corpse or nobody. The walk is
 // exactly TWO hops, not a loop: the attacker's own +0x178 link @0x4e66e0..
 // 0x4e66ea, then that entity's +0x178 under the same test @0x4e66ff..
 // 0x4e6707 — this predicate is what each hop tests.
@@ -80,7 +74,7 @@ inline bool collision_kill_fires(int32_t health_before, int32_t health_after) {
 	return health_after <= 0 && health_before > 0;
 }
 
-// The damage flag the target latches when run over [orig: the `|= 0x400` on
+// The damage flag the target latches on this hit [orig: the `|= 0x400` on
 // +0x2C @0x4E6740], set BEFORE the death callback so a handler sees it.
 inline constexpr uint32_t kDamageFlagCollision = 0x400u;
 
@@ -130,7 +124,7 @@ inline bool run_over_kill_applies(bool pusher_is_vehicle, bool pusher_is_victims
 // x 2^32/2pi, `(Yaw - that + 0x1FFFFFFF) >> 30` as an UNSIGNED shift].
 inline int run_over_quadrant(int32_t victim_yaw_bam, int32_t rel_dx, int32_t rel_dy) {
 	const double a = std::atan2(static_cast<double>(rel_dy), static_cast<double>(rel_dx));
-	const int32_t bam = static_cast<int32_t>(std::llround(a * 683565275.5764316));
+	const int32_t bam = static_cast<int32_t>(static_cast<int64_t>(a * 683565275.5764316));
 	const uint32_t q = (static_cast<uint32_t>(victim_yaw_bam) - static_cast<uint32_t>(bam) +
 			0x1FFFFFFFu) >> 30;
 	return static_cast<int>(q);

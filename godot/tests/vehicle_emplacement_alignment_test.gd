@@ -15,6 +15,32 @@ const MRK5_TYPE_ID := 1299
 const MRK5_GRAPHIC := "Dmrk51"
 
 
+var _drive_terrain_roots: Array[String] = []
+var _resource_roots: Array[ResourceRoot] = []
+
+
+func _driving_terrain() -> TerrainData:
+	var directory := TestFs.stage_terrain_root("vehicle_attachments")
+	_drive_terrain_roots.append(directory)
+	var terrain := TerrainData.new()
+	terrain.set_trn_path(directory.path_join(TestFs.TMAP_TRN))
+	assert_eq(terrain.load(), OK)
+	terrain.set_water_height(-100)
+	return terrain
+
+
+func after_each() -> void:
+	for root in _resource_roots:
+		root.clear()
+	_resource_roots.clear()
+
+
+func after_all() -> void:
+	for directory in _drive_terrain_roots:
+		TestFs.remove_dir_recursive(directory)
+	_drive_terrain_roots.clear()
+
+
 func _retail_attachment_basis(direction: Vector3) -> Basis:
 	var forward := direction.normalized()
 	var right := Vector3(forward.z, 0.0, -forward.x)
@@ -139,6 +165,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 		return
 
 	var root := ResourceRoot.new()
+	_resource_roots.append(root)
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, MISSION), OK)
@@ -225,6 +252,7 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 		return
 
 	var root := ResourceRoot.new()
+	_resource_roots.append(root)
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
@@ -338,6 +366,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Blackhawk witness")
 		return
 	var root := ResourceRoot.new()
+	_resource_roots.append(root)
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
@@ -426,6 +455,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		return
 
 	var root := ResourceRoot.new()
+	_resource_roots.append(root)
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
@@ -449,11 +479,12 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		child_types[child_type] = true
 		attachment_by_type[child_type] = attachment
 
+	var driving_terrain := _driving_terrain()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, DBUGGY_ITEM_ID,
-			Vector3(2, 0, 0), Vector3.ZERO)
+			Vector3(2, 0, driving_terrain.get_height_world_bilinear(Vector3(2, 0, 0)) + 1.0), Vector3.ZERO)
 	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -474,6 +505,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	node_options.item_db = item_db
 	node_options.placer = placer
 	node_options.playable = true
+	node_options.terrain = driving_terrain
 	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
 	assert_true(rt.tick())
 	var carrier_node := rt.get_entity_index().resolve(
@@ -511,8 +543,13 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var carrier_before := (
 			carrier_node.global_transform
 			if carrier_node != null else Transform3D.IDENTITY)
-	assert_true(rt.get_sim().local_player_toggle_mount(),
-			"the local player mounts the real DBuggy controller")
+	for _settle in range(125):
+		assert_true(rt.tick())
+	assert_eq(rt.get_sim().debug_teleport_local_player(
+			Vector3(carrier_node.global_position.x - 1.0, -carrier_node.global_position.z,
+					carrier_node.global_position.y), 90.0, 0.0), OK)
+	assert_eq(rt.get_sim().debug_crew_local_player(placed.bms_id), OK,
+			"the alignment fixture seats the local player in the DBuggy controller")
 	# The drive rides the typed frame input: the session re-applies the
 	# frame's movement before every tick (ADR 0035), so a latch deposited
 	# on the sim is clobbered by the empty MissionFrameInput rt.tick() builds.
@@ -636,6 +673,7 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
 		return
 	var root := ResourceRoot.new()
+	_resource_roots.append(root)
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
@@ -644,10 +682,11 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 		child_types[authored.item_id - 100000] = true
 	assert_gt(child_types.size(), 0, "the shipped DBuggy authors a child emplacement")
 
+	var driving_terrain := _driving_terrain()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var placed := mission.add_entity(
-			MissionData.KIND_ITEM, DBUGGY_ITEM_ID, Vector3(2, 0, 0), Vector3.ZERO)
+			MissionData.KIND_ITEM, DBUGGY_ITEM_ID, Vector3(2, 0, driving_terrain.get_height_world_bilinear(Vector3(2, 0, 0)) + 1.0), Vector3.ZERO)
 	assert_not_null(placed)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -664,6 +703,7 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 	node_options.item_db = item_db
 	node_options.placer = placer
 	node_options.playable = true
+	node_options.terrain = driving_terrain
 	assert_gt(int(rt.setup(mission, mission_objects, node_options)), 0)
 	assert_true(rt.tick())
 	var sim: Simulation = rt.get_sim()
@@ -685,7 +725,13 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 		assert_false(culled.has(int(handle_v)),
 				"attachment %04x is collected beside the parked buggy" % int(handle_v))
 
-	assert_true(sim.local_player_toggle_mount(), "the local player mounts the DBuggy")
+	for _settle in range(125):
+		assert_true(rt.tick())
+	assert_eq(sim.debug_teleport_local_player(
+			Vector3(carrier_node.global_position.x - 1.0, -carrier_node.global_position.z,
+					carrier_node.global_position.y), 90.0, 0.0), OK)
+	assert_eq(sim.debug_crew_local_player(placed.bms_id), OK,
+			"the collection fixture seats the local player in the DBuggy controller")
 	rt.play()
 	for _tick in range(62 * 6):
 		var input := MissionFrameInput.new()

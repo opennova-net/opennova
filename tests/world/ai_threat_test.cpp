@@ -10,6 +10,7 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
+#include <runtime/terrain_query/height_field.h>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -83,6 +84,33 @@ int main() {
 	if (!expect(first.ai != nullptr, "CP01 carries at least one foot NPC")) return 1;
 	std::printf("threat: nearest NPC %.1f u (item %d team %d hp %d)\n", first.distance,
 			first.entity->item_id, int(first.ai->team), int(first.ai->health));
+
+	// Exercise threat/fire behavior from an open approach to this authored NPC.
+	// Crew assignment can change the farthest-point spawn choice; a straight
+	// 200-unit walk from that spawn can hit the camp walls before perception.
+	bool staged = false;
+	const w::Vec3 target_pos = testrig::ai_position(*first.ai);
+	for (int i = 0; i < 16 && !staged; ++i) {
+		const double angle = i * 6.283185307179586 / 16;
+		w::Vec3 start{ target_pos.x + float(24 * std::cos(angle)),
+			target_pos.y + float(24 * std::sin(angle)), target_pos.z };
+		if (rig.world.tables.terrain)
+			start.z = terrain::height_field_height_world_bilinear(
+							  *rig.world.tables.terrain, start.x, -start.y) +
+					0.9f;
+		if (std::abs(start.z - target_pos.z) > 2.0f)
+			continue;
+		const int32_t from[3] = { int32_t(start.x * 65536), int32_t(start.y * 65536),
+			int32_t((start.z + 0.8f) * 65536) };
+		const int32_t to[3] = { first.ai->pos[0], first.ai->pos[1], first.ai->pos[2] + 52428 };
+		if (!rig.world.ai.line_of_sight_clear(
+					rig.world, from, to, rig.world.cached.local_player, first.entity->handle))
+			continue;
+		rig.world.commands.set_entity_position(rig.world.cached.local_player, start);
+		staged = true;
+	}
+	if (!expect(staged, "an unobstructed ground approach to the authored NPC exists"))
+		return 1;
 
 	// --- Approach: walk at the nearest NPC until it is inside the stop distance
 	// or fire already lands.

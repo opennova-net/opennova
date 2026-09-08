@@ -265,6 +265,15 @@ public:
 		PF_VEHICLE_TIRE03 = opennova::world::PF_VEHICLE_TIRE03,
 		PF_VEHICLE_TIRE04 = opennova::world::PF_VEHICLE_TIRE04,
 		PF_VEHICLE_TIRE05 = opennova::world::PF_VEHICLE_TIRE05,
+		PF_VEHICLE_TIRE06 = opennova::world::PF_VEHICLE_TIRE06,
+		PF_VEHICLE_TIRE07 = opennova::world::PF_VEHICLE_TIRE07,
+		PF_VEHICLE_TIRE08 = opennova::world::PF_VEHICLE_TIRE08,
+		PF_VEHICLE_TIRE09 = opennova::world::PF_VEHICLE_TIRE09,
+		PF_VEHICLE_TIRE10 = opennova::world::PF_VEHICLE_TIRE10,
+		PF_VEHICLE_TIRE11 = opennova::world::PF_VEHICLE_TIRE11,
+		PF_VEHICLE_TIRE12 = opennova::world::PF_VEHICLE_TIRE12,
+		PF_VEHICLE_TIRE13 = opennova::world::PF_VEHICLE_TIRE13,
+		PF_VEHICLE_GEAR = opennova::world::PF_VEHICLE_GEAR,
 		PF_TEX_TEAM_VALID = opennova::world::PF_TEX_TEAM_VALID,
 		PF_TEX_TEAM = opennova::world::PF_TEX_TEAM,
 		PF_ZONE_CTRL_VALID = opennova::world::PF_ZONE_CTRL_VALID,
@@ -283,6 +292,19 @@ public:
 		PF_SECTION_MASK_LO = opennova::world::PF_SECTION_MASK_LO,
 		PF_SECTION_MASK_HI = opennova::world::PF_SECTION_MASK_HI,
 		PF_STANCE_BITS = opennova::world::PF_STANCE_BITS,
+		PF_FOCAL_SWAY_VALID = opennova::world::PF_FOCAL_SWAY_VALID,
+		PF_FOCAL_SWAY_BASIS_0 = opennova::world::PF_FOCAL_SWAY_BASIS_0,
+		PF_FOCAL_SWAY_BASIS_1 = opennova::world::PF_FOCAL_SWAY_BASIS_1,
+		PF_FOCAL_SWAY_BASIS_2 = opennova::world::PF_FOCAL_SWAY_BASIS_2,
+		PF_FOCAL_SWAY_BASIS_3 = opennova::world::PF_FOCAL_SWAY_BASIS_3,
+		PF_FOCAL_SWAY_BASIS_4 = opennova::world::PF_FOCAL_SWAY_BASIS_4,
+		PF_FOCAL_SWAY_BASIS_5 = opennova::world::PF_FOCAL_SWAY_BASIS_5,
+		PF_FOCAL_SWAY_BASIS_6 = opennova::world::PF_FOCAL_SWAY_BASIS_6,
+		PF_FOCAL_SWAY_BASIS_7 = opennova::world::PF_FOCAL_SWAY_BASIS_7,
+		PF_FOCAL_SWAY_BASIS_8 = opennova::world::PF_FOCAL_SWAY_BASIS_8,
+		PF_FOCAL_SWAY_X = opennova::world::PF_FOCAL_SWAY_X,
+		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
+		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -1787,6 +1809,7 @@ public:
 	// plus the diagnostic counters, moved out and cleared (empty until a world
 	// is installed). NOT ClassDB-bound: DestructionPresenter reads the engine
 	// events; the tests author a DestructionDrain through its data leg.
+	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
 	// The live death-piece pool — each piece renders as its single husk-model
 	// section. NOT ClassDB-bound. (engine: runtime/world/destruction.cpp)
@@ -2150,9 +2173,12 @@ public:
 	// Even-tick, simulation-owned watercraft W3/W4 wake samples. The native
 	// vector is the fixed-tick presenter's path; the typed array is the
 	// diagnostic/test wrapper over the same values.
-	void fill_vehicle_wake_visual_rows(
-			std::vector<opennova::world::VehicleWakeVisualRow> &r_rows) const;
-	TypedArray<VehicleWakeVisualRow> get_vehicle_wake_visuals() const;
+	void fill_water_wake_frame(
+			const Vector3 &camera, opennova::renderer::WaterWakeFrame &frame) const;
+	const opennova::particle::ParticleForceField *particle_force_field() const;
+	void fill_vehicle_trail_visual_rows(
+			std::vector<opennova::world::VehicleTrailVisualRow> &r_rows) const;
+	TypedArray<VehicleTrailVisualRow> get_vehicle_trail_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's

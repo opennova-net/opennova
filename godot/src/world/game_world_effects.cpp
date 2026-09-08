@@ -184,11 +184,11 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	if (effect_world != nullptr && !skip_effect_tick) {
 		if (frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
 			const int64_t fx_start = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
-			effect_world->advance_fixed_tick(Simulation::tick_dt());
+			effect_world->advance_simulation_tick(Simulation::tick_dt(), get_sim().ptr());
 			frame_stats_->add(FrameStats::EFFECTS_TICK,
 					static_cast<int64_t>(Time::get_singleton()->get_ticks_usec()) - fx_start);
 		} else {
-			effect_world->advance_fixed_tick(Simulation::tick_dt());
+			effect_world->advance_simulation_tick(Simulation::tick_dt(), get_sim().ptr());
 		}
 	}
 }

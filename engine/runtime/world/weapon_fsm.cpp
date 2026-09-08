@@ -578,8 +578,9 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
         const char *anim = nullptr;
         for (size_t r = 0; r < row_count; ++r) {
             if (!name_equals_ci(rows[r].name, kWeaponActionSuffixes[i])) continue;
-            ds = rows[r].delaystart;
-            de = rows[r].delayend;
+			a.action_value = rows[r].action_value;
+			ds = rows[r].delaystart;
+			de = rows[r].delayend;
             if (rows[r].anim[0] != '\0') anim = rows[r].anim;
             // The row's audio/effect legs ride the baked pool entry [orig: the
             // ActionDef record carries the resolved references].

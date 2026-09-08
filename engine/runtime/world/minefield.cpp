@@ -28,36 +28,13 @@ int32_t distance(FixedVec3 a, FixedVec3 b) {
                                        static_cast<double>(INT32_MAX)));
 }
 
-// [orig: Weapon_FireProcess @ 0x53F5B0]
+// [orig: Weapon_FireProcess @0x53F5B0]
 void fire(World &world, Entity &field, FixedVec3 p, uint8_t ammo_index) {
-    if (world.tables.ammo.by_index(ammo_index) == nullptr) return;
-    RoundSpawnParams params;
-    params.owner = field.primary_occupant;
-    params.shooter_handle = params.owner.packed;
-    params.origin = {p.x * io::kInvFp16One, p.y * io::kInvFp16One,
-                     p.z * io::kInvFp16One};
-    params.dir_yaw_bam = field.veh.yaw_seeded ? field.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(field.yaw);
-    params.dir_pitch_bam = bam_from_degrees_wrapped(field.pitch);
-    params.ammo_index = ammo_index;
-    params.adm_index = ammo_index;
-    // Launch effects precede authority/ceasefire. Their source is the field;
-    // the occupant (normally null) owns the gameplay round.
-    RoundSpawnParams presentation = params;
-    presentation.owner = field.handle;
-    presentation.shooter_handle = field.handle.packed;
-    world.round_sim.present_fire(world, presentation);
-    if (!world.rules.logic_authority || world.rules.cease_fire) return;
-    RoundEvent event;
-    event.shooter_handle = params.shooter_handle;
-    event.origin_x = p.x; event.origin_y = p.y; event.origin_z = p.z;
-    event.dir_yaw = params.dir_yaw_bam; event.dir_pitch = params.dir_pitch_bam;
-    event.adm_index = ammo_index;
-    event.mode_flags = 1;
-    world.out.rounds.add(event);
-    params.launch_presented = true;
-    world.round_sim.spawn(world, params);
+	world.round_sim.fire_source(world, field, p,
+			field.veh.yaw_seeded ? field.veh.yaw_bam : bam_heading_from_mission_yaw_deg(field.yaw),
+			bam_from_degrees_wrapped(field.pitch), ammo_index);
 }
+
 } // namespace
 
 // [orig: Entity_InitHardpoints @ 0x4417D0]

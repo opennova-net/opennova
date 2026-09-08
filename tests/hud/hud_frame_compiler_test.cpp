@@ -1577,11 +1577,12 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	vp.shown = false;
 	const HudDrawList hidden = compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(missing.quads.size() == hidden.quads.size() &&
-	      missing.glyphs.size() == hidden.glyphs.size(),
-	      "missing vehicle interface texture hides the entire panel");
+					missing.glyphs.size() == hidden.glyphs.size(),
+			"missing vehicle interface texture hides the entire panel");
 	vp.shown = true;
 	vp.silhouette_valid = true;
-	vp.silhouette_w = 64; vp.silhouette_h = 32;
+	vp.silhouette_w = 64;
+	vp.silhouette_h = 32;
 
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	// Exactly ONE filled seat box -- the occupied seat. The empty seat draws a

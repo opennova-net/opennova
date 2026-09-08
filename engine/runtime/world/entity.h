@@ -246,21 +246,19 @@ constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
 }
                                                                  // [orig: @0x40e9f0; @0x40dc8e]
 
-// Captured inputs for the watercraft's two afloat wake lanes. The cbot mover
-// samples these on its even-tick effect pass; presentation consumes the saved
-// pose rather than a later interpolated entity pose, so particles and their
-// intensity share one simulation instant.
-struct VehicleWakeState {
-    bool valid = false;
-    bool afloat = false;
-    uint32_t source_tick = 0;
-    Vec3 position;
-    float pitch_deg = 0.0f;
-    float yaw_deg = 0.0f;
-    float roll_deg = 0.0f;
-    int32_t water_z = 0;
-    uint32_t command_magnitude_q16 = 0;
-    uint32_t motion_magnitude_q16 = 0;
+// One shared bank of sixteen persistent movement emitters. W1/W2 on land
+// and W3/W4 in water address these same slots, selected by the userpoint mask.
+// [orig: Entity_UpdateBoneTrailEffects @0x4589C0, entity+0x408..0x444]
+struct VehicleTrailPoint {
+	uint8_t definition = 0;
+	uint32_t magnitude_q16 = 0;
+	uint32_t source_tick = 0;
+	Vec3 position;
+	Vec3 direction;
+};
+struct VehicleTrailState {
+	VehicleTrailPoint points[16];
+	uint16_t effect_state[2] = {};
 };
 
 // The lndm entity overlay. Zero-filled, unauthored slots still participate.
@@ -306,8 +304,9 @@ struct Entity {
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
-    uint8_t item_type = 0;    // raw ItemDef+0x5C type (1 vehicle, 3 person)
-    // Whether the live graphic model carries the +0xE0 portal/occlusion pointer
+	bool render_sway = false;
+	uint8_t item_type = 0; // raw ItemDef+0x5C type (1 vehicle, 3 person)
+	// Whether the live graphic model carries the +0xE0 portal/occlusion pointer
     // used by Entity_ClassifyForMinimap for ordinary Building entries. Kept as
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di
     // assets. Armory/zone/etc. classifiers do not require it.
@@ -336,8 +335,9 @@ struct Entity {
     // attaches [orig: Entity_InitFromModel @0x40dd04 resolves the hardcoded
     // name TARGET]. The non-person aim/LOS origin transforms it by the
     // placement matrix [orig: Entity_ComputeWeaponFireOrigin @0x43b5d4..0x43b5f6].
-    uint8_t target_userpoint_byte = 0;
-    int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
+	uint8_t look_userpoint_byte = 0; // def+1351, LOOK; fire-validation LOS origin
+	uint8_t target_userpoint_byte = 0;
+	int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
     // The §5.10b wire replication class, resolved from the item's items.def *_function class
@@ -555,13 +555,14 @@ struct Entity {
     int8_t net_analog_x = 0;
     int8_t net_analog_y = 0;
     int8_t net_analog_z = 0;
-    // Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
-    // (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
-    // index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
-    // AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
-    // to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
-    // (D-NET-143)
-    uint8_t equipped_adm_index = 0xFF;
+	int8_t analog_throttle = 0; // local fourth axis +0x133; not carried by C2S 0x0C
+	// Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
+	// (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
+	// index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
+	// AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
+	// to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
+	// (D-NET-143)
+	uint8_t equipped_adm_index = 0xFF;
     // UseGun temporarily replaces EquippedSlot with the parent's embedded slot.
     // Preserve the personal AdmDef byte. Detach restores it for a player-classified
     // occupant and clears the equipped byte for an NPC.
@@ -612,17 +613,19 @@ struct Entity {
     // [orig: Entity_SpawnDeathPieces @ 0x493983]
     uint32_t spawned_piece_mask = 0;
     DeathMotionMode death_motion = DeathMotionMode::None;
+	uint8_t death_effect_active[3] = {}; // four owned handles per bank
+	bool death_effect_underwater = false;
 
-    // The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
-    // streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",
-    // D-NET-147/150). Composed from mission attributes + item-def traits:
-    //   BMS Indestructible(1<<21) -> 0x4000000, Reflective(1<<23) -> 0x400,
-    //   NoShadow(1<<24) -> 0x1000000            [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
-    //   kind Building                -> 0x20000  [orig: Entity_InitFromModel @0x40e105]
-    //   items.def hp == 0            -> 0x4000000 (+ sub_type 0xFF) [orig: @0x40dc8e]
-    // Organic low-byte runtime/wire state also has a legacy flags mirror. Retail
-    // consumers of player 0x100 and guarding/mounted 0x40 keep both views coherent.
-    uint32_t engine_flags = 0;
+	// The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
+	// streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",
+	// D-NET-147/150). Composed from mission attributes + item-def traits:
+	//   BMS Indestructible(1<<21) -> 0x4000000, Reflective(1<<23) -> 0x400,
+	//   NoShadow(1<<24) -> 0x1000000            [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+	//   kind Building                -> 0x20000  [orig: Entity_InitFromModel @0x40e105]
+	//   items.def hp == 0            -> 0x4000000 (+ sub_type 0xFF) [orig: @0x40dc8e]
+	// Organic low-byte runtime/wire state also has a legacy flags mirror. Retail
+	// consumers of player 0x100 and guarding/mounted 0x40 keep both views coherent.
+	uint32_t engine_flags = 0;
     // entity+290 low byte <- BMS record byte 81; always-present byte of the 0x10 static record
     // (golden buildings carry 0xFF). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     uint8_t ammo_count = 0;
@@ -631,11 +634,17 @@ struct Entity {
     uint8_t sub_type = 0;
     // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
     uint8_t ref_num = 0;
+	// BMS team_budget byte165 -> entity+356, distinct from spawn team +357.
+	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0]
+	int8_t vehicle_spawn_team = 0;
+	uint8_t vehicle_spawn_priority = 0; // marker+539 [orig: @0x529B40]
+	// Resolved pcvehicle_spawnlist mask -> full items.def IDs (+100000).
+	std::vector<int32_t> vehicle_spawn_ids;
 
-    // --- Advance & Secure zone fields (net-re §5.61) ---
-    // entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
-    // 0 = not a chain zone (plain flag/base). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
-    uint8_t zone_number = 0;
+	// --- Advance & Secure zone fields (net-re §5.61) ---
+	// entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
+	// 0 = not a chain zone (plain flag/base). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+	uint8_t zone_number = 0;
     // entity+350 (0x15E) <- BMS record word 14 (wp_distance low u16) — the capture-zone /
     // proximity radius. Streamed as the 0x0D record's 0x2000/0x8000-gated u16 (golden ASH_I5A
     // bunkers: 70) and read by the client's zone-radius consumers (CaptureZone_* /
@@ -815,8 +824,15 @@ struct Entity {
                                       // (mission deg) mirrors (90 - bam/deg) each motor tick —
                                       // steering accumulates sub-degree BAM deltas.
         bool yaw_seeded = false;      // yaw_bam initialized from Entity::yaw on first tick
-        int32_t speed = 0;            // currentSpeed, 16.16 u/tick [orig: entity+0x29C]
-        int32_t speed_accel = 0;      // per-tick speed delta [orig: entity+0x2A0 speedAccel]
+		// Spawn-relative pose (+0x24C), support (+0x264), and team (+0x165).
+		// [orig: Game_StartMission @0x526003..0x52606B]
+		int32_t spawn_pose[6] = {};
+		EntityHandle spawn_support;
+		uint8_t spawn_team = 0;
+		bool spawn_pose_valid = false;
+		bool respawn_waiting_for_overlay = false; // entity+0x2C bit 0, @0x52A110
+		int32_t speed = 0; // currentSpeed, 16.16 u/tick [orig: entity+0x29C]
+		int32_t speed_accel = 0;      // per-tick speed delta [orig: entity+0x2A0 speedAccel]
         int32_t cmd_speed = 0;        // commanded/target speed [orig: vehicleData+544]
         int32_t cmd_lateral_speed = 0; // commanded lateral speed [orig: vehicleData+540]
         int32_t steer_target_bam = 0; // steering target heading [orig: vehicleData+528]
@@ -826,11 +842,27 @@ struct Entity {
         int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
         int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
         int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
-        bool engine_sound_latched = false; // brain+0x318 bit 0: claimant start/stop
-        bool light_sound_latched = false;  // brain+0x318 bit 2: lights-on audio edge
-        bool reverse_sound_latched = false; // movement-sound direction bit
-                                            // [orig: vehicleData+0x318 bit 2]
-        uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
+		int32_t contact_direction[3] = {}; // +0x3BC..0x3C4: retained skid direction, Q16
+		uint32_t slip_started_tick = 0; // +0x3F8: tire-slip recovery window
+		int32_t wheel_slip_phase = 0; // +0x46C: signed wheelspin carry
+		bool contact_solved_once = false; // +0x3CE: contact solver has run
+		bool flare_latched = false; // brain+0x318 bit 2
+		int32_t view_tilt_bam = 0; // +0x45C, helo GUNPITCH fallback and bike lean history
+		uint16_t gear_phase = 0; // +0x470, automatic five-unit clearance servo
+		bool movement_effects_disabled = false; // +0x44C
+		bool damage_smoke_active = false; // emitter +0x1CC
+		bool damage_fire_active = false; // emitter +0x400
+
+		bool skid_sound_latched = false; // brain+0x318 bit 3
+		uint32_t rev_sound_ticks = 0; // brain+0x31C
+		bool skid_effects_requested = false; // per-tick bone-effect producer
+		uint32_t contact_wake_tick = 0; // entity+0x3B8: heavy neighbor wake
+		bool collision_sound_latched = false; // brain+0x318 bit 4
+		bool engine_sound_latched = false; // brain+0x318 bit 0: claimant start/stop
+		bool light_sound_latched = false; // brain+0x318 bit 2: lights-on audio edge
+		bool reverse_sound_latched = false; // movement-sound direction bit
+											// [orig: vehicleData+0x318 bit 2]
+		uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
         bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick
@@ -881,12 +913,12 @@ struct Entity {
         bool plat_at_rest = false;         // bob arm latch [orig: byte +0x364]
         bool plat_porpoise = false;        // bow-dip cycle latch [orig: byte +0x365]
         bool plat_planing = false;         // planing/bow-up bit [orig: +0x472 bit 1]
-        bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
         bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
         bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
-        VehicleWakeState wake;             // even-tick W3/W4 presentation sample
-        int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
-        // Light (cbik) solve: consecutive rear-wheel contact ticks — the
+		VehicleTrailState trails;
+		uint16_t rotor_wash_handle = 0;
+		int32_t plat_airborne_ticks = 0; // [orig: +0x3D4]
+		// Light (cbik) solve: consecutive rear-wheel contact ticks — the
         // contact byte requires > 1, so a one-tick graze never grounds the
         // bike [orig: entity[1].pad_040[8]; ++ @0x47C154-analog in
         // Entity_ProcessLightVehiclePhysics, reset in the both-wheels-off
@@ -907,28 +939,45 @@ struct Entity {
         };
         PartSpin part_spin;
         int32_t wheel_phase = 0; // +0x2B8
-        int32_t track_phase[2] = {}; // +0x2BC/+0x2C0, tank left/right tracks
-        // --- Suspension spring leg (world/vehicle_suspension.cpp +
-        // world/ground_conform.h). Per-wheel compression sinks, the four
-        // oscillator blocks, the spring energy word, and the park latch bytes
-        // [orig: +0x2D4..+0x2E0 compression; +0x304 + 0x18*i oscillators;
-        //  +0x300 energy; +0x2EC parked latch / +0x2ED mover disable request
-        //  / +0x2EE / +0x2EF; vehicle-client-movers-re.md §7.3].
-        int32_t wheel_comp[4] = {};
-        struct WheelOsc {
-            int32_t amplitude = 0; // +0
+		int32_t track_phase[2] = {}; // +0x2BC/+0x2C0, tank left/right tracks
+		// --- Suspension spring leg (world/vehicle_suspension.cpp +
+		// world/ground_conform.h). Per-wheel compression sinks, the four
+		// oscillator blocks, the spring energy word, and the park latch bytes
+		// [orig: +0x2D4..+0x2E0 compression; +0x304 + 0x18*i oscillators;
+		//  +0x300 energy; +0x2EC parked latch / +0x2ED mover disable request
+		//  / +0x2EE / +0x2EF; vehicle-client-movers-re.md §7.3].
+		int32_t wheel_comp[6] = {};
+		struct WheelOsc {
+			int32_t amplitude = 0; // +0
             int32_t extension = 0; // +4
             int32_t energy = 0;    // +8
-            float phase = 0.0f;    // +0x14
-        };
-        WheelOsc wheel_osc[4];
+			int32_t impulse = 0; // +0x10, tank landing impulse
+			float phase = 0.0f; // +0x14
+		};
+		WheelOsc wheel_osc[4];
         // DIAGNOSTIC ONLY (aiprobe "pd"): the ground solve's per-pad contact
         // depths from the last solve — probe instrumentation for the 00TRg
         // contact-flap hunt (AI-PARITY-CONCEPT §6.15). Not retail state; no
         // gameplay reader.
         int32_t dbg_pad_depth[4] = {};
-        int32_t spring_energy = 0;   // +0x300 (the impact sink)
-        // The crash latch bytes, named by retail offset (vehicle_suspension.h
+		// One-tick wheel forces and the retained chassis rotation.
+		// [orig: Entity_ComputeChassisOrientation @0x463940; +0x368 / +0x4E8..0x540]
+		struct ChassisForce {
+			int32_t direction[3] = {};
+			int32_t rate = 0, scratch = 0;
+		};
+		ChassisForce chassis_forces[4];
+		int32_t chassis_matrix[16] = { 4194304, 0, 0, 0, 0, 4194304, 0, 0, 0, 0, 4194304, 0, 0, 0,
+			0, 4194304 };
+		float chassis_quaternion[4] = {};
+		bool chassis_active = false;
+		uint32_t chassis_blend_tick = 0;
+		int32_t chassis_blend_ticks = 0;
+		bool chassis_contact_active = false; // +0x3DC
+		int32_t chassis_impulse_direction[3] = {}; // +0x3EC..0x3F4, normalized Q16
+		int32_t chassis_impulse_amplitude = 0; // +0x3FC
+		int32_t spring_energy = 0; // +0x300 (the impact sink)
+		// The crash latch bytes, named by retail offset (vehicle_suspension.h
         // documents each; Entity_RespawnVehicle @0x45FF40 is the one writer of
         // the whole set).
         uint8_t crashed = 0;         // +0x2EC — the CRASHED / TIPPED state

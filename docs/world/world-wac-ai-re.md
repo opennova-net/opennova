@@ -4831,7 +4831,8 @@ scale applied at the brain seed in `init_brain`), resolved natively by
 `mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp, driven by `boot_mission`) inside `MissionKernel::boot` (S9, ADR
 0028; the former shell `AiProfileSpeeds.build` reader + the
 `set_ai_profile_speeds` seam are deleted). d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
-`mission_promote` ctest. The REST of the profile parse stays D-AI-11 (h).
+`mission_promote` ctest. PR #640 completes the remaining vehicle profile consumers,
+including initial state, priorities, weapon blocks and aircraft flight fields.
 
 **The profile-NAME fallbacks, witnessed + ported 2026-08-25 (post-merge tidy
 #553–#573).** A placed vehicle with no ai_textfile never runs profile-less in
@@ -4878,11 +4879,11 @@ is `atof * 65536`; `flight_skill`/`drive_skill` `@ 0x45f827/@ 0x45f83c` share
 the +0x20 clamp 0..4 with `aim_skill`. The GROUND branch converts its speed
 pair the same way `@ 0x45e6df/@ 0x45e72d` (+0xC0/+0xC4); the port keeps that
 pair raw because its consumer (the brain seed) applies the identical scale.
-No engine consumer reads the HELO rows yet — the host-side helicopter mover is
-the open port (D-AI-11 (h)); the def layer is faithful ahead of it
-(`runtime_boot` ctest pins every conversion).
+The authority aircraft brain and client motor now consume these HELO rows
+(PR #640); `runtime_boot` pins every conversion and the aircraft AI and
+client-motor tests cover their runtime behavior.
 
-### 23.4 The AI boarding chain (witnessed; the board walk + the 123..127 command legs PORTED 2026-08-25, #571)
+### 23.4 The AI boarding chain (ported; completed in PR #640)
 
 aiComp (+0x68 component) fields: **+148 (dword 37) = the waypoint-list slot,
 OVERLOADED as the boarding mode when 123/124/125**; +152 (dword 38) = the
@@ -4896,8 +4897,8 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   `HeliLift_SpawnPickup @ 0x452668` (mode 125). No shipped-mission BMS action
   sets 123/124 (register-form writers only).
 - The think consumes them [orig: Entity_UpdateInfantryAI]: mode present ->
-  resolve the target by DcbId across pools 0-3 [@ 0x4baeb5-0x4baf88], walk to
-  the nearest `E8`->`E7`->`E6`->`E5` entry bone [@ 0x4baf9b-0x4bb026]; on
+  resolve the target by DcbId across pools 0-3 [@ 0x4baeb5-0x4baf88], claim the lowest free entry index after probing
+  `E8` down through `E1` [@ 0x4baf9b-0x4bb026]; on
   arrival with `attrib & 0x60` -> `Entity_FindBestSeatSlot` +
   `Entity_RequestVehicleAttach` [@ 0x4bbda6-0x4bbe07]; every 64 ticks a seated
   boarder re-runs the pick and UPGRADES seats when a better one freed (ctrl
@@ -4933,12 +4934,12 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   child `sitex` 0x2000000 (lowest wins) [@ 0x4353ee..0x43540e]; the think's
   per-entity stagger key is `current_tick + 36 * entity+0x7C` [@ 0x4b9948..
   0x4b9953, strength-reduced `lea [eax+eax*8]` / `lea [tick+edx*4]`].
-  Still open, on D-INF-2: the E1..E8 entry-bone claim/stagger
+  PR #640 completes the E1..E8 entry-bone claim/stagger
   [@ 0x4bb100..0x4bb17a], the 64-tick seated re-upgrade [@ 0x4ba9d8..0x4baa41:
   `(tickKey & 0x3F) == 0`, mounted, `Entity_FindBestSeatSlot`,
-  `Entity_GetBoneSlotType != +0x168`, re-attach], the 11000/12000/12001 escort
-  offsets, the can't-enter fallbacks, and `Entity_CanEnterVehicle @ 0x435480`'s
-  internal gates.
+  `Entity_GetBoneSlotType != +0x168`, re-attach], the can't-enter fallbacks,
+  and `Entity_CanEnterVehicle @ 0x435480`'s internal gates. Only the scripted
+  organic escort offsets 11000/12000/12001 remain on D-INF-2.
 
 Ported same session (the second wave, after the 00TRa probe forced them out):
 
@@ -4963,22 +4964,20 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   items.def x293 is its integer approximation)
   [orig: Entity_ApplyCommand @ 0x43ab60 cases 0x1D/0x1E -> AIEvent types 10/11 ->
   AI_HandleCommand @ 0x465770 cases 0xA/0xB].
-- **Vehicle brains**: promote attaches an AI brain to pool-1 items whose type
-  authors a CONTROL seat (ctrlx/drvrx spec — the drivable class; the stand-in
-  for the def AIData gate, D-AI-11), initialized into state 16 GROUND_FOLLOWWP
-  (the shipped ground .aip `default_state`; the profile parse is unported).
-  Pure-gunner parent items stay brainless: retail lets the attached organic gunner own
-  perception and drive the parent's embedded weapon slot (§26), so this is no longer a
-  no-fire condition. Item brains also
-  spawn with the flags100-bit1 ACQUIRE SKIP [orig: the profile+100 & 2 gate
-  @ 0x46775c]: the shipped transport .aip profiles author zero target
-  priorities, and the D-AI-1 feed scans unconditionally where retail's class
-  table rejects — without the skip, 13 per-tick pool scans + LOS raycasts
-  spiraled the 00TRa load. Lifts with the .aip parse (D-AI-11 i). With the SM mover
-  feeding `kOutSpeed` and the AI-driver leg consuming it, a crewed truck now
-  drives its authored route: 00TRa's instructor (command-mounted into ctrlx at
-  spawn via waypoint_id 123-125) drives the ride the moment event 2 redirects
-  group 3.
+- **Vehicle brains**: known drivable classes consume the resolved profile's
+  initial state, speeds, perception priorities, weapon blocks and aircraft
+  flight fields. Initial current, pending and fallback state come from
+  profile +24 (`Entity_InitVehicleAI @ 0x460200`); transport zero-priority
+  profiles suppress acquisition through the class-priority test. Pure-gunner
+  parents use the mounted organic's perception and weapon slot.
+
+The remaining vehicle boarding and USE work is completed in PR #640:
+E/G/S/H entry stages, live eye and hull queries, carried-gun occupancy,
+WAC seatbelt, full admission gates, facing-push arrival radius and the
+64-tick seat upgrade. See [vehicle-client-movers-re section 36](vehicle-client-movers-re.md#36-boarding-use-scans-and-authored-ai-state)
+for the current witness and validation map. The scripted organic escort
+identities 11000/12000/12001 remain in the separate D-INF-2 infantry scope.
+
 
 ### 23.5 The mounted seat carry (the ride)
 
@@ -5025,7 +5024,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | Mount-chain residuals after §26 closes emplaced fire, mounted collision suppression, death-detach animation, UseGun live root position, and the joiner C2S 0x26/0x27 + requester-local S2C 0x0A confirmation leg (`Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`; player/AI callers `0x4b63c7` / `0x4bec23`): (a) the USE scan remains a registry sweep with a +0.9 u chest eye; (b) its emplaced-carrier LOS leg (`attrib & 0x20` -> `groundEntity` as the ray's excluded target `@ 0x43615c..0x436183`, so an EWeap's own hull still blocks the ray to its seat from a rider inside the carrier) is modeled since 2026-09-05 by the seated rider's carrier-FAMILY candidate skip (`own_carrier_family`: the root carrier and its EWeap children), which is why USE exits the DBuggy instead of cycling driver -> gun -> driver (asset-gated ctest `mission_buggy_01tr` on 01TR); the armory leg is ported; (c) the WAC no-dismount global is unmodeled; (d) numbered seat-position keys 0xB6-0xBF are ported (2026-09-05; request-side AI eligibility preserves the authority occupied-slot rejection); (e) the AI board walk is ported (#571, 2026-08-25 — §23.4); the 64-tick seated seat-upgrade `@ 0x4ba9d8..0x4baa41` and the E1..E8 entry-bone stagger stay open under D-INF-2; (f) child-vehicle seat traversal is unmodeled; (g) sub-39 groundEntity persistence rides the generic carrier reference; (h) vehicle brains retain the acquire-skip stand-in pending `.aip` parse; (i) own-hull seated-scan occlusion remains that carrier-family candidate skip until pool-1 hulls are built. Generic-seat follow and the full UseGun matrix basis remain D-INF-2. | §23.1/§23.4/§23.5 and §26; asset-gated 00TRc E50triB GUT | mount/ride/drive/emplaced-fire/death, UseGun root position, and joiner relationship confirmation are live; boarding, generic/full-basis, and scan residuals stay OPEN |
+| D-AI-11 | FIXED in PR #640: live-eye proximity scan, carried-gun/root occupancy, original all-type hull LOS and label exclusions, WAC seatbelt, 64-tick upgrade, full admission and E/G/S/H entry walk, child-seat selection, posed carrier follow and profile-driven vehicle brains. | `Entity_FindNearestSeatOrArmory @ 0x435D50`; `Entity_CanEnterVehicle @ 0x435480`; `Entity_UpdateInfantryAI @ 0x4B9910`; `Entity_InitVehicleAI @ 0x460200`. | Native boarding, collision, mission, profile and WAC regressions; see vehicle-client-movers-re section 36. |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).
@@ -5398,22 +5397,14 @@ entity-matched clear always clears nothing. It also does NOT touch the
 256x180-B `g_death_piece_pool @ 0x26BAC58`: death-piece slots carry no owner
 pointer, and `Entity_SpawnDeathPieces` writes none.
 
-Port status: the reimpl creates at most one origin-anchored group for each
-authored Dead/water, Fire, and Other family and performs one crackle roll per
-wreck. The crackle roll itself moved into the SIM (S12b, 2026-08-07):
-`destruction_tick_dead_items` rolls per logic tick per burning wreck
-(husk + authored `particlefire`) on the world's rol-xor PRNG stand-in
-stream — the same generator as `PRNG_Next16_C @ 0x6131b0`, one stream
-standing in for the A/B/C instances — with retail's evaluation order (the
-draw consumed BEFORE the water gate `@ 0x4932bf`), the effect emitted as a
-transient event and the sound routed through the fire-sound distance-delay
-queue at the ENTITY position (`Sound_PlayWithDistanceAttenuation @ 0x4932e2`
-— the previous shell-side roll ran per render frame on a Godot RNG with an
-immediate ungated sound). It does not populate or follow the four bone slots
-independently. It
-also does not sample fire-bone submersion or emit `g_fx_Boat01Steam`: the
-effect world's kill plane merely culls particles at a plane, so it cannot
-substitute for the retail steam spawn or per-bone bank release (D-ITEM-15).
+Port status (2026-09-07, PR #640): death_effects.cpp implements the
+four-slot Dead/water, Fire and Other bone banks. Each slot follows its posed
+bone, consumes the shared C random stream in the original order, and uses
+its own fire/submersion state. Underwater Fire slots retire and spawn
+Boat01Steam; resurfacing can restart the authored bank. Transient crackle
+and distance-delayed sound retain their separate positions. The native
+destruction and GUT destruction_present_pass suites cover these consumers.
+D-ITEM-15 is FIXED; a particle kill plane does not replace this lifecycle.
 The settle transition is ported, and D-ITEM-14 CLOSED 2026-08-12: the four
 ported transition sites (`destruction.cpp transition_to_ground_death` — the
 routed-falling contact `@ 0x494113`, both static-death legs
@@ -5543,7 +5534,7 @@ the FFI structs.
 | D-ITEM-12 | Round BALLISTICS are absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
 | D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
 | D-ITEM-14 | CLOSED 2026-08-12: the four ported transition sites (`transition_to_ground_death` — routed-falling `@0x494113`, static legs `@0x4942c6`/`@0x4943da`, unitType-3 pitch equality `@0x48f0c7`) play the item's authored `particlefinale` once at the grounded pose and stamp savedLivePose; the periodic-sound clear closed as FAITHFUL-NOTHING — the pool has no producer in retail JO (allocator `@0x57b380` + reset `@0x57b360` have zero xrefs; `PeriodicSound_TickAll @0x57b450` walks an always-empty pool), so the entity-matched clear never clears anything and no pool is modeled. The old "+0x4E0 impact pair" gloss corrected: only the +0x4E2 `particlefinale` handle is read `@0x493088` | `Entity_TransitionToGroundDeath @0x493080`; intern site `resolve_item_materials_and_spawn_bone_trails @0x5231cb` (name +0x4E4 → handle +0x4E2); `PeriodicSound_ClearByEntity @0x57b3e0` over `g_periodic_sound_pool @0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | `destruction_test` pins routed and specialized finale/saved-pose transitions plus generic silence |
-| D-ITEM-15 | Wreck effects are one origin-anchored group per authored family plus one fire-crackle roll per wreck; there are no four-slot Dead/water/Fire/Other bone banks, per-slot bone follow, or underwater `g_fx_Boat01Steam` transition. The effect kill plane is particle culling only and cannot substitute for spawning steam | `Entity_InitDeathSounds @ 0x4939b0`; `Entity_UpdateDeadWreckEffects @ 0x493140` | large/multi-bone wreck effects originate and roll at one point, and burning bones entering water neither steam nor retire like retail |
+| D-ITEM-15 | FIXED (PR #640): four-slot Dead/water, Fire and Other bone banks with per-slot follow, PRNG_C crackle and underwater steam/restart | Entity_InitDeathSounds @0x4939B0; Entity_UpdateDeadWreckEffects @0x493140 | destruction and destruction_present_pass regressions; vehicle-client-movers-re section 28 |
 | D-ITEM-16 | **FIXED 2026-08-16.** The intact `CollisionWorld` view now samples every section at the total-face 8.8 stride, uses retail's signed centroid arithmetic and first callback matrix, derives the witnessed blast/radial direction, and emits material-17 foliage versus wood effects at each sampled triangle | `Entity_SpawnSectionDebris @ 0x43f580` | `destruction_test::test_section_debris_samples_collision_faces` pins 150 samples plus centroid/transform/direction/material; the present-pass test pins the resolved event row |
 | D-ITEM-17 | **FIXED 2026-08-16.** Exact stock graphic→userpoint resolution feeds full-Euler glass points; the pool-2 blast leg uses authored `kz_maxradius`, four ordered probabilistic shatter families, exact PRNG consumption, and a persistent per-point broken bit | `Projectile_ProcessExplosionQueue @0x4eb814-0x4eb85d`; `Terrain_SpawnEffectsAtUserPoint @0x5cee20` | native `destruction` pins range/effects/RNG/break-once; GUT pins real-model name/axis resolution and verbatim presentation |
 | D-ITEM-18 | **FIXED 2026-08-23.** UnitType 3's explicit `PiecePhysics` callback now ports raw-Q16 air/water motion, the one-draw angle branch, four Q22 slope probes and the husk-picked model-bottom correction, strict landing pose, `Effect_HeloGroundHit`, scorch 7, authority-only Organic/MItem dual blasts, exact fallback sounds, and a separate `PiecePitchSettle` state for `DeathPiece_SettlePitch`'s two-degree step/four-degree snap/delayed transition | `DeathPiece_PhysicsUpdate @0x48f500`; `Entity_CalcSlopeForces @0x4b0b00`; `DeathPiece_SettlePitch @0x48f0b0` | `destruction_test::test_specialized_piece_physics_callback` pins dry/wet/ramp/authority paths; object participation in the four rays is tracked once under D-ITEM-9 |
@@ -7034,13 +7025,13 @@ simply contributes zero deltas.
   rider-ticks-before-carrier ordering case (the mover order is entity-table
   order there). Rows adopt heading (+ the org1 chase target and RENDERED
   look pitch) and roll (rendered — the avatar euler consumes
-  `pitch_bam`/`roll_bam`). Open pair, tracked on the ledger row: the org2
-  bodyPitch/torso-aim adoption needs the replica body-conform channel (the
-  same +0x90 consumer family as the unported replica slope pass), and the
-  VEHICLE deck-carrier ride twins (`@ 0x48D6DA-0x48DACD` watercraft /
-  `@ 0x4905BC-0x49095B` air — same math, no capsule bias, no radius drop)
-  sit behind D-NET-161's vehicle-vs-vehicle contact, without which no ground
-  link can form on our side. Pinned by
+  `pitch_bam`/`roll_bam`). The remaining organic item on D-NET-196 is org2
+  bodyPitch/torso-aim adoption belongs to the shared infantry replica
+  body-conform channel (the same +0x90 consumer family as the replica slope
+  pass). The VEHICLE deck-carrier twins (`@ 0x48D6DA-0x48DACD` watercraft /
+  `@ 0x4905BC-0x49095B` air) and the contact needed to form their ground links
+  are implemented in PR #640; see vehicle-client-movers-re sections 22, 27
+  and 33. The organic ride is pinned by
   `netsim_client_replica_pipeline_contact_resolver` (zero-delta parked
   carrier, translation follow, the 90° rotate-about, heading adoption, the
   radius drop) and the collision_test replica flags legs (the resolve-start

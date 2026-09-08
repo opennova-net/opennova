@@ -363,7 +363,11 @@ private:
 	bool authored_lod_enabled_ = false;
     bool exact_owner_lod_ = false;
     bool geometry_visible_ = true;
-    bool rigid_parts_ = false;
+	bool focal_sway_active_ = false;
+	Basis focal_sway_basis_;
+	Vector3 focal_sway_offset_;
+	void apply_focal_sway();
+	bool rigid_parts_ = false;
 	ObjectID authored_lod_owner_;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
@@ -766,6 +770,7 @@ public:
 			float p_viewport_width,
 			float p_viewport_height);
 	Dictionary get_render_part_nodes() const;
+	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
 	void set_section_visibility_mask(int64_t p_mask);
 	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
 	// sections visible). Read by the corona owner-section gate.

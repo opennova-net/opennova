@@ -280,6 +280,7 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 
 	request.owner_relative_pose = native_pose(p_request->get_owner_relative_transform());
 	request.initial_age_ticks = non_negative_u32(p_request->get_initial_age_ticks());
+	request.force_zone = uint16_t(p_request->get_force_zone());
 	request.source_tick = token_from_godot(p_request->get_source_tick());
 	request.source_order = token_from_godot(p_request->get_source_order());
 	request.color_tint = native_vector(p_request->get_color_tint());
@@ -364,8 +365,14 @@ void EffectScene::reset_runtime_state() {
 }
 
 void EffectScene::advance_in_place(double p_delta_seconds) {
+	advance_with_forces(p_delta_seconds, nullptr);
+}
+
+void EffectScene::advance_with_forces(
+		double p_delta_seconds, const opennova::particle::ParticleForceField *forces) {
 	opennova::particle::EffectAdvanceRequest request;
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
+	request.forces = forces;
 	scene_.advance_simulation(request);
 	snapshot_dirty_ = true;
 }

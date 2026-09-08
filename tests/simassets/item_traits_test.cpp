@@ -395,18 +395,18 @@ int main() {
         CHECK(vt->flip == 220);
         // ctank keys the 4-byte ctan row -> the tank mover [orig: @0x82ABC0].
         CHECK(vt->family == VehicleFamily::Tank);
-        CHECK(vt->render_family == VehicleRenderFamily::Ground); // render cveh, move ctank
-        CHECK(vt->player_control);
-        CHECK(!vt->amphibian);
+		CHECK(vt->render_family == VehicleRenderFamily::Ground); // render cveh, move ctank
+		CHECK(vt->player_control);
+		CHECK(!vt->amphibian);
         CHECK(vt->sound_profile == "SP_Tank");
         CHECK(vt->sound_loops[0] == "LP_TANK");
         CHECK(vt->sound_loops[1].empty());
-        CHECK(vt->wake_w3.effect == "fx_sml_wk");
-        CHECK(vt->wake_w3.userpoint == "FX00");
-        CHECK(vt->wake_w4.effect == "fx_sml_wk_f");
-        CHECK(vt->wake_w4.userpoint == "FX01");
-    }
-    const VehicleTraits *apc_vt = w.vehicles.traits.get(501);
+		CHECK(vt->trails[2].effect == "fx_sml_wk");
+		CHECK(vt->trails[2].userpoint == "FX00");
+		CHECK(vt->trails[3].effect == "fx_sml_wk_f");
+		CHECK(vt->trails[3].userpoint == "FX01");
+	}
+	const VehicleTraits *apc_vt = w.vehicles.traits.get(501);
     CHECK(apc_vt != nullptr);
     if (apc_vt != nullptr) {
         CHECK(apc_vt->family == VehicleFamily::Ground);
@@ -420,11 +420,18 @@ int main() {
         CHECK(helo_vt->family == VehicleFamily::Helicopter);
         CHECK(helo_vt->physics == 0);
     }
-    // A ground row without the physics selector lands NO traits row.
-    CHECK(w.vehicles.traits.get(503) == nullptr);
-    (void)apc_h; (void)helo_h; (void)truck_h; (void)bush_h; (void)player_h;
+	// Ground selector zero is a real motor, as used by the shipped LCAC.
+	const VehicleTraits *simple_vt = w.vehicles.traits.get(503);
+	CHECK(simple_vt != nullptr);
+	if (simple_vt != nullptr)
+		CHECK(simple_vt->physics == 0);
+	(void)apc_h;
+	(void)helo_h;
+	(void)truck_h;
+	(void)bush_h;
+	(void)player_h;
 
-    // ---- the throwable class scan ----
+	// ---- the throwable class scan ----
     const ThrowableClassRow *frag = w.throwables.classes.get(600);
     CHECK(frag != nullptr);
     if (frag != nullptr) {

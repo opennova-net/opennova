@@ -230,8 +230,9 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.net_analog_x = 0;
     piece.net_analog_y = 0;
     piece.net_analog_z = 0;
-    piece.equipped_adm_index = kAdmSlotNone;
-    piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
+	piece.analog_throttle = 0;
+	piece.equipped_adm_index = kAdmSlotNone;
+	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
     piece.use_gun_slot_swapped = false;
     piece.hidden = false;
     piece.held = false;
@@ -700,8 +701,21 @@ void record_round_fire(World &world, RoundSim &sim,
     event.wire_round_flags = params.wire_round_flags;
     event.adm_index = params.adm_index;
     sim.fired.push_back(event);
-    // The sound legs run on the same logic-tick moment (world/fire_sound.h).
-    fire_sound_on_spawn(world, params);
+	// Received ADM fire executes the action row on every peer, including its
+	// tank recoil. The local FSM owns its own action execution. [orig: @0x4020A0]
+	if (params.owner != world.cached.local_player &&
+			(params.wire_round_flags &
+					(round_event_flag::kAltFire | round_event_flag::kAdmIndexed)) ==
+					round_event_flag::kAdmIndexed) {
+		const auto *weapon = world.tables.weapons.by_index(params.adm_index);
+		if (Entity *shooter = world.registry.get(params.owner);
+				shooter != nullptr && weapon != nullptr)
+			world.vehicles.weapon_recoil(*shooter,
+					weapon->action_fsm.actions[weapon_action::kFire].action_value,
+					params.dir_yaw_bam, params.dir_pitch_bam);
+	}
+	// The sound legs run on the same logic-tick moment (world/fire_sound.h).
+	fire_sound_on_spawn(world, params);
 }
 
 } // namespace
@@ -1403,11 +1417,25 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             }
         }
 
-        // Entity Health/healthMax (+286 and its template mirror) and ItemDef armor
-        // (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
-        // int32_t carriers to the rest of OpenNova, so enforce the storage width at
-        // this consequence boundary before any signed comparisons are made.
-        if (authoritative && target != nullptr) {
+		if (!not_armed && target != nullptr && ammo != nullptr) {
+			// The impact helper receives the ray's incoming direction, not
+			// the struck face normal. [orig: Projectile_UpdatePhysics @0x4E9D70,
+			// normalized ray @0x4EA20A, final argument @0x4EA73A]
+			const int32_t magnitude = fixed_magnitude(velocity_q16);
+			const int32_t inverse = magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
+			const int32_t incoming[3] = { int32_t((int64_t(inverse) * velocity_q16.x + 32768) >>
+												  16),
+				int32_t((int64_t(inverse) * velocity_q16.y + 32768) >> 16),
+				int32_t((int64_t(inverse) * velocity_q16.z + 32768) >> 16) };
+			const int32_t hit[3] = { impact_q16.x, impact_q16.y, impact_q16.z };
+			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
+		}
+
+		// Entity Health/healthMax (+286 and its template mirror) and ItemDef armor
+		// (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
+		// int32_t carriers to the rest of OpenNova, so enforce the storage width at
+		// this consequence boundary before any signed comparisons are made.
+		if (authoritative && target != nullptr) {
             target->health = retail_signed_i16(target->health);
             target->health_max = retail_signed_i16(target->health_max);
             target->armor_impact = retail_signed_i16(target->armor_impact);

@@ -53,47 +53,28 @@ public:
 	bool get_move_effect_live() const { return value_.move_effect_live; }
 };
 
-// One even-tick cbot wake sample (Simulation::get_vehicle_wake_visuals;
-// world::VehicleWakeVisualRow carries the identity and lane notes).
-class VehicleWakeVisualRow : public RefCounted {
-	GDCLASS(VehicleWakeVisualRow, RefCounted)
-
-	opennova::world::VehicleWakeVisualRow value_;
+// One persistent vehicle trail point, already posed by the simulation.
+class VehicleTrailVisualRow : public RefCounted {
+	GDCLASS(VehicleTrailVisualRow, RefCounted)
+	opennova::world::VehicleTrailVisualRow value_;
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const opennova::world::VehicleWakeVisualRow &p_value) { value_ = p_value; }
-	const opennova::world::VehicleWakeVisualRow &value() const { return value_; }
-	// Test constructor: position/water height are Godot-space values; the
-	// rotation is the canonical (pitch, mission yaw, roll) degree triple.
-	static Ref<VehicleWakeVisualRow> make(int p_handle_packed, int64_t p_registry_spawn_id,
-			const Vector3 &p_pos, const Vector3 &p_rotation_deg, float p_water_height,
-			bool p_afloat = true, const String &p_w3_effect = String(),
-			const String &p_w3_userpoint = String(), float p_w3_magnitude = 0.0f,
-			const String &p_w4_effect = String(), const String &p_w4_userpoint = String(),
-			float p_w4_magnitude = 0.0f, int p_bms_id = 0, int p_origin_kind = 255,
-			int p_origin_index = 0xFFFFFF, int p_item_id = 0, int p_source_tick = 0);
-
+	void assign(const opennova::world::VehicleTrailVisualRow &p_value) { value_ = p_value; }
+	const opennova::world::VehicleTrailVisualRow &value() const { return value_; }
+	static Ref<VehicleTrailVisualRow> make(int p_handle, int64_t p_generation, int p_point,
+			const String &p_effect, const Vector3 &p_pos, const Vector3 &p_dir, float p_magnitude,
+			int p_tick = 0);
 	int get_handle_packed() const { return value_.handle_packed; }
-	int64_t get_registry_spawn_id() const {
-		return static_cast<int64_t>(value_.registry_spawn_id);
-	}
-	int get_item_id() const { return value_.item_id; }
-	int get_bms_id() const { return value_.bms_id; }
-	int64_t get_spawn_origin() const { return value_.spawn_origin; }
-	int get_source_tick() const { return static_cast<int>(value_.source_tick); }
+	int64_t get_registry_spawn_id() const { return int64_t(value_.registry_spawn_id); }
+	int get_point() const { return value_.point; }
+	int get_source_tick() const { return int(value_.source_tick); }
 	Vector3 get_pos() const;
-	Vector3 get_rotation_deg() const;
-	float get_water_height() const;
-	bool get_afloat() const { return value_.afloat; }
-	String get_w3_effect() const;
-	String get_w3_userpoint() const;
-	float get_w3_magnitude() const;
-	String get_w4_effect() const;
-	String get_w4_userpoint() const;
-	float get_w4_magnitude() const;
+	Vector3 get_dir() const;
+	String get_effect() const;
+	float get_magnitude() const;
 };
 
 // One round spawned since the last drain (Simulation::drain_fire_presentation_events;

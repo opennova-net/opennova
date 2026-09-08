@@ -318,6 +318,7 @@ world::WeaponTable build_weapon_table(
 			std::memcpy(dst.name, src.name, sizeof(dst.name));
 			std::memcpy(dst.anim, src.anim, sizeof(dst.anim));
 			std::memcpy(dst.function, src.function, sizeof(dst.function));
+			dst.action_value = src.action_value;
 			dst.delaystart = src.delaystart;
 			dst.delayend = src.delayend;
 			std::memcpy(dst.soundset, src.soundset, sizeof(dst.soundset));

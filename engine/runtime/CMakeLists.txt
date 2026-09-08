@@ -146,12 +146,14 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_aircraft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_handlers.cpp   # scoring, state names, per-state handlers + the table
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_system.cpp     # event queue + the AiSystem core and tick
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_waypoints.cpp  # waypoint targeting/movement + vehicle drive staging
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_los.cpp      # ground casts, LOS, sound occlusion
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_model.cpp    # model bounds + the fixed-point matrix ops
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_query.cpp    # the stateless target queries
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_vehicle.cpp # vehicle probe contacts
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_resolve.cpp  # contact resolution + the debug views
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_trace.cpp    # target views, broad phase, trace_projectile
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_world.cpp    # instance registry + the proximity table build
@@ -183,6 +185,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/death_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ground_conform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/impact_scar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
@@ -197,11 +201,26 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minefield.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/round_source_fire.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_countermeasures.cpp
+    world/vehicle_lifecycle.cpp
+    world/vehicle_spawn_markers.cpp
+    world/vehicle_effects.cpp
+    world/vehicle_trails.cpp
+    world/rotor_wash.cpp
+    renderer/water_wake_frame.cpp
+    world/vehicle_chassis.cpp
+    world/vehicle_impulse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/spawn_select.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tracer_trails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_attach.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_traction.cpp # retained skid/drive direction
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/carrier_motion.cpp
+    world/vehicle_contact.cpp # shared probe/impact contract
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
+    world/vehicle_simple_motor.cpp
+    world/vehicle_simple_contact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_mount.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_system.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor_air.cpp # the CHel/cpln mover: input block, prediction leg, authority legs (split of vehicle_motor.cpp)

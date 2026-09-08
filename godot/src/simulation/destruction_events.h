@@ -41,11 +41,14 @@ public:
 	const opennova::world::DestructionEffectEvent &value() const { return value_; }
 	static Ref<DestructionEffectEvent> make(const String &p_effect, const Vector3 &p_pos,
 			int p_family, const Vector3 &p_dir, int p_attach_net_id, int p_attach_bms_id,
-			int p_attach_wire_handle, int64_t p_attach_spawn_origin);
+			int p_attach_wire_handle, int64_t p_attach_spawn_origin, bool p_release,
+			int p_bank_slot = 0, const Vector3 &p_local_pos = Vector3());
 
 	String get_effect() const;
 	Vector3 get_pos() const;
 	Vector3 get_dir() const;
+	bool get_release() const { return value_.release; }
+	int get_bank_slot() const { return value_.bank_slot; }
 	int get_family() const { return static_cast<int>(value_.family); }
 	int get_attach_net_id() const { return static_cast<int>(value_.attach_net_id); }
 	int get_attach_bms_id() const { return value_.attach_bms_id; }
@@ -68,8 +71,9 @@ public:
 	void assign(const opennova::world::HuskSwapEvent &p_value) { value_ = p_value; }
 	const opennova::world::HuskSwapEvent &value() const { return value_; }
 	static Ref<HuskSwapEvent> make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
-			int p_wire_handle);
+			int p_wire_handle, bool p_restore_intact);
 
+	bool get_restore_intact() const { return value_.restore_intact; }
 	int get_net_id() const { return static_cast<int>(value_.net_id); }
 	int get_wire_handle() const { return static_cast<int>(value_.wire_handle); }
 	int get_bms_id() const { return value_.bms_id; }

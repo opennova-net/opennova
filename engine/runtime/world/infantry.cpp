@@ -1,3 +1,4 @@
+#include <runtime/world/vehicle_attach.h>
 // Infantry motor: per-frame update for AI soldiers (entity class org1).
 // [orig: Entity_UpdateInfantryAI @ 0x4b9910]. Spec: docs/world/world-wac-ai-re.md §3.
 //
@@ -303,8 +304,9 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
     inf.move_mode = 0;
     inf.target_dist = 0;
     inf.at_final_oneshot = false;
+	inf.board_anim = -1;
 
-    const int32_t ch = slot.f[37]; // [orig: slot+148 = waypoint channel / command]
+	const int32_t ch = slot.f[37]; // [orig: slot+148 = waypoint channel / command]
     // The board-target/carrier cache survives only under command 125 — every
     // other think clears it. [orig: @0x4b9910 think head — aiComp[36] = 0
     // unless aiComp[37] == 125]
@@ -1278,8 +1280,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // The rain ambient registration rides the local body tick.
         if (ent != nullptr) infantry_rain_ambient(world, *ent);
     } else if (is_authority && (key & 15u) == 0) {
-        // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
-        infantry_think(e, world);
+		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
+		// A cached board-any target can upgrade an already seated NPC once
+		// per 64 staggered ticks. Compare slot TYPE, not the userpoint index.
+		// [orig: Entity_UpdateInfantryAI @0x4BA9D8..0x4BAA41; cadence @0x4BA9E1,
+		// cache @0x4BA9FB, seat-type compare @0x4BAA1D, attach @0x4BAA2C]
+		if ((key & 63u) == 0 && tick_entity != nullptr && tick_entity->mounted &&
+				e.slot.f[37] == 125 && e.slot.f[36] > 0) {
+			VehicleSeatSelection selected;
+			const EntityHandle target{ static_cast<uint16_t>(e.slot.f[36] - 1) };
+			if (find_best_vehicle_seat(world, target, e.handle, selected) &&
+					selected.type != tick_entity->mount_type)
+				world.vehicles.attach_to_seat(e.handle, selected);
+		}
+		infantry_think(e, world);
         // On a ladder the NPC's gait selection is suppressed — the org1
         // on-ladder block after the resolve owns states 32-35 (the same-tick
         // overwrite mapping as the player selection skip above; retail also
@@ -1289,9 +1303,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             ((tick_entity->flags | tick_entity->engine_flags) &
              kEntityFlagLadderContact) != 0)
             inf.move_mode = 0;
-        else
-            infantry_select(e, tick_entity);
-    }
+		else {
+			infantry_select(e, tick_entity);
+			if (inf.board_anim >= 0 && inf.move_mode == 0 &&
+					(tick_entity == nullptr || !tick_entity->mounted))
+				inf.begin_body_transition(inf.board_anim);
+		}
+	}
 
     // 2c. The on-ladder override + player dismounts (org2; EVERY tick — the
     // 4th-tick gate above covers only the stance selection). Body in

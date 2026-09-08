@@ -1,6 +1,7 @@
 #include <runtime/world/ground_conform.h>
 
 #include <cmath>
+#include <algorithm>
 
 namespace opennova::world {
 namespace {
@@ -54,9 +55,32 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 	return step; // [orig: the new-minus-old compression @0x45D024 returned @0x45D095]
 }
 
-int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t &shock, int32_t spring, int32_t entity_a0) {
-	osc.phase += kOscPhaseStep; // [orig: @0x45D11F..0x45D128]
+// The tank compression law is linear in step and spring, with the x86
+// low-dword product and separate truncation of each half.
+// [orig: Suspension_CompressWheelLinear @0x45CEB0]
+int32_t conform_spring_compress_linear(ConformOscillator &osc, int32_t &compression,
+		int32_t &impact, int32_t step, int32_t travel, int32_t spring) {
+	osc.phase = kOscPhasePreset;
+	if (compression > travel) {
+		osc.energy = 0;
+		osc.amplitude = travel;
+		return 0;
+	}
+	compression = wrap_i32(int64_t(compression) + step);
+	osc.extension = wrap_i32(int64_t(osc.extension) - step);
+	const int32_t product = wrap_i32(int64_t(step) * spring);
+	osc.energy = wrap_i32(int64_t(osc.energy) - product / 2);
+	if (impact > 0)
+		impact = wrap_i32(int64_t(impact) - product / 2);
+	if (osc.energy < 0)
+		osc.energy = -1;
+	osc.amplitude = std::min(compression, travel);
+	return step;
+}
+
+int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression, int32_t &impact,
+		int32_t &shock, int32_t spring, int32_t entity_a0, float phase_step) {
+	osc.phase += phase_step; // [orig: @0x45D11F..0x45D128]
 
 	// A raised sine, clamped at 1 — the wheel's travel envelope
 	// [orig: (sin(phase) + dbl_7C6A08 (1.0)) * dbl_7C3618 (0.5), fld1/fcom

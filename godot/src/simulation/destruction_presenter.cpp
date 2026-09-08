@@ -103,6 +103,13 @@ void DestructionPresenter::reset_runtime_state() {
 	piece_generation_.clear();
 	piece_pos_.clear();
 
+	if (EffectWorld *effects = fx()) {
+		for (const KeyValue<String, int64_t> &group : attached_groups_) {
+			effects->stop_group(group.value);
+			effects->release_effect_binding(group.key);
+		}
+	}
+	attached_groups_.clear();
 	for (const String &key : wreck_anchor_keys_) {
 		unregister_effect_anchor(key);
 	}
@@ -208,11 +215,35 @@ Node3D *DestructionPresenter::resolve_entity_node(int p_bms_id, int64_t p_spawn_
 // husk grafts into the mission container at the placed transform. No husk
 // authored -> the intact graphic keeps standing, dead — the witnessed
 // render-pick fallback (batched statics stay in their batches).
+void DestructionPresenter::restore_intact(const String &key) {
+	if (const HuskRestore *restore = husk_restore_.getptr(key)) {
+		if (placer_.is_valid() && restore->bms_id != 0)
+			placer_->clear_static_terrain_shadow_replacement(restore->bms_id);
+		if (restore->kind == HuskRestore::STATIC && placer_.is_valid())
+			placer_->show_static_instance(restore->bms_id);
+		for (const HuskRestoreChild &saved : restore->children)
+			if (Node3D *child = live_node3d(saved.node))
+				child->set_visible(saved.visible);
+	}
+	husk_restore_.erase(key);
+	if (const ObjectID *id = husked_.getptr(key)) {
+		if (Node3D *husk = live_node3d(*id)) {
+			husk->set_visible(false);
+			husk->queue_free();
+		}
+	}
+	husked_.erase(key);
+}
+
 void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
 	const int bms_id = p_husk.bms_id;
 	const int64_t spawn_origin = static_cast<int64_t>(p_husk.spawn_origin);
 	const int wire_handle = static_cast<int>(p_husk.wire_handle);
 	const String husk_key = identity_key(bms_id, spawn_origin, wire_handle);
+	if (p_husk.restore_intact) {
+		restore_intact(husk_key);
+		return;
+	}
 	if (husked_.has(husk_key)) {
 		return;
 	}
@@ -434,7 +465,7 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		return;
 	}
 	const String effect = String::utf8(p_effect.effect.c_str());
-	if (effect.is_empty()) {
+	if (effect.is_empty() && !p_effect.release) {
 		return;
 	}
 	const Vector3 pos = mission_to_godot(p_effect.pos);
@@ -450,13 +481,25 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		++stat_effects_;
 		return;
 	}
-	// Attached families (death smoke / fire / other): one owned group per
-	// (entity, family), anchored at the wreck (the husk Dead/Fire/Other
-	// user-point anchors are the tracked refinement).
-	const String key = dynamic_identity
-			? wreck_wire_owner_key(wire_handle, family)
-			: wreck_owner_key(net_id, family);
-	fx_world->spawn_effect_owned(key, effect, pos, Vector3(0, 1, 0));
+	// Each retained emitter follows its own model point under the live owner.
+	String key = dynamic_identity ? wreck_wire_owner_key(wire_handle, family)
+								  : wreck_owner_key(net_id, family);
+	if (p_effect.bank_slot != 0)
+		key += ":" + String::num_int64(p_effect.bank_slot);
+	const auto &local = p_effect.attach_local_pos;
+	const Vector3 local_point(-local.y, local.z, local.x);
+	if (p_effect.release) {
+		if (const int64_t *group = attached_groups_.getptr(key))
+			fx_world->stop_group(*group);
+		attached_groups_.erase(key);
+		fx_world->release_effect_binding(key);
+		unregister_effect_anchor(key);
+		wreck_anchor_keys_.erase(key);
+		burning_.erase(key);
+		return;
+	}
+	attached_groups_[key] =
+			fx_world->spawn_effect_owned(key, effect, pos, mission_to_godot(p_effect.dir));
 	++stat_effects_;
 	if (anchors_.is_valid()) {
 		Node3D *node = nullptr;
@@ -468,7 +511,7 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		if (node != nullptr) {
 			anchors_->register_effect_anchor(key,
 					callable_mp(this, &DestructionPresenter::resolve_wreck_node_anchor)
-							.bind(static_cast<int64_t>(node->get_instance_id())));
+							.bind(static_cast<int64_t>(node->get_instance_id()), local_point));
 			if (family == 2) {
 				WreckFire fire;
 				fire.node = node->get_instance_id();
@@ -481,7 +524,7 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 			const Transform3D fixed(Basis(), pos);
 			anchors_->register_effect_anchor(key,
 					callable_mp(this, &DestructionPresenter::resolve_wreck_pinned_anchor)
-							.bind(dynamic_identity, bms_id, spawn_origin, fixed));
+							.bind(dynamic_identity, bms_id, spawn_origin, fixed, local_point));
 			if (family == 2) {
 				// A dynamic identity with no runtime node has no sibling-safe
 				// positional lookup; either way the wreck stays pinned at its
@@ -495,17 +538,25 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 	}
 }
 
-Variant DestructionPresenter::resolve_wreck_node_anchor(int64_t p_node_id) {
+Variant DestructionPresenter::resolve_wreck_node_anchor(int64_t p_node_id, const Vector3 &p_local) {
 	Node3D *node = live_node3d(ObjectID(static_cast<uint64_t>(p_node_id)));
-	return node != nullptr ? Variant(node->get_global_transform()) : Variant();
+	if (node == nullptr)
+		return Variant();
+	Transform3D pose = node->get_global_transform();
+	pose.origin = pose.xform(p_local);
+	return pose;
 }
 
 Variant DestructionPresenter::resolve_wreck_pinned_anchor(bool p_dynamic_identity, int p_bms_id,
-		int64_t p_spawn_origin, const Transform3D &p_fixed) {
+		int64_t p_spawn_origin, const Transform3D &p_fixed, const Vector3 &p_local) {
 	const Variant live_v = p_dynamic_identity
 			? Variant()
 			: present_transform_for_identity(p_bms_id, p_spawn_origin);
-	return live_v.get_type() == Variant::TRANSFORM3D ? live_v : Variant(p_fixed);
+	if (live_v.get_type() != Variant::TRANSFORM3D)
+		return p_fixed;
+	Transform3D pose = live_v;
+	pose.origin = pose.xform(p_local);
+	return pose;
 }
 
 Variant DestructionPresenter::resolve_piece_anchor(int p_slot) {

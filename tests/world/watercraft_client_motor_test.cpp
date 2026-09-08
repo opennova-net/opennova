@@ -961,6 +961,62 @@ bool run_platform_basis_preserves_roll_sign() {
 	              "platform Q22 basis preserves positive roll sign");
 }
 
+bool run_bike_grounded_lean_recovers_roll() {
+	bool ok = true;
+	for (int sign : { -1, 1 }) {
+		Rig r;
+		make_rig(r);
+		set_zodiac_boxes(r.traits);
+		RampField flat(false);
+		r.world.tables.terrain = &flat.field;
+		r.world.env.water_z = 0;
+		r.traits.family = w::VehicleFamily::Bike;
+		r.traits.lean = 40;
+		r.traits.lean_velocity = 50;
+		auto *e = r.world.registry.get(r.boat);
+		e->position.z = 2.5f;
+		stage(*e, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(2.5f), 0, 0, 0);
+		e->veh.yaw_seeded = true;
+		e->veh.air_roll_bam = w::bam_from_degrees_wrapped(sign * 10.0);
+		e->veh.slide_z = -501;
+		e->veh.grounded = true;
+		e->flags |= 0x40u; // newly contacted hull bypasses the at-rest sleep path
+		r.world.vehicles.ground_client_tick(*e, r.traits);
+		ok &= expect(sign * int64_t(e->veh.air_roll_rate) < 0,
+				"grounded bike applies authored lean recovery against hull roll");
+		ok &= expect(std::abs(e->veh.air_roll_bam) < w::bam_from_degrees_wrapped(10.0),
+				"bike lean recovery reaches the solved attitude");
+	}
+	return ok;
+}
+
+bool run_planing_boat_leans_into_steer() {
+	bool ok = true;
+	for (int sign : { -1, 1 }) {
+		Rig r;
+		make_rig(r);
+		set_zodiac_boxes(r.traits);
+		r.traits.lean = 40;
+		r.traits.lean_velocity = 50;
+		r.traits.pitch_lift = 10;
+		r.traits.pitch_lift_vel = 10;
+		auto *e = r.world.registry.get(r.boat);
+		e->veh.yaw_seeded = true;
+		e->veh.yaw_bam = 0;
+		e->veh.speed = 16384;
+		e->veh.cmd_speed = 16384;
+		e->veh.steer_state = w::bam_from_degrees_wrapped(sign * 10.0);
+		e->veh.plat_planing = true;
+		e->veh.plat_afloat = true;
+		r.world.vehicles.watercraft_platform_solve(*e, r.traits);
+		ok &= expect(e->veh.byte_2ef && sign * int64_t(e->veh.air_roll_rate) > 0,
+				"planing boat starts its signed lean from steering");
+		ok &= expect(sign * int64_t(e->veh.air_roll_bam) > 0,
+				"boat lean reaches the suspension orientation");
+	}
+	return ok;
+}
+
 bool run_water_rudder_wraps_min_speed() {
 	// Retail NEG is a 32-bit wrapping register operation: INT_MIN remains
 	// INT_MIN. Promoting before negation reverses the rudder-rate sign.
@@ -1319,6 +1375,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	heli->veh.net_recv_lat = 3000;
 	heli->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-66.0);
 	heli->veh.net_engine_on = true; // replicated Flags 0x80: engine spun up
+	heli->veh.net_climb = 65536; // this terrain-less fixture is already airborne
 	local.world.vehicles.aircraft_client_tick(*heli, local.traits);
 	bool ok = true;
 	ok &= expect(heli->veh.cmd_speed ==
@@ -1863,12 +1920,9 @@ bool run_physicsless_air_dispatches_directly() {
 	ok &= expect(air->veh.cmd_speed == 26214 &&
 	                     air->veh.cmd_lateral_speed == 4096,
 	             "aircraft prediction mirrors both received motion commands");
-	ok &= expect(ground->position.x == ground_start.x &&
-	                     ground->position.y == ground_start.y &&
-	                     ground->position.z == ground_start.z &&
-	                     ground->veh.net_interp_progress == 0 &&
-	                     ground->veh.cmd_speed == 0,
-	             "physicsless Ground remains inert behind its selector");
+	ok &= expect(ground->position.z < ground_start.z && ground->veh.net_interp_progress > 0 &&
+					ground->veh.cmd_speed == 26214,
+			"selector-zero Ground runs simple prediction through AiSystem");
 	return ok;
 }
 
@@ -2054,11 +2108,11 @@ bool run_authority_boat_parks_without_controller() {
 	w::AiBrain &b = sys.at(ai_idx)->brain;
 	w::Entity *boat = r.world.registry.get(r.boat);
 	w::VehicleDriveCmd cmd;
+	const int32_t pending = b.f[w::AiBrain::kPendState];
 	sys.watercraft_ai_drive(r.world, *boat, nullptr, r.traits, cmd);
 	bool ok = expect(!cmd.ai_drive, "no drive command without a controller");
-	ok &= expect(b.f[w::AiBrain::kCurState] == 22 &&
-	                     b.f[w::AiBrain::kPendState] == 22,
-	             "parked stamp 22 (+ the pend mirror)");
+	ok &= expect(b.f[w::AiBrain::kCurState] == 22 && b.f[w::AiBrain::kPendState] == pending,
+			"parked stamp preserves the pending transition");
 	const float x0 = boat->position.x;
 	for (int i = 0; i < 60; ++i)
 		r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &cmd);
@@ -2218,97 +2272,143 @@ bool run_authority_ai_leg_caps_at_waterspeed() {
 	return ok;
 }
 
-// The two boat-wake lanes are persistent emitter controls, sampled by the
-// shared cbot mover every other logic tick. W3 follows the commanded register;
-// W4 follows the signed current-speed register. The retail integer pipeline
-// shifts before taking the absolute value, so equal forward/reverse inputs
-// intentionally differ by one Q16 unit.
-bool run_wake_snapshot_tracks_even_tick_motion() {
+// Motor entry points own the shared first-sixteen trail bank. The device sees
+// posed points, including held samples on odd/camera-culled ticks.
+bool run_trail_bank_tracks_motor_motion() {
 	bool ok = true;
-	ok &= expect(w::watercraft_wake_magnitude_q16(16384) == 32767u,
-			"forward wake magnitude preserves the retail multiply/shift order");
-	ok &= expect(w::watercraft_wake_magnitude_q16(-16384) == 32768u,
-			"reverse wake magnitude preserves the retail signed-shift asymmetry");
-	ok &= expect(w::watercraft_wake_magnitude_q16(0) == 0u,
-			"zero speed has zero wake magnitude");
-
-	Rig r;
-	make_rig(r);
-	r.traits.wake_w3.effect = "fx_sml_wk";
-	r.traits.wake_w3.userpoint = "FX00";
-	r.traits.wake_w4.effect = "fx_sml_wk_f";
-	r.traits.wake_w4.userpoint = "FX01";
-	w::Entity *boat = r.world.registry.get(r.boat);
-	if (!expect(boat != nullptr, "wake boat spawned")) return false;
-	stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
-			w::to_fixed(10.0f), 0, 16384, 0);
-
-	r.world.logic_tick = 1;
-	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
-	ok &= expect(!boat->veh.wake.valid, "odd ticks do not create a wake sample");
-
-	r.world.logic_tick = 2;
-	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
-	const w::VehicleWakeState sampled = boat->veh.wake;
-	ok &= expect(sampled.valid && sampled.afloat, "even afloat tick publishes wake state");
-	ok &= expect(sampled.source_tick == 2, "wake state records its source tick");
-	ok &= expect(sampled.water_z == r.world.env.water_z,
-			"wake state records the sampled water plane");
-	ok &= expect(sampled.command_magnitude_q16 ==
-			w::watercraft_wake_magnitude_q16(boat->veh.cmd_speed),
-			"W3 follows commanded speed");
-	ok &= expect(sampled.motion_magnitude_q16 ==
-			w::watercraft_wake_magnitude_q16(boat->veh.speed),
-			"W4 follows current motion");
-	ok &= expect(sampled.position.x == boat->position.x &&
-			sampled.position.y == boat->position.y &&
-			sampled.position.z == boat->position.z,
-			"wake state captures the post-solve boat pose");
-	ok &= expect(sampled.yaw_deg == boat->yaw && sampled.pitch_deg == boat->pitch &&
-			sampled.roll_deg == boat->roll,
-			"wake state captures the post-solve attitude");
-
-	r.world.logic_tick = 3;
-	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
-	ok &= expect(boat->veh.wake.source_tick == sampled.source_tick,
-			"odd ticks retain the previous wake sample");
-
-	r.world.env.water_z = 0;
-	r.world.logic_tick = 4;
-	r.world.vehicles.watercraft_client_tick(*boat, r.traits);
-	ok &= expect(boat->veh.wake.valid && !boat->veh.wake.afloat,
-			"an even dry tick publishes the release state");
-	ok &= expect(boat->veh.wake.command_magnitude_q16 == 0 &&
-			boat->veh.wake.motion_magnitude_q16 == 0,
-			"a non-afloat sample zeros both wake lanes");
-
-	Rig authority;
-	make_rig(authority);
-	authority.traits.player_control = false;
-	authority.traits.wake_w3 = r.traits.wake_w3;
-	authority.traits.wake_w4 = r.traits.wake_w4;
-	w::Entity *authority_boat = authority.world.registry.get(authority.boat);
-	if (!expect(authority_boat != nullptr, "authority wake boat spawned")) return false;
-	stage(*authority_boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
-			w::to_fixed(10.0f), 0, 16384, 0);
-	authority.world.logic_tick = 2;
-	authority.world.vehicles.tick_watercraft_motor(
-			*authority_boat, authority.traits, nullptr);
-	ok &= expect(authority_boat->veh.wake.valid &&
-			authority_boat->veh.wake.source_tick == 2,
-			"the authority entry point publishes through the same wake core");
-	ok &= expect(authority_boat->veh.wake.command_magnitude_q16 ==
-			w::watercraft_wake_magnitude_q16(authority_boat->veh.cmd_speed) &&
-			authority_boat->veh.wake.motion_magnitude_q16 ==
-			w::watercraft_wake_magnitude_q16(authority_boat->veh.speed),
-			"authority W3/W4 use the same command/motion split");
+	ok &= expect(w::vehicle_trail_magnitude_q16(16384) == 32767u,
+			"forward trail magnitude preserves multiply/shift order");
+	ok &= expect(w::vehicle_trail_magnitude_q16(-16384) == 32768u,
+			"reverse trail magnitude preserves signed-shift asymmetry");
+	ok &= expect(w::vehicle_trail_magnitude_q16(65536) == 2u,
+			"trail multiplication wraps at 32 bits before shifting");
+	for (bool authority : { false, true }) {
+		Rig r;
+		make_rig(r);
+		r.traits.player_control = authority;
+		for (int i = 0; i < 4; ++i) {
+			r.traits.trails[i].effect = "trail" + std::to_string(i + 1);
+			r.traits.trails[i].mask = uint16_t(1u << (i & 1));
+		}
+		r.traits.trail_point_count = 2;
+		r.traits.trail_points[0] = { { 65536, 0, 0 }, { 0, 0, 65536 } };
+		r.traits.trail_points[1] = { { -65536, 0, 0 }, { 0, 0, 65536 } };
+		auto *boat = r.world.registry.get(r.boat);
+		boat->health = boat->health_max = 1000;
+		if (authority) {
+			auto *driver = mount_prediction_driver(r, false);
+			if (!driver)
+				return false;
+			driver->player_class = 0;
+		}
+		w::VehicleDriveCmd command;
+		command.ai_drive = true;
+		command.cmd_speed = 16384;
+		r.world.out.fire_sounds.set_listener(boat->position);
+		stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(10.0f), 0, 16384, 0);
+		auto tick = [&](uint32_t t) {
+			r.world.logic_tick = t;
+			if (authority)
+				r.world.vehicles.tick_watercraft_motor(*boat, r.traits, &command);
+			else
+				r.world.vehicles.watercraft_client_tick(*boat, r.traits);
+		};
+		tick(1);
+		ok &= expect(boat->veh.trails.points[0].definition == 0,
+				"odd wet tick does not allocate an emitter");
+		tick(2);
+		const auto sample = boat->veh.trails;
+		ok &= expect(sample.points[0].definition == 3 && sample.points[1].definition == 4,
+				"both motor roles allocate W3 and W4 at their authored points");
+		ok &= expect(sample.points[0].magnitude_q16 ==
+								w::vehicle_trail_magnitude_q16(boat->veh.cmd_speed) &&
+						sample.points[1].magnitude_q16 ==
+								w::vehicle_trail_magnitude_q16(boat->veh.speed),
+				"wet W3 uses command and W4 uses motion");
+		ok &= expect(sample.points[0].source_tick == 2 && sample.points[0].position.z == 10.0f &&
+						sample.points[1].position.z == 10.0f,
+				"sample records fixed tick and clamps both points to water");
+		ok &= expect(std::hypot(sample.points[0].position.x - sample.points[1].position.x,
+							 sample.points[0].position.y - sample.points[1].position.y) > 1.9f,
+				"authored points retain their separate transformed offsets");
+		tick(3);
+		ok &= expect(boat->veh.trails.points[0].source_tick == 2,
+				"odd wet tick retains the previous point pose");
+		r.world.out.fire_sounds.set_listener({ -1000, -1000, 0 });
+		tick(4);
+		ok &= expect(boat->veh.trails.points[0].source_tick == 2,
+				"camera culling holds the previous emitter sample");
+		r.world.out.fire_sounds.set_listener(boat->position);
+		// The two lanes address one handle bank, so the later lane changes
+		// controls on point zero without replacing its original W3 effect.
+		r.traits.trails[3].mask = 1;
+		tick(6);
+		ok &= expect(boat->veh.trails.points[0].definition == 3 &&
+						boat->veh.trails.points[0].magnitude_q16 ==
+								w::vehicle_trail_magnitude_q16(boat->veh.speed),
+				"overlapping masks share the first effect and last controls");
+		r.traits.trails[3].mask = 2;
+		r.world.env.water_z = 0;
+		tick(8);
+		ok &= expect(boat->veh.trails.points[0].definition == 1 &&
+						boat->veh.trails.points[1].definition == 2,
+				"leaving water releases W3/W4 before dry W1/W2 allocate");
+		ok &= expect(boat->veh.trails.points[0].magnitude_q16 ==
+						boat->veh.trails.points[1].magnitude_q16,
+				"both dry boat lanes use command speed");
+	}
 	return ok;
 }
 
 } // namespace
 
-int main() {
+bool run_amphibian_selects_water_mover_on_both_roles() {
 	bool ok = true;
+	for (bool authority : { false, true }) {
+		Rig r;
+		make_rig(r);
+		auto &world = r.world;
+		world.ai.is_authority = authority;
+		world.rules.logic_authority = authority;
+		auto *vehicle = world.registry.get(r.boat);
+		r.traits.family = w::VehicleFamily::Ground;
+		r.traits.amphibian = true;
+		r.traits.player_speed = 30000;
+		vehicle->flags |= 0x8000u;
+		vehicle->health = vehicle->health_max = 1000;
+		vehicle->veh.yaw_seeded = true;
+		vehicle->veh.plat_afloat = true;
+		vehicle->veh.net_predicted = !authority;
+		vehicle->veh.net_recv_speed = 12000;
+		vehicle->veh.cmd_speed = 12000;
+		vehicle->veh.speed = 12000;
+		vehicle->veh.part_spin.speed = 123456;
+		const auto phase = vehicle->veh.wheel_phase;
+		if (authority)
+			world.vehicles.tick_motor(*vehicle, r.traits);
+		else
+			world.vehicles.ground_client_tick(*vehicle, r.traits);
+		ok &= expect(vehicle->veh.part_spin.speed == 123456,
+				"afloat catv runs the boat mover without the ground rotor machine");
+		ok &= expect(vehicle->veh.wheel_phase != phase,
+				"afloat catv uses the command-driven boat phase");
+		ok &= expect(
+				vehicle->health == 1000, "afloat catv avoids the ground family's drowning drain");
+		vehicle->flags &= ~0x8000u;
+		vehicle->veh.plat_afloat = false;
+		world.env.water_z = 0;
+		if (authority)
+			world.vehicles.tick_motor(*vehicle, r.traits);
+		else
+			world.vehicles.ground_client_tick(*vehicle, r.traits);
+		ok &= expect(vehicle->veh.part_spin.speed != 123456,
+				"beached catv returns to the ground rotor machine on the next tick");
+	}
+	return ok;
+}
+
+int main() {
+	bool ok = run_amphibian_selects_water_mover_on_both_roles();
 	ok &= run_authority_ai_boat_drives_afloat();
 	ok &= run_authority_boat_parks_without_controller();
 	ok &= run_authority_capsize_drain_and_dead_skip();
@@ -2328,6 +2428,8 @@ int main() {
 	ok &= run_afloat_latch_controls_drag();
 	ok &= run_first_prediction_seeds_platform_state();
 	ok &= run_platform_basis_preserves_roll_sign();
+	ok &= run_bike_grounded_lean_recovers_roll();
+	ok &= run_planing_boat_leans_into_steer();
 	ok &= run_water_rudder_wraps_min_speed();
 	ok &= run_airborne_watercraft_preserves_yaw_rate();
 	ok &= run_prior_euler_drives_thrust_and_beach_stop();
@@ -2349,7 +2451,7 @@ int main() {
 	ok &= run_client_family_sound_dispatch_scope();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();
-	ok &= run_wake_snapshot_tracks_even_tick_motion();
+	ok &= run_trail_bank_tracks_motor_motion();
 	if (!ok) {
 		std::fprintf(stderr, "watercraft_client_motor: FAILED\n");
 		return EXIT_FAILURE;

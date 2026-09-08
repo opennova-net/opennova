@@ -743,10 +743,10 @@ int main() {
         TickContext ctx{};
         ctx.is_authority = true;
         ai.tick(w, ctx);
-        CHECK(ai.at(idx)->inf.anim_state == 100); // anim_sit_24
-    }
+		CHECK(ai.at(idx)->inf.anim_state == 107); // sit_24 selects its stationary driver pose
+	}
 
-    // ---- unmounted stance stays under normal infantry logic, not mount pose logic ----
+	// ---- unmounted stance stays under normal infantry logic, not mount pose logic ----
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;

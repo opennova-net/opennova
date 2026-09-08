@@ -14,40 +14,55 @@ namespace opennova::world {
 // AI event queue [orig: the per-class tick from Entity_UpdateAllEntities].
 void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
     World &world = world_;
-    // Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
-    // `physics` selector non-zero) runs its family's drive core — ground/bike
-    // through the cveh core, watercraft through the cbot mover — consuming a
-    // mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
-    // here: a joiner's local copies are wire-posed (the vehicle compact record
-    // read side), and the driver's client-side prediction leg is the retail
-    // client's concern, not this host loop's.
-    // [orig: the per-class tick from Entity_UpdateAllEntities ->
-    // Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
-    // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
-    // authority drive gates @0x48b0ff / @0x48DF8C]
-    if (is_authority && !this->traits.empty()) {
+	// Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
+	// class callback, including selector zero) runs its family's drive core — ground/bike
+	// through the cveh core, watercraft through the cbot mover — consuming a
+	// mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
+	// here: a joiner's local copies are wire-posed (the vehicle compact record
+	// read side), and the driver's client-side prediction leg is the retail
+	// client's concern, not this host loop's.
+	// [orig: the per-class tick from Entity_UpdateAllEntities ->
+	// Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
+	// @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
+	// authority drive gates @0x48b0ff / @0x48DF8C]
+	if (is_authority && !this->traits.empty()) {
         devtools::ProfileLap vehicle_lap(world.profile);
         pass_handles_.clear();
         world.registry.for_each_in_pool(1, [&](const Entity &e) {
             const VehicleTraits *traits = this->traits.get(e.item_id);
-            // Ground/water rows are selector-gated. Direct CHel/cpln rows are
-            // admitted regardless of the selector — they branch to the shared
-            // aircraft mover below, never through tick_vehicle_motor.
-            if (traits == nullptr) return;
-            if (traits->physics == 0 &&
-                !vehicle_family_uses_direct_air_mover(traits->family)) return;
+			// Ground/water callbacks choose their motor by selector. CHel/cpln rows
+			// are admitted regardless of that ground selector — they branch to the shared
+			// aircraft mover below, never through tick_vehicle_motor.
+			if (traits == nullptr) return;
             pass_handles_.push_back(e.handle);
         });
         vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_SCAN);
         for (const EntityHandle h : pass_handles_) {
             Entity *veh = world.registry.get(h);
             if (veh == nullptr) continue;
-            const VehicleTraits *traits = this->traits.get(veh->item_id);
-            if (traits == nullptr) continue;
-            // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
-            // stamps every mover carries; rider deltas read (current - saved)].
-            stamp_saved_live_pose(*veh);
-            // Direct CHel/cpln rows never reach the ground cmd/motor leg: the
+			// The installed death callback replaces +0x1C4's live mover.
+			// The AI death-state callback at +0x1C8 can also run this tick.
+			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
+			if (veh->death_motion != DeathMotionMode::None)
+				continue;
+			if (!veh->veh.spawn_pose_valid)
+				capture_spawn_pose(*veh);
+			const VehicleTraits *traits = this->traits.get(veh->item_id);
+			if (traits == nullptr)
+				continue;
+			// catv's callback switches the entire mover (including input,
+			// sound and trails) using the previous tick's afloat flag.
+			// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+			VehicleTraits afloat_traits;
+			if (traits->amphibian && (veh->flags & 0x8000u) != 0) {
+				afloat_traits = *traits;
+				afloat_traits.family = VehicleFamily::Watercraft;
+				traits = &afloat_traits;
+			}
+			// Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
+			// stamps every mover carries; rider deltas read (current - saved)].
+			stamp_saved_live_pose(*veh);
+			// Direct CHel/cpln rows never reach the ground cmd/motor leg: the
             // class table routes them to the shared aircraft mover, whose AI
             // brain leg and physics live in one function. A live PLAYER pilot
             // drives through the predicted path instead. [orig: the class table
@@ -77,10 +92,16 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                         world.ai.chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
                                       *traits);
                         world.vehicles.aircraft_client_tick(*veh, *traits);
-                    }
-                }
-                else {
-                    // A predicted row skips the mover, so the mover's tail call
+						if (AiEntity *brain = world.ai.for_handle(h)) {
+							brain->brain.f[AiBrain::kWorkPosZ] = veh->veh.net_alt_target;
+							brain->brain.f[AiBrain::kWorkHeading] = veh->veh.steer_target_bam;
+							brain->brain.f[135] = veh->veh.cmd_lateral_speed;
+							brain->brain.f[136] = veh->veh.cmd_speed;
+							brain->brain.f[137] = veh->veh.net_climb;
+						}
+					}
+				} else {
+					// A predicted row skips the mover, so the mover's tail call
                     // never runs for it. Retail's client has no such skip — it
                     // runs the aircraft function (and therefore the tail) for
                     // every vehicle it is not driving, seeding the drive
@@ -90,17 +111,18 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     //  mover's tail @0x4905A6; the not-driven client leg is
                     //  @0x48B7F0]
                     world.vehicles.part_anim_tick(*veh, *traits);
-                }
-                if (AiEntity *ve = world.ai.for_handle(h)) {
+				}
+				if (AiEntity *ve = world.ai.for_handle(h)) {
                     ve->pos[0] = to_fixed(veh->position.x);
                     ve->pos[1] = to_fixed(veh->position.y);
                     ve->pos[2] = to_fixed(veh->position.z);
-                    ve->heading = veh->veh.yaw_seeded
-                            ? veh->veh.yaw_bam
-                            : bam_heading_from_mission_yaw_deg(
-                                      static_cast<double>(veh->yaw));
-                }
-                continue;
+					ve->pitch = veh->veh.air_pitch_bam;
+					ve->roll = veh->veh.air_roll_bam;
+					ve->heading = veh->veh.yaw_seeded
+							? veh->veh.yaw_bam
+							: bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+				}
+				continue;
             }
             // Stage the drive input class the motor will consume: a live PLAYER controller
             // keeps the occupant leg; an AI controller (or none) routes through the brain
@@ -129,7 +151,6 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     // leg forces SM state 22 too @0x48b993 / the boat leg @0x48DFF5].
                     if (AiEntity *ve = world.ai.for_handle(h)) {
                         ve->brain.f[AiBrain::kCurState] = 22;
-                        ve->brain.f[AiBrain::kPendState] = 22;
                     }
                 } else if (traits->family == VehicleFamily::Watercraft) {
                     world.ai.watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
@@ -185,22 +206,37 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
             if (traits == nullptr) return;
             // Ground/water/bike rows retain their selector gate. CHel/cpln
             // dispatch directly and therefore remain eligible at physics=0.
-            if (traits->physics == 0 &&
-                !vehicle_family_uses_direct_air_mover(traits->family)) return;
             pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : pass_handles_) {
             Entity *veh = world.registry.get(h);
             if (veh == nullptr) continue;
-            const VehicleTraits *traits = this->traits.get(veh->item_id);
-            if (traits == nullptr) continue;
-            // Mover-entry savedLivePose, stamped BEFORE the prediction gates
-            // so a frozen/parked hull reads as zero rider delta — retail
-            // stamps in every mover prologue regardless of the later bails
-            // [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
-            // @0x4b530b../@0x4ba47f..].
-            stamp_saved_live_pose(*veh);
-            // The joiner-side family prediction (net-re §5.38e B-facet, all
+			// The installed death callback replaces +0x1C4's live mover.
+			// The AI death-state callback at +0x1C8 can also run this tick.
+			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
+			if (veh->death_motion != DeathMotionMode::None)
+				continue;
+			if (!veh->veh.spawn_pose_valid)
+				capture_spawn_pose(*veh);
+			const VehicleTraits *traits = this->traits.get(veh->item_id);
+			if (traits == nullptr)
+				continue;
+			// catv's callback switches the entire mover (including input,
+			// sound and trails) using the previous tick's afloat flag.
+			// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+			VehicleTraits afloat_traits;
+			if (traits->amphibian && (veh->flags & 0x8000u) != 0) {
+				afloat_traits = *traits;
+				afloat_traits.family = VehicleFamily::Watercraft;
+				traits = &afloat_traits;
+			}
+			// Mover-entry savedLivePose, stamped BEFORE the prediction gates
+			// so a frozen/parked hull reads as zero rider delta — retail
+			// stamps in every mover prologue regardless of the later bails
+			// [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
+			// @0x4b530b../@0x4ba47f..].
+			stamp_saved_live_pose(*veh);
+			// The joiner-side family prediction (net-re §5.38e B-facet, all
             // four families landed): each mover chases the staged wire target
             // and predicts between records from the mirrored speed/steer
             // registers — the client-executed subset of its family mover

@@ -495,9 +495,8 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 }
 
 bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, EntityHandle source,
-                                     const int32_t start_in[3], const int32_t end_in[3],
-                                     int32_t height_offset) {
-    const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
+		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types) {
+	const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
     const Entity *se = source.valid() ? world.registry.get(source) : nullptr;
 
     // --- Terrain leg. [orig: Physics_CheckTerrainLineOfSight @ 0x53b080] ---
@@ -531,14 +530,14 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
         }
     }
 
-    // --- Entity leg: building-kind candidates from the LISTENER's slice.
-    // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
-    // the def-type-5 filter @ 0x539baf; walker raycast_against_entity_pool
-    // @ 0x538720.] The segment is the UNSHIFTED one (the z shift was
-    // terrain-leg-internal); the height offset instead reaches the walker as
-    // its clip RADIUS (the arg-slot reuse witnessed at the @ 0x53b166 push),
-    // so ray 2 clips 0.5u thin — see sound_segment_blocked.
-    CollisionRay ray;
+	// --- Entity leg: listener candidates; sound filters to buildings, USE admits all types.
+	// [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 0 —
+	// the def-type-5 filter @ 0x539baf; walker raycast_against_entity_pool
+	// @ 0x538720.] The segment is the UNSHIFTED one (the z shift was
+	// terrain-leg-internal); the height offset instead reaches the walker as
+	// its clip RADIUS (the arg-slot reuse witnessed at the @ 0x53b166 push),
+	// so ray 2 clips 0.5u thin — see sound_segment_blocked.
+	CollisionRay ray;
     ray.start[0] = start_in[0];
     ray.start[1] = start_in[1];
     ray.start[2] = start_in[2];
@@ -554,13 +553,21 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
         const CandidateSlice slice = it->second;
         for (int32_t i = 0; i < slice.count; ++i) {
             const EntityHandle ch = arena_[slice.start + i];
-            if (ch == listener || (source.valid() && ch == source)) continue;
-            const Entity *ce = world.registry.get(ch);
+			if (ch == listener)
+				continue;
+			const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
-            if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
+			// An all-type USE ray can hit its target hull. A non-vehicle EWeap
+			// endpoint is excluded. [orig: @0x539B99..0x539BAF]
+			if (source.valid() && ch == source &&
+					(!all_types ||
+							((ce->item_attrib & kItemAttribEweap) != 0 && ce->item_type != 1)))
+				continue;
+			if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
             if ((ce->engine_flags & 0x8000000u) != 0) continue; // [orig: @ 0x5387b4]
-            if (ce->kind != EntityKind::Building) continue; // [orig: itemDef+92 == 5]
-            // Candidates standing on the listener/source are excluded (one
+			if (!all_types && ce->kind != EntityKind::Building)
+				continue; // [orig: itemDef+92 == 5]
+			// Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;
             if (source.valid() && ce->ground_target == source) continue;

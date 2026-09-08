@@ -80,7 +80,8 @@ int main() {
 	// Bring the player to the truck (the spawn point sits inside the barracks;
 	// the motor pool is open ground and the truck's list-2 route starts there).
 	const w::Vec3 tpos = truck->position;
-	rig.world.commands.set_entity_position(player_handle, w::Vec3{tpos.x + 1.6f, tpos.y, tpos.z});
+	rig.world.commands.set_entity_position(
+			player_handle, w::Vec3{ tpos.x, tpos.y, tpos.z + truck->bound_radius + 1.0f });
 	rig.tick(31);
 
 	// --- Toggle mount: the player must end up seated on SSN 11.

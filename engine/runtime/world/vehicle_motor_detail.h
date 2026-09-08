@@ -49,7 +49,22 @@ inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
 // ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
 
+int32_t turn_pilot_view(World &, Entity &, int32_t delta);
+void stage_player_vehicle_input(World &, Entity &, Entity &, const VehicleTraits &);
+void vehicle_client_chase(Entity &);
+
 namespace detail {
+
+// Shared physics=0 pad/spine suspension. [orig: Entity_ProcessVehicleSuspension @0x463C60]
+void vehicle_simple_contact(
+		World &, Entity &, const VehicleTraits &, int32_t &, int32_t &, int32_t &);
+
+// Mover-entry ground-object refresh and carried pose; run before client chase.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00; boat @0x48D480; air @0x490310]
+int32_t vehicle_ground_height_at(
+		World &world, Entity &vehicle, const VehicleTraits &traits, const int32_t position[3]);
+void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTraits &traits);
+void vehicle_follow_carrier(World &world, Entity &vehicle);
 
 // Boat/air family trig: retail computes THESE movers' sin/cos with x87
 // fsin/fcos scaled by the verbatim BAM->radian constant dbl_7C3608 =
@@ -116,13 +131,10 @@ VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
 // One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
 // @0x462150, terrain loop @0x462246..0x4624CA]: 4 samples at ±r, gradient
 // force, penetration, slope classing against soft/hard cos22 thresholds.
-struct PlatProbeForce {
-    int32_t fx = 0, fy = 0, fz = 0; // force[i]; fz = push-up (-pen)
-};
+using PlatProbeForce = VehicleProbeForce;
 
-int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
-                           int32_t r, int32_t soft, int32_t hard,
-                           PlatProbeForce &out);
+int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, int32_t r,
+		int32_t soft, int32_t hard, PlatProbeForce &out, bool wheel_probe = false);
 
 // The probe placement every contact solve shares: each model-space probe
 // rotated by the hull's Q22 euler basis, then offset by the hull position.
@@ -139,19 +151,36 @@ inline void place_probes(const VehicleEulerBasis &basis,
     }
 }
 
-// One force pass: every probe through plat_terrain_probe, the worst severity
-// retained (the shared terrain-leg sub-contract of every solve).
+// Terrain and models share the authored probe array. The boat variant's
+// terrain broad phase applies to every point; the other families always
+// evaluate the first four wheel points. [orig: @0x462C13..0x462C45]
+int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],
+		const int32_t *radii, int count, int32_t soft, int32_t hard, PlatProbeForce *forces,
+		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity);
+
 template <int N>
-inline int32_t plat_probe_pass(const World &world, const int32_t (&probes)[N][3],
-                               const int32_t (&radii)[N], int32_t soft,
-                               int32_t hard, PlatProbeForce (&forces)[N]) {
-    int32_t sev = 0;
-    for (int i = 0; i < N; ++i)
-        sev = std::max(sev, plat_terrain_probe(world, probes[i][0], probes[i][1],
-                                               probes[i][2], radii[i], soft, hard,
-                                               forces[i]));
-    return sev;
+inline int32_t plat_probe_pass(World &world, Entity &vehicle, const int32_t (&probes)[N][3],
+		const int32_t (&radii)[N], int32_t soft, int32_t hard, PlatProbeForce (&forces)[N],
+		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity = nullptr) {
+	return vehicle_probe_pass(
+			world, vehicle, probes, radii, N, soft, hard, forces, px, py, pz, hit_entity);
 }
+
+// The lighter contacted machine takes its share of the separation. Each
+// family scales its own saved depth count (boat leaves its seventh depth).
+// [orig: ground @0x47D336..0x47D458; boat @0x482957..0x482A7F]
+void vehicle_contact_mass_share(World &world, const Entity &vehicle, EntityHandle hit, int32_t &dx,
+		int32_t &dy, int32_t *depths, int count);
+
+// Severity-three damage, scrape edge and momentum transfer. The caller has
+// already applied its torque speed decay. [orig: @0x47CD00..0x47CF55]
+void vehicle_landing_damage(
+		World &, Entity &, const VehicleTraits &, const int32_t *depth, int count, int32_t up);
+void vehicle_crush_damage(
+		World &, Entity &, const VehicleTraits &, const int32_t *spine, int32_t up);
+
+void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &traits,
+		int severity, EntityHandle hit, int32_t px, int32_t py, int32_t pz);
 
 // The sev-3 0.25-cut distance gate every solve runs: the STRONGEST planar
 // force among the first `scan` probes must sit > 0x8000 (0.5 u) from the
@@ -172,54 +201,95 @@ inline bool strongest_probe_beyond_hull(const PlatProbeForce (&forces)[N],
     return ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000;
 }
 
-// The second pass shared by the air, tracked and wheeled contact solves
-// (vehicle_contact_solve.cpp): re-probe the planar-shifted probes and, when
-// the shift still collides, average the second pass into the depths and the
-// push; then apply the X/Y push (the Z sum rides the deferred entity-mass
-// leg and is zero). The boat solve keeps its own copy: it mirrors the
-// second-pass forces into the shared zc[] buffer the grounded leg reads.
+// The shared second contact pass averages forces after the planar probe shift and applies the
+// contacted entity mass share. Boat keeps its depth buffer locally because the grounded branch
+// consumes it.
 template <int N>
-inline void plat_second_pass(const World &world, int32_t (&probes)[N][3],
-                             const int32_t (&radii)[N], int32_t soft, int32_t hard,
-                             const PlatProbeForce (&forces)[N], int32_t (&d)[N],
-                             int32_t &px, int32_t &py) {
-    int64_t dX = 0, dY = 0;
-    for (int i = 0; i < N; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
-    for (int i = 0; i < N; ++i) {
+inline void plat_second_pass(World &world, Entity &vehicle, int32_t (&probes)[N][3],
+		const int32_t (&radii)[N], int32_t soft, int32_t hard, PlatProbeForce (&forces)[N],
+		int32_t (&d)[N], int32_t &px, int32_t &py, int32_t pz, EntityHandle hit) {
+	int64_t dX = 0, dY = 0;
+	for (int i = 0; i < N; ++i) {
+		dX += forces[i].fx;
+		dY += forces[i].fy;
+	}
+	for (int i = 0; i < N; ++i) {
         probes[i][0] += int32_t(dX);
         probes[i][1] += int32_t(dY);
     }
     PlatProbeForce forces2[N];
-    const int32_t sev2 = plat_probe_pass(world, probes, radii, soft, hard, forces2);
-    if (sev2 != 0) {
-        int64_t dX2 = 0, dY2 = 0;
-        for (int i = 0; i < N; ++i) {
+	const int32_t sev2 =
+			plat_probe_pass(world, vehicle, probes, radii, soft, hard, forces2, px, py, pz);
+	for (int i = 0; i < N; ++i)
+		forces[i].terrain_gap = forces2[i].terrain_gap;
+	if (sev2 != 0) {
+		int64_t dX2 = 0, dY2 = 0;
+		for (int i = 0; i < N; ++i) {
             dX2 += forces2[i].fx;
             dY2 += forces2[i].fy;
         }
         for (int i = 0; i < N; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
         dX = (dX2 + dX) >> 1;
         dY = (dY2 + dY) >> 1;
-    }
-    px += int32_t(dX);
-    py += int32_t(dY);
+	}
+	int32_t dx = int32_t(dX), dy = int32_t(dY);
+	vehicle_contact_mass_share(world, vehicle, hit, dx, dy, d, N);
+	px += dx;
+	py += dy;
 }
 
 // The in-water flag with the r/2 hysteresis shared by the contact solves:
 // the four pad probes' average Z (lowered by r/2 while already in water)
 // against the hull-bottom reference and the world water plane. W == 0 = our
 // no-water-world sentinel (retail worlds always carry a plane).
+void vehicle_water_entry(World &, Entity &, int32_t x, int32_t y, bool was_water);
+void vehicle_trail_water_transition(Entity &e, const VehicleTraits &traits, bool was_water);
+void vehicle_sample_trails(
+		World &world, Entity &e, const VehicleTraits &traits, int32_t target_speed);
+void vehicle_update_trail_lane(
+		World &world, Entity &e, const VehicleTraits &traits, uint8_t lane, int32_t intensity);
 template <int N>
-inline void plat_water_flag(Entity &veh, const int32_t (&probes)[N][3], int32_t r,
-                            int32_t hull_bottom_neg, int32_t water_z) {
-    if (water_z == 0) return;
-    int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] + probes[3][2]) >> 2;
-    if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
-    if (hull_bottom_neg + avg >= water_z)
+inline void plat_water_flag(World &world, Entity &veh, const VehicleTraits &traits,
+		const int32_t (&probes)[N][3], int32_t r, int32_t hull_bottom_neg, int32_t water_z) {
+	if (water_z == 0)
+		return;
+	const bool was_water = (veh.flags & 0x8000u) != 0;
+	int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] + probes[3][2]) >> 2;
+	if ((veh.flags & 0x8000u) != 0u)
+		avg -= r >> 1;
+	if (hull_bottom_neg + avg >= water_z)
         veh.flags &= ~0x8000u;
     else
         veh.flags |= 0x8000u;
+	vehicle_trail_water_transition(veh, traits, was_water);
+	int lowest = 0;
+	for (int i = 1; i < 4; ++i)
+		if (probes[i][2] < probes[lowest][2])
+			lowest = i;
+	vehicle_water_entry(world, veh, probes[lowest][0], probes[lowest][1], was_water);
 }
+
+// The retained contact direction joins the contact solve to next tick's
+// acceleration, velocity, wheelspin and skid effects.
+void vehicle_health_effects(World &world, Entity &e, const VehicleTraits &traits, bool critical);
+void vehicle_release_damage_effects(World &world, Entity &e);
+void vehicle_smoke_effect(World &world, Entity &e, bool release = false);
+void vehicle_crash_state(
+		World &world, Entity &e, const VehicleTraits &traits, const bool *contacts, int32_t up_z16);
+void vehicle_expire_contact_wake(World &, Entity &);
+void vehicle_kill_crash_occupants(World &, Entity &);
+void vehicle_rebuild_rest_orientation(World &, Entity &, bool inverted);
+void vehicle_rest_state(World &, Entity &, VehicleFamily);
+void vehicle_emit_skid_effects(World &, Entity &, const VehicleTraits &);
+bool vehicle_has_contact_direction(const Entity::VehicleMotorState &m);
+bool vehicle_traction_acceleration(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
+void vehicle_wheel_traction_tick(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
+void vehicle_traction_velocity(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed);
+void vehicle_capture_contact_direction(Entity &vehicle, const VehicleEulerBasis &basis);
+void vehicle_contact_downhill_tail(Entity &vehicle, int32_t pz);
 
 // The shared 4-normal plane fit [orig: identical in both solvers —
 // Entity_ComputeSuspensionOrientation @0x46CAB7.. / the wheeled twin
@@ -228,14 +298,44 @@ inline void plat_water_flag(Entity &veh, const int32_t (&probes)[N][3], int32_t 
 // @0x46E099..0x46E0B3]. Outputs pitch/roll BAM via the standard atan2
 // decomposition (the @0x613310 interior = pending witness).
 struct PlatFit {
-    int32_t pitch_bam = 0;
-    int32_t roll_bam = 0;
-    int32_t z_avg = 0;          // plain 4-corner average (orientation solver)
+	int32_t yaw_bam = 0;
+	int32_t pitch_bam = 0;
+	int32_t roll_bam = 0;
+	int32_t z_avg = 0;          // plain 4-corner average (orientation solver)
     int32_t positive_z_avg = 0; // corners with z > 0 only (wheeled solver leg C)
     double fwd_z = 0.0; // unit forward vertical component (beach term feed)
 };
 
-void plat_fit_corners(const int32_t c[4][3], PlatFit &out);
+// Assemble the three Q16 axes into the solver's Q22 matrix for extraction.
+// [orig: Math_FixedPointMatrixToEulerAngles @0x613310]
+inline void vehicle_axes_to_euler(const int32_t forward[3], const int32_t side[3],
+		const int32_t up[3], int32_t &yaw, int32_t &pitch, int32_t &roll) {
+	CollisionMatrix matrix;
+	for (int row = 0; row < 3; ++row) {
+		matrix.m[4 * row] = bam_shl_wrap(forward[row], 6);
+		matrix.m[4 * row + 1] = bam_shl_wrap(side[row], 6);
+		matrix.m[4 * row + 2] = bam_shl_wrap(up[row], 6);
+	}
+	int32_t euler[3];
+	collision_matrix_to_euler(matrix, euler);
+	yaw = euler[0];
+	pitch = euler[1];
+	roll = euler[2];
+}
+
+void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matrix = nullptr);
+void vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
+		PlatFit &, int32_t px, int32_t py, int32_t pz, bool tank = false);
+void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],
+		PlatFit &, int32_t px, int32_t py, int32_t pz);
+void vehicle_boat_lean(Entity &, const VehicleTraits &, int32_t side_z16);
+void vehicle_bike_lean(Entity &, const VehicleTraits &, int32_t side_z16);
+void vehicle_apply_lean(Entity &, CollisionMatrix &);
+void vehicle_clear_chassis(Entity::VehicleMotorState &);
+void vehicle_recoil_impulse(
+		World &, Entity &, const VehicleTraits &, int32_t amplitude, const int32_t direction[3]);
+void vehicle_apply_chassis(World &, Entity &, CollisionMatrix &);
+void vehicle_clear_chassis_forces(Entity &, const int32_t corners[4][3], int mode);
 
 // The air + ground contact/suspension solves (vehicle_contact_solve.cpp) — the
 // client-executed subsets of Entity_ProcessAircraftContactPhysics

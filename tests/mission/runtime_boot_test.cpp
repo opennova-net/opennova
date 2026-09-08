@@ -155,6 +155,39 @@ bool run_aip_parse() {
 			"min_agl 15\n"
 			"min_speed 10\n"
 			"view_dist 400\n";
+	const std::string extended = helo +
+			"subtype plane\nflight_skill 9\ndefault_state helo_combat\n"
+			"hunt_flags MAINTAIN_SPEED\nhunt_limit 1.5\nalert RED\nrank 7\n"
+			"radio_distance 300\nradio_delay 10\ncheck_six_rate 2\ntarget_eval_rate 3\n"
+			"evade_flags COUNTER ATEAM RC_FIRE\n";
+	const auto extra = opennova::aip::parse_profile(
+			reinterpret_cast<const uint8_t *>(extended.data()), extended.size());
+	if (!expect(extra.subtype == 2 && extra.drive_skill == 4 && extra.default_state == 8,
+				"aip: aircraft class, skill clamp and default state name"))
+		return false;
+	if (!expect(extra.hunt_flags == 1 && extra.hunt_limit == 93 && extra.alert == 2 &&
+						extra.rank == 7,
+				"aip: flight hunt, alert and rank fields"))
+		return false;
+	if (!expect(extra.radio_distance == 300 && extra.radio_delay == 10 &&
+						extra.check_six_rate == 1310 && extra.target_eval_rate == 1966 &&
+						extra.evade_flags == 0x10,
+				"aip: radio/evaluation conversions and evade-only flags"))
+		return false;
+	const std::string ground_extra =
+			"type GROUND\ndefault_state GROUND_FOLLOWWP\npatrol_speed 2.5\n"
+			"combat_speed 5.75\nturn_rate 30\naccel_time 2\ndrive_skill -2\nview_fov 360\n";
+	const auto gp = opennova::aip::parse_profile(
+			reinterpret_cast<const uint8_t *>(ground_extra.data()), ground_extra.size());
+	if (!expect(gp.default_state == 17 && gp.has_ground_patrol_speed &&
+						gp.ground_patrol_speed == 728 && gp.has_ground_combat_speed &&
+						gp.ground_combat_speed == 1674 && gp.drive_skill == 0,
+				"aip: literal ground state table and fractional speeds"))
+		return false;
+	if (!expect(gp.turn_rate_bam_tick == 11930464 * 30 / 62 && gp.accel_ticks == 124 &&
+						gp.view_fov_bam == -256,
+				"aip: ground steering/acceleration and full-turn BAM wrap"))
+		return false;
 	std::vector<uint8_t> hb(helo.begin(), helo.end());
 	const opennova::aip::Profile hp =
 			opennova::aip::parse_profile(hb.data(), hb.size());

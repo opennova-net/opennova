@@ -25,81 +25,82 @@ bool is_blocking_enemy_rider(const Entity &entity, const Entity &requester) {
     return entity.mounted;
 }
 
-// A live ENEMY occupies `vehicle` (or one of its carried guns — gun-carrier traversal is
-// unmodeled; tracked D-NET-157). Scans pool 0, skipping dead / self / same-team occupants,
-// so same-team co-boarding never blocks. [orig: Vehicle_HasEnemyOccupant @0x4359F0 —
-// pool-0 scan, dead skip, +0x162 team compare @0x435a5f, parentEntity(0x16C) == root hit]
-bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
-                                const Entity &requester) {
-    const std::size_t pool_capacity = world.registry.pool_capacity(0);
-    for (std::size_t slot = 0; slot < pool_capacity; ++slot) {
-        const Entity *entity =
-                world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-        if (entity != nullptr && is_blocking_enemy_rider(*entity, requester) &&
-            entity->mount_target == vehicle.handle)
-            return true;
-    }
-    return false;
+// Emplaced guns share hostile occupancy with their carrier. Vehicle-type
+// EWeap targets remain roots. [orig: Vehicle_HasEnemyOccupant @0x4359F0]
+EntityHandle occupancy_root(const World &world, const Entity &target) {
+	if (target.has_item_def && (target.item_attrib & kItemAttribEweap) != 0 &&
+			target.item_type != 1 && world.registry.get(target.ground_target) != nullptr)
+		return target.ground_target;
+	return target.handle;
 }
 
-// Requester-relative hostile mount targets for one synchronous attach query. The
-// source-of-truth remains the witnessed pool-0 rider parent link; this is only a
-// per-call index, so attach/detach, death, team changes, restore, and handle reuse
-// need no cross-frame invalidation.
+bool rider_blocks_root(const World &world, const Entity &rider, EntityHandle root) {
+	if (rider.mount_target == root)
+		return true;
+	const Entity *mount = world.registry.get(rider.mount_target);
+	return mount != nullptr && mount->has_item_def &&
+			(mount->item_attrib & kItemAttribEweap) != 0 && mount->ground_target == root;
+}
+
+bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
+                                const Entity &requester) {
+	const EntityHandle root = occupancy_root(world, vehicle);
+	for (std::size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+		const Entity *entity = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+		if (entity != nullptr && is_blocking_enemy_rider(*entity, requester) &&
+				rider_blocks_root(world, *entity, root))
+			return true;
+	}
+	return false;
+}
+
+// One requester-relative index per query, including carried-gun parents;
+// attachment, death and team changes are observed without a retained cache.
 class HostileMountIndex {
 public:
-    HostileMountIndex(const World &world, const Entity &requester,
-                      AttachLabelScanStats *stats, const VehicleOccupancySource *source) {
-        if (stats != nullptr) ++stats->enemy_occupancy_registry_passes;
-        const std::size_t pool_capacity = world.registry.pool_capacity(0);
-        for (std::size_t slot = 0; slot < pool_capacity; ++slot) {
-            const Entity *entity =
-                    world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-            if (entity == nullptr || !is_blocking_enemy_rider(*entity, requester) ||
-                !entity->mount_target.valid())
-                continue;
-            const std::size_t target = entity->mount_target.packed;
-            if (target < blocked_.size()) blocked_.set(target);
-        }
-        if (source != nullptr) {
+	HostileMountIndex(const World &world, const Entity &requester, AttachLabelScanStats *stats,
+			const VehicleOccupancySource *source) :
+			world_(world) {
+		if (stats != nullptr) ++stats->enemy_occupancy_registry_passes;
+		for (std::size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+			const Entity *entity =
+					world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+			if (entity != nullptr && is_blocking_enemy_rider(*entity, requester))
+				mark(entity->mount_target);
+		}
+		if (source != nullptr) {
             std::vector<EntityHandle> remote;
             source->collect_hostile_mounts(requester, remote);
-            for (EntityHandle target : remote) {
-                if (target.valid() && target.packed < blocked_.size())
-                    blocked_.set(target.packed);
-            }
-        }
-    }
+			for (EntityHandle target : remote)
+				mark(target);
+		}
+	}
 
-    bool blocks(EntityHandle vehicle) const {
-        return vehicle.valid() && vehicle.packed < blocked_.size() &&
-               blocked_.test(vehicle.packed);
-    }
+	bool blocks(EntityHandle target) const {
+		const Entity *entity = world_.registry.get(target);
+		if (entity != nullptr)
+			target = occupancy_root(world_, *entity);
+		return target.valid() && target.packed < blocked_.size() && blocked_.test(target.packed);
+	}
 
 private:
-    std::bitset<kEntityHandleDomain> blocked_;
+	void mark(EntityHandle target) {
+		if (!target.valid())
+			return;
+		if (target.packed < blocked_.size())
+			blocked_.set(target.packed);
+		const Entity *mount = world_.registry.get(target);
+		if (mount != nullptr && mount->has_item_def &&
+				(mount->item_attrib & kItemAttribEweap) != 0 && mount->ground_target.valid() &&
+				mount->ground_target.packed < blocked_.size())
+			blocked_.set(mount->ground_target.packed);
+	}
+	const World &world_;
+	std::bitset<kEntityHandleDomain> blocked_;
 };
 
 bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
     return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
-}
-
-// While seated, retail's LOS leg walks the hulls: the OWN carrier's other
-// seats sit behind its hull, and an EWeap candidate riding a vehicle resolves
-// its LOS target to that carrier, so the EWeap's own hull still blocks the ray
-// to its seat from a rider inside the carrier [orig: Entity_FindNearestSeatOrArmory
-// @0x43615c..0x436183 -> Entity_CheckLineOfSightTerrainAndEntities @0x53b130].
-// That is why USE exits a vehicle instead of cycling its seats or hopping onto
-// its own gun. Pool-1 hulls are unbuilt (D-AI-11 j), so the occlusion is
-// modeled as this candidate skip over the rider's carrier FAMILY: the root
-// carrier (an EWeap mount re-roots to its carrier) and every EWeap child of it.
-bool own_carrier_family(const World &world, const Entity &player, const Entity &cand) {
-    if (!player.mounted || !player.mount_target.valid()) return false;
-    EntityHandle root = player.mount_target;
-    if (const Entity *mount = world.registry.get(root);
-            mount != nullptr && mount->emplacement_parent.valid())
-        root = mount->emplacement_parent;
-    return cand.handle == root || cand.emplacement_parent == root;
 }
 
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
@@ -301,6 +302,28 @@ bool find_best_vehicle_seat(
     return out.vehicle.valid();
 }
 
+bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &carrier) {
+	if (!carrier.has_item_def || (carrier.flags & kEntityFlagDead) != 0 || !carrier.alive ||
+			carrier.health <= 0)
+		return false;
+	VehicleSeatSelection seat;
+	if (!find_best_vehicle_seat(
+				world, carrier.handle, rider != nullptr ? rider->handle : EntityHandle{}, seat))
+		return false;
+	if (rider != nullptr && rider->ground_target == carrier.handle)
+		return true;
+	if (vehicle_at_spawn_anchor(world, carrier))
+		return true;
+	if ((carrier.flags & kEntityFlagInAir) != 0)
+		return false;
+	// The comparison is 16 raw 16.16 counts, not sixteen world units.
+	// [orig: @0x4354D7..0x43551D]
+	const int64_t x = static_cast<int32_t>(carrier.position.x * 65536.0f);
+	const int64_t y = static_cast<int32_t>(carrier.position.y * 65536.0f);
+	return std::abs(x - carrier.saved_live_pos[0]) <= 16 &&
+			std::abs(y - carrier.saved_live_pos[1]) <= 16;
+}
+
 bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection) {
     World &world = world_;
     Entity *occ = world.registry.get(player);
@@ -457,32 +480,51 @@ bool VehicleSystem::detach(EntityHandle player) {
 
 namespace {
 
-// LOS between the player position and a candidate point, excluding both entities
-// [orig: Entity_CheckLineOfSightTerrainAndEntities @0x436183 in the scan; the label draw's
-// Physics_RaycastTerrainAndSectors @0x5a3609 — both cast from the player POSITION].
-// The 0.9 u lift both ends is today's eye stand-in (the D-AI-11 CameraOffset
-// residual), kept at the call site now that line_of_sight_clear takes exact
-// endpoints — deliberately not the muzzle seam: a USE scan is not a fire origin.
-bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &sp) {
-    constexpr int32_t kEyeLift = 0xE666; // 0.9 u
-    const int32_t a[3] = {static_cast<int32_t>(player.position.x * 65536.0f),
-                          static_cast<int32_t>(player.position.y * 65536.0f),
-                          static_cast<int32_t>(player.position.z * 65536.0f) + kEyeLift};
-    const int32_t b[3] = {static_cast<int32_t>(sp.x * 65536.0f),
-                          static_cast<int32_t>(sp.y * 65536.0f),
-                          static_cast<int32_t>(sp.z * 65536.0f) + kEyeLift};
-    return world.ai.line_of_sight_clear(world, a, b, player.handle, cand.handle);
+// Both queries start at Position. Only scan scoring reads CameraOffset.
+// The scan's sixth argument is allowAllTypes=1; labels use the sector query.
+// [orig: Entity_FindNearestSeatOrArmory @0x436174..0x436188;
+// HUD_DrawEntityLabel @0x5A35F6..0x5A360E]
+bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
+		bool label = false) {
+	const int32_t a[3] = { static_cast<int32_t>(player.position.x * 65536.0f),
+		static_cast<int32_t>(player.position.y * 65536.0f),
+		static_cast<int32_t>(player.position.z * 65536.0f) };
+	const int32_t b[3] = { static_cast<int32_t>(point.x * 65536.0f),
+		static_cast<int32_t>(point.y * 65536.0f),
+		static_cast<int32_t>(point.z * 65536.0f) + (label ? 0 : 12288) };
+	if (label) {
+		const EntityHandle endpoint =
+				cand.ground_target.valid() ? cand.ground_target : player.handle;
+		return world.ai.line_of_sight_clear(world, a, b, cand.handle, endpoint);
+	}
+	EntityHandle endpoint = cand.handle;
+	if (cand.has_item_def && (cand.item_attrib & kItemAttribEweap) != 0 &&
+			(cand.item_attrib & kItemAttribPlayerControl) == 0) {
+		const Entity *ground = world.registry.get(cand.ground_target);
+		if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+			endpoint = ground->handle;
+	}
+	if (world.collision != nullptr)
+		return world.collision->entity_los_clear(world, player.handle, endpoint, a, b, 0, true);
+	return world.ai.line_of_sight_clear(world, a, b, player.handle, endpoint);
 }
 
 // The shared per-entity reject set of the scan and the label pass
 // [orig: @0x435e28..0x435eae / @0x5a335a..0x5a3395 — dead/destroyed skip, itemDef/model
-// presence, enemy-occupant reject; the carrier legs are unmodeled (D-AI-11)].
-bool scan_entity_rejected(const Entity &cand, const Entity &player,
-                          const HostileMountIndex &hostile_mounts) {
-    if (cand.handle == player.handle) return true;
+// presence, enemy-occupant and carried-object rejects].
+bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
+		const HostileMountIndex &hostile_mounts) {
+	if (cand.handle == player.handle) return true;
     if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
     if ((cand.flags & 2u) != 0) return true;
-    return hostile_mounts.blocks(cand.handle);
+	if (hostile_mounts.blocks(cand.handle))
+		return true;
+	const Entity *ground = world.registry.get(cand.ground_target);
+	if (cand.item_type == 6 && ground != nullptr && ground->has_item_def &&
+			(ground->item_attrib & kItemAttribPlayerControl) != 0)
+		return !ground->alive || ground->health <= 0 || (ground->flags & kEntityFlagDead) != 0 ||
+				hostile_mounts.blocks(ground->handle);
+	return false;
 }
 
 // The scan container: the player's proximity slice when the per-tick tables are
@@ -513,14 +555,13 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0].
     const int32_t max_dist3d = player.mounted ? 59652320 : 1073741760;
-    // The player reference point: position + the +0.9 u chest/eye stand-in (CameraOffset
-    // unmodeled, D-AI-11) + the witnessed +0.1875 u scan bias [orig: the +12288 term
-    // @0x436041].
-    const double eye_x = static_cast<double>(player.position.x);
-    const double eye_y = static_cast<double>(player.position.y);
-    const double eye_z = static_cast<double>(player.position.z) + 0.9;
+	// Score from the live posed eye, with the candidate's +0.1875 scan bias.
+	// [orig: @0x436010..0x436041]
+	const double eye_x = static_cast<double>(player.position.x) + player.eye_offset_x / 65536.0;
+	const double eye_y = static_cast<double>(player.position.y) + player.eye_offset_y / 65536.0;
+	const double eye_z = static_cast<double>(player.position.z) + player.eye_offset_z / 65536.0;
 
-    int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
+	int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
     bool found = false;
 
     // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
@@ -555,9 +596,9 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-        if (own_carrier_family(world, player, cand)) return; // the D-AI-11 j hull stand-in
-        if (scan_entity_rejected(cand, player, hostile_mounts)) return;
-        if (!armory_mode) {
+		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+			return;
+		if (!armory_mode) {
             // [orig: the searchMode-0 seat loop @0x435f1e]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
@@ -607,8 +648,9 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
         // [orig: the label radius @0x5a35f0 — dist < 0x40000 (4.0 u), FULL 3D, from the
         // entity position (not the eye)]
         if (static_cast<int32_t>(d3 * 65536.0) >= 0x40000) return;
-        if (!point_los_clear(world, player, cand, lifted)) return;
-        AttachLabel label;
+		if (!point_los_clear(world, player, cand, lifted, true))
+			return;
+		AttachLabel label;
         label.entity = cand.handle;
         label.seat_index = index;
         label.type = type;
@@ -630,9 +672,9 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-        if (own_carrier_family(world, player, cand)) return; // the D-AI-11 j hull stand-in
-        if (scan_entity_rejected(cand, player, hostile_mounts)) return;
-        if (!armory_mode) {
+		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+			return;
+		if (!armory_mode) {
             // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
@@ -654,8 +696,12 @@ bool VehicleSystem::player_toggle_mount(EntityHandle player) {
     World &world = world_;
     Entity *p = world.registry.get(player);
     if (p == nullptr || !p->alive || p->health <= 0) return false;
+	// WAC's lock is local-player USE only; explicit AI/script detaches bypass it.
+	// [orig: Entity_ToggleVehicleMount @0x43698B]
+	if (p->mounted && player == world.cached.local_player && world.script.wac_values.seatbelt != 0)
+		return false;
 
-    if (!p->mounted) {
+	if (!p->mounted) {
         // Standing ON a seat-bearing carrier -> best free seat on it [orig: the Flags 0x200
         // deck branch @0x4368cf -> Entity_FindBestSeatSlot @0x4351f0; represented by
         // the generic ground_target carrier, not a CL ladder volume].

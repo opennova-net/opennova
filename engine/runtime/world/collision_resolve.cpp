@@ -26,97 +26,6 @@ namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
 
-// See collision.h — the vehicle hull contact. [orig: Entity_CheckCollisionState
-// @ 0x462a30, the entity-collision half; the per-wheel terrain half rides the
-// motor's terrain column (D-NET-161).]
-int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
-                                             const int32_t pos[3], const int32_t prev_pos[3],
-                                             int32_t out_force[2]) {
-    out_force[0] = 0;
-    out_force[1] = 0;
-    auto it = candidates_.find(source.packed);
-    if (it == candidates_.end()) return 0;
-    const CandidateSlice slice = it->second;
-    if (slice.count <= 0) return 0;
-
-    // The hull-center test point: +1.5 u lift (mid-hull, so a wall's bottom face
-    // is never the cheapest SAT exit), radius 1.5 u — the wheel-point array and
-    // per-wheel radii ride the unported wheel solver (D-NET-161).
-    CollisionPoint point{pos[0], pos[1], pos[2] + 0x18000, 0};
-    int32_t radius = 0x18000;
-
-    ContactQuery q;
-    q.points = &point;
-    q.radii = &radius;
-    q.num_points = 1;
-    q.prev_pos[0] = prev_pos[0];
-    q.prev_pos[1] = prev_pos[1];
-    q.prev_pos[2] = prev_pos[2] + 0x18000;
-    q.source_bound_radius = radius;
-    // The vehicle contact mask is 8: use the VC/type-7 run when present, otherwise
-    // fall back to ordinary CB/default solids. It is 24 when the def
-    // attrib2 low byte has bit 7 set, adding type-12 volumes [orig: @ 0x462a91-
-    // 0x462a9f — collisionMask = 8; attrib2 sign byte -> 24]. attrib2 is not
-    // fed to the sim yet, so the 24 leg is a tracked residual (D-NET-161).
-    q.mask = 8;
-    q.query_is_player = false;
-
-    BlinkAccum blink;       // vehicles accumulate no blink state
-    LadderContact ladder;   // nor ladder contact frames
-    int32_t severity = 0;
-    CollisionTargetView view;
-    std::vector<CollisionMatrix> mats;
-
-    for (int32_t i = 0; i < slice.count; ++i) {
-        const EntityHandle ch = arena_[slice.start + i];
-        if (ch == source) continue;
-        // Skip candidates whose groundEntity CHAIN rides this hull — the
-        // mounted/carried children (an emplaced cannon whose 0x0D target seeds
-        // groundEntity = this vehicle), up to three hops. The pre-fix port
-        // inverted the relation (it skipped MY carrier instead), so a hull
-        // ground against its own mounted cannon's collision volume every tick
-        // and was shoved off its wire pose — the live joiner "vehicle jumping
-        // around" (13 u false equilibrium, re-snapping every subrate record).
-        // [orig: Entity_CheckCollisionState @0x462a30 proximity walk —
-        //  v33 = candidate->groundEntity @0x462e26; skip v33 == ent @0x462e37,
-        //  v33->groundEntity == ent or v33->groundEntity->groundEntity == ent
-        //  @0x462e3d..0x462e4f]
-        {
-            const Entity *cand = world.registry.get(ch);
-            if (cand != nullptr && cand->ground_target.valid()) {
-                if (cand->ground_target == source) continue;
-                const Entity *g1 = world.registry.get(cand->ground_target);
-                if (g1 != nullptr && g1->ground_target.valid()) {
-                    if (g1->ground_target == source) continue;
-                    const Entity *g2 = world.registry.get(g1->ground_target);
-                    if (g2 != nullptr && g2->ground_target == source) continue;
-                }
-            }
-        }
-        int32_t bound_pos[3];
-        int32_t bound_radius = 0;
-        if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/false)) continue;
-        if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
-        const CollisionTargetView *tv = target_view(world, ch, view, mats);
-        if (tv == nullptr) continue;
-        ContactResult res;
-        if (!collision_contact_force(*tv, q, blink, ladder, res)) continue;
-        // Verticality split [orig: @ 0x462fc2-0x462fcb — |fz|<<22 / |force| vs the
-        // caller's slope thresholds]: a wall-like (horizontal-dominant) push lands
-        // in FULL at severity 3 [orig: @ 0x46322d-0x463240]; vertical-dominant
-        // force is the ground's — dropped here, the terrain column owns it (the
-        // graded ¼/⅛ bands ride the wheel solver, D-NET-161).
-        if (abs32(res.force[0]) + abs32(res.force[1]) < abs32(res.force[2])) continue;
-        out_force[0] -= res.force[0];
-        out_force[1] -= res.force[1];
-        severity = 3;
-        if (contact_debug_enabled_)
-            contact_debug_record(ContactDebugKind::kVehicleHull, world.logic_tick,
-                                 ch, pos, 0xFF);
-    }
-    return severity;
-}
-
 int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, ResolveState &state,
                                        int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                                        int32_t capsule_bottom, int32_t capsule_top,
@@ -593,7 +502,21 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[0] += total_force[0];
     pos[1] += total_force[1];
     pos[2] += total_force[2];
-    lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS);
+	// A hull opposing the walk widens the carrier entry ring. The signed sum
+	// and both angular gates are retail's exact tests, not a stalled-walk timer.
+	// [orig: Physics_ResolveEntityCollision @0x4B377A..0x4B37BB]
+	if (int64_t(total_force[0]) + total_force[1] != 0) {
+		if (AiEntity *body = world.ai.for_handle(source)) {
+			const int32_t facing = io::bam_sub(body->inf.target_heading, body->inf.body_heading);
+			const int32_t against = static_cast<int32_t>(
+					std::atan2(-double(total_force[1]), -double(total_force[0])) *
+					io::kBamPerRadian);
+			if (std::abs(int64_t(facing)) < 95443712 &&
+					std::abs(int64_t(io::bam_sub(body->inf.target_heading, against))) < 178956960)
+				body->inf.board_blocked = true;
+		}
+	}
+	lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS);
 
     // The CL latch bookkeeping (motor callers already set the flag inline at
     // the latch site; this keeps the replica/harness channel and the transient
@@ -629,17 +552,19 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (pusher.valid() && ent != nullptr && is_authority) {
         const Entity *p = world.registry.get(pusher);
         if (p != nullptr && p->has_item_def) {
-            const int32_t pdx = p->saved_live_valid
-                    ? to_fixed(p->position.x) - p->saved_live_pos[0] : 0;
-            const int32_t pdy = p->saved_live_valid
-                    ? to_fixed(p->position.y) - p->saved_live_pos[1] : 0;
-            const int32_t vdx = pos[0] - state.prev_pos[0];
-            const int32_t vdy = pos[1] - state.prev_pos[1];
-            const int32_t rdx = pdx - vdx;
-            const int32_t rdy = pdy - vdy;
-            const double rl = std::sqrt(static_cast<double>(rdx) * rdx +
-                                        static_cast<double>(rdy) * rdy);
-            const double pl = std::sqrt(static_cast<double>(pdx) * pdx +
+			const int32_t pdx = p->saved_live_valid
+					? io::bam_sub(to_fixed(p->position.x), p->saved_live_pos[0])
+					: 0;
+			const int32_t pdy = p->saved_live_valid
+					? io::bam_sub(to_fixed(p->position.y), p->saved_live_pos[1])
+					: 0;
+			const int32_t vdx = io::bam_sub(pos[0], state.prev_pos[0]);
+			const int32_t vdy = io::bam_sub(pos[1], state.prev_pos[1]);
+			const int32_t rdx = io::bam_sub(pdx, vdx);
+			const int32_t rdy = io::bam_sub(pdy, vdy);
+			const double rl =
+					std::sqrt(static_cast<double>(rdx) * rdx + static_cast<double>(rdy) * rdy);
+			const double pl = std::sqrt(static_cast<double>(pdx) * pdx +
                                         static_cast<double>(pdy) * pdy);
             const int32_t rel_move = rl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(rl);
             const int32_t pusher_move = pl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(pl);

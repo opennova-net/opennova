@@ -191,6 +191,53 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     CHECK(npc.inf.aim_heading == default_heading * 3);
 }
 
+// WAC's writable seatbelt value locks local USE, including seat swaps, while
+// script-forced detach remains available. [orig: @0xC6EADC / @0x43698B]
+static void test_wac_seatbelt_controls_local_use() {
+	World w;
+	w.cached.humans = 1;
+	w.registry.configure_pool(0, 4);
+	w.registry.configure_pool(1, 4);
+	world::Entity player;
+	player.kind = world::EntityKind::Organic;
+	player.health = 100;
+	const auto ph = w.registry.spawn(0, player);
+	w.cached.local_player = ph;
+	world::Entity carrier;
+	carrier.has_item_def = true;
+	carrier.item_type = 1;
+	carrier.item_attrib = world::kItemAttribPlayerControl;
+	carrier.health = 100;
+	world::Seat seat;
+	seat.type = world::SeatType::Controller;
+	seat.bone_index = 1;
+	carrier.seats.push_back(seat);
+	const auto vh = w.registry.spawn(1, carrier);
+	CHECK(w.vehicles.process_attach(ph, vh, 1));
+	wac::WacSystem ws;
+	wac::CompileEnv env;
+	auto program = wac::compile_source("if never() then set(SeAtBeLt,1) endif\n"
+									   "if eq(seatbelt,1) then set(v9,1) endif\n"
+									   "if eq(v10,1) then set(seatbelt,0) endif\n",
+			env);
+	CHECK(program.diagnostics.empty());
+	ws.set_program(std::move(program));
+	w.add_system(&ws);
+	w.load_systems();
+	tick_n(w, wac::WacSystem::kTicksPerExecution);
+	CHECK(w.script.vars.get_mission(0) == 0);
+	CHECK(w.script.vars.get_mission(9) == 1);
+	CHECK(!w.vehicles.player_toggle_mount(ph));
+	CHECK(w.registry.get(ph)->mounted);
+	CHECK(w.vehicles.detach(ph)); // forced script/API detach bypasses USE
+	CHECK(w.vehicles.process_attach(ph, vh, 1));
+	w.script.vars.set_mission(10, 1);
+	tick_n(w, wac::WacSystem::kTicksPerExecution);
+	CHECK(w.script.wac_values.seatbelt == 0);
+	CHECK(w.vehicles.player_toggle_mount(ph));
+	CHECK(!w.registry.get(ph)->mounted);
+}
+
 // Pure BMS: var counter via Increment, trigger threshold, fire-once vs ResetAfter.
 // Two events: index 0 is touched on passes 1,5,9,.. (ticks 16,80,144,208) and index 1
 // on passes 2,6,10,.. (ticks 32,96,160,224).
@@ -1729,7 +1776,8 @@ int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
     test_wac_accuracyspread_drives_npc_aim();
-    test_bms_increment_and_threshold();
+	test_wac_seatbelt_controls_local_use();
+	test_bms_increment_and_threshold();
     test_activation_delay();
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();

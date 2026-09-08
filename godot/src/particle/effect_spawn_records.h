@@ -27,22 +27,23 @@ namespace godot {
 // enums (Admission, Binding, RenderDomain, KillPlane); slot_token /
 // owner_token are the interned identities the shell holds; lod_divisor is
 // clamped to >= 1 by the scene.
-#define EFFECT_SPAWN_REQUEST_FIELDS(X)                        \
-	X(int64_t, effect_handle, 0)                              \
-	X(Transform3D, transform, Transform3D())                  \
-	X(int, admission, 0)                                      \
-	X(int, binding, 0)                                        \
-	X(int, render_domain, 0)                                  \
-	X(int64_t, slot_token, 0)                                 \
-	X(int64_t, owner_token, 0)                                \
-	X(Transform3D, owner_relative_transform, Transform3D())   \
-	X(int, initial_age_ticks, 0)                              \
-	X(int64_t, source_tick, 0)                                \
-	X(int64_t, source_order, 0)                               \
-	X(Vector3, color_tint, Vector3(1.0f, 1.0f, 1.0f))         \
-	X(float, spring_const, 0.0f)                              \
-	X(int, lod_divisor, 1)                                    \
-	X(int, kill_plane, 0)                                     \
+#define EFFECT_SPAWN_REQUEST_FIELDS(X)                                                             \
+	X(int64_t, effect_handle, 0)                                                                   \
+	X(Transform3D, transform, Transform3D())                                                       \
+	X(int, admission, 0)                                                                           \
+	X(int, binding, 0)                                                                             \
+	X(int, render_domain, 0)                                                                       \
+	X(int64_t, slot_token, 0)                                                                      \
+	X(int64_t, owner_token, 0)                                                                     \
+	X(Transform3D, owner_relative_transform, Transform3D())                                        \
+	X(int, force_zone, 0)                                                                          \
+	X(int, initial_age_ticks, 0)                                                                   \
+	X(int64_t, source_tick, 0)                                                                     \
+	X(int64_t, source_order, 0)                                                                    \
+	X(Vector3, color_tint, Vector3(1.0f, 1.0f, 1.0f))                                              \
+	X(float, spring_const, 0.0f)                                                                   \
+	X(int, lod_divisor, 1)                                                                         \
+	X(int, kill_plane, 0)                                                                          \
 	X(float, kill_plane_y, 0.0f)
 
 class EffectSpawnRequest : public RefCounted {
@@ -99,15 +100,16 @@ private:
 // EffectWorld composes the native EffectSpawnRequest from this plus the
 // interned effect handle; the request's remaining fields (tint, spring, LOD
 // divisor, kill plane) keep their native defaults.
-#define EFFECT_SPAWN_OPTIONS_FIELDS(X)                        \
-	X(int, admission, 0)                                      \
-	X(int, binding, 0)                                        \
-	X(int, render_domain, 0)                                  \
-	X(Transform3D, owner_transform, Transform3D())            \
-	X(bool, has_owner_transform, false)                       \
-	X(Transform3D, owner_relative_transform, Transform3D())   \
-	X(int, initial_age_ticks, 0)                              \
-	X(int64_t, source_tick, 0)                                \
+#define EFFECT_SPAWN_OPTIONS_FIELDS(X)                                                             \
+	X(int, admission, 0)                                                                           \
+	X(int, binding, 0)                                                                             \
+	X(int, render_domain, 0)                                                                       \
+	X(Transform3D, owner_transform, Transform3D())                                                 \
+	X(bool, has_owner_transform, false)                                                            \
+	X(Transform3D, owner_relative_transform, Transform3D())                                        \
+	X(int, force_zone, 0)                                                                          \
+	X(int, initial_age_ticks, 0)                                                                   \
+	X(int64_t, source_tick, 0)                                                                     \
 	X(int64_t, source_order, 0)
 
 class EffectSpawnOptions : public RefCounted {

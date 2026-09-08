@@ -1,4 +1,5 @@
 #include "particle/effect_world.h"
+#include "simulation/simulation.h"
 
 #include "particle/particle_effect.h"
 #include "particle/particle_renderer.h"
@@ -346,6 +347,7 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	request->set_owner_token(owner_token);
 	request->set_owner_relative_transform(options->get_owner_relative_transform());
 	request->set_initial_age_ticks(options->get_initial_age_ticks());
+	request->set_force_zone(options->get_force_zone());
 	request->set_source_tick(options->get_source_tick());
 	request->set_source_order(options->get_source_order());
 	request->set_kill_plane(KILL_PLANE_DISABLED);
@@ -604,8 +606,13 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 }
 
 void EffectWorld::advance_fixed_tick(double p_delta) {
+	advance_simulation_tick(p_delta, nullptr);
+}
+
+void EffectWorld::advance_simulation_tick(double p_delta, Simulation *simulation) {
 	_sync_owner_poses(false);
-	scene_->advance_in_place(p_delta > 0.0 ? p_delta : 0.0);
+	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0,
+			simulation ? simulation->particle_force_field() : nullptr);
 }
 
 void EffectWorld::render_frame() {

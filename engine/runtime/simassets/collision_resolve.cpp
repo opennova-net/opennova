@@ -347,6 +347,32 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		if (h.pool() == 1) {
 			world::VehicleTraits *vt =
 					world.vehicles.traits.get_mutable(e->item_id);
+			if (vt != nullptr) {
+				if (const Threedi3di3 *model = deps.models.model_for(key)) {
+					vt->trail_point_count =
+							uint8_t(std::min(size_t(16), size_t(model->user_point_count)));
+					for (auto &trail : vt->trails)
+						trail.mask = threedi_3di3_user_point_mask(model, trail.userpoint.c_str());
+					for (size_t i = 0; i < vt->trail_point_count; ++i) {
+						const auto &point = model->user_points[i];
+						vt->trail_points[i] = { { point.x, point.y, point.z },
+							{ point.rot_x, point.rot_y, point.rot_z } };
+					}
+				}
+			}
+			if (vt != nullptr && vt->skid_points.empty() && !vt->skid_userpoint.empty()) {
+				if (const Threedi3di3 *model = deps.models.model_for(key)) {
+					const uint16_t mask =
+							threedi_3di3_user_point_mask(model, vt->skid_userpoint.c_str());
+					for (size_t i = 0; i < model->user_point_count && i < 16; ++i) {
+						if ((mask & (1u << i)) == 0)
+							continue;
+						const auto &point = model->user_points[i];
+						vt->skid_points.push_back({ { point.x, point.y, point.z },
+								{ point.rot_x, point.rot_y, point.rot_z } });
+					}
+				}
+			}
 			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
 				const Threedi3di3 *vm3 = deps.models.has_index()
 						? deps.models.model_for(key)
@@ -368,14 +394,72 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					}
 				}
 			}
+			if (vt != nullptr) {
+				// [orig: Entity_InitVehicleAI @0x460200, first 16 FLARE-prefix points]
+				if (vt->flare_points.empty()) {
+					if (const Threedi3di3 *model = deps.models.model_for(key)) {
+						for (size_t i = 0; model->user_points != nullptr &&
+								i < model->user_point_count && vt->flare_points.size() < 16;
+								++i) {
+							const auto &point = model->user_points[i];
+							const std::string name(point.name);
+							if (name.size() < 5 || !strutil::iequals(name.substr(0, 5), "flare"))
+								continue;
+							vt->flare_points.push_back({ { point.x, point.y, point.z },
+									{ point.rot_x, point.rot_y, point.rot_z } });
+						}
+					}
+				}
+				// brain[11] is the CMDL floor's absolute value.
+				// [orig: Entity_InitHelicopterAIFromDef @0x4683C0]
+				const world::AiEntity *vehicle_ai = world.ai.for_handle(e->handle);
+				if (vehicle_ai != nullptr &&
+						(vehicle_ai->profile.type == 1 ||
+								(vehicle_ai->profile.type == 2 &&
+										vehicle_ai->profile.subtype != 1))) {
+					e->veh.air_probe_z_off =
+							static_cast<int32_t>(vt->box_z_lo < 0 ? 0u - uint32_t(vt->box_z_lo)
+																  : uint32_t(vt->box_z_lo));
+					if (world::AiEntity *ai = world.ai.for_handle(e->handle))
+						ai->brain.f[11] = e->veh.air_probe_z_off;
+				}
+			}
 		}
 		if (resolved_model >= 0) {
 			deps.collision.assign_entity(h, resolved_model, e->registry_spawn_id);
 			++attached;
 			// The aim/LOS origin's TARGET userpoint [orig: Entity_InitFromModel
 			// @0x40dd04 -> def+1350]; 0 when the model has none.
-			if (const Threedi3di3 *m3 = deps.models.model_for(key))
+			if (const Threedi3di3 *m3 = deps.models.model_for(key)) {
 				e->target_userpoint_byte = userpoint_index_by_name(*m3, "TARGET");
+				e->look_userpoint_byte = userpoint_index_by_name(*m3, "LOOK");
+				// [orig: Entity_InitVehicleAI @0x460200, three bounded prefix scans]
+				if (world::AiEntity *ai = world.ai.for_handle(e->handle)) {
+					if (!ai->inf.active) {
+						auto &b = ai->brain;
+						b.f[55] = b.f[72] = b.f[89] = 0;
+						for (size_t index = 0;
+								m3->user_points != nullptr && index < m3->user_point_count;
+								++index) {
+							const std::string name = strutil::to_lower(m3->user_points[index].name);
+							const bool primary = name.compare(0, 4, "prim") == 0 ||
+									name.compare(0, 8, "bullet01") == 0 ||
+									name.compare(0, 8, "bullet02") == 0;
+							const bool secondary = name.compare(0, 3, "sec") == 0 ||
+									name.compare(0, 8, "bullet02") == 0;
+							const bool flare = name.compare(0, 5, "flare") == 0;
+							for (int bank = 0; bank < 3; ++bank) {
+								const int count = 55 + 17 * bank;
+								if ((bank == 0					? primary
+													: bank == 1 ? secondary
+																: flare) &&
+										b.f[count] < 16)
+									b.f[count + 1 + b.f[count]++] = int32_t(index + 1);
+							}
+						}
+					}
+				}
+			}
 			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
 				if (const Threedi3di3 *m3 = deps.models.model_for(key))
 					resolve_weapon_userpoint_bytes(*def, *m3, *e);
@@ -431,6 +515,25 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				if (piece_m3 != nullptr && t->husk_piece_bound_radius <= 0.0f)
 					t->husk_piece_bound_radius =
 							model_bound_radius_from_3di(*piece_m3);
+				// The interned death masks and all three banks use final-husk first.
+				// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
+				if (piece_m3 != nullptr) {
+					const char *names[3] = { "Dead", "Fire", "Other" };
+					for (int bank = 0; bank < 3; ++bank) {
+						auto &out = t->effect_banks[bank];
+						out.mask = threedi_3di3_user_point_mask(piece_m3, names[bank]);
+						out.points.clear();
+						for (size_t i = 0; i < piece_m3->user_point_count; ++i) {
+							if ((out.mask & (1u << (i & 31u))) == 0)
+								continue;
+							float pos[3], dir[3];
+							threedi_user_point_position(&piece_m3->user_points[i], pos);
+							threedi_user_point_direction(&piece_m3->user_points[i], dir);
+							out.points.push_back(
+									{ { pos[2], -pos[0], pos[1] }, { dir[2], -dir[0], dir[1] } });
+						}
+					}
+				}
 			}
 			const std::string &husk_key = husk_name;
 			const Threedi3di3 *husk_m3 = first_husk_name.empty()

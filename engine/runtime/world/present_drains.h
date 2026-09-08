@@ -77,25 +77,15 @@ struct ThrowableVisualRow {
 // prefer its placed model and the packed handle resolves a wire-built model.
 // The pose, water plane, and both Q16 controls come from the SAME even-tick
 // cbot sample. W3 is commanded speed, W4 current signed motion.
-struct VehicleWakeVisualRow {
-    int32_t handle_packed = -1;
-    uint64_t registry_spawn_id = 0;
-    int32_t item_id = 0;
-    int32_t bms_id = 0;
-    uint32_t spawn_origin = 0xFFFFFFFFu;
-    uint32_t source_tick = 0;
-    Vec3 pos;
-    float pitch_deg = 0.0f;
-    float yaw_deg = 0.0f;
-    float roll_deg = 0.0f;
-    int32_t water_z = 0;
-    bool afloat = false;
-    std::string w3_effect;
-    std::string w3_userpoint;
-    uint32_t w3_magnitude_q16 = 0;
-    std::string w4_effect;
-    std::string w4_userpoint;
-    uint32_t w4_magnitude_q16 = 0;
+struct VehicleTrailVisualRow {
+	int32_t handle_packed = -1;
+	uint64_t registry_spawn_id = 0;
+	uint8_t point = 0;
+	uint32_t source_tick = 0;
+	Vec3 pos;
+	Vec3 dir;
+	std::string effect;
+	uint32_t magnitude_q16 = 0;
 };
 
 // One live death piece: the pool slot and its allocation generation (a

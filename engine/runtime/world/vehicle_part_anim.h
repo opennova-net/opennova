@@ -161,8 +161,8 @@ inline uint16_t part_register(int32_t accumulator) {
 // D-NET-161 level-frame re-derive does not carry — a peer integrates with
 // slip 0; the wheelspin kick is that ledger row's, not something approximated.
 inline int32_t wheel_phase_step(int32_t phase, int32_t speed, int32_t slip_abs) {
-	return io::bam_add(io::bam_add(phase, slip_abs),
-            static_cast<int32_t>(static_cast<uint32_t>(speed) << 13));
+	return io::bam_add(
+			io::bam_add(phase, slip_abs), static_cast<int32_t>(static_cast<uint32_t>(speed) << 13));
 }
 
 // A watercraft's phase rides the brain's forward command instead.
@@ -170,15 +170,14 @@ inline int32_t watercraft_wheel_phase_step(int32_t phase, int32_t forward) {
 	return io::bam_add(phase, static_cast<int32_t>(static_cast<uint32_t>(forward) << 13));
 }
 
-
 // Differential track phases, before the tank velocity/contact solve.
 // [orig: Entity_UpdateTankVehiclePhysics @0x489F6E..0x489FA0]
 inline void track_phase_tick(int32_t (&phase)[2], int32_t speed, int32_t yaw_rate) {
-    const uint32_t drive = static_cast<uint32_t>(speed) << 12;
-    phase[0] = static_cast<int32_t>(static_cast<uint32_t>(phase[0]) +
-            ((drive - static_cast<uint32_t>(yaw_rate)) << 3));
-    phase[1] = static_cast<int32_t>(static_cast<uint32_t>(phase[1]) +
-            ((drive + static_cast<uint32_t>(yaw_rate)) << 3));
+	const uint32_t drive = static_cast<uint32_t>(speed) << 12;
+	phase[0] = static_cast<int32_t>(
+			static_cast<uint32_t>(phase[0]) + ((drive - static_cast<uint32_t>(yaw_rate)) << 3));
+	phase[1] = static_cast<int32_t>(
+			static_cast<uint32_t>(phase[1]) + ((drive + static_cast<uint32_t>(yaw_rate)) << 3));
 }
 
 } // namespace opennova::world

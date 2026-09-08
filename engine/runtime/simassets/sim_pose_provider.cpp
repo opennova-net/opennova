@@ -238,6 +238,21 @@ bool SimPoseProvider::resolve_userpoint_transform(world::World &world,
 	return true;
 }
 
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+bool SimPoseProvider::resolve_named_transform(
+		world::World &world, world::EntityHandle entity, const char *name, int32_t out[6]) {
+	if (name == nullptr || world.collision == nullptr)
+		return false;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr)
+		return false;
+	const Threedi3di3 &model = *found->second;
+	for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
+		if (strutil::iequals(model.user_points[i].name, name))
+			return resolve_userpoint_transform(world, entity, static_cast<int>(i + 1), out);
+	return false;
+}
+
 bool SimPoseProvider::resolve_userpoint_rigid(world::World &world,
 		world::EntityHandle entity, int userpoint_index, int32_t out[3]) {
 	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
@@ -255,6 +270,28 @@ bool SimPoseProvider::resolve_userpoint_rigid(world::World &world,
 	// [orig: Entity_ComputeWeaponFireOrigin @0x43b5f6].
 	const int32_t local_q16[3] = {point.x, point.y, point.z};
 	world::entity_placement_matrix(*e).transform_point(local_q16, out);
+	return true;
+}
+
+// [orig: Entity_ComputeWeaponFireTransform_0 @0x456980, COBJ pivot branch]
+bool SimPoseProvider::resolve_userpoint_pivot(
+		world::World &world, world::EntityHandle entity, int userpoint_index, int32_t out[3]) {
+	if (out == nullptr || userpoint_index <= 0 || world.collision == nullptr)
+		return false;
+	const world::Entity *e = world.registry.get(entity);
+	if (e == nullptr)
+		return false;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr)
+		return false;
+	const Threedi3di3 &model = *found->second;
+	if (model.user_points == nullptr || size_t(userpoint_index) > model.user_point_count ||
+			model.collision == nullptr || model.collision->objects == nullptr)
+		return false;
+	const int part = model.user_points[userpoint_index - 1].subobject_index;
+	if (part < 0 || size_t(part) >= model.collision->object_count)
+		return false;
+	world::entity_placement_matrix(*e).transform_point(model.collision->objects[part].offset, out);
 	return true;
 }
 

@@ -131,6 +131,8 @@ func _designated_g_mission_fixture() -> Dictionary:
 	}
 
 
+# The designated-G parent is moved explicitly by the test. Its null mover
+# keeps it at the authored seat-scan position in this terrain-free wire fixture.
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
 # carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
 # row of the same child type on the parent (stored slot 2, missing anchor).
@@ -177,7 +179,7 @@ begin "Wire Header Designated-G Parent"
   attrib: EWeap
   ai_function cveh
   render_function cveh
-  move_function cveh
+  move_function null
   primary_weapon WPN_EMPLCD50NA
   addeweapG ewep01 101419
 """)

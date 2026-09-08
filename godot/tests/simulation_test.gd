@@ -154,11 +154,28 @@ func _write_char_rig(dir: String, graphic: String) -> void:
 			+ "anim_emplaced %sBINOC.bad%s\n" % [quote, quote])
 
 
+# These pose fixtures have no walking clips. Spawn their boarder at the
+# authored entry/seat point so they exercise attachment within the real radius.
+func _seat_fixture_spawn(model_path: String, point_name: String,
+		position: Vector3, rotation: Vector3 = Vector3.ZERO) -> Vector3:
+	var model := ObjectData.new()
+	assert_eq(model.open_file(model_path), OK)
+	for i in range(model.get_user_point_count()):
+		var point := model.get_user_point_info(i)
+		if String(point.name).to_lower() == point_name.to_lower():
+			var posed := MissionObjectPlacer.entity_transform(position, rotation) * point.position
+			return Vector3(posed.x, -posed.z, posed.y)
+	fail_test("missing authored seat point " + point_name)
+	return position
+
+
 func _install_native_seat_table(sim: Simulation, dir: String,
 		item_db: ItemDatabase, type_ids: PackedInt32Array) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	sim.set_asset_root(root)
+	# Boarding requires the same definition metadata as the authored seat table.
+	sim.resolve_item_traits(item_db)
 	assert_true(sim.install_seat_specs_for_type_ids(item_db, type_ids),
 			"native seat-spec install over the composed fixture root")
 	return root
@@ -897,7 +914,7 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 			"the snapshot carries the live wheel-phase high word once driven")
 
 
-func test_physicsless_air_definitions_install_direct_traits_without_enabling_ground() -> void:
+func test_selector_zero_installs_direct_air_and_simple_ground_traits() -> void:
 	var item_db := _physicsless_air_item_db()
 	assert_not_null(item_db)
 	if item_db == null:
@@ -940,8 +957,8 @@ func test_physicsless_air_definitions_install_direct_traits_without_enabling_gro
 			"plain chel installs the Helicopter prediction family without physics")
 	assert_eq(air_b_card.get_vehicle_family(), 2,
 			"case-folded fourcc chel installs the same air prediction family")
-	assert_eq(ground_card.get_vehicle_family(), -1,
-			"zero remains the no-motor selector for the ground cveh family")
+	assert_eq(ground_card.get_vehicle_family(), 0,
+			"zero selects the simpler motor for the ground cveh family")
 	assert_eq(plane_card.get_vehicle_family(), 3,
 			"physicsless cpln installs the Plane prediction family")
 
@@ -954,7 +971,7 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 			Vector3(0, 8, 0), Vector3.ZERO)
 	var npc := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3(0, 8, 0), Vector3.ZERO)
+			_seat_fixture_spawn("res://../fixtures/threedi/synth/mount.3di", "Usegun", Vector3(0, 8, 0)), Vector3.ZERO)
 	assert_not_null(mount)
 	assert_not_null(npc)
 	assert_true(md.set_entity_property_int(
@@ -975,6 +992,7 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 	_write_fixture_bytes(dir, "seatgun.3di", model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Seat Verdict Gun"
   id 101294
+  attrib: EWeap PlayerControl
   type object
   graphic seatgun
   phrase_set 6
@@ -984,12 +1002,16 @@ end
 	sim.enable_listen_server(true)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries instead of a single step.
 	# Co-located with the carrier, the first think boards.
 	for _board_tick in range(48):
 		sim.step()
+	var card: EntityCard = sim.entity_card_by_net_id(npc.bms_id)
+	assert_true(card.is_mounted(), "seat predicate fixture must attach its occupant")
+	assert_eq(card.get_mount_type(), seat_type, "fixture attaches the requested seat type")
 	var verdict := _present_field_for_origin(
 			sim, MissionData.KIND_ORGANIC, npc.index,
 			Simulation.PF_RIGHT_HAND_COLLAPSED)
@@ -1670,13 +1692,13 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			Vector3(-20, 8, 0), Vector3.ZERO)
 	var reference_enemy := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3(-20, 8, 0), Vector3.ZERO)
+			_seat_fixture_spawn("res://../fixtures/threedi/synth/mount.3di", "Usegun", Vector3(-20, 8, 0)), Vector3.ZERO)
 	var rotated_gun := md.add_entity(
 			MissionData.KIND_ITEM, 101294,
 			Vector3(0, 8, 0), Vector3(0, -90, 0))
 	var rotated_enemy := md.add_entity(
 			MissionData.KIND_ORGANIC, 105311,
-			Vector3(0, 8, 0), Vector3.ZERO)
+			_seat_fixture_spawn("res://../fixtures/threedi/synth/mount.3di", "Usegun", Vector3(0, 8, 0), Vector3(0, -90, 0)), Vector3.ZERO)
 	for pair in [
 		[reference_enemy, reference_gun],
 		[rotated_enemy, rotated_gun],
@@ -2553,7 +2575,10 @@ end
 	# A second command-125 rider: with the controller seat claimed it takes the
 	# first passenger row (sitex00d), whose authored direction faces backward —
 	# the yaw-offset carry witness.
-	var rider := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(9, 0, 0), Vector3.ZERO)
+	var rider_point := MissionObjectPlacer.entity_transform(
+			Vector3(10, 0, 0), Vector3.ZERO) * passenger_point
+	var rider := md.add_entity(MissionData.KIND_ORGANIC, 102072,
+			Vector3(rider_point.x, -rider_point.z, rider_point.y), Vector3.ZERO)
 	assert_not_null(vehicle)
 	assert_not_null(soldier)
 	assert_not_null(rider)
@@ -2793,10 +2818,10 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
-	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, _seat_fixture_spawn("res://../fixtures/threedi/synth/mount.3di", "Usegun", Vector3(10, 0, 0)), Vector3.ZERO)
 	assert_not_null(vehicle)
 	assert_not_null(soldier)
-	# Command-125 mounts the soldier into the best seat at promote — that seat must not label.
+	# Command-125 boards the soldier into the best seat; that seat must not label.
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "wp_number", vehicle.bms_id))
 	# Same team as the local player: a live ENEMY occupant would reject the whole
@@ -2813,18 +2838,22 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	_write_fixture_bytes(dir, "ctrlgun.3di", model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Occupied Labels Gun"
   id 101294
+  attrib: EWeap PlayerControl
   type object
   graphic ctrlgun
 end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries before reading the mounted state.
 	# Co-located with the carrier, the first think boards.
 	for _board_tick in range(48):
 		sim.step()
+	assert_true(sim.entity_card_by_net_id(soldier.bms_id).is_mounted(),
+			"label fixture must occupy its controller seat")
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	var texts := _attach_label_texts(sim)
 	assert_eq(texts.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
@@ -2902,7 +2931,7 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3(0, -90, 0))
-	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, _seat_fixture_spawn("res://../fixtures/threedi/synth/carrier.3di", "ctrlx13", Vector3(10, 0, 0), Vector3(0, -90, 0)), Vector3.ZERO)
 	assert_not_null(vehicle)
 	assert_not_null(soldier)
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
@@ -2913,6 +2942,7 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
 	var item_db := _item_db_from_text(dir, """begin "Rotated SUV"
   id 101294
+  attrib: PlayerControl
   type vehicle
   graphic carrier
 end
@@ -3736,7 +3766,7 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
-	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(MissionData.KIND_ORGANIC, 102072, _seat_fixture_spawn("res://../fixtures/threedi/synth/mount.3di", "Usegun", Vector3(10, 0, 0)), Vector3.ZERO)
 	assert_not_null(gun)
 	assert_not_null(soldier)
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, soldier.index, "waypoint_id", 125))
@@ -3747,6 +3777,7 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, """begin "Config3 UseGun"
   id 101294
+  attrib: EWeap
   type object
   graphic mount
   phrase_set 3
@@ -3754,6 +3785,7 @@ end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
+	sim.resolve_item_traits(item_db)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries before reading the mounted state.
@@ -4368,6 +4400,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
+	# This fixture isolates PANM attachment motion on a stationary carrier.
 	# The carrier def authors the addeweap row; the fixture model resolves the
 	# ewep01 anchor natively (tank also authors the ctrlx25 controller seat the
 	# old dict spec faked). This attachment lifecycle needs the real
@@ -4377,6 +4410,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	_copy_fixture(dir, SYN_TANK_SPECIAL1_SLIDE_EWEP01, "tank.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text()
 			.replace("graphic Dbuggy1", "graphic tank")
+			.replace("move_function cveh", "move_function null")
 			.replace("id 101291", "id 101291\n  addeweap ewep01 101419"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))

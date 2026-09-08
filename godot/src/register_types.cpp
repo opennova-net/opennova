@@ -88,7 +88,7 @@
 #include "simulation/destruction_events.h"
 #include "simulation/destruction_presenter.h"
 #include "simulation/throwable_presenter.h"
-#include "simulation/vehicle_wake_presenter.h"
+#include "simulation/vehicle_trail_presenter.h"
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/hud_view_records.h"
@@ -294,7 +294,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
 	GDREGISTER_CLASS(ThrowableVisualRow);
-	GDREGISTER_CLASS(VehicleWakeVisualRow);
+	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
 	GDREGISTER_CLASS(FireSoundRow);
 	GDREGISTER_CLASS(SlotSoundRow);
@@ -335,7 +335,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	// registered internally, never script-visible.
 	GDREGISTER_INTERNAL_CLASS(DestructionPresenter);
 	GDREGISTER_INTERNAL_CLASS(ThrowablePresenter);
-	GDREGISTER_INTERNAL_CLASS(VehicleWakePresenter);
+	GDREGISTER_INTERNAL_CLASS(VehicleTrailPresenter);
 	GDREGISTER_CLASS(EntityPresenter);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);

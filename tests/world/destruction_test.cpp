@@ -77,7 +77,9 @@ ItemDeathTraits barrel_traits() {
     t.sound_death = "EXPLO_BARREL";
     t.particledeath = "Effect_LrgOrdExp";
     t.particlefire = "Effect_Fire";
-    return t;
+	t.effect_banks[1].mask = 1;
+	t.effect_banks[1].points.push_back({ {}, { 0, 0, 1 } });
+	return t;
 }
 
 int32_t fixed16(double value) {
@@ -802,9 +804,11 @@ void test_synthetic_husk_events_preserve_distinct_handles() {
     CHECK(first != second);
     ItemDeathTraits traits = barrel_traits();
     traits.particleother = "Effect_Smoke";
-    w.tables.item_death_traits.set(500, traits);
+	traits.effect_banks[2].mask = 1;
+	traits.effect_banks[2].points.push_back({ {}, { 0, 0, 1 } });
+	w.tables.item_death_traits.set(500, traits);
 
-    process_destructible_death(w, *w.registry.get(first));
+	process_destructible_death(w, *w.registry.get(first));
     process_destructible_death(w, *w.registry.get(second));
 
     CHECK(w.out.destruction.husk_swaps.size() == 2);
@@ -1341,9 +1345,10 @@ void test_specialized_piece_physics_callback() {
     ItemDeathTraits traits = barrel_traits();
     traits.unit_type = 3;
     traits.kz = 0.0f; // forces integer-truncated bound-radius fallback
-    traits.particlefire.clear(); // keep the callback's one PRNG draw isolated
-    traits.particlefinale = "Effect_PieceFinale";
-    w.tables.item_death_traits.set(730, traits);
+	traits.particlefire.clear();
+	traits.effect_banks[1] = {}; // keep the callback's one PRNG draw isolated
+	traits.particlefinale = "Effect_PieceFinale";
+	w.tables.item_death_traits.set(730, traits);
     // The GRAPHIC probe-box floor sits at -2.0: a husked wreck must never read
     // it [orig: Flags & 4 picks entity+0x34 huskModel @ 0x4b0c10..0x4b0c1b].
     VehicleTraits model;
@@ -1480,13 +1485,12 @@ void test_specialized_piece_physics_callback() {
     ordered_piece->veh.air_roll_rate = 0x00200000;
     DestructionRng ordered_expected = ordered.destruction_rng;
     const uint16_t ordered_angle_roll = ordered_expected.next16();
-    (void)ordered_expected.next16(); // Entity_UpdateDeadWreckEffects fire roll
-    destruction_tick_dead_items(
-            ordered, nullptr, -1.0e9f, ordered.out.destruction);
-    CHECK(ordered.destruction_rng.state == ordered_expected.state);
-    CHECK(ordered_piece->veh.yaw_bam ==
-            ((ordered_angle_roll & 1u) != 0 ? 0 : 0x02D82D82));
-    CHECK(ordered_piece->veh.air_pitch_bam ==
+	const uint32_t fire_state_before = ordered.prng16_c_state; // independent retail PRNG_C
+	destruction_tick_dead_items(ordered, nullptr, -1.0e9f, ordered.out.destruction);
+	CHECK(ordered.destruction_rng.state == ordered_expected.state);
+	CHECK(ordered.prng16_c_state != fire_state_before);
+	CHECK(ordered_piece->veh.yaw_bam == ((ordered_angle_roll & 1u) != 0 ? 0 : 0x02D82D82));
+	CHECK(ordered_piece->veh.air_pitch_bam ==
             ((ordered_angle_roll & 1u) != 0 ? 0x00100000 : 0));
     ordered_piece->death_motion = DeathMotionMode::PiecePitchSettle;
     ordered_piece->veh.air_pitch_bam = 0;
@@ -1912,6 +1916,21 @@ void test_dead_item_water_splash() {
         CHECK(std::abs(fx.pos.z - water) < 1.0e-6f);
     }
     CHECK(splash_effect);
+
+	// Authored water impact overrides the fallback and uses the old hull pose,
+	// while the effect still uses the integrated crossing point.
+	static constexpr char profile[] = "begin \"Wreck\"\nsound_impactwater WRECK_WATER\nend\n";
+	CHECK(w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	routed.sound_profile = "Wreck";
+	w.tables.item_death_traits.set(701, routed);
+	routed_e->position = seed.position;
+	routed_e->veh.slide_z = -8 * 65536;
+	w.out.destruction.clear();
+	destruction_tick_dead_items(w, &flat.field, water, w.out.destruction);
+	CHECK(w.out.destruction.sounds.size() == 1);
+	CHECK(w.out.destruction.sounds[0].sound == "WRECK_WATER");
+	CHECK(w.out.destruction.sounds[0].pos.x == seed.position.x);
+	CHECK(w.out.destruction.sounds[0].pos.z == seed.position.z);
 }
 
 // Matched unitType dispatch rows OR the death bits and preserve the Building
@@ -2172,6 +2191,56 @@ void test_net_kill_runs_client_side_death_chain() {
     CHECK(sp.explosions.queue.size() == 1); // still parked: not a visual client
 }
 
+// Four retained effect handles follow independent points on the selected husk.
+void test_death_effect_banks_and_water_crossings() {
+	auto heap = std::make_unique<World>();
+	World &w = *heap;
+	Entity e;
+	e.position = { 10, 20, 1 };
+	e.yaw = 90;
+	e.net_id = 8;
+	auto traits = barrel_traits();
+	traits.effect_banks[0].mask = 3;
+	traits.effect_banks[0].points = { { { 2, 0, 1 }, { 0, 0, 1 } },
+		{ { -2, 0, -2 }, { 0, 0, 1 } } };
+	traits.effect_banks[1].mask = 3;
+	traits.effect_banks[1].points = { { { 1, 0, -2 }, { 0, 0, 1 } },
+		{ { -1, 0, 2 }, { 0, 0, 1 } } };
+	spawn_death_effect_banks(e, traits, false, w.out.destruction);
+	CHECK(w.out.destruction.effects.size() == 4);
+	CHECK(e.death_effect_active[0] == 3 && e.death_effect_active[1] == 3);
+	CHECK(w.out.destruction.effects[0].pos.x == 12);
+	CHECK(w.out.destruction.effects[1].bank_slot == 1);
+	w.out.destruction.effects.clear();
+	update_dead_wreck_effects(w, e, &traits, 0, w.out.destruction);
+	CHECK(e.death_effect_active[0] == 1 && e.death_effect_active[1] == 2);
+	int steam = 0, stopped = 0;
+	for (const auto &event : w.out.destruction.effects) {
+		steam += event.effect == "Effect_Boat01Steam";
+		stopped += event.release;
+		if (event.effect == "Effect_Boat01Steam")
+			CHECK(event.pos.z == -1);
+	}
+	CHECK(steam == 1 && stopped == 2);
+	e.position.z = 4;
+	w.out.destruction.effects.clear();
+	update_dead_wreck_effects(w, e, &traits, 0, w.out.destruction);
+	CHECK(e.death_effect_active[0] == 1); // ordinary smoke never restarts
+	CHECK(e.death_effect_active[1] == 3); // fire re-emerges independently
+	release_death_effect_bank(e, 2, w.out.destruction);
+	CHECK(e.death_effect_active[1] == 0);
+	traits.effect_banks[0] = {};
+	traits.effect_banks[1] = {};
+	w.out.destruction.effects.clear();
+	spawn_death_effect_banks(e, traits, true, w.out.destruction);
+	CHECK(w.out.destruction.effects.size() == 1); // only death has origin fallback
+	CHECK(!e.death_effect_underwater); // absent water effect uses the ordinary family
+	traits.husk_model_loaded = false;
+	w.out.destruction.effects.clear();
+	spawn_death_effect_banks(e, traits, false, w.out.destruction);
+	CHECK(w.out.destruction.effects.empty());
+}
+
 // The wreck-fire random crackle rolls in the SIM per tick on the engine PRNG
 // stream (S12b): a burning wreck (husk + authored particlefire) eventually
 // crackles — the effect event + the distance-delay-gated sound through the
@@ -2221,8 +2290,10 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     w2.registry.configure_pool(1, 4);
     ItemDeathTraits quiet = barrel_traits();
     quiet.particlefire.clear();
-    quiet.static_death = true;
-    w2.tables.item_death_traits.set(700, quiet);
+	quiet.effect_banks[1] = {};
+	quiet.effect_banks[1] = {};
+	quiet.static_death = true;
+	w2.tables.item_death_traits.set(700, quiet);
     const EntityHandle h2 = w2.registry.spawn(1, seed);
     Entity *e2 = w2.registry.get(h2);
     e2->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
@@ -2244,11 +2315,11 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     Entity *e3 = w3.registry.get(h3);
     e3->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     e3->alive = false;
-    const uint32_t state_before = w3.destruction_rng.state;
-    for (int i = 0; i < 64; ++i)
-        destruction_tick_dead_items(w3, &flat.field, 100.0f, w3.out.destruction);
+	const uint32_t state_before = w3.prng16_c_state;
+	for (int i = 0; i < 64; ++i)
+		destruction_tick_dead_items(w3, &flat.field, 100.0f, w3.out.destruction);
     CHECK(w3.out.destruction.crackles == 0);
-    CHECK(w3.destruction_rng.state != state_before);
+	CHECK(w3.prng16_c_state != state_before);
 }
 
 // The debris-type trail column reads the ONE native table row
@@ -2263,9 +2334,370 @@ void test_death_piece_trail_effect_rows() {
     CHECK(std::string(death_piece_trail_effect(255)).empty());
 }
 
+// [orig: Entity_ProcessFallingDeathPhysics @0x461D30]
+void test_generic_wreck_zero_velocity_and_inverted_rest() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 4);
+	FlatField flat(0x4000);
+	const float ground = opennova::terrain::height_field_height_world_bilinear(flat.field, 8, -8);
+	Entity seed;
+	seed.item_id = 705;
+	seed.position = { 8, 8, ground + 10 };
+	seed.engine_flags = kEntityFlagHusk | kEntityFlagDead;
+	seed.death_motion = DeathMotionMode::Generic;
+	auto h = w.registry.spawn(1, seed);
+	Entity &e = *w.registry.get(h);
+	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	CHECK(e.veh.slide_z == -334);
+	CHECK(e.position.z < seed.position.z); // zero velocity does not suppress gravity
+	ItemDeathTraits t;
+	t.husk_rest_min_z = -0.25f;
+	t.husk_rest_max_z = 2.0f;
+	w.tables.item_death_traits.set(e.item_id, t);
+	e.position = { 8, 8, ground + 1 };
+	e.roll = 180;
+	e.veh.yaw_seeded = false;
+	e.veh.slide_z = -65536;
+	e.veh.vel_x = 65536;
+	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	CHECK(e.position.x == 8 && e.position.z == ground + 1);
+	CHECK(e.roll == 180 && e.veh.slide_z == 0 && e.veh.vel_x == 65536);
+	e.roll = 0;
+	e.veh.slide_z = -65536;
+	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	CHECK(e.position.x == 9 && e.position.z < ground + 1); // upright lower bound permits this step
+}
+
+// State-23 boundary and full live-state restoration through the public system.
+static void test_vehicle_respawn_lifecycle() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 2);
+	w.registry.configure_pool(2, 2);
+	w.env.water_z = INT32_MIN;
+	Entity seed;
+	seed.item_id = 42;
+	seed.position = { 10, 20, 30 };
+	seed.yaw = 90;
+	seed.team = 2;
+	seed.health_max = 500;
+	seed.item_attrib = kItemAttribPlayerControl;
+	auto h = w.registry.spawn(1, seed);
+	Entity &e = *w.registry.get(h);
+	w.ai.attach(h);
+	AiEntity &ai = *w.ai.for_handle(h);
+	ItemDeathTraits death;
+	death.static_death = true;
+	w.tables.item_death_traits.set(seed.item_id, death);
+	w.vehicles.capture_spawn_pose(e);
+	e.health = 0;
+	e.alive = false;
+	e.flags = e.engine_flags = kEntityFlagHusk | kEntityFlagDead | kEntityFlagReflective;
+	e.team = 0;
+	e.position = { 40, 50, 60 };
+	e.death_motion = DeathMotionMode::Generic;
+	e.section_mask = 7;
+	e.spawned_piece_mask = 15;
+	e.veh.crashed = 1;
+	e.veh.wheel_comp[5] = 900;
+	ai.brain.f[AiBrain::kCurState] = 23;
+	ai.slot.f[37] = 4;
+	ai.slot.f[38] = 5;
+	for (int i = 0; i < 15; ++i)
+		w.vehicles.tick_dead(e, ai);
+	CHECK(e.health == 0 && e.veh.stuck_ticks == 15);
+	ai.inf.wait_cooldown = 1;
+	w.vehicles.tick_dead(e, ai);
+	CHECK(e.health == 0 && ai.inf.wait_cooldown == 1);
+	ai.inf.wait_cooldown = 2; // a value above one decrements AND proceeds
+	w.vehicles.tick_dead(e, ai);
+	CHECK(ai.inf.wait_cooldown == 1 && e.health == 500 && ai.health == 500);
+	CHECK(e.position.x == 10 && e.position.y == 20 && e.position.z == 30);
+	CHECK(e.alive && e.team == 2 && ai.team == 2);
+	CHECK(e.engine_flags == 0x22400 && e.flags == e.engine_flags);
+	CHECK(e.death_motion == DeathMotionMode::None && e.section_mask == 0);
+	CHECK(e.spawned_piece_mask == 0 && e.veh.crashed == 0 && e.veh.fresh_2f1 == 1);
+	CHECK(e.veh.wheel_comp[5] == 0 && e.veh.slide_z == -501);
+	CHECK(ai.brain.f[AiBrain::kPendState] == 22);
+	CHECK(ai.brain.f[AiBrain::kWpType] == 1 && ai.brain.f[AiBrain::kWpChannel] == 4);
+	CHECK(ai.brain.f[AiBrain::kWpNode] == 5 && e.saved_live_valid);
+
+	Entity support_seed;
+	support_seed.position = { 8, 20, 30 };
+	support_seed.yaw = 90;
+	const auto support_h = w.registry.spawn(2, support_seed);
+	Entity &support = *w.registry.get(support_h);
+	e.ground_target = support_h;
+	w.vehicles.capture_spawn_pose(e); // two units along the carrier's local X
+	support.position = { 18, 20, 30 };
+	support.yaw = 0;
+	int32_t pose[6];
+	CHECK(w.vehicles.resolve_spawn_pose(e, pose));
+	CHECK(std::abs(pose[0] - 18 * 65536) < 16 && std::abs(pose[1] - 22 * 65536) < 16);
+	e.position = { float(pose[0]) / 65536, float(pose[1]) / 65536, float(pose[2]) / 65536 };
+	CHECK(vehicle_at_spawn_anchor(w, e));
+	support.engine_flags = kEntityFlagDead;
+	CHECK(!w.vehicles.resolve_spawn_pose(e, pose));
+	CHECK(!vehicle_at_spawn_anchor(w, e));
+	e.health = 0;
+	ai.inf.wait_cooldown = 0;
+	w.vehicles.tick_dead(e, ai);
+	CHECK(e.health == 0); // a dead spawn support defers respawn
+	w.ai.is_authority = false;
+	w.rules.vehicle_respawns = false;
+	w.vehicles.tick_dead(e, ai);
+	CHECK(w.registry.get(h) != nullptr && w.out.entity_removals.empty());
+	w.ai.is_authority = true;
+	w.vehicles.tick_dead(e, ai);
+	CHECK(w.registry.get(h) == nullptr && w.out.entity_removals.size() == 1);
+	CHECK(w.out.entity_removals[0] == h.packed);
+}
+
+static void test_vehicle_death_kills_authored_children() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 8);
+	Entity seed;
+	seed.kind = EntityKind::Item;
+	seed.health = 0;
+	seed.is_ai_capable = true;
+	const auto parent_h = w.registry.spawn(1, seed);
+	w.ai.attach(parent_h);
+	seed.health = 100;
+	seed.is_ai_capable = false;
+	seed.emplacement_parent = parent_h;
+	seed.emplacement_parent_spawn_id = w.registry.get(parent_h)->registry_spawn_id;
+	const auto child_h = w.registry.spawn(1, seed);
+	++seed.emplacement_parent_spawn_id;
+	const auto stale_h = w.registry.spawn(1, seed);
+	seed.emplacement_parent = {};
+	const auto unrelated_h = w.registry.spawn(1, seed);
+	auto &brain = *w.ai.for_handle(parent_h);
+	brain.brain.f[AiBrain::kCurState] = 22;
+	VehicleTraits traits;
+	traits.family = VehicleFamily::Ground;
+	w.vehicles.tick_health(*w.registry.get(parent_h), traits);
+	CHECK(brain.brain.f[AiBrain::kPendState] == 21);
+	w.ai.apply_transition(brain, w);
+	CHECK(w.registry.get(child_h)->health == 0);
+	CHECK((w.registry.get(child_h)->engine_flags & kEntityFlagHusk) != 0);
+	CHECK(w.registry.get(stale_h)->health == 100);
+	CHECK(w.registry.get(unrelated_h)->health == 100);
+}
+
+// Exercise the public motor -> AI event -> aircraft death -> respawn path.
+static void test_aircraft_death_lifecycle() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 4);
+	w.env.water_z = INT32_MIN;
+	w.logic_tick = 17;
+	Entity seed;
+	seed.kind = EntityKind::Item;
+	seed.item_id = 42;
+	seed.is_ai_capable = true;
+	seed.item_attrib = kItemAttribPlayerControl;
+	seed.health = seed.health_max = 500;
+	seed.team = 2;
+	seed.position = { 10, 20, 30 };
+	const auto h = w.registry.spawn(1, seed);
+	w.ai.attach(h);
+	auto &e = *w.registry.get(h);
+	auto &ai = *w.ai.for_handle(h);
+	ai.brain.f[AiBrain::kCurState] = ai.brain.f[AiBrain::kPendState] = 14;
+	w.vehicles.capture_spawn_pose(e);
+	e.health = 0;
+	VehicleTraits traits;
+	traits.family = VehicleFamily::Helicopter;
+	w.vehicles.tick_health(e, traits);
+	CHECK(ai.brain.f[AiBrain::kPendState] == 13);
+	w.ai.apply_transition(ai, w);
+	CHECK(ai.brain.f[AiBrain::kCurState] == 13 && ai.brain.f[AiBrain::kStep] == 16);
+	CHECK(ai.brain.f[138] == 1336 && (e.engine_flags & 6) == 6);
+	CHECK(e.death_motion == DeathMotionMode::PiecePhysics);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	// The initializer stamps savedLivePose. An unchanged pose queues event four.
+	e.veh.slide_z = -500;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(e.veh.slide_z == 0);
+	w.ai.events.process_timed(w.ai, w);
+	CHECK(ai.brain.f[AiBrain::kCurState] == 15 && ai.brain.f[AiBrain::kStep] == 62);
+	CHECK(e.team == 0 && e.death_tick == 17);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	for (int tick = 0; tick < 30; ++tick)
+		w.vehicles.tick_dead(e, ai);
+	CHECK(e.health == 0 && e.veh.stuck_ticks == 30);
+	w.vehicles.tick_dead(e, ai);
+	CHECK(e.health == 500 && e.alive && e.team == 2);
+	CHECK(ai.brain.f[AiBrain::kPendState] == 14);
+	CHECK(e.death_motion == DeathMotionMode::None);
+	CHECK(w.out.destruction.husk_swaps.back().restore_intact);
+	// Boat idle follows the water plane and uses event three, not event five.
+	ai.brain.f[AiBrain::kCurState] = ai.brain.f[AiBrain::kPendState] = 22;
+	ai.profile.subtype = 1;
+	ai.brain.f[AiBrain::kPrevAlert] = ai.brain.f[AiBrain::kAlert];
+	w.env.water_z = 7 * 65536;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(ai.brain.f[AiBrain::kWorkPosZ] == 7 * 65536);
+	CHECK(ai.brain.f[AiBrain::kWorkPosX] == 10 * 65536);
+	e.health = 0;
+	e.veh.vel_x = 0;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	w.ai.events.process_timed(w.ai, w);
+	CHECK(ai.brain.f[AiBrain::kCurState] == 23);
+}
+
+// Captured AS zones select a category-compatible marker in team frontier order.
+// Occupied best markers defer instead of falling back to a lower priority marker.
+static void test_vehicle_spawn_marker_selection() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 4);
+	w.registry.configure_pool(3, 8);
+	Entity seed;
+	seed.has_item_def = true;
+	seed.item_type = 5;
+	seed.item_attrib = 0x60000;
+	seed.zone_control = 65536;
+	seed.zone_number = 1;
+	seed.team = 1;
+	seed.position = { 10, 0, 0 };
+	const auto z1 = w.registry.spawn(2, seed);
+	seed.zone_number = 2;
+	seed.team = 2;
+	seed.position = { 20, 0, 0 };
+	const auto z2 = w.registry.spawn(2, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 4;
+	seed.item_attrib2 = 4;
+	seed.vehicle_spawn_ids = { 100042 };
+	seed.zone_number = 1;
+	seed.position = { 10, 0, 3 };
+	const auto m1 = w.registry.spawn(3, seed);
+	seed.zone_number = 2;
+	seed.position = { 20, 0, 4 };
+	const auto m2 = w.registry.spawn(3, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 1;
+	seed.item_id = 42;
+	seed.vehicle_spawn_team = 1;
+	seed.team = 1;
+	seed.bound_radius = 2;
+	seed.position = { 100, 100, 0 };
+	const auto vh = w.registry.spawn(1, seed);
+	auto &v = *w.registry.get(vh);
+	w.vehicles.capture_spawn_pose(v);
+	w.vehicles.build_spawn_markers();
+	v.engine_flags = 6;
+	v.veh.stuck_ticks = 1;
+	w.vehicles.tick_spawn_markers();
+	CHECK(!v.veh.respawn_waiting_for_overlay);
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536 && v.veh.spawn_pose[2] == 3 * 65536);
+	w.registry.get(z2)->team = 1; // capture and secure the forward zone
+	w.vehicles.tick_spawn_markers();
+	CHECK(v.veh.spawn_pose[0] == 20 * 65536);
+	w.registry.get(z2)->zone_control = 65535;
+	w.vehicles.tick_spawn_markers();
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536);
+	w.registry.get(z2)->zone_control = 65536;
+	seed.position = { 21, 0, 0 };
+	seed.vehicle_spawn_team = 0;
+	seed.engine_flags = 6;
+	const auto blocking = w.registry.spawn(1, seed);
+	w.vehicles.tick_spawn_markers();
+	CHECK(v.veh.respawn_waiting_for_overlay); // dead hull blocks clearance
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536); // no second-best retry
+	w.registry.get(blocking)->engine_flags = 0;
+	w.vehicles.tick_spawn_markers();
+	CHECK(!v.veh.respawn_waiting_for_overlay); // live hull blocks first-pass eligibility
+	CHECK(v.veh.spawn_pose[0] == 10 * 65536);
+	w.registry.get(m1)->vehicle_spawn_ids = { 100043 }; // wrong category
+	w.vehicles.tick_spawn_markers();
+	CHECK(v.veh.respawn_waiting_for_overlay);
+	w.registry.get(blocking)->position = { 100, 100, 0 };
+	v.veh.stuck_ticks = 0;
+	w.vehicles.tick_spawn_markers();
+	CHECK(v.veh.respawn_waiting_for_overlay); // the initial dead tick has not run
+	v.veh.stuck_ticks = 1;
+	w.vehicles.tick_spawn_markers();
+	CHECK(!v.veh.respawn_waiting_for_overlay && !v.veh.spawn_support.valid());
+	CHECK(v.veh.spawn_pose[0] == 20 * 65536);
+	(void)z1;
+	(void)m2;
+}
+
+static void test_aircraft_landing_and_navigation_states() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 2);
+	FlatField flat(0);
+	w.tables.terrain = &flat.field;
+	w.ai.terrain = &flat.field;
+	w.env.water_z = INT32_MIN;
+	Entity seed;
+	seed.position = { 10, 10, 10 };
+	seed.is_ai_capable = true;
+	const auto h = w.registry.spawn(1, seed);
+	w.ai.attach(h);
+	auto &e = *w.registry.get(h);
+	auto &ai = *w.ai.for_handle(h);
+	auto &b = ai.brain;
+	ai.profile.type = 1;
+	ai.profile.patrol_climb = 6000;
+	b.f[AiBrain::kPendState] = 6;
+	w.ai.apply_transition(ai, w);
+	CHECK(b.f[AiBrain::kCurState] == 6 && b.f[AiBrain::kStep] == 8 && b.f[138] == 3000);
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[138] == 3000);
+	e.position.z = 4;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[138] == 2114);
+	e.position.z = -1;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[AiBrain::kCurState] == 14 && e.position.z == 0);
+	b.f[AiBrain::kPendState] = 7;
+	w.ai.apply_transition(ai, w);
+	ai.pos[0] = 10 * 65536;
+	ai.pos[1] = 10 * 65536;
+	b.f[AiBrain::kWpType] = 3;
+	b.f[AiBrain::kWpCoordX] = 100 * 65536;
+	b.f[AiBrain::kWpCoordY] = 10 * 65536;
+	b.f[AiBrain::kWpCoordZ] = 30 * 65536;
+	b.f[AiBrain::kWpCoordSrc] = 65536;
+	b.f[AiBrain::kSpeedB] = 1000;
+	b.f[AiBrain::kSpeedA] = 2000;
+	ai.profile.patrol_altitude = 12 * 65536;
+	ai.profile.field216 = 20 * 65536;
+	ai.profile.field220 = 8000;
+	ai.profile.min_agl = 5 * 65536;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[AiBrain::kWorkPosZ] == 12 * 65536 && b.f[138] == 6000);
+	CHECK(b.f[AiBrain::kOutSpeed] == 1000 && b.f[AiBrain::kWorkPosX] == 100 * 65536);
+	b.f[AiBrain::kUseWaypointZones] = 1;
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[AiBrain::kWorkPosZ] == 30 * 65536);
+	b.f[AiBrain::kUseWaypointZones] = 0;
+	b.f[AiBrain::kPendState] = 11;
+	w.ai.apply_transition(ai, w);
+	w.ai.process_infantry_state_machine(ai, w, 0);
+	CHECK(b.f[AiBrain::kWorkPosZ] == 20 * 65536 && b.f[138] == 8000);
+	CHECK(b.f[AiBrain::kOutSpeed] == 2000 && w.ai.unported_calls == 0);
+}
+
 int main() {
-    test_wreck_fire_crackle_rolls_on_the_engine_prng();
-    test_death_piece_trail_effect_rows();
+	test_death_effect_banks_and_water_crossings();
+	test_aircraft_landing_and_navigation_states();
+	test_vehicle_spawn_marker_selection();
+	test_aircraft_death_lifecycle();
+	test_vehicle_death_kills_authored_children();
+	test_vehicle_respawn_lifecycle();
+	test_generic_wreck_zero_velocity_and_inverted_rest();
+	test_wreck_fire_crackle_rolls_on_the_engine_prng();
+	test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
     test_multiplayer_destroy_buildings_rule();
     test_explosion_los_excludes_victim_hull();

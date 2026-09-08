@@ -56,10 +56,20 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 	// The authoritative motor owns these controls. Its render callback selects
 	// which channels may be published; joiner compact rows leave VALID clear
 	// because they do not carry the full animation and turret state.
+	const FocalSwayPose sway = world.rotor_wash.sway_pose(entity);
+	record[PF_FOCAL_SWAY_VALID] = sway.active ? 1.0f : 0.0f;
+	if (sway.active) {
+		for (int k = 0; k < 9; ++k)
+			record[PF_FOCAL_SWAY_BASIS_0 + k] = sway.basis[k];
+		record[PF_FOCAL_SWAY_X] = sway.offset.x;
+		record[PF_FOCAL_SWAY_Y] = sway.offset.z;
+		record[PF_FOCAL_SWAY_Z] = -sway.offset.y;
+	}
 	const VehicleTraits *traits = world.vehicles.traits.get(entity.item_id);
-	if (entity.handle.pool() != 1 || traits == nullptr) return;
-	const VehicleCtrlRegisters controls = vehicle_ctrl_registers(entity.veh,
-			traits->render_family, world.ai.for_handle(entity.handle));
+	if (entity.handle.pool() != 1 || traits == nullptr)
+		return;
+	const VehicleCtrlRegisters controls = vehicle_ctrl_registers(
+			entity.veh, traits->render_family, world.ai.for_handle(entity.handle));
 	record[PF_VEHICLE_MOTION_VALID] = 1.0f;
 	record[PF_VEHICLE_CTRL_MASK] = static_cast<float>(controls.mask);
 	record[PF_VEHICLE_TRACK_LEFT] = static_cast<float>(controls.tracks[0]);
@@ -76,6 +86,7 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 	// world/vehicle_part_anim.h's].
 	record[PF_VEHICLE_ROTOR] = static_cast<float>(controls.rotor);
 	record[PF_VEHICLE_TAIL_ROTOR] = static_cast<float>(controls.tail_rotor);
+	record[PF_VEHICLE_GEAR] = static_cast<float>(controls.gear);
 	record[PF_VEHICLE_WHEELS] = static_cast<float>(controls.wheels);
 	for (size_t i = 0; i < controls.tires.size(); ++i)
 		record[PF_VEHICLE_TIRE00 + i] = static_cast<float>(controls.tires[i]);

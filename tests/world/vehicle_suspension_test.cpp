@@ -349,7 +349,7 @@ void test_bike_crash_test_and_eject() {
 	CHECK(!veh.seats[0].occupant.valid() && !veh.primary_occupant.valid(),
 			"the bike seed ejects its rider");
 	CHECK(!w.registry.get(dh)->mounted, "the rider is dismounted");
-	CHECK(veh.veh.has_been_driven == 0, "and the driven byte clears");
+	CHECK(veh.veh.has_been_driven == 1, "the contact fall keeps its driven force until it lands");
 }
 
 // Sink growth: off-ground pads only, gated on the latch bytes for the
@@ -583,9 +583,123 @@ void test_shock_clamps_the_table_entry_in_place() {
 	CHECK(veh.veh.wheel_osc[0].phase > 0.0f, "the oscillator ran");
 }
 
+void test_tank_linear_spring_and_airborne_hold() {
+	auto heap = make_world(true);
+	World &w = *heap;
+	EntityHandle h;
+	Entity &v = spawn_veh(w, h);
+	VehicleTraits t = sprung_traits();
+	t.family = VehicleFamily::Tank;
+	t.mass = 10;
+	t.spring = 10;
+	t.spring_comp = 100;
+	auto &m = v.veh;
+	m.wheel_osc[0].impulse = 100;
+	int32_t depth[4] = { 500, 0, 0, 0 };
+	bool contact[4] = { true, false, false, false };
+	int32_t adj[4] = {};
+	w.vehicles.suspension_tank_loop(v, t, true, depth, contact, adj);
+	CHECK(m.wheel_comp[0] == 50 && depth[0] == 450, "tank uses energy/(2*spring) linear step");
+	CHECK(m.wheel_osc[0].energy == 750 && m.wheel_osc[0].impulse == 0,
+			"landing impulse is consumed and linear compression drains energy");
+	CHECK(m.spring_energy == 1000, "tank impact sink receives then drains the impulse");
+	m.wheel_osc[0].energy = 100000;
+	w.vehicles.suspension_tank_loop(v, t, false, depth, contact, adj);
+	CHECK(m.wheel_comp[0] == 1073, "airborne tank compression takes its 1023-unit cap");
+	m.wheel_osc[0].energy = 0;
+	m.wheel_osc[0].amplitude = 1000;
+	m.wheel_osc[0].phase = 0;
+	const int32_t comp = m.wheel_comp[0];
+	w.vehicles.suspension_tank_loop(v, t, false, depth, contact, adj);
+	CHECK(m.wheel_comp[0] == comp && m.wheel_osc[0].phase == 0,
+			"airborne tank does not run the release oscillator");
+	w.vehicles.suspension_tank_loop(v, t, true, depth, contact, adj);
+	CHECK(std::abs(m.wheel_osc[0].phase - 0.08722222596406937f) < 0.000001f,
+			"grounded tank uses the slow phase step");
+}
+
+// Authored action_value survives parse/bake and rocks only a mounted CTANK.
+// [orig: ActionDef_ParseScriptLine @0x4023C0; WeaponAction_Fire @0x542B10]
+void test_mounted_action_recoil() {
+	auto heap = make_world(true);
+	World &w = *heap;
+	EntityHandle vh;
+	Entity &v = spawn_veh(w, vh);
+	VehicleTraits t = sprung_traits();
+	t.family = VehicleFamily::Tank;
+	v.has_item_def = true;
+	v.item_type = 1;
+	v.veh.yaw_seeded = true;
+	t.box_x_lo = -131072;
+	t.box_x_hi = 131072;
+	t.box_y_lo = -65536;
+	t.box_y_hi = 65536;
+	w.vehicles.traits.set(v.item_id, t);
+	Entity gun;
+	gun.ground_target = vh;
+	const auto gh = w.registry.spawn(1, gun);
+	Entity person;
+	person.mounted = true;
+	person.mount_type = SeatType::Gunner;
+	person.mount_target = gh;
+	w.logic_tick = 120;
+	w.vehicles.weapon_recoil(person, 20, 0, 0);
+	CHECK(v.veh.chassis_active && v.veh.chassis_contact_active, "tank rocks on fire");
+	CHECK(v.veh.chassis_blend_tick == 120 && v.veh.chassis_blend_ticks == 40,
+			"recoil blends for 40 ticks");
+	CHECK(v.veh.chassis_impulse_direction[0] == -65536, "recoil opposes shot direction");
+	const int32_t pitch = v.veh.chassis_matrix[8];
+	CHECK(pitch != 0, "the recoil pair tilts the chassis");
+	w.vehicles.weapon_recoil(person, 0, 0, 0);
+	CHECK(v.veh.chassis_matrix[8] == pitch, "zero action value preserves the previous recoil");
+	w.vehicles.weapon_recoil(person, 20, int32_t(0x80000000u), 0);
+	CHECK(int64_t(pitch) * v.veh.chassis_matrix[8] < 0, "opposite shot reverses recoil pitch");
+	for (const auto &f : v.veh.chassis_forces)
+		CHECK(f.rate == 0, "applied force slots are consumed");
+	person.mount_type = SeatType::Driver;
+	w.vehicles.weapon_recoil(person, 55, 0, 0);
+	CHECK(v.veh.chassis_impulse_amplitude == 20, "ordinary seats do not rock their vehicle");
+
+	v.has_item_def = true;
+	v.item_type = 1;
+	t.unit_type = 1;
+	w.vehicles.traits.set(v.item_id, t);
+	const int32_t normal[3] = { 0, 65536, 0 };
+	const int32_t hit[3] = { to_fixed(v.position.x) + 65536, to_fixed(v.position.y),
+		to_fixed(v.position.z) };
+	v.veh.chassis_impulse_amplitude = 0;
+	w.vehicles.projectile_impact(v, 20000, normal, hit);
+	CHECK(v.veh.chassis_impulse_amplitude == 0, "threshold projectile does not rock the hull");
+	w.vehicles.projectile_impact(v, 30000, normal, hit);
+	CHECK(v.veh.chassis_impulse_amplitude == 17 && (v.flags & 0x40u),
+			"heavy hit wakes and rocks a chassis");
+	v.veh.chassis_impulse_amplitude = 0;
+	w.vehicles.projectile_impact(v, 40000, normal, hit);
+	CHECK(v.veh.chassis_impulse_amplitude == 0,
+			"wrapped negative round weight preserves the retail threshold");
+
+	const char *source = "weapon \"test\"\naction \"fire\"\naction_value 25\nend\nend\n";
+	DefWeaponsFile defs{};
+	CHECK(def_parse_weapons_memory(
+				  reinterpret_cast<const uint8_t *>(source), std::strlen(source), &defs) == 0,
+			"action value parses");
+	CHECK(defs.count == 1 && defs.entries[0].actions_count == 1 &&
+					defs.entries[0].actions[0].action_value == 25,
+			"parsed action retains amplitude");
+	WeaponFsmActionRow row{};
+	std::strcpy(row.name, "fire");
+	row.action_value = 25;
+	WeaponFsmDef baked;
+	weapon_fsm_bake(&row, 1, nullptr, nullptr, nullptr, baked);
+	CHECK(baked.actions[weapon_action::kFire].action_value == 25, "bake retains amplitude");
+	def_free_weapons(&defs);
+}
+
 } // namespace
 
 int main() {
+	test_mounted_action_recoil();
+	test_tank_linear_spring_and_airborne_hold();
 	test_def_keys_parse_raw();
 	test_fresh_row_never_arms();
 	test_request_arms_by_role_and_replication();

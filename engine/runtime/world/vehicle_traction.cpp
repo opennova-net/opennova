@@ -1,0 +1,314 @@
+#include "vehicle_motor_detail.h"
+
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/world.h>
+
+namespace opennova::world::detail {
+
+bool vehicle_has_contact_direction(const Entity::VehicleMotorState &m) {
+	return m.contact_direction[0] != 0 || m.contact_direction[1] != 0 ||
+			m.contact_direction[2] != 0;
+}
+
+namespace {
+
+void clear_direction(Entity::VehicleMotorState &m) {
+	for (int32_t &component : m.contact_direction)
+		component = 0;
+	m.slip_started_tick = 0;
+}
+
+int32_t dot_q16(const int32_t a[3], const int32_t b[3]) {
+	return io::bam_add(
+			io::bam_add(q16_mul_rhu(a[0], b[0]), q16_mul_rhu(a[1], b[1])), q16_mul_rhu(a[2], b[2]));
+}
+
+void cross_q16(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
+	int64_t raw[3];
+	q16_cross(a, b, raw);
+	for (int i = 0; i < 3; ++i)
+		out[i] = int32_t(raw[i]);
+}
+
+bool sharp_steering(const Entity::VehicleMotorState &m) {
+	// This is the wheel-angle register +0x2B4, not chassis pitch.
+	// [orig: Entity_UpdateTankVehiclePhysics @0x488AB0, @0x489BB1..0x489C32]
+	return std::abs(double(m.steer_state) * 8.381903171539307e-8) > 4.0;
+}
+
+void velocity_from_direction(
+		Entity::VehicleMotorState &m, const int32_t dir[3], int32_t speed, bool replace_z) {
+	m.vel_x = q16_mul_rhu(speed, dir[0]);
+	m.vel_y = q16_mul_rhu(speed, dir[1]);
+	if (replace_z)
+		m.slide_z = q16_mul_rhu(speed, dir[2]);
+}
+
+// Assemble the direction frame with unnormalized Q16 cross products, rotate
+// locally, then extract column zero. Do not normalize the matrix: the original
+// preserves the cross-product quantization and length.
+// [orig: Math_FixedPointCrossProduct @0x6134A0; Math_SetRow0FromVec3Scaled
+// @0x613820; Math_BuildFixedPointRotationMatrixYXZ @0x615400 ->
+// Matrix_Multiply3x4_FixedPoint @0x613940; cveh @0x48CA61..0x48CB21]
+void turn_contact_direction(
+		Entity::VehicleMotorState &m, const int32_t forward[3], const int32_t up[3], int32_t step) {
+	int32_t side[3], turn[3];
+	cross_q16(up, m.contact_direction, side);
+	cross_q16(m.contact_direction, forward, turn);
+	if (turn[2] <= 0)
+		step = io::bam_sub(0, step);
+	const int32_t c = cos22_of_bam_x87(step), s = sin22_of_bam_x87(step);
+	for (int i = 0; i < 3; ++i) {
+		const int32_t d22 = bam_shl_wrap(m.contact_direction[i], 6);
+		const int32_t side22 = bam_shl_wrap(side[i], 6);
+		const int32_t rotated22 =
+				int32_t((int64_t(d22) * c + int64_t(side22) * s + 0x200000) >> 22);
+		m.contact_direction[i] = rotated22 >> 6;
+	}
+}
+
+} // namespace
+
+// True means the skid branch supplied the complete acceleration, so the
+// ordinary acceleration/deceleration clamp tree is skipped.
+// [orig: cveh @0x48C330..0x48C3D0; cbik @0x4853EB..0x485501;
+// ctan @0x489C3A..0x489F34]
+bool vehicle_traction_acceleration(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
+	auto &m = vehicle.veh;
+	if (!vehicle_has_contact_direction(m))
+		return false;
+	if (traits.family == VehicleFamily::Tank) {
+		const bool reversal = (target_speed > 0 && m.speed <= 0) ||
+				(target_speed < 0 && m.speed >= 0) || (target_speed == 0 && m.speed == 0);
+		if (reversal || !sharp_steering(m))
+			return false;
+		const int32_t amount = io::bam_abs(m.speed) <= 4096 && target_speed != 0
+				? traits.deceleration >> 2
+				: bam_shl_wrap(traits.deceleration, 1);
+		if (m.speed > 0)
+			m.speed_accel = io::bam_sub(0, amount);
+		if (m.speed < 0)
+			m.speed_accel = amount;
+		return true;
+	}
+	if (!m.grounded || m.settle_2f0 != 0)
+		return false;
+	m.skid_effects_requested = true; // Entity_SpawnBoneEffectsAtMask @0x458750
+	const bool recovering = m.slip_started_tick != 0 && m.handbrake_latched == 0 &&
+			int32_t(world.logic_tick - m.slip_started_tick) > bam_mul_wrap(5, traits.tire_slip);
+	const int32_t amount = recovering ? traits.acceleration >> 4 : traits.deceleration;
+	if (m.speed > 0)
+		m.speed_accel = recovering ? amount : io::bam_sub(0, amount);
+	if (m.speed < 0)
+		m.speed_accel = recovering ? io::bam_sub(0, amount) : amount;
+	return true;
+}
+
+// Before the velocity/contact solve: the wheel phase uses the drive speed,
+// not its post-collision value. The wheelspin carry decays AFTER the phase add.
+// [orig: cveh @0x48C330..0x48C535; cbik @0x4855C1..0x48586D]
+void vehicle_wheel_traction_tick(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
+	if (traits.family == VehicleFamily::Tank)
+		return;
+	auto &m = vehicle.veh;
+	const Entity *occupant = world.registry.get(vehicle.primary_occupant);
+	if (occupant == nullptr)
+		return;
+	if (traits.family == VehicleFamily::Bike) {
+		if ((occupant->net_move_input & Entity::kMoveOrderLeanRight) != 0)
+			return;
+	} else if (m.handbrake_latched != 0)
+		return;
+	if (vehicle_has_contact_direction(m)) {
+		// The initialized dword is negative and the comparison uses its ABS,
+		// then stores the signed value (the repeated lock is intentional).
+		// [orig: dword_81518C = 0xE8480000; @0x48C49F..0x48C4B4]
+		constexpr int32_t kSlipPhase = -397934592;
+		if (m.wheel_slip_phase < io::bam_abs(kSlipPhase))
+			m.wheel_slip_phase = kSlipPhase;
+		m.wheel_phase = wheel_phase_step(m.wheel_phase, m.speed, io::bam_abs(m.wheel_slip_phase));
+	} else {
+		m.wheel_phase = wheel_phase_step(m.wheel_phase, m.speed, io::bam_abs(m.wheel_slip_phase));
+		if (target_speed == 0)
+			m.wheel_slip_phase = 0;
+		else if (m.wheel_slip_phase != 0) {
+			const double factor = std::min(1.0, 1.0 - double(m.speed) * 1.627604251552839e-5);
+			m.wheel_slip_phase = int32_t(factor * m.wheel_slip_phase);
+			m.skid_effects_requested = true;
+		}
+	}
+}
+
+// Retain the previous drive direction throughout a handbrake skid, then
+// turn it back toward the chassis in one-degree steps after the authored
+// recovery window. Tanks use their separate five-degree/low-speed ladder.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00, @0x48C55A..0x48CF97;
+// Entity_UpdateLightVehiclePhysics @0x483FE0, @0x48586D..0x48659B;
+// Entity_UpdateTankVehiclePhysics @0x488AB0, @0x489FA0..0x48A82C]
+void vehicle_traction_velocity(
+		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
+	auto &m = vehicle.veh;
+	const bool tank = traits.family == VehicleFamily::Tank;
+	if ((vehicle.flags & kEntityFlagInAir) != 0)
+		return;
+	if (!m.grounded && m.handbrake_latched == 0) {
+		if (!m.contact_solved_once)
+			return;
+		if (!tank) {
+			if (m.slip_started_tick != 0 &&
+					int32_t(world.logic_tick - m.slip_started_tick) <=
+							bam_mul_wrap(5, traits.tire_slip))
+				m.slip_started_tick = world.logic_tick;
+			else
+				clear_direction(m);
+		}
+		if (m.crashed == 0)
+			return;
+		const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
+		int32_t dir[3];
+		q16_normalize(motion, dir);
+		const int32_t stop = bam_shl_wrap(traits.deceleration, 1);
+		m.speed = m.speed > 0 ? io::bam_sub(m.speed, stop) : io::bam_add(m.speed, stop);
+		velocity_from_direction(m, dir, m.speed, true);
+		if (io::bam_abs(m.speed) >= 4096)
+			m.skid_effects_requested = true;
+		else {
+			m.vel_x >>= 1;
+			m.vel_y >>= 1;
+			m.speed >>= 1;
+			m.wheel_rate_bam = m.air_roll_rate = m.air_pitch_rate = 0;
+			m.settle_2f0 = 1;
+		}
+		return;
+	}
+	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	const int32_t forward[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
+	const int32_t up[3] = { basis.q22.m[2] >> 6, basis.q22.m[6] >> 6, basis.q22.m[10] >> 6 };
+	if (tank) {
+		if (target_speed == 0 && sharp_steering(m)) {
+			if (!vehicle_has_contact_direction(m)) {
+				for (int i = 0; i < 3; ++i)
+					m.contact_direction[i] = m.speed > 0 ? forward[i] : io::bam_sub(0, forward[i]);
+			}
+			m.contact_direction[2] = std::min(0, m.contact_direction[2]);
+			velocity_from_direction(m, m.contact_direction, io::bam_abs(m.speed), true);
+			m.wheel_rate_bam = q16_mul_rhu(-16384, m.steer_state >> 2);
+			return;
+		}
+		if ((target_speed == 0 || io::bam_abs(m.speed) <= 8192) &&
+				vehicle_has_contact_direction(m)) {
+			if (dot_q16(forward, m.contact_direction) >= 61439 || m.speed <= 1280)
+				clear_direction(m);
+			else
+				turn_contact_direction(m, forward, up, 59652323);
+		}
+		// Retail advances the stored skid frame but drives along the current
+		// forward row in this arm; only the sharp, zero-command arm uses it.
+		velocity_from_direction(m, forward, m.speed, m.crashed == 0 || target_speed == 0);
+		m.wheel_rate_bam = q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+		return;
+	}
+	if (m.handbrake_latched != 0 && m.speed != 0 && vehicle_has_contact_direction(m)) {
+		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+		return;
+	}
+	if (!vehicle_has_contact_direction(m)) {
+		clear_direction(m);
+		velocity_from_direction(m, forward, m.speed, m.crashed == 0);
+		return;
+	}
+	if (m.slip_started_tick == 0) {
+		m.slip_started_tick = world.logic_tick;
+		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+		return;
+	}
+	if (int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip)) {
+		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+		return;
+	}
+	if (dot_q16(forward, m.contact_direction) < 0) {
+		if (io::bam_abs(m.speed) > 256) {
+			velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+			if (m.speed >= 0)
+				m.speed = io::bam_sub(m.speed, traits.acceleration);
+			if (m.speed < 0)
+				m.speed = io::bam_add(m.speed, traits.acceleration);
+			return;
+		}
+	} else {
+		int32_t a[3], b[3];
+		const int64_t planar_a[3] = { forward[0], forward[1], 0 };
+		const int64_t planar_b[3] = { m.contact_direction[0], m.contact_direction[1], 0 };
+		q16_normalize(planar_a, a);
+		q16_normalize(planar_b, b);
+		if (dot_q16(a, b) < 61166 && m.speed > 0) {
+			turn_contact_direction(m, forward, up, 11930464);
+			velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+			return;
+		}
+	}
+	clear_direction(m);
+	velocity_from_direction(m, forward, m.speed, m.crashed == 0);
+}
+
+// Handbrake contact latches forward with uphill motion removed, normalized
+// after the Z clamp. Ground requires both rear pads; bike requires its rear
+// wheel. [orig: @0x47E65D..0x47E78F; @0x47B71E..0x47B838]
+void vehicle_capture_contact_direction(Entity &vehicle, const VehicleEulerBasis &basis) {
+	auto &m = vehicle.veh;
+	if (m.handbrake_latched == 0)
+		return;
+	if (m.cmd_speed == 0 && (m.speed == 0 || vehicle_has_contact_direction(m)))
+		return;
+	const int64_t raw[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6,
+		std::min(0, basis.q22.m[8] >> 6) };
+	q16_normalize(raw, m.contact_direction);
+}
+
+// Tank/bike contact tails bias an existing skid vector downhill after an
+// actual descent, then renormalize it. [orig: @0x47951E..0x4795B7;
+// @0x47C0EB..0x47C182]
+void vehicle_contact_downhill_tail(Entity &vehicle, int32_t pz) {
+	auto &m = vehicle.veh;
+	if (!vehicle.saved_live_valid || vehicle.saved_live_pos[2] <= pz ||
+			!vehicle_has_contact_direction(m))
+		return;
+	const int64_t raw[3] = { m.contact_direction[0], m.contact_direction[1], -28672 };
+	q16_normalize(raw, m.contact_direction);
+}
+
+// The fxs emitter is transient at every masked userpoint, with no origin
+// fallback. The source entity is an input context, not a following attachment.
+// The camera range is 600 units every fourth tick, 300 on the intervening ticks.
+// [orig: Entity_SpawnBoneEffectsAtMask @0x458750, gates @0x45875E..0x458836,
+// rigid point/direction transform @0x4588F9..0x458986]
+void vehicle_emit_skid_effects(World &world, Entity &vehicle, const VehicleTraits &traits) {
+	if (!vehicle.veh.skid_effects_requested || vehicle.veh.movement_effects_disabled ||
+			traits.skid_effect.empty() || traits.skid_points.empty() ||
+			!world.out.fire_sounds.listener_valid())
+		return;
+	const Vec3 &camera = world.out.fire_sounds.listener();
+	const int64_t dx = int64_t(to_fixed(vehicle.position.x)) - to_fixed(camera.x);
+	const int64_t dy = int64_t(to_fixed(vehicle.position.y)) - to_fixed(camera.y);
+	const int32_t limit = ((world.logic_tick & 3u) == 0 ? 600 : 300) << 16;
+	if (std::sqrt(double(dx) * dx + double(dy) * dy) > limit)
+		return;
+	const bool snow = terrain::surface_type_at_fixed(world.tables.surface_map,
+							  to_fixed(vehicle.position.x), to_fixed(vehicle.position.y)) == 3;
+	const std::string &effect =
+			snow && !traits.skid_snow_effect.empty() ? traits.skid_snow_effect : traits.skid_effect;
+	const CollisionMatrix matrix = entity_placement_matrix(vehicle);
+	for (const auto &point : traits.skid_points) {
+		int32_t pos[3], dir[3];
+		matrix.transform_point(point.position, pos);
+		matrix.rotate_point(point.direction, dir);
+		world.out.vehicle_effects.push_back({ effect,
+				{ float(from_fixed(pos[0])), float(from_fixed(pos[1])), float(from_fixed(pos[2])) },
+				{ float(from_fixed(dir[0])), float(from_fixed(dir[1])), float(from_fixed(dir[2])) },
+				world.logic_tick + 1 });
+	}
+}
+
+} // namespace opennova::world::detail

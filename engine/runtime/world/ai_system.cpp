@@ -391,9 +391,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             AiEventEntry ev{};
             ev.f[0] = 1; // damage
             ev.f[1] = (index_of(*victim) << 16);
-            ev.f[3] = hit.damage; // -> brain[39] kDamageInfo via h_combat_event
-            ev.set_timer(0.0f);
-            events.queue(ev);
+			// HitRecord[17] is the projectile owner, not the damage amount.
+			// [orig: Projectile_CopyEntityToHitRecord @0x4E7010]
+			ev.f[3] = hit.shooter.valid() ? int32_t(hit.shooter.packed) + 1 : 0;
+			ev.set_timer(0.0f);
+			events.queue(ev);
         }
     }
     world.round_sim.hits.clear();
@@ -494,14 +496,12 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
                     ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
-            const bool motor_driven = vt != nullptr &&
-                    (vt->physics != 0 ||
-                     vehicle_family_uses_direct_air_mover(vt->family));
-            if (locomotion_enabled && !motor_driven) {
-                apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
+			const bool motor_driven = vt != nullptr;
+			if (locomotion_enabled && !motor_driven) {
+				apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
                 apply_ground_clamp(e, &world); // vertical: snap pos[2] onto ground (no-op if unwired)
-            }
-        }
+			}
+		}
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
@@ -583,8 +583,10 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             fire[4] = bam_from_degrees_wrapped(static_cast<double>(mount->pitch));
             fire[5] = bam_from_degrees_wrapped(static_cast<double>(mount->roll));
         }
-        if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))
-            gunner->inf.aim_ref0 = gunner->inf.combat_target;
+		world.vehicles.weapon_recoil(*owner,
+				weapon->action_fsm.actions[weapon_action::kFire].action_value, fire[3], fire[4]);
+		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))
+			gunner->inf.aim_ref0 = gunner->inf.combat_target;
     }
 }
 

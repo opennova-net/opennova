@@ -586,6 +586,15 @@ struct ContactQuery {
     bool query_is_player = false;  // [orig: g_CollisionQueryIsPlayer @ 0xB5AB84]
 };
 
+// Per-wheel/hull result of the vehicle contact query. Vertical support is
+// retained even when the surface is climbable (severity zero).
+// [orig: Entity_CheckCollisionState @0x462A30]
+struct VehicleProbeForce {
+	int32_t terrain_gap = 0; // optional contact output: positive separation from terrain
+	int32_t fx = 0, fy = 0, fz = 0;
+	bool wall_contact = false;
+};
+
 struct ContactResult {
     int32_t force[4] = {};         // world push force (16.16); [3] spare like the orig
     uint32_t flags = 0;            // contact flags (see the type table)
@@ -1120,10 +1129,10 @@ public:
     // terrain ray and shrinks/inflates the solid clip. Audio and blasts share
     // this distinct retail query [orig: Entity_CheckLineOfSightTerrainAndEntities
     // @ 0x53B130; Physics_CheckTerrainLineOfSight @ 0x53B080].
-    bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
-                         const int32_t start[3], const int32_t end[3],
-                         int32_t height_offset);
-    // Same exact query with per-target section matrices retained for a caller-
+	bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
+			const int32_t start[3], const int32_t end[3], int32_t height_offset,
+			bool all_types = false);
+	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
     // then reuse retail's entity-resident matrix equivalent without observing
@@ -1266,24 +1275,19 @@ public:
                             int32_t peer_count, uint16_t exclude_handle,
                             uint32_t *entity_flags, EntityHandle *out_ground);
 
-    // Hull-vs-world contact for the vehicle motor [orig: Entity_CheckCollisionState
-    // @ 0x462a30, called per tick from the vehicle physics @ 0x47cb8c/0x47d213 —
-    // walks the source's proximity candidates and runs the contact-force query
-    // (Entity_ComputeBoneCollisionForce @ 0x4ae150 = collision_contact_force) per
-    // wheel point; a horizontal-dominant push (|fz|<<22/|f| under the slope
-    // thresholds) applies in FULL at severity 3, vertical-dominant contacts take
-    // the graded bands]. Our wheel-less stand-in queries ONE hull-center point
-    // (radius 1.5 u, +0.5 u lift — the wheel array + per-wheel radii + the
-    // v84/v85 slope-threshold grading ride the unported wheel solver, D-NET-161)
-    // and keeps only the wall-like full-force class: vertical-dominant force is
-    // dropped (the motor's terrain column owns the vertical). Returns severity
-    // (0 or 3) and the XY push in out_force (16.16).
-    int32_t resolve_vehicle_hull(World &world, EntityHandle source, const int32_t pos[3],
-                                 const int32_t prev_pos[3], int32_t out_force[2]);
+	// Fold model contacts into the terrain forces, one query per authored
+	// wheel/hull probe. Returns severity 0..3 and the last severe hit entity.
+	// The hull position is the already-integrated pose; savedLivePose supplies
+	// the previous-plane gate. Mounted children are excluded through three
+	// carrier links. [orig: Entity_CheckCollisionState @0x462A30, entity half
+	// @0x462DFB..0x4632CC; Entity_ComputeCollisionForces @0x462150 boat twin]
+	int32_t resolve_vehicle_probes(World &world, Entity &source, const int32_t hull_pos[3],
+			const int32_t (*probes)[3], const int32_t *radii, int count, int32_t soft, int32_t hard,
+			VehicleProbeForce *forces, EntityHandle &hit_entity);
 
-    // World-level blink state for the local player.
-    // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
-    uint32_t local_player_blink_flags = 0;
+	// World-level blink state for the local player.
+	// [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
+	uint32_t local_player_blink_flags = 0;
     EntityHandle local_player;
 
     // The last CL latch's alignment frame. Retail keeps these as globals that

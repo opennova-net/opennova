@@ -152,8 +152,9 @@ struct OcclusionFrameCamera {
 // ----------------------------------------------------------------------------
 class OcclusionWorld {
 public:
-    // Def-derived bits the engine reads off the entity's itemDef.
-    struct EntityDefBits {
+	void bind_focal_wind_random(uint32_t *state) { shared_latch_rng_ = state; }
+	// Def-derived bits the engine reads off the entity's itemDef.
+	struct EntityDefBits {
         bool weldable = false;        // [orig: itemDef attrib2 (+0x58) bit 6]
         bool recurse_windows = false; // [orig: itemDef attrib (+0x54) bit 27]
         // Destruction bone-map bases; bits >= these are forced visible in the
@@ -451,7 +452,8 @@ private:
     bool water_visible_ = false;
     bool camera_indoors_ = false;
 
-    uint32_t latch_rng_ = 0; // [orig: dword_31BFBB4 — BSS-zero boot state]
+	uint32_t *shared_latch_rng_ = nullptr;
+	uint32_t latch_rng_ = 0; // [orig: dword_31BFBB4 — BSS-zero boot state]
 };
 
 } // namespace opennova::world

@@ -252,10 +252,20 @@ struct AiProfile {
     bool has_src148 = false; // +148 target-source gate
     bool has_src180 = false; // +180 target-source gate
     int32_t field216 = 0;  // +216: added into brain working field [131]
-    int32_t field220 = 0;  // +220: copied into brain working field [138]
-    // ---- combat / targeting (P2) ----
-    int32_t field104 = 0;       // +104: base fire delay (engagement); 0 -> no jitter (branch A)
-    uint8_t fov_primary = 0;    // +75:  primary FOV arc byte (OR'd with 1 before use)
+	int32_t patrol_altitude = 0; // profile+204
+	int32_t patrol_climb = 0; // profile+208
+	int32_t min_agl = 0; // profile+232
+	int32_t min_speed = 0; // profile+236
+	int32_t min_chase = 0; // profile+184
+	int32_t max_chase = 0; // profile+188
+	uint32_t flight_flags = 0; // profile+192
+	int32_t field220 = 0; // +220: copied into brain working field [138]
+	// ---- combat / targeting (P2) ----
+	int32_t view_fov_bam = 0; // profile+64, full precision for fire validation
+	int32_t radar_fov_bam = 0; // profile+72
+	int32_t view_dist = 0; // profile+68, 16.16
+	int32_t field104 = 0; // +104: base fire delay (engagement); 0 -> no jitter (branch A)
+	uint8_t fov_primary = 0;    // +75:  primary FOV arc byte (OR'd with 1 before use)
     uint8_t fov_secondary = 0;  // +67:  secondary FOV / turret arc byte (OR'd with 1)
     int16_t range_primary = 0;  // +78:  primary-FOV max engage range (world units, signed i16)
     int16_t range_secondary = 0;// +70:  secondary-FOV max engage range (world units, signed i16)
@@ -308,7 +318,8 @@ struct AiProfile {
     // priority-descending; only type 1/2 profiles load the sort keys).]
     int32_t class_priority[4] = {}; // +80/+84/+88/+92: air/ground/organics/decorations
     int8_t slot_class[4] = {3, 2, 1, 0}; // +40..+52: class ids, priority-descending
-    int32_t type = 0; // +16: HELO 1 / GROUND 2 / ORGANIC 3 (0 = unresolved)
+	int32_t subtype = 0; // +20: STD 0 / BOAT 1 / PLANE 2 / TRAIN 3
+	int32_t type = 0; // +16: HELO 1 / GROUND 2 / ORGANIC 3 (0 = unresolved)
 };
 
 // AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
@@ -427,9 +438,13 @@ struct AiEntity {
     // is an open RE TODO (notes §9); reconciling would move the budget here too.
     int32_t patrol_f0 = 0;     // scheduler +0
     int32_t patrol_delta = 0;  // scheduler +4 (patrol heading delta)
-    int32_t patrol_goal = 0;   // scheduler +8 (patrol goal active -> still en route)
+	int32_t aircraft_controller = 0; // controller+0: movement callback ID
+	int32_t aircraft_result = 0; // controller+12
+	int32_t aircraft_phase = 0; // controller+16
+	int32_t aircraft_side = 0; // controller+20
+	int32_t patrol_goal = 0; // scheduler +8 (patrol goal active -> still en route)
 
-    // Infantry motor state (org1-class soldiers). When inf.active the entity is driven
+	// Infantry motor state (org1-class soldiers). When inf.active the entity is driven
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
@@ -540,7 +555,7 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
 // lifts it to world first and a dead parent fails the test]: planar deltas
 // full, the Z delta HALVED, 3D length <= 8 u (0x80000). Consumers: the minAI
 // crew clamp and Entity_CanEnterVehicle's at-spawn arm. Body in ai_waypoints.cpp.
-bool vehicle_at_spawn_anchor(const Entity &veh);
+bool vehicle_at_spawn_anchor(const World &world, const Entity &veh);
 
 // The rider count [orig: Entity_CountMountedEntities @0x435970 — live pool-0
 // entities with an ItemDef whose ground link (+0x28) is the vehicle, or whose
@@ -729,9 +744,10 @@ public:
                                            // the APPLY now writes world.script.relations — D-AI-3)
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
-    uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
+	int32_t aircraft_turn_sequence = -1; // [orig: dword_815190]
+	uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
 
-    // dword_31BFBB8 owns this independent rotate LCG. PRNG_Next16's shared
+	// dword_31BFBB8 owns this independent rotate LCG. PRNG_Next16's shared
     // dword_31BFBB0 owner lives on World so non-AI consumers cannot fork it.
     int32_t prng_step_a();  // [orig: inline LCG on dword_31BFBB8]
 
@@ -766,17 +782,18 @@ public:
     // world.relations (D-AI-3 closed) + record the trace, Entity_SetAITarget, reset the
     // combat timer, set the fire-delay (exact PRNG jitter; the has_controller branch is
     // guarded by base-delay, the other is unconditional), pending = 17.
-    void engage_target(World &world, AiEntity &e, const AiTarget &t);
+	void engage_target(World &world, AiEntity &e, const AiTarget &t, bool aircraft = false);
 
-    // [orig: Entity_SetAITarget @0x45d760] brain[kTargetSlot] + AiSlot[3] = handle;
-    // maintain the OLD/NEW targets' Entity::ai_target_refcount (dec clamp >=0 / inc).
-    void ai_set_target(World &world, AiEntity &e, EntityHandle target);
+	// [orig: Entity_SetAITarget @0x45d760] brain[kTargetSlot] + AiSlot[3] = handle;
+	// maintain the OLD/NEW targets' Entity::ai_target_refcount (dec clamp >=0 / inc).
+	void ai_set_target(World &world, AiEntity &e, EntityHandle target);
+	void clear_vehicle_target_references(World &world, AiEntity &e);
 
-    // The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
-    // in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
-    // [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2; matrix identity via the setter
-    // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
-    void apply_engage_relations(World &world, const Entity &self, const Entity &target);
+	// The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
+	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
+	// [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2; matrix identity via the setter
+	// bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
+	void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
     // The aim/LOS origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0]. The
     // person leg (def type 3) is pos + (entity+0x6C >> 1|2) + jitter with the
@@ -846,11 +863,12 @@ public:
     // turrets, aligned) — the caller then fires; false = hold (slewing, cone
     // miss, LOS block, or no valid solve). `out` = {pos xyz 16.16, yaw, pitch,
     // roll BAM}.
-    bool solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
-                                     const AiProfile::WeaponFire &wb, int32_t aim_offset,
-                                     bool skip_los, int32_t out[6]);
+	bool weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
+			const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]);
+	bool solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
+			const AiProfile::WeaponFire &wb, int32_t aim_offset, bool skip_los, int32_t out[6]);
 
-    // [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
+	// [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
     // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
     // returns false and the combat event switch proceeds faithfully.
     bool ai_handle_command(AiEntity &e, const AiEventEntry &ev);
@@ -870,10 +888,18 @@ public:
     // out-speed (kOutSpeed). Applies the per-advance visited marks that BMS
     // SingleAtWaypoint/GroupAtWaypoint consume, and retains a diagnostic trace.
     int update_waypoint_movement(AiEntity &e, World &world);
+	int update_aircraft_waypoint_movement(AiEntity &e, World &world);
+	int32_t aircraft_ground_height(World &world, AiEntity &e, int32_t radius);
+	void enter_aircraft_combat(AiEntity &e, World &world);
+	void enter_aircraft_evade(AiEntity &e, World &world);
+	void aircraft_evade_tick(AiEntity &e, World &world);
+	void aircraft_combat_tick(AiEntity &e, World &world);
+	int aircraft_movement(AiEntity &e, World &world);
+	bool aircraft_target_in_sight(AiEntity &e, World &world);
 
-    // Apply the mover output to the entity transform (turn to kWorkHeading, advance pos toward
-    // the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
-    void apply_locomotion(AiEntity &e);
+	// Apply the mover output to the entity transform (turn to kWorkHeading, advance pos toward
+	// the kWorkPos* target by kOutSpeed * loco_scale, clamped to not overshoot). See loco_scale.
+	void apply_locomotion(AiEntity &e);
 
     // [orig: AI_ProcessMovementStep @0x466db0 brain[131] = ground + 0x50000 /
     // AI_UpdateMovementTarget @0x460e40 brain[131] = max(targetZ, ground)] Drive the vertical

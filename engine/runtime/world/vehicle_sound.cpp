@@ -173,6 +173,20 @@ int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
 
 } // namespace
 
+// Profile SSAudio3 carries the contact scrape; other contact transitions use
+// their own family slot. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0,
+// profile lookup @0x47CE17..0x47CE62]
+void VehicleSystem::play_contact_sound(Entity &vehicle, const VehicleTraits &traits, int slot) {
+	const auto *profile = profile_for(world_, traits);
+	if (!set_for_slot(profile, traits, slot).empty())
+		emit_profile_oneshot(world_, vehicle, profile, traits, slot);
+	else if (slot == 25 || slot == 26 || slot == 36)
+		// The global name-to-slot table @0x82F590 binds +0x24E0908 and
+		// +0x24E08D4 to these sets. Fallbacks use propagation delay.
+		world_.out.fire_sounds.play_with_distance_delay(
+				slot == 25 ? "TIRE_SKID" : "IMP_DEBMED_LAND", vehicle.position, vehicle.bms_id);
+}
+
 void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {
     World &world = world_;
     const audio::SoundProfile *profile = profile_for(world, traits);
@@ -195,34 +209,35 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
         return;
     }
 
-    const Entity *claimant = world.registry.get(vehicle.primary_occupant);
-    const bool submerged_driver = claimant != nullptr && claimant->player_class != 0 &&
-            watercraft_driver_submerged(world, *claimant);
-    // Retail zeroes all four sound arguments when a player claimant's eye is
-    // submerged, before selecting the stop/collision/motion branch.
-    // [orig: Entity_ProcessMovementSoundEffects @0x5294A0, gate @0x5294A8..0x5294D8]
-    const bool stopped = wrecked || ((vehicle.flags | vehicle.engine_flags) & 2u) != 0 ||
-            submerged_driver;
-    // The family's max drive speed: boats author waterSpeed (+0x8EC) and no
-    // player_speed — the ground field would zero the denominator and pin every
-    // boat in the stop lane.
-    int32_t max_speed = traits.family == VehicleFamily::Watercraft
-            ? traits.water_speed : traits.player_speed;
-    // The ground caller falls back to brain speed A, then the command.
-    // [orig: Entity_UpdateVehiclePhysics @0x48AF00, caller @0x48D196..0x48D1B8]
-    if (max_speed == 0 && traits.family != VehicleFamily::Watercraft) {
-        if (const AiEntity *ai = world.ai.for_handle(vehicle.handle))
-            max_speed = ai->brain.f[AiBrain::kSpeedA];
-        if (max_speed == 0) max_speed = vehicle.veh.cmd_speed;
-    }
-    const int64_t denominator = magnitude_i32(max_speed);
-    if (stopped || denominator <= 0) {
-        emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
+	const Entity *claimant = world.registry.get(vehicle.primary_occupant);
+	const bool submerged_driver = claimant != nullptr && claimant->player_class != 0 &&
+			watercraft_driver_submerged(world, *claimant);
+	// Retail zeroes all four sound arguments when a player claimant's eye is
+	// submerged, before selecting the stop/collision/motion branch.
+	// [orig: Entity_ProcessMovementSoundEffects @0x5294A0, gate @0x5294A8..0x5294D8]
+	const bool stopped =
+			wrecked || ((vehicle.flags | vehicle.engine_flags) & 2u) != 0 || submerged_driver;
+	// The family's max drive speed: boats author waterSpeed (+0x8EC) and no
+	// player_speed — the ground field would zero the denominator and pin every
+	// boat in the stop lane.
+	int32_t max_speed =
+			traits.family == VehicleFamily::Watercraft ? traits.water_speed : traits.player_speed;
+	// The ground caller falls back to brain speed A, then the command.
+	// [orig: Entity_UpdateVehiclePhysics @0x48AF00, caller @0x48D196..0x48D1B8]
+	if (max_speed == 0 && (traits.family != VehicleFamily::Watercraft || traits.physics == 0)) {
+		if (const AiEntity *ai = world.ai.for_handle(vehicle.handle))
+			max_speed = ai->brain.f[AiBrain::kSpeedA];
+		if (max_speed == 0)
+			max_speed = vehicle.veh.cmd_speed;
+	}
+	const int64_t denominator = magnitude_i32(max_speed);
+	if (stopped || denominator <= 0) {
+		emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
                      {}, 0, 0);
         emit_emitter(world, vehicle, kReverseLane, audio::kSlotSoundLoop1 + 2,
                      {}, 0, 0);
-    } else if (collided) {
-        // Collision is not the all-zero/wreck branch. Retail clears reverse,
+	} else if (collided) {
+		// Collision is not the all-zero/wreck branch. Retail clears reverse,
         // clears forward, then falls through to a forced full-volume idle
         // registration for this tick.
         // [orig: @0x5297db..0x529882]
@@ -233,24 +248,26 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
         emit_emitter(world, vehicle, kIdleLane, audio::kSlotSoundLoop1,
                      set_for_slot(profile, traits, audio::kSlotSoundLoop1),
                      kUnityQ16, kFullVolumeQ8_8);
-    } else {
-        int64_t speed = magnitude_i32(vehicle.veh.speed);
-        if (speed == 0 && vehicle.saved_live_valid) {
-            const double dx = static_cast<double>(vehicle.saved_live_pos[0]) -
-                    to_fixed(vehicle.position.x);
-            const double dy = static_cast<double>(vehicle.saved_live_pos[1]) -
-                    to_fixed(vehicle.position.y);
-            const double dz = static_cast<double>(vehicle.saved_live_pos[2]) -
-                    to_fixed(vehicle.position.z);
-            // fild/square/sum/fsqrt, flt_7C19E0 clamp, then truncation.
-            // Direction still comes from the original signed speed argument.
-            // [orig: Entity_ProcessMovementSoundEffects @0x5294A0, displacement @0x52953B..0x52959D]
-            speed = static_cast<int64_t>(std::min(std::sqrt(dx*dx + dy*dy + dz*dz),
-                                                2147418112.0));
-        }
-        if (speed < 256) speed = 0; // sub-1/256-unit motion is treated as stationary
+	} else {
+		int64_t speed = magnitude_i32(vehicle.veh.speed);
+		if (speed == 0 && vehicle.saved_live_valid) {
+			const double dx =
+					static_cast<double>(vehicle.saved_live_pos[0]) - to_fixed(vehicle.position.x);
+			const double dy =
+					static_cast<double>(vehicle.saved_live_pos[1]) - to_fixed(vehicle.position.y);
+			const double dz =
+					static_cast<double>(vehicle.saved_live_pos[2]) - to_fixed(vehicle.position.z);
+			// fild/square/sum/fsqrt, flt_7C19E0 clamp, then truncation.
+			// Direction still comes from the original signed speed argument.
+			// [orig: Entity_ProcessMovementSoundEffects @0x5294A0, displacement
+			// @0x52953B..0x52959D]
+			speed = static_cast<int64_t>(
+					std::min(std::sqrt(dx * dx + dy * dy + dz * dz), 2147418112.0));
+		}
+		if (speed < 256)
+			speed = 0; // sub-1/256-unit motion is treated as stationary
 
-        if (speed > 0) {
+		if (speed > 0) {
             const bool reverse = vehicle.veh.speed < 0;
             const int slot = reverse ? audio::kSlotSoundLoop1 + 2
                                      : audio::kSlotSoundLoop1 + 1;
@@ -280,9 +297,9 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
                              kUnityQ16, static_cast<uint16_t>(volume));
             }
         }
-    }
+	}
 
-    // The movement direction latch plays enginereverse on both direction edges.
+	// The movement direction latch plays enginereverse on both direction edges.
     // Entering reverse waits for command AND actual speed to be negative; leaving
     // only waits for a positive command.
     // [orig: vehicleData+0x318 bit2 @0x48d1d1..0x48d222]
@@ -299,51 +316,150 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     }
 }
 
+// Skid edge and free-rev cadence follow movement sound. The timer increments
+// even without an occupant; a successful rev resets it before the increment.
+// [orig: cveh @0x48D226..0x48D34E / @0x48D43D, cbik @0x486793..0x4869F5,
+// ctan @0x48AB5D..0x48AE48]
+void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &traits) {
+	auto &m = vehicle.veh;
+	if (m.settle_2f0 == 0) {
+		if (world_.registry.get(vehicle.primary_occupant) != nullptr && m.rev_sound_ticks > 124 &&
+				m.plat_airborne_ticks > 30) {
+			m.rev_sound_ticks = 0;
+			emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
+		}
+		const bool skid = (m.contact_direction[0] != 0 || m.contact_direction[1] != 0 ||
+								  m.contact_direction[2] != 0) &&
+				m.speed != 0 && (vehicle.flags & kEntityFlagInAir) == 0;
+		if (skid && !m.skid_sound_latched)
+			play_contact_sound(vehicle, traits, 25);
+		m.skid_sound_latched = skid;
+	}
+	++m.rev_sound_ticks;
+}
+
 // The claimant and lights edge lanes follow the continuous movement fold.
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, tail @0x48D34E..0x48D429;
 // Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B]
 void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
-    if (vehicle_family_uses_direct_air_mover(traits.family)) return;
-    const auto *profile = profile_for(world_, traits);
-    const bool lights = (vehicle.flags & 0x80u) != 0;
-    if (traits.family != VehicleFamily::Watercraft) {
-        if (lights && !vehicle.veh.light_sound_latched)
-            emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotAudio1);
-        vehicle.veh.light_sound_latched = lights;
-    }
-    if (!traits.player_control) return;
-    const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
-    if (occupant != nullptr) {
-        if (!vehicle.veh.engine_sound_latched) {
-            vehicle.veh.engine_sound_latched = true;
-            if (static_cast<int64_t>(to_fixed(occupant->position.z)) +
-                    occupant->eye_offset_z > world_.env.water_z)
-                emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStart);
-        }
-    } else if (vehicle.veh.engine_sound_latched) {
-        stop_ground_sound(vehicle, 0x18000);
-    }
+	if (vehicle_family_uses_direct_air_mover(traits.family))
+		return;
+	const auto *profile = profile_for(world_, traits);
+	const bool lights = (vehicle.flags & 0x80u) != 0;
+	if (traits.family != VehicleFamily::Watercraft || traits.physics == 0) {
+		if (lights && !vehicle.veh.light_sound_latched)
+			emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotAudio1);
+		vehicle.veh.light_sound_latched = lights;
+	}
+	if (!traits.player_control)
+		return;
+	const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
+	if (occupant != nullptr) {
+		if (!vehicle.veh.engine_sound_latched) {
+			vehicle.veh.engine_sound_latched = true;
+			if (static_cast<int64_t>(to_fixed(occupant->position.z)) + occupant->eye_offset_z >
+					world_.env.water_z)
+				emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStart);
+		}
+	} else if (vehicle.veh.engine_sound_latched) {
+		stop_ground_sound(vehicle, 0x18000);
+	}
 }
 
 // The helo start is a cold-rotor edge, not the generic ground claimant edge.
 // [orig: Entity_UpdateHeloRotorSpin @0x48FA70, start @0x48FAA1..0x48FB0C]
+// The helicopter's three simultaneous loops use rotor speed and climb intensity.
+// The aircraft caller runs this while the rotor coasts after its claimant leaves.
+// [orig: update_vehicle_effect_emissions @ 0x528F20;
+//  Entity_UpdateHeloRotorSpin @ 0x48FA70]
+void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &traits) {
+	if (((vehicle.flags | vehicle.engine_flags) & 2u) != 0)
+		return;
+	const auto *profile = profile_for(world_, traits);
+	if (profile == nullptr)
+		return;
+	const auto &p = profile->loop_params;
+	const int32_t ratio = std::min<int32_t>(
+			65536, static_cast<int32_t>(int64_t(vehicle.veh.part_spin.speed) * 65536 / 214748352));
+	int32_t lateral = 0;
+	if (ratio != 0) {
+		const int64_t vertical = magnitude_i32(vehicle.veh.slide_z);
+		const int32_t collective = vertical < 334 || traits.climb_speed == 0
+				? 0
+				: static_cast<int32_t>(vertical * 65536 / traits.climb_speed);
+		const int32_t product = static_cast<int32_t>(167772u * uint32_t(collective) + 128u);
+		lateral = (product >> 8) - 2048;
+	}
+	// Invalid ranges leave the destination untouched. The cruise volume reuses
+	// the medium-volume scratch word, including this authored-degenerate case.
+	// Keep the float reciprocal: even an exact upper endpoint loses one unit
+	// before the original ftol chop. [orig: interpolate_value_in_range @ 0x527EA0]
+	const auto interpolate = [](int32_t &out, int32_t current, int32_t start, int32_t end,
+									 int32_t low, int32_t high) {
+		if (start >= end)
+			return;
+		if (current < start) {
+			out = low;
+			return;
+		}
+		if (current > end) {
+			out = high;
+			return;
+		}
+		constexpr double scale = 1.5259021893143654e-05;
+		const double span =
+				(double(high >= low ? high : low) - double(high >= low ? low : high)) * scale;
+		const double range = (double(end) - start) * scale;
+		const double offset = span / range * ((double(current) - start) * scale) *
+				(high >= low ? -65535.0 : 65535.0);
+		out = static_cast<int32_t>(uint32_t(low) - uint32_t(static_cast<int32_t>(offset)));
+	};
+	int32_t scratch = 0, medium_pitch = 0, cruise_pitch = 0;
+	if (ratio <= p[1])
+		interpolate(scratch, ratio, p[0], p[1], 0, 65535);
+	else if (ratio <= p[2])
+		scratch = 65535;
+	else if (ratio <= p[3])
+		interpolate(scratch, ratio, p[2], p[3], 65535, 0);
+	const int32_t medium = scratch;
+	interpolate(medium_pitch, ratio, p[4], p[5], p[6], p[7]);
+	interpolate(scratch, ratio, p[8], p[9], 0, 65535);
+	interpolate(cruise_pitch, ratio, p[8], p[9], p[10], p[11]);
+	const auto volume = [](int32_t value) {
+		return static_cast<uint16_t>((255u * uint16_t(value) + 128u) >> 8);
+	};
+	const uint16_t medium_volume = volume(medium), cruise_volume = volume(scratch),
+				   lateral_volume = volume(std::min(lateral, 65535));
+	if (medium_volume == 0 && cruise_volume == 0 && lateral_volume == 0)
+		return;
+	const auto emit = [&](uint8_t lane, int slot, int32_t pitch, uint16_t level) {
+		const auto set = set_for_slot(profile, traits, slot);
+		if (!set.empty())
+			emit_emitter(world_, vehicle, lane, slot, set, pitch, level);
+	};
+	emit(21, 6, cruise_pitch, cruise_volume);
+	emit(11, 5, medium_pitch, medium_volume);
+	emit(1, 4, ratio, lateral_volume);
+}
+
 void VehicleSystem::play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits) {
-    if (!traits.player_control || vehicle.veh.part_spin.rate != 0 ||
-        vehicle.veh.part_spin.speed > 10737417 || vehicle.veh.engine_sound_latched ||
-        static_cast<int64_t>(to_fixed(vehicle.position.z)) + vehicle.eye_offset_z <=
-                world_.env.water_z)
-        return;
-    const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
-    if (occupant == nullptr) return;
-    // Retail anchors this one-shot on the pilot, whose sound pointer is passed
-    // with the pilot position, while selecting the vehicle's profile slot.
-    emit_profile_oneshot(world_, *occupant, profile_for(world_, traits), traits,
-                         audio::kSlotEngineStart);
+	if (!traits.player_control || vehicle.veh.part_spin.rate != 0 ||
+			vehicle.veh.part_spin.speed > 10737417 || vehicle.veh.engine_sound_latched ||
+			static_cast<int64_t>(to_fixed(vehicle.position.z)) + vehicle.eye_offset_z <=
+					world_.env.water_z)
+		return;
+	const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
+	if (occupant == nullptr)
+		return;
+	// Retail anchors this one-shot on the pilot, whose sound pointer is passed
+	// with the pilot position, while selecting the vehicle's profile slot.
+	emit_profile_oneshot(
+			world_, *occupant, profile_for(world_, traits), traits, audio::kSlotEngineStart);
 }
 
 void VehicleSystem::stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16) {
-    World &world = world_;
-    const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
+	World &world = world_;
+	const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
     if (traits == nullptr || !traits->player_control) return;
     const audio::SoundProfile *profile = profile_for(world, *traits);
     emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
@@ -351,12 +467,12 @@ void VehicleSystem::stop_ground_sound(Entity &vehicle, int32_t water_clearance_q
     emit_emitter(world, vehicle, kReverseLane, audio::kSlotSoundLoop1 + 2,
                  {}, 0, 0);
     vehicle.veh.reverse_sound_latched = false;
-    vehicle.veh.engine_sound_latched = false;
-    if (world.env.water_z == 0 ||
-        static_cast<int64_t>(to_fixed(vehicle.position.z)) + water_clearance_q16 > world.env.water_z) {
-        emit_profile_oneshot(world, vehicle, profile, *traits,
-                             audio::kSlotEngineStop);
-    }
+	vehicle.veh.engine_sound_latched = false;
+	if (world.env.water_z == 0 ||
+			static_cast<int64_t>(to_fixed(vehicle.position.z)) + water_clearance_q16 >
+					world.env.water_z) {
+		emit_profile_oneshot(world, vehicle, profile, *traits, audio::kSlotEngineStop);
+	}
 }
 
 } // namespace opennova::world

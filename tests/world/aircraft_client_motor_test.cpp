@@ -80,6 +80,36 @@ w::Entity *prime(Rig &r, bool engine_on) {
 // mirror reaches zero. A hull left alone settles from below and creeps from
 // above; "fixing" it into a symmetric damp changes every idle aircraft's
 // resting attitude [orig: @0x492213..0x492246].
+bool run_pilot_planar_drag() {
+	bool ok = true;
+	for (bool terminal : { false, true }) {
+		Rig r;
+		make_rig(r);
+		auto *heli = prime(r, true);
+		w::Entity pilot;
+		pilot.flags = terminal ? 0x100u : 0u;
+		pilot.mounted = true;
+		pilot.mount_target = r.heli;
+		pilot.mount_type = w::SeatType::Controller;
+		const auto pilot_h = r.world.registry.spawn(0, pilot);
+		w::Seat seat;
+		seat.type = w::SeatType::Controller;
+		seat.occupant = pilot_h;
+		heli->seats.push_back(seat);
+		heli->primary_occupant = pilot_h;
+		heli->veh.vel_x = 10240;
+		heli->veh.vel_y = -10240;
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
+		const int32_t once = (1019 * 10240 + 512) >> 10;
+		const int32_t neg_once = (-1019 * 10240 + 512) >> 10;
+		ok &= expect(heli->veh.vel_x == (terminal ? once : (1019 * once + 512) >> 10),
+				"pilot Flags 0x100 gates second positive planar drag");
+		ok &= expect(heli->veh.vel_y == (terminal ? neg_once : (1019 * neg_once + 512) >> 10),
+				"pilot Flags 0x100 gates second negative planar drag");
+	}
+	return ok;
+}
+
 bool run_airborne_rate_damp_is_asymmetric() {
 	bool ok = true;
 	// Large rates: the negative side decays one step further.
@@ -246,10 +276,187 @@ bool run_global_rate_clamp_binds() {
 	return ok;
 }
 
+bool run_gear_clearance_servo() {
+	Rig r;
+	make_rig(r);
+	w::Entity *h = prime(r, true);
+	r.traits.climb_speed = 0; // hold altitude while testing the threshold
+	h->veh.ground_cache = w::to_fixed(55.0f);
+	h->veh.gear_phase = 0;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	bool ok = expect(h->veh.gear_phase == 1598, "five-unit clearance retracts gear");
+	h->veh.gear_phase = 65500;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.gear_phase == 65535, "gear retract caps at unsigned max");
+	h->veh.ground_cache = w::to_fixed(55.01f);
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.gear_phase == 65535 - 1598, "below five units extends gear");
+	h->veh.gear_phase = 10;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.gear_phase == 0, "gear extension caps at zero");
+	return ok;
+}
+
+w::Entity *add_pilot(Rig &r, w::Entity &h) {
+	w::Entity seed;
+	seed.kind = w::EntityKind::Organic;
+	seed.health = 100;
+	seed.player_class = 1;
+	seed.mounted = true;
+	seed.mount_target = h.handle;
+	seed.mount_type = w::SeatType::Controller;
+	const auto handle = r.world.registry.spawn(0, seed);
+	w::Seat seat;
+	seat.type = w::SeatType::Controller;
+	seat.retail_slot = 8;
+	seat.occupant = handle;
+	h.seats.push_back(seat);
+	h.primary_occupant = handle;
+	h.health = 100;
+	h.has_item_def = true;
+	h.item_attrib = 0x40;
+	r.traits.player_control = true;
+	r.world.cached.local_player = handle;
+	return r.world.registry.get(handle);
+}
+
+bool run_collective_and_view_boundaries() {
+	Rig r;
+	make_rig(r);
+	w::Entity *h = prime(r, true);
+	w::Entity *pilot = add_pilot(r, *h);
+	r.traits.climb_speed = 0;
+	r.traits.player_speed = 10000;
+	r.world.ai.is_authority = true;
+	h->veh.net_predicted = false;
+	h->veh.part_spin.speed = w::kRotorSpeedMax;
+	r.world.logic_tick = 1;
+	h->bound_radius = 1;
+	h->position.z = 60.5f; // near ground, above the grounded servo threshold
+	h->veh.ground_cache = w::to_fixed(59.0f);
+	h->veh.net_alt_target = w::to_fixed(80.0f);
+	h->veh.net_climb = w::to_fixed(3.0f);
+	pilot->analog_throttle = 64;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	bool ok = expect(h->veh.net_climb == 3 * 65536 - 8192,
+			"near-ground analog collective changes retained climb");
+	ok &= expect(h->veh.net_alt_target == 62 * 65536 - 8192,
+			"near-ground altitude reconciles from climb, not old absolute target");
+	pilot->net_move_input = 0x80;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.net_climb == 3 * 65536 + 8192,
+			"keyboard collective takes precedence over fourth analog axis");
+	// At precisely two radii the input writes absolute altitude first.
+	h->position.z = 61;
+	h->veh.net_alt_target = 70 * 65536;
+	h->veh.net_climb = 65536;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.net_climb == 11 * 65536 + 16384,
+			"two-radius equality takes the absolute-altitude input arm");
+	// Zero climb parks commands even with cyclic keys held.
+	h->position.z = 60.5f;
+	h->veh.net_climb = 1;
+	pilot->net_move_input = 0x40 | w::Entity::kMoveOrderMoving;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.net_climb == 0 && h->veh.net_alt_target == 59 * 65536 - 16384 &&
+					h->veh.cmd_speed == 0 && h->veh.cmd_lateral_speed == 0,
+			"zero climb parks target below ground and clears cyclic commands");
+	const int index = r.world.ai.attach(pilot->handle);
+	r.world.ai.at(index)->pitch = w::bam_from_degrees_wrapped(-60.0);
+	h->veh.air_pitch_bam = 0;
+	h->veh.view_tilt_bam = 0;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.view_tilt_bam == -3848520, "pilot view tilt uses doubled limit step");
+	h->veh.view_tilt_bam = -298261599;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	ok &= expect(h->veh.view_tilt_bam == -298261600, "pilot view tilt lower clamp");
+	return ok;
+}
+
+bool run_dead_hull_skips_live_servos() {
+	Rig r;
+	make_rig(r);
+	w::Entity *h = prime(r, true);
+	h->flags |= w::kEntityFlagDead;
+	h->veh.air_pitch_rate = 12345;
+	h->veh.slide_z = 2345;
+	h->veh.gear_phase = 123;
+	const auto position = h->position;
+	r.world.vehicles.aircraft_client_tick(*h, r.traits);
+	return expect(h->position.z == position.z && h->veh.air_pitch_rate == 12345 &&
+					h->veh.slide_z == 2345 && h->veh.gear_phase == 123,
+			"dead aircraft skips live motion, rate damping and gear");
+}
+
+bool run_flare_roles_and_seat_cadence() {
+	Rig r;
+	make_rig(r);
+	w::Entity *h = prime(r, true);
+	w::Entity *pilot = add_pilot(r, *h);
+	r.world.ai.attach(h->handle);
+	auto *body = r.world.ai.for_handle(h->handle);
+	body->profile.type = 1;
+	r.world.tables.ammo.entries.resize(3);
+	for (int i = 1; i <= 2; ++i) {
+		auto &ammo = r.world.tables.ammo.entries[i];
+		ammo.valid = true;
+		ammo.name = i == 1 ? "FLARE" : "GROUND_FLARE";
+		ammo.velocity = 10;
+		ammo.max_age_ticks = 62;
+		ammo.flags = w::kAmmoFlagNoGravity;
+	}
+	r.traits.flare_points = { { { 65536, 0, 0 }, { 65536, 0, 0 } },
+		{ { -65536, 0, 0 }, { -65536, 0, 65536 } } };
+	r.world.vehicles.traits.set(h->item_id, r.traits);
+	w::Entity passenger = *pilot;
+	passenger.net_move_input = 0x20;
+	const auto rider = r.world.registry.spawn(0, passenger);
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	seat.retail_slot = 0;
+	seat.occupant = rider;
+	h->seats.push_back(seat);
+	h->veh.net_climb = 65536;
+	r.world.logic_tick = 1;
+	r.world.vehicles.tick_flare_input(*h);
+	bool ok = expect(r.world.out.rounds.count == 2, "two authored flare points fire");
+	const auto first = r.world.out.rounds.records[0];
+	ok &= expect(first.origin_x == 101 * 65536 && first.origin_y == 200 * 65536 &&
+					first.dir_pitch > 0 && first.adm_index == 1 && first.mode_flags == 1,
+			"flare uses model point, zero-Z direction lift, and ammo-indexed fire");
+	r.world.vehicles.tick_flare_input(*h);
+	ok &= expect(r.world.out.rounds.count == 2, "held passenger flare input is latched");
+	r.world.logic_tick = 64;
+	r.world.vehicles.tick_flare_input(*h);
+	ok &= expect(r.world.out.rounds.count == 4, "64-phase cadence rearms held flare input");
+	r.world.rules.mp_session = true;
+	r.world.rules.logic_authority = false;
+	r.world.vehicles.release_flares(*h);
+	ok &= expect(r.world.out.source_fires.size() == 2 && r.world.out.rounds.count == 4,
+			"local pilot queues flare uplink without authority ring duplication");
+	r.world.cached.local_player = {};
+	r.world.vehicles.release_flares(*h);
+	ok &= expect(
+			r.world.out.source_fires.size() == 2, "remote client does not originate flare rounds");
+	r.world.rules.mp_session = false;
+	body->profile.type = 2;
+	r.traits.flare_points.clear();
+	r.world.vehicles.traits.set(h->item_id, r.traits);
+	r.world.vehicles.release_flares(*h);
+	ok &= expect(r.world.out.rounds.count == 5 && r.world.out.rounds.records[4].adm_index == 2 &&
+					r.world.out.rounds.records[4].origin_x == 100 * 65536,
+			"ground profile selects GROUND_FLARE with origin fallback");
+	return ok;
+}
+
 } // namespace
 
 int main() {
-	bool ok = true;
+	bool ok = run_collective_and_view_boundaries();
+	ok &= run_dead_hull_skips_live_servos();
+	ok &= run_flare_roles_and_seat_cadence();
+	ok &= run_gear_clearance_servo();
+	ok &= run_pilot_planar_drag();
 	ok &= run_airborne_rate_damp_is_asymmetric();
 	ok &= run_grounded_damps_twice_as_hard();
 	ok &= run_sideslip_pitch_two_gain_pick();

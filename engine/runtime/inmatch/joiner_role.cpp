@@ -208,6 +208,8 @@ bool JoinerRole::queue_mount_toggle() {
 	world::World &world = kernel_->world;
 	const world::Entity *player = kernel_->local.player();
 	if (player == nullptr || !player->alive || player->health <= 0) return false;
+	if (player->mounted && world.script.wac_values.seatbelt != 0)
+		return false;
 	world::VehicleSeatSelection hit;
 	// Mounted Use first scans for an alternative seat, then falls back to
 	// detach. Both requests wait for the host echo; neither edits L here.
@@ -328,7 +330,39 @@ void JoinerRole::tick_local_weapon() {
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
-	if (io.fired.valid) {
+	std::vector<world::LocalWeaponFiredWire> fires;
+	if (io.fired.valid)
+		fires.push_back(io.fired);
+	// Countermeasures use the same sequence and descriptor path as the local
+	// weapon. Their launch effects already ran at the vehicle input boundary.
+	// [orig: Weapon_FireProcess @0x53F5B0 -> Entity_FireWeaponAndSendPacket @0x42BD80]
+	for (auto &params : kernel.world.out.source_fires) {
+		const world::AiEntity *pilot = kernel.world.ai.for_handle(params.owner);
+		if (pilot == nullptr)
+			continue;
+		params.shot_seq = ++lp.weapon.round_sequence;
+		params.shooter_handle = self_wire_handle_;
+		params.shooter_carrier_handle = io.carrier_exclusion();
+		kernel.world.round_sim.spawn(kernel.world, params, world::RoundConsequenceMode::VisualOnly);
+		world::LocalWeaponFiredWire fired;
+		fired.valid = true;
+		fired.shot_seq = params.shot_seq;
+		fired.ammo_index = params.ammo_index;
+		fired.adm_index = params.adm_index;
+		fired.round.origin_x = world::to_fixed(params.origin.x);
+		fired.round.origin_y = world::to_fixed(params.origin.y);
+		fired.round.origin_z = world::to_fixed(params.origin.z);
+		fired.round.dir_yaw = params.dir_yaw_bam;
+		fired.round.dir_pitch = params.dir_pitch_bam;
+		fired.round.mode_flags = 1;
+		for (int axis = 0; axis < 3; ++axis)
+			fired.shooter_pose[axis] = pilot->pos[axis];
+		fired.shooter_pose[3] = pilot->heading;
+		fired.shooter_pose[4] = pilot->pitch;
+		fires.push_back(fired);
+	}
+	kernel.world.out.source_fires.clear();
+	for (const auto &fired : fires) {
 		// The client-side half of Entity_FireWeaponAndSendPacket: the pump
 		// predicted the round; queue the fixed C2S 0x06 descriptor. The pose
 		// helper writes full XYZ, rounded Yaw/Pitch high words, and retail's
@@ -337,8 +371,8 @@ void JoinerRole::tick_local_weapon() {
 		// [orig: @0x42A62F/@0x42A6A1..0x42A890]
 		opennova::ClientFiredRound fire;
 		fire.shooter_handle = self_wire_handle_;
-		fire.fire_flags = io.fired.round.mode_flags;
-		fire.adm_index = io.fired.adm_index;
+		fire.fire_flags = fired.round.mode_flags;
+		fire.adm_index = fired.adm_index;
 		fire.target_handle = 0xFFFF;
 		// hit_part is NOT a bare sequence: it is
 		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
@@ -360,8 +394,7 @@ void JoinerRole::tick_local_weapon() {
 		// comment ALSO blamed it for a retail host's own first-person weapon
 		// reacting to our shots; that was WRONG, and the symptom survived this
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
-		fire.hit_part = opennova::pack_fired_round_hit_part(
-				rt.local_player_slot(), io.fired.shot_seq);
+		fire.hit_part = opennova::pack_fired_round_hit_part(rt.local_player_slot(), fired.shot_seq);
 		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
 		// into g_ammoDefTable (stride 276). The host stores it onto the remote
 		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
@@ -372,24 +405,23 @@ void JoinerRole::tick_local_weapon() {
 		// the writer's parameter is a char @0x42a7da and the receiver reads one
 		// byte @0x51347d — so indices >= 256 are untransmittable by design.
 		// We shipped 0 here until 2026-07-26 (D-WPN-8).
-		fire.extra_byte1 = io.fired.ammo_index >= 0
-				? static_cast<uint8_t>(io.fired.ammo_index)
-				: uint8_t(0);
-		fire.extra_byte2 = io.fired.round.subtype;
-		fire.misc_byte = io.fired.charge;
+		fire.extra_byte1 =
+				fired.ammo_index >= 0 ? static_cast<uint8_t>(fired.ammo_index) : uint8_t(0);
+		fire.extra_byte2 = fired.round.subtype;
+		fire.misc_byte = fired.charge;
 		const std::array<int32_t, 5> fire_pose = {
-				io.fired.round.origin_x,
-				io.fired.round.origin_y,
-				io.fired.round.origin_z,
-				io.fired.round.dir_yaw,
-				io.fired.round.dir_pitch,
+			fired.round.origin_x,
+			fired.round.origin_y,
+			fired.round.origin_z,
+			fired.round.dir_yaw,
+			fired.round.dir_pitch,
 		};
 		const std::array<int32_t, 5> shooter_pose = {
-				io.fired.shooter_pose[0],
-				io.fired.shooter_pose[1],
-				io.fired.shooter_pose[2],
-				io.fired.shooter_pose[3],
-				io.fired.shooter_pose[4],
+			fired.shooter_pose[0],
+			fired.shooter_pose[1],
+			fired.shooter_pose[2],
+			fired.shooter_pose[3],
+			fired.shooter_pose[4],
 		};
 		opennova::set_client_fired_round_pose(fire, fire_pose, shooter_pose);
 		rt.queue_fired_round(fire);

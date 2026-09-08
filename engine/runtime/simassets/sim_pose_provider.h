@@ -152,9 +152,13 @@ public:
 			int32_t out[3]) override;
 	bool resolve_userpoint_rigid(world::World &world, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
+	bool resolve_userpoint_pivot(world::World &world, world::EntityHandle entity,
+			int userpoint_index, int32_t out[3]) override;
 	bool resolve_userpoint_transform(world::World &world,
 			world::EntityHandle entity, int userpoint_index,
 			int32_t out[6]) override;
+	bool resolve_named_transform(
+			world::World &, world::EntityHandle, const char *name, int32_t out[6]) override;
 	uint64_t muzzle_query_count() const { return muzzle_queries_; }
 	uint64_t muzzle_resolve_count() const { return muzzle_resolves_; }
 
