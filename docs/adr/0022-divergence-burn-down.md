@@ -134,11 +134,15 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 
 - **D-VEH-2** — water-ring removal clears the vacated tail of the compacted
-  128-slot bank. Retail leaves the last active row duplicated when a full
-  bank expires, so the same-index expiry loop can fail to terminate.
-  Clearing the tail preserves all surviving rings and bounds retirement;
-  the saturation regression covers all 128 slots. Accepted as the bounded
-  implementation of the existing lifetime contract (PR #640, 2026-09-07).
+  128-slot bank. Retail's `sub_5DDDB0 @0x5DDDB0` zeroes the removed slot and
+  shifts the suffix down without ever clearing slot 127 (`@0x5DDDCB..0x5DDDFC`),
+  and `sub_5DDE10 @0x5DDE10` steps its cursor back onto the removed index
+  (`@0x5DDEAD..0x5DDEC0`), so a full bank whose duplicated last row expires is
+  re-copied and re-expired forever. Clearing the tail preserves all surviving
+  rings and bounds retirement; the saturation regression covers all 128 slots.
+  **Proposed in PR #640 (2026-09-07) as the bounded implementation of the
+  existing lifetime contract; requires maintainer ratification at merge — no
+  sign-off has been recorded yet.**
 
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not

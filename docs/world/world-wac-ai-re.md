@@ -390,12 +390,18 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     through the same shared body since 2026-08-17 (`InfantryState::begin_weapon_transition`
     mirrors `begin_body_transition`; §14.8 blend window).
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
-    partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
+    driven. Commands 123/124/125 authored spawn attachment resolve `wp_number` as the
     target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
     mount occupants already authored near a binding-provided seat, render `UseGun`/gunner seats with
     `anim_emplaced` plus available variants (00TRa class), and carry a UseGun occupant at the live
-    control-posed parent userpoint. Remaining gaps: staged E/S/G/H walk-to-seat, 126/127,
-    child-seat traversal, true bone-transform follow for non-UseGun seats, and driver-lean poses.
+    control-posed parent userpoint. PR #640 (re-grilled 2026-09-08) ported the staged E/G/S/H
+    walk-to-seat, 126/127, child-seat traversal, the non-UseGun full-basis follow, the can't-enter
+    arm and driver lean 107..110 (vehicle-client-movers-re §36). Remaining (the ledger row carries
+    the addresses): the scripted organic escort offsets 11000/12000/12001; the `+0x369` path-state
+    byte's 1/2/3 progression and clear in the unported `ai_find_cover_position @0x4afab0` /
+    `CAIPath_FindPath @0x409580` consumer (the reimpl models nonzero-ness only); the S-point side
+    writes `+0x184` / `+0x2FC..+0x304` `@0x4BB840..0x4BB852` (no reader witnessed); and the
+    driver-lean roll thresholds for states 109/110 (not re-witnessed).
   - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
     ground probes, triggers, and landing. Water/swim transitions remain; CL climb locomotion
     LANDED with the **D-COL-5** port 2026-08-15 (§30). The vertical capsule-bottom settle is **D-INF-6**
@@ -2821,7 +2827,10 @@ recorded-not-applied rel-ops — plus `AI_UpdateWaypointMovement` / `AI_UpdateMo
 ### 16.5 Open follow-ups (this session's unknowns)
 
 4. `Entity_ProcessInfantryWeaponFire @ 0x471710` is wired as the **state-8 tick**
-   (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — identity/misname unresolved.
+   (`@ 0x8152bc`, HELO enum range) yet named "Infantry" — RESOLVED 2026-09-08: it is
+   the aircraft brain's weapon-fire leg (the IDB name is a misnomer and is kept; the
+   PR #640 alias `AI_UpdateAircraftCombat` never existed in the IDB) — ported in
+   `ai_aircraft.cpp`, vehicle-client-movers-re §26.
 7. `AI_FindBestTarget @ 0x465a50` (variant A, `profile+16 == 1` classes).
 
 ### 16.6 IDB write-backs (2026-07-16, saved)
@@ -5024,7 +5033,7 @@ the motor consumes, and a degree round-trip therefore cannot quantize yaw or fre
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-11 | FIXED in PR #640: live-eye proximity scan, carried-gun/root occupancy, original all-type hull LOS and label exclusions, WAC seatbelt, 64-tick upgrade, full admission and E/G/S/H entry walk, child-seat selection, posed carrier follow and profile-driven vehicle brains. | `Entity_FindNearestSeatOrArmory @ 0x435D50`; `Entity_CanEnterVehicle @ 0x435480`; `Entity_UpdateInfantryAI @ 0x4B9910`; `Entity_InitVehicleAI @ 0x460200`. | Native boarding, collision, mission, profile and WAC regressions; see vehicle-client-movers-re section 36. |
+| D-AI-11 | FIXED in PR #640: live-eye proximity scan, carried-gun/root occupancy, original all-type hull LOS and label exclusions, WAC seatbelt, 64-tick upgrade, full admission and E/G/S/H entry walk, child-seat selection, posed carrier follow and profile-driven vehicle brains. 2026-09-08 review: the vehicle-class brain machine, its class key and the brain lifetime are ported (vehicle-client-movers-re §26.1); vehicle-AI residuals noted at the review ride D-NET-161 (e)..(g). | `Entity_FindNearestSeatOrArmory @ 0x435D50`; `Entity_CanEnterVehicle @ 0x435480`; `Entity_UpdateInfantryAI @ 0x4B9910`; `Entity_InitVehicleAI @ 0x460200`. | Native boarding, collision, mission, profile and WAC regressions; see vehicle-client-movers-re section 36. |
 
 Correspondence adds: see the rows appended to the section-2 map this session
 (the toggle chain, the four predicates, `vehicle_ai_drive`, the deploy stamp).

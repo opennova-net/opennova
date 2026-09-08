@@ -3049,6 +3049,41 @@ The receiver at `@0x513310` keeps the claimed full fire pose in `dest[4..8]` and
 `dest[10..14]` from its current shooter pose plus those words; the latter feeds the
 moving-carrier re-anchor paths in `Server_ClientFiredRound`.
 
+**The COUNTERMEASURE producer (witnessed 2026-09-08, PR #640 review).**
+`Weapon_FireProcess @ 0x53f5b0` takes the vehicle's `occupantEntity` (+0x170, the
+pilot) as the shooter `@ 0x53f6d6` and calls `Entity_FireWeaponAndSendPacket(aim,
+occupant, aiRuntime->f0_7[3], targetId=1, ammoDefIndex, weaponSlot=0)` `@ 0x53f70a`,
+so for a flare: off6 = 1 (the ammo-def arm), off7 = the FLARE ammo-def index
+(`g_ammoDefTable` stride 276), off28 = the pool-resolve of the VEHICLE's
+`aiRuntime[3]` (0xFFFF when none) `@ 0x42a70d`, off32 = the PILOT's `entity+352`
+(his handheld ammo-def index) `@ 0x42c052` → `@ 0x42a7da`, off33 = `fire_flags` =
+`Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)` `@ 0x42bdd6..0x42bdf9`
+where a seated pilot (parentSlot 2 or 5) fails `Player_CanFireWeapon
+@ 0x5cf7a8..0x5cf7b6`, so `can_fire = 0` and the helper returns its default 12
+`@ 0x422fd1`/`@ 0x422fd5` → off33 = 0x0C, off34 = 0 (weaponSlot). On a joiner the
+packet ships only when the pilot is the local player (`@ 0x53f6f4`). Reimpl:
+`JoinerRole::tick_local_weapon`'s `source_fires` leg stamps the pilot's handheld
+ammo index (off32) and subtype 12 (off33); pin
+`inmatch_joiner_role::run_flare_descriptor_carries_the_pilot_handheld`. Still
+0xFFFF on our side: off28 (ledger D-NET-161 (c)).
+Generic-producer gaps recorded under D-WPN-8 (pre-existing, not this PR): off33 —
+the reimpl sends `round.subtype` (12 on the on-foot hip-fire leg, 0 on
+settled-FP/mounted legs, never bit 0x80) where retail sends the
+`Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)` composition
+(`Player_CanFireWeapon @ 0x5cf780` gates: EquippedSlot null → 0, parentSlot 2/5 → 0,
+Flags & 0x2002 → 0, `g_camera_mode` → 0, MoveOrder & 8 without gunner scope → 0, not
+scoped and not gunner-scoped → 0, submerged → 0; `Weapon_GetScopeZoomLevel
+@ 0x422fc0`: weaponActive && Def->Flags & 3 → `fireInterval != -1 ? 0 :
+clamp((dword_B76808 + range/2) / range, 0..39)` with range = `(Def+0x9C) << 16` or
+1638400 when zero); off32 for a MOUNTED GUNNER — the reimpl reads
+`by_index(equipped_adm_index)->ammo_index` after `bind_use_gun_slot` swapped the
+adm to the vehicle weapon's, where retail's `entity+352` is written only by
+`WeaponSlot_InitFromEntityDef @ 0x54673b` (from `Entity_InitBoneReferences
+@ 0x441482` / `Entity_InitInfantryBoneData @ 0x49017b`), `PlayerClass_InitEntity
+@ 0x4b1105` (seed 3) and the host store in `Server_ClientFiredRound @ 0x50bd48` —
+i.e. it stays the handheld's (a handheld-switch restamp was not witnessed; a full
+write-xref sweep of `+0x160` is still owed).
+
 **Cross-witness against `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`:**
 - f=2057 (adm=7, fire_flags=0x02): `tick=15532061 pos=(-444.8, -413.2, 14.5) hit_part=1025`.
 - f=2061 (adm=7, +7 ticks ≈ 113 ms): `tick=15532068`, hit_part increments to 1026 — read at the
@@ -12528,15 +12563,19 @@ ground drowning, rotor startup/gate timing, mover turret slew, tank track
 phases, renderer-selected suspension/track/gun controls and engine/light
 sound edges are ported. See
 [vehicle-client-movers-re section 11](../world/vehicle-client-movers-re.md#section-11-health-turret-state-animation-ownership-and-sound-edges-2026-09-07).
-D-NET-161 is FIXED by PR #640. Vehicle-client-movers-re sections 12 through 33
-complete model contact, traction, force/crash/death state, renderer controls,
-selector-zero craft, amphibious dispatch, mounted/AI controls, carrier pose,
-respawn markers, trails, rotor wash and water rings. D-SND-17 and D-ITEM-15
-close with their sound and wreck-bank consumers. The dated history below
+PR #640 ported D-NET-161's scope; the 2026-09-08 review then re-grilled it and
+left the row OPEN, narrowed to the witnessed residuals (a)..(h) listed in the
+ledger row and in the 2026-09-07/08 update below. Vehicle-client-movers-re
+sections 12 through 37 complete model contact, traction, force/crash/death
+state, renderer controls, selector-zero craft, amphibious dispatch, mounted/AI
+controls, carrier pose, respawn markers, trails, rotor wash and water rings.
+D-ITEM-15 closes with its wreck-bank consumers; D-SND-17 is likewise OPEN but
+narrowed (the tank fold's extra-effect argument and the sound-ready gate). The
+dated history below
 records earlier port boundaries; current coverage is the vehicle record's
 verdict table.
 
-**D-NET-161** [FIXED 2026-09-07, PR #640; historical ground-core account below] **The host
+**D-NET-161** [OPEN — narrowed 2026-09-08 at the PR #640 review: the ledger row lists the unported residuals (a)..(h) with addresses; the PR #640 port summary and the historical ground-core account follow] **The host
 never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the
 §5.13 drive-authority subsection for the witness). Ported: the items.def physics-property
 block (engine/formats/def, scaled at parse per `ItemDef_ParsePhysicsProperty @ 0x49d870` — turn rates
@@ -12632,6 +12671,32 @@ ground boarders hold, helo AI flight, helo health machine), `watercraft_client_m
 flare scan, the pilot analog collective and the pilot yaw follow of the burn spiral, the
 spawn-parent (+0x264) anchor lift, the run-over player gates (+0x124 / the spectator
 slot byte +0x188D7), the FX/sound seams of every leg above.
+2026-09-07/08 update (PR #640 + its review; vehicle-client-movers-re sections 11
+through 37): PORTED — the selector-zero ground/boat movers and the amphibious
+dispatch (`Entity_DispatchPhysicsUpdate @ 0x48F010`), model-probe contacts and
+impact response, traction/slip/pivot (the off-contact and crashed arms re-grilled
+`@ 0x48CE02..0x48D003` / `@ 0x48A684..0x48A81F` / `@ 0x4861F6..0x4863D5`), the
+family springs/chassis/lean (bike `Entity_SmoothHeadingToTarget @ 0x45B2C0`, boat
+`Vehicle_UpdateTurretRotation @ 0x45AEA0`), the moving-support follow, the
+vehicle-class brain machine (`EntityAI_ProcessVehicleStateMachine @ 0x4583C0`:
+client tick gate cur 21/23 `@ 0x458545..0x45854d`, client commit pend 16 or 21..23
+`@ 0x458579..0x458586`, keyed by items.def `ai_function` through
+`g_EntityClassEventCallbackTable @ 0x813000` / `Entity_LookupRenderCallbacks
+@ 0x407DC0`) and the brain lifetime (`Entity_Destroy @ 0x43E810` /
+`Entity_InitVehicleAI @ 0x460200`), the aircraft flare scan + the pilot analog
+collective + the pilot yaw follow of the burn spiral (`@ 0x4904A6..0x4904D0`), the
+spawn-parent `+0x264` anchor (`Game_StartMission @ 0x525F80..0x526071`),
+death/respawn, the movement-sound tails and the rotor/wreck presentation.
+Residuals witnessed at the review and NOT ported (the ledger row is
+authoritative): (a) the bike's not-crashed off-contact launch-vector arm
+`@ 0x4863DA..0x48657E`; (b) the pool-3 spawn-marker deck localization
+`Game_StartMission @ 0x525E6D..0x525F58`; (c) the flare C2S 0x06 off28 target
+(retail: the vehicle's `aiRuntime[3]`, `Weapon_FireProcess @ 0x53f6f6..0x53f70a` —
+§5.16); (d) the selector-zero boat's part-spin call `@ 0x47004B..0x4700F5`; (e)
+`Entity_CalcAverageGroundHeight @ 0x457230`'s per-tap ray kinds; (f) the
+`entity+684` brain-step mirror `@ 0x458568`/`@ 0x4585b4`; (g) the brain machine
+for non-vehicle-class pool-1 brains (ewep row `@ 0x8130a8`); (h) the 2026-09-01
+run-over player gates, unchanged.
 
 **D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
 learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire

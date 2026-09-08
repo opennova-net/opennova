@@ -11,22 +11,27 @@ is [net-re section 5.38e](../net/novaworld-net-re.md).
 
 Sections 1 through 10 retain the dated instruction-level research and the boundaries
 of the earlier client-only ports. Their historical deferred/unported labels
-are superseded by sections 11 through 36 and the current table below. D-NET-161,
-D-SND-17 and D-ITEM-15 are FIXED by PR #640. D-NET-196 retains its separate
-organic body-conform and authority-smoothing scope. D-VEH-2 records the
-bounded water-ring retirement correction.
+are superseded by sections 11 through 37 and the current table below. PR #640
+ported the vehicle families end to end; its 2026-09-08 review re-grilled the
+traction, lean, selector-zero, aircraft-brain, sound and dispatcher legs (the
+corrections are listed under "PR #640 review corrections" below). D-ITEM-15 and
+D-AI-11 are FIXED; D-NET-161 and D-SND-17 are OPEN but narrowed to the residuals
+the review witnessed and did not port (the ledger rows carry them with
+addresses). D-NET-196 retains its separate organic body-conform and
+authority-smoothing scope. D-VEH-2 records the bounded water-ring retirement
+correction — proposed in PR #640, pending maintainer ratification at merge.
 
 ## Verdicts
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor |
-| Model contacts, springs, traction, chassis and carrier motion | Ported | Sections 12 through 15, 19 through 20, 22 through 23, 27; collision, vehicle_suspension, vehicle_mount |
-| Occupancy, AI, death and respawn state | Ported | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount |
+| Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction (open: the selector-zero boat part-spin call, D-NET-161 (d)) | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor |
+| Model contacts, springs, traction, chassis and carrier motion | Ported (open: the bike not-crashed off-contact launch-vector arm, D-NET-161 (a)) | Sections 12 through 15, 19 through 20, 22 through 23, 27; collision, vehicle_suspension, vehicle_mount |
+| Occupancy, AI, death and respawn state | Ported (open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the `entity+684` mirror, the emplacement brain dispatch — D-NET-161 (b), (e), (f), (g)) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount |
 | Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
-| Ground/boat/aircraft sound and contact edges | Ported | Sections 11 through 13, 29, 32 through 33; vehicle_motor, ambient_mixer, mission_audio |
+| Ground/boat/aircraft sound and contact edges | Ported (open: the tank fold's extra-effect argument and the sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
 | Wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings | Ported | Sections 28 through 29, 32; destruction, vehicle_part_anim, vehicle_trail_present_pass, shader_resource_contract |
-| Full water-ring bank expiry | PERMANENT bounded-pool correction | D-VEH-2; saturated 128-slot retirement regression; ADR 0022 |
+| Full water-ring bank expiry | PERMANENT bounded-pool correction (proposed in PR #640, requires maintainer ratification at merge) | D-VEH-2; saturated 128-slot retirement regression; ADR 0022 register entry |
 
 ---
 
@@ -592,9 +597,12 @@ is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
   `AI_CheckVehicleStuckState @ 0x465290` (deferred), lights off, state 22.
   Both legs fall into the steer integrator @ 0x48E82C (§3, the ported core).
 
-Deferrals staying with D-NET-161: the every-8th-tick groundEntity refresh
-[@ 0x48D51F] + deck-carrier follow, the fire-FX leg (health is ported in section 11), the [135]
-mirror, and the wake-anim lerp. Ported 2026-09-01: the MoveOrder merge (the
+Deferrals that stayed with D-NET-161 at the time: the fire-FX leg (health is
+ported in section 11), the [135] mirror, and the wake-anim lerp. The
+every-8th-tick groundEntity refresh [@ 0x48D51F] + deck-carrier follow are
+PORTED (section 15, `vehicle_contact.cpp`, phase `(current_tick + 36*DcbId) & 7`;
+the "deferred" label that stood here was stale at the 2026-09-08 review).
+Ported 2026-09-01: the MoveOrder merge (the
 occupant's own word, wire-visible in the echo), the submerged-driver cut
 (`watercraft_driver_submerged` — a body with no derived eye height keeps the
 wheel), the minAI clamp (`AiSystem::apply_min_ai_crew_clamp`), the boarding-wait
@@ -609,15 +617,18 @@ The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
 (ai_waypoints.cpp) + the authority legs of `aircraft_client_tick`
 (vehicle_motor_air.cpp). Block map, in retail order:
 
-1. **Health machine** [@ 0x4903F0..0x490480, on the `(tick + 9*DcbId) & 0x3F`
-   cadence]: above `criticalHp` (+0x180) the hull regens `nonCriticalRegen`
-   (+0x184) while `Health < healthMax − regen` [@ 0x4903f9..0x49042d]; at or
-   below it the hull BURNS `criticalDrain` (+0x182) per cadence
-   [@ 0x490434..0x490480] and, airborne (Flags 0x2000) with `[524] − ground >
-   1 u`, `Yaw −= 2886390` every tick — the tail-rotor spiral [@ 0x49048e..
-   0x4904be; the pilot's own Yaw follows unless free-looking — a look write the
-   client owns, deferred]. Smoke (`Health < healthMax/4`) and fire emitters +
-   the every-64th-tick fire sound are presentation seams.
+1. **Health machine** [@ 0x4903F0..0x490480, on the `(tick + 36*DcbId) & 0x3F`
+   cadence — `lea eax,[eax+eax*8]` @0x490334 then `lea ecx,[ecx+eax*4]`
+   @0x490340; the decompiler's `tick[9*DcbId]` was pointer scaling, not a
+   nine-tick stagger (corrected 2026-09-08)]: above `criticalHp` (+0x180) the
+   hull regens `nonCriticalRegen` (+0x184) while `Health < healthMax − regen`
+   [@ 0x4903f9..0x49042d]; at or below it the hull BURNS `criticalDrain`
+   (+0x182) per cadence [@ 0x490434..0x490480] and, airborne (Flags 0x2000)
+   with `[524] − ground > 1 u`, `Yaw −= 2886390` every tick — the tail-rotor
+   spiral [@ 0x49048e..0x4904be; the pilot's own Yaw follows unless
+   free-looking — `@0x4904a6..0x4904d0`, PORTED in section 16 as
+   `turn_pilot_view(world, *pilot, -2886390)`]. Smoke (`Health < healthMax/4`)
+   and fire emitters + the every-64th-tick fire sound are presentation seams.
 2. **Rotor gate** [@ 0x490592..0x4905a6]: `updated = Health > 0 && !(Flags & 1)
    ? Entity_UpdateHeloRotorSpin(...) : 0`, whose return is `!is_authority ||
    speed >= 0x0CCCCCC0`; at LABEL_328 [@ 0x491ca7..0x491cc2] a false `updated`
@@ -3816,15 +3827,18 @@ complete mission-level vehicle parity.
 |---|---|
 | `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, phase `@ 0x48AF24..0x48AF2D`, health `@ 0x48AFFD..0x48B083`; boat `@ 0x48D561..0x48D616`; aircraft `@ 0x4903F4..0x490480` | All families use `(tick + 36 * DcbId) & 63`, authority only. Above critical HP, regeneration requires `health < max - regen` strictly. At/below critical HP, criticalDrain floors at zero. The x9 LEA is scaled by four again: the decompiler's `tick[9 * id]` is not a nine-tick offset. Boat health runs before authority-only capsize damage. |
 | `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, drain `@ 0x48D05A..0x48D083` | Ground/bike/tank lose two HP per submerged authority tick. Boat flag 0x8000 means normal afloat operation and must not use this drain. The attacker-slot clear at death remains unmodeled. |
-| `[orig: Entity_UpdateAircraftPhysics @ 0x490310]`, `@ 0x490459..0x4904A6` | The burning hull's -2886390 BAM yaw step shares the authority 64-tick cadence. The separate pilot-yaw follow remains unported. |
+| `[orig: Entity_UpdateAircraftPhysics @ 0x490310]`, `@ 0x490459..0x4904A6`; pilot follow `@ 0x4904A6..0x4904D0` | The burning hull's -2886390 BAM yaw step shares the authority 64-tick cadence. The separate pilot-yaw follow (occupant +0x170, MoveOrder bit 0x10 freelook clear, Flags 0x2000, brain+0x20C − ground > 0x10000 → `add [eax+10h], 0FFD3F50Ah` every tick, no authority or cadence gate) is ported in `vehicle_motor_air.cpp` — section 16. |
 | `[orig: Entity_UpdateHeloRotorSpin @ 0x48FA70]`, call `@ 0x4905A6` | Rotor integration runs before the lift gate; the exact full-speed crossing opens the gate that tick. A cold occupied player-control rotor plays slot 30 using the vehicle profile and pilot position only above water and at speed <= 10737417.6. Aircraft does not advance the ground wheel phase. Each caller admits only its own profile type (ground 2, helo 1); other air profiles bypass rotor run-up without running a different spin machine. |
 | Ground `@ 0x48D0E3..0x48D15D`, bike `@ 0x48669A..0x486711`, tank `@ 0x48AA23..0x48AA9E`, aircraft `@ 0x492694..0x492703` | Movers slew active brain yaw (+0x1D8) toward staged yaw (+0x1F0). Below absolute wrapped delta 0x2108421, all six staged words commit; equality takes the yaw-only step. Ground/bike/tank step by signed 0x2108421. Aircraft uses retained signed yaw demand (`@ 0x491CE4..0x491CF8`), not the damped yaw velocity. Watercraft has no such slew block. |
 | `[orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0]`, `@ 0x489F6E..0x489FA0` | Before velocity/contact solving, +0x2BC adds `((speed << 12) - yawRate) << 3`; +0x2C0 adds `((speed << 12) + yawRate) << 3`, with 32-bit wrap. Stationary steering counter-rotates the tracks. |
 | `[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]`, `@ 0x4929F6..0x492AC5` | TIRE00..05 are clamp(comp0), clamp(comp1), clamp((comp0+comp2)>>1), clamp((comp1+comp3)>>1), clamp(comp3), clamp(comp2). Average before clamping. |
-| Renderer table `@ 0x82CFD0..0x82D00F`; `[orig: HUD_CacheEntityDebugStats @ 0x449C10]`; `[orig: HUD_CacheInfantryDisplayInfo @ 0x48F1A0]`; `[orig: HUD_CacheVehicleDisplayInfo @ 0x48F140]` | `render_function` selects independently of `move_function`. Tank WHEELS00..03 alternate unsigned track high words. Gun yaw/pitch use signed active-brain high words (`@ 0x449ECF..0x449EE2`). Ground, tank, helo and plane own different channel subsets; absent channels are released. The curated tank/helo function names were retained despite their misleading descriptions. |
+| Renderer table `@ 0x82CFD0..0x82D00F`; `[orig: HUD_CacheEntityDebugStats @ 0x449C10]`; `[orig: HUD_CacheInfantryDisplayInfo @ 0x48F1A0]` (the IDB name; a misnomer — the chel render cache: rotor `+0x466`, gear `+0x470`, view `+0x45E`; sections 14 and 16 use this one name); `[orig: HUD_CacheVehicleDisplayInfo @ 0x48F140]` | `render_function` selects independently of `move_function`. Tank WHEELS00..03 alternate unsigned track high words. Gun yaw/pitch use signed active-brain high words (`@ 0x449ECF..0x449EE2`). Ground, tank, helo and plane own different channel subsets; absent channels are released. The curated tank/helo function names were retained despite their misleading descriptions. |
 | `[orig: Entity_ProcessMovementSoundEffects @ 0x5294A0]`, `@ 0x5294A8..0x5294D8`, `@ 0x52953B..0x52959D`; ground caller `@ 0x48D196..0x48D1B8` | A submerged player claimant takes the stop branch. Zero speed substitutes saved-live-pose XYZ displacement, then sqrt/clamp/truncate and the 256 deadband. Ground's speed denominator falls back to brain speed A, then command speed. |
 | `[orig: Entity_UpdateVehiclePhysics @ 0x48AF00]`, sound tail; `[orig: Entity_UpdateWatercraftPhysics @ 0x48D480]`, engine edge | Ground lights emit slot 24 on the rising edge. First claimant emits slot 30 when the occupant eye is above water. Claimant loss clears motion lanes and emits slot 31 subject to the hull water gate. Explicit detach clears the same latch, avoiding a second stop. Mover stop includes +0x18000 clearance; detach has its own gate. |
 | Mounted panel gate `@ 0x5A5038` | A missing interface texture suppresses both silhouette and seats. A valid texture admits both. |
+| Critical warning (slot 34) cadence: `Entity_UpdateVehiclePhysics` `test bl,1Fh @0x48B08C`; `Entity_UpdateLightVehiclePhysics @0x48416C`; `Entity_UpdateTankVehiclePhysics @0x488C44`; `Entity_UpdateWatercraftPhysics @0x48D61F`; `Entity_ProcessInfantryPhysics @0x46E250..0x46E266`; `Entity_ProcessAirVehiclePhysics @0x46FB79`; `Entity_UpdateAircraftPhysics` `test byte ptr [esp+var_A4],3Fh @0x4904D7..0x4904F0` | The slot-34 warning fires on the `& 0x1F` (32-tick) phase for every mover except the direct-air family, which uses `& 0x3F` (64 ticks); the `0x3F` tests in the other movers are the authority health regen/drain cadence, not the warning. (Corrected 2026-09-08; `vehicle_motor::test_warning_cadence_by_family`.) |
+| Skid latch under the settle gate: cveh settle jump `@0x48D163..0x48D16A` lands ON the skid section `@0x48D264` (bit 8: and `@0x48D2C4`, set `@0x48D2EB`, clear `@0x48D345`); ctan's settle jump `@0x48AAB7..0x48AABE` lands at `0x48AD49` PAST its skid section `@0x48ABCB..0x48ACB5`; `flt_7C19E0` = 0x4EFFFE00 = 2147418112.0 | A settled cveh/cbik wreck still runs the skid latch/clear; only the tank skips it. The skid test is `ftol(min(sqrt(cx²+cy²+cz²), 2147418112.0)) != 0` with speed nonzero and `!(Flags & 0x2000)`. `+0x318` bit values: 1 claimant latch (`@0x48D3A5`), 2 reverse latch (`@0x48D1D7`), 4 lights latch (`@0x48D358`), 8 skid latch (`@0x48D2C4`), 0x20 a tank-only latch (`@0x48AAE0`). (Corrected 2026-09-08.) |
+| Helicopter loops: `update_vehicle_effect_emissions @0x528F20` `@0x52919D..0x5291CE` / `@0x5291ED..0x52921D` / `@0x529235..0x529260`; lifetime `effect_params+16 = 15 @0x528F94` → `SoundEmitter_RegisterSetLayers` slot word 21 `@0x528471`; `ItemDef_ResolveAllResources @0x49E7F0` fills `ItemDef.soundLoopId[7] @0x82C` from `res[16+i]` | Lane 21 reads `soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop), lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`), lane 1 `soundLoopId[0]` (+2092 = Soundloop_1); each registers with lifetime 15 (the ground fold's `SoundEmitter_Register @0x5292A6` packs 30). Retail sndprof.def helicopter profiles author only soundloop_2/3 (SP_Apache1: V_APACHE_ILP / V_APACHE_DLP .8 1.2), so lane 1 is normally silent and Soundloop_4..7 are never consulted. (Corrected 2026-09-08 — the PR row had slots 7/6/5; `vehicle_part_anim::test_helicopter_sound_curves_and_decay`.) |
 
 The presentation mask carries ownership only. Joiner compact rows still do
 not publish authoritative vehicle controls. Native regressions cover
@@ -3875,14 +3889,50 @@ renamed `Entity_UpdatePlayerInfantryMovement` → `Entity_UpdateLightVehiclePhys
 (the cbik mover) — both historic misnomers; witness comments on the two solves
 (§8/§9 contract summaries + port cross-references). Saved.
 
+PR #640 review corrections (2026-09-08; IDA read-only, nothing renamed): the
+record's own names were corrected to the IDB's — `Entity_DispatchPhysics_catv`
+→ `Entity_DispatchPhysicsUpdate @0x48F010`; `AI_UpdateHelicopterCombatMovement`
+→ `AI_ProcessVehicleCombatState @0x461080`; `AI_UpdateAircraftCombat` →
+`Entity_ProcessInfantryWeaponFire @0x471710`; `Entity_Respawn` →
+`Entity_RespawnVehicle @0x45FF40` (no `Entity_InitFromItemDef` edge);
+`HUD_CacheEntityDisplayInfo_Helicopter` → `HUD_CacheInfantryDisplayInfo
+@0x48F1A0` (one name, misnomer noted); `Physics_ResolveEntityCollision` →
+`Entity_MovementCollisionResolver @0x4B2BD0`; `Entity_ProcessAirPhysics` →
+`Entity_ProcessAircraftContactPhysics @0x47EF10`; the `WaterWake_*` names →
+`sub_5DDC60` / `CWeatherSlot_Init` / `sub_5DDDB0` / `sub_5DDE10`; the bike/boat
+lean pairing (`Entity_SmoothHeadingToTarget @0x45B2C0` = bike,
+`Vehicle_UpdateTurretRotation @0x45AEA0` = boat) restored from `xrefs_to`; the
+§1.13 cadence rewritten to `36*DcbId` (the `lea` pair `@0x490334`/`@0x490340`);
+the section-11 "pilot-yaw follow unported" line reconciled with section 16; the
+section-29 render-callback labels, lane/slot mapping and focal-wind clear
+moments corrected; section 31's boat-wave reading corrected; the three
+section-13 "behavioral proof" rows replaced by instruction-level witnesses; the
+D-VEH-2 wording changed from "Accepted" to "proposed, pending ratification".
+Ported at the review (all cited in code): the vehicle-class brain machine + the
+class key + the brain lifetime, the off-contact/crashed traction arms, the
+steering blend default, the submerged-driver cut on both selector-zero movers,
+the selector-zero sound tails, the helicopter lane/slot mapping and lifetime,
+the aircraft warning cadence, the skid latch under the settle gate, the
+rotor-wash surface-effect group protocol and spawn-time zone binding, the
+grazing correction width, the tank catch-up gate, the bike lean gate order, the
+part-spin call gating, the pilot flare descriptor bytes, the death spin-rate
+order, the thinkCooldown seed and the crew clip/reserve zeroing. Witnessed and
+NOT ported (ledger D-NET-161 (a)..(h), D-SND-17, D-INF-2): listed in those rows.
+
 ## Current coverage
 
-The vehicle work in this record is implemented through section 34. Native
+The vehicle work in this record is implemented through section 37. Native
 regressions pin authority/prediction gates and the fixed-point transitions;
 GUT exercises snapshot transport, renderer ownership and retail attachments.
 These checks establish the covered branches, not an exhaustive retail LAN
 or pixel-by-pixel comparison. D-NET-196 remains open for organic body-conform
 presentation and its authority smoothing arm, outside the vehicle consumers.
+D-NET-161 and D-SND-17 remain OPEN, narrowed to the residuals the 2026-09-08
+review witnessed and did not port (the bike off-contact launch-vector arm, the
+pool-3 deck-marker localization, the flare off28 target, the selector-zero boat
+part-spin call, the ground-height tap ray kinds, the `entity+684` step mirror,
+the emplacement brain dispatch; the tank fold's extra-effect argument and the
+sound-ready gate) — each with its witness in the ledger row.
 
 ## Section 12: model probe contacts and impact response (2026-09-07)
 
@@ -3949,6 +3999,15 @@ airborne streak, rather than immediate model-contact severity
 center-sphere assumptions were replaced with explicit probe fixtures; the wall
 route includes model bounds, a valid road terrain layout and saved-pose stamps.
 
+Grazing-correction width (2026-09-08): both terrain probes form `pen * (−2r)`
+with the two-operand 32-bit `imul` before `cdq; idiv` —
+`Entity_ComputeCollisionForces @0x4623BF` (Y twin `@0x4623D7`),
+`Entity_CheckCollisionState @0x462C5F` (Y `@0x462C77`), `ebx = −2r` set
+`@0x462B7A..0x462B7E`. Wheel probes (index < 4) skip the clearance gate
+`@0x462C16..0x462C45`, so the wrap is reachable; `plat_terrain_probe` now uses
+the wrapped low-dword product
+(`vehicle_motor::test_plat_terrain_probe_grazing_uses_wrapped_product`).
+
 
 ## Section 13: traction, wheel slip and movement effects (2026-09-07)
 
@@ -3959,9 +4018,9 @@ where an older curated function name describes another family.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Ground/bike handbrake slip and grip recovery | MATCHING (behavioral proof) | `vehicle_motor`: held direction, inclusive timer boundary, one-degree recovery and wheel carry reset |
-| Tank pivot and track phase ordering | MATCHING (behavioral proof) | `vehicle_motor`: retained direction and previous-tick yaw-rate integration |
-| Skid sound, rev edge and rigid masked particles | MATCHING (behavioral proof) | `vehicle_motor`: rising edge, airborne suppression, strict rev threshold, transformed points, range cadence and snow alternate |
+| Ground/bike handbrake slip and grip recovery | MATCHING (IDA-witnessed 2026-09-08; DIVERGENT in three off-contact legs before the review fixes below) | held direction under `+0x3CD` `@0x48C5AC..0x48C69B` (cbik `@0x4858F1..0x485964`); slip stamp `@0x48C702..0x48C71C`; inclusive hold `cmp edx,eax; jle @0x48C7AF..0x48C7B1` (accel twin `jle @0x48C2B3`: > 5·tireslip → accel>>4 `@0x48C2CE..0x48C2F0`, else deceleration `@0x48C397..0x48C3CB`); opposing arm speed > 0x100 `@0x48CB59`, speed ∓ acceleration `@0x48CBE8..0x48CC16`; aligned arm planar dot < 0xEEEE && speed > 0 `@0x48C98F..0x48C9A0` then the 1° step 0xB60B60 `@0x48CA13` (cbik `@0x485CDA`/`@0x485D5E`); clear arm zeroes `+0x3F8/+0x3BC/+0x3C0/+0x3C4` `@0x48CD56..0x48CD6A`; wheel carry lock `dword_81518C` `@0x48C49F..0x48C4B4`, reset on target 0 `@0x48C53F`, decay `min(1, 1 − speed·flt_7C6F98)` `@0x48C506..0x48C52F`; grounded store's Z rule `cmp +0x2EC,0 @0x48CD70..0x48CD8D`; `vehicle_motor` |
+| Tank pivot and track phase ordering | MATCHING (IDA-witnessed 2026-09-08) | track phase `+0x2BC += ((speed<<12) − +0xA4) << 3; +0x2C0 += ((speed<<12) + +0xA4) << 3` `@0x489F6E..0x489FA0` runs before the basis build `@0x489FB3`, and the ctan steering block `@0x489C26..0x489CE0` writes only `+0x2B4` (no `+0xA4`), so the phase consumes the previous tick's yaw rate (normal-arm write `−speed·(+0x2B4>>2)` `@0x48A5DA..0x48A607`); pivot gates `cmp eax,0EFFFh; jge @0x48A38D` and `cmp +0x29C,500h; jle @0x48A398` → clear arm `@0x48A4BA..0x48A532` (zeroes `+0x3BC/+0x3C0/+0x3C4`), else the 5° step 0x38E38E3 `@0x48A418` signed by `var_F8` `@0x48A40D..0x48A416`; `vehicle_motor` |
+| Skid sound, rev edge and rigid masked particles | MATCHING (the particle half IDA-witnessed 2026-09-08; the skid-sound/rev-edge half in `vehicle_sound.cpp` carries the PR #640 cites `@0x48D226..0x48D34E` and was re-grilled only for the settle-gate structure in section 11) | `Entity_SpawnBoneEffectsAtMask @0x458750`: gates `+0x44C == 0`, graphicModel, itemDef word[340] effect and word[342] mask `@0x45875E..0x458789`; camera distance vs `(tick&3)==0 ? 600<<16 : 300<<16` `@0x4587D0..0x458816`; surface type 3 → word[341] `@0x458831..0x458838`; matrix = entity orientation under Flags 0x20000 `@0x458843..0x458854`; per masked bone (48-B stride) position via `Math_FixedPointTransformPoint22 @0x615810`, direction via `Math_TransformPointFixedPoint22 @0x412e90` `@0x4588F0..0x458991`; call sites cveh `@0x48C285` (skid accel arm), `@0x48C535` (slip-carry decay), `@0x48CF8D` (crashed ≥ 0x1000); cbik `@0x48547A`/`@0x48571D`/`@0x485868`/`@0x4863CD`; ctan `@0x48A820`; `vehicle_motor` |
 
 [orig: Entity_UpdateVehiclePhysics @ 0x48AF00] and
 [orig: Entity_UpdateLightVehiclePhysics @ 0x483FE0] retain the Q16 contact
@@ -3982,6 +4041,60 @@ stored yaw rate before the current velocity/yaw block replaces it. Ground, tank
 and bike retain the solved-contact and airborne-streak fields through their
 contact tails. Tank and bike bias an existing direction downhill after descent
 [orig: @ 0x47951E; @ 0x47C0EB].
+
+Off-contact and crashed velocity arms (re-grilled 2026-09-08; three
+divergences fixed in `vehicle_traction_velocity`): the basis is built before the
+gates; cveh's entry gates are `@0x48C587..0x48C5A6` and its off-contact arm
+`@0x48CE02..0x48D003` (the `+0x3CE` gate `@0x48CE17`, the slip-stamp
+refresh/clear `@0x48CE24..0x48CE61`, the not-crashed `jz loc_48CF97 @0x48CE6E` →
+forward·speed into `+0x98/+0x9C`, `+0xA0` only when `fwd.z < 0`
+`@0x48CFD9..0x48D003` — the PR held velocity here; crashed = 2-D normalize
+`@0x48CE74..0x48CEEE`, NO speed step, X/Y stores `@0x48CF0E`/`@0x48CF46`). ctan
+enters its arm on `+0x2F2 == 0` alone `@0x489FFF..0x48A005` (no `+0x3CD` test;
+the PR gated it on the handbrake), arm `@0x48A684..0x48A81F` (not crashed → hold
+`@0x48A6AD`; crashed 3-D normalize, ∓2·decel `@0x48A752`/`@0x48A75E`, three stores
+`@0x48A78B`/`@0x48A7AF`/`@0x48A7D3`). cbik gates `@0x4858CC..0x4858EB`, arm
+`@0x4861F6..0x4863D5` with NO `+0x3F8` slip handling (the PR refreshed/cleared it
+for the bike; crashed: ±0x6000 clamp `@0x486232..0x48624F`, 3-D normalize,
+∓1·decel `@0x4862EE`/`@0x486305`, stores `@0x48632B`/`@0x486355`/`@0x486379`). The
+shared tail — speed ≥ 0x1000 → `Entity_SpawnBoneEffectsAtMask`, else halve
+X/Y/speed, zero `+0xA4/+0xAC/+0xA8`, `+0x2F0 = 1` — is `@0x48CF41..0x48CF95` /
+`@0x486386..0x4863D5` / `@0x48A7E0..0x48A81F`. OPEN (D-NET-161 (a)): the cbik
+not-crashed off-contact arm `@0x4863DA..0x48657E` drives velocity from a stored
+launch vector `+0x3E0..+0x3E8` (3-D normalized `@0x4863E3..0x486451`) under the
+`+0x3DE` has-been-driven byte, else from a planar pair kept in frame slots
+`outVec`/`var_E4` (`@0x48645D..0x4864A7`; writer not located this pass), stores
+`@0x4864C1..0x48651F`, slip-stamp refresh/clear `@0x486523..0x48655E`, join
+`@0x48657E`; the reimpl carries no `+0x3E0` state and holds the bike's velocity
+there.
+
+Steering blend (2026-09-08): the turn-rate blend fraction is 0 whenever
+`playerSpeed == 0` in every ground family (`cmp eax,edx; jz → xor ecx,ecx`
+`@0x48C0A9..0x48C0D8`; ctan `@0x489C3C..0x489C67`; cbik `@0x485283..0x4852B0`),
+so a zero-`player_speed` row turns at `minRate` — the PR's `Tank ? 0 : 0x10000`
+default was wrong for Ground/Bike
+(`vehicle_motor::test_zero_player_speed_turns_at_min_rate`). The remaining cveh
+drive-core sites, for the record: proportional step `@0x48C111..0x48C12C`, wheel
+deflection `@0x48C12E..0x48C14E`, yaw rate + the `0x2000`/`+0x2EC`/`+0x2F0` gates
+`@0x48C146..0x48C18F`, coast brake `@0x48C195..0x48C1C2`, cos² slope
+`@0x48C1C6..0x48C1FA`, raw accel `@0x48C1FC..0x48C215`, the straight-drive clamp
+tree `@0x48C3D0..0x48C46C` (parent `+0x16C` Flags 0x100 gate `@0x48C428`), the
+airborne half-deceleration `+0x8E4 >> 1` `@0x48C471..0x48C492` reached by
+`cmp +0x2F2,0; jz` / `cmp +0x2F0,0; jnz` `@0x48C20E..0x48C228`, integration
+`@0x48C2FC..0x48C32A`, gravity −324 `add [esi+0A0h], 0FFFFFEBCh @0x48D009`.
+
+Part-spin call gating (2026-09-08): `Entity_UpdatePartSpinAccumulator @0x4928B0`
+is reached only inside the `itemDef->attrib & 0x40` block at all six callers —
+cveh gate `@0x48D38B` / call `@0x48D42B`, ctan `@0x48AD97`/`@0x48AE3D`, cbik
+`@0x486944`/`@0x4869EA`, selector-zero ground `@0x46F8FF`/`@0x46F99E`,
+selector-zero boat `@0x47004B`/`@0x4700F5`, mounted infantry
+`@0x488956`/`@0x4889F5` — so a non-PlayerControl item never draws the machine's
+PRNG roll through any mover. `Entity_UpdateWatercraftPhysics` has no such call;
+its wheel-phase add `mov edx,[ebp+220h]; shl edx,0Dh; add [esi+2B8h],edx`
+`@0x48E9F0..0x48E9F9` sits inside the `cmd != 0` (`@0x48E92E`) and `up.z > 0`
+(`jle loc_48EA06 @0x48E9A6`) gates of the thrust block. The full movers' tails
+now call `part_anim_tick` only for `traits.player_control`, and the boat keeps
+its phase step inline.
 
 The movement sound pass uses the solved direction and airborne streak. Slot 25
 starts on a new skid edge; slot 33 requires an occupant, an airborne streak above
@@ -4020,6 +4133,13 @@ tail releases compression into the latest positive terrain gap
 [orig: @ 0x4790A1..0x4792FE]. `vehicle_suspension` exercises these numerical
 boundaries; `vehicle_motor` covers the integrated family path.
 
+The grounded catch-up (2026-09-08): `mov eax,[eax]; sub eax,0FAh; test eax,eax;
+jle loc_478E27` `@0x478DC0..0x478DC9` returns before the same-side pair-clear
+tests `@0x478DDF..0x478E0E` whenever `sink − 250 <= 0`; the tracked twin clamps
+(`jns`/`xor` `@0x47E9DC..0x47E9DE`) and still runs them. The tank loop's grounded
+call now carries that flag
+(`vehicle_suspension::test_tank_grounded_catch_up_skips_within_one_step`).
+
 [orig: HUD_CacheEntityDebugStats @ 0x449C10] is the tank renderer cache despite
 its curated name. It publishes fourteen tire words from the six channels:
 repeated front/back values, pairwise means and two triplet means. Both triplets
@@ -4030,8 +4150,8 @@ present-row schema, native appliers and wire memoization table carry all fourtee
 channels under tank-specific ownership.
 
 The helicopter's gear word is unsigned `entity+0x470`
-[orig: HUD_CacheEntityDisplayInfo_Helicopter @ 0x48F1A0,
-load @ 0x48F1C8]. Its mover approaches 65535 by 1598 per tick when terrain
+[orig: HUD_CacheInfantryDisplayInfo @ 0x48F1A0 (the IDB name; a misnomer —
+the chel render cache), load @ 0x48F1C8]. Its mover approaches 65535 by 1598 per tick when terrain
 clearance is at least five units, otherwise approaches zero by the same step
 [orig: @ 0x492676..0x492743]. `aircraft_client_motor` exercises the threshold
 and both clamps; renderer ownership and projection are in `vehicle_part_anim`.
@@ -4065,7 +4185,13 @@ release on the next failed ground ray.
 
 Matrix-to-Euler extraction removes yaw, then pitch, using individually shifted
 signed Q22 products before each `atan2`. It negates matrix elements 4 and 6;
-yaw uses the negative `683565275.5764316` scale. Subsequent sine/cosine calls
+yaw uses the negative `683565275.5764316` scale (`dbl_7C57B8` =
+−683565275.5764316, `dbl_7C19D8` = +683565275.5764316, `dbl_7C3608` =
+1.4629627251502471e-9, `dbl_7C3600` = 4194304.0; disasm `0x613316..0x61347B`;
+`collision::test_fixed_matrix_euler_witnessed_vector` pins the Q22 matrix
+{3413315, −807948, −2299715; 1970678, 3243611, 1785386; 1434536, −2533455,
+3019254} → yaw 357913891, pitch 238609309, roll −477222480, hand-traced with
+every ftol at least 0.12 from an integer). Subsequent sine/cosine calls
 use `1.4629627251502471e-9` radians per BAM, which is 30.5 ppm above the
 mathematical inverse. Thus compound rotations do not round-trip exactly.
 The shared `collision_matrix_to_euler` now retains these individual truncations
@@ -4075,9 +4201,12 @@ consume it, including yaw publication for crashed hulls.
 ## 16. Aircraft controls and countermeasures
 
 Witness: `Entity_UpdateAircraftPhysics @0x490310`,
-`HUD_CacheEntityDisplayInfo`'s helicopter caller `@0x48F1A0`,
+`HUD_CacheInfantryDisplayInfo @0x48F1A0` (the IDB name; the chel render
+cache, which calls `HUD_CacheEntityDisplayInfo` first),
 `AIEntity_ReleaseFlareCountermeasures @0x455EF0`,
-`Entity_InitVehicleAI @0x460200`, and `Weapon_FireProcess @0x53F5B0`.
+`Entity_InitVehicleAI @0x460200`, `Weapon_FireProcess @0x53F5B0`,
+`Entity_FireWeaponAndSendPacket @0x42BD80` and
+`NetPacket_WriteEntityPositionUpdate @0x42A610`.
 
 The collective keeps brain[548] (climb above ground) distinct from brain[524]
 (absolute altitude). Strictly below twice the bound radius, keyboard/analog
@@ -4102,8 +4231,36 @@ command mirroring, then skip live controls, attitude integration and gear.
 
 Flare input scans weapon/seat-list slots 1 through 9, reading each associated
 seat occupant's MoveOrder bit 0x20. The pilot entry is excluded. The 64-phase
-boundary clears brain+0x318 bit 2; nonzero climb plus a pressed seat fires once
-and sets it. AI fire-timer callers use the same dispenser directly.
+boundary clears entity+0x318 bit 2; nonzero climb plus a pressed seat fires once
+and sets it. AI fire-timer callers use the same dispenser directly. Verbatim
+(2026-09-08): `Entity_BuildWeaponSlotList(entityPtrs[10], slotTypes[10], entity)`
+`@0x4911a5..0x4911b5`; for entries 1..9 (`@0x4911c5..0x49145c`, unrolled) a
+non-null entry reads `occ = word[entry + slotTypes[i]*2 + 0x190]` (the per-slot
+seat occupant word), skips 0xFFFF, pool-resolves it through `g_pool_list`
+(`handle >> 12` pool, `& 0xFFF` slot × stride) and ORs `(rider+0x12C >> 5) & 1`;
+then `if ((var_A4 & 0x3F) == 0) entity+0x318 &= ~4` `@0x49145e..0x491465`; then
+`if (entity+0x224 != 0 && pressed) { if (!(entity+0x318 & 4))
+AIEntity_ReleaseFlareCountermeasures(entity) @0x455ef0; entity+0x318 |= 4; }`
+`@0x49146c..0x49148b`. `VehicleSystem::tick_flare_input` builds the fixed
+10-entry `VehiclePanelSlotList` (the port of retail's two frame arrays, tail
+zeroed like `Entity_BuildWeaponSlotList @0x434db4..0x434dd3`) and early-outs on
+`net_climb == 0` before the side-effect-free scan — observationally identical.
+
+The flare's C2S 0x06 descriptor (2026-09-08): `Weapon_FireProcess @0x53F5B0`
+takes the vehicle's occupant (+0x170, the pilot) as the shooter `@0x53f6d6` and
+calls `Entity_FireWeaponAndSendPacket(aim, occupant, aiRuntime->f0_7[3], 1,
+ammoDefIndex, 0)` `@0x53f70a`; the packet then carries off6 = 1 (the ammo-def
+arm), off7 = the FLARE ammo-def index, off32 = the PILOT's `entity+352` (his
+handheld ammo-def index, `@0x42c052` → `@0x42a7da`), off33 = `fire_flags` =
+`Weapon_GetScopeZoomLevel(can_fire, 12) | (can_fire ? 0x80 : 0)`
+`@0x42bdd6..0x42bdf9` where a seated pilot (parentSlot 2 or 5) fails
+`Player_CanFireWeapon @0x5cf7a8..0x5cf7b6`, so off33 = 12 (`@0x422fd1`/`@0x422fd5`),
+off34 = 0, and off28 = the VEHICLE's `aiRuntime[3]` pool-resolved (0xFFFF when
+null, `@0x42a70d`). On a joiner the packet ships only when the pilot is the
+local player (`@0x53f6f4`). `JoinerRole::tick_local_weapon`'s source-fire leg
+now stamps the pilot's handheld ammo index and subtype 12
+(`inmatch_joiner_role::run_flare_descriptor_carries_the_pilot_handheld`); off28
+stays 0xFFFF — OPEN, D-NET-161 (c).
 
 The dispenser requires a brain and chooses GROUND_FLARE for profile type 2,
 FLARE otherwise. Model initialization retains the first 16 case-insensitive
@@ -4160,10 +4317,32 @@ wreck is removed when flag 0x1000 is set or vehicle respawn is disabled. After
 15 ticks, a nonzero cooldown decrements; a transition from one to zero restores
 one and returns, while other values continue. The overlay-wait arm moves the
 wreck by 5000 units in X/Y and buries it 1000 below terrain. Otherwise the saved
-pose/team and waypoint registers are restored before `Entity_Respawn @0x45FF40`.
+pose/team and waypoint registers are restored before `Entity_RespawnVehicle
+@0x45FF40` (the IDB name; the PR's `Entity_Respawn` → `Entity_InitFromItemDef`
+chain was wrong — its callees are `Entity_ClearSuspensionState`,
+`EntityDef_LoadModelsAndCallbacks`, `Entity_BuildProximityListsFromPools`,
+`Entity_RaycastGroundHeightAndObject`, `Math_BuildFixedPointMatrixFromEulerAngles`,
+`EntityList_ClearParentRef` and `CEffectEmitter_ReleaseSafe` on `+0x1CC`
+`@0x460199` / `+0x400` `@0x4601b2`; it zeroes the words `+0x138` `@0x4600ae` and
+`+0x1AC` `@0x46006e` and pends `cur == 15 ? 14 : 22` `@0x460130`).
 The implemented reset restores health, clears seats and death state, resets
 motion/springs/chassis and controls, sets flags to preserved 0x400 plus 0x22000,
-sets vertical speed to -501, and resamples the ground.
+sets vertical speed to -501, and resamples the ground. Not re-witnessed at the
+2026-09-08 review: how those two retail emitter slots map onto the reimpl's
+three event-driven bank releases plus `vehicle_release_damage_effects`
+(section 28).
+
+`Game_StartMission`'s pool-1 leg `@0x525F80..0x526071` is the anchor capture
+above (`Entity_RaycastGroundHeightAndObject(entity,0,0,0x10000,0x100000)`, Z =
+ground + brain[11], water clamp, Flags |= 0x40, `+0x2A4` = Z, `+0x165` = `+0x162`,
+the update callback, `+0x264` = groundEntity, `Entity_TransformWorldToLocal` into
+`+0x24C`); it then seeds `thinkCooldown` (`+0x128`) = `aiSlot[18] / 31`
+`@0x526071..0x526095` (`imul 0x84210843; sar 5`) for each hull with an AI slot —
+promote seeds slot[18] = 62·spawns, so the budget is 2·spawns, and
+`AI_TickState_VehicleDead` consumes one per respawn and holds at 1
+`@0x467eff..0x467f1c` (`vehicle_lifecycle.cpp initialize_mission_vehicles`,
+ported 2026-09-08). The pool-3 spawn-MARKER leg that precedes it is NOT ported —
+section 25.
 
 `vehicle_lifecycle.cpp` owns these transitions. `destruction` tests cover the
 15/16-tick boundary, cooldown one/two, team/health/suspension restoration,
@@ -4227,8 +4406,13 @@ by six), not the up axis's Y component. The public motor tests cover both
 signs. A sleeping bike does not run the lean servo; a newly contacted hull
 carrying flag 0x40 does.
 
-Bike `Vehicle_UpdateTurretRotation @0x45AEA0` runs only when not crashed,
-not settled and not airborne. Above speed 4096 it enables the lean override;
+Bike `Entity_SmoothHeadingToTarget @0x45B2C0` (the IDB name, a misnomer; sole
+caller `Entity_ProcessLightVehiclePhysics @0x479600` at `@0x47A7D3` — the PR's
+text had the two routines swapped, corrected 2026-09-08 from `xrefs_to`) runs
+only when not crashed, not settled and not airborne, in the caller's order
+`cmp +0x2EC @0x47A78B` (crashed returns), `mov byte ptr [esi+2EFh],0 @0x47A79F`
+(the override byte clears), THEN `+0x2F0 @0x47A798/@0x47A7A6` and
+`test Flags,0x2000 @0x47A7A8` return. Above speed 4096 it enables the lean override;
 steer magnitude above two degrees applies authored lean velocity unless the
 signed slope exceeds the authored lean limit. Otherwise error above 256
 drives roll back toward zero. The high-speed deadband retains the old roll
@@ -4236,8 +4420,9 @@ rate; the low-speed deadband clears it. The +45C previous steering angle,
 +468 steering delta, +464 envelope origin and +470 interval retain their
 separate update gates. The caller supplies turnRate=0 and scaleFactor=1.
 
-Boat `Entity_SmoothHeadingToTarget @0x45B2C0` is a hull-lean routine despite
-its curated name. It runs for planing, afloat boats above speed 8192. It uses
+Boat `Vehicle_UpdateTurretRotation @0x45AEA0` is a hull-lean routine despite
+its curated name (sole caller `Entity_ProcessPlatformPhysics @0x481870` at
+`@0x4838CF`). It runs for planing, afloat boats above speed 8192. It uses
 a two-degree steering deadband, slope deadband 160, authored lean limit,
 and retained acceleration/deceleration interval. The interval stores only
 16 bits; its progress clamps at one. The negative and positive arms retain
@@ -4308,6 +4493,18 @@ The immediate grounded impact uses Effect_HeloGroundHit/EXPLO_HELO_LAND;
 water uses Effect_MedSplash/EXPLO_HELO_WATER. It also releases the live
 vehicle fire slot.
 
+The two hull spin rates come from `Death_RandomSpinRateBam @0x57B940`
+(2026-09-08): floor = ftol(min·11930464.0f) first, `r = PRNG % 100`, `fild r ×
+0.01f` kept extended, max = ftol(max·11930464.0f), `fimul`, ftol, then max with
+the floor (`flt_7D76D0` = 0x4B360B60 = 11930464.0f, `flt_7C56A8` = 0x3C23D70A =
+0.01f); the callers are `@0x48F98A` (+172 roll, 0.45..0.65) then `@0x48F9A4`
+(+168 pitch = −(0.15..0.35)) — roll draws first. Ported as
+`death_random_spin_rate_bam`
+(`destruction::test_aircraft_death_spin_rates_roll_in_retail_order`: seed 0x200
+→ r 93/13 → roll 7211964, pitch −1789569). `Entity_InitDeathState @0x48F7C0`
+also clears the focal-wind slot owner (`Terrain_ClearShadowTileSlot @0x5CB0D0`
+at `@0x48F9F8`; the only other caller is `Entity_Destroy @0x43E984`).
+
 The idle state-22 subtype test reads AI profile +20: BOAT is one. The AIP
 parser accepts STD=0, GROUND BOAT=1/TRAIN=3, and HELO PLANE=2. An alive
 idle boat copies its pose into the work transform and sets work Z to water.
@@ -4343,6 +4540,18 @@ The shared lifecycle restores that pose, team, health, children, controls and
 effect ownership. [orig: assign_overlay_spawn_points @ 0x529E60;
 build_spawn_marker_budget_list @ 0x529B40]
 
+NOT ported (witnessed 2026-09-08, D-NET-161 (b)): `Game_StartMission @0x524360`
+localizes deck-carried spawn markers before its pool-1 vehicle leg —
+`@0x525E6D..0x525F58` walks pool 3 for the marker item types 0x1771..0x1774 /
+0x17CE..0x17D1 (6001..6004 / 6094..6097, matched through
+`ItemList_FindIndexByTypeId @0x49E100`), calls
+`sub_414380(entity, 0, 0, 0x10000, 0x80000)` `@0x525F25..0x525F34` and, when the
+marker's `groundEntity` (+0x28) is then set, rewrites its Position in place
+through `Entity_TransformWorldToLocal @0x43BB50` against the carrier
+`@0x525F47..0x525F50`. `vehicle_spawn_markers.cpp` has no counterpart: the
+markers always carry an empty `spawn_support`, so a marker authored on a deck
+never follows its carrier.
+
 The parked/player input fold writes the current state only. The pending
 state remains available to the state callback: zero-health requests cannot
 be overwritten by the same tick's idle stamp. `vehicle_mount` exercises
@@ -4365,8 +4574,91 @@ prediction role gates. `ai`, `vehicle_mount` and
 The witness map in `ai_aircraft.cpp` records each original state callback.
 [orig: AI_EnterState_AircraftCombat @ 0x466330;
 AI_TransitionToDeath_Infantry @ 0x465F60;
-AI_UpdateHelicopterCombatMovement @ 0x461080;
-AI_UpdateAircraftCombat @ 0x471710]
+AI_ProcessVehicleCombatState @ 0x461080;
+Entity_ProcessInfantryWeaponFire @ 0x471710 (the IDB name; the aircraft
+brain's weapon-fire leg, wired as the state-8 tick)]
+The PR's `AI_UpdateHelicopterCombatMovement` / `AI_UpdateAircraftCombat` names
+did not exist in the IDB (corrected 2026-09-08). Two more misnomers to read
+past: `AI_CalcGroundVehicleTarget @0x4613A0` is the HELICOPTER mover (controller
+0x10000, table `0x8153E0[1]`) and `AI_CalcHelicopterTarget @0x461870` the PLANE
+mover (0x10005, `0x815408[1]`).
+
+Mover facts re-grilled 2026-09-08 (ported in `ai_aircraft.cpp`, pinned by
+`ai::test_aircraft_combat_mover_pins` / `test_aircraft_fire_arc_gate`): the helo
+mover clears `[127]` at its head `@0x4613ca` and writes `[127] = [45] << 14` at
+LABEL_35 `@0x4616c7` from both within-max_chase arms (only `[40] = 0` is gated on
+`AI_GetSuspensionFirePoint` `@0x4616b1..0x4616bd`; the > min_chase / angle > 0x40
+arm skips the fire check); its reverse bearing is a second truncated
+atan2(self − target) `@0x461453..0x46149e` folded against the target's Yaw; helo
+ceiling test ground + 819200 `@0x46172c`, plane ground + 3276800 `@0x461b5c`,
+replacement ground + [51] + 3276800 in both (`@0x46173b`/`@0x461b6b`); speed
+clamps `@0x46174c..0x46176c` / `@0x461b71..0x461b8b`; the plane's no-target idle
+`@0x4619a4..0x461a07` falls through to the common tail `@0x461b3f` (the helo
+returns `@0x4615a1`); the plane mover never writes `[127]`. Fire leg
+(`@0x471710`): arc limit = `(movsx byte [profile+67] | 1) | 2` `@0x471736..0x47173a`,
+`sar 1`, unsigned `cmp/ja` `@0x472477..0x472481` straight to the epilogue
+`@0x472df5` (bone/last_weapon untouched); the unprocessed no-weapon leg tests
+block flags & 1 (TURRET) at profile+136 `@0x471c18` / +168 `@0x471d18`, primary
+first then return. `Entity_CalcAverageGroundHeight @0x457230` with radius 0 is
+one centre ray (`@0x457254`/`@0x45735d`); its per-tap ray KIND is not ported
+(north/south/west `Entity_RaycastGroundHeight @0x4142c0`
+`@0x45725d`/`@0x457281`/`@0x4572c1`, east/centre
+`Entity_RaycastGroundHeightAndObject @0x414320` `@0x4572a1`/`@0x4572e0`; the
+reimpl uses one ray kind — D-NET-161 (e)).
+`Vehicle_CleanupTeamEntitiesOnDestruction` zeroes clip/reserve (+804/+802)
+unconditionally `@0x5470f9..0x547100` for every matched non-vehicle peer before
+the optional split `@0x547107` (ported 2026-09-08).
+
+### 26.1 The vehicle-class brain machine, its class key and the brain lifetime
+
+`EntityAI_ProcessVehicleStateMachine @0x4583C0` (cveh/cbot/ctrn) and
+`EntityAI_ProcessInfantryStateMachine @0x4581B0` (CHel/cpln) share one body and
+differ in exactly four gates: the alert edge pends 18 unless `cur == 22`
+`@0x458442..0x458448` (vs 10 unless 14 `@0x458239..0x45823b`); the client tick
+gate runs the tick table only when authority or `cur` is 21/23
+`@0x458545..0x45855c` (vs 13/15 `@0x458340..0x458348`); the client commit gate
+accepts `pend` 16 or 21..23 `@0x458576..0x458586` (vs 7 or 13..15
+`@0x458375..0x458382`); the spawn AIEvent channel word is 0 (`xor ebx,ebx
+@0x4583cd`, store `@0x45851a`) vs 9 (`@0x458312`). The death event (4) writes
+channel 9 in both (`@0x4582c8`/`@0x4584d4`). Both mirror the brain step into
+`entity+684` after the tick `@0x458568` and zero it on a transition `@0x4585b4`
+— not modeled (D-NET-161 (f)). Ported 2026-09-08 as
+`AiSystem::process_vehicle_state_machine` / `process_infantry_state_machine`
+over one `StateMachineGates` table (`ai::test_vehicle_class_state_machine_gates`).
+
+The class key: `g_EntityClassEventCallbackTable @0x813000`, 41 rows (count
+`@0x8133D8`) of 24 bytes = name[8] + 4 fn ptrs, consumed ONLY by
+`Entity_LookupRenderCallbacks @0x407DC0` (stricmp over the names) from
+`EntityDef_InitAllCallbacks @0x4A5AAE`, keyed by items.def `ai_function` (else
+"Null"). fn1 is the brain machine: CHel `@0x8132a0` → 0x4581B0; cpln `@0x8133a8`
+→ thunk `0x462120` → 0x4581B0; cveh `@0x813378` → 0x4583C0; cbot `@0x813390` →
+thunk `0x462130` → 0x4583C0; ctrn `@0x8133c0` → thunk `0x462140` → 0x4583C0. fn2
+= `Entity_InitHelicopterAIFromDef @0x4683C0` / `Entity_InitVehicleAIFromDef
+@0x4686C0` (cbot/cpln/ctrn thunks `0x474560`/`0x474550`/`0x474570`), fn3 =
+0x45D700, fn4 = `Entity_SerializeVehicleState @0x460560`. ewep `@0x8130a8` fn1 =
+`Entity_UpdateChildAttachment @0x4409A0` (not a state machine); the null row's
+fn1 = `sub_406FF0`, a 15-byte stub. `AI_DispatchStateMachineByProfileClass
+@0x4680A0` has NO callers and must not be cited as the dispatcher. JOX ITEMS.DEF
+`ai_function` census: cveh 15, chel 14, cbot 10, ewep 3; no cpln/ctrn/ctank rows.
+Reimpl: `VehicleTraits::brain_class` (item_traits.cpp; chel/cpln → Air,
+cveh/cbot/ctrn → Ground, else Unset → by mover family; a brain with no traits
+row keeps the air machine — where retail ticks an emplacement brain's machine is
+unwitnessed, D-NET-161 (g)).
+
+Brain lifetime: `AI_TickState_VehicleDead @0x467ede` →
+`Server_RemoveEntityAndNotify @0x50A270` (S2C 0x12 mask 0x90,
+`Entity_RemovePlacedDevicesByOwner @0x546e00` for players, then `Entity_Destroy
+@0x43E810`); `Entity_Destroy` memsets the 812-byte brain `@0x43e995`, nulls
+`entity+100` `@0x43e99d` and memsets the AiSlot `@0x43e9ae`; `Entity_InitVehicleAI
+@0x460200` allocates the lowest slot with `[0] == 0` `@0x460204..0x460222` and
+memsets it `@0x460246`; the org1 corpse path calls `Entity_Destroy` `@0x4b9f93`
+then jumps to the epilogue `@0x4b9f9b`. Reimpl (2026-09-08): `AiSystem::release`
++ `attach` slot reuse; release sites `vehicle_lifecycle.cpp tick_dead`,
+`infantry.cpp` corpse despawn, `entity_commands.cpp remove_ssn/remove_group`,
+`world.cpp` orphan children, `napi_np_protocol.cpp` player leave
+(`ai::test_dead_vehicle_despawn_frees_brain`). Sites deliberately without a
+release (no brain by construction): placed devices, minefields, flags,
+`promote.cpp` (attach frees a stale brain itself).
 
 ## 27. Recoil, impact, landing and crew death
 
@@ -4404,6 +4696,9 @@ submersion, and restart when they emerge. Respawn releases every bank.
 [orig: Entity_InitDeathSounds @ 0x4939B0;
 Entity_UpdateDeadWreckEffects @ 0x493140;
 Entity_SpawnMaskedEffectBank @ 0x5F7620]
+The respawn release's correspondence to `Entity_RespawnVehicle @0x45FF40`'s two
+emitter slots (`+0x1CC`/`+0x400`) and two zeroed words is not re-witnessed
+(section 18).
 
 The W1/W2/W3/W4 movement effects share a sixteen-point bank, implemented
 in `vehicle_trails.cpp`. The first allocation owns an overlapping point's
@@ -4422,8 +4717,18 @@ Proof: `destruction`, `watercraft_client_motor`, GUT
 ## 29. Rotor sound, downwash, foliage and surface rings
 
 The historical name `update_vehicle_effect_emissions @ 0x528F20` is misleading:
-the function registers helicopter sound loops. Slot 7 uses lane 21, slot 6
-lane 11, and slot 5 lane 1. Medium and cruise fade/pitch curves use the twelve
+the function registers helicopter sound loops. Lane 21 reads itemDef
+`soundLoopId[2]` (+2100 = Soundloop_3, the `*_DLP` loop) `@0x52919D..0x5291CE`,
+lane 11 `soundLoopId[1]` (+2096 = Soundloop_2, `*_ILP`) `@0x5291ED..0x52921D`,
+lane 1 `soundLoopId[0]` (+2092 = Soundloop_1) `@0x529235..0x529260`
+(`ItemDef.soundLoopId` is `uint32_t[7] @0x82C`, filled from `res[16+i]` by
+`ItemDef_ResolveAllResources @0x49E7F0`); each registers with lifetime 15
+(`effect_params+16 @0x528F94` → `SoundEmitter_RegisterSetLayers` slot word 21
+`@0x528471`; the ground fold's `SoundEmitter_Register @0x5292A6` packs 30).
+Retail sndprof.def helicopter profiles author only soundloop_2/soundloop_3
+(SP_Apache1: V_APACHE_ILP / V_APACHE_DLP .8 1.2), so lane 1 is normally silent
+and Soundloop_4..7 are never consulted. (The PR's "slot 7 / 6 / 5" mapping was
+wrong — corrected 2026-09-08.) Medium and cruise fade/pitch curves use the twelve
 SndProf words; the lateral loop uses climb intensity and rotor pitch. The
 medium scratch value is reused by a degenerate cruise interval. The float
 reciprocal and ftol chop preserve the one-unit endpoint loss; negative lateral
@@ -4436,12 +4741,54 @@ Entity_UpdateHeloRotorSpin @ 0x48FA70]
 the authored RwDust/Grass/Snow/Sand/Water particle family. Stationary dry
 wash starts without dust; movement establishes the intensity that later
 decays. Particle focal-wind and repulsion flags read the same field at the
-original phase/index cadence. The shared C random stream also supplies the
-occlusion wind sampler. [orig: terrain_overlay_alloc @ 0x5CAF40;
-sub_5CB020 @ 0x5CB020; WeatherParticle_UpdateAllEmitters @ 0x5CB220;
+original phase/index cadence. The C random stream (`PRNG_Next16_C @0x6131B0`)
+also supplies the occlusion wind sampler; it is a PRESENTATION-ONLY stream —
+every draw sits behind the listener / 0x2200000 camera-distance gate
+`@0x5CB1CD` or a render gate — so `World::prng16_c_state` is never
+authoritative and must not enter any peer comparison.
+[orig: terrain_overlay_alloc @ 0x5CAF40;
+sub_5CB020 @ 0x5CB020; WeatherParticle_UpdateAllEmitters @ 0x5CB100
+(the function spans 0x5CB100..0x5CB5B0; the PR's 0x5CB220 was mid-body);
 WindZone_ApplyVortexForce @ 0x5CB8A0;
 Terrain_CalcSectorRepulsionForce @ 0x5CBF50;
 Terrain_FindNearestAmbientSoundZone @ 0x5CBCD0]
+
+Surface-effect groups (re-grilled and fixed 2026-09-08): each focal-wind slot
+keeps ONE surface-effect group — slot dwords +3 = the group instance, +4 = the
+effect id `@0x5CB407..0x5CB46E`. The group is released (`sub_5F6C70 @0x5F6C70` →
+`sub_5E5ED0` notifies each top-level child dead) and re-created
+(`CEffectWorld_SpawnEmitterAtPosition @0x5F6DF0`, dest {type 4, id, hit}) only
+when the effect id changes; EVERY hit then calls `sub_5F6C10 @0x5F6C10` →
+`CEffectWorld_SpawnAllActiveChildren @0x5E5E70`, which invokes vtable slot 6 =
+`CParticleEmitter_SpawnNewParticle @0x5F35B0` (position = hit, direction
+(0,1,0), 0.0, 0, parent −1, 0) on every child whose nested-child word +264 is
+zero; `dword_29D6BB0` (the spawn window) is set `@0x5CB3A6` and cleared
+`@0x5CB4A0` around the create and the trigger. The slot never releases its group
+when the zone clears (`Terrain_ClearShadowTileSlot @0x5CB0D0` only writes the
+owner tag, and it is called from `Entity_InitDeathState @0x48F9F8` and
+`Entity_Destroy @0x43E984` only — `Entity_RespawnVehicle @0x45FF40` does not
+call it); the group dies with its last child (`CEffectWorld_UpdateAndReapGroups
+@0x5EC920` → `CEffectGroup_AdvanceChildrenAndReap @0x5E59A0` →
+`CEffectWorld_RemoveAndFreeGroup @0x5E9200`, which memsets and returns the
+120-byte slot to the 1024-entry pool `@0x2C077C8`), after which the slot's stale
+instance pointer makes the trigger a no-op until the surface effect changes.
+Reimpl: `rotor_wash.cpp` emits `EnsureZoneGroup` / `TriggerZoneGroup` /
+`ReleaseZoneGroup` `VehicleEffectEvent` kinds (the PR's per-hit spawn is gone),
+`vehicle_trail_presenter.cpp` executes them and
+`particle::EffectScene::trigger_group_children` is the re-trigger; the reimpl
+releases at death init (`destruction.cpp entity_init_aircraft_death`), at the
+rotor tick's dead/gone-owner sweep, and still on respawn. Deliberately NOT
+ported: retail's stale group pointer aliasing a REUSED pool slot (a later hit
+would re-trigger whatever group now occupies the slot;
+`allocate_effect_emitter_slot @0x5E46B0` reuses round-robin) — a lifetime
+hazard, not behavior; the reimpl treats a reaped group as the freed-slot no-op.
+
+Every spawned particle binds its force zone at spawn:
+`CParticleEmitter_SpawnNewParticle @0x5F37C6..0x5F37D8` stores
+`Terrain_FindNearestAmbientSoundZone(particle+24)` into particle+12; that
+function answers `dword_29D6BB0` when the window is open (`@0x5CBCD3`), else the
+nearest containing zone. Reimpl: `emitter.cpp emit_one_internal` (window, else
+`forces->zone_at`), `RotorWashSystem::zone_at`.
 
 Sway renderers stay individually placed. Their five position-seeded waves
 bend the second part about its authored pivot and add the radial wind offset.
@@ -4454,18 +4801,36 @@ two-unit-grid surface ring. The 128-slot bank fades in over twelve ticks,
 fades out through tick 31 and retires at 32. The portable renderer compiles
 nine radial rows and nineteen angular columns, the camera-distance height
 bias and both UV sets. The device uses the authored wake5/wakegrad textures.
+The ring opacity divides by the slot's EXTENT: `fidiv dword ptr [esi-4]`
+`@0x5CB532` (bytes DA 76 FC) is a 4-BYTE displacement from `_ESI` = &slot
+dword 31, i.e. slot dword 30, which `terrain_overlay_alloc @0x5CAFC4` stamps
+with the extent; the ray radius's `*(_ESI - 4)` `@0x5CB265` is the DWORD index
+−4 = slot dword 27 = the inner radius (the review's "divide by inner" claim was
+refuted 2026-09-08). Bank name map: `sub_5DDC60 @0x5DDC60` allocation,
+`CWeatherSlot_Init @0x5DDD80` (IDB misnomer: one surface-ring row init),
+`sub_5DDDB0 @0x5DDDB0` row removal, `sub_5DDE10 @0x5DDE10` per-tick fade.
 [orig: sub_6108E0 @ 0x6108E0; sub_56BD20 @ 0x56BD20;
-CWeatherSlot_Init @ 0x5DDD80; sub_5DDE10 @ 0x5DDE10;
-create_water_surface_mesh @ 0x5DDEF0;
-render_water_surface_decal @ 0x5DE0F0]
+sub_5DDC60 @ 0x5DDC60; CWeatherSlot_Init @ 0x5DDD80; sub_5DDDB0 @ 0x5DDDB0;
+sub_5DDE10 @ 0x5DDE10; create_water_surface_mesh @ 0x5DDEF0;
+render_water_surface_decal @ 0x5DE0F0; sub_5DDC90 @ 0x5DDC90]
 
 `vehicle_part_anim` pins rotor sounds, focal forces, lifetime ownership,
 material selection, foliage waves and ring geometry. Device coverage lives
 in `vehicle_trail_present_pass_test.gd`.
 
-The render callbacks are sub_5DE0F0 @0x5DE0F0 (ring geometry) and
-sub_5DDC90 @0x5DDC90 (material and texture-stage setup). The Godot shader
-implements that two-texture, unshaded draw through the compiled mesh.
+The render side (corrected 2026-09-08): `create_water_surface_mesh @0x5DDEF0`
+builds the 19×9 ring geometry; `render_water_surface_decal @0x5DE0F0` owns the
+draw state — the 0.4 ambient material `@0x5DE202..0x5DE217`, `SetMaterial`
+`@0x5DE232`, `D3DRS_AMBIENT` (139) white `@0x5DE1EC`, `GfxShader_ApplyPassChecked`
+pass 0x100000 `@0x5DE245`, and the first-UV scroll `(dword_24C1948 & 0x1FF) / 512`
+and `(dword_24C1948 & 0x3FF) × −0.01171875` `@0x5DE277..0x5DE2AD`; `sub_5DDC90
+@0x5DDC90` only loads wake5.tga / wakegrad.tga and sets sampler addressing. The
+Godot shader implements that two-texture, unshaded draw through the compiled
+mesh (`provenance.json` cites `render_water_surface_decal` / `sub_5DDC90`).
+Documented stand-in, no ledger row: the UV scroll counter `dword_24C1948` is the
+RENDER frame counter, but the portable compile runs once per fixed tick from
+`Simulation::fill_water_wake_frame`, so the logic tick stands in
+(`water_wake_frame.h/.cpp`).
 
 ## 30. Amphibious mover selection
 
@@ -4475,7 +4840,9 @@ vehicle returns to the ground mover. The platform draft uses half the pad
 radius for catv instead of the boat's 0.9-unit adjustment. Authority and
 prediction use the same dispatch. `watercraft_client_motor` pins both role
 paths and the absence of ground drowning while afloat.
-[orig: Entity_DispatchPhysics_catv @ 0x48F010;
+[orig: Entity_DispatchPhysicsUpdate @ 0x48F010 (the IDB name — the PR's
+`Entity_DispatchPhysics_catv` alias does not exist in the IDB; Flags 0x8000
+selects the watercraft mover);
 Entity_ProcessPlatformPhysics @ 0x481870]
 
 ## 31. Selector-zero craft motors and suspension
@@ -4500,8 +4867,46 @@ turret commit, light/direction sound edges and their separate trail cadences.
 
 The slip-length duplicate is confirmed in instructions 46F399..46F3B5:
 EAX is stored in both x87 input locals. Water wave constants are read
-directly from 7C6950 and 7C6F20..58. The 1.6 multiplier applies to the sum
-of both roll waves. A reverse boat does not enter the positive-only lean arm.
+directly from 7C6950 and 7C6F20..58. The wave (re-traced from the x87 sequence
+2026-09-08, `Entity_ProcessAirVehiclePhysics @0x46FA00 @0x47115D..0x4711D9`,
+radius shifts `@0x4711DD..0x4711FC`): P = fild(((x+y)>>10) + tick·4) ×
+`flt_7C6950` (1/256); pitch = ftol(cos(1.4P)·327680 + cos(P)·655360);
+roll = ftol(sin(0.8P)·524288 + sin(1.2P)·655360) with NO 1.6 factor — the
+`fmul dbl_7C6F28` `@0x4711BD` belongs to the HEIGHT phase: height = −1024 −
+ftol(sin(1.6P) × −1024.0); constants `dbl_7C6F20..7C6F58` = −1024.0, 1.6, 1.2,
+524288.0, 0.8, 655360.0, 327680.0, 1.4. (The PR's "1.6 multiplies the roll sum"
+reading was wrong; `vehicle_motor` pins P = 0.5 → 825755 / 574211 / −145 and
+P = 0.375 → 893366 / 439996 / −223.) A reverse boat does not enter the
+positive-only lean arm. The submerged-driver cut (`CameraOffset.z + Z <=
+Env_WaterHeightFixed` → the AI leg) exists on the ground selector-zero mover too
+(`Entity_ProcessInfantryPhysics @0x46E100 @0x46EA2E..0x46EA3A`) and on cveh
+(`@0x48B9A0..0x48B9AC`), not only the boat (`@0x48DFD3..0x48DFDF`) — the
+`!boat ||` guard was dropped 2026-09-08. The selector-zero boat's part-spin call
+inside its attrib-0x40 block (`@0x47004B..0x4700F5`) is not reached by the
+reimpl (`part_anim_tick` forces the Watercraft machine off; presentation-only,
+D-NET-161 (d)).
+
+Sound tails (witnessed and ported 2026-09-08;
+`vehicle_motor::test_selector_zero_sound_tails`): the ground twin's tail
+`@0x46F7C8..0x46F9A6` is cveh's — gate `dword_24E0E80` `@0x46F7C8`, the fold
+(max playerSpeed +0x8E8 → brain +0xC4 → command +0x220, isColliding =
+`+0x3D4 > 30`) `@0x46F7D4..0x46F825`, direction latch `@0x46F828..0x46F888`,
+high-rev (slot 33) `@0x46F88B..0x46F8C0`, lights (slot 24, bit 4)
+`@0x46F8C3..0x46F8FC`, claimant edge `@0x46F8FC..0x46F99C` (bit 1; slot 30 when
+occupant `+0xC+0x74` > water; all-zero fold then slot 31 when hull
+`+0xC+0x18000` > water), part spin `@0x46F99E`, timer `@0x46F9A6` — ported
+through `update_ground_sound` / `update_engine_sound`. The boat twin's tail
+`@0x4714EA..0x47166F` is different: lights (slot 24) BEFORE the fold
+`@0x4714EA..0x471523`, gate `@0x471523`, fold gate (`!player_control ||
+occupant`) `@0x471533..0x471546`, the speed substitute
+`ftol(min(sqrt(vx²+vy²+vz²), flt_7C19E0))` when `+0x29C == 0`
+`@0x47154C..0x4715A5`, maximum waterSpeed +0x8EC → brain +0xC4 → command +0x220
+with NO fold when all zero `@0x4715AA..0x4715C6`, fold (isColliding 0)
+`@0x4715D2`, direction latch `@0x4715DA..0x471667` — NO high-rev, NO slot 30/31
+claimant edge, NO part spin, NO timer. The reverse-shift (slot 32) `PlaySound`
+sites are `@0x46F883` (ground) and `@0x471621` (boat) — the old D-SND-17 tail's
+"aircraft slot-30 start" reading of those two addresses was wrong. The
+`dword_24E0E80` sound-ready gate itself has no reimpl equivalent (D-SND-17).
 
 vehicle_simple_contact.cpp preserves the crossed four-pad order plus
 three upper probes, the second pass's old-depth-plus-half-old/new sum,
@@ -4563,7 +4968,7 @@ also checking the authoritative pose and mounted prediction order.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` shifts the suffix without clearing its last slot; `sub_5DDE10 @ 0x5DDE10` revisits the removed index | PERMANENT ([ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register)), PR #640: a completely full bank otherwise duplicates the final active row indefinitely during expiry. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
+| D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` zeroes the removed slot and shifts the suffix (`@0x5DDDCB..0x5DDDFC`) without ever clearing slot 127; `sub_5DDE10 @ 0x5DDE10` steps its cursor back onto the removed index (`@0x5DDEAD..0x5DDEC0`) | PERMANENT — proposed in PR #640 (2026-09-07), requires maintainer ratification at merge (no sign-off recorded yet; [ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register) original-bug class): a completely full bank otherwise re-copies and re-expires the duplicated final row forever. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
 
 ## 35. Ground and boat pedal view turn
 
@@ -4589,9 +4994,34 @@ USE scores from the live three-axis eye offset and casts from Position to
 seat + 12288 Z. Its sixth LOS argument admits every collision type; sound
 queries retain the building filter. Carried EWeap occupancy is checked at
 the root vehicle, and a non-PlayerControl EWeap ray uses its vehicle parent
-as the endpoint. Own-hull occlusion follows the collision query; visible
-seats on the same carrier remain eligible. Label rays retain their separate
-sector-query endpoint exclusions.
+as the endpoint. The walker never tests the endpoint's own hull: its exclusion
+set is the query entity, the endpoint and both parent slots
+(`raycast_find_collision_entity @0x539ab8..0x539b10` -> ctx[17..20], skipped
+in `raycast_against_entity_pool @0x538832..0x538859`), and the 0x8000000 skip
+applies to sound rays only (the walker's includeFlagged is the caller's
+allTypes, `@0x539ba4 -> @0x5387ac`). What keeps a mounted USE from cycling
+seats is the scan's second gate, not any hull: the two caps `maxDistance =
+0x3FFFFFC0` / mounted `0x38E38E0` (`@0x435d90` / `@0x435d9a`) are BAM32 aim
+radii, not distances. Per candidate point the block ftol's the horizontal and
+3D reaches from the eye (`@0x436047..0x43608a`, through the `flt_7C19E0 =
+0x4EFFFE00` clamp), takes `atan2(dy, dx) * 2^32/2pi - Yaw` and `atan2(dz,
+horiz) * 2^32/2pi - Pitch` (`@0x43608f..0x4360c6`, `dbl_7C19D8`), clamps each
+delta to +100 deg (`0x471C7180`, positive side only, `@0x4360c9..0x4360de`),
+and forms the aim magnitude `sqrt(yaw_d^2 + pitch_d^2)` (`@0x4360e2..0x436103`).
+Score is `dist3d + (aim >> 9)` (`@0x43610c..0x436111`); the gates are
+`dist3d <= 0x40000` (4.0 u, `@0x436113`) and `aim <= maxDistance`
+(`@0x43611f..0x436123`): just under 90 deg for a standing player, 5.0 deg for
+a seated one. A rider therefore swaps only onto a free seat he is looking at,
+and USE from a Drivable Dune Buggy driver looking ahead finds nothing and
+exits (`Entity_ToggleVehicleMount @0x4369ac..0x4369c7`); the earlier port read
+both caps as 3D distances (16384 u / 910 u) and the horizontal reach as the
+4.0 u gate, which is why it needed an own-hull stand-in to exit. Corrected
+2026-09-08: `vehicle_attach.cpp` (the view frame is the body's BAM32
+heading/pitch, the mission-degree mirror for a bare entity), `collision_los.cpp`;
+ctests `vehicle_mount`, `buggy_01tr`; GUT `vehicle_emplacement_alignment_test`
+(the teleport looks down at the ctrlx point). Label rays retain their separate
+sector-query endpoint exclusions; the label list's own 4.0 u radius has no
+cone, only its nearest-scan bracket does.
 
 The writable WAC `seatbelt` value at `0xC6EADC` blocks mounted local-player
 USE in both local and joiner request paths. Forced script detach and numbered
@@ -4623,6 +5053,25 @@ for current, pending and fallback state (`Entity_InitVehicleAI @ 0x460200`).
 The native profile regression selects HELO_LAND to distinguish this from
 the old unconditional HELO_FOLLOWWP seed. Missing-profile fixture worlds
 retain the existing family fallback.
+
+D-INF-2 scope after the 2026-09-08 review: the `+0x369` path-state byte is
+modeled as nonzero-ness only (`board_blocked`) — producers `@0x4BA94E` and
+`@0x4B37BB` and the ring reader `@0x4BB325` are ported, the arrival writes a
+frame local (`var_1169 @0x4BBD8F`), not `+0x369`, and the 1/2/3 progression with
+its only clear lives in the unported cover/path consumer `ai_find_cover_position
+@0x4afab0` / `CAIPath_FindPath @0x409580` (search → 2 `@0x4afea8`, clear within
+1 u `@0x4aff06`). The S-point leg `@0x4BB7B2..0x4BB88F`: the guard clip is gated
+on `[[entity+0x188]+0x48][0x8C] != [0]` (= `has_clip(kGuard)`) — ported; its side
+writes `attachParent (+0x184) = self @0x4BB840` and the S position into
+`+0x2FC..+0x304` `@0x4BB846..0x4BB852` (then `+0x184 = 0 @0x4BB885`) are NOT
+modeled (no reader witnessed). The live can't-enter arm (goal = self, radius
+0x7D0000 `@0x4BB2CE..0x4BB2EC`; arrival stage++ `@0x4BBD9E`, attach skipped by
+the 0x640000 gate `@0x4BBDAF`) is ported, and the arrival no longer clears
+`board_blocked` (retail cleared the frame local). Driver lean 107..110 is
+ported in `ai_detail.h mounted_anim_state_for_seat` (writes `@0x4bee46` 110,
+`@0x4bee59` 109, `@0x4bee6b` 108 = carrier `+0x29C < 0`, `@0x4bee87` 107 =
+abs(`+0x29C`) < 0xC8); the roll compare constants for 109/110 (section 21's
+±71582784) were not re-witnessed this pass.
 
 ### 37. Retained contact geometry across shell asset binding
 
