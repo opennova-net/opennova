@@ -1308,6 +1308,9 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// The local player's live eye offset above its position (the entity CameraOffset
+	// mirror the USE seat scan measures from), Godot space; Vector3() when no player is spawned.
+	Vector3 get_local_player_eye_offset() const;
 	// The AI row's 16.16 position (mission x/y ground, z up) the retail hashes read; false without a player row.
 	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.

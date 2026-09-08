@@ -148,7 +148,18 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 						static_cast<int32_t>(uint32_t(yaw) - uint32_t(inf.body_heading));
 				if (std::abs(int64_t(diff)) < 1073741760) {
 					self.flags |= kEntityFlagMounted;
-					inf.board_anim = anim_state::kGuard;
+					// The guard clip (0x8C) is selected only when the body's
+					// anim table maps state 140 to a clip of its own: the record
+					// behind [[entity+0x188]+0x48] is a dword per state and the
+					// test is [rec+0x230] != [rec+0] (0x230 = 4 * 0x8C), which is
+					// the root-motion source's has_clip(kGuard). Retail also
+					// stamps attachParent (+0x184) = self and the S position into
+					// +0x2FC..+0x304 here; no consumer of either is witnessed
+					// (the IDB tracks no reader), so they are not modeled.
+					// [orig: Entity_UpdateInfantryAI @0x4BB818..0x4BB858]
+					const IRootMotionSource *rm = world.ai.root_motion;
+					if (rm == nullptr || rm->has_clip(inf.adm_id, anim_state::kGuard))
+						inf.board_anim = anim_state::kGuard;
 				}
 				if (std::abs(int64_t(diff)) < 0x2D82D80) {
 					e.pos[0] = sx;
@@ -263,6 +274,17 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 				self->last_attacker = target->last_attacker;
 			}
 		}
+		// The live can't-enter arm still runs the common arrival tail: the goal
+		// is the entity's own position with a 125 u ring (0x7D0000), so the
+		// distance is zero and the arrival branch increments a nonzero entry
+		// stage; the attach is skipped by the ring's >= 100 u (0x640000) gate.
+		// [orig: goal = self @0x4BB2CE..0x4BB2E4, radius @0x4BB2D7 -> loc_4BB5A1;
+		//  arrival @0x4BBD87..0x4BBDA0; attach gate @0x4BBDAF; flag clear
+		//  @0x4BBDFA..0x4BBE07]
+		if (inf.board_entry_stage)
+			++inf.board_entry_stage;
+		if (!self->mounted)
+			self->flags &= ~kEntityFlagMounted;
 		return;
 	}
 	int32_t goal[3] = { board_to_fixed(target->position.x), board_to_fixed(target->position.y),
@@ -297,7 +319,10 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 	if (dist < radius) {
 		if (inf.board_entry_stage)
 			++inf.board_entry_stage;
-		inf.board_blocked = false;
+		// The arrival clears a frame LOCAL (var_1169 @0x4BBD8F), not the +0x369
+		// path-state byte, so board_blocked (its model) stays set here; only the
+		// unported cover/path consumer (ai_find_cover_position @0x4afab0, clear
+		// within 1 u @0x4aff06) returns that byte to 0.
 		if (radius < 0x640000 &&
 				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0)
 			world.commands.mount_boarding_command(self->net_id, ssn, static_cast<uint8_t>(command));

@@ -5416,6 +5416,40 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     CHECK(!sys.line_of_sight_clear_cached(world, b, a, target_h, walker_h));
 }
 
+// A concrete Q22 matrix hand-run through Math_FixedPointMatrixToEulerAngles
+// @0x613310 (disasm 0x613316..0x61347B), so the integer pairing and the
+// truncations can never silently change. The rotation is Rz(30 deg) *
+// Ry(-20 deg) * Rx(-40 deg) rounded to Q22; the reader consumes m[0], m[2],
+// m[4], m[6], m[8], m[10] (the side column and translation are inert). With
+// ftol = truncation and every product an `imul; shrd 22` (int64 >> 22):
+//   negy = -m[4] = -1970678; negupy = -m[6] = -1785386
+//   yaw   = ftol(atan2(-1970678, 3413315) * dbl_7C57B8 (-683565275.5764316))
+//         = ftol(357913891.155) = 357913891
+//   sy = ftol(sin(yaw * dbl_7C3608) * 4194304) = ftol(2097209.775) = 2097209
+//   cy = ftol(cos(yaw * dbl_7C3608) * 4194304) = ftol(3632340.458) = 3632340
+//   roll_y = (cy*negupy >> 22) + (sy*m[2] >> 22) = -1546176 + -1149889 = -2696065
+//   up_x   = (cy*m[2] >> 22) - (sy*negupy >> 22) = -1991594 - (-892718) = -1098876
+//   fwd_x  = (cy*m[0] >> 22) - (sy*negy >> 22)   = 2955989 - (-985366) = 3941355
+//   pitch = ftol(atan2(m[8] = 1434536, 3941355) * dbl_7C19D8 (+683565275.5764316))
+//         = ftol(238609309.127) = 238609309
+//   sp = ftol(1434578.527) = 1434578; cp = ftol(3941341.205) = 3941341
+//   up_z  = (cp*m[10] >> 22) - (sp*up_x >> 22) = 2837159 - (-375849) = 3213008
+//   roll  = ftol(atan2(-2696065, 3213008) * 683565275.5764316)
+//         = ftol(-477222480.167) = -477222480
+// Every truncated value sits >= 0.12 from an integer, beyond any libm ulp.
+void test_fixed_matrix_euler_witnessed_vector() {
+	CollisionMatrix matrix;
+	const int32_t m[12] = { 3413315, -807948, -2299715, 0, 1970678, 3243611, 1785386, 0,
+		1434536, -2533455, 3019254, 0 };
+	for (int i = 0; i < 12; ++i)
+		matrix.m[i] = m[i];
+	int32_t got[3];
+	collision_matrix_to_euler(matrix, got);
+	CHECK(got[0] == 357913891);
+	CHECK(got[1] == 238609309);
+	CHECK(got[2] == -477222480);
+}
+
 void test_fixed_matrix_euler_round_trip() {
 	// Compound yaw/pitch and obtuse rolls exercise all three sequential
 	// integer projections, including the inverted-hull quadrant. The retail
@@ -5440,6 +5474,7 @@ void test_fixed_matrix_euler_round_trip() {
 }
 
 int main() {
+	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();

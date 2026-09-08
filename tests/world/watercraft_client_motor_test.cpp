@@ -2374,6 +2374,20 @@ bool run_amphibian_selects_water_mover_on_both_roles() {
 		r.traits.family = w::VehicleFamily::Ground;
 		r.traits.amphibian = true;
 		r.traits.player_speed = 30000;
+		// The rotor (part-spin) machine sits inside the ground mover's
+		// `itemDef->attrib & 0x40` (PlayerControl) block behind the claimant
+		// edge, on both roles: a non-PlayerControl row never reaches it
+		// [orig: cveh Entity_UpdateVehiclePhysics @0x48AF00, gate `test byte
+		//  [itemDef+54h],40h; jz loc_48D433` @0x48D38B..0x48D38F, the
+		//  Entity_UpdatePartSpinAccumulator call @0x48D42B]. The retail
+		// amphibians are PlayerControl items, and a PlayerControl hull with no
+		// controller parks its command [orig: @0x48E7EE..0x48E81E], so the
+		// afloat leg's command comes from a seated remote driver.
+		r.traits.player_control = true;
+		w::Entity *driver = mount_prediction_driver(r, /*is_local=*/false);
+		if (!expect(driver != nullptr, "amphibian driver mounted")) return false;
+		driver->position = vehicle->position;
+		driver->net_move_input = 0x08; // move bit, dir 0 = forward
 		vehicle->flags |= 0x8000u;
 		vehicle->health = vehicle->health_max = 1000;
 		vehicle->veh.yaw_seeded = true;

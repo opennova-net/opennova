@@ -1233,7 +1233,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     // than either, since the client would drop a row we keep sending.
                     ent->hidden = true;
                     world.out.entity_removals.push_back(e.handle.packed);
-                    world.registry.despawn(e.handle);
+                    // Entity_Destroy frees the AI component with the row, and the
+                    // updater jumps straight to its epilogue afterwards.
+                    // [orig: brain memset @0x43e995; jmp loc_4BFC89 @0x4b9f9b]
+                    // release() zeroes this AiEntity (e.handle with it), so
+                    // take the handle first and destroy the row before the brain.
+                    const EntityHandle corpse = e.handle;
+                    world.registry.despawn(corpse);
+                    release(corpse);
+                    return;
                 }
             }
         }

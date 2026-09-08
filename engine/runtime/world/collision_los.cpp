@@ -498,6 +498,15 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types) {
 	const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
     const Entity *se = source.valid() ? world.registry.get(source) : nullptr;
+    // The walker's two parent slots: per endpoint entity, parentEntity (+0x16C,
+    // the seat mount) wins over mountedChild (+0x268) [orig:
+    // raycast_find_collision_entity @0x539ab8..0x539b10 -> ctx[19]/ctx[20]].
+    const auto walker_parent = [](const Entity *e) -> EntityHandle {
+        if (e == nullptr) return EntityHandle{};
+        return e->mount_target.valid() ? e->mount_target : e->mounted_child;
+    };
+    const EntityHandle parent_a = walker_parent(le);
+    const EntityHandle parent_b = walker_parent(se);
 
     // --- Terrain leg. [orig: Physics_CheckTerrainLineOfSight @ 0x53b080] ---
     bool terrain_clear = false;
@@ -557,14 +566,20 @@ bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, Entit
 				continue;
 			const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
-			// An all-type USE ray can hit its target hull. A non-vehicle EWeap
-			// endpoint is excluded. [orig: @0x539B99..0x539BAF]
-			if (source.valid() && ch == source &&
-					(!all_types ||
-							((ce->item_attrib & kItemAttribEweap) != 0 && ce->item_type != 1)))
-				continue;
+			// The walker's exclusion set is ctx[17..20]: the query entity, the
+			// endpoint entity and both parent slots. The endpoint skip is
+			// unconditional: a USE ray is never blocked by the hull of the
+			// vehicle it targets [orig: raycast_against_entity_pool
+			// @0x538832..0x538859]. The EWeap clause @0x539b85..0x539b99 gates
+			// a candidate whose groundEntity (+0x28) IS the endpoint (the gun
+			// standing on it), which the ground skips below already cover.
+			if (source.valid() && ch == source) continue;
+			if (parent_a.valid() && ch == parent_a) continue;
+			if (parent_b.valid() && ch == parent_b) continue;
 			if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
-            if ((ce->engine_flags & 0x8000000u) != 0) continue; // [orig: @ 0x5387b4]
+			// The 0x8000000 skip is sound-only: the walker's includeFlagged arg
+			// is the caller's allTypes [orig: push ebp @0x539ba4 -> @0x5387ac..0x5387b4].
+            if (!all_types && (ce->engine_flags & 0x8000000u) != 0) continue;
 			if (!all_types && ce->kind != EntityKind::Building)
 				continue; // [orig: itemDef+92 == 5]
 			// Candidates standing on the listener/source are excluded (one

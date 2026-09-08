@@ -6,7 +6,10 @@
 namespace opennova::renderer {
 
 // The bounded surface-ring bank. Coordinates are mission-frame Q16.
-// [orig: WaterWake_Alloc @ 0x5DDC60; WaterWake_Init @ 0x5DDD80]
+// [orig: sub_5DDC60 @ 0x5DDC60 (the bank allocation); IDB: CWeatherSlot_Init
+//  @ 0x5DDD80 (a misnomer: it initialises one surface-ring row); sub_5DDC90
+//  @ 0x5DDC90 only loads wake5.tga / wakegrad.tga and sets their sampler
+//  addressing]
 class WaterWakePool {
 public:
 	struct Row {
@@ -37,7 +40,12 @@ struct WaterWakeFrame {
 
 // Output is the render frame (mission x,z,-y), with the witnessed radial
 // geometry, animated first UV and fixed gradient UV ready for device upload.
-// [orig: WaterWake_CreateMesh @ 0x5DDEF0; WaterWake_Render @ 0x5DE0F0]
+// `tick` drives the first UV's scroll: retail reads dword_24C1948, the render
+// frame counter, on every draw; this compile runs once per fixed tick and is
+// handed the logic tick instead (no display-frame counter reaches the
+// portable renderer).
+// [orig: create_water_surface_mesh @ 0x5DDEF0; render_water_surface_decal
+//  @ 0x5DE0F0, the dword_24C1948 reads @ 0x5DE277 / @ 0x5DE284]
 void compile_water_wakes(const WaterWakePool &pool, int32_t water_height, uint32_t tick,
 		const int32_t camera[3], WaterWakeFrame &out);
 

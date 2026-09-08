@@ -335,7 +335,10 @@ void JoinerRole::tick_local_weapon() {
 		fires.push_back(io.fired);
 	// Countermeasures use the same sequence and descriptor path as the local
 	// weapon. Their launch effects already ran at the vehicle input boundary.
-	// [orig: Weapon_FireProcess @0x53F5B0 -> Entity_FireWeaponAndSendPacket @0x42BD80]
+	// The SHOOTER is the vehicle's occupantEntity — the pilot — not the
+	// vehicle: Weapon_FireProcess passes (aim, occupant, aiRuntime[3], 1,
+	// ammoDefIndex, 0) [orig: Weapon_FireProcess @0x53f6d6 -> @0x53f70a ->
+	// Entity_FireWeaponAndSendPacket @0x42BD80].
 	for (auto &params : kernel.world.out.source_fires) {
 		const world::AiEntity *pilot = kernel.world.ai.for_handle(params.owner);
 		if (pilot == nullptr)
@@ -347,7 +350,18 @@ void JoinerRole::tick_local_weapon() {
 		world::LocalWeaponFiredWire fired;
 		fired.valid = true;
 		fired.shot_seq = params.shot_seq;
-		fired.ammo_index = params.ammo_index;
+		// The descriptor's off32 is the PILOT's entity+0x160 — his handheld
+		// ammo-def index, the same source the on-foot pump reads (the equipped
+		// adm's ammo row) — NOT the flare's: the writer's flags byte is
+		// *(WORD*)(shooterEntity+352) [orig: @0x42c01a..0x42c052 -> off32
+		// @0x42a7da]. The flare's ammo-def index travels only as the adm byte
+		// (weaponFlags -> off7 @0x42a69b) under targetId 1 (off6 @0x42a68a,
+		// the ammo-def arm).
+		const world::Entity *shooter = kernel.world.registry.get(params.owner);
+		const world::WeaponTableEntry *handheld = shooter != nullptr
+				? kernel.world.tables.weapons.by_index(shooter->equipped_adm_index)
+				: nullptr;
+		fired.ammo_index = handheld != nullptr ? handheld->ammo_index : -1;
 		fired.adm_index = params.adm_index;
 		fired.round.origin_x = world::to_fixed(params.origin.x);
 		fired.round.origin_y = world::to_fixed(params.origin.y);
@@ -355,6 +369,13 @@ void JoinerRole::tick_local_weapon() {
 		fired.round.dir_yaw = params.dir_yaw_bam;
 		fired.round.dir_pitch = params.dir_pitch_bam;
 		fired.round.mode_flags = 1;
+		// off33 is fire_flags = Weapon_GetScopeZoomLevel(can_fire, 12) |
+		// (can_fire ? 0x80 : 0) for the local shooter [orig: @0x42bdd6..
+		// 0x42bdf9]; a seated pilot (parentSlot 2/5) fails Player_CanFireWeapon
+		// [orig: @0x5cf7a8..0x5cf7b6], and with weaponActive 0 the zoom helper
+		// returns its default 12 [orig: Weapon_GetScopeZoomLevel @0x422fd1/
+		// @0x422fd5]. The on-foot pump stamps the same 12 on its own witnessed leg.
+		fired.round.subtype = 12;
 		for (int axis = 0; axis < 3; ++axis)
 			fired.shooter_pose[axis] = pilot->pos[axis];
 		fired.shooter_pose[3] = pilot->heading;

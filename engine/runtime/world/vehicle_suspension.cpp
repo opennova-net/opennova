@@ -21,7 +21,11 @@
 #include <cmath>
 #include <cstdlib>
 
-// Bike crash seeding clears the has-been-driven latch. [orig: @0x468BB1]
+// The bike's has-been-driven byte (+0x3DE) is cleared by the FALLEN-bike arm of
+// Entity_UpdateVehicleChassisOrientation @0x468A50 (the `mov [esi+3DEh], bl`
+// @0x468BB1 under `[ebp+8] > 250 && [ebp+14h] > 250 || [ebp+38h] > 0`, ported in
+// vehicle_contact_solve.cpp's light solve), NOT by the crash seed
+// @0x468B28..0x468B3B, which writes only +0x2EC/+0x2EF/+0x2EE and ejects.
 namespace opennova::world {
 
 namespace {
@@ -62,9 +66,16 @@ void store_osc(Entity::VehicleMotorState::WheelOsc &w, const ConformOscillator &
 //  0x47e32c airborne]: the corner target drops by the sink beyond one growth
 //  step, and a drop past -5000 while falling marks the hard landing.
 void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded,
-              const bool contact[4], int32_t corner_adj[4]) {
+              const bool contact[4], int32_t corner_adj[4], bool tank = false) {
 	int32_t c = m.plat_acc[k] - growth;
-	if (grounded) {
+	if (grounded && tank) {
+		// The tank's grounded twin skips the WHOLE block — the pair clear
+		// included — while the sink is within one growth step [orig:
+		// Entity_ProcessWheeledVehiclePhysics @0x475DE0 (site @0x478DC0..0x478DC9
+		// `mov eax,[eax]; sub eax, 0FAh; test eax, eax; jle loc_478E27`; the pair
+		// tests it skips @0x478DDF..0x478E0E)].
+		if (c <= 0) return;
+	} else if (grounded) {
 		if (c < 0) c = 0; // [orig: jns / xor @0x47e9dc..0x47e9de]
 	} else if (c <= 0) {
 		return; // [orig: test/jle @0x47e307..0x47e309]
@@ -278,7 +289,7 @@ void VehicleSystem::suspension_tank_loop(Entity &veh, const VehicleTraits &trait
 		if (on_ground && traits.spring == 0)
 			continue;
 		if (on_ground && !contact[k] && m.crash_request == 0 && m.crashed == 0)
-			catch_up(m, k, 250, true, contact, corner_adj);
+			catch_up(m, k, 250, true, contact, corner_adj, /*tank=*/true);
 		ConformOscillator osc = load_osc(m.wheel_osc[k]);
 		int32_t delta = 0;
 		if (on_ground) {

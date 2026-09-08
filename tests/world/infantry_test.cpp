@@ -2382,9 +2382,14 @@ void test_death_presentation() {
         Entity *ent = w.registry.get(h);
         CHECK(ent->corpse_timer == 3);
         CHECK(!ent->hidden);
-        run_ticks(ai, w, 3, 8); // drain to 0 -> despawn
-        CHECK(ent->hidden);
+        run_ticks(ai, w, 3, 5); // drain toward 0: the corpse pose holds while the row lives
+        CHECK(!ent->hidden);
         CHECK(e->inf.anim_state == anim_state::kDeathPungi); // the corpse pose held
+        run_ticks(ai, w, 5, 8); // timer 0 -> despawn; the brain goes with the row
+        CHECK(ent->hidden);
+        // [orig: Entity_Destroy @0x43e810 memsets the brain @0x43e995, and the
+        //  updater leaves through loc_4BFC89 @0x4b9f9b: no pose survives the row]
+        CHECK(ai.for_handle(h) == nullptr);
     }
 
     // ---- LeaveCorpse (attrib 0x400000): the corpse never expires ----
@@ -2553,6 +2558,12 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     Entity seed;
     seed.health = 100;
     seed.health_max = 100;
+    // An authored person (`deathtime 30`, parse-scaled to 30*62 + 62 ticks
+    // [orig: ItemDef_ParseProperty @0x49fa6c-0x49faa0 -> def+0x890; the death edge
+    //  copies it to entity+0x148 @0x4b9c97]). A def-less row keeps 0, and the edge
+    // tick's persistence block then destroys the row (Entity_Destroy @0x4b9f93)
+    // before the death clip is ever staged, which this test is not about.
+    seed.deathtime_ticks = 30 * 62 + 62;
     const EntityHandle handle = w->registry.spawn(0, seed);
 
     auto ai = std::make_unique<AiSystem>();

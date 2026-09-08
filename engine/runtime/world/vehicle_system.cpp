@@ -52,7 +52,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 				continue;
 			// catv's callback switches the entire mover (including input,
 			// sound and trails) using the previous tick's afloat flag.
-			// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+			// [orig: Entity_DispatchPhysicsUpdate @ 0x48F010]
 			VehicleTraits afloat_traits;
 			if (traits->amphibian && (veh->flags & 0x8000u) != 0) {
 				afloat_traits = *traits;
@@ -223,7 +223,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 				continue;
 			// catv's callback switches the entire mover (including input,
 			// sound and trails) using the previous tick's afloat flag.
-			// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+			// [orig: Entity_DispatchPhysicsUpdate @ 0x48F010]
 			VehicleTraits afloat_traits;
 			if (traits->amphibian && (veh->flags & 0x8000u) != 0) {
 				afloat_traits = *traits;

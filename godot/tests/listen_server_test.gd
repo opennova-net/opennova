@@ -1,5 +1,9 @@
 extends GutTest
 
+# The USE scan admits a seat only inside the player's view cone (just under
+# 90 deg standing, 5 deg seated); a test that presses USE looks at the seat first.
+const MountLook := preload("res://tests/support/mount_look.gd")
+
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
 # Simulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
@@ -128,6 +132,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		if personal_index >= 0:
 			sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
 		sim.drain_local_player_weapon_events()
+		MountLook.face(sim, Vector3(2, 0, 0))
 		assert_true(sim.local_player_toggle_mount(),
 				"the listen-server player mounts the config-%d gun" % config_value)
 		sim.set_local_player_mouse(511, false)

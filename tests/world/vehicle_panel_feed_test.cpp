@@ -109,8 +109,9 @@ int main() {
     //     passenger seats by index [orig: @0x434ca9 / @0x434cf4 / @0x434d8d].
     {
         Rig r;
-        std::vector<VehiclePanelSlot> slots;
+        VehiclePanelSlotList slots;
         CHECK(build_vehicle_panel_slots(r.w, r.veh, slots) == 4);
+        CHECK(slots.count == 4 && slots[4].type == 0 && !slots[4].entity.valid());
         CHECK(slots[0].type == 8 && slots[0].entity == r.veh);
         CHECK(slots[1].type == 9 && slots[1].entity == r.gun && slots[1].gun_slot == 1);
         CHECK(slots[2].type == 0);

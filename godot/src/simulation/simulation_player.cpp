@@ -114,6 +114,16 @@ Vector3 Simulation::get_local_player_position() const {
 	return Vector3(e->position.x, e->position.z, -e->position.y);
 }
 
+Vector3 Simulation::get_local_player_eye_offset() const {
+	if (!kernel_->world.cached.local_player.valid()) return Vector3();
+	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
+	if (!e) return Vector3();
+	// The entity's 16.16 CameraOffset mirror (the USE scan's eye above Position),
+	// mission (x,y,z) -> Godot (x, z, -y).
+	return Vector3(e->eye_offset_x / 65536.0f, e->eye_offset_z / 65536.0f,
+			-e->eye_offset_y / 65536.0f);
+}
+
 bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
 	if (!kernel_->world.cached.local_player.valid()) return false;
 	const AiEntity *body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);

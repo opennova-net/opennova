@@ -359,6 +359,21 @@ bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,
 	return changed;
 }
 
+bool EffectScene::trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
+		const Vector3 &p_forward, int p_force_zone) {
+	const bool triggered = scene_.trigger_group_children(
+			opennova::particle::EffectGroupId{ token_from_godot(p_group_id) },
+			opennova::particle::Vec3{ float(p_position.x), float(p_position.y),
+					float(p_position.z) },
+			opennova::particle::Vec3{ float(p_forward.x), float(p_forward.y),
+					float(p_forward.z) },
+			static_cast<std::uint16_t>(p_force_zone & 0xFFFF));
+	if (triggered) {
+		snapshot_dirty_ = true;
+	}
+	return triggered;
+}
+
 void EffectScene::reset_runtime_state() {
 	scene_.reset_runtime_state();
 	snapshot_dirty_ = true;

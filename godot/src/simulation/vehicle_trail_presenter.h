@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/variant.hpp>
 
 #include <runtime/world/present_drains.h>
+#include <runtime/world/vehicle_motor.h>
 
 #include <vector>
 
@@ -45,7 +46,19 @@ private:
 		String owner_key;
 		int64_t group_id = 0;
 	};
+	// One surface-effect group per helicopter focal-wind zone (the retail
+	// slot's instance word +3 and effect word +4). The sim owns the
+	// identity and orders Ensure/Trigger/Release; a group that already died
+	// keeps its record, so later triggers are the retail freed-slot no-op.
+	// The witness is cited at the sim's producer (world/rotor_wash.cpp).
+	struct ZoneGroup {
+		String effect;
+		int64_t group_id = 0;
+	};
 
+	void apply_zone_group_event(EffectWorld *p_fx,
+			const opennova::world::VehicleEffectEvent &p_event, const Vector3 &p_position,
+			const Vector3 &p_direction);
 	void sync_water_wakes();
 	ObjectID water_mesh_id_;
 	Ref<ArrayMesh> water_mesh_;
@@ -62,6 +75,7 @@ private:
 	Ref<ItemEffectDirector> anchors_;
 	HashMap<String, Transform3D> transforms_;
 	HashMap<String, TrailGroup> groups_;
+	HashMap<int, ZoneGroup> zone_groups_;
 };
 
 } // namespace godot

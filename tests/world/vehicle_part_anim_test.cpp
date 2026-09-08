@@ -215,16 +215,26 @@ void test_player_control_rotor_follows_the_claimant() {
 			"the whole spin-down drew nothing from the shared stream");
 }
 
-// A NON-player-control item re-rolls its rate EVERY unoccupied tick — one
-// draw from the shared stream per tick, no more, no less — so the stream
-// position after N ticks is exactly N draws on.
+// A NON-player-control item re-rolls its rate EVERY unoccupied tick of the
+// MACHINE — one draw from the shared stream per tick, no more, no less — so
+// the stream position after N machine ticks is exactly N draws on. The full
+// mover never reaches the machine for such an item: Entity_UpdatePartSpinAccumulator
+// is called only inside the `itemDef->attrib & 0x40` block (cveh gate @0x48D38B,
+// call @0x48D42B; ctan @0x48AD97/@0x48AE3D; cbik @0x486944/@0x4869EA), so through
+// tick_motor the stream is untouched and the spin state stays zero.
 void test_non_player_control_rolls_once_per_unoccupied_tick() {
 	Rig r;
 	const VehicleTraits t = buggy_traits(false);
+	const uint32_t mover0 = r.w.prng16_state;
+	r.tick(3, t);
+	CHECK(r.w.prng16_state == mover0,
+			"the full mover draws nothing for a non-PlayerControl item");
+	CHECK(r.veh().veh.part_spin.rate == 0 && r.veh().veh.part_spin.speed == 0,
+			"and never spins it");
 	World probe;
 	probe.prng16_state = r.w.prng16_state;
 	const int kTicks = 17;
-	r.tick(kTicks, t);
+	for (int i = 0; i < kTicks; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
 	for (int i = 0; i < kTicks; ++i) (void)probe.next_prng16();
 	CHECK(r.w.prng16_state == probe.prng16_state,
 			"exactly one shared-stream draw per unoccupied tick");
@@ -241,14 +251,14 @@ void test_non_player_control_rolls_once_per_unoccupied_tick() {
 	drv.mount_type = SeatType::Controller;
 	veh.seats[0].occupant = r.drv_h;
 	const uint32_t before = r.w.prng16_state;
-	r.tick(1, t);
+	r.w.vehicles.part_anim_tick(veh, t);
 	const int32_t rolled = veh.veh.part_spin.rate;
 	CHECK(rolled == kRotorRateFull || rolled == kRotorRateMid ||
 					rolled == kRotorRateLow,
 			"an occupied non-player item seeds one of the three rolled rates");
 	CHECK(r.w.prng16_state != before, "the seed took one draw");
 	const uint32_t after = r.w.prng16_state;
-	r.tick(5, t);
+	for (int i = 0; i < 5; ++i) r.w.vehicles.part_anim_tick(veh, t);
 	CHECK(veh.veh.part_spin.rate == rolled && r.w.prng16_state == after,
 			"a seeded rate holds without further draws");
 	CHECK(veh.veh.part_spin.speed == 6 * rolled, "spin-up at the rolled rate");
@@ -539,24 +549,45 @@ void test_rotor_wash_particles_and_lifetime() {
 	tree.render_sway = false;
 	CHECK(!world.rotor_wash.sway_pose(tree).active,
 			"ordinary renderers do not inherit tree deformation");
+	// One persistent surface-effect group per zone: the first dust hit creates
+	// it, every later hit only re-triggers it, and nothing is released while the
+	// surface effect stays the same. [orig: WeatherParticle_UpdateAllEmitters
+	// @0x5CB407..0x5CB4A0]
+	using Kind = VehicleEffectEvent::Kind;
 	world.env.water_z = -100 * 65536;
-	bool dust = false;
 	for (int i = 0; i < 12; ++i) {
 		++world.logic_tick;
 		world.rotor_wash.tick();
 	}
-	for (const auto &event : world.out.vehicle_effects)
-		dust |= event.effect == "Effect_RwDust" && event.force_zone == slot;
-	CHECK(dust, "ground-directed rays emit the authored dust effect with its force-zone binding");
+	int ensures = 0, triggers = 0, releases = 0;
+	bool zone_bound = !world.out.vehicle_effects.empty();
+	for (const auto &event : world.out.vehicle_effects) {
+		zone_bound &= event.force_zone == slot && event.effect == "Effect_RwDust";
+		if (event.kind == Kind::EnsureZoneGroup)
+			++ensures;
+		else if (event.kind == Kind::TriggerZoneGroup)
+			++triggers;
+		else if (event.kind == Kind::ReleaseZoneGroup)
+			++releases;
+		else
+			zone_bound = false;
+	}
+	CHECK(zone_bound && ensures == 1 && triggers >= 1 && releases == 0,
+			"ground-directed rays create one persistent dust group per zone and re-trigger it per hit");
 	world.out.vehicle_effects.clear();
 	world.env.water_z = 0;
 	for (int i = 0; i < 12; ++i) {
 		++world.logic_tick;
 		world.rotor_wash.tick();
 	}
-	CHECK(!world.out.vehicle_effects.empty() &&
-					world.out.vehicle_effects[0].effect == "Effect_RwWater",
-			"water chooses the authored rotor-wash effect");
+	CHECK(world.out.vehicle_effects.size() >= 3 &&
+					world.out.vehicle_effects[0].kind == Kind::ReleaseZoneGroup &&
+					world.out.vehicle_effects[0].effect == "Effect_RwDust" &&
+					world.out.vehicle_effects[1].kind == Kind::EnsureZoneGroup &&
+					world.out.vehicle_effects[1].effect == "Effect_RwWater" &&
+					world.out.vehicle_effects[2].kind == Kind::TriggerZoneGroup &&
+					world.out.vehicle_effects[2].effect == "Effect_RwWater",
+			"a surface change releases the dust group and creates the water group before re-triggering");
 	world.env.water_z = 65536;
 	for (int i = 0; i < 9; ++i) {
 		++world.logic_tick;
@@ -566,6 +597,36 @@ void test_rotor_wash_particles_and_lifetime() {
 	for (const auto &row : world.rotor_wash.water_wakes().rows())
 		ring |= row.active;
 	CHECK(ring, "downwash over a nonzero water plane produces the surface-ring bank");
+	// Every spawn binds its zone: a zoneless emitter inside the pool searches
+	// the nearest containing zone, an open spawn window wins without a search,
+	// a spawn outside every zone stays zoneless, and the re-trigger spawn lands
+	// at the hit with the zone as its window. Positions are render-frame
+	// (x, up, -y): (1, 3, 0) is 3.2 units from the rotor at mission (0, 0, 6),
+	// (400, 3, 0) is outside the 75-unit slot box.
+	// [orig: CParticleEmitter_SpawnNewParticle @0x5F37C6..0x5F37D8;
+	//  Terrain_FindNearestAmbientSoundZone @0x5CBCD0; CEffectWorld_SpawnAllActiveChildren
+	//  @0x5E5E70]
+	p::ParticleDef spawn_def = def;
+	spawn_def.age = 1.0f;
+	p::Emitter search;
+	p::emitter_init(search, &spawn_def, { 1, 3, 0 }, 1);
+	CHECK(p::emitter_spawn_one(search, &world.rotor_wash) &&
+					search.particles.back().force_zone == slot,
+			"a zoneless spawn inside the pool binds the nearest containing zone");
+	search.force_zone = uint16_t(0x8000u | 77u);
+	CHECK(p::emitter_spawn_one(search, &world.rotor_wash) &&
+					search.particles.back().force_zone == uint16_t(0x8000u | 77u),
+			"an open spawn window binds without a search");
+	p::Emitter outside;
+	p::emitter_init(outside, &spawn_def, { 400, 3, 0 }, 1);
+	CHECK(p::emitter_spawn_one(outside, &world.rotor_wash) &&
+					outside.particles.back().force_zone == 0,
+			"a spawn outside every zone stays zoneless");
+	CHECK(p::emitter_spawn_one_at(outside, { 2, 3, 0 }, { 0, 1, 0 }, slot, &world.rotor_wash) &&
+					outside.particles.back().force_zone == slot &&
+					outside.particles.back().position.x == 2.0f &&
+					outside.particles.back().position.y == 3.0f,
+			"the re-trigger spawn lands at the hit position with the zone as its window");
 	world.vehicles.respawn(helo);
 	CHECK(helo.veh.rotor_wash_handle == 0 && world.rotor_wash.active_count() == 0,
 			"respawn releases the vehicle's wind slot");
@@ -585,8 +646,14 @@ void test_helicopter_sound_curves_and_decay() {
 	traits.family = VehicleFamily::Helicopter;
 	traits.player_control = true;
 	traits.climb_speed = 65536;
+	// Authored like retail sndprof.def SP_Apache1 (soundloop_2 V_APACHE_ILP .8 1.2,
+	// soundloop_3 V_APACHE_DLP .8 1.2, no soundloop_1) plus decoy Soundloop_5..7
+	// that the helicopter lanes must never consult: lanes 21/11/1 read itemDef
+	// soundLoopId[2]/[1]/[0] = Soundloop_3/2/1 (+2100/+2096/+2092
+	// @0x52919D/@0x5291ED/@0x529235), each with lifetime 15 (+16 @0x528F94).
 	const char profile[] = "begin Rotor\n"
-						   "Soundloop_5 Lateral\nSoundloop_6 Medium\nSoundloop_7 Cruise\n"
+						   "Soundloop_2 V_APACHE_ILP .8 1.2\nSoundloop_3 V_APACHE_DLP .8 1.2\n"
+						   "Soundloop_5 Decoy5\nSoundloop_6 Decoy6\nSoundloop_7 Decoy7\n"
 						   "medloopfadeinstart 0\nmedloopfadeinend 50\n"
 						   "medloopfadeoutstart 75\nmedloopfadeoutend 100\n"
 						   "medlooppitchstart 0\nmedlooppitchend 100\n"
@@ -595,8 +662,26 @@ void test_helicopter_sound_curves_and_decay() {
 						   "crslooppitchstartp 60\ncrslooppitchendp 120\nend\n";
 	CHECK(world.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1,
 			"rotor sound profile parses its authored curves");
-	traits.sound_loops[6] = "ItemCruise";
 	helo.veh.part_spin.speed = kRotorSpeedMax;
+	world.vehicles.update_rotor_sound(helo, traits);
+	const auto retail = world.out.sound_emitters.drain();
+	CHECK(retail.size() == 2,
+			"a retail-shaped profile registers only the medium and cruise lanes");
+	if (retail.size() == 2) {
+		CHECK(retail[0].lane == 21 && retail[0].slot == 2 && retail[0].set_name == "V_APACHE_DLP" &&
+						retail[0].pitch_q16 == 78600 && retail[0].volume_q8_8 == 65279 &&
+						retail[0].lifetime_ticks == 15,
+				"cruise is Soundloop_3 at lifetime 15 with its upper authored pitch");
+		CHECK(retail[1].lane == 11 && retail[1].slot == 1 && retail[1].set_name == "V_APACHE_ILP" &&
+						retail[1].volume_q8_8 == 0 && retail[1].lifetime_ticks == 15,
+				"medium is Soundloop_2 and fades out at full rotor speed");
+	}
+	for (const auto &event : retail)
+		CHECK(event.set_name.rfind("Decoy", 0) != 0, "Soundloop_5..7 are never consulted");
+	// An item override for Soundloop_3 and an authored Soundloop_1 complete the
+	// three lanes.
+	traits.sound_loops[2] = "ItemCruise";
+	traits.sound_loops[0] = "ItemLateral";
 	world.vehicles.update_rotor_sound(helo, traits);
 	const auto full = world.out.sound_emitters.drain();
 	CHECK(full.size() == 3, "three rotor lanes are registered together");
@@ -606,7 +691,8 @@ void test_helicopter_sound_curves_and_decay() {
 				"cruise uses the item override and its upper authored pitch");
 		CHECK(full[1].lane == 11 && full[1].volume_q8_8 == 0,
 				"medium fades out at full rotor speed");
-		CHECK(full[2].lane == 1 && full[2].pitch_q16 == 65536 && full[2].volume_q8_8 == 63240,
+		CHECK(full[2].lane == 1 && full[2].slot == 0 && full[2].set_name == "ItemLateral" &&
+						full[2].pitch_q16 == 65536 && full[2].volume_q8_8 == 63240,
 				"zero climb preserves the original negative-to-unsigned lateral volume");
 	}
 	helo.veh.part_spin.speed =

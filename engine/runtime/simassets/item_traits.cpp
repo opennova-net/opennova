@@ -319,6 +319,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 						: render == "chel"			? world::VehicleRenderFamily::Helicopter
 						: render == "cpln"			? world::VehicleRenderFamily::Plane
 													: world::VehicleRenderFamily::None;
+				// The brain machine class is keyed by ai_function through the class
+				// event-callback table (stricmp, 24-byte rows): CHel @0x8132a0 and
+				// the cpln thunk @0x8133a8 -> EntityAI_ProcessInfantryStateMachine
+				// @0x4581b0 (the air machine); cveh @0x813378, cbot @0x813390 and
+				// ctrn @0x8133c0 -> EntityAI_ProcessVehicleStateMachine @0x4583c0.
+				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
+				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
+				// @0x407dc0]
+				const std::string brain = fourcc_prefix(def->ai_function);
+				vt.brain_class = brain == "chel" || brain == "cpln"
+						? world::VehicleBrainClass::Air
+						: brain == "cveh" || brain == "cbot" || brain == "ctrn"
+						? world::VehicleBrainClass::Ground
+						: world::VehicleBrainClass::Unset;
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
 				// mounted NPC's AiProfile. Resolve the profile name and the
 				// item-level soundloop overrides once at this portable boundary.

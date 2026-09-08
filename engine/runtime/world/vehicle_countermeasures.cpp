@@ -50,7 +50,13 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 }
 
 // The pilot's entry is skipped: slots 1..9 read their actual seat occupant.
-// [orig: Entity_UpdateAircraftPhysics @0x490310, flare scan before @0x491546]
+// [orig: Entity_UpdateAircraftPhysics @0x490310 — Entity_BuildWeaponSlotList
+//  into the frame's two 10-entry arrays @0x4911a5..0x4911b5; entries 1..9 OR
+//  the seat occupant's +0x12C bit 5 @0x4911c5..0x49145c; the (phase & 0x3F)
+//  latch clear @0x49145e..0x491465; the +0x224 (net climb) && pressed gate,
+//  the un-latched release and the latch @0x49146c..0x49148b]
+// The scan has no side effect, so the early-out on a parked hull (retail
+// scans first and tests +0x224 after) changes nothing observable.
 void VehicleSystem::tick_flare_input(Entity &vehicle) {
 	auto &m = vehicle.veh;
 	const uint32_t phase = world_.logic_tick + 36u * uint32_t(vehicle.net_id);
@@ -58,10 +64,11 @@ void VehicleSystem::tick_flare_input(Entity &vehicle) {
 		m.flare_latched = false;
 	if (m.net_climb == 0)
 		return;
-	std::vector<VehiclePanelSlot> slots;
+	// Retail's stack arrays: rebuilt every tick with no allocation.
+	VehiclePanelSlotList slots;
 	build_vehicle_panel_slots(world_, vehicle.handle, slots);
 	bool pressed = false;
-	for (size_t i = 1; i < slots.size(); ++i) {
+	for (int i = 1; i < slots.count; ++i) {
 		const Entity *holder = world_.registry.get(slots[i].entity);
 		if (holder == nullptr)
 			continue;

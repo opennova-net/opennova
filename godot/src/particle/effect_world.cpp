@@ -1,5 +1,4 @@
 #include "particle/effect_world.h"
-#include "simulation/simulation.h"
 
 #include "particle/particle_effect.h"
 #include "particle/particle_renderer.h"
@@ -609,10 +608,16 @@ void EffectWorld::advance_fixed_tick(double p_delta) {
 	advance_simulation_tick(p_delta, nullptr);
 }
 
-void EffectWorld::advance_simulation_tick(double p_delta, Simulation *simulation) {
+void EffectWorld::advance_simulation_tick(double p_delta,
+		const opennova::particle::ParticleForceField *p_forces) {
 	_sync_owner_poses(false);
-	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0,
-			simulation ? simulation->particle_force_field() : nullptr);
+	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0, p_forces);
+}
+
+bool EffectWorld::trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
+		const Vector3 &p_forward, int p_force_zone) {
+	return scene_.is_valid() && p_group_id != 0 &&
+			scene_->trigger_group_children(p_group_id, p_position, p_forward, p_force_zone);
 }
 
 void EffectWorld::render_frame() {
@@ -748,6 +753,9 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_effect_by_handle", "handle", "position", "orientation"),
 			&EffectWorld::spawn_effect_by_handle, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("stop_group", "group_id"), &EffectWorld::stop_group);
+	ClassDB::bind_method(D_METHOD("trigger_group_children", "group_id", "position", "forward",
+								 "force_zone"),
+			&EffectWorld::trigger_group_children);
 	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
 					"offset_control"),
 			&EffectWorld::set_group_parameters);

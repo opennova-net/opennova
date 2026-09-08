@@ -5,6 +5,9 @@ const MISSION := "00TRc.bms"
 const GUN_BMS_ID := 88
 const GUN_ITEM_ID := 101881
 const GUN_GRAPHIC := "E50triB"
+# The USE scan admits a seat only inside the player's view cone (just under
+# 90 deg standing); the spawn looks at the gun before pressing USE.
+const MountLook := preload("res://tests/support/mount_look.gd")
 
 
 func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
@@ -90,6 +93,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.set_local_player_weapon(weapons.get_weapon(personal_index), {})
 	sim.drain_local_player_weapon_events()
 
+	MountLook.face(sim, gun.position)
 	assert_true(sim.local_player_toggle_mount(), "the 00TRc spawn can mount E50triB")
 	sim.step()
 	sim.set_local_player_mouse(511, false)

@@ -53,6 +53,13 @@ class ParticleForceField {
 public:
 	virtual ~ParticleForceField() = default;
 	virtual void apply(Particle &particle, std::size_t index, bool repulsion) const = 0;
+	// The zone a particle spawned at `position` (render frame) binds to when no
+	// spawn window is open: the nearest containing focal-wind zone, 0 for none.
+	// [orig: CParticleEmitter_SpawnNewParticle @0x5F35B0 stores
+	//  Terrain_FindNearestAmbientSoundZone(pos) @0x5F37C6..0x5F37D8 into
+	//  particle+12 for EVERY spawn; Terrain_FindNearestAmbientSoundZone @0x5CBCD0
+	//  answers dword_29D6BB0 while a rotor-wash trigger window is open]
+	virtual std::uint16_t zone_at(const Vec3 &position) const = 0;
 };
 
 struct Particle {
@@ -223,8 +230,20 @@ void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces = nu
 
 // Spawn one particle immediately (bypasses the emission schedule). Returns
 // false if the particle pool is at max_particles and no slot can be reclaimed.
-// Test helper; production code should use emitter_advance.
-bool emitter_spawn_one(Emitter &e);
+// Test helper; production code should use emitter_advance. `forces` answers
+// the spawn-time zone search when the emitter has no spawn window.
+bool emitter_spawn_one(Emitter &e, const ParticleForceField *forces = nullptr);
+
+// The rotor-wash re-trigger: one particle spawned exactly like a scheduled
+// one but at `position` along `forward`, with `force_zone_window` standing in
+// for the open dword_29D6BB0 window (0 falls back to the `forces` search).
+// [orig: CEffectWorld_SpawnAllActiveChildren @0x5E5E70 calls vtable slot 6 =
+//  CParticleEmitter_SpawnNewParticle @0x5F35B0 (position, direction, 0.0, 0,
+//  parent -1, 0) on each top-level child; the emission schedule
+//  (CEffectEmitter_AdvanceEmission @0x5E1D30 @0x5E1E3E) calls the same slot
+//  with the emitter's own +24 position and +48 forward]
+bool emitter_spawn_one_at(Emitter &e, Vec3 position, Vec3 forward,
+		std::uint16_t force_zone_window, const ParticleForceField *forces = nullptr);
 
 // Move the emitter to `new_pos`, recording the delta and updating the
 // cumulative drift since spawn. Engine ref:

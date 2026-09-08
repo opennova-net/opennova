@@ -218,7 +218,7 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 		std::fill_n(m.plat_acc, 4, 0);
 	}
 	// Replicated parked state seeds the small opposite-corner up forces.
-	// [orig: Entity_ProcessAirPhysics @0x47EF10, tail @0x4816DD]
+	// [orig: Entity_ProcessAircraftContactPhysics @0x47EF10 (site @0x4816DD)]
 	if (((veh.flags | veh.engine_flags) & 0x10u) != 0 && !m.crashed && !m.settle_2f0) {
 		int32_t quad[4][3];
 		const int32_t hx = (traits.box_x_hi - traits.box_x_lo) >> 1;
@@ -857,8 +857,9 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 
 // Bike/light contact uses two wheel probes, three spine probes and one mid-hull probe. The two-
 // corner axle fit preserves roll continuity and mean wheel height. Rider ejection, wheelie, spring
-// and tumble state retain the family gates. The bike lean helper is Vehicle_UpdateTurretRotation
-// at 0x45AEA0. See vehicle-client-movers-re.md sections 9 and 12-32.
+// and tumble state retain the family gates. The bike lean helper is Entity_SmoothHeadingToTarget
+// at 0x45B2C0 (sole caller @0x47A7D3; Vehicle_UpdateTurretRotation @0x45AEA0 is the boat's, sole
+// caller @0x4838CF). See vehicle-client-movers-re.md sections 9 and 12-32.
 // Witness sites: [orig: @0x479600, @0x483FE0, @0x486672, @0x48eff4, @0x468A50, @0x468D34,
 // @0x47A343, @0x45CFB0, @0x45D110, @0x45B2C0, @0x47a7d3]
 bool light_contact_solve_active(const VehicleTraits &traits) {

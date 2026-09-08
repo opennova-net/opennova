@@ -56,19 +56,28 @@ EntityHandle vehicle_panel_root(const World &world, const Entity &local) {
 }
 
 int build_vehicle_panel_slots(const World &world, EntityHandle root_h,
-                              std::vector<VehiclePanelSlot> &out) {
-    out.clear();
+                              VehiclePanelSlotList &out) {
+    out.count = 0;
+    const auto push = [&out](const VehiclePanelSlot &slot) {
+        out.slots[static_cast<size_t>(out.count++)] = slot;
+    };
+    // The tail past the count is zeroed like retail's [orig: @0x434db4..0x434dd3].
+    const auto zero_tail = [&out]() {
+        for (int i = out.count; i < kVehiclePanelSlotMax; ++i)
+            out.slots[static_cast<size_t>(i)] = VehiclePanelSlot{};
+        return out.count;
+    };
     const Entity *root = world.registry.get(root_h);
-    if (root == nullptr) return 0;
+    if (root == nullptr) return zero_tail();
     if (!root->has_item_def || (root->item_attrib & kAttribVehicle) == 0 ||
-            seat_by_retail_slot(*root, 8) == nullptr) return 0; // def+613 @0x434C91
+            seat_by_retail_slot(*root, 8) == nullptr) return zero_tail(); // def+613 @0x434C91
     // Slot 0: the vehicle's control seat [orig: @0x434ca9..0x434cab].
-    out.push_back(VehiclePanelSlot{root_h, 8, -1});
+    push(VehiclePanelSlot{root_h, 8, -1});
     // The attached gun children [orig: the child walk @0x434cf4..0x434d5e —
     // live (+28), Flags bit 1 clear, a def with attrib 0x20 and not 0x40,
     // parent == vehicle, bone in the gun-slot table, a UseGun seat].
     world.registry.for_each([&](const Entity &child) {
-        if (static_cast<int>(out.size()) >= kVehiclePanelSlotMax) return;
+        if (out.count >= kVehiclePanelSlotMax) return;
         if (child.emplacement_parent != root_h) return;
         if (!child.alive || (child.flags & 1u) != 0) return;
         if (!child.has_item_def) return;
@@ -82,16 +91,16 @@ int build_vehicle_panel_slots(const World &world, EntityHandle root_h,
         // gun seat); the child's authored addeweap slot IS that index.
         if (child.emplacement_slot >= DEF_VEHICLE_HUD_MAX_EMPLACE) return;
         if (gun_seat(child) == nullptr) return;
-        out.push_back(VehiclePanelSlot{child.handle, 9,
+        push(VehiclePanelSlot{child.handle, 9,
                 static_cast<int>(child.emplacement_slot)});
     });
     // The passenger seats by index [orig: @0x434d8d..0x434da8].
     for (int s = 0; s < 8; ++s) {
-        if (static_cast<int>(out.size()) >= kVehiclePanelSlotMax) break;
+        if (out.count >= kVehiclePanelSlotMax) break;
         if (seat_by_retail_slot(*root, s) == nullptr) continue;
-        out.push_back(VehiclePanelSlot{root_h, s, -1});
+        push(VehiclePanelSlot{root_h, s, -1});
     }
-    return static_cast<int>(out.size());
+    return zero_tail();
 }
 
 void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
@@ -101,7 +110,7 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
     out.clear();
     const Entity *root = world.registry.get(root_h);
     if (root == nullptr) return;
-    std::vector<VehiclePanelSlot> slots;
+    VehiclePanelSlotList slots;
     build_vehicle_panel_slots(world, root_h, slots);
 
     // Returns true for a held slot whose rider has no def: retail draws
@@ -118,7 +127,7 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
     };
     char label[8];
 
-    for (size_t pos = 0; pos < slots.size(); ++pos) {
+    for (int pos = 0; pos < slots.count; ++pos) {
         const VehiclePanelSlot &slot = slots[pos];
         hud::HudVehicleSeat row;
         bool unresolved = false;

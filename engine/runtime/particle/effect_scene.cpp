@@ -822,6 +822,29 @@ bool EffectScene::set_group_parameters(EffectGroupId group_id,
 	return true;
 }
 
+bool EffectScene::trigger_group_children(EffectGroupId group_id, const Vec3 &position,
+		const Vec3 &forward, std::uint16_t force_zone) {
+	Impl::GroupRecord *group = impl_->find_group(group_id);
+	if (group == nullptr || group->detached) {
+		return false;
+	}
+	// The portable scene has no nested child emitters, so every group emitter
+	// is a top-level child (retail's +264 == 0 gate). A full pool refuses the
+	// spawn exactly as CParticleEmitter_SpawnParticle's count >= capacity
+	// test does @0x5E7687.
+	for (const std::size_t emitter_slot : group->emitter_slots) {
+		if (emitter_slot >= impl_->emitter_pool.size()) {
+			continue;
+		}
+		Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
+		if (!record.active) {
+			continue;
+		}
+		emitter_spawn_one_at(record.emitter, position, forward, force_zone, nullptr);
+	}
+	return true;
+}
+
 void EffectScene::detach(EffectGroupId group_id) {
 	Impl::GroupRecord *group = impl_->find_group(group_id);
 	if (group != nullptr) {

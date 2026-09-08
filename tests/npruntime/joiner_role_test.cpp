@@ -27,6 +27,9 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 
+#include <base/io/bam.h>
+
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -37,6 +40,28 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
+
+namespace {
+// The USE/label seat scan gates on an aim cone from the eye (standing
+// 0x3FFFFFC0, seated 5 deg) [orig: Entity_FindNearestSeatOrArmory
+// @0x43608f..0x436123], so a rig must face the seat point it expects to
+// be offered, from a step away (the co-located case is atan2(0, 0)).
+void look_at(w::World &world, w::EntityHandle player_h, float tx, float ty, float tz) {
+	w::Entity *player = world.registry.get(player_h);
+	if (player == nullptr) return;
+	const double dx = double(tx) - player->position.x - player->eye_offset_x / 65536.0;
+	const double dy = double(ty) - player->position.y - player->eye_offset_y / 65536.0;
+	const double dz = double(tz) + 0.1875 - player->position.z - player->eye_offset_z / 65536.0;
+	const double heading = std::atan2(dy, dx);
+	const double pitch = std::atan2(dz, std::hypot(dx, dy));
+	player->yaw = int16_t(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846));
+	player->pitch = int16_t(std::lround(pitch * 180.0 / 3.14159265358979323846));
+	if (w::AiEntity *body = world.ai.for_handle(player_h)) {
+		body->heading = int32_t(heading * opennova::io::kBamPerRadian);
+		body->pitch = int32_t(pitch * opennova::io::kBamPerRadian);
+	}
+}
+} // namespace
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -253,6 +278,7 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	vehicle.item_attrib = 0x40u;
 	vehicle.spawn_origin = (1u << 24) | 3u;
 	vehicle.position = local->position;
+	vehicle.position.x += 1.0f; // a step away: the scan aims from the eye at the seat point
 	vehicle.health = vehicle.health_max = 3000;
 	vehicle.team = local->team;
 	w::Seat controller;
@@ -386,6 +412,8 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	adjacent.position.x += 1.0f;
 	adjacent.seats[0].occupant = {};
 	const auto adjacent_h = world.registry.spawn(1, adjacent);
+	// Seated, the scan admits only what the rider looks at (5 deg cone).
+	look_at(world, local->handle, adjacent.position.x, adjacent.position.y, adjacent.position.z);
 	std::vector<w::AttachLabel> labels;
 	h.kernel->local.collect_attach_labels(labels, &h.role);
 	bool adjacent_highlighted = false;
@@ -471,6 +499,7 @@ bool run_remote_vehicle_occupancy() {
 	def::DefItemsFile items{&person_def, 1};
 	h.kernel->set_items_table(&items);
 	h.role.run_tick(h.input);
+	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
 	std::vector<w::AttachLabel> labels;
 	h.kernel->local.collect_attach_labels(labels, &h.role);
 	bool ok = expect(labels.empty(), "remote occupied seat has no free-seat label");
@@ -535,6 +564,96 @@ bool run_remote_vehicle_occupancy() {
 	return ok;
 }
 
+// A pilot's countermeasure rides the same C2S 0x06 as the handheld, and the
+// descriptor's side bytes are the PILOT's, not the flare's. Retail: the flare
+// fires with the vehicle's occupantEntity as the shooter and
+// (aiRuntime[3], targetId 1, ammoDefIndex, weaponSlot 0)
+// [orig: Weapon_FireProcess @0x53f6d6 -> @0x53f70a]; the writer then stores
+// targetId at off6 (@0x42a68a), the ammo-def index at off7 (@0x42a69b),
+// *(WORD*)(shooter+352) — the pilot's handheld ammo-def index — at off32
+// (@0x42c052 -> @0x42a7da), fire_flags at off33 (@0x42a7ed) and weaponSlot at
+// off34 (@0x42a800). fire_flags = Weapon_GetScopeZoomLevel(can_fire, 12) |
+// (can_fire ? 0x80 : 0) [orig: Entity_FireWeaponAndSendPacket @0x42bdd6..
+// 0x42bdf9] with can_fire = Player_CanFireWeapon() = 0 for a seated pilot
+// (parentSlot 2/5 @0x5cf7a8..0x5cf7b6), and weaponActive 0 returns the default
+// 12 [orig: @0x422fd1/@0x422fd5]. Expected bytes derived by hand from those
+// legs: off6 = 1, off7 = the flare index, off32 = the handheld's ammo-def index
+// (the retail capture's 0x03 beside adm 69, net-re 5.66 seeds the row),
+// off33 = 12, off34 = 0, off28 = 0xFFFF (no AI runtime target). The yaw/pitch
+// words are (bam + 0x8000) >> 16 [orig: @0x42a6e1/@0x42a6fb].
+bool run_flare_descriptor_carries_the_pilot_handheld() {
+	Harness h;
+	constexpr int16_t kHandheldAdm = 69; // WPN_M4AUTO-shaped row
+	constexpr int32_t kHandheldAmmo = 3; // its ammo-def index (the captured off32)
+	constexpr uint8_t kFlareAmmo = 41;   // the FLARE ammo-def index; carried verbatim
+	h.role.kit_seams.apply_authoritative = [&h, kHandheldAdm] {
+		h.seams.push_back("loadout");
+		h.kernel->local.inventory_valid = true;
+		h.inventory().equipped_combo = 0;
+		h.inventory().slots[0].adm_index = kHandheldAdm;
+	};
+	w::World &world = h.kernel->world;
+	world.tables.weapons.entries.resize(static_cast<size_t>(kHandheldAdm) + 1);
+	w::WeaponTableEntry &handheld = world.tables.weapons.entries[static_cast<size_t>(kHandheldAdm)];
+	handheld.valid = true;
+	handheld.name = "WPN_M4AUTO";
+	handheld.ammo_index = kHandheldAmmo;
+
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "flare: L spawned")) return false;
+	const w::Entity *L = world.registry.get(world.cached.local_player);
+	if (!expect(L != nullptr && L->equipped_adm_index == static_cast<uint8_t>(kHandheldAdm),
+			"flare: L carries the handheld adm")) return false;
+	if (!expect(world.ai.for_handle(L->handle) != nullptr, "flare: L carries its AI body"))
+		return false;
+
+	// What VehicleSystem::release_flares -> RoundSim::fire_source queues on a
+	// joiner whose local player pilots the source (the launch already presented).
+	w::RoundSpawnParams flare;
+	flare.launch_presented = true;
+	flare.owner = L->handle;
+	flare.shooter_handle = L->handle.packed;
+	flare.origin = w::Vec3{12.0f, -7.0f, 30.0f};
+	flare.dir_yaw_bam = 0x20000000;
+	flare.dir_pitch_bam = 0x10000000;
+	flare.ammo_index = kFlareAmmo;
+	flare.adm_index = kFlareAmmo;
+	world.out.source_fires.push_back(flare);
+
+	// The descriptor queues in the frame's weapon phase and ships with a send.
+	h.role.run_tick(h.input);
+	h.role.run_tick(h.input);
+	ProtocolMessage msg;
+	if (!expect(h.socket.last_message(0x06, msg), "flare: a C2S 0x06 shipped")) return false;
+	ClientFiredRound r;
+	size_t consumed = 0;
+	if (!expect(decode_client_fired_round(msg.payload.data(), msg.payload.size(), r, consumed) &&
+					consumed == 45,
+			"flare: the fixed 45 B body decodes")) return false;
+	bool ok = true;
+	ok &= expect(r.shooter_handle == 0x0005, "flare: the shooter is the pilot's wire handle");
+	ok &= expect(r.fire_flags == 1, "flare: off6 = targetId 1 (the ammo-def arm)");
+	ok &= expect(r.adm_index == kFlareAmmo, "flare: off7 = the flare's ammo-def index");
+	ok &= expect(r.extra_byte1 == kHandheldAmmo,
+			"flare: off32 = the pilot's handheld ammo-def index (entity+0x160), not the flare's");
+	ok &= expect(r.extra_byte2 == 12,
+			"flare: off33 = Weapon_GetScopeZoomLevel(0, 12) = 12 for a seated pilot");
+	ok &= expect(r.misc_byte == 0, "flare: off34 = weaponSlot 0");
+	ok &= expect(r.target_handle == 0xFFFF, "flare: off28 = 0xFFFF without an AI target");
+	ok &= expect((r.hit_part & 0x1FF) == 1 &&
+					(r.hit_part >> 9) == h.role.runtime->local_player_slot(),
+			"flare: hit_part packs (roster slot << 9) | shot seq 1");
+	ok &= expect(r.pos_x == 12 * 65536 && r.pos_y == -7 * 65536 && r.pos_z == 30 * 65536,
+			"flare: the launch origin rides off8..off19 in full");
+	ok &= expect(r.dir_x == 0x2000 && r.dir_y == 0x1000,
+			"flare: the launch yaw/pitch ride as (bam + 0x8000) >> 16");
+	ok &= expect(world.out.source_fires.empty(), "flare: the source-fire queue drained");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -550,6 +669,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(2);
 	ok &= run_confirmed_vehicle_drive(3);
 	ok &= run_confirmed_vehicle_drive(4);
+	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

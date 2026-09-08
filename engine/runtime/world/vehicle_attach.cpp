@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstdint>
 
+#include <base/io/bam.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
@@ -240,9 +242,9 @@ bool find_numbered_vehicle_seat(const World &world, const Entity &player, int in
     out = {};
     if (index < 0 || index >= kVehiclePanelSlotMax) return false;
     const EntityHandle root = vehicle_panel_root(world, player);
-    std::vector<VehiclePanelSlot> slots;
+    VehiclePanelSlotList slots;
     if (index >= build_vehicle_panel_slots(world, root, slots)) return false;
-    const VehiclePanelSlot &slot = slots[static_cast<size_t>(index)];
+    const VehiclePanelSlot &slot = slots[index];
     const Entity *carrier = world.registry.get(slot.entity);
     if (carrier == nullptr) return false;
     for (int i = 0; i < static_cast<int>(carrier->seats.size()); ++i) {
@@ -317,7 +319,7 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 	if ((carrier.flags & kEntityFlagInAir) != 0)
 		return false;
 	// The comparison is 16 raw 16.16 counts, not sixteen world units.
-	// [orig: @0x4354D7..0x43551D]
+	// [orig: Entity_CanEnterVehicle @0x4354C7..0x435509]
 	const int64_t x = static_cast<int32_t>(carrier.position.x * 65536.0f);
 	const int64_t y = static_cast<int32_t>(carrier.position.y * 65536.0f);
 	return std::abs(x - carrier.saved_live_pos[0]) <= 16 &&
@@ -483,7 +485,9 @@ namespace {
 // Both queries start at Position. Only scan scoring reads CameraOffset.
 // The scan's sixth argument is allowAllTypes=1; labels use the sector query.
 // [orig: Entity_FindNearestSeatOrArmory @0x436174..0x436188;
-// HUD_DrawEntityLabel @0x5A35F6..0x5A360E]
+// draw_vehicle_seat_and_armory_labels @0x5A35F6..0x5A360E (the label ray endpoint
+// is groundEntity, else the player; HUD_DrawEntityLabel @0x5a39b0 is the friendly
+// tag drawer, not this site)]
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
 		bool label = false) {
 	const int32_t a[3] = { static_cast<int32_t>(player.position.x * 65536.0f),
@@ -552,14 +556,39 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
                                         VehicleSeatSelection &out, bool armory_mode,
                                         const HostileMountIndex &hostile_mounts,
                                         const VehicleOccupancySource *source) {
-    // Range caps, verbatim 16.16 [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
-    // override @0x435d9a = 0x38E38E0].
-    const int32_t max_dist3d = player.mounted ? 59652320 : 1073741760;
-	// Score from the live posed eye, with the candidate's +0.1875 scan bias.
-	// [orig: @0x436010..0x436041]
-	const double eye_x = static_cast<double>(player.position.x) + player.eye_offset_x / 65536.0;
-	const double eye_y = static_cast<double>(player.position.y) + player.eye_offset_y / 65536.0;
-	const double eye_z = static_cast<double>(player.position.z) + player.eye_offset_z / 65536.0;
+    // The aim cone, verbatim [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
+    // override @0x435d9a = 0x38E38E0]. Both are BAM32 look-offset radii, not
+    // distances: 0x3FFFFFC0 is a hair under 90 deg for a standing player, 0x38E38E0
+    // is 5.0 deg for a seated one, so a rider only swaps onto a seat he is looking
+    // at and USE dismounts when the cone is empty [orig: Entity_ToggleVehicleMount
+    // @0x4369ac..0x4369c7].
+    const int32_t max_aim_bam = player.mounted ? 59652320 : 1073741760;
+    // The scan's view frame is the entity Yaw/Pitch (+0x10/+0x14) [orig: the
+    // subtractions @0x4360b6 / @0x4360c6]: the body's BAM32 heading and pitch for
+    // every real player, the mission-degree mirror for a bare entity.
+    int32_t view_heading = bam_heading_from_mission_yaw_deg(player.yaw);
+    int32_t view_pitch = static_cast<int32_t>(player.pitch * kBamPerDegree);
+    if (const AiEntity *body = world.ai.for_handle(player.handle)) {
+        view_heading = body->heading;
+        view_pitch = body->pitch;
+    }
+    // The eye is Position + CameraOffset in 16.16; the candidate point carries
+    // the +0x3000 (0.1875 u) scan bias [orig: @0x435fff..0x436041, the
+    // Position.Y subtract @0x436010].
+    const int32_t eye_x = to_fixed(player.position.x) + player.eye_offset_x;
+    const int32_t eye_y = to_fixed(player.position.y) + player.eye_offset_y;
+    const int32_t eye_z = to_fixed(player.position.z) + player.eye_offset_z;
+    // _ftol2_sse over the 0x4EFFFE00 (2^31 - 16384) float clamp the block keeps
+    // on the x87 stack [orig: flt_7C19E0 @0x43604d / @0x43607d / @0x4360f4];
+    // an out-of-range conversion is the x87 indefinite integer.
+    const auto ftol_clamped = [](double v) -> int32_t {
+        if (v > 2147467264.0) v = 2147467264.0;
+        return static_cast<int32_t>(v);
+    };
+    const auto ftol = [](double v) -> int32_t {
+        if (v >= 2147483648.0 || v < -2147483648.0) return INT32_MIN;
+        return static_cast<int32_t>(v);
+    };
 
 	int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
     bool found = false;
@@ -567,17 +596,33 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
     // @0x43624d..0x436417 (armory points)]. Returns true when it becomes the best hit.
     const auto consider = [&](const Entity &cand, const Vec3 &sp, int index, SeatType type) {
-        const double dx = static_cast<double>(sp.x) - eye_x;
-        const double dy = static_cast<double>(sp.y) - eye_y;
-        const double dz = static_cast<double>(sp.z) - eye_z + 0.1875;
-        const double horiz = std::sqrt(dx * dx + dy * dy);
-        const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
-        const int32_t horiz_fx = static_cast<int32_t>(horiz * 65536.0);
-        const int32_t d3_fx = static_cast<int32_t>(d3 * 65536.0);
-        // [orig: @0x436123 — v66 <= 0x40000 && v24 <= maxDistance]
-        if (horiz_fx > 0x40000 || d3_fx > max_dist3d) return;
-        // Score = horizontal + 3D/512 [orig: candidateScore = v66 + (v24 >> 9)].
-        const int32_t score = horiz_fx + (d3_fx >> 9);
+        const int32_t dx = to_fixed(sp.x) - eye_x;
+        const int32_t dy = to_fixed(sp.y) - eye_y;
+        const int32_t dz = to_fixed(sp.z) - eye_z + 0x3000;
+        // The horizontal and 3D reaches [orig: @0x436047..0x43608a].
+        const double horiz_sq = static_cast<double>(dx) * dx + static_cast<double>(dy) * dy;
+        const int32_t horiz = ftol_clamped(std::sqrt(horiz_sq));
+        const int32_t d3 = ftol_clamped(std::sqrt(horiz_sq + static_cast<double>(dz) * dz));
+        // The point's yaw (atan2(dy, dx)) and pitch (atan2(dz, horiz)) in the
+        // view frame, each clamped to +100 deg (0x471C7180) on the positive side
+        // only [orig: @0x43608f..0x4360de; dbl_7C19D8 = 2^32 / 2pi].
+        int32_t yaw_d = io::bam_sub(
+                ftol(std::atan2(static_cast<double>(dy), static_cast<double>(dx)) *
+                     io::kBamPerRadian),
+                view_heading);
+        int32_t pitch_d = io::bam_sub(
+                ftol(std::atan2(static_cast<double>(dz), static_cast<double>(horiz)) *
+                     io::kBamPerRadian),
+                view_pitch);
+        if (yaw_d > 0x471C7180) yaw_d = 0x471C7180;
+        if (pitch_d > 0x471C7180) pitch_d = 0x471C7180;
+        // The aim offset magnitude [orig: @0x4360e2..0x436103].
+        const int32_t aim = ftol_clamped(std::sqrt(
+                static_cast<double>(yaw_d) * yaw_d + static_cast<double>(pitch_d) * pitch_d));
+        // Score = 3D reach + aim/512 [orig: @0x43610c..0x436111]; the reach gate is
+        // 4.0 u @0x436113 and the cone gate @0x43611f..0x436123.
+        const int32_t score = d3 + (aim >> 9);
+        if (d3 > 0x40000 || aim > max_aim_bam) return;
         if (score >= best_score) return;
         // LOS gate LAST [orig: @0x436183].
         if (!point_los_clear(world, player, cand, sp)) return;

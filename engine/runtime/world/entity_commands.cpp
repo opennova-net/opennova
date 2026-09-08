@@ -61,6 +61,9 @@ bool EntityCommands::kill_ssn(uint16_t ssn) {
 bool EntityCommands::remove_ssn(uint16_t ssn) {
     EntityHandle h = resolve_ssn(ssn);
     if (!world_.registry.get(h)) return false;
+    // A removed row frees its AI component with it [orig: Entity_Destroy
+    // @0x43e810, brain memset @0x43e995].
+    world_.ai.release(h);
     world_.registry.despawn(h);
     return true;
 }
@@ -853,6 +856,7 @@ int EntityCommands::remove_group(int group) {
             if (entity == nullptr || entity->item_id == 0 ||
                 static_cast<int>(entity->group_id) != group)
                 continue;
+            world_.ai.release(handle); // the row's brain goes with it [orig: Entity_Destroy @0x43e810]
             world_.registry.despawn(handle);
             ++removed;
         }

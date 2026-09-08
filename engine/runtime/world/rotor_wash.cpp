@@ -67,7 +67,12 @@ void RotorWashSystem::update(Entity &e, const VehicleTraits &traits) {
 	}
 }
 
-// [orig: Entity_Respawn @0x45FF40; focal-wind slot owner tag @0x5CAF40]
+// Retail clears the slot's owner tag to 0xFFFF at two moments only: vehicle
+// death init and entity destruction. The slot's surface-effect group is NOT
+// released there; it dies with its last child (CEffectWorld_UpdateAndReapGroups
+// @0x5EC920). [orig: Terrain_ClearShadowTileSlot @0x5CB0D0, called from
+// Entity_InitDeathState @0x48F9F8 and Entity_Destroy @0x43E984; the owner tag
+// terrain_overlay_alloc @0x5CAF40 stamps]
 void RotorWashSystem::release(Entity &e) {
 	const auto slot = std::size_t(e.veh.rotor_wash_handle & 0x7fffu);
 	if (e.veh.rotor_wash_handle && slot < zones_.size() && zones_[slot].owner == e.handle)
@@ -217,6 +222,11 @@ void RotorWashSystem::apply(particle::Particle &particle, std::size_t index, boo
 		-float(from_fixed(v[1])) };
 }
 
+uint16_t RotorWashSystem::zone_at(const particle::Vec3 &position) const {
+	const int32_t p[3] = { to_fixed(position.x), to_fixed(-position.z), to_fixed(position.y) };
+	return nearest(p);
+}
+
 // [orig: find_nearest_force_zone @0x5CB5B0]
 bool RotorWashSystem::sample_sway(const int32_t p[3], int32_t &magnitude, int32_t dir[3]) const {
 	for (std::size_t i = 0; i < count_; ++i) {
@@ -276,8 +286,13 @@ FocalSwayPose RotorWashSystem::sway_pose(const Entity &e) const {
 }
 
 // Rotor wash chooses the authored ground material, casts down the rotor axis,
-// and spawns the effect's active children at each hit.
-// [orig: WeatherParticle_UpdateAllEmitters @0x5CB220; sub_5F6C10 @0x5F6C10]
+// keeps one surface-effect group per zone and re-triggers that group's
+// children at each hit. The random draws here come from PRNG_C, the
+// presentation stream (World::prng16_c_state): every draw sits behind the
+// listener/camera-distance gates, so the stream is never authoritative.
+// [orig: WeatherParticle_UpdateAllEmitters @0x5CB100 (0x5CB100..0x5CB5B0;
+//  earlier records cite its body @0x5CB220); sub_5F6C10 @0x5F6C10;
+//  PRNG_Next16_C @0x6131B0]
 void RotorWashSystem::tick() {
 	water_wakes_.tick();
 	for (std::size_t i = 0; i < count_; ++i) {
@@ -347,20 +362,52 @@ void RotorWashSystem::tick() {
 						: material == 3		   ? "Effect_RwSnow"
 						: material == 5		   ? "Effect_RwSand"
 											   : "Effect_RwDust";
-				VehicleEffectEvent event;
-				event.effect = effect;
-				event.position = { float(from_fixed(p[0])), float(from_fixed(p[1])),
-					float(from_fixed(p[2])) };
-				event.direction = { 0, 0, 1 };
-				event.source_tick = world_.logic_tick;
-				event.force_zone = uint16_t(i | 0x8000u);
-				world_.out.vehicle_effects.push_back(std::move(event));
+				// One persistent surface-effect group per zone: the slot's
+				// instance word (+3) is released and re-created only when the
+				// surface effect (+4) changes; every hit then re-triggers that
+				// group's children at the hit with this zone as their spawn
+				// window (dword_29D6BB0 is set @0x5CB3A6 and cleared @0x5CB4A0
+				// around the create and the trigger). Retail never releases the
+				// group when the zone itself is cleared: it dies with its last
+				// child, after which the stale instance word makes the trigger
+				// a no-op until the surface effect changes.
+				// [orig: WeatherParticle_UpdateAllEmitters @0x5CB407..0x5CB4A0;
+				//  sub_5F6C70 @0x5F6C70 (release); CEffectWorld_SpawnEmitterAtPosition
+				//  @0x5F6DF0 (create, dest{type 4, id, hit}); sub_5F6C10 @0x5F6C10
+				//  -> CEffectWorld_SpawnAllActiveChildren @0x5E5E70 (trigger)]
+				const auto push = [&](VehicleEffectEvent::Kind kind, const std::string &name) {
+					VehicleEffectEvent event;
+					event.kind = kind;
+					event.effect = name;
+					event.position = { float(from_fixed(p[0])), float(from_fixed(p[1])),
+						float(from_fixed(p[2])) };
+					event.direction = { 0, 0, 1 };
+					event.source_tick = world_.logic_tick;
+					event.force_zone = uint16_t(i | 0x8000u);
+					world_.out.vehicle_effects.push_back(std::move(event));
+				};
+				if (z.surface_effect != effect) {
+					if (z.effect_group)
+						push(VehicleEffectEvent::Kind::ReleaseZoneGroup, z.surface_effect);
+					z.effect_group = false;
+					push(VehicleEffectEvent::Kind::EnsureZoneGroup, effect);
+					z.effect_group = true;
+					z.surface_effect = effect;
+				}
+				if (z.effect_group)
+					push(VehicleEffectEvent::Kind::TriggerZoneGroup, z.surface_effect);
 				break;
 			}
 		}
 		// The water wake projects the rotor origin down its axis every eighth
-		// tick, then caps its height falloff by the rotor intensity.
-		// [orig: WeatherParticle_UpdateAllEmitters @ 0x5CB220;
+		// tick, then caps its height falloff by the rotor intensity. The
+		// height divisor is the slot's EXTENT: `fidiv dword ptr [esi-4]`
+		// @0x5CB532 (bytes DA 76 FC) is a 4-BYTE displacement from
+		// _ESI = &slot dword 31, i.e. slot dword 30, the extent stamped by
+		// terrain_overlay_alloc @0x5CAFC4 (slot[31] there is the intensity
+		// word; the ray radius's `*(_ESI - 4)` @0x5CB265 is the DWORD index
+		// -4 = slot dword 27, the inner radius).
+		// [orig: WeatherParticle_UpdateAllEmitters @0x5CB4D1..0x5CB584;
 		//  sub_6108E0 @ 0x6108E0]
 		if (world_.env.water_z != 0 && (world_.logic_tick & 7u) == 0) {
 			const int32_t height = io::bam_sub(z.frame.m[11], world_.env.water_z);

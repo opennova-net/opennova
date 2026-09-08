@@ -606,7 +606,14 @@ public:
     static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
     uint32_t prng16_b_state = kMissionPrng16BSeed;
     uint16_t next_prng16_b() noexcept;
-	uint32_t prng16_c_state = 0; // PRNG_Next16_C @0x6131B0, BSS boot state
+	// PRESENTATION-ONLY stream: every consumer (rotor-wash particles, wreck
+	// fire crackle, the occlusion focal-wind sampler) draws behind listener,
+	// camera-distance or render gates, so its value diverges per machine and
+	// no authoritative system may read it or compare it across peers. It is
+	// snapshotted only so an editor play/stop cycle restores the boot state.
+	// [orig: PRNG_Next16_C @0x6131B0, BSS boot state; WeatherParticle_UpdateAllEmitters
+	//  @0x5CB100 draws it after the 0x2200000 camera gate @0x5CB1CD]
+	uint32_t prng16_c_state = 0;
 	uint16_t next_prng16_c() noexcept;
 	// The simulation's owner of the CRT rand() recurrence retail draws from
 	// (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll

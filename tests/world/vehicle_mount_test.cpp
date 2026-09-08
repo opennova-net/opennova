@@ -6,6 +6,7 @@
 //  - Entity_UpdateVehiclePhysics @0x48af00: parked stamp @0x48c002-0x48c02d + the
 //    AI-driver leg @0x48bc12-0x48c034
 //  - the player deploy group stamp @0x519fd0 (commandGroup = 1)
+#include <base/io/bam.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -95,6 +96,29 @@ struct Rig {
     Entity &veh() { return *w.registry.get(veh_h); }
     Entity &player() { return *w.registry.get(player_h); }
 };
+
+// Point a player's view at a world point (the seat point before its +0.1875 u
+// scan bias): the USE scan's aim cone is measured from the entity Yaw/Pitch
+// [orig: Entity_FindNearestSeatOrArmory @0x4360b6 / @0x4360c6], which a body
+// carries in BAM32 and a bare entity as the mission-degree mirror.
+void look_at(World &w, EntityHandle player_h, const Vec3 &target) {
+	Entity *player = w.registry.get(player_h);
+	if (player == nullptr) return;
+	const double dx = static_cast<double>(target.x) - player->position.x -
+			player->eye_offset_x / 65536.0;
+	const double dy = static_cast<double>(target.y) - player->position.y -
+			player->eye_offset_y / 65536.0;
+	const double dz = static_cast<double>(target.z) + 0.1875 - player->position.z -
+			player->eye_offset_z / 65536.0;
+	const double heading = std::atan2(dy, dx);
+	const double pitch = std::atan2(dz, std::hypot(dx, dy));
+	player->yaw = static_cast<int16_t>(std::lround(90.0 - heading * 180.0 / 3.14159265358979323846));
+	player->pitch = static_cast<int16_t>(std::lround(pitch * 180.0 / 3.14159265358979323846));
+	if (AiEntity *body = w.ai.for_handle(player_h)) {
+		body->heading = static_cast<int32_t>(heading * opennova::io::kBamPerRadian);
+		body->pitch = static_cast<int32_t>(pitch * opennova::io::kBamPerRadian);
+	}
+}
 
 struct FakeMountedPoseProvider final : IPoseProvider {
     bool available = true;
@@ -544,14 +568,18 @@ void test_toggle_nearest_seat() {
         CHECK(r.player().mount_target == r.veh_h);
         CHECK((r.player().flags & 0x40u) != 0);
         CHECK((r.player().engine_flags & 0x40u) != 0);
-        // Lowest SCORE (horiz + 3D/512) wins [orig: @0x436123]: from +2x the ctrl
-        // bone (+0.5,+1.5 local; horiz 2.12) beats the sitex (0,-2; horiz 2.83).
+        // Facing +y from +2x, only the ctrl bone (+0.5,+1.5 local) sits inside the
+        // standing 90 deg aim cone; the sitex (0,-2) is over 100 deg off the view
+        // [orig: the cone gate @0x43611f over 0x3FFFFFC0].
         CHECK(r.player().mount_seat == 0);
     }
     {
-        // From -2.5x the SITEX (horiz 3.20) outscores the ctrl (3.35): the scan is
-        // score-ranked, not seat-weighted (the deck weights never apply here).
+        // Looking at the SITEX from -2.5x: its aim term is ~0 while the ctrl's
+        // 65 deg offset costs 1.5M on the score (dist3d + aim/512), so the sitex
+        // wins on score, not seat weight (the deck weights never apply here)
+        // [orig: @0x436111].
         Rig r(-2.5f);
+        look_at(r.w, r.player_h, entity_local_point_world(r.veh(), r.veh().seats[1].seat_local));
         CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
         CHECK(r.player().mount_seat == 1);
     }
@@ -732,6 +760,8 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     spawn.health = 100;
     const EntityHandle player_h = spawn_player(w, spawn);
     CHECK(player_h.valid());
+    // The spawn faces +x; the seat is at -x, so look at it (the aim cone).
+    look_at(w, player_h, entity_local_point_world(*w.registry.get(vehicle_h), seat.seat_local));
     const Entity *player = w.registry.get(player_h);
     CHECK(player != nullptr);
     if (player != nullptr) {
@@ -768,6 +798,7 @@ void test_restore_refreshes_completed_candidate_epoch() {
     const World::Snapshot baseline = r.w.snapshot();
 
     r.player().position = {202.0f, 200.0f, 10.0f};
+    look_at(r.w, r.player_h, {200.0f, 200.0f, 11.0f}); // the aim cone
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
     VehicleSeatSelection hit;
     CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
@@ -827,13 +858,21 @@ CollisionModel make_seat_hull() {
 	return box;
 }
 
-// The own hull, rather than a blanket carrier skip, determines whether USE
-// swaps to a visible seat or dismounts. [orig: @0x436174..0x436188]
+// A mounted USE scans first and swaps onto a free seat only when the rider is
+// LOOKING at it: the seated aim cone is 5.0 deg (0x38E38E0 BAM32) against the
+// standing 90 deg, so USE dismounts unless a seat sits inside that cone. The
+// carrier's own hull never blocks the ray (the USE LOS walker skips the
+// endpoint entity and both parent slots), so an interior ray through the real
+// hull is clear and the cone alone decides.
+// [orig: Entity_ToggleVehicleMount @0x4369ac..0x4369c7 (scan, then
+//  TryEnterNearestVehicle / SendDetachPacket); the cone caps @0x435d90 /
+//  @0x435d9a and their gate @0x43611f; raycast_against_entity_pool ctx[17..20]
+//  skips @0x538832..0x538859]
 void test_toggle_dismount_and_swap() {
 	Rig r;
 	r.veh().item_type = 1;
 	r.veh().seats[0].seat_local = { -2, 0, 1 };
-	r.veh().seats[1].seat_local = { 2, 0, 1 };
+	r.veh().seats[1].seat_local = { 1, 0, 1 };
 	r.player().position = entity_local_point_world(r.veh(), { -2.5f, 0, 1 });
 	CollisionWorld collision;
 	StubCollisionMatrixProvider provider;
@@ -842,22 +881,46 @@ void test_toggle_dismount_and_swap() {
 	collision.assign_entity(r.veh_h, collision.add_model(make_seat_hull()));
 	for (int i = 0; i < 17; ++i)
 		collision.build_tick_tables(r.w);
+	const Vec3 ctrl = entity_local_point_world(r.veh(), r.veh().seats[0].seat_local);
+	const Vec3 sit = entity_local_point_world(r.veh(), r.veh().seats[1].seat_local);
+	look_at(r.w, r.player_h, ctrl);
 	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
 	CHECK(r.player().mount_type == SeatType::Controller);
+	// Seated, looking along the carrier (+y) with the sitex 90 deg to the side:
+	// outside the 5 deg cone -> the scan is empty -> dismount.
+	r.player().yaw = 0;
+	r.player().pitch = 0;
 	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
-	CHECK(!r.player().mounted); // the interior ray hits the real hull
+	CHECK(!r.player().mounted);
+	// Back in the control seat and looking straight at the sitex 3.0 u across
+	// the hull box: the ray crosses the real hull, the endpoint/parent skips
+	// admit it, the cone holds it -> swap, not dismount.
+	look_at(r.w, r.player_h, ctrl);
 	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
-
-	// A free seat on the SAME carrier, on the visible side of its hull, is
-	// eligible; the old unconditional carrier-family skip suppressed it.
-	r.veh().seats[1].seat_local = { -3, 0, 1 };
+	CHECK(r.player().mount_type == SeatType::Controller);
+	look_at(r.w, r.player_h, sit);
 	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
 	CHECK(r.player().mounted && r.player().mount_type == SeatType::Passenger);
+	// Looking away from the freed control seat (it is behind the rider now):
+	// its yaw offset clamps at +100 deg, far outside the cone -> dismount.
+	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+	CHECK(!r.player().mounted);
+
+	// Beyond the 4.0 u 3D reach even when looked at: no candidate
+	// [orig: @0x436113 dist3d <= 0x40000].
+	r.veh().seats[1].seat_local = { 4.5f, 0, 1 };
+	look_at(r.w, r.player_h, ctrl);
+	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+	CHECK(r.player().mount_type == SeatType::Controller);
+	look_at(r.w, r.player_h, entity_local_point_world(r.veh(), r.veh().seats[1].seat_local));
+	CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+	CHECK(!r.player().mounted);
 }
 
 void test_scan_uses_live_eye_offset() {
 	Rig r;
 	r.player().position = { 0, 0, 0 };
+	r.player().yaw = 90; // facing +x, toward the seat (the aim cone)
 	r.veh().position = { 5, 1, 0 };
 	r.veh().seats.resize(1);
 	r.veh().seats[0].seat_local = {};
@@ -1064,6 +1127,8 @@ void test_enemy_occupant_blocks_scan() {
     ee->mount_seat = 0;
     ee->mount_type = SeatType::Controller;
     r.veh().seats[0].occupant = eh;
+    // The free sitex sits over 100 deg off the rig's +y view: look at it.
+    look_at(r.w, r.player_h, entity_local_point_world(r.veh(), r.veh().seats[1].seat_local));
 
     auto label_count = [&]() {
         std::vector<AttachLabel> labels;
@@ -1850,7 +1915,27 @@ void test_helo_ai_flight() {
 		CHECK(h.r.veh().veh.net_engine_on);
         CHECK(h.r.veh().position.z > z0 + 5.0f);
         CHECK(h.r.veh().position.x > x0 + 5.0f);
-		CHECK(std::abs(h.r.veh().position.x - 300.0f) < 300.0f - x0);
+		// The node is never reached: this rig orbits it, by the witnessed math.
+		// The SM's out-speed seeds the forward command verbatim ([544] = brain[128]
+		// @0x4915a9) and that command is a TILT, not an airspeed: the tilt block
+		// pushes the pitch rate by cmd << 11 capped at acceleration << 12
+		// (@0x491d41..0x491d67; this rig's 512 -> 0x200000 BAM/tick), the aero
+		// block only counters it with (along - cmd) << 4 / << 2 once the airspeed
+		// exceeds the command (@0x491f30..0x491fa5), and against the 1019/1024
+		// drag (@0x492146..0x492187) the 1169 * sin(pitch) thrust (@0x492018)
+		// settles the airspeed near 1.1 u/tick, six times the 0.18 u/tick route
+		// speed (40 km/h * 293). The yaw servo is clamped at itemDef+0x924
+		// (@0x491cd6..0x491cf8; 0x600000 = 0.53 deg/tick), so the turn radius is
+		// ~117 u and the closest approach is 55.7 u (t=350), outside the node's
+		// 2 u radius: AI_UpdateMovementTarget's arrival, wrap and speed*step
+		// halving arms (@0x460ea6, @0x460f04, @0x460f8e) never fire and
+		// brain[128] stays 11720. The hull crosses x = 300 near t = 305 and the
+		// same arithmetic puts it here at t = 500 (the tolerance covers last-bit
+		// libm differences in the trig lanes, not a behavior band). The pre-port
+		// `x < 300` held only while state 7 had no tick handler and the rig's
+		// unseeded SM speed left the command at the 132-count creep seed
+		// (@0x49181b..0x491834).
+		CHECK(std::fabs(h.r.veh().position.x - 414.44f) < 0.25f);
 	}
 	{
         HeloRig h; // no route: the parked altitude target holds -> it settles
@@ -2172,6 +2257,7 @@ void test_attach_labels_armory_mode() {
     crate.alive = true;
     crate.armory_points.push_back({0.0f, 0.0f, 1.0f});
     const EntityHandle crate_h = r.w.registry.spawn(1, crate);
+    look_at(r.w, r.player_h, {99.0f, 199.0f, 11.0f}); // the aim cone
 
     std::vector<AttachLabel> labels;
     r.w.vehicles.collect_attach_labels(r.player(), /*armory_mode=*/true, false, labels);
@@ -2200,6 +2286,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
     Entity player_seed;
     player_seed.kind = EntityKind::Organic;
     player_seed.position = {100.0f, 200.0f, 10.0f};
+    player_seed.yaw = 90; // facing +x, down the row of seats (the aim cone)
     player_seed.health = 100;
     player_seed.alive = true;
     player_seed.team = 1;

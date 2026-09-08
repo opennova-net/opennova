@@ -231,6 +231,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_mouse", "sensitivity", "invert_y"), &Simulation::set_local_player_mouse);
 	ClassDB::bind_method(D_METHOD("request_local_player_stance", "stance"), &Simulation::request_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &Simulation::get_local_player_position);
+	ClassDB::bind_method(D_METHOD("get_local_player_eye_offset"), &Simulation::get_local_player_eye_offset);
 	ClassDB::bind_method(D_METHOD("get_local_player_heading_bam"),
 	                     &Simulation::get_local_player_heading_bam);
 	ClassDB::bind_method(D_METHOD("request_hud_radar_zoom", "direction"),
